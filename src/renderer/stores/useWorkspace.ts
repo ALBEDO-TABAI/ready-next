@@ -8,6 +8,15 @@ export interface FileItem {
   modified: Date
 }
 
+export type SidePanelWidthKey = 'files' | 'search' | 'skills'
+export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'calendar' | 'hidden'
+
+interface SidePanelWidths {
+  files: number
+  search: number
+  skills: number
+}
+
 interface WorkspaceState {
   // State
   workspaceRoot: string | null
@@ -18,7 +27,9 @@ interface WorkspaceState {
   dirChildren: Map<string, FileItem[]>
   pinnedFolders: string[]
   sidebarVisible: boolean
-  sidebarWidth: number
+  sidePanelVariant: WorkspaceSidePanelVariant
+  sidePanelWidths: SidePanelWidths
+  skillsSplitRatio: number
   chatPanelVisible: boolean
   chatPanelWidth: number
   renamingPath: string | null
@@ -29,6 +40,9 @@ interface WorkspaceState {
   setFiles: (files: FileItem[]) => void
   selectFile: (path: string | null) => void
   toggleSidebar: () => void
+  setSidePanelVariant: (variant: WorkspaceSidePanelVariant) => void
+  setSidePanelWidth: (variant: SidePanelWidthKey, width: number) => void
+  setSkillsSplitRatio: (ratio: number) => void
   toggleChatPanel: () => void
   refreshFiles: () => Promise<void>
   toggleDir: (path: string) => Promise<void>
@@ -50,6 +64,7 @@ interface WorkspaceState {
   createFolder: (name: string) => Promise<boolean>
   renameItem: (oldPath: string, newName: string) => Promise<boolean>
   deleteItem: (path: string) => Promise<boolean>
+  moveItem: (src: string, dest: string) => Promise<boolean>
   showInFolder: (path: string) => Promise<void>
   copyPathToClipboard: (path: string) => void
 
@@ -66,6 +81,61 @@ const getDirName = (path: string): string => {
   return idx <= 0 ? '/' : path.slice(0, idx)
 }
 
+const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
+const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
+const DEFAULT_SIDE_PANEL_WIDTH = 220
+const MIN_SIDE_PANEL_WIDTH = 220
+const MAX_SIDE_PANEL_WIDTH = 420
+const DEFAULT_SKILLS_SPLIT_RATIO = 0.5
+const MIN_SKILLS_SPLIT_RATIO = 0.25
+const MAX_SKILLS_SPLIT_RATIO = 0.75
+
+const clampSidePanelWidth = (width: number): number => {
+  if (!Number.isFinite(width)) return DEFAULT_SIDE_PANEL_WIDTH
+  return Math.max(MIN_SIDE_PANEL_WIDTH, Math.min(MAX_SIDE_PANEL_WIDTH, Math.round(width)))
+}
+
+const clampSkillsSplitRatio = (ratio: number): number => {
+  if (!Number.isFinite(ratio)) return DEFAULT_SKILLS_SPLIT_RATIO
+  return Math.max(MIN_SKILLS_SPLIT_RATIO, Math.min(MAX_SKILLS_SPLIT_RATIO, ratio))
+}
+
+const loadSidePanelWidthsFromStorage = (): SidePanelWidths => {
+  const fallback: SidePanelWidths = {
+    files: DEFAULT_SIDE_PANEL_WIDTH,
+    search: DEFAULT_SIDE_PANEL_WIDTH,
+    skills: DEFAULT_SIDE_PANEL_WIDTH,
+  }
+  if (typeof localStorage === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(SIDE_PANEL_WIDTHS_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<SidePanelWidths>
+    return {
+      files: clampSidePanelWidth(parsed.files ?? fallback.files),
+      search: clampSidePanelWidth(parsed.search ?? fallback.search),
+      skills: clampSidePanelWidth(parsed.skills ?? fallback.skills),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+const loadSkillsSplitRatioFromStorage = (): number => {
+  if (typeof localStorage === 'undefined') return DEFAULT_SKILLS_SPLIT_RATIO
+  const raw = localStorage.getItem(SKILLS_SPLIT_RATIO_KEY)
+  const parsed = raw ? Number(raw) : Number.NaN
+  return clampSkillsSplitRatio(parsed)
+}
+
+const remapPathAfterMove = (value: string | null, src: string, dest: string): string | null => {
+  if (!value) return value
+  if (value === src) return dest
+  if (value.startsWith(`${src}/`)) return `${dest}${value.slice(src.length)}`
+  if (value.startsWith(`${src}\\`)) return `${dest}${value.slice(src.length)}`
+  return value
+}
+
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   workspaceRoot: null,
   currentPath: '/',
@@ -75,7 +145,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: JSON.parse(localStorage.getItem('ready-pinned-folders') || '[]') as string[],
   sidebarVisible: true,
-  sidebarWidth: 220,
+  sidePanelVariant: 'files',
+  sidePanelWidths: loadSidePanelWidthsFromStorage(),
+  skillsSplitRatio: loadSkillsSplitRatioFromStorage(),
   chatPanelVisible: true,
   chatPanelWidth: 380,
   renamingPath: null,
@@ -92,6 +164,31 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
+  setSidePanelVariant: (variant) => set({ sidePanelVariant: variant }),
+
+  setSidePanelWidth: (variant, width) => {
+    const clamped = clampSidePanelWidth(width)
+    set((state) => {
+      const next: SidePanelWidths = {
+        ...state.sidePanelWidths,
+        [variant]: clamped,
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SIDE_PANEL_WIDTHS_KEY, JSON.stringify(next))
+      }
+      return { sidePanelWidths: next }
+    })
+  },
+
+  setSkillsSplitRatio: (ratio) => {
+    const next = clampSkillsSplitRatio(ratio)
+    if (get().skillsSplitRatio === next) return
+    set({ skillsSplitRatio: next })
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SKILLS_SPLIT_RATIO_KEY, String(next))
+    }
+  },
+
   toggleChatPanel: () => set((state) => ({ chatPanelVisible: !state.chatPanelVisible })),
 
   loadDirChildren: async (dirPath) => {
@@ -99,12 +196,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       if (typeof window !== 'undefined' && window.electronAPI) {
         const result = await window.electronAPI.document.listFiles(dirPath)
         if (result.success && result.items) {
-          const items = result.items
-            .map((item: { modified: string | number | Date }) => ({
+          const items: FileItem[] = result.items
+            .map((item) => ({
               ...item,
               modified: new Date(item.modified)
-            }))
-            .sort((a: FileItem, b: FileItem) => {
+            }) as FileItem)
+            .sort((a, b) => {
               if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
               return a.name.localeCompare(b.name)
             })
@@ -231,18 +328,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         const result = await window.electronAPI.document.listFiles(currentPath)
 
         if (result.success && result.items) {
-          const items = result.items
-            .map((item: { modified: string | number | Date }) => ({
+          const items: FileItem[] = result.items
+            .map((item) => ({
               ...item,
               modified: new Date(item.modified)
-            }))
+            }) as FileItem)
             // Sort: directories first, then by name
-            .sort((a: FileItem, b: FileItem) => {
+            .sort((a, b) => {
               if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
               return a.name.localeCompare(b.name)
             })
             // Hide dotfiles
-            .filter((item: FileItem) => !item.name.startsWith('.'))
+            .filter((item) => !item.name.startsWith('.'))
 
           set({ files: items })
         }
@@ -359,6 +456,57 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to delete:', error)
+    }
+    return false
+  },
+
+  moveItem: async (src, dest) => {
+    try {
+      if (src === dest) return true
+
+      if (window.electronAPI) {
+        const result = await window.electronAPI.document.moveItem(src, dest)
+        if (!result.success) return false
+
+        set((state) => {
+          const remappedExpanded = new Set<string>()
+          state.expandedDirs.forEach((dir) => {
+            remappedExpanded.add(remapPathAfterMove(dir, src, dest) || dir)
+          })
+          return {
+            selectedFile: remapPathAfterMove(state.selectedFile, src, dest),
+            currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
+            expandedDirs: remappedExpanded,
+            dirChildren: new Map(),
+          }
+        })
+
+        await get().refreshFiles()
+        const expanded = Array.from(get().expandedDirs)
+        for (const dir of expanded) {
+          await get().loadDirChildren(dir)
+        }
+        return true
+      }
+
+      // Mock fallback
+      set((state) => ({
+        files: state.files.map((f) => {
+          if (f.path === src) {
+            return {
+              ...f,
+              path: dest,
+              name: dest.split('/').pop() || f.name,
+            }
+          }
+          return f
+        }),
+        selectedFile: remapPathAfterMove(state.selectedFile, src, dest),
+        currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
+      }))
+      return true
+    } catch (error) {
+      console.error('Failed to move item:', error)
     }
     return false
   },

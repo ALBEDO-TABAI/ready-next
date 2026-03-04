@@ -1,709 +1,348 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, RefreshCw, ChevronRight, ChevronDown, Search,
-  FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet,
-  FilePlus, FolderPlus, FolderOpen as FolderOpenIcon, PanelLeftClose,
-  MoreVertical
+  Search, FilePlus, FolderPlus, MoreVertical,
+  LayoutList, LayoutGrid, SlidersHorizontal,
+  Folder, FolderOpen,
 } from 'lucide-react'
-import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
-import { useMode, type WorkbenchMode } from '../../stores/useMode'
-import ContextMenu, { type ContextMenuItem } from './ContextMenu'
+import { useWorkspace } from '../../stores/useWorkspace'
+import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
+import GlobalSearchPanel from './GlobalSearchPanel'
+import SkillsCenterPanel from './SkillsCenterPanel'
+import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 
-// --- Inline editing input ---
-function InlineInput({
-  defaultValue,
-  onConfirm,
-  onCancel
-}: {
-  defaultValue: string
-  onConfirm: (value: string) => void
-  onCancel: () => void
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [value, setValue] = useState(defaultValue)
+export type SidePanelVariant = 'files' | 'search' | 'skills' | 'calendar' | 'hidden'
 
-  useEffect(() => {
-    inputRef.current?.focus()
-    // Select filename without extension
-    const dotIdx = defaultValue.lastIndexOf('.')
-    inputRef.current?.setSelectionRange(0, dotIdx > 0 ? dotIdx : defaultValue.length)
-  }, [defaultValue])
-
-  return (
-    <input
-      ref={inputRef}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => {
-        if (value.trim()) onConfirm(value.trim())
-        else onCancel()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && value.trim()) onConfirm(value.trim())
-        if (e.key === 'Escape') onCancel()
-        e.stopPropagation()
-      }}
-      className="w-full px-1 py-0.5 text-[12px] border border-[var(--color-blue)] rounded bg-[var(--bg-primary)] outline-none"
-    />
-  )
+interface SidePanelProps {
+  variant?: SidePanelVariant
 }
 
-// --- Single file tree item ---
-function FileTreeItem({
-  item,
-  isActive,
-  isExpanded,
-  isRenaming,
-  depth,
-  onToggleDir,
-  onOpenFile,
-  onContextMenu,
-  onRenameConfirm,
-  onRenameCancel
-}: {
-  item: FileItem
-  isActive: boolean
-  isExpanded: boolean
-  isRenaming: boolean
-  depth: number
-  onToggleDir: () => void
-  onOpenFile: () => void
-  onContextMenu: (e: React.MouseEvent) => void
-  onRenameConfirm: (newName: string) => void
-  onRenameCancel: () => void
-}) {
-  const getIcon = () => {
-    if (item.isDirectory) {
-      return isExpanded
-        ? <FolderOpen className="w-4 h-4 text-[var(--color-blue)]" />
-        : <Folder className="w-4 h-4 text-[var(--color-blue)]" />
-    }
-    const ext = item.name.split('.').pop()?.toLowerCase()
-    switch (ext) {
-      case 'md': case 'txt': case 'json': case 'ts': case 'tsx': case 'js': case 'css':
-        return <FileText className="w-4 h-4 text-[var(--text-muted)]" />
-      case 'png': case 'jpg': case 'jpeg': case 'webp': case 'svg': case 'gif':
-        return <Image className="w-4 h-4 text-[var(--color-purple)]" />
-      case 'mp4': case 'mov': case 'mkv': case 'avi': case 'webm':
-        return <Film className="w-4 h-4 text-[var(--color-orange)]" />
-      case 'xlsx': case 'csv': case 'xls':
-        return <FileSpreadsheet className="w-4 h-4 text-[var(--color-green)]" />
-      default:
-        return <FileText className="w-4 h-4 text-[var(--text-muted)]" />
-    }
-  }
+const ICON_BTN =
+  'flex items-center justify-center rounded transition-colors duration-100 hover:bg-black/[0.05]'
 
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return ''
-    if (bytes < 1024) return `${bytes}B`
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`
-    return `${(bytes / 1048576).toFixed(1)}MB`
-  }
-
-  return (
-    <div
-      onClick={() => item.isDirectory ? onToggleDir() : onOpenFile()}
-      onContextMenu={onContextMenu}
-      className={`
-        flex items-center gap-2 rounded-lg text-[12px] cursor-pointer
-        transition-colors duration-150 group
-        ${isActive ? 'bg-[#E8E8E8] dark:bg-[#333538]' : 'hover:bg-black/5'}
-      `}
-      style={{ padding: '6px 8px', paddingLeft: `${8 + depth * 16}px` }}
-    >
-      {/* Chevron for directories */}
-      {item.isDirectory ? (
-        isExpanded
-          ? <ChevronDown className="w-3 h-3 text-[var(--text-light)] flex-shrink-0" />
-          : <ChevronRight className="w-3 h-3 text-[var(--text-light)] flex-shrink-0" />
-      ) : (
-        <span className="w-3 flex-shrink-0" />
-      )}
-
-      {/* Icon */}
-      <span className="flex-shrink-0">{getIcon()}</span>
-
-      {/* Name (inline editable or static) */}
-      <div className="flex-1 min-w-0">
-        {isRenaming ? (
-          <InlineInput
-            defaultValue={item.name}
-            onConfirm={onRenameConfirm}
-            onCancel={onRenameCancel}
-          />
-        ) : (
-          <span className="truncate block">{item.name}</span>
-        )}
-      </div>
-
-      {/* File size (subtle) */}
-      {!item.isDirectory && item.size > 0 && (
-        <span className="text-[10px] text-[var(--text-light)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          {formatSize(item.size)}
-        </span>
-      )}
-    </div>
-  )
-}
-
-// --- Allowed file extensions ---
-const ALLOWED_EXTENSIONS = new Set([
-  // 文档
-  'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt',
-  // 代码
-  'ts', 'tsx', 'js', 'jsx', 'json', 'html', 'css', 'scss', 'less',
-  'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h',
-  'yaml', 'yml', 'toml', 'xml', 'sql', 'sh', 'bash', 'zsh',
-  'vue', 'svelte', 'astro', 'env', 'gitignore',
-  // 网页
-  'htm', 'svg',
-  // 图片
-  'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico', 'tiff',
-  // 视频
-  'mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'wmv',
-  // 音频
-  'mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a',
-  // 表格
-  'xlsx', 'xls', 'csv', 'tsv',
-  // 配置
-  'ini', 'cfg', 'conf', 'properties', 'plist',
-  // 其他
-  'log', 'lock',
-])
-
-function isFileAllowed(item: FileItem): boolean {
-  if (item.isDirectory) return true
-  // Files without extension are allowed (Makefile, Dockerfile, etc.)
-  const ext = item.name.split('.').pop()?.toLowerCase()
-  if (!ext || ext === item.name.toLowerCase()) return true
-  return ALLOWED_EXTENSIONS.has(ext)
-}
-
-// --- Recursive file tree ---
-function FileTreeRecursive({
-  items,
-  depth,
-  selectedFile,
-  expandedDirs,
-  dirChildren,
-  renamingPath,
-  onToggleDir,
-  onOpenFile,
-  onContextMenu,
-  onRenameConfirm,
-  onRenameCancel
-}: {
-  items: FileItem[]
-  depth: number
-  selectedFile: string | null
-  expandedDirs: Set<string>
-  dirChildren: Map<string, FileItem[]>
-  renamingPath: string | null
-  onToggleDir: (path: string) => Promise<void>
-  onOpenFile: (item: FileItem) => void
-  onContextMenu: (e: React.MouseEvent, item: FileItem) => void
-  onRenameConfirm: (path: string, newName: string) => void
-  onRenameCancel: () => void
-}) {
-  return (
-    <>
-      {items.filter(isFileAllowed).map((item) => {
-        const isExpanded = expandedDirs.has(item.path)
-        const children = dirChildren.get(item.path) || []
-        return (
-          <div key={item.path}>
-            <FileTreeItem
-              item={item}
-              isActive={selectedFile === item.path}
-              isExpanded={isExpanded}
-              isRenaming={renamingPath === item.path}
-              depth={depth}
-              onToggleDir={() => onToggleDir(item.path)}
-              onOpenFile={() => onOpenFile(item)}
-              onContextMenu={(e) => onContextMenu(e, item)}
-              onRenameConfirm={(newName) => onRenameConfirm(item.path, newName)}
-              onRenameCancel={onRenameCancel}
-            />
-            {item.isDirectory && isExpanded && children.length > 0 && (
-              <FileTreeRecursive
-                items={children}
-                depth={depth + 1}
-                selectedFile={selectedFile}
-                expandedDirs={expandedDirs}
-                dirChildren={dirChildren}
-                renamingPath={renamingPath}
-                onToggleDir={onToggleDir}
-                onOpenFile={onOpenFile}
-                onContextMenu={onContextMenu}
-                onRenameConfirm={onRenameConfirm}
-                onRenameCancel={onRenameCancel}
-              />
-            )}
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-// --- Main SidePanel ---
-export default function SidePanel() {
+export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   const [query, setQuery] = useState('')
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false)
-  const workspaceMenuRef = useRef<HTMLDivElement>(null)
+  const [viewMode, setViewMode] = useState<FileViewMode>('tree')
+  const [filters, setFilters] = useState<FileFilterMap>({ ...DEFAULT_FILE_FILTERS })
+  const [showFilterMenu, setShowFilterMenu] = useState(false)
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [thumbnailSize, setThumbnailSize] = useState(132)
+  const filterMenuRef = useRef<HTMLDivElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+
   const {
-    files,
     sidebarVisible,
-    sidebarWidth,
-    toggleSidebar,
-    currentPath,
+    sidePanelWidths,
     workspaceRoot,
-    selectedFile,
-    expandedDirs,
-    dirChildren,
-    renamingPath,
-    creatingType,
-    setCurrentPath,
-    selectFile,
-    refreshFiles,
-    toggleDir,
-    openFolderDialog,
-    createFile,
-    createFolder,
-    renameItem,
-    deleteItem,
-    showInFolder,
-    copyPathToClipboard,
-    startRenaming,
-    cancelRenaming,
+    pinnedFolders,
     startCreating,
-    cancelCreating,
     clearWorkspace,
     saveWorkspace,
     getSavedWorkspaces,
     loadSavedWorkspace,
-    pinnedFolders,
-    addPinnedFolder,
-    removePinnedFolder,
   } = useWorkspace()
 
-  const { setWorkbenchMode } = useMode()
+  const isVisible = variant !== 'hidden' && sidebarVisible
+  const panelWidth = variant === 'skills'
+    ? sidePanelWidths.skills
+    : variant === 'search'
+      ? sidePanelWidths.search
+      : sidePanelWidths.files
 
-  // Close workspace menu on click outside
+  const isConnected = useMemo(() => {
+    if (workspaceRoot) return true
+    if (typeof window === 'undefined') return false
+    return !!window.electronAPI
+  }, [workspaceRoot])
+
+  // Close menus on outside click
   useEffect(() => {
-    if (!showWorkspaceMenu) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target as Node)) {
-        setShowWorkspaceMenu(false)
+    if (!showFilterMenu && !showMoreMenu) return
+    const handler = (e: MouseEvent) => {
+      if (showFilterMenu && filterMenuRef.current && !filterMenuRef.current.contains(e.target as Node)) {
+        setShowFilterMenu(false)
+      }
+      if (showMoreMenu && moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false)
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showWorkspaceMenu])
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showFilterMenu, showMoreMenu])
 
-  const parentPath = useMemo(() => {
-    if (!workspaceRoot || currentPath === workspaceRoot) return null
-    const normalized = currentPath.replace(/\/+$/, '') || '/'
-    const idx = normalized.lastIndexOf('/')
-    if (idx <= 0) return '/'
-    return normalized.slice(0, idx)
-  }, [currentPath, workspaceRoot])
-
-  const filteredFiles = useMemo(() => {
-    let result = files.filter(isFileAllowed)
-    const keyword = query.trim().toLowerCase()
-    if (keyword) {
-      result = result.filter((file) => file.name.toLowerCase().includes(keyword))
-    }
-    return result
-  }, [files, query])
-
-  // File opener that switches mode based on extension
-  const handleOpenFile = useCallback((item: FileItem) => {
-    selectFile(item.path)
-    const ext = item.name.split('.').pop()?.toLowerCase() || ''
-    const modeMap: Record<string, WorkbenchMode> = {
-      md: 'document', txt: 'document', json: 'document', ts: 'document', tsx: 'document',
-      js: 'document', css: 'document', html: 'document', docx: 'document', xlsx: 'document',
-      png: 'document', jpg: 'document', jpeg: 'document', webp: 'document', svg: 'document', gif: 'document',
-      bmp: 'document', ico: 'document',
-      mp4: 'document', mov: 'document', mkv: 'document', avi: 'document', webm: 'document', ogg: 'document',
-      pdf: 'document'
-    }
-    if (modeMap[ext]) {
-      setWorkbenchMode(modeMap[ext])
-    }
-  }, [selectFile, setWorkbenchMode])
-
-  // Context menu items
-  const getContextItems = useCallback((item: FileItem | null): ContextMenuItem[] => {
-    if (!item) {
-      // Right-click on empty area
-      return [
-        { id: 'newFile', label: '新建文件', onClick: () => startCreating('file') },
-        { id: 'newFolder', label: '新建文件夹', onClick: () => startCreating('folder') },
-        { id: 'sep1', label: '', separator: true },
-        { id: 'refresh', label: '刷新', onClick: () => refreshFiles() }
-      ]
-    }
-    return [
-      ...(item.isDirectory ? [] : [
-        { id: 'open', label: '打开', onClick: () => handleOpenFile(item) }
-      ]),
-      { id: 'sep1', label: '', separator: true },
-      { id: 'rename', label: '重命名', shortcut: 'Enter', onClick: () => startRenaming(item.path) },
-      { id: 'copyPath', label: '复制路径', shortcut: '⌥⌘C', onClick: () => copyPathToClipboard(item.path) },
-      { id: 'sep2', label: '', separator: true },
-      { id: 'newFile', label: '新建文件', onClick: () => startCreating('file') },
-      { id: 'newFolder', label: '新建文件夹', onClick: () => startCreating('folder') },
-      { id: 'sep3', label: '', separator: true },
-      { id: 'showInFinder', label: '在 Finder 中显示', onClick: () => showInFolder(item.path) },
-      { id: 'sep4', label: '', separator: true },
-      {
-        id: 'delete', label: '删除', danger: true, onClick: () => {
-          if (confirm(`确定删除 "${item.name}" 吗？`)) {
-            deleteItem(item.path)
-          }
-        }
-      }
-    ]
-  }, [handleOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, deleteItem, refreshFiles])
-
-  // Show "Open Folder" prompt when no workspace root
-  if (!workspaceRoot && !(typeof window !== 'undefined' && window.electronAPI)) {
-    // In browser preview, just show mock files
-  }
-
-  // --- Drag & Drop from Finder ---
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.dataTransfer.types.includes('Files')) {
-      e.dataTransfer.dropEffect = 'copy'
-      setIsDragOver(true)
-    }
+  const toggleFilter = useCallback((key: keyof FileFilterMap) => {
+    setFilters((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-  }, [])
+  const filterLabels: { key: keyof FileFilterMap; label: string }[] = [
+    { key: 'folder', label: '文件夹' },
+    { key: 'document', label: '文档' },
+    { key: 'code', label: '代码' },
+    { key: 'image', label: '图片' },
+    { key: 'video', label: '视频' },
+    { key: 'audio', label: '音频' },
+    { key: 'spreadsheet', label: '表格' },
+    { key: 'design', label: '设计' },
+    { key: 'other', label: '其他' },
+  ]
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-
-    const droppedFiles = e.dataTransfer.files
-    if (!droppedFiles || droppedFiles.length === 0) return
-
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      for (let i = 0; i < droppedFiles.length; i++) {
-        const p = window.electronAPI.getFilePathFromDrop(droppedFiles[i])
-        if (p) addPinnedFolder(p)
-      }
-    }
-  }, [addPinnedFolder])
-
-  const displayPath = currentPath === workspaceRoot
-    ? currentPath.split('/').pop() || currentPath
-    : currentPath.replace(workspaceRoot || '', '').replace(/^\//, '') || '/'
+  const savedWorkspaces = useMemo(() => getSavedWorkspaces(), [getSavedWorkspaces])
 
   return (
     <div
-      className="flex-shrink-0 border-r border-[var(--border-default)] flex flex-col select-none overflow-hidden"
+      className="flex-shrink-0 border-r flex flex-col select-none overflow-hidden"
       style={{
-        width: sidebarVisible ? sidebarWidth : 0,
-        minWidth: sidebarVisible ? sidebarWidth : 0,
-        background: 'var(--bg-panel)',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
-        borderRightWidth: sidebarVisible ? 1 : 0,
-      }}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        setContextMenu({ x: e.clientX, y: e.clientY, item: null })
+        width: isVisible ? panelWidth : 0,
+        minWidth: isVisible ? panelWidth : 0,
+        background: PANEL_TOKENS.panelBg,
+        fontFamily: 'Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+        transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out',
+        borderColor: PANEL_TOKENS.border,
+        borderRightWidth: isVisible ? 1 : 0,
       }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-default)' }}>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[13px] font-semibold text-[var(--text-title)]">文件管理</span>
-          {!(typeof window !== 'undefined' && window.electronAPI) ? (
-            <span
-              className="flex items-center gap-1 rounded-[10px] text-[10px] font-medium"
-              style={{ padding: '3px 8px', background: 'var(--color-orange-light)', color: 'var(--color-orange)' }}
-              title="浏览器预览模式下显示模拟文件"
-            >
-              预览
-            </span>
-          ) : (
-            <span
-              className="flex items-center gap-1 rounded-[10px] text-[10px] font-medium"
-              style={{ padding: '3px 8px', background: 'var(--color-green-light)', color: 'var(--color-green)' }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-green)]" />
-              已连接
-            </span>
-          )}
+      {variant === 'calendar' ? (
+        <div className="flex-1 flex items-center justify-center">
+          <span className="text-[13px]" style={{ color: PANEL_TOKENS.mutedStrong }}>日历侧边栏</span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => startCreating('file')}
-            title="新建文件"
-            className="p-1 rounded hover:bg-black/5 text-[var(--text-gray)]"
+      ) : variant === 'search' ? (
+        <GlobalSearchPanel key="global-search-panel" />
+      ) : variant === 'skills' ? (
+        <SkillsCenterPanel key="skills-center-panel" />
+      ) : (
+        <>
+          {/* Header row */}
+          <div
+            className="shrink-0 border-b flex items-center justify-between"
+            style={{
+              height: FILES_PANEL_DIMENSIONS.headerHeight,
+              borderColor: PANEL_TOKENS.border,
+              padding: `${FILES_PANEL_DIMENSIONS.headerPaddingY}px ${FILES_PANEL_DIMENSIONS.headerPaddingX}px`,
+            }}
           >
-            <FilePlus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => startCreating('folder')}
-            title="新建文件夹"
-            className="p-1 rounded hover:bg-black/5 text-[var(--text-gray)]"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Workspace menu */}
-          <div className="relative" ref={workspaceMenuRef}>
-            <button
-              onClick={() => setShowWorkspaceMenu(v => !v)}
-              title="工作区操作"
-              className="p-1 rounded hover:bg-black/5 text-[var(--text-gray)]"
+            <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
+              文件管理
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-[10px] text-[10px] font-medium"
+              style={{
+                padding: '3px 8px',
+                background: 'rgba(52, 211, 153, 0.07)',
+                color: '#34D399',
+              }}
             >
-              <MoreVertical className="w-3.5 h-3.5" />
-            </button>
+              <span className="h-[6px] w-[6px] rounded-full" style={{ background: '#34D399' }} />
+              {isConnected ? 'Connected' : 'Offline'}
+            </span>
+          </div>
 
-            {showWorkspaceMenu && (
-              <div
-                className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg py-1"
-                onClick={() => setShowWorkspaceMenu(false)}
+          {/* Toolbar row */}
+          <div
+            className="shrink-0 border-b flex items-center justify-between"
+            style={{
+              borderColor: PANEL_TOKENS.border,
+              padding: '6px 14px',
+            }}
+          >
+            {/* Left: view mode + filter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <button
+                className={ICON_BTN}
+                style={{
+                  width: 24, height: 24,
+                  color: viewMode === 'tree' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
+                  background: viewMode === 'tree' ? 'rgba(0,0,0,0.05)' : 'transparent',
+                }}
+                onClick={() => setViewMode('tree')}
+                title="列表视图"
               >
-                <button
-                  onClick={() => {
-                    if (!workspaceRoot || confirm('确定新建工作区？当前文件列表将被清空。')) {
-                      clearWorkspace()
-                    }
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5 flex items-center gap-2"
-                >
-                  <FilePlus className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                  新建工作区
-                </button>
-                <button
-                  onClick={() => {
-                    if (pinnedFolders.length === 0) return alert('当前没有打开的工作区')
-                    const defaultName = pinnedFolders.map(p => p.split('/').pop()).join(' + ') || '我的工作区'
-                    const name = prompt('工作区名称：', defaultName)
-                    if (name) {
-                      saveWorkspace(name)
-                      alert(`工作区 "${name}" 已保存`)
-                    }
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5 flex items-center gap-2"
-                >
-                  <Folder className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                  保存工作区
-                </button>
+                <LayoutList style={{ width: 14, height: 14 }} />
+              </button>
+              <button
+                className={ICON_BTN}
+                style={{
+                  width: 24, height: 24,
+                  color: viewMode === 'grid' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
+                  background: viewMode === 'grid' ? 'rgba(0,0,0,0.05)' : 'transparent',
+                }}
+                onClick={() => setViewMode('grid')}
+                title="缩略图视图"
+              >
+                <LayoutGrid style={{ width: 14, height: 14 }} />
+              </button>
 
-                {/* Separator */}
-                <div className="border-t border-[var(--border-default)] my-1" />
-
-                {/* Saved workspaces */}
-                {getSavedWorkspaces().length > 0 && (
-                  <>
-                    <div className="px-3 py-1 text-[10px] text-[var(--text-light)] font-medium">已保存的工作区</div>
-                    {getSavedWorkspaces().map(w => (
+              {/* Filter */}
+              <div className="relative" ref={filterMenuRef}>
+                <button
+                  className={ICON_BTN}
+                  style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+                  onClick={() => setShowFilterMenu((v) => !v)}
+                  title="筛选"
+                >
+                  <SlidersHorizontal style={{ width: 14, height: 14 }} />
+                </button>
+                {showFilterMenu && (
+                  <div
+                    className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1"
+                    style={{
+                      minWidth: 140,
+                      background: '#FFFFFF',
+                      borderColor: PANEL_TOKENS.border,
+                    }}
+                  >
+                    {filterLabels.map(({ key, label }) => (
                       <button
-                        key={w.name}
-                        onClick={() => loadSavedWorkspace(w.folders)}
-                        className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5 flex items-center gap-2 group"
+                        key={key}
+                        onClick={() => toggleFilter(key)}
+                        className="w-full text-left flex items-center gap-2 hover:bg-black/[0.04]"
+                        style={{ padding: '5px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
                       >
-                        <FolderOpen className="w-3.5 h-3.5 text-[var(--color-blue)]" />
-                        <span className="flex-1 truncate">{w.name}</span>
+                        <span
+                          style={{
+                            width: 14, height: 14, borderRadius: 3,
+                            border: `1px solid ${filters[key] ? '#5B8DEF' : PANEL_TOKENS.border}`,
+                            background: filters[key] ? '#5B8DEF' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#fff', fontSize: 10, lineHeight: 1,
+                          }}
+                        >
+                          {filters[key] ? '✓' : ''}
+                        </span>
+                        {label}
                       </button>
                     ))}
-                    <div className="border-t border-[var(--border-default)] my-1" />
-                  </>
+                  </div>
                 )}
+              </div>
+            </div>
 
+            {/* Right: new file, new folder, more */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <button
+                className={ICON_BTN}
+                style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+                onClick={() => startCreating('file')}
+                title="新建文档"
+              >
+                <FilePlus style={{ width: 14, height: 14 }} />
+              </button>
+              <button
+                className={ICON_BTN}
+                style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+                onClick={() => startCreating('folder')}
+                title="新建文件夹"
+              >
+                <FolderPlus style={{ width: 14, height: 14 }} />
+              </button>
+
+              {/* More menu */}
+              <div className="relative" ref={moreMenuRef}>
                 <button
-                  onClick={openFolderDialog}
-                  className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-black/5 flex items-center gap-2"
+                  className={ICON_BTN}
+                  style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+                  onClick={() => setShowMoreMenu((v) => !v)}
+                  title="更多"
                 >
-                  <FolderOpenIcon className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                  打开文件夹...
+                  <MoreVertical style={{ width: 14, height: 14 }} />
                 </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div style={{ padding: '10px 14px' }}>
-        <div className="flex items-center gap-1 mb-2">
-          <button
-            onClick={() => parentPath && setCurrentPath(parentPath)}
-            disabled={!parentPath}
-            className="p-1 rounded border border-[var(--border-default)] disabled:opacity-40 hover:bg-black/5"
-            title="返回上一级"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => refreshFiles()}
-            className="p-1 rounded border border-[var(--border-default)] hover:bg-black/5"
-            title="刷新"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-          <div
-            className="flex-1 truncate text-[11px] text-[var(--text-muted)] rounded-[10px] px-2.5 py-1"
-            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-input)' }}
-            title={currentPath}
-          >
-            {displayPath}
-          </div>
-        </div>
-
-        <div
-          className="flex items-center gap-[6px] rounded-[10px]"
-          style={{ padding: '6px 10px', border: '1px solid var(--border-input)' }}
-        >
-          <Search className="w-3 h-3 text-[var(--text-light)] flex-shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索文件..."
-            className="flex-1 bg-transparent border-none outline-none text-[12px] text-[var(--text-body)] placeholder:text-[var(--text-placeholder)]"
-          />
-        </div>
-      </div>
-
-      {/* File List */}
-      <div className="flex-1 overflow-auto px-1 pb-2 pt-2 relative">
-        {/* Drag overlay */}
-        {isDragOver && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-blue-light)] border-2 border-dashed border-[var(--color-blue)] rounded-lg m-1 pointer-events-none">
-            <div className="flex flex-col items-center gap-1">
-              <FolderOpenIcon className="w-6 h-6 text-[var(--color-blue)]" />
-              <span className="text-[12px] font-medium text-[var(--color-blue)]">拖放文件到这里</span>
-            </div>
-          </div>
-        )}
-        {/* Inline create input */}
-        {creatingType && (
-          <div className="px-2 py-1">
-            <div className="flex items-center gap-1">
-              {creatingType === 'folder'
-                ? <Folder className="w-4 h-4 text-[var(--color-blue)] flex-shrink-0" />
-                : <FileText className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
-              }
-              <InlineInput
-                defaultValue={creatingType === 'folder' ? '新建文件夹' : '新建文件.md'}
-                onConfirm={(name) => {
-                  if (creatingType === 'folder') createFolder(name)
-                  else createFile(name)
-                }}
-                onCancel={cancelCreating}
-              />
-            </div>
-          </div>
-        )}
-
-        {pinnedFolders.length > 0 ? (
-          /* Render pinned folders as top-level expandable entries */
-          pinnedFolders.map(folderPath => {
-            const folderName = folderPath.split('/').pop() || folderPath
-            const isExpanded = expandedDirs.has(folderPath)
-            const children = dirChildren.get(folderPath) || []
-            const pinnedItem: FileItem = {
-              name: folderName,
-              path: folderPath,
-              isDirectory: true,
-              size: 0,
-              modified: new Date(),
-            }
-            return (
-              <div key={folderPath}>
-                <FileTreeItem
-                  item={pinnedItem}
-                  isActive={selectedFile === folderPath}
-                  isExpanded={isExpanded}
-                  isRenaming={renamingPath === folderPath}
-                  depth={0}
-                  onToggleDir={() => toggleDir(folderPath)}
-                  onOpenFile={() => { }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setContextMenu({ x: e.clientX, y: e.clientY, item: pinnedItem })
-                  }}
-                  onRenameConfirm={(newName) => renameItem(folderPath, newName)}
-                  onRenameCancel={cancelRenaming}
-                />
-                {isExpanded && children.length > 0 && (
-                  <FileTreeRecursive
-                    items={children}
-                    depth={1}
-                    selectedFile={selectedFile}
-                    expandedDirs={expandedDirs}
-                    dirChildren={dirChildren}
-                    renamingPath={renamingPath}
-                    onToggleDir={toggleDir}
-                    onOpenFile={handleOpenFile}
-                    onContextMenu={(e, item) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setContextMenu({ x: e.clientX, y: e.clientY, item })
+                {showMoreMenu && (
+                  <div
+                    className="absolute right-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1"
+                    style={{
+                      minWidth: 180,
+                      background: '#FFFFFF',
+                      borderColor: PANEL_TOKENS.border,
                     }}
-                    onRenameConfirm={(path, newName) => renameItem(path, newName)}
-                    onRenameCancel={cancelRenaming}
-                  />
+                    onClick={() => setShowMoreMenu(false)}
+                  >
+                    <button
+                      onClick={() => {
+                        if (pinnedFolders.length === 0) return
+                        const defaultName =
+                          pinnedFolders.map((p) => p.split('/').pop()).join(' + ') || '我的工作区'
+                        const name = prompt('工作区名称：', defaultName)
+                        if (name) saveWorkspace(name)
+                      }}
+                      className="w-full text-left flex items-center gap-2 hover:bg-black/[0.04]"
+                      style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
+                    >
+                      <Folder style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+                      保存当前工作区
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!workspaceRoot || confirm('确定新建工作区？当前文件列表将被清空。')) {
+                          clearWorkspace()
+                        }
+                      }}
+                      className="w-full text-left flex items-center gap-2 hover:bg-black/[0.04]"
+                      style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
+                    >
+                      <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+                      新建工作区
+                    </button>
+
+                    {savedWorkspaces.length > 0 && (
+                      <>
+                        <div style={{ borderTop: `1px solid ${PANEL_TOKENS.border}`, margin: '4px 0' }} />
+                        <div style={{ padding: '4px 12px', fontSize: 10, color: PANEL_TOKENS.mutedStrong, fontWeight: 500 }}>
+                          已保存的工作区
+                        </div>
+                        {savedWorkspaces.map((w) => (
+                          <button
+                            key={w.name}
+                            onClick={() => loadSavedWorkspace(w.folders)}
+                            className="w-full text-left flex items-center gap-2 hover:bg-black/[0.04]"
+                            style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
+                          >
+                            <FolderOpen style={{ width: 14, height: 14, color: '#5B8DEF' }} />
+                            <span className="truncate">{w.name}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
-            )
-          })
-        ) : filteredFiles.length === 0 && !creatingType ? (
-          <div className="flex flex-col items-center justify-center h-32 text-[var(--text-light)]">
-            <FolderOpenIcon className="w-8 h-8 mb-2 opacity-50" />
-            <span className="text-[11px]">拖入文件夹或点击打开文件夹</span>
+            </div>
           </div>
-        ) : (
-          <FileTreeRecursive
-            items={filteredFiles}
-            depth={0}
-            selectedFile={selectedFile}
-            expandedDirs={expandedDirs}
-            dirChildren={dirChildren}
-            renamingPath={renamingPath}
-            onToggleDir={toggleDir}
-            onOpenFile={handleOpenFile}
-            onContextMenu={(e, item) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setContextMenu({ x: e.clientX, y: e.clientY, item })
-            }}
-            onRenameConfirm={(path, newName) => renameItem(path, newName)}
-            onRenameCancel={cancelRenaming}
-          />
-        )}
-      </div>
 
-      {/* Context Menu */}
-      {contextMenu && (
-        <ContextMenu
-          items={getContextItems(contextMenu.item)}
-          x={contextMenu.x}
-          y={contextMenu.y}
-          onClose={() => setContextMenu(null)}
-        />
+          {/* Search */}
+          <div
+            className="shrink-0"
+            style={{
+              padding: `${FILES_PANEL_DIMENSIONS.searchPaddingY}px ${FILES_PANEL_DIMENSIONS.searchPaddingX}px`,
+            }}
+          >
+            <label
+              className="flex items-center gap-[6px] border"
+              style={{
+                height: FILES_PANEL_DIMENSIONS.searchHeight,
+                borderRadius: FILES_PANEL_DIMENSIONS.searchRadius,
+                borderColor: PANEL_TOKENS.inputBorder,
+                padding: '6px 10px',
+              }}
+            >
+              <Search className="h-[13px] w-[13px]" style={{ color: '#4A4A4A' }} />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索文件..."
+                className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[#AAAAAA]"
+                style={{ color: '#333333' }}
+              />
+            </label>
+          </div>
+
+          {/* File tree / grid */}
+          <FileTree
+            query={query}
+            filters={filters}
+            viewMode={viewMode}
+            thumbnailSize={thumbnailSize}
+            onThumbnailSizeChange={setThumbnailSize}
+          />
+        </>
       )}
     </div>
   )
