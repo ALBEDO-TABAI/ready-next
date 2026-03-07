@@ -1,67 +1,995 @@
 // Type declarations for window.electronAPI exposed by preload
 
+// =============================================================================
+// Base IPC Response Types
+// =============================================================================
+
+/** Base response shape used across most IPC handlers */
+interface IPCResponse<T = void> {
+  success: boolean
+  data?: T
+  error?: string
+  mock?: boolean
+}
+
+// =============================================================================
+// Agent API Types
+// =============================================================================
+
+type ChannelAdapterType =
+  | 'local-debug'
+  | 'generic-webhook'
+  | 'feishu-bot'
+  | 'feishu-app'
+  | 'telegram-bot'
+
+interface AgentChannelConfigData {
+  id: string
+  type: ChannelAdapterType
+  name: string
+  enabled: boolean
+  config: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  lastError?: string | null
+  lastSeenAt?: string | null
+}
+
+interface AgentCronTaskData {
+  id: string
+  name: string
+  cronExpr: string
+  prompt: string
+  channelId?: string | null
+  enabled: boolean
+  payload?: Record<string, unknown>
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface AgentHeartbeatSnapshot {
+  sidecar: {
+    status: 'starting' | 'running' | 'stopped' | 'error'
+    pid?: number
+    port?: number
+    lastBeatAt?: string
+    error?: string
+  }
+  adapters: Array<{
+    id: string
+    type: ChannelAdapterType
+    healthy: boolean
+    status?: 'starting' | 'running' | 'stopped' | 'error'
+    lastBeatAt?: string
+    error?: string
+  }>
+  orchestrator: {
+    healthy: boolean
+    activeTasks: number
+    lastBeatAt?: string
+    error?: string
+  }
+  toolGateway: {
+    healthy: boolean
+    availableTools: number
+    lastBeatAt?: string
+    error?: string
+  }
+}
+
+interface AgentRuntimeStatusData {
+  orchestrator: 'claude-sdk'
+  sidecarEnabled: boolean
+  sidecar: AgentHeartbeatSnapshot['sidecar']
+  channels: {
+    total: number
+    enabled: number
+    connected: number
+    errors: number
+    byType: Record<string, number>
+  }
+  schedules: {
+    total: number
+    enabled: number
+  }
+  heartbeat: AgentHeartbeatSnapshot
+}
+
+type ConversationSourceKind = 'local' | 'channel'
+
+interface ConversationScopeData {
+  id: string
+  agent: string
+  title: string
+  sourceKind: ConversationSourceKind
+  sourceId: string
+  threadKey: string
+  meta: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  lastMessageAt?: string | null
+}
+
+interface ConversationScopeMessageData {
+  id: string
+  conversationId: string
+  role: string
+  content: string
+  timestamp: string
+  meta: Record<string, unknown>
+}
+
+interface ConversationEventData {
+  type: 'scope_created' | 'scope_updated' | 'message_added'
+  scope: ConversationScopeData
+  message?: ConversationScopeMessageData
+}
+
+interface ConversationAttachmentData {
+  attachmentId: string
+  scopeId: string
+  sourceMessageId: string
+  name: string
+  path: string
+  type: 'image' | 'video' | 'text' | 'spreadsheet' | 'other'
+  size: number
+  ext: string
+  url?: string | null
+  mimeType?: string | null
+  remoteId?: string | null
+  channelId?: string | null
+  threadKey?: string | null
+  createdAt: string
+}
+
+interface RemoteAttachmentCacheStatsData {
+  totalFiles: number
+  totalBytes: number
+  targetPath: string
+  channels: Array<{
+    channelId: string
+    files: number
+    bytes: number
+  }>
+}
+
+interface ScopeRunTraceItemData {
+  id: string
+  kind: 'call' | 'result'
+  text: string
+  timestamp: string
+}
+
+interface ScopeRunEventData {
+  type: 'started' | 'updated' | 'finished'
+  scopeId: string
+  agent: string
+  runId?: string
+  phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
+  latestText?: string
+  toolEvent?: ScopeRunTraceItemData
+  error?: string
+  blockedReason?: string
+  controllerId?: string
+  ownerTabId?: string
+  checkpointExpiresAt?: number
+  timestamp: string
+}
+
 interface ElectronAgentAPI {
-  send: (agent: string, message: string) => Promise<{ success: boolean; error?: string | null }>
+  send: (
+    agent: string,
+    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+    sessionId?: string,
+    requestId?: string
+  ) => Promise<{ success: boolean; error?: string | null }>
+  newSession: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
   orchestrate: (task: string, agents: string[]) => Promise<{ success: boolean; error?: string | null }>
   getStatus: (agent: string) => Promise<unknown>
   getAll: () => Promise<unknown>
-  kill: (agent: string) => Promise<{ success: boolean; error?: string }>
+  kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
   getDiagnostics: () => Promise<{ success: boolean; data: unknown }>
-  onStream: (callback: (data: { agent: string; chunk: string; type: string }) => void) => () => void
-  onStatusChange: (callback: (data: { agent: string; status: string; isMock: boolean }) => void) => () => void
-  onError: (callback: (data: { agent: string; error: string; type: string }) => void) => () => void
+  getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
+  listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
+  listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
+  getConversationScopeMessages: (scopeId: string) => Promise<IPCResponse<ConversationScopeMessageData[]>>
+  createLocalScope: (agent: string) => Promise<IPCResponse<ConversationScopeData>>
+  listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>
+  getScopeAttachment: (scopeId: string, attachmentId: string) => Promise<IPCResponse<ConversationAttachmentData>>
+  clearRemoteAttachmentCache: (channelId?: string) => Promise<IPCResponse<{ removedFiles: number; removedBytes: number; targetPath: string }>>
+  getRemoteAttachmentCacheStats: (channelId?: string) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
+  sendScoped: (
+    scopeId: string,
+    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+    requestId?: string
+  ) => Promise<{ success: boolean; error?: string | null }>
+  upsertChannel: (payload: {
+    id?: string
+    type: ChannelAdapterType
+    name: string
+    enabled?: boolean
+    config?: Record<string, unknown>
+  }) => Promise<IPCResponse<AgentChannelConfigData>>
+  testChannel: (payload: {
+    id?: string
+    type: ChannelAdapterType
+    name: string
+    enabled?: boolean
+    config?: Record<string, unknown>
+  }) => Promise<{ success: boolean; error?: string }>
+  deleteChannel: (id: string) => Promise<{ success: boolean; error?: string }>
+  setChannelEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<AgentChannelConfigData>>
+  sendChannelProbe: (id: string, text: string) => Promise<{ success: boolean; error?: string }>
+  listSchedules: () => Promise<IPCResponse<AgentCronTaskData[]>>
+  upsertSchedule: (payload: {
+    id?: string
+    name: string
+    cronExpr: string
+    prompt: string
+    channelId?: string | null
+    enabled?: boolean
+    payload?: Record<string, unknown>
+  }) => Promise<IPCResponse<AgentCronTaskData>>
+  runScheduleNow: (id: string) => Promise<{ success: boolean; error?: string }>
+  pauseSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
+  resumeSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
+  deleteSchedule: (id: string) => Promise<{ success: boolean; error?: string }>
+  onStream: (callback: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => () => void
+  onStatusChange: (callback: (data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => void) => () => void
+  onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => void) => () => void
+  onToolAction: (callback: (data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => () => void
+  onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
+  onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
+}
+
+// =============================================================================
+// Browser API Types
+// =============================================================================
+
+/** Tab info returned by browser:getTabs */
+interface BrowserTabInfo {
+  id: string
+  url: string
+  title: string
+  domain: string
+  favicon: string | null
+  owner: 'manual' | 'agent'
+  required: boolean
+  activity: 'idle' | 'running' | 'attention'
+  lastAuditedAt: number | null
+  active: boolean
+}
+
+/** Tab update event pushed to renderer via browser:tabUpdate */
+interface BrowserTabUpdateEvent {
+  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta'
+  tabId: string
+  title?: string
+  url?: string
+  domain?: string
+  favicon?: string | null
+  owner?: 'manual' | 'agent'
+  required?: boolean
+  activity?: 'idle' | 'running' | 'attention'
+  lastAuditedAt?: number | null
+  canGoBack?: boolean
+  canGoForward?: boolean
+  loading?: boolean
+  error?: string
+}
+
+interface BrowserBookmarkData {
+  id: string
+  url: string
+  title: string
+  favicon: string | null
+  created_at: number
+}
+
+interface BrowserHistoryData {
+  id: string
+  url: string
+  title: string
+  visited_at: number
+}
+
+interface BrowserDownloadData {
+  id: string
+  url: string
+  filename: string
+  save_path: string
+  total_bytes: number
+  received_bytes: number
+  state: string
+  created_at: number
+}
+
+interface BrowserDownloadUpdateEvent {
+  id: string
+  filename: string
+  totalBytes: number
+  receivedBytes: number
+  state: string
+}
+
+interface BrowserTabContextData {
+  title: string
+  url: string
+  domain: string
+  heading: string
+  selection: string
+  excerpt: string
+  capturedAt: number
+}
+
+interface BrowserPreviewState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
+}
+
+interface BrowserBookmarksChangedEvent {
+  action: 'import' | 'export'
+  imported?: number
+  skipped?: number
+  exported?: number
+  filePath?: string
+}
+
+interface BrowserAdblockStateData {
+  enabled: boolean
+  previewEnabled: boolean
+  whitelistDomains: string[]
+  rulesVersion: string
+  networkBlockedCount: number
+  lastUpdatedAt: number | null
 }
 
 interface ElectronBrowserAPI {
-  createTab: (url: string) => Promise<unknown>
-  closeTab: (tabId: string) => Promise<unknown>
-  switchTab: (tabId: string) => Promise<unknown>
-  navigate: (tabId: string, url: string) => Promise<unknown>
-  goBack: (tabId: string) => Promise<unknown>
-  goForward: (tabId: string) => Promise<unknown>
-  reload: (tabId: string) => Promise<unknown>
-  updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<unknown>
-  hideAll: () => Promise<unknown>
-  showActive: () => Promise<unknown>
-  getTabs: () => Promise<unknown>
-  onTabUpdate: (callback: (data: unknown) => void) => () => void
+  createTab: (url: string) => Promise<{ success: boolean; tabId?: string; title?: string; error?: string; mock?: boolean }>
+  closeTab: (tabId: string) => Promise<{ success: boolean; error?: string }>
+  switchTab: (tabId: string) => Promise<{
+    success: boolean
+    url?: string
+    title?: string
+    domain?: string
+    favicon?: string | null
+    owner?: 'manual' | 'agent'
+    required?: boolean
+    activity?: 'idle' | 'running' | 'attention'
+    lastAuditedAt?: number | null
+    canGoBack?: boolean
+    canGoForward?: boolean
+    error?: string
+  }>
+  navigate: (tabId: string, url: string) => Promise<{ success: boolean; error?: string }>
+  goBack: (tabId: string) => Promise<{ success: boolean; error?: string }>
+  goForward: (tabId: string) => Promise<{ success: boolean; error?: string }>
+  reload: (tabId: string) => Promise<{ success: boolean; error?: string }>
+  updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }>
+  hideAll: () => Promise<{ success: boolean }>
+  showActive: () => Promise<{ success: boolean }>
+  getTabs: () => Promise<BrowserTabInfo[]>
+  getAdblockState: () => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
+  setAdblockEnabled: (
+    enabled: boolean,
+    scope?: 'main' | 'preview' | 'all',
+  ) => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
+  toggleAdblockDomain: (domain: string) => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
+  getTabContext: (tabId?: string) => Promise<{ success: boolean; data?: BrowserTabContextData; error?: string }>
+  previewOpen: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
+  previewNavigate: (payload: { url: string }) => Promise<{ success: boolean; error?: string }>
+  previewGoBack: () => Promise<{ success: boolean; error?: string }>
+  previewGoForward: () => Promise<{ success: boolean; error?: string }>
+  previewReload: () => Promise<{ success: boolean; error?: string }>
+  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }>
+  previewClose: () => Promise<{ success: boolean }>
+  previewGetState: () => Promise<BrowserPreviewState>
+  onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
+  onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
+  onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
+  onNewTabRequest: (callback: (url: string) => void) => () => void
+
+  // Bookmarks
+  addBookmark: (url: string, title: string, favicon?: string) => Promise<{ success: boolean; id?: string; error?: string }>
+  removeBookmark: (url: string) => Promise<{ success: boolean; error?: string }>
+  getBookmarks: () => Promise<{ success: boolean; data?: BrowserBookmarkData[]; error?: string }>
+  isBookmarked: (url: string) => Promise<{ success: boolean; bookmarked: boolean }>
+  importBookmarks: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    imported?: number
+    skipped?: number
+    error?: string
+    filePath?: string
+  }>
+  exportBookmarks: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    exported?: number
+    error?: string
+    filePath?: string
+  }>
+  onBookmarksChanged: (callback: (data: BrowserBookmarksChangedEvent) => void) => () => void
+
+  // History
+  getHistory: (limit?: number) => Promise<{ success: boolean; data?: BrowserHistoryData[]; error?: string }>
+  clearHistory: () => Promise<{ success: boolean; error?: string }>
+  searchHistory: (query: string) => Promise<{ success: boolean; data?: BrowserHistoryData[]; error?: string }>
+
+  // Downloads
+  getDownloads: () => Promise<{ success: boolean; data?: BrowserDownloadData[]; error?: string }>
+  clearDownloads: () => Promise<{ success: boolean; error?: string }>
+  onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
+
+  // Print
+  print: (tabId: string) => Promise<{ success: boolean; error?: string }>
+}
+
+// =============================================================================
+// Document API Types
+// =============================================================================
+
+/** File item returned by document:list */
+interface DocumentFileItem {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+  modified: Date | string
+}
+
+/** Text file data from document:read */
+interface DocumentReadTextData {
+  type: 'text'
+  content: string
+}
+
+/** Binary file data from document:read */
+interface DocumentReadBinaryData {
+  type: 'binary'
+  category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
+  localUrl: string
+  extension: string
+}
+
+/** Read file response */
+interface DocumentReadResponse {
+  success: boolean
+  data?: DocumentReadTextData | DocumentReadBinaryData
+  /** Backward-compat top-level content (only for text files) */
+  content?: string
+  error?: string
+  errorCode?: string
+  mock?: boolean
+}
+
+/** Write file response */
+interface DocumentWriteResponse {
+  success: boolean
+  error?: string
+  mock?: boolean
+}
+
+/** List directory response */
+interface DocumentListResponse {
+  success: boolean
+  items?: DocumentFileItem[]
+  error?: string
+  errorCode?: string
+  mock?: boolean
+}
+
+/** DOCX parse result data */
+interface DocumentDocxData {
+  html: string
+  rawText: string
+  messages?: Array<{ type: string; message: string }>
+}
+
+/** DOCX parse response */
+interface DocumentDocxResponse {
+  success: boolean
+  data?: DocumentDocxData
+  /** Backward-compat top-level content */
+  content?: string
+  html?: string
+  file?: string
+  error?: string
+  errorCode?: string
+  mock?: boolean
+}
+
+/** Single sheet in XLSX result */
+interface DocumentXlsxSheet {
+  name: string
+  data: unknown[][]
+}
+
+/** XLSX parse result data */
+interface DocumentXlsxData {
+  sheets: DocumentXlsxSheet[]
+}
+
+/** XLSX parse response */
+interface DocumentXlsxResponse {
+  success: boolean
+  data?: DocumentXlsxData
+  /** Backward-compat: sheet names */
+  sheets?: string[]
+  /** Backward-compat: flat data map keyed by sheet name */
+  sheetData?: Record<string, unknown[][]>
+  file?: string
+  error?: string
+  errorCode?: string
+  mock?: boolean
+}
+
+/** File stat structured data */
+interface DocumentStatData {
+  size: number
+  modifiedTime: number
+  createdTime: number
+  isDirectory: boolean
+  extension: string | null
+}
+
+/** Legacy stat shape (backward compat) */
+interface DocumentStatLegacy {
+  size: number
+  isDirectory: boolean
+  modified: Date | string
+  created?: Date | string
+}
+
+/** Stat response */
+interface DocumentStatResponse {
+  success: boolean
+  data?: DocumentStatData
+  stat?: DocumentStatLegacy
+  error?: string
+  mock?: boolean
+}
+
+/** Simple success/failure response for file operations (mkdir, rename, delete, copy, move, showInFolder, createFile) */
+interface DocumentOperationResponse {
+  success: boolean
+  error?: string
+  mock?: boolean
+}
+
+/** Open folder dialog response */
+interface DocumentOpenFolderResponse {
+  success: boolean
+  path?: string
+  error?: string
+}
+
+/** Get home directory response */
+interface DocumentHomeResponse {
+  success: boolean
+  path: string
 }
 
 interface ElectronDocumentAPI {
-  readFile: (path: string) => Promise<any>
-  writeFile: (path: string, content: string) => Promise<any>
-  listFiles: (dir: string) => Promise<any>
-  parseDocx: (path: string) => Promise<any>
-  parseXlsx: (path: string) => Promise<any>
+  readFile: (path: string) => Promise<DocumentReadResponse>
+  writeFile: (path: string, content: string) => Promise<DocumentWriteResponse>
+  listFiles: (dir: string) => Promise<DocumentListResponse>
+  parseDocx: (path: string) => Promise<DocumentDocxResponse>
+  parseXlsx: (path: string) => Promise<DocumentXlsxResponse>
   // File management
-  mkdir: (path: string) => Promise<any>
-  rename: (oldPath: string, newPath: string) => Promise<any>
-  deleteItem: (path: string) => Promise<any>
-  copyItem: (src: string, dest: string) => Promise<any>
-  moveItem: (src: string, dest: string) => Promise<any>
-  stat: (path: string) => Promise<any>
-  openFolder: () => Promise<any>
-  getHome: () => Promise<any>
-  showInFolder: (path: string) => Promise<any>
-  createFile: (path: string) => Promise<any>
+  mkdir: (path: string) => Promise<DocumentOperationResponse>
+  rename: (oldPath: string, newPath: string) => Promise<DocumentOperationResponse>
+  deleteItem: (path: string) => Promise<DocumentOperationResponse>
+  copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
+  moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
+  stat: (path: string) => Promise<DocumentStatResponse>
+  openFolder: () => Promise<DocumentOpenFolderResponse>
+  getHome: () => Promise<DocumentHomeResponse>
+  showInFolder: (path: string) => Promise<DocumentOperationResponse>
+  openPath: (path: string) => Promise<DocumentOperationResponse>
+  createFile: (path: string) => Promise<DocumentOperationResponse>
+}
+
+// =============================================================================
+// RSS API Types
+// =============================================================================
+
+/** RSS source record */
+interface RSSSourceData {
+  id: string
+  name: string
+  url: string
+  group?: string
+  enabled?: boolean
+  platform?: string
+}
+
+/** RSS item record */
+interface RSSItemData {
+  id: string
+  sourceId: string
+  title: string
+  link: string
+  summary: string
+  author?: string
+  source?: string
+  publishedAt: string
+  read: boolean
+  starred: boolean
+  coverImage?: string | null
+  aiScore?: number | null
+  aiTags?: string | null
+}
+
+/** Input for adding an RSS source */
+interface RSSAddSourceInput {
+  name?: string
+  url: string
+  group?: string
+}
+
+/** Unified RSS response shape (all RSS handlers use { success, mock, data?, error? }) */
+interface RSSResponse<T> {
+  success: boolean
+  mock: boolean
+  data?: T
+  error?: string
+}
+
+type RSSAnalysisAction = 'copy' | 'visual'
+type RSSAnalysisJobStatus =
+  | 'queued'
+  | 'paused'
+  | 'running_script'
+  | 'running_subagent'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+
+interface RSSAnalysisJobData {
+  id: string
+  itemId: string
+  action: RSSAnalysisAction
+  sourceUrl: string
+  title: string
+  targetDir: string
+  outputDir: string
+  reportPath: string | null
+  status: RSSAnalysisJobStatus
+  progress: number
+  message: string | null
+  error: string | null
+  meta: Record<string, unknown> | null
+  createdAt: string
+  startedAt: string | null
+  updatedAt: string
+  finishedAt: string | null
+}
+
+interface RSSItemAnalysisProgress {
+  itemId: string
+  jobId: string
+  action: RSSAnalysisAction
+  status: RSSAnalysisJobStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+  updatedAt: string
 }
 
 interface ElectronRSSAPI {
-  getSources: () => Promise<any>
-  addSource: (source: any) => Promise<any>
-  removeSource: (id: string) => Promise<any>
-  getItems: (sourceId?: string) => Promise<any>
-  markRead: (itemId: string) => Promise<any>
-  fetchAll: () => Promise<any>
+  getSources: () => Promise<RSSResponse<RSSSourceData[]>>
+  addSource: (source: RSSAddSourceInput) => Promise<RSSResponse<{ id: string; platform?: string; name?: string; itemCount?: number; warning?: string }>>
+  removeSource: (id: string) => Promise<RSSResponse<{ removed: boolean }>>
+  getItems: (sourceId?: string) => Promise<RSSResponse<RSSItemData[]>>
+  markRead: (itemId: string) => Promise<RSSResponse<{ marked: boolean }>>
+  markReadBatch: (itemIds: string[]) => Promise<RSSResponse<{ marked: number }>>
+  deleteItems: (itemIds: string[]) => Promise<RSSResponse<{ deleted: number }>>
+  toggleStarred: (itemId: string) => Promise<RSSResponse<{ toggled: boolean }>>
+  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none' }) =>
+    Promise<RSSResponse<{ message: string; fetched: number; digest?: boolean; running?: boolean; errors?: string[]; status?: unknown }>>
+  status: () => Promise<RSSResponse<unknown>>
+  stats: () => Promise<RSSResponse<{
+    totalSources: number
+    totalItems: number
+    unreadItems: number
+    platformDistribution: Record<string, number>
+    categoryDistribution: Record<string, number>
+  }>>
+  diagnostics: () => Promise<RSSResponse<unknown>>
+  exportOpml: () => Promise<RSSResponse<{ path: string }>>
+  exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') => Promise<RSSResponse<{ path: string }>>
+  startItemAnalysis: (payload: {
+    itemId: string
+    action: RSSAnalysisAction
+    link: string
+    title: string
+    targetDir: string
+    source?: string
+    summary?: string
+    publishedAt?: string
+    force?: boolean
+  }) => Promise<RSSResponse<RSSAnalysisJobData>>
+  getItemAnalysisProgress: (payload?: {
+    itemIds?: string[]
+  }) => Promise<RSSResponse<Record<string, RSSItemAnalysisProgress>>>
+  listItemAnalysisJobs: (payload?: { itemId?: string; limit?: number }) => Promise<RSSResponse<RSSAnalysisJobData[]>>
+  pauseAnalysisJob: (payload: { jobId: string }) => Promise<RSSResponse<{ paused: boolean; job?: RSSAnalysisJobData }>>
+  resumeAnalysisJob: (payload: { jobId: string }) => Promise<RSSResponse<{ resumed: boolean; job?: RSSAnalysisJobData }>>
+  deleteAnalysisJob: (payload: { jobId: string }) => Promise<RSSResponse<{ deleted: boolean; reason?: string }>>
+}
+
+// =============================================================================
+// Calendar API Types
+// =============================================================================
+
+/** Calendar source record */
+interface CalendarSourceData {
+  id: string
+  name: string
+  color: string
+  type?: string
+  enabled: boolean
+}
+
+/** Calendar event record */
+interface CalendarEventData {
+  id: string
+  calendarId: string
+  title: string
+  description?: string | null
+  location?: string | null
+  startTime: string
+  endTime: string
+  allDay: boolean | number
+}
+
+/** Input for creating a calendar event */
+interface CalendarCreateEventInput {
+  calendarId: string
+  title: string
+  description?: string
+  location?: string
+  startTime: Date | string | number
+  endTime: Date | string | number
+  allDay?: boolean
+  [key: string]: unknown
+}
+
+/** Input for updating a calendar event (partial) */
+interface CalendarUpdateEventInput {
+  title?: string
+  description?: string
+  location?: string
+  calendarId?: string
+  startTime?: Date | string | number
+  endTime?: Date | string | number
+  allDay?: boolean
+  [key: string]: unknown
+}
+
+/** Unified calendar response shape (all calendar handlers use { success, mock, data?, error? }) */
+interface CalendarResponse<T> {
+  success: boolean
+  mock: boolean
+  data?: T
+  error?: string
 }
 
 interface ElectronCalendarAPI {
-  getSources: () => Promise<any>
-  getEvents: (start: Date, end: Date) => Promise<any>
-  createEvent: (event: any) => Promise<any>
-  updateEvent: (id: string, event: any) => Promise<any>
-  deleteEvent: (id: string) => Promise<any>
+  getSources: () => Promise<CalendarResponse<CalendarSourceData[]>>
+  getEvents: (start: Date, end: Date) => Promise<CalendarResponse<CalendarEventData[]>>
+  createEvent: (event: CalendarCreateEventInput) => Promise<CalendarResponse<{ id: string }>>
+  updateEvent: (id: string, event: CalendarUpdateEventInput) => Promise<CalendarResponse<{ updated: boolean }>>
+  deleteEvent: (id: string) => Promise<CalendarResponse<{ deleted: boolean }>>
 }
+
+// =============================================================================
+// Video API Types
+// =============================================================================
+
+interface ElectronVideoInfo {
+  duration: number
+  width: number
+  height: number
+  codec: string
+  fps: number
+  bitrate: number
+  audioCodec: string | null
+  format: string
+  size: number
+}
+
+interface ElectronVideoAPI {
+  getInfo: (path: string) => Promise<{ success: boolean; data?: ElectronVideoInfo; error?: string; errorCode?: string }>
+  extractFrame: (options: { input: string; timestamp: number; output?: string }) =>
+    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
+  trim: (options: { input: string; start: number; end: number; output: string }) =>
+    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
+  transcode: (options: {
+    input: string; output: string; codec?: string;
+    resolution?: string; bitrate?: string; audioCodec?: string; audioBitrate?: string
+  }) => Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
+  extractAudio: (options: { input: string; output?: string; format?: string }) =>
+    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
+  /**
+   * Timeline renderer endpoint (implemented in main process and extensible for future engines).
+   */
+  renderTimeline: (options: {
+    output: string
+    width: number
+    height: number
+    fps: number
+    duration: number
+    tracks: {
+      video: unknown[]
+      subtitle: unknown[]
+      audio: unknown[]
+    }
+  }) => Promise<{ success: boolean; path?: string; warning?: string; error?: string; errorCode?: string }>
+}
+
+// =============================================================================
+// Design API Types
+// =============================================================================
+
+interface DesignReadResponse {
+  success: boolean
+  data?: unknown
+  error?: string
+  errorCode?: string
+}
+
+interface DesignWriteResponse {
+  success: boolean
+  path?: string
+  error?: string
+  errorCode?: string
+}
+
+interface ElectronDesignAPI {
+  read: (path: string) => Promise<DesignReadResponse>
+  write: (path: string, data: unknown) => Promise<DesignWriteResponse>
+  saveAs: (payload?: { defaultPath?: string; data?: unknown }) => Promise<DesignWriteResponse>
+  export: (payload: { path?: string; format: 'png' | 'svg'; data: string; defaultName?: string }) => Promise<DesignWriteResponse>
+}
+
+// =============================================================================
+// Skills Runtime API Types
+// =============================================================================
+
+type SkillSource = 'embedded' | 'custom'
+type SkillRuntimeKind = 'python' | 'node' | 'shell' | 'reference'
+
+interface SkillParamDefinition {
+  name: string
+  type: string
+  description: string
+  required: boolean
+  enum?: string[]
+}
+
+interface SkillActionDefinition {
+  name: string
+  description: string
+  runtime: SkillRuntimeKind
+  entry: string
+  timeoutMs?: number
+  params: SkillParamDefinition[]
+  baseArgs?: string[]
+  inputMode?: 'flags' | 'json'
+}
+
+interface SkillState {
+  id: string
+  name: string
+  description: string
+  version: string
+  installed: boolean
+  installStatePath: string
+  source: SkillSource
+  manifestValid: boolean
+  defaultAction?: string
+  actions: SkillActionDefinition[]
+  managedPath?: string
+  sourcePath?: string
+}
+
+interface SkillInstallResult {
+  success: boolean
+  skillId: string
+  skillPath?: string
+  venvPython?: string
+  error?: string
+}
+
+interface SkillRunResult {
+  success: boolean
+  skillId: string
+  action: string
+  stdout: string
+  stderr: string
+  outputDir?: string
+  command: string[]
+  error?: string
+}
+
+interface SkillJobRecord {
+  id: string
+  skillId: string
+  action: string
+  status: string
+  triggerType: 'manual' | 'tool' | 'schedule'
+  scheduleId: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  durationMs: number | null
+  stdout: string
+  stderr: string
+  outputDir: string | null
+  error: string | null
+  command: string[]
+}
+
+interface SkillScheduleRecord {
+  id: string
+  skillId: string
+  action: string
+  params: Record<string, unknown>
+  intervalMinutes: number
+  nextRunAt: string
+  lastRunAt: string | null
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+interface SkillsRuntimeInfo {
+  runtimeRoot: string
+  skillsRoot: string
+  customSkillsRoot: string
+  outputsRoot: string
+  venvRoot: string
+}
+
+interface ElectronSkillsAPI {
+  list: () => Promise<IPCResponse<SkillState[]>>
+  runtimeInfo: () => Promise<IPCResponse<SkillsRuntimeInfo>>
+  importCustomSkill: (payload: { path: string }) => Promise<IPCResponse<SkillState>>
+  removeCustomSkill: (payload: { skillId: string }) => Promise<IPCResponse<{ removed: boolean }>>
+  updateCustomSkillDescription: (payload: { skillId: string; description: string }) => Promise<IPCResponse<SkillState>>
+  install: (payload: { skillId: string; force?: boolean }) => Promise<IPCResponse<SkillInstallResult>>
+  run: (payload: {
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+    timeoutMs?: number
+  }) => Promise<IPCResponse<SkillRunResult>>
+  listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
+  listSchedules: () => Promise<IPCResponse<SkillScheduleRecord[]>>
+  createSchedule: (payload: {
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+    intervalMinutes: number
+    startAt?: string
+  }) => Promise<IPCResponse<SkillScheduleRecord>>
+  toggleSchedule: (payload: { id: string; enabled: boolean }) => Promise<IPCResponse<SkillScheduleRecord>>
+  deleteSchedule: (payload: { id: string }) => Promise<IPCResponse<{ removed: boolean }>>
+}
+
+// =============================================================================
+// Window API Types
+// =============================================================================
 
 interface ElectronWindowAPI {
   minimize: () => Promise<void>
@@ -69,13 +997,141 @@ interface ElectronWindowAPI {
   close: () => Promise<void>
 }
 
+// =============================================================================
+// Theme API Types
+// =============================================================================
+
+interface ElectronThemeAPI {
+  set: (theme: string) => Promise<void>
+}
+
+// =============================================================================
+// App / Auto-update API Types
+// =============================================================================
+
+interface ElectronUpdateStatus {
+  status: string
+  version?: string
+  releaseDate?: string
+  percent?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
+  error?: string
+}
+
+interface ElectronAppShortcutEvent {
+  key: string
+  metaKey?: boolean
+  ctrlKey?: boolean
+  shiftKey?: boolean
+  altKey?: boolean
+}
+
+interface ElectronAppAPI {
+  checkUpdate: () => Promise<{ success: boolean; version?: string | null; error?: string }>
+  installUpdate: () => Promise<void>
+  onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
+  onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
+}
+
+// =============================================================================
+// Settings API Types
+// =============================================================================
+
+interface AIModelConfigData {
+  provider: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  agentProtocol?: 'anthropic' | 'openai'
+  wireApi?: 'chat/completions' | 'responses'
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'
+  toolUseMode?: 'auto' | 'on' | 'off'
+  visionMode?: 'auto' | 'on' | 'off'
+  nativeVideoMode?: 'auto' | 'on' | 'off'
+  endpointId?: string
+}
+
+interface SettingsTestResult {
+  latencyMs: number
+  modelList?: string[]
+}
+
+interface ElectronSettingsAPI {
+  get: (key: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+  set: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
+  getAll: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
+  getAIConfig: () => Promise<{ success: boolean; data?: AIModelConfigData | null; error?: string }>
+  setAIConfig: (config: AIModelConfigData) => Promise<{ success: boolean; error?: string }>
+  testAIConnection: (config: AIModelConfigData) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
+}
+
+// =============================================================================
+// Chat History + File API Types
+// =============================================================================
+
+interface ChatConversationData {
+  id: string
+  agent: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+interface ChatMessageData {
+  id: string
+  conversation_id: string
+  role: string
+  content: string
+  timestamp: string
+}
+
+interface ChatPickedFile {
+  name: string
+  path: string
+  type: 'image' | 'video' | 'text' | 'spreadsheet' | 'other'
+  size: number
+  ext: string
+}
+
+interface ChatFileForAI {
+  type: 'image' | 'video' | 'text'
+  base64?: string
+  mimeType?: string
+  content?: string
+  name?: string
+}
+
+interface ElectronChatAPI {
+  getConversations: (agent: string) => Promise<{ success: boolean; data?: ChatConversationData[]; error?: string }>
+  getMessages: (conversationId: string) => Promise<{ success: boolean; data?: ChatMessageData[]; error?: string }>
+  deleteConversation: (conversationId: string) => Promise<{ success: boolean; error?: string }>
+  saveMessage: (data: { id: string; conversationId: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) => Promise<{ success: boolean; error?: string }>
+  createConversation: (data: { id: string; agent: string; title: string }) => Promise<{ success: boolean; error?: string }>
+  updateConversationTitle: (data: { id: string; title: string }) => Promise<{ success: boolean; error?: string }>
+  pickFiles: () => Promise<{ success: boolean; data?: ChatPickedFile[]; error?: string }>
+  readFileForAI: (filePath: string) => Promise<{ success: boolean; data?: ChatFileForAI; error?: string }>
+}
+
+// =============================================================================
+// Top-level API
+// =============================================================================
+
 interface ElectronAPI {
   agent: ElectronAgentAPI
   browser: ElectronBrowserAPI
   document: ElectronDocumentAPI
   rss: ElectronRSSAPI
   calendar: ElectronCalendarAPI
+  video: ElectronVideoAPI
+  design: ElectronDesignAPI
+  skills: ElectronSkillsAPI
+  app: ElectronAppAPI
   window: ElectronWindowAPI
+  theme: ElectronThemeAPI
+  settings: ElectronSettingsAPI
+  chat: ElectronChatAPI
   platform: string
   getFilePathFromDrop: (file: File) => string
 }

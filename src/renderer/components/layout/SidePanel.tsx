@@ -256,7 +256,7 @@ export default function SidePanel() {
   const {
     files,
     sidebarVisible,
-    sidebarWidth,
+    sidePanelWidths,
     toggleSidebar,
     currentPath,
     workspaceRoot,
@@ -288,6 +288,7 @@ export default function SidePanel() {
     addPinnedFolder,
     removePinnedFolder,
   } = useWorkspace()
+  const sidebarWidth = sidePanelWidths.files
 
   const { setWorkbenchMode } = useMode()
 

@@ -8,6 +8,15 @@ export interface FileItem {
   modified: Date
 }
 
+export type SidePanelWidthKey = 'files' | 'search' | 'skills'
+export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'calendar' | 'hidden'
+
+interface SidePanelWidths {
+  files: number
+  search: number
+  skills: number
+}
+
 interface WorkspaceState {
   // State
   workspaceRoot: string | null
@@ -18,17 +27,23 @@ interface WorkspaceState {
   dirChildren: Map<string, FileItem[]>
   pinnedFolders: string[]
   sidebarVisible: boolean
-  sidebarWidth: number
+  sidePanelVariant: WorkspaceSidePanelVariant
+  sidePanelWidths: SidePanelWidths
+  skillsSplitRatio: number
   chatPanelVisible: boolean
   chatPanelWidth: number
   renamingPath: string | null
   creatingType: 'file' | 'folder' | null
+  creatingPath: string | null
 
   // Navigation
   setCurrentPath: (path: string) => void
   setFiles: (files: FileItem[]) => void
   selectFile: (path: string | null) => void
   toggleSidebar: () => void
+  setSidePanelVariant: (variant: WorkspaceSidePanelVariant) => void
+  setSidePanelWidth: (variant: SidePanelWidthKey, width: number) => void
+  setSkillsSplitRatio: (ratio: number) => void
   toggleChatPanel: () => void
   refreshFiles: () => Promise<void>
   toggleDir: (path: string) => Promise<void>
@@ -50,6 +65,7 @@ interface WorkspaceState {
   createFolder: (name: string) => Promise<boolean>
   renameItem: (oldPath: string, newName: string) => Promise<boolean>
   deleteItem: (path: string) => Promise<boolean>
+  moveItem: (src: string, dest: string) => Promise<boolean>
   showInFolder: (path: string) => Promise<void>
   copyPathToClipboard: (path: string) => void
 
@@ -66,6 +82,106 @@ const getDirName = (path: string): string => {
   return idx <= 0 ? '/' : path.slice(0, idx)
 }
 
+const joinChildPath = (dir: string, name: string): string => {
+  const separator = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
+  const normalized = dir.replace(/[\\/]+$/, '')
+  if (!normalized) return `${separator}${name}`
+  return `${normalized}${separator}${name}`
+}
+
+const isKnownDirectoryPath = (
+  path: string | null,
+  files: FileItem[],
+  dirChildren: Map<string, FileItem[]>,
+  pinnedFolders: string[],
+): boolean => {
+  if (!path) return false
+  if (pinnedFolders.includes(path)) return true
+  if (files.some((item) => item.path === path && item.isDirectory)) return true
+  for (const children of dirChildren.values()) {
+    if (children.some((item) => item.path === path && item.isDirectory)) return true
+  }
+  return false
+}
+
+const resolveCreationBaseDir = (state: Pick<
+  WorkspaceState,
+  'currentPath' | 'workspaceRoot' | 'pinnedFolders' | 'selectedFile' | 'files' | 'dirChildren'
+>): string => {
+  if (state.currentPath && state.currentPath !== '/') {
+    return state.currentPath
+  }
+
+  if (isKnownDirectoryPath(state.selectedFile, state.files, state.dirChildren, state.pinnedFolders)) {
+    return state.selectedFile as string
+  }
+
+  if (state.workspaceRoot) {
+    return state.workspaceRoot
+  }
+
+  if (state.pinnedFolders.length > 0) {
+    return state.pinnedFolders[0]
+  }
+
+  return state.currentPath || '/'
+}
+
+const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
+const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
+const DEFAULT_SIDE_PANEL_WIDTH = 220
+const MIN_SIDE_PANEL_WIDTH = 220
+const MAX_SIDE_PANEL_WIDTH = 420
+const DEFAULT_SKILLS_SPLIT_RATIO = 0.5
+const MIN_SKILLS_SPLIT_RATIO = 0.25
+const MAX_SKILLS_SPLIT_RATIO = 0.75
+
+const clampSidePanelWidth = (width: number): number => {
+  if (!Number.isFinite(width)) return DEFAULT_SIDE_PANEL_WIDTH
+  return Math.max(MIN_SIDE_PANEL_WIDTH, Math.min(MAX_SIDE_PANEL_WIDTH, Math.round(width)))
+}
+
+const clampSkillsSplitRatio = (ratio: number): number => {
+  if (!Number.isFinite(ratio)) return DEFAULT_SKILLS_SPLIT_RATIO
+  return Math.max(MIN_SKILLS_SPLIT_RATIO, Math.min(MAX_SKILLS_SPLIT_RATIO, ratio))
+}
+
+const loadSidePanelWidthsFromStorage = (): SidePanelWidths => {
+  const fallback: SidePanelWidths = {
+    files: DEFAULT_SIDE_PANEL_WIDTH,
+    search: DEFAULT_SIDE_PANEL_WIDTH,
+    skills: DEFAULT_SIDE_PANEL_WIDTH,
+  }
+  if (typeof localStorage === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(SIDE_PANEL_WIDTHS_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<SidePanelWidths>
+    return {
+      files: clampSidePanelWidth(parsed.files ?? fallback.files),
+      search: clampSidePanelWidth(parsed.search ?? fallback.search),
+      skills: clampSidePanelWidth(parsed.skills ?? fallback.skills),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+const loadSkillsSplitRatioFromStorage = (): number => {
+  if (typeof localStorage === 'undefined') return DEFAULT_SKILLS_SPLIT_RATIO
+  const raw = localStorage.getItem(SKILLS_SPLIT_RATIO_KEY)
+  const parsed = raw ? Number(raw) : Number.NaN
+  return clampSkillsSplitRatio(parsed)
+}
+
+const remapPathAfterMove = (value: string | null, src: string, dest: string): string | null => {
+  if (!value) return value
+  if (value === src) return dest
+  if (value.startsWith(`${src}/`)) return `${dest}${value.slice(src.length)}`
+  if (value.startsWith(`${src}\\`)) return `${dest}${value.slice(src.length)}`
+  return value
+}
+
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   workspaceRoot: null,
   currentPath: '/',
@@ -75,11 +191,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: JSON.parse(localStorage.getItem('ready-pinned-folders') || '[]') as string[],
   sidebarVisible: true,
-  sidebarWidth: 220,
+  sidePanelVariant: 'files',
+  sidePanelWidths: loadSidePanelWidthsFromStorage(),
+  skillsSplitRatio: loadSkillsSplitRatioFromStorage(),
   chatPanelVisible: true,
   chatPanelWidth: 380,
   renamingPath: null,
   creatingType: null,
+  creatingPath: null,
 
   setCurrentPath: (path) => {
     set({ currentPath: path })
@@ -92,6 +211,31 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
+  setSidePanelVariant: (variant) => set({ sidePanelVariant: variant }),
+
+  setSidePanelWidth: (variant, width) => {
+    const clamped = clampSidePanelWidth(width)
+    set((state) => {
+      const next: SidePanelWidths = {
+        ...state.sidePanelWidths,
+        [variant]: clamped,
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SIDE_PANEL_WIDTHS_KEY, JSON.stringify(next))
+      }
+      return { sidePanelWidths: next }
+    })
+  },
+
+  setSkillsSplitRatio: (ratio) => {
+    const next = clampSkillsSplitRatio(ratio)
+    if (get().skillsSplitRatio === next) return
+    set({ skillsSplitRatio: next })
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SKILLS_SPLIT_RATIO_KEY, String(next))
+    }
+  },
+
   toggleChatPanel: () => set((state) => ({ chatPanelVisible: !state.chatPanelVisible })),
 
   loadDirChildren: async (dirPath) => {
@@ -99,12 +243,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       if (typeof window !== 'undefined' && window.electronAPI) {
         const result = await window.electronAPI.document.listFiles(dirPath)
         if (result.success && result.items) {
-          const items = result.items
-            .map((item: { modified: string | number | Date }) => ({
+          const items: FileItem[] = result.items
+            .map((item) => ({
               ...item,
               modified: new Date(item.modified)
-            }))
-            .sort((a: FileItem, b: FileItem) => {
+            }) as FileItem)
+            .sort((a, b) => {
               if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
               return a.name.localeCompare(b.name)
             })
@@ -155,6 +299,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       pinnedFolders: [],
       renamingPath: null,
       creatingType: null,
+      creatingPath: null,
     })
     localStorage.removeItem('ready-workspace-root')
     localStorage.removeItem('ready-pinned-folders')
@@ -231,18 +376,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         const result = await window.electronAPI.document.listFiles(currentPath)
 
         if (result.success && result.items) {
-          const items = result.items
-            .map((item: { modified: string | number | Date }) => ({
+          const items: FileItem[] = result.items
+            .map((item) => ({
               ...item,
               modified: new Date(item.modified)
-            }))
+            }) as FileItem)
             // Sort: directories first, then by name
-            .sort((a: FileItem, b: FileItem) => {
+            .sort((a, b) => {
               if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
               return a.name.localeCompare(b.name)
             })
             // Hide dotfiles
-            .filter((item: FileItem) => !item.name.startsWith('.'))
+            .filter((item) => !item.name.startsWith('.'))
 
           set({ files: items })
         }
@@ -266,14 +411,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   createFile: async (name) => {
-    const { currentPath } = get()
-    const filePath = `${currentPath}/${name}`
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    const filePath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.document.createFile(filePath)
         if (result.success) {
+          if (state.currentPath !== targetDir) {
+            set({ currentPath: targetDir })
+          }
           await get().refreshFiles()
-          set({ creatingType: null, selectedFile: filePath })
+          await get().loadDirChildren(targetDir)
+          set({ creatingType: null, creatingPath: null, selectedFile: filePath })
           return true
         }
       } else {
@@ -281,7 +431,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         set((state) => ({
           files: [...state.files, { name, path: filePath, isDirectory: false, size: 0, modified: new Date() }],
           creatingType: null,
-          selectedFile: filePath
+          creatingPath: null,
+          selectedFile: filePath,
+          currentPath: targetDir,
         }))
         return true
       }
@@ -292,20 +444,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   createFolder: async (name) => {
-    const { currentPath } = get()
-    const folderPath = `${currentPath}/${name}`
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    const folderPath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.document.mkdir(folderPath)
         if (result.success) {
+          if (state.currentPath !== targetDir) {
+            set({ currentPath: targetDir })
+          }
           await get().refreshFiles()
-          set({ creatingType: null })
+          await get().loadDirChildren(targetDir)
+          set({ creatingType: null, creatingPath: null, selectedFile: folderPath })
           return true
         }
       } else {
         set((state) => ({
           files: [...state.files, { name, path: folderPath, isDirectory: true, size: 0, modified: new Date() }],
-          creatingType: null
+          creatingType: null,
+          creatingPath: null,
+          selectedFile: folderPath,
+          currentPath: targetDir,
         }))
         return true
       }
@@ -344,10 +504,26 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   deleteItem: async (path) => {
     try {
       if (window.electronAPI) {
+        const state = get()
+        const parentPath = getDirName(path)
         const result = await window.electronAPI.document.deleteItem(path)
         if (result.success) {
+          if (state.currentPath === path) {
+            set({ currentPath: parentPath })
+          }
           await get().refreshFiles()
-          if (get().selectedFile === path) set({ selectedFile: null })
+          const currentState = get()
+          const cleanedExpanded = new Set<string>()
+          currentState.expandedDirs.forEach((dir) => {
+            if (dir !== path && !dir.startsWith(`${path}/`) && !dir.startsWith(`${path}\\`)) {
+              cleanedExpanded.add(dir)
+            }
+          })
+          set({
+            selectedFile: currentState.selectedFile === path ? null : currentState.selectedFile,
+            expandedDirs: cleanedExpanded,
+          })
+          await get().loadDirChildren(parentPath)
           return true
         }
       } else {
@@ -359,6 +535,57 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to delete:', error)
+    }
+    return false
+  },
+
+  moveItem: async (src, dest) => {
+    try {
+      if (src === dest) return true
+
+      if (window.electronAPI) {
+        const result = await window.electronAPI.document.moveItem(src, dest)
+        if (!result.success) return false
+
+        set((state) => {
+          const remappedExpanded = new Set<string>()
+          state.expandedDirs.forEach((dir) => {
+            remappedExpanded.add(remapPathAfterMove(dir, src, dest) || dir)
+          })
+          return {
+            selectedFile: remapPathAfterMove(state.selectedFile, src, dest),
+            currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
+            expandedDirs: remappedExpanded,
+            dirChildren: new Map(),
+          }
+        })
+
+        await get().refreshFiles()
+        const expanded = Array.from(get().expandedDirs)
+        for (const dir of expanded) {
+          await get().loadDirChildren(dir)
+        }
+        return true
+      }
+
+      // Mock fallback
+      set((state) => ({
+        files: state.files.map((f) => {
+          if (f.path === src) {
+            return {
+              ...f,
+              path: dest,
+              name: dest.split('/').pop() || f.name,
+            }
+          }
+          return f
+        }),
+        selectedFile: remapPathAfterMove(state.selectedFile, src, dest),
+        currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
+      }))
+      return true
+    } catch (error) {
+      console.error('Failed to move item:', error)
     }
     return false
   },
@@ -379,6 +606,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   startRenaming: (path) => set({ renamingPath: path }),
   cancelRenaming: () => set({ renamingPath: null }),
-  startCreating: (type) => set({ creatingType: type }),
-  cancelCreating: () => set({ creatingType: null })
+  startCreating: (type) => {
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    if (targetDir !== state.currentPath) {
+      set({ creatingType: type, creatingPath: targetDir, currentPath: targetDir, selectedFile: targetDir })
+      void get().refreshFiles()
+      return
+    }
+    set({ creatingType: type, creatingPath: targetDir })
+  },
+  cancelCreating: () => set({ creatingType: null, creatingPath: null })
 }))

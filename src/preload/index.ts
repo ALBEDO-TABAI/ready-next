@@ -2,24 +2,99 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // Agent API
 const agentAPI = {
-  send: (agent: string, message: string) => ipcRenderer.invoke('agent:send', { agent, message }),
+  send: (
+    agent: string,
+    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+    sessionId?: string,
+    requestId?: string
+  ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId }),
+  newSession: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:newSession', { agent, sessionId }),
   orchestrate: (task: string, agents: string[]) =>
     ipcRenderer.invoke('agent:orchestrate', { task, agents }),
   getStatus: (agent: string) => ipcRenderer.invoke('agent:getStatus', agent),
   getAll: () => ipcRenderer.invoke('agent:getAll'),
-  kill: (agent: string) => ipcRenderer.invoke('agent:kill', agent),
+  kill: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:kill', { agent, sessionId }),
   getDiagnostics: () => ipcRenderer.invoke('agent:getDiagnostics'),
-  onStream: (callback: (data: { agent: string; chunk: string; type: string }) => void) => {
-    ipcRenderer.on('agent:stream', (_, data) => callback(data))
-    return () => ipcRenderer.removeAllListeners('agent:stream')
+  getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
+  listChannels: () => ipcRenderer.invoke('agent:listChannels'),
+  listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
+  getConversationScopeMessages: (scopeId: string) =>
+    ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
+  createLocalScope: (agent: string) => ipcRenderer.invoke('agent:createLocalScope', { agent }),
+  listScopeAttachments: (scopeId?: string) => ipcRenderer.invoke('agent:listScopeAttachments', { scopeId }),
+  getScopeAttachment: (scopeId: string, attachmentId: string) =>
+    ipcRenderer.invoke('agent:getScopeAttachment', { scopeId, attachmentId }),
+  clearRemoteAttachmentCache: (channelId?: string) =>
+    ipcRenderer.invoke('agent:clearRemoteAttachmentCache', { channelId }),
+  getRemoteAttachmentCacheStats: (channelId?: string) =>
+    ipcRenderer.invoke('agent:getRemoteAttachmentCacheStats', { channelId }),
+  sendScoped: (
+    scopeId: string,
+    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+    requestId?: string
+  ) => ipcRenderer.invoke('agent:sendScoped', { scopeId, message, requestId }),
+  upsertChannel: (payload: {
+    id?: string
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    name: string
+    enabled?: boolean
+    config?: Record<string, unknown>
+  }) => ipcRenderer.invoke('agent:upsertChannel', payload),
+  testChannel: (payload: {
+    id?: string
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    name: string
+    enabled?: boolean
+    config?: Record<string, unknown>
+  }) => ipcRenderer.invoke('agent:testChannel', payload),
+  deleteChannel: (id: string) => ipcRenderer.invoke('agent:deleteChannel', { id }),
+  setChannelEnabled: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke('agent:setChannelEnabled', { id, enabled }),
+  sendChannelProbe: (id: string, text: string) =>
+    ipcRenderer.invoke('agent:sendChannelProbe', { id, text }),
+  listSchedules: () => ipcRenderer.invoke('agent:listSchedules'),
+  upsertSchedule: (payload: {
+    id?: string
+    name: string
+    cronExpr: string
+    prompt: string
+    channelId?: string | null
+    enabled?: boolean
+    payload?: Record<string, unknown>
+  }) => ipcRenderer.invoke('agent:upsertSchedule', payload),
+  runScheduleNow: (id: string) => ipcRenderer.invoke('agent:runScheduleNow', { id }),
+  pauseSchedule: (id: string) => ipcRenderer.invoke('agent:pauseSchedule', { id }),
+  resumeSchedule: (id: string) => ipcRenderer.invoke('agent:resumeSchedule', { id }),
+  deleteSchedule: (id: string) => ipcRenderer.invoke('agent:deleteSchedule', { id }),
+  onStream: (callback: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => callback(data)
+    ipcRenderer.on('agent:stream', handler)
+    return () => { ipcRenderer.removeListener('agent:stream', handler) }
   },
-  onStatusChange: (callback: (data: { agent: string; status: string; isMock: boolean }) => void) => {
-    ipcRenderer.on('agent:status', (_, data) => callback(data))
-    return () => ipcRenderer.removeAllListeners('agent:status')
+  onStatusChange: (callback: (data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => callback(data)
+    ipcRenderer.on('agent:status', handler)
+    return () => { ipcRenderer.removeListener('agent:status', handler) }
   },
-  onError: (callback: (data: { agent: string; error: string; type: string }) => void) => {
-    ipcRenderer.on('agent:error', (_, data) => callback(data))
-    return () => ipcRenderer.removeAllListeners('agent:error')
+  onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => callback(data)
+    ipcRenderer.on('agent:error', handler)
+    return () => { ipcRenderer.removeListener('agent:error', handler) }
+  },
+  onToolAction: (callback: (data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
+    const handler = (_: unknown, data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
+    ipcRenderer.on('agent:toolAction', handler)
+    return () => { ipcRenderer.removeListener('agent:toolAction', handler) }
+  },
+  onConversationEvent: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data)
+    ipcRenderer.on('agent:conversationEvent', handler)
+    return () => { ipcRenderer.removeListener('agent:conversationEvent', handler) }
+  },
+  onScopeRunEvent: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data)
+    ipcRenderer.on('agent:scopeRunEvent', handler)
+    return () => { ipcRenderer.removeListener('agent:scopeRunEvent', handler) }
   }
 }
 
@@ -37,10 +112,71 @@ const browserAPI = {
   hideAll: () => ipcRenderer.invoke('browser:hideAll'),
   showActive: () => ipcRenderer.invoke('browser:showActive'),
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
+  getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
+  setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
+    ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
+  toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
+  getTabContext: (tabId?: string) => ipcRenderer.invoke('browser:getTabContext', tabId),
+  previewOpen: (payload: { url: string }) => ipcRenderer.invoke('browser:previewOpen', payload),
+  previewNavigate: (payload: { url: string }) => ipcRenderer.invoke('browser:previewNavigate', payload),
+  previewGoBack: () => ipcRenderer.invoke('browser:previewGoBack'),
+  previewGoForward: () => ipcRenderer.invoke('browser:previewGoForward'),
+  previewReload: () => ipcRenderer.invoke('browser:previewReload'),
+  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('browser:previewUpdateBounds', bounds),
+  previewClose: () => ipcRenderer.invoke('browser:previewClose'),
+  previewGetState: () => ipcRenderer.invoke('browser:previewGetState'),
+  onPreviewUpdate: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:previewUpdate', handler)
+    return () => ipcRenderer.removeListener('browser:previewUpdate', handler)
+  },
   onTabUpdate: (callback: (data: unknown) => void) => {
-    ipcRenderer.on('browser:tabUpdate', (_, data) => callback(data))
-    return () => ipcRenderer.removeAllListeners('browser:tabUpdate')
-  }
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:tabUpdate', handler)
+    return () => ipcRenderer.removeListener('browser:tabUpdate', handler)
+  },
+  onAdblockUpdate: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:adblockUpdate', handler)
+    return () => ipcRenderer.removeListener('browser:adblockUpdate', handler)
+  },
+  onNewTabRequest: (callback: (url: string) => void) => {
+    const handler = (_: unknown, url: string): void => callback(url)
+    ipcRenderer.on('browser:newTabRequest', handler)
+    return () => ipcRenderer.removeListener('browser:newTabRequest', handler)
+  },
+
+  // Bookmarks
+  addBookmark: (url: string, title: string, favicon?: string) =>
+    ipcRenderer.invoke('browser:addBookmark', { url, title, favicon }),
+  removeBookmark: (url: string) => ipcRenderer.invoke('browser:removeBookmark', url),
+  getBookmarks: () => ipcRenderer.invoke('browser:getBookmarks'),
+  isBookmarked: (url: string) => ipcRenderer.invoke('browser:isBookmarked', url),
+  importBookmarks: () => ipcRenderer.invoke('browser:importBookmarks'),
+  exportBookmarks: () => ipcRenderer.invoke('browser:exportBookmarks'),
+  onBookmarksChanged: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:bookmarksChanged', handler)
+    return () => ipcRenderer.removeListener('browser:bookmarksChanged', handler)
+  },
+
+  // History
+  getHistory: (limit?: number) => ipcRenderer.invoke('browser:getHistory', limit),
+  clearHistory: () => ipcRenderer.invoke('browser:clearHistory'),
+  searchHistory: (query: string) => ipcRenderer.invoke('browser:searchHistory', query),
+
+  // Downloads
+  getDownloads: () => ipcRenderer.invoke('browser:getDownloads'),
+  clearDownloads: () => ipcRenderer.invoke('browser:clearDownloads'),
+  onDownloadUpdate: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:downloadUpdate', handler)
+    return () => ipcRenderer.removeListener('browser:downloadUpdate', handler)
+  },
+
+  // Print
+  print: (tabId: string) => ipcRenderer.invoke('browser:print', tabId)
 }
 
 // Document API
@@ -60,6 +196,7 @@ const documentAPI = {
   openFolder: () => ipcRenderer.invoke('document:openFolder'),
   getHome: () => ipcRenderer.invoke('document:getHome'),
   showInFolder: (path: string) => ipcRenderer.invoke('document:showInFolder', path),
+  openPath: (path: string) => ipcRenderer.invoke('document:openPath', path),
   createFile: (path: string) => ipcRenderer.invoke('document:createFile', path)
 }
 
@@ -70,7 +207,35 @@ const rssAPI = {
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),
   getItems: (sourceId?: string) => ipcRenderer.invoke('rss:getItems', sourceId),
   markRead: (itemId: string) => ipcRenderer.invoke('rss:markRead', itemId),
-  fetchAll: () => ipcRenderer.invoke('rss:fetchAll')
+  markReadBatch: (itemIds: string[]) => ipcRenderer.invoke('rss:markReadBatch', itemIds),
+  deleteItems: (itemIds: string[]) => ipcRenderer.invoke('rss:deleteItems', itemIds),
+  toggleStarred: (itemId: string) => ipcRenderer.invoke('rss:toggleStarred', itemId),
+  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none' }) =>
+    ipcRenderer.invoke('rss:fetchAll', options),
+  status: () => ipcRenderer.invoke('rss:status'),
+  stats: () => ipcRenderer.invoke('rss:stats'),
+  diagnostics: () => ipcRenderer.invoke('rss:diagnostics'),
+  exportOpml: () => ipcRenderer.invoke('rss:exportOpml'),
+  exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') =>
+    ipcRenderer.invoke('rss:exportFeed', type),
+  startItemAnalysis: (payload: {
+    itemId: string
+    action: 'copy' | 'visual'
+    link: string
+    title: string
+    targetDir: string
+    source?: string
+    summary?: string
+    publishedAt?: string
+    force?: boolean
+  }) => ipcRenderer.invoke('rss:startItemAnalysis', payload),
+  getItemAnalysisProgress: (payload?: { itemIds?: string[] }) =>
+    ipcRenderer.invoke('rss:getItemAnalysisProgress', payload),
+  listItemAnalysisJobs: (payload?: { itemId?: string; limit?: number }) =>
+    ipcRenderer.invoke('rss:listItemAnalysisJobs', payload),
+  pauseAnalysisJob: (payload: { jobId: string }) => ipcRenderer.invoke('rss:pauseAnalysisJob', payload),
+  resumeAnalysisJob: (payload: { jobId: string }) => ipcRenderer.invoke('rss:resumeAnalysisJob', payload),
+  deleteAnalysisJob: (payload: { jobId: string }) => ipcRenderer.invoke('rss:deleteAnalysisJob', payload),
 }
 
 // Calendar API
@@ -82,11 +247,148 @@ const calendarAPI = {
   deleteEvent: (id: string) => ipcRenderer.invoke('calendar:deleteEvent', id)
 }
 
+// Video API
+const videoAPI = {
+  getInfo: (path: string) => ipcRenderer.invoke('video:get-info', path),
+  extractFrame: (options: { input: string; timestamp: number; output?: string }) =>
+    ipcRenderer.invoke('video:extract-frame', options),
+  trim: (options: { input: string; start: number; end: number; output: string }) =>
+    ipcRenderer.invoke('video:trim', options),
+  transcode: (options: {
+    input: string; output: string; codec?: string;
+    resolution?: string; bitrate?: string; audioCodec?: string; audioBitrate?: string
+  }) => ipcRenderer.invoke('video:transcode', options),
+  extractAudio: (options: { input: string; output?: string; format?: string }) =>
+    ipcRenderer.invoke('video:extract-audio', options),
+  renderTimeline: (options: {
+    output: string
+    width: number
+    height: number
+    fps: number
+    duration: number
+    tracks: {
+      video: unknown[]
+      subtitle: unknown[]
+      audio: unknown[]
+    }
+  }) => ipcRenderer.invoke('video:render-timeline', options) as Promise<{
+    success: boolean
+    path?: string
+    warning?: string
+    error?: string
+    errorCode?: string
+  }>,
+}
+
+// Design API
+const designAPI = {
+  read: (path: string) => ipcRenderer.invoke('design:read', path),
+  write: (path: string, data: unknown) => ipcRenderer.invoke('design:write', { path, data }),
+  saveAs: (payload?: { defaultPath?: string; data?: unknown }) => ipcRenderer.invoke('design:saveAs', payload),
+  export: (payload: { path?: string; format: 'png' | 'svg'; data: string; defaultName?: string }) =>
+    ipcRenderer.invoke('design:export', payload),
+}
+
+// Skills Runtime API
+const skillsAPI = {
+  list: () => ipcRenderer.invoke('skills:list'),
+  runtimeInfo: () => ipcRenderer.invoke('skills:runtimeInfo'),
+  importCustomSkill: (payload: { path: string }) => ipcRenderer.invoke('skills:importCustomSkill', payload),
+  removeCustomSkill: (payload: { skillId: string }) => ipcRenderer.invoke('skills:removeCustomSkill', payload),
+  updateCustomSkillDescription: (payload: { skillId: string; description: string }) =>
+    ipcRenderer.invoke('skills:updateCustomSkillDescription', payload),
+  install: (payload: { skillId: string; force?: boolean }) => ipcRenderer.invoke('skills:install', payload),
+  run: (payload: {
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+    timeoutMs?: number
+  }) => ipcRenderer.invoke('skills:run', payload),
+  listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
+  listSchedules: () => ipcRenderer.invoke('skills:schedules:list'),
+  createSchedule: (payload: {
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+    intervalMinutes: number
+    startAt?: string
+  }) => ipcRenderer.invoke('skills:schedules:create', payload),
+  toggleSchedule: (payload: { id: string; enabled: boolean }) =>
+    ipcRenderer.invoke('skills:schedules:toggle', payload),
+  deleteSchedule: (payload: { id: string }) => ipcRenderer.invoke('skills:schedules:delete', payload),
+}
+
+// App / Auto-update API
+const appAPI = {
+  checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+  installUpdate: () => ipcRenderer.invoke('app:install-update'),
+  onUpdateStatus: (callback: (data: {
+    status: string; version?: string; releaseDate?: string;
+    percent?: number; bytesPerSecond?: number; transferred?: number; total?: number;
+    error?: string
+  }) => void) => {
+    const handler = (_: unknown, data: {
+      status: string; version?: string; releaseDate?: string;
+      percent?: number; bytesPerSecond?: number; transferred?: number; total?: number;
+      error?: string
+    }): void => callback(data)
+    ipcRenderer.on('update-status', handler)
+    return () => ipcRenderer.removeListener('update-status', handler)
+  },
+  onShortcut: (callback: (data: {
+    key: string
+    metaKey?: boolean
+    ctrlKey?: boolean
+    shiftKey?: boolean
+    altKey?: boolean
+  }) => void) => {
+    const handler = (_: unknown, data: {
+      key: string
+      metaKey?: boolean
+      ctrlKey?: boolean
+      shiftKey?: boolean
+      altKey?: boolean
+    }): void => callback(data)
+    ipcRenderer.on('app:shortcut', handler)
+    return () => ipcRenderer.removeListener('app:shortcut', handler)
+  }
+}
+
 // Window API
 const windowAPI = {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close')
+}
+
+// Theme API
+const themeAPI = {
+  set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
+}
+
+// Settings API
+const settingsAPI = {
+  get: (key: string) => ipcRenderer.invoke('settings:get', key),
+  set: (key: string, value: string) => ipcRenderer.invoke('settings:set', { key, value }),
+  getAll: () => ipcRenderer.invoke('settings:getAll'),
+  getAIConfig: () => ipcRenderer.invoke('settings:getAIConfig'),
+  setAIConfig: (config: unknown) => ipcRenderer.invoke('settings:setAIConfig', config),
+  testAIConnection: (config: unknown) => ipcRenderer.invoke('settings:testAIConnection', config),
+}
+
+// Chat History + File API
+const chatAPI = {
+  getConversations: (agent: string) => ipcRenderer.invoke('chat:getConversations', agent),
+  getMessages: (conversationId: string) => ipcRenderer.invoke('chat:getMessages', conversationId),
+  deleteConversation: (conversationId: string) => ipcRenderer.invoke('chat:deleteConversation', conversationId),
+  saveMessage: (data: { id: string; conversationId: string; role: string; content: string; timestamp: string }) =>
+    ipcRenderer.invoke('chat:saveMessage', data),
+  createConversation: (data: { id: string; agent: string; title: string }) =>
+    ipcRenderer.invoke('chat:createConversation', data),
+  updateConversationTitle: (data: { id: string; title: string }) =>
+    ipcRenderer.invoke('chat:updateConversationTitle', data),
+  pickFiles: () => ipcRenderer.invoke('chat:pickFiles'),
+  readFileForAI: (filePath: string) => ipcRenderer.invoke('chat:readFileForAI', filePath),
 }
 
 // Expose APIs to renderer
@@ -96,7 +398,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   document: documentAPI,
   rss: rssAPI,
   calendar: calendarAPI,
+  video: videoAPI,
+  design: designAPI,
+  skills: skillsAPI,
+  app: appAPI,
   window: windowAPI,
+  theme: themeAPI,
+  settings: settingsAPI,
+  chat: chatAPI,
   platform: process.platform,
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
@@ -111,7 +420,14 @@ declare global {
       document: typeof documentAPI
       rss: typeof rssAPI
       calendar: typeof calendarAPI
+      video: typeof videoAPI
+      design: typeof designAPI
+      skills: typeof skillsAPI
+      app: typeof appAPI
       window: typeof windowAPI
+      theme: typeof themeAPI
+      settings: typeof settingsAPI
+      chat: typeof chatAPI
       platform: string
       getFilePathFromDrop: (file: File) => string
     }

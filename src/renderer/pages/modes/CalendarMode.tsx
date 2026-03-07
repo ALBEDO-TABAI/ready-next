@@ -51,10 +51,13 @@ export default function CalendarMode() {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const result = await window.electronAPI.calendar.getEvents(start, end)
         if (result.success && result.data) {
-          setEvents(result.data.map((e: { startTime: string | number | Date; endTime: string | number | Date }) => ({
-            ...e,
+          setEvents(result.data.map((e) => ({
+            id: e.id,
+            title: e.title || '未命名事件',
             startTime: new Date(e.startTime),
-            endTime: new Date(e.endTime)
+            endTime: new Date(e.endTime),
+            calendarId: e.calendarId || 'default',
+            color: '#5B8DEF',
           })))
           // Set mock mode from API response
           setIsMock(result.mock === true)

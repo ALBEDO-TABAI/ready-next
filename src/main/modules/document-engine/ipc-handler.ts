@@ -3,12 +3,13 @@ import {
   readFileSync, writeFileSync, readdirSync, statSync, existsSync,
   mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync
 } from 'fs'
-import { join, basename, dirname } from 'path'
+import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
+let docxLib: typeof import('docx') | null = null
 
 async function getMammoth(): Promise<typeof import('mammoth') | null> {
   if (mammothLib) return mammothLib
@@ -30,14 +31,341 @@ async function getXlsx(): Promise<typeof import('xlsx') | null> {
   }
 }
 
+async function getDocx(): Promise<typeof import('docx') | null> {
+  if (docxLib) return docxLib
+  try {
+    docxLib = await import('docx')
+    return docxLib
+  } catch {
+    return null
+  }
+}
+
+// --- Binary file detection ---
+
+const BINARY_EXTENSIONS = new Set([
+  // Images
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif',
+  // Video
+  '.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v',
+  // Audio
+  '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma',
+  // Documents (binary)
+  '.pdf', '.docx', '.xlsx', '.xls', '.pptx', '.ppt', '.doc',
+  // Archives
+  '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2',
+  // Other binary
+  '.exe', '.dmg', '.app', '.so', '.dylib', '.dll', '.woff', '.woff2', '.ttf', '.otf', '.eot'
+])
+
+const TEXT_WRITE_BLOCKED_EXTENSIONS = new Set([
+  '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf',
+])
+
+function isBinaryFile(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase()
+  return BINARY_EXTENSIONS.has(ext)
+}
+
+function isTextWriteBlocked(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase()
+  return TEXT_WRITE_BLOCKED_EXTENSIONS.has(ext)
+}
+
+function looksLikeReadableText(value: string): boolean {
+  if (!value || value.trim().length === 0) return false
+  const sample = value.slice(0, 4000)
+  let printable = 0
+  for (let i = 0; i < sample.length; i += 1) {
+    const code = sample.charCodeAt(i)
+    const isControl = code < 32 && code !== 9 && code !== 10 && code !== 13
+    if (!isControl) printable += 1
+  }
+  return printable / sample.length > 0.88
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '\'')
+    .replace(/&amp;/g, '&')
+}
+
+function normalizeDocContentForDocx(content: string): string {
+  if (!content) return ''
+  const hasHtml = /<[^>]+>/.test(content)
+  if (!hasHtml) return content
+
+  const withBreaks = content
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|section|article|blockquote|h[1-6])>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<\/li>/gi, '\n')
+
+  const noTags = withBreaks.replace(/<[^>]+>/g, '')
+  return decodeHtmlEntities(noTags)
+}
+
+function normalizeInlineMarkdown(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+}
+
+function makeTimestampLabel(date = new Date()): string {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mi = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `${yyyy}${mm}${dd}-${hh}${mi}${ss}`
+}
+
+async function readDocxRawText(path: string): Promise<string> {
+  const mammoth = await getMammoth()
+  if (!mammoth) return ''
+  try {
+    const buffer = readFileSync(path)
+    const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
+    const textResult = await mammothMod.extractRawText({ buffer })
+    return (textResult.value || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+async function writeDocxFromContent(path: string, content: string): Promise<{ success: boolean; error?: string }> {
+  const docx = await getDocx()
+  if (!docx) {
+    return { success: false, error: 'DOCX 写入库(docx)不可用' }
+  }
+
+  try {
+    const normalized = normalizeDocContentForDocx(content).replace(/\r\n/g, '\n')
+    const trimmed = normalized.trim()
+
+    if (trimmed.length === 0 && existsSync(path)) {
+      const previousText = await readDocxRawText(path)
+      if (previousText.length > 0) {
+        return {
+          success: false,
+          error: '检测到空内容将覆盖已有 DOCX 正文，已阻止保存。请先确认文档已正确加载。',
+        }
+      }
+    }
+
+    if (existsSync(path)) {
+      const previousText = await readDocxRawText(path)
+      const prevLen = previousText.trim().length
+      const nextLen = trimmed.length
+      const suspiciousShrink =
+        prevLen >= 600 &&
+        nextLen > 0 &&
+        nextLen <= 120 &&
+        nextLen / prevLen < 0.08
+      if (suspiciousShrink) {
+        return {
+          success: false,
+          error:
+            '检测到将长文档覆盖为极短内容，已阻止保存以避免误写。请确认文档已正确加载后再保存。',
+        }
+      }
+    }
+
+    if (existsSync(path)) {
+      try {
+        const backupPath = `${path}.autosave-${makeTimestampLabel()}.bak.docx`
+        copyFileSync(path, backupPath)
+      } catch {
+        // Backup failure should not block user save.
+      }
+    }
+
+    const lines = normalized.split('\n')
+    const paragraphs: InstanceType<typeof docx.Paragraph>[] = []
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\s+$/g, '')
+      const trimmed = line.trim()
+      if (!trimmed) {
+        paragraphs.push(new docx.Paragraph({ text: '' }))
+        continue
+      }
+
+      const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
+      if (headingMatch) {
+        const level = headingMatch[1].length
+        const text = normalizeInlineMarkdown(headingMatch[2].trim())
+        const heading =
+          level <= 1 ? docx.HeadingLevel.HEADING_1
+            : level === 2 ? docx.HeadingLevel.HEADING_2
+              : level === 3 ? docx.HeadingLevel.HEADING_3
+                : level === 4 ? docx.HeadingLevel.HEADING_4
+                  : level === 5 ? docx.HeadingLevel.HEADING_5
+                    : docx.HeadingLevel.HEADING_6
+        paragraphs.push(
+          new docx.Paragraph({
+            text,
+            heading,
+          }),
+        )
+        continue
+      }
+
+      const bulletMatch = trimmed.match(/^[-*]\s+(.+)$/)
+      if (bulletMatch) {
+        paragraphs.push(
+          new docx.Paragraph({
+            text: normalizeInlineMarkdown(bulletMatch[1].trim()),
+            bullet: { level: 0 },
+          }),
+        )
+        continue
+      }
+
+      const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/)
+      if (orderedMatch) {
+        paragraphs.push(new docx.Paragraph({ text: normalizeInlineMarkdown(orderedMatch[1].trim()) }))
+        continue
+      }
+
+      const quoteMatch = trimmed.match(/^>\s*(.+)$/)
+      if (quoteMatch) {
+        paragraphs.push(
+          new docx.Paragraph({
+            text: normalizeInlineMarkdown(quoteMatch[1].trim()),
+            indent: { left: 480 },
+          }),
+        )
+        continue
+      }
+
+      paragraphs.push(new docx.Paragraph({ text: normalizeInlineMarkdown(trimmed) }))
+    }
+
+    const document = new docx.Document({
+      sections: [
+        {
+          children: paragraphs.length > 0 ? paragraphs : [new docx.Paragraph({ text: '' })],
+        },
+      ],
+    })
+
+    const output = await docx.Packer.toBuffer(document)
+    writeFileSync(path, output)
+    return { success: true }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    return { success: false, error: `DOCX 写入失败: ${errorMessage}` }
+  }
+}
+
+/** Convert an absolute file path to a local-file:// URL with proper encoding */
+function toLocalFileUrl(filePath: string): string {
+  // Encode each path component separately to handle Chinese chars, spaces, etc.
+  const encoded = filePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return `local-file://${encoded}`
+}
+
+/** Detect content type category from extension */
+function getFileCategory(filePath: string): 'image' | 'video' | 'audio' | 'pdf' | 'binary' {
+  const ext = extname(filePath).toLowerCase()
+  if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif'].includes(ext)) return 'image'
+  if (['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'].includes(ext)) return 'video'
+  if (['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'].includes(ext)) return 'audio'
+  if (ext === '.pdf') return 'pdf'
+  return 'binary'
+}
+
+function shouldHideInternalBackup(name: string): boolean {
+  return (
+    /\.autosave-\d{8}-\d{6}\.bak\.docx$/i.test(name) ||
+    /\.empty-backup-\d{8}-\d{6}$/i.test(name)
+  )
+}
+
+export async function readDocumentEditableText(
+  filePath: string,
+): Promise<{ success: boolean; content: string; error?: string }> {
+  try {
+    if (!existsSync(filePath)) {
+      return { success: false, content: '', error: 'File not found' }
+    }
+    const ext = extname(filePath).toLowerCase()
+    if (ext === '.docx') {
+      const text = await readDocxRawText(filePath)
+      if (!text && existsSync(filePath)) {
+        return { success: false, content: '', error: 'DOCX 读取失败或正文为空' }
+      }
+      return { success: true, content: text }
+    }
+    if (isBinaryFile(filePath)) {
+      return { success: false, content: '', error: `不支持直接编辑二进制文件: ${ext || 'unknown'}` }
+    }
+    const content = readFileSync(filePath, 'utf-8')
+    return { success: true, content }
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+export async function writeDocumentEditableText(
+  filePath: string,
+  content: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const ext = extname(filePath).toLowerCase()
+    if (ext === '.docx') {
+      return writeDocxFromContent(filePath, content)
+    }
+    if (isTextWriteBlocked(filePath)) {
+      return {
+        success: false,
+        error: `无法直接以纯文本保存到 ${ext || 'binary'} 文件。请另存为 .md/.txt，避免损坏原文件。`,
+      }
+    }
+    writeFileSync(filePath, content, 'utf-8')
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export function setupDocumentIPC(useMock = false): void {
-  // Read file
+  // Read file — enhanced with binary file handling via local-file:// URLs
   ipcMain.handle('document:read', async (_, path: string) => {
     try {
       if (useMock) {
         return {
           success: true,
-          content: `[Mock] Content of ${path}`,
+          data: { type: 'text' as const, content: `[Mock] Content of ${path}` },
           mock: true
         }
       }
@@ -46,8 +374,28 @@ export function setupDocumentIPC(useMock = false): void {
         return { success: false, error: 'File not found', errorCode: 'FILE_NOT_FOUND' }
       }
 
+      // For binary files, return a local-file:// URL instead of content
+      if (isBinaryFile(path)) {
+        const category = getFileCategory(path)
+        return {
+          success: true,
+          data: {
+            type: 'binary' as const,
+            category,
+            localUrl: toLocalFileUrl(path),
+            extension: extname(path).toLowerCase()
+          }
+        }
+      }
+
+      // Text file — read as UTF-8
       const content = readFileSync(path, 'utf-8')
-      return { success: true, content }
+      return {
+        success: true,
+        data: { type: 'text' as const, content },
+        // Keep backward-compatible `content` at top level
+        content
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage, errorCode: 'PARSE_ERROR' }
@@ -60,9 +408,16 @@ export function setupDocumentIPC(useMock = false): void {
       if (useMock) {
         return { success: true, mock: true }
       }
-
-      writeFileSync(path, content, 'utf-8')
-      return { success: true }
+      const result = await writeDocumentEditableText(path, content)
+      if (!result.success) {
+        const ext = extname(path).toLowerCase()
+        return {
+          success: false,
+          error: result.error || '文档写入失败',
+          errorCode: ext === '.docx' ? 'DOCX_WRITE_FAILED' : 'UNSUPPORTED_TEXT_WRITE',
+        }
+      }
+      return result
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage }
@@ -88,15 +443,28 @@ export function setupDocumentIPC(useMock = false): void {
         return { success: false, error: 'Directory not found', errorCode: 'FILE_NOT_FOUND' }
       }
 
-      const items = readdirSync(dir).map(name => {
+      const items = readdirSync(dir)
+        .filter((name) => !shouldHideInternalBackup(name))
+        .map(name => {
         const filePath = join(dir, name)
-        const stats = statSync(filePath)
-        return {
-          name,
-          path: filePath,
-          isDirectory: stats.isDirectory(),
-          size: stats.size,
-          modified: stats.mtime
+        try {
+          const stats = statSync(filePath)
+          return {
+            name,
+            path: filePath,
+            isDirectory: stats.isDirectory(),
+            size: stats.size,
+            modified: stats.mtime
+          }
+        } catch {
+          // Handle permission errors or broken symlinks gracefully
+          return {
+            name,
+            path: filePath,
+            isDirectory: false,
+            size: 0,
+            modified: new Date(0)
+          }
         }
       })
 
@@ -107,13 +475,18 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  // Parse docx — real parsing with mammoth, fallback to mock
+  // Parse docx — real parsing with mammoth, returns { html, rawText }
   ipcMain.handle('document:parseDocx', async (_, path: string) => {
     try {
       if (useMock) {
         return {
           success: true,
-          content: '<p>[Mock] DOCX parsing requires mammoth.js</p><p>File: ' + path + '</p>',
+          data: {
+            html: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
+            rawText: '[Mock] DOCX parsing requires mammoth.js'
+          },
+          // backward compat
+          content: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
           html: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
           mock: true
         }
@@ -133,34 +506,74 @@ export function setupDocumentIPC(useMock = false): void {
       }
 
       const buffer = readFileSync(path)
-      const result = await mammoth.convertToHtml({ buffer })
+
+      // Use the mammoth module — handle both default and named exports
+      const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
+      const htmlResult = await mammothMod.convertToHtml({ buffer })
+      const textResult = await mammothMod.extractRawText({ buffer })
 
       return {
         success: true,
-        content: result.value,
-        html: result.value,
-        messages: result.messages,
+        data: {
+          html: htmlResult.value,
+          rawText: textResult.value,
+          messages: htmlResult.messages
+        },
+        // backward compat
+        content: htmlResult.value,
+        html: htmlResult.value,
         file: path
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
+      if (/end of central directory|zip file/i.test(errorMessage)) {
+        try {
+          const rawText = readFileSync(path, 'utf-8')
+          if (looksLikeReadableText(rawText)) {
+            const html = `<pre>${escapeHtml(rawText)}</pre>`
+            return {
+              success: true,
+              data: {
+                html,
+                rawText,
+                messages: [
+                  {
+                    type: 'warning',
+                    message: 'DOCX 文件结构损坏，已回退为原始文本视图（文件可能曾被当作纯文本覆盖保存）。',
+                  },
+                ],
+              },
+              content: html,
+              html,
+              file: path,
+            }
+          }
+        } catch {
+          // Keep original parse error below.
+        }
+      }
       return {
         success: false,
-        error: errorMessage,
+        error: `Failed to parse DOCX: ${errorMessage}`,
         errorCode: 'PARSE_ERROR',
         file: path
       }
     }
   })
 
-  // Parse xlsx — real parsing with SheetJS, fallback to mock
+  // Parse xlsx — real parsing with SheetJS, multi-sheet support
   ipcMain.handle('document:parseXlsx', async (_, path: string) => {
     try {
       if (useMock) {
         return {
           success: true,
+          data: {
+            sheets: [
+              { name: 'Sheet1', data: [['A1', 'B1'], ['A2', 'B2']] }
+            ]
+          },
+          // backward compat
           sheets: ['Sheet1'],
-          data: { 'Sheet1': [['A1', 'B1'], ['A2', 'B2']] },
           file: path,
           mock: true
         }
@@ -180,26 +593,35 @@ export function setupDocumentIPC(useMock = false): void {
       }
 
       const buffer = readFileSync(path)
-      const workbook = xlsx.read(buffer, { type: 'buffer' })
+      const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
+      const workbook = xlsxMod.read(buffer, { type: 'buffer' })
 
-      const data: Record<string, unknown[][]> = {}
+      // Build structured multi-sheet output: { name, data: string[][] }
+      const sheets: Array<{ name: string; data: unknown[][] }> = []
+      const legacyData: Record<string, unknown[][]> = {}
+
       for (const sheetName of workbook.SheetNames) {
-        data[sheetName] = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 }) as unknown[][]
+        const sheet = workbook.Sheets[sheetName]
+        const rows = xlsxMod.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][]
+        sheets.push({ name: sheetName, data: rows })
+        legacyData[sheetName] = rows
       }
 
       return {
         success: true,
+        data: { sheets },
+        // backward compat
         sheets: workbook.SheetNames,
-        data,
+        // Legacy flat data map
+        sheetData: legacyData,
         file: path
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return {
         success: false,
-        error: errorMessage,
+        error: `Failed to parse XLSX: ${errorMessage}`,
         errorCode: 'PARSE_ERROR',
-        originalError: errorMessage,
         file: path
       }
     }
@@ -277,16 +699,30 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  // Get file stats
+  // Get file stats — enhanced with extension and modifiedTime/createdTime
   ipcMain.handle('document:stat', async (_, path: string) => {
     try {
       if (useMock) {
-        return { success: true, mock: true, stat: { size: 1024, isDirectory: false, modified: new Date() } }
+        return {
+          success: true,
+          mock: true,
+          data: { size: 1024, isDirectory: false, modifiedTime: Date.now(), createdTime: Date.now(), extension: '.md' },
+          stat: { size: 1024, isDirectory: false, modified: new Date() }
+        }
       }
       if (!existsSync(path)) return { success: false, error: 'Not found' }
       const stats = statSync(path)
+      const ext = extname(path).toLowerCase()
       return {
         success: true,
+        data: {
+          size: stats.size,
+          modifiedTime: stats.mtime.getTime(),
+          createdTime: stats.birthtime.getTime(),
+          isDirectory: stats.isDirectory(),
+          extension: ext || null
+        },
+        // backward compat
         stat: {
           size: stats.size,
           isDirectory: stats.isDirectory(),
@@ -327,6 +763,16 @@ export function setupDocumentIPC(useMock = false): void {
     try {
       if (!existsSync(path)) return { success: false, error: 'Not found' }
       shell.showItemInFolder(path)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('document:openPath', async (_, path: string) => {
+    try {
+      if (!existsSync(path)) return { success: false, error: 'Not found' }
+      await shell.openPath(path)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
