@@ -1,20 +1,13 @@
-import { useEffect, useCallback, useRef, lazy, Suspense, useMemo } from 'react'
+import { useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useMode } from '../stores/useMode'
 import TopBar from '../components/layout/TopBar'
 import IconRail from '../components/layout/IconRail'
 import SidePanel, { type SidePanelVariant } from '../components/layout/SidePanel'
+import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
-import BrowserMode from './modes/BrowserMode'
-import DocumentMode from './modes/DocumentMode'
-import DesignMode from './modes/DesignMode'
-import VideoMode from './modes/VideoMode'
-import RSSMode from './modes/RSSMode'
-
-// Lazy load CalendarMode to prevent Schedule-X CSS from clobbering TipTap styles
-const CalendarMode = lazy(() => import('./modes/CalendarMode'))
 
 // --- Resize Handle ---
 function ResizeHandle({
@@ -161,25 +154,6 @@ export default function WorkbenchMode() {
     return 'folder'
   }, [sidePanelVariant])
 
-  const renderModeComponent = (mode: string) => {
-    switch (mode) {
-      case 'browser':
-        return <BrowserMode />
-      case 'document':
-        return <DocumentMode />
-      case 'design':
-        return <DesignMode />
-      case 'video':
-        return <VideoMode />
-      case 'rss':
-        return <RSSMode />
-      case 'calendar':
-        return <Suspense fallback={<div className="flex items-center justify-center h-full"><span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载日历...</span></div>}><CalendarMode /></Suspense>
-      default:
-        return <BrowserMode />
-    }
-  }
-
   return (
     <div className="workbench-mode-root flex flex-col h-full">
       {/* TopBar: right button toggles ChatPanel */}
@@ -202,17 +176,17 @@ export default function WorkbenchMode() {
               className="flex flex-col min-w-0 bg-[var(--bg-content)]"
               style={{ flexBasis: `${splitRatio}%`, flexShrink: 0, flexGrow: 0 }}
             >
-              {renderModeComponent(workbenchMode)}
+              <WorkbenchModeOutlet mode={workbenchMode} />
             </div>
             <ResizeHandle onResize={handleSplitResize} direction="right" />
             <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-              {renderModeComponent(splitMode)}
+              <WorkbenchModeOutlet mode={splitMode} />
             </div>
           </div>
         ) : (
           /* Single mode */
           <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-            {renderModeComponent(workbenchMode)}
+            <WorkbenchModeOutlet mode={workbenchMode} />
           </div>
         )}
 

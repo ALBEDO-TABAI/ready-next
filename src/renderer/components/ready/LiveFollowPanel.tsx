@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { useAgent } from '../../stores/useAgent'
-import BrowserMode from '../../pages/modes/BrowserMode'
-import DocumentMode from '../../pages/modes/DocumentMode'
-import DesignMode from '../../pages/modes/DesignMode'
-import VideoMode from '../../pages/modes/VideoMode'
-import RSSMode from '../../pages/modes/RSSMode'
-import CalendarMode from '../../pages/modes/CalendarMode'
+import WorkbenchModeOutlet from '../layout/WorkbenchModeOutlet'
 
 /** Map agent names to their primary working mode */
 const agentModeMap: Record<string, WorkbenchMode> = {
@@ -97,13 +92,15 @@ export default function LiveFollowPanel({ isFollowMode }: LiveFollowPanelProps) 
     }
 
     switch (readySubMode) {
-      case 'browser': return <BrowserMode />
-      case 'document': return <DocumentMode />
-      case 'design': return <DesignMode />
-      case 'video': return <VideoMode />
-      case 'rss': return <RSSMode />
-      case 'calendar': return <CalendarMode />
-      default: return <BrowserMode />
+      case 'browser':
+      case 'document':
+      case 'design':
+      case 'video':
+      case 'rss':
+      case 'calendar':
+        return <WorkbenchModeOutlet mode={readySubMode} />
+      default:
+        return <WorkbenchModeOutlet mode="browser" />
     }
   }
 
