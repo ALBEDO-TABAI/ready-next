@@ -44,9 +44,17 @@ export default function RSSMode() {
           setError(result.error || '获取 RSS 项目失败')
           setItems([])
         } else if (result.data) {
-          setItems(result.data.map((item: { publishedAt: string | number | Date }) => ({
-            ...item,
-            publishedAt: new Date(item.publishedAt).toLocaleString()
+          setItems(result.data.map((item) => ({
+            id: item.id,
+            title: item.title || '未命名 RSS 条目',
+            source: item.source || '未知来源',
+            sourceId: item.sourceId || 'unknown',
+            summary: item.summary || '',
+            publishedAt: new Date(item.publishedAt).toLocaleString(),
+            read: Boolean(item.read),
+            starred: Boolean(item.starred),
+            coverImage: item.coverImage || undefined,
+            link: item.link || '',
           })))
           setIsMock(result.mock || false)
         }

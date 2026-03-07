@@ -17,6 +17,9 @@ interface DocTabsState {
     openTab: (path: string) => void
     closeTab: (id: string) => void
     setActiveTab: (id: string) => void
+    renameTab: (id: string, title: string) => void
+    setTabContent: (id: string, content: string) => void
+    appendTabContent: (id: string, content: string) => void
     updateTabContent: (id: string, content: string) => void
     markTabSaved: (id: string) => void
     reorderTabs: (fromIndex: number, toIndex: number) => void
@@ -110,6 +113,31 @@ export const useDocTabs = create<DocTabsState>((set, get) => ({
 
     setActiveTab: (id: string) => {
         set({ activeTabId: id, splitTabId: null })
+    },
+
+    renameTab: (id: string, title: string) => {
+        const nextTitle = title.trim() || '新文档'
+        set({
+            tabs: get().tabs.map(t =>
+                t.id === id ? { ...t, title: nextTitle } : t
+            )
+        })
+    },
+
+    setTabContent: (id: string, content: string) => {
+        set({
+            tabs: get().tabs.map(t =>
+                t.id === id ? { ...t, content, isDirty: true } : t
+            )
+        })
+    },
+
+    appendTabContent: (id: string, content: string) => {
+        set({
+            tabs: get().tabs.map(t =>
+                t.id === id ? { ...t, content: `${t.content}${content}`, isDirty: true } : t
+            )
+        })
     },
 
     updateTabContent: (id: string, content: string) => {

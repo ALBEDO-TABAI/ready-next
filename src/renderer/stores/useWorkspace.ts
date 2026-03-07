@@ -34,6 +34,7 @@ interface WorkspaceState {
   chatPanelWidth: number
   renamingPath: string | null
   creatingType: 'file' | 'folder' | null
+  creatingPath: string | null
 
   // Navigation
   setCurrentPath: (path: string) => void
@@ -81,6 +82,50 @@ const getDirName = (path: string): string => {
   return idx <= 0 ? '/' : path.slice(0, idx)
 }
 
+const joinChildPath = (dir: string, name: string): string => {
+  const separator = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
+  const normalized = dir.replace(/[\\/]+$/, '')
+  if (!normalized) return `${separator}${name}`
+  return `${normalized}${separator}${name}`
+}
+
+const isKnownDirectoryPath = (
+  path: string | null,
+  files: FileItem[],
+  dirChildren: Map<string, FileItem[]>,
+  pinnedFolders: string[],
+): boolean => {
+  if (!path) return false
+  if (pinnedFolders.includes(path)) return true
+  if (files.some((item) => item.path === path && item.isDirectory)) return true
+  for (const children of dirChildren.values()) {
+    if (children.some((item) => item.path === path && item.isDirectory)) return true
+  }
+  return false
+}
+
+const resolveCreationBaseDir = (state: Pick<
+  WorkspaceState,
+  'currentPath' | 'workspaceRoot' | 'pinnedFolders' | 'selectedFile' | 'files' | 'dirChildren'
+>): string => {
+  if (state.currentPath && state.currentPath !== '/') {
+    return state.currentPath
+  }
+
+  if (isKnownDirectoryPath(state.selectedFile, state.files, state.dirChildren, state.pinnedFolders)) {
+    return state.selectedFile as string
+  }
+
+  if (state.workspaceRoot) {
+    return state.workspaceRoot
+  }
+
+  if (state.pinnedFolders.length > 0) {
+    return state.pinnedFolders[0]
+  }
+
+  return state.currentPath || '/'
+}
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
 const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
 const DEFAULT_SIDE_PANEL_WIDTH = 220
@@ -152,6 +197,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   chatPanelWidth: 380,
   renamingPath: null,
   creatingType: null,
+  creatingPath: null,
 
   setCurrentPath: (path) => {
     set({ currentPath: path })
@@ -252,6 +298,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       pinnedFolders: [],
       renamingPath: null,
       creatingType: null,
+      creatingPath: null,
     })
     localStorage.removeItem('ready-workspace-root')
     localStorage.removeItem('ready-pinned-folders')
@@ -363,14 +410,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   createFile: async (name) => {
-    const { currentPath } = get()
-    const filePath = `${currentPath}/${name}`
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    const filePath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.document.createFile(filePath)
         if (result.success) {
+          if (state.currentPath !== targetDir) {
+            set({ currentPath: targetDir })
+          }
           await get().refreshFiles()
-          set({ creatingType: null, selectedFile: filePath })
+          await get().loadDirChildren(targetDir)
+          set({ creatingType: null, creatingPath: null, selectedFile: filePath })
           return true
         }
       } else {
@@ -378,7 +430,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         set((state) => ({
           files: [...state.files, { name, path: filePath, isDirectory: false, size: 0, modified: new Date() }],
           creatingType: null,
-          selectedFile: filePath
+          creatingPath: null,
+          selectedFile: filePath,
+          currentPath: targetDir,
         }))
         return true
       }
@@ -389,20 +443,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   createFolder: async (name) => {
-    const { currentPath } = get()
-    const folderPath = `${currentPath}/${name}`
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    const folderPath = joinChildPath(targetDir, name)
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.document.mkdir(folderPath)
         if (result.success) {
+          if (state.currentPath !== targetDir) {
+            set({ currentPath: targetDir })
+          }
           await get().refreshFiles()
-          set({ creatingType: null })
+          await get().loadDirChildren(targetDir)
+          set({ creatingType: null, creatingPath: null, selectedFile: folderPath })
           return true
         }
       } else {
         set((state) => ({
           files: [...state.files, { name, path: folderPath, isDirectory: true, size: 0, modified: new Date() }],
-          creatingType: null
+          creatingType: null,
+          creatingPath: null,
+          selectedFile: folderPath,
+          currentPath: targetDir,
         }))
         return true
       }
@@ -441,10 +503,26 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   deleteItem: async (path) => {
     try {
       if (window.electronAPI) {
+        const state = get()
+        const parentPath = getDirName(path)
         const result = await window.electronAPI.document.deleteItem(path)
         if (result.success) {
+          if (state.currentPath === path) {
+            set({ currentPath: parentPath })
+          }
           await get().refreshFiles()
-          if (get().selectedFile === path) set({ selectedFile: null })
+          const currentState = get()
+          const cleanedExpanded = new Set<string>()
+          currentState.expandedDirs.forEach((dir) => {
+            if (dir !== path && !dir.startsWith(`${path}/`) && !dir.startsWith(`${path}\\`)) {
+              cleanedExpanded.add(dir)
+            }
+          })
+          set({
+            selectedFile: currentState.selectedFile === path ? null : currentState.selectedFile,
+            expandedDirs: cleanedExpanded,
+          })
+          await get().loadDirChildren(parentPath)
           return true
         }
       } else {
@@ -527,6 +605,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   startRenaming: (path) => set({ renamingPath: path }),
   cancelRenaming: () => set({ renamingPath: null }),
-  startCreating: (type) => set({ creatingType: type }),
-  cancelCreating: () => set({ creatingType: null })
+  startCreating: (type) => {
+    const state = get()
+    const targetDir = resolveCreationBaseDir(state)
+    if (targetDir !== state.currentPath) {
+      set({ creatingType: type, creatingPath: targetDir, currentPath: targetDir, selectedFile: targetDir })
+      void get().refreshFiles()
+      return
+    }
+    set({ creatingType: type, creatingPath: targetDir })
+  },
+  cancelCreating: () => set({ creatingType: null, creatingPath: null })
 }))

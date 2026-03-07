@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Users, Settings, Plus, Send, Globe, FileText, Image,
   Scissors, Rss, Calendar, Search, ChevronDown, Folder
@@ -6,18 +5,13 @@ import {
 import { useMode } from '../stores/useMode'
 import { useAgent } from '../stores/useAgent'
 import ModeSlider from '../components/layout/ModeSlider'
+import TaskPanel from '../components/ready/TaskPanel'
 import BrowserMode from './modes/BrowserMode'
 import DocumentMode from './modes/DocumentMode'
 import ImageMode from './modes/ImageMode'
 import VideoMode from './modes/VideoMode'
 import RSSMode from './modes/RSSMode'
 import CalendarMode from './modes/CalendarMode'
-
-interface Task {
-  id: string
-  title: string
-  status: 'pending' | 'running' | 'completed'
-}
 
 const subModes: { id: string; label: string; icon: React.ElementType }[] = [
   { id: 'browser', label: '浏览器', icon: Globe },
@@ -30,12 +24,7 @@ const subModes: { id: string; label: string; icon: React.ElementType }[] = [
 
 export default function ReadyMode() {
   const { readySubMode, setReadySubMode } = useMode()
-  const { agents, messages, inputValue, isStreaming, setInputValue, toggleAgentSelection, sendMessage } = useAgent()
-  const [tasks] = useState<Task[]>([
-    { id: '1', title: '分析视频素材', status: 'completed' },
-    { id: '2', title: '生成文案草稿', status: 'running' },
-    { id: '3', title: '剪辑视频片段', status: 'pending' }
-  ])
+  const { agents, messages, inputValue, isStreaming, setInputValue, sendMessage } = useAgent()
 
   const renderSubMode = () => {
     switch (readySubMode) {
@@ -123,63 +112,7 @@ export default function ReadyMode() {
 
       {/* ContentBody — matches design Z58Gf */}
       <div className="flex-1 flex overflow-hidden">
-        {/* TaskPanel — matches design vkdOx */}
-        <div
-          className="flex-shrink-0 flex flex-col"
-          style={{
-            width: 200,
-            background: 'var(--bg-panel)',
-            borderRight: '1px solid var(--border-default)'
-          }}
-        >
-          {/* Task Header */}
-          <div
-            className="flex items-center justify-between"
-            style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
-          >
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>任务</span>
-            <button
-              className="flex items-center justify-center rounded-lg hover:bg-black/5 transition-colors"
-              style={{ width: 24, height: 24 }}
-            >
-              <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
-            </button>
-          </div>
-
-          {/* Task Count */}
-          <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-default)' }}>
-            <span style={{ fontSize: 11, color: '#8A8A8A' }}>{tasks.length} 个任务</span>
-          </div>
-
-          {/* Task List */}
-          <div className="flex-1 overflow-auto" style={{ padding: 8 }}>
-            <div className="flex flex-col" style={{ gap: 6 }}>
-              {tasks.map(task => (
-                <div
-                  key={task.id}
-                  className="flex items-center rounded-lg transition-colors hover:bg-black/5"
-                  style={{ padding: '8px 10px', gap: 8 }}
-                >
-                  <span className={`
-                    w-2 h-2 rounded-full flex-shrink-0
-                    ${task.status === 'completed' ? 'bg-[var(--color-green)]' : ''}
-                    ${task.status === 'running' ? 'bg-[var(--color-blue)] animate-pulse' : ''}
-                    ${task.status === 'pending' ? 'bg-[var(--text-light)]' : ''}
-                  `} />
-                  <span
-                    className={task.status === 'completed' ? 'line-through' : ''}
-                    style={{
-                      fontSize: 12,
-                      color: task.status === 'completed' ? '#8A8A8A' : 'var(--text-body)'
-                    }}
-                  >
-                    {task.title}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TaskPanel />
 
         {/* MeetingChat — matches design bLNSY */}
         <div

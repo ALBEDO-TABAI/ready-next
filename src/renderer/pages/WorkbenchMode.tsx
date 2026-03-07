@@ -67,6 +67,8 @@ export default function WorkbenchMode() {
     refreshFiles,
     toggleSidebar,
     toggleChatPanel,
+    setSidePanelWidth,
+    sidePanelWidths,
     sidebarVisible,
     chatPanelVisible,
   } = useWorkspace()
@@ -119,10 +121,8 @@ export default function WorkbenchMode() {
   }
 
   const handleSidebarResize = useCallback((delta: number) => {
-    useWorkspace.setState((state) => ({
-      sidebarWidth: Math.max(160, Math.min(400, state.sidebarWidth + delta))
-    }))
-  }, [])
+    setSidePanelWidth('files', Math.max(160, Math.min(400, sidePanelWidths.files + delta)))
+  }, [setSidePanelWidth, sidePanelWidths.files])
 
   const handleChatResize = useCallback((delta: number) => {
     useWorkspace.setState((state) => ({

@@ -9,7 +9,7 @@ import { join, extname } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
-import { setupAgentIPC } from './modules/claude-bridge/ipc-handler'
+import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
@@ -68,20 +68,11 @@ function createWindow(): void {
   }
 
   // Setup IPC handlers
-  setupAgentIPC(agentManager, mainWindow)
-  setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES)
+  const browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES)
+  setupAgentIPC(agentManager, mainWindow, browserController)
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupRSSIPC(ENABLE_MOCK_SERVICES)
   setupCalendarIPC(ENABLE_MOCK_SERVICES)
-
-  // Agent management IPC
-  ipcMain.handle('agent:getDiagnostics', () => {
-    return { success: true, data: agentManager.getDiagnostics() }
-  })
-  ipcMain.handle('agent:kill', (_, agent: string) => {
-    const result = agentManager.killAgent(agent)
-    return { success: result, error: result ? undefined : `Agent '${agent}' not found` }
-  })
 
   // Window state IPC
   ipcMain.handle('window:minimize', () => {
@@ -155,6 +146,7 @@ app.on('window-all-closed', () => {
 
 // Clean up before quit
 app.on('before-quit', () => {
+  void cleanupAgentRuntime()
   db.close()
   agentManager.cleanup()
 })

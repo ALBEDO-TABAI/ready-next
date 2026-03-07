@@ -1,6 +1,8 @@
 import { spawn, spawnSync, ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { WorktreePool } from './worktree-pool'
+import { getDatabase } from '../database'
+import { type AIModelConfig, normalizeAIConfig } from '../../../shared/ai-providers'
 
 export interface AgentInstance {
   name: string
@@ -17,7 +19,7 @@ export interface AgentInstance {
 export interface AgentOutput {
   agent: string
   chunk: string
-  type: 'stdout' | 'stderr' | 'error'
+  type: 'stdout' | 'stderr' | 'error' | 'text' | 'done' | 'tool_use'
 }
 
 export interface AgentStatusEvent {
@@ -35,6 +37,7 @@ export interface AgentSpawnResult {
   pid?: number
   error?: string
   exitCode?: number | null
+  reused?: boolean
 }
 
 export interface OrchestrateResult {
@@ -50,8 +53,95 @@ export interface AgentErrorEvent {
   exitCode?: number | null
 }
 
+// ---------------------------------------------------------------------------
+// Agent Tool Definitions
+// These are passed to Claude via --allowedTools and system prompt so the agent
+// can call back into the app.
+// ---------------------------------------------------------------------------
+
+export interface AgentToolDef {
+  name: string
+  description: string
+  parameters: Record<string, { type: string; description: string; required?: boolean }>
+}
+
+const AGENT_TOOLS: AgentToolDef[] = [
+  {
+    name: 'calendar.createEvent',
+    description: 'Create a new calendar event in the user\'s calendar',
+    parameters: {
+      title: { type: 'string', description: 'Event title', required: true },
+      startTime: { type: 'string', description: 'ISO 8601 start time', required: true },
+      endTime: { type: 'string', description: 'ISO 8601 end time', required: true },
+      description: { type: 'string', description: 'Event description' }
+    }
+  },
+  {
+    name: 'calendar.listEvents',
+    description: 'List calendar events within a date range',
+    parameters: {
+      startDate: { type: 'string', description: 'ISO 8601 start date', required: true },
+      endDate: { type: 'string', description: 'ISO 8601 end date', required: true }
+    }
+  },
+  {
+    name: 'document.openFile',
+    description: 'Open a file in the document editor',
+    parameters: {
+      path: { type: 'string', description: 'Absolute file path to open', required: true }
+    }
+  },
+  {
+    name: 'document.writeFile',
+    description: 'Write content to a file',
+    parameters: {
+      path: { type: 'string', description: 'Absolute file path', required: true },
+      content: { type: 'string', description: 'File content to write', required: true }
+    }
+  },
+  {
+    name: 'app.switchMode',
+    description: 'Switch the app to a different workspace mode',
+    parameters: {
+      mode: { type: 'string', description: 'Mode name: browser, document, image, video, rss, calendar', required: true }
+    }
+  },
+  {
+    name: 'app.notify',
+    description: 'Show a notification message to the user',
+    parameters: {
+      message: { type: 'string', description: 'Notification message text', required: true }
+    }
+  }
+]
+
+function buildToolSystemPrompt(): string {
+  const toolDescriptions = AGENT_TOOLS.map(t => {
+    const params = Object.entries(t.parameters)
+      .map(([k, v]) => `  - ${k} (${v.type}${v.required ? ', required' : ''}): ${v.description}`)
+      .join('\n')
+    return `### ${t.name}\n${t.description}\nParameters:\n${params}`
+  }).join('\n\n')
+
+  return `\n\n---\nYou have access to the following tools in the Ready app. To invoke a tool, output a JSON block with this exact format on its own line:\n\n:::tool_call\n{"tool": "<tool_name>", "args": { ... }}\n:::\n\nAvailable tools:\n\n${toolDescriptions}\n`
+}
+
+// ---------------------------------------------------------------------------
+// Session tracking for persistent processes
+// ---------------------------------------------------------------------------
+
+interface AgentSession {
+  process: ChildProcess
+  worktreePath: string
+  isMock: boolean
+  spawnTime: number
+  lineBuffer: string
+  timeoutId: ReturnType<typeof setTimeout> | null
+}
+
 export class AgentManager extends EventEmitter {
   private agents = new Map<string, AgentInstance>()
+  private sessions = new Map<string, AgentSession>()
   private worktreePool: WorktreePool
   private maxAgents = 4
   private useMock: boolean
@@ -93,10 +183,38 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Spawn a new Agent (Claude Code instance)
+   * Send a message to an existing agent session, or spawn a new one.
+   * This is the main entry point — it reuses a running Claude process
+   * if one exists for the given agent name, otherwise spawns fresh.
    */
   async spawnAgent(name: string, task: string): Promise<AgentSpawnResult> {
-    if (this.agents.size >= this.maxAgents) {
+    // Check for an existing live session
+    const existing = this.sessions.get(name)
+    if (existing && !existing.process.killed && existing.process.exitCode === null) {
+      // Reuse the existing process — write the new message to stdin
+      try {
+        existing.process.stdin?.write(task + '\n')
+        this.emit('status', { agent: name, status: 'working', isMock: existing.isMock })
+
+        // Reset timeout
+        if (existing.timeoutId) clearTimeout(existing.timeoutId)
+        existing.timeoutId = this.createSessionTimeout(name)
+
+        return {
+          success: true,
+          agent: name,
+          mock: existing.isMock,
+          pid: existing.process.pid,
+          reused: true
+        }
+      } catch {
+        // stdin write failed — kill and respawn below
+        this.destroySession(name)
+      }
+    }
+
+    // Limit check
+    if (this.sessions.size >= this.maxAgents) {
       const error = `Maximum agent limit (${this.maxAgents}) reached.`
       this.emit('output', {
         agent: name,
@@ -106,10 +224,8 @@ export class AgentManager extends EventEmitter {
       return { success: false, agent: name, mock: false, error }
     }
 
-    // Kill existing agent with same name
-    if (this.agents.has(name)) {
-      this.killAgent(name)
-    }
+    // Kill any leftover session with same name
+    this.destroySession(name)
 
     let isMock = this.shouldUseMock()
     const spawnTime = Date.now()
@@ -151,38 +267,25 @@ export class AgentManager extends EventEmitter {
       this.emit('status', { agent: name, status: 'working', isMock: agent.isMock })
 
       // Setup timeout handler
-      const timeoutId = setTimeout(() => {
-        if (agent.status === 'working') {
-          agent.status = 'timeout'
-          agent.errorMessage = `Agent timed out after ${this.agentTimeoutMs}ms`
-          this.emit('output', {
-            agent: name,
-            chunk: agent.errorMessage,
-            type: 'error'
-          })
-          this.emit('error', {
-            agent: name,
-            error: agent.errorMessage,
-            type: 'timeout'
-          })
-          this.emit('status', {
-            agent: name,
-            status: 'timeout',
-            errorMessage: agent.errorMessage,
-            isMock: agent.isMock
-          })
-          this.killAgent(name)
-        }
-      }, this.agentTimeoutMs)
+      const timeoutId = this.createSessionTimeout(name)
+
+      // Create session tracking
+      const session: AgentSession = {
+        process: proc,
+        worktreePath: wt.path,
+        isMock,
+        spawnTime,
+        lineBuffer: '',
+        timeoutId
+      }
+      this.sessions.set(name, session)
 
       // Buffer for incomplete JSON lines
-      let lineBuffer = ''
-
       proc.stdout?.on('data', (chunk: Buffer) => {
-        lineBuffer += chunk.toString()
-        const lines = lineBuffer.split('\n')
+        session.lineBuffer += chunk.toString()
+        const lines = session.lineBuffer.split('\n')
         // Keep the last potentially incomplete line in the buffer
-        lineBuffer = lines.pop() || ''
+        session.lineBuffer = lines.pop() || ''
 
         for (const line of lines) {
           const trimmed = line.trim()
@@ -194,6 +297,16 @@ export class AgentManager extends EventEmitter {
               for (const block of json.message.content) {
                 if (block.type === 'text' && block.text) {
                   this.emit('output', { agent: name, chunk: block.text, type: 'text' })
+                  // Check for tool_call patterns in the text
+                  this.parseToolCalls(name, block.text)
+                }
+                if (block.type === 'tool_use') {
+                  this.emit('output', {
+                    agent: name,
+                    chunk: `${block.name}(${JSON.stringify(block.input || {})})`,
+                    type: 'tool_use'
+                  })
+                  this.handleToolUse(name, block.name, block.input || {}, block.id)
                 }
               }
             } else if (json.type === 'result') {
@@ -218,7 +331,7 @@ export class AgentManager extends EventEmitter {
       })
 
       proc.on('close', (code) => {
-        clearTimeout(timeoutId)
+        if (session.timeoutId) clearTimeout(session.timeoutId)
         agent.exitCode = code
         const status = code === 0 ? 'done' : 'error'
         agent.status = status
@@ -240,11 +353,12 @@ export class AgentManager extends EventEmitter {
           isMock: agent.isMock
         } as AgentStatusEvent)
         this.agents.delete(name)
+        this.sessions.delete(name)
         this.worktreePool.release(wt.path).catch(console.error)
       })
 
       proc.on('error', (error) => {
-        clearTimeout(timeoutId)
+        if (session.timeoutId) clearTimeout(session.timeoutId)
         agent.status = 'error'
         agent.errorMessage = `Process error: ${error.message}`
 
@@ -265,6 +379,7 @@ export class AgentManager extends EventEmitter {
           isMock: agent.isMock
         } as AgentStatusEvent)
         this.agents.delete(name)
+        this.sessions.delete(name)
         this.worktreePool.release(wt.path).catch(console.error)
       })
 
@@ -272,7 +387,8 @@ export class AgentManager extends EventEmitter {
         success: true,
         agent: name,
         mock: agent.isMock,
-        pid: proc.pid
+        pid: proc.pid,
+        reused: false
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -296,20 +412,184 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Create Claude Code process
+   * Create a timeout for a session that fires if no activity for agentTimeoutMs
+   */
+  private createSessionTimeout(name: string): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      const agent = this.agents.get(name)
+      if (agent && agent.status === 'working') {
+        agent.status = 'timeout'
+        agent.errorMessage = `Agent timed out after ${this.agentTimeoutMs}ms`
+        this.emit('output', {
+          agent: name,
+          chunk: agent.errorMessage,
+          type: 'error'
+        })
+        this.emit('error', {
+          agent: name,
+          error: agent.errorMessage,
+          type: 'timeout'
+        })
+        this.emit('status', {
+          agent: name,
+          status: 'timeout',
+          errorMessage: agent.errorMessage,
+          isMock: agent.isMock
+        })
+        this.destroySession(name)
+      }
+    }, this.agentTimeoutMs)
+  }
+
+  /**
+   * Destroy an agent session (kill process, release worktree)
+   */
+  private destroySession(name: string): void {
+    const session = this.sessions.get(name)
+    if (session) {
+      if (session.timeoutId) clearTimeout(session.timeoutId)
+      try {
+        session.process.kill('SIGTERM')
+        setTimeout(() => {
+          if (!session.process.killed) {
+            session.process.kill('SIGKILL')
+          }
+        }, 5000)
+      } catch {
+        // Process may already be dead
+      }
+      this.sessions.delete(name)
+      this.worktreePool.release(session.worktreePath).catch(console.error)
+    }
+    this.agents.delete(name)
+  }
+
+  /**
+   * Start a new session for an agent (kill existing, clear state)
+   */
+  newSession(name: string): void {
+    this.destroySession(name)
+    this.emit('status', { agent: name, status: 'idle', isMock: this.shouldUseMock() })
+  }
+
+  /**
+   * Parse tool_call patterns from agent text output
+   * Looks for :::tool_call\n{...}\n::: blocks
+   */
+  private parseToolCalls(agentName: string, text: string): void {
+    const toolCallRegex = /:::tool_call\s*\n\s*({[\s\S]*?})\s*\n\s*:::/g
+    let match: RegExpExecArray | null
+    while ((match = toolCallRegex.exec(text)) !== null) {
+      try {
+        const call = JSON.parse(match[1])
+        if (call.tool && typeof call.tool === 'string') {
+          this.handleToolUse(agentName, call.tool, call.args || {})
+        }
+      } catch {
+        // Invalid JSON in tool call — skip
+      }
+    }
+  }
+
+  /**
+   * Handle a tool_use block from Claude's output.
+   * Executes the tool and feeds the result back into the process stdin.
+   */
+  private handleToolUse(
+    agentName: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    _toolId?: string
+  ): void {
+    // Emit tool_use event so the renderer can display it
+    this.emit('output', {
+      agent: agentName,
+      chunk: `${toolName}(${JSON.stringify(args)})`,
+      type: 'tool_use'
+    })
+
+    // Emit a tool execution event for the IPC handler to pick up
+    // The IPC handler will execute the tool and call feedToolResult
+    this.emit('tool_execute', {
+      agent: agentName,
+      tool: toolName,
+      args,
+      toolId: _toolId
+    })
+  }
+
+  /**
+   * Feed a tool result back to the agent process stdin
+   */
+  feedToolResult(agentName: string, toolId: string | undefined, result: unknown): void {
+    const session = this.sessions.get(agentName)
+    if (!session || session.process.killed) return
+
+    const resultPayload = JSON.stringify({
+      type: 'tool_result',
+      tool_use_id: toolId,
+      content: typeof result === 'string' ? result : JSON.stringify(result)
+    })
+
+    try {
+      session.process.stdin?.write(resultPayload + '\n')
+    } catch {
+      // stdin write failed
+    }
+  }
+
+  /**
+   * Read the current AI model config from the database (settings table).
+   * Falls back to env vars or hardcoded defaults if not set.
+   */
+  private getAIConfig(): AIModelConfig | null {
+    try {
+      const raw = getDatabase().getSetting('ai_model_config')
+      if (raw) return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
+    } catch {
+      // ignore parse errors
+    }
+    return null
+  }
+
+  /**
+   * Create Claude Code process — persistent session (stdin stays open)
    */
   private createClaudeProcess(worktreePath: string, task: string): ChildProcess {
+    const toolPrompt = buildToolSystemPrompt()
+
+    // Read dynamic AI config from database
+    const aiConfig = this.getAIConfig()
+    const baseUrl = aiConfig?.baseUrl
+      || process.env.ANTHROPIC_BASE_URL
+      || 'https://api.moonshot.cn/v1'
+    const apiKey = aiConfig?.apiKey
+      || process.env.ANTHROPIC_API_KEY
+      || ''
+
+    // Build a clean env — strip ALL Claude-related env vars to prevent "nested session" detection
+    const cleanEnv: Record<string, string | undefined> = {}
+    for (const [key, val] of Object.entries(process.env)) {
+      if (!key.startsWith('CLAUDE') && key !== 'ANTHROPIC_BASE_URL' && key !== 'ANTHROPIC_API_KEY') {
+        cleanEnv[key] = val
+      }
+    }
+
     const proc = spawn(
       'claude',
-      ['--print', '--verbose', '--output-format', 'stream-json'],
+      [
+        '-p', task,
+        '--verbose',
+        '--output-format', 'stream-json',
+        '--system-prompt', toolPrompt
+      ],
       {
         cwd: worktreePath,
         env: {
-          ...process.env,
+          ...cleanEnv,
           CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-          // Kimi API configuration (can be overridden by process.env)
-          ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || 'https://api.kimi.com/coding/',
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || ''
+          ANTHROPIC_BASE_URL: baseUrl,
+          ANTHROPIC_API_KEY: apiKey,
         }
       }
     )
@@ -317,9 +597,6 @@ export class AgentManager extends EventEmitter {
     if (!proc.pid) {
       throw new Error('Failed to spawn Claude process')
     }
-
-    proc.stdin?.write(task)
-    proc.stdin?.end()
 
     return proc
   }
@@ -330,13 +607,40 @@ export class AgentManager extends EventEmitter {
   private createMockProcess(task: string): ChildProcess {
     const script = `
 const task = ${JSON.stringify(task)};
-console.log('[Mock Agent] Received task: ' + task);
-console.log('[Mock Agent] Claude Code is not available. Running in mock mode.');
-console.log('[Mock Agent] Simulating task execution...');
-setTimeout(() => {
-  console.log('[Mock Agent] Task completed (mock).');
-  process.exit(0);
-}, 1000);
+process.stdin.resume();
+process.stdin.setEncoding('utf8');
+
+// Send initial response
+const response = {
+  type: 'assistant',
+  message: {
+    content: [{
+      type: 'text',
+      text: '[Mock Agent] 收到任务: ' + task + '\\n\\nClaude Code 当前不可用，运行在模拟模式。\\n\\n### 模拟回复\\n- **任务已记录**\\n- 等待 Claude CLI 配置\\n- 输入新消息继续对话'
+    }]
+  }
+};
+console.log(JSON.stringify(response));
+
+const done = { type: 'result', result: 'done' };
+console.log(JSON.stringify(done));
+
+// Listen for follow-up messages on stdin
+process.stdin.on('data', (data) => {
+  const msg = data.toString().trim();
+  if (!msg) return;
+  const followUp = {
+    type: 'assistant',
+    message: {
+      content: [{
+        type: 'text',
+        text: '[Mock Agent] 收到后续消息: ' + msg + '\\n\\n这是模拟的后续回复。在 Electron 环境中配置 Claude CLI 后可使用真实 AI。'
+      }]
+    }
+  };
+  console.log(JSON.stringify(followUp));
+  console.log(JSON.stringify(done));
+});
 `
     return spawn(process.execPath, ['-e', script], { stdio: ['pipe', 'pipe', 'pipe'] })
   }
@@ -392,9 +696,22 @@ setTimeout(() => {
   }
 
   /**
-   * Kill an agent with graceful shutdown (SIGTERM → SIGKILL)
+   * Check if an agent has an active session
+   */
+  hasActiveSession(name: string): boolean {
+    const session = this.sessions.get(name)
+    return !!session && !session.process.killed && session.process.exitCode === null
+  }
+
+  /**
+   * Kill an agent with graceful shutdown (SIGTERM -> SIGKILL)
    */
   killAgent(name: string): boolean {
+    const hasSession = this.sessions.has(name)
+    if (hasSession) {
+      this.destroySession(name)
+      return true
+    }
     const agent = this.agents.get(name)
     if (agent) {
       try {
@@ -417,6 +734,9 @@ setTimeout(() => {
    * Cleanup all agents
    */
   cleanup(): void {
+    for (const [name] of this.sessions) {
+      this.destroySession(name)
+    }
     for (const [name, agent] of this.agents) {
       try {
         agent.process.kill('SIGTERM')
@@ -426,6 +746,14 @@ setTimeout(() => {
       }
     }
     this.agents.clear()
+    this.sessions.clear()
+  }
+
+  /**
+   * Get the tool definitions (for external use / documentation)
+   */
+  getToolDefinitions(): AgentToolDef[] {
+    return AGENT_TOOLS
   }
 
   /**
@@ -438,6 +766,8 @@ setTimeout(() => {
     agentTimeoutMs: number
     activeAgents: number
     activeAgentNames: string[]
+    activeSessions: number
+    activeSessionNames: string[]
   } {
     return {
       claudeAvailable: this.claudeAvailable ?? false,
@@ -445,7 +775,9 @@ setTimeout(() => {
       maxAgents: this.maxAgents,
       agentTimeoutMs: this.agentTimeoutMs,
       activeAgents: this.agents.size,
-      activeAgentNames: Array.from(this.agents.keys())
+      activeAgentNames: Array.from(this.agents.keys()),
+      activeSessions: this.sessions.size,
+      activeSessionNames: Array.from(this.sessions.keys())
     }
   }
 }
