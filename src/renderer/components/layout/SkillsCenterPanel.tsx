@@ -1,38 +1,49 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { Folder, FolderInput, FolderOpen, Trash2 } from 'lucide-react'
+import { Folder, FolderInput, FolderOpen, Pen, Trash2 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { PANEL_TOKENS, SKILLS_PANEL_DIMENSIONS } from './panelTokens'
 
-type EmbeddedSkillId = 'video-expert-analyzer' | 'video-copy-analyzer' | 'lets-go-rss'
+interface SkillActionDefinition {
+  name: string
+  description: string
+}
 
-interface EmbeddedSkillState {
-  id: EmbeddedSkillId
+interface SkillState {
+  id: string
   name: string
   description: string
   version: string
   installed: boolean
   installStatePath: string
+  source: 'embedded' | 'custom'
+  manifestValid: boolean
+  defaultAction?: string
+  actions: SkillActionDefinition[]
+  managedPath?: string
+  sourcePath?: string
 }
 
 interface SkillsRuntimeInfo {
   skillsRoot: string
+  customSkillsRoot: string
 }
 
-interface ImportedSkillFolder {
-  id: string
-  name: string
+interface LegacyImportedSkillFolder {
+  id?: string
+  name?: string
   path: string
-  addedAt: number
+  addedAt?: number
 }
 
-type SkillCardContextTarget =
-  | { type: 'system'; id: string; path: string }
-  | { type: 'imported'; id: string; path: string }
+type SkillCardContextTarget = {
+  skill: SkillState
+  path: string
+}
 
 const IMPORTED_SKILL_KEY = 'ready-imported-skill-folders'
 
-const DEFAULT_ACTION_TEMPLATES: Record<EmbeddedSkillId, string> = {
+const DEFAULT_SYSTEM_COMMANDS: Record<string, string> = {
   'video-expert-analyzer': '/skill video-expert-analyzer video_expert_pipeline {"url":""}',
   'video-copy-analyzer': '/skill video-copy-analyzer video_copy_analyze {"input":""}',
   'lets-go-rss': '/skill lets-go-rss rss_update {"digest":true,"noLlm":true}',
@@ -46,7 +57,6 @@ const PANEL_COLORS = {
   text: PANEL_TOKENS.text,
   muted: PANEL_TOKENS.muted,
   mutedStrong: PANEL_TOKENS.mutedStrong,
-  cardBg: PANEL_TOKENS.cardBg,
   dropBorder: PANEL_TOKENS.dropBorder,
   iconAccent: PANEL_TOKENS.iconAccent,
   blue: PANEL_TOKENS.blue,
@@ -59,17 +69,27 @@ function basename(input: string): string {
   return chunks[chunks.length - 1] || input
 }
 
-function parseImportedFoldersFromStorage(): ImportedSkillFolder[] {
+function parseLegacyImportedFolders(): LegacyImportedSkillFolder[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = localStorage.getItem(IMPORTED_SKILL_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw) as ImportedSkillFolder[]
+    const parsed = JSON.parse(raw) as LegacyImportedSkillFolder[]
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((item) => !!item?.path && !!item?.name)
+    return parsed.filter((item) => typeof item?.path === 'string' && item.path.trim().length > 0)
   } catch {
     return []
   }
+}
+
+function buildDefaultCommand(skill: SkillState): string {
+  if (skill.source === 'embedded' && DEFAULT_SYSTEM_COMMANDS[skill.id]) {
+    return DEFAULT_SYSTEM_COMMANDS[skill.id]
+  }
+  if (skill.defaultAction) {
+    return `/skill ${skill.id} ${skill.defaultAction}`
+  }
+  return `/skill ${skill.id}`
 }
 
 function putSkillDragData(
@@ -77,8 +97,8 @@ function putSkillDragData(
   payload: {
     name: string
     path: string
-    skillId?: string
-    defaultCommand?: string
+    skillId: string
+    defaultCommand: string
     source: 'system' | 'imported'
   },
 ): void {
@@ -97,25 +117,32 @@ function putSkillDragData(
 }
 
 export default function SkillsCenterPanel() {
-  const [skills, setSkills] = useState<EmbeddedSkillState[]>([])
+  const [skills, setSkills] = useState<SkillState[]>([])
   const [runtimeInfo, setRuntimeInfo] = useState<SkillsRuntimeInfo | null>(null)
-  const [importedFolders, setImportedFolders] = useState<ImportedSkillFolder[]>(() => parseImportedFoldersFromStorage())
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [importDropActive, setImportDropActive] = useState(false)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: SkillCardContextTarget } | null>(null)
+  const [editingSkill, setEditingSkill] = useState<SkillState | null>(null)
+  const [descriptionDraft, setDescriptionDraft] = useState('')
+  const [savingDescription, setSavingDescription] = useState(false)
 
   const bodyRef = useRef<HTMLDivElement>(null)
+  const migratedLegacyRef = useRef(false)
   const skillsSplitRatio = useWorkspace((state) => state.skillsSplitRatio)
   const setSkillsSplitRatio = useWorkspace((state) => state.setSkillsSplitRatio)
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    localStorage.setItem(IMPORTED_SKILL_KEY, JSON.stringify(importedFolders))
-  }, [importedFolders])
+  const pushMessage = useCallback((text: string) => {
+    setMessage(text)
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        setMessage((current) => (current === text ? '' : current))
+      }, 2400)
+    }
+  }, [])
 
-  const loadAll = useCallback(async () => {
+  const refreshSkills = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.skills) return
     setLoading(true)
     try {
@@ -123,61 +150,86 @@ export default function SkillsCenterPanel() {
         window.electronAPI.skills.list(),
         window.electronAPI.skills.runtimeInfo(),
       ])
-      if (skillsRes.success && skillsRes.data) setSkills(skillsRes.data as EmbeddedSkillState[])
-      if (runtimeRes.success && runtimeRes.data) setRuntimeInfo(runtimeRes.data as SkillsRuntimeInfo)
+      if (skillsRes.success && skillsRes.data) {
+        setSkills(skillsRes.data as SkillState[])
+      }
+      if (runtimeRes.success && runtimeRes.data) {
+        setRuntimeInfo(runtimeRes.data as SkillsRuntimeInfo)
+      }
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void loadAll()
-  }, [loadAll])
+    void refreshSkills()
+  }, [refreshSkills])
 
-  const pushMessage = useCallback((text: string) => {
-    setMessage(text)
-    if (typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        setMessage((current) => (current === text ? '' : current))
-      }, 2200)
+  const importFolders = useCallback(async (paths: string[]) => {
+    if (typeof window === 'undefined' || !window.electronAPI?.skills?.importCustomSkill) return { imported: 0, failed: paths }
+    const uniquePaths = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
+    let imported = 0
+    const failed: string[] = []
+
+    for (const path of uniquePaths) {
+      try {
+        const res = await window.electronAPI.skills.importCustomSkill({ path })
+        if (res.success && res.data) {
+          imported += 1
+        } else {
+          failed.push(path)
+        }
+      } catch {
+        failed.push(path)
+      }
     }
-  }, [])
 
-  const upsertImportedPaths = useCallback((paths: string[]) => {
-    const cleaned = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
-    if (cleaned.length === 0) return 0
+    if (imported > 0) {
+      await refreshSkills()
+    }
+    return { imported, failed }
+  }, [refreshSkills])
 
-    let addedCount = 0
-    setImportedFolders((prev) => {
-      const existing = new Set(prev.map((item) => item.path))
-      const additions = cleaned
-        .filter((path) => !existing.has(path))
-        .map((path) => ({
-          id: `skill-folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name: basename(path),
-          path,
-          addedAt: Date.now(),
-        }))
-      addedCount = additions.length
-      return additions.length > 0 ? [...additions, ...prev] : prev
-    })
-    return addedCount
-  }, [])
+  useEffect(() => {
+    if (migratedLegacyRef.current || typeof window === 'undefined' || !window.electronAPI?.skills?.importCustomSkill) return
+    migratedLegacyRef.current = true
+    const legacyFolders = parseLegacyImportedFolders()
+    if (legacyFolders.length === 0) {
+      localStorage.removeItem(IMPORTED_SKILL_KEY)
+      return
+    }
+
+    void (async () => {
+      const { imported, failed } = await importFolders(legacyFolders.map((item) => item.path))
+      if (failed.length > 0) {
+        localStorage.setItem(
+          IMPORTED_SKILL_KEY,
+          JSON.stringify(failed.map((path) => ({ path, name: basename(path), addedAt: Date.now() }))),
+        )
+        pushMessage(`旧版技能目录已迁移 ${imported} 个，失败 ${failed.length} 个`)
+        return
+      }
+      localStorage.removeItem(IMPORTED_SKILL_KEY)
+      if (imported > 0) {
+        pushMessage(`已迁移 ${imported} 个旧版技能目录`)
+      }
+    })()
+  }, [importFolders, pushMessage])
 
   const handleImportByDialog = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.document?.openFolder) return
     const res = await window.electronAPI.document.openFolder()
     if (!res.success || !res.path) return
-    const count = upsertImportedPaths([res.path])
-    if (count > 0) pushMessage(`已导入技能目录：${basename(res.path)}`)
-  }, [pushMessage, upsertImportedPaths])
-
-  const handleRemoveImported = useCallback((id: string) => {
-    setImportedFolders((prev) => prev.filter((item) => item.id !== id))
-  }, [])
+    const result = await importFolders([res.path])
+    if (result.imported > 0) {
+      pushMessage(`已导入技能：${basename(res.path)}`)
+    } else {
+      pushMessage('导入失败，请确认目录内包含可识别的 skill 清单或文档')
+    }
+  }, [importFolders, pushMessage])
 
   const handleOpenPath = useCallback(async (path: string) => {
-    if (typeof window === 'undefined' || !window.electronAPI?.document?.showInFolder) return
+    if (!path || typeof window === 'undefined' || !window.electronAPI?.document?.showInFolder) return
     await window.electronAPI.document.showInFolder(path)
   }, [])
 
@@ -238,25 +290,52 @@ export default function SkillsCenterPanel() {
     void (async () => {
       const paths = await resolveDroppedPaths(e)
       if (paths.length === 0) {
-        pushMessage('仅支持导入文件夹作为技能目录')
+        pushMessage('仅支持导入 skill 文件夹')
         return
       }
-      const count = upsertImportedPaths(paths)
-      if (count <= 0) {
-        pushMessage('目录已存在，无需重复导入')
-        return
+      const result = await importFolders(paths)
+      if (result.imported > 0) {
+        pushMessage(`已导入 ${result.imported} 个 skill`)
+      } else {
+        pushMessage('没有成功导入任何 skill，请检查目录内容')
       }
-      pushMessage(`已导入 ${count} 个技能目录`)
     })()
-  }, [pushMessage, resolveDroppedPaths, upsertImportedPaths])
+  }, [importFolders, pushMessage, resolveDroppedPaths])
 
-  const sortedSkills = useMemo(
-    () => [...skills].sort((a, b) => Number(b.installed) - Number(a.installed) || a.name.localeCompare(b.name)),
-    [skills],
-  )
+  const handleRemoveCustomSkill = useCallback(async (skill: SkillState) => {
+    if (typeof window === 'undefined' || !window.electronAPI?.skills?.removeCustomSkill) return
+    const confirmed = confirm(`确定移除技能 “${skill.name}” 吗？`)
+    if (!confirmed) return
+    const res = await window.electronAPI.skills.removeCustomSkill({ skillId: skill.id })
+    if (res.success && res.data?.removed) {
+      setContextMenu(null)
+      pushMessage(`已移除技能：${skill.name}`)
+      await refreshSkills()
+      return
+    }
+    pushMessage(`移除失败：${res.error || skill.name}`)
+  }, [pushMessage, refreshSkills])
 
-  const topHeight = `calc((100% - 4px) * ${skillsSplitRatio})`
-  const bottomHeight = `calc((100% - 4px) * ${1 - skillsSplitRatio})`
+  const handleSaveDescription = useCallback(async () => {
+    if (!editingSkill || typeof window === 'undefined' || !window.electronAPI?.skills?.updateCustomSkillDescription) return
+    setSavingDescription(true)
+    try {
+      const res = await window.electronAPI.skills.updateCustomSkillDescription({
+        skillId: editingSkill.id,
+        description: descriptionDraft,
+      })
+      if (res.success && res.data) {
+        setSkills((prev) => prev.map((item) => item.id === editingSkill.id ? (res.data as SkillState) : item))
+        setEditingSkill(null)
+        setDescriptionDraft('')
+        pushMessage(`已更新技能说明：${editingSkill.name}`)
+        return
+      }
+      pushMessage(`更新失败：${res.error || editingSkill.name}`)
+    } finally {
+      setSavingDescription(false)
+    }
+  }, [descriptionDraft, editingSkill, pushMessage])
 
   const handleSplitterMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -285,44 +364,79 @@ export default function SkillsCenterPanel() {
     document.body.style.userSelect = 'none'
   }, [setSkillsSplitRatio])
 
-  const getSystemSkillPath = useCallback((skill: EmbeddedSkillState): string => {
-    if (runtimeInfo?.skillsRoot) return `${runtimeInfo.skillsRoot}/${skill.id}`
-    return skill.installStatePath.replace(/[\\/]\.ready-install-state\.json$/, '')
+  const getSkillPath = useCallback((skill: SkillState): string => {
+    if (skill.source === 'embedded') {
+      if (runtimeInfo?.skillsRoot) return `${runtimeInfo.skillsRoot}/${skill.id}`
+      return skill.managedPath || skill.installStatePath.replace(/[\\/]\.ready-install-state\.json$/, '')
+    }
+    return skill.managedPath || skill.sourcePath || ''
   }, [runtimeInfo?.skillsRoot])
 
-  const openContextMenu = useCallback((e: React.MouseEvent, target: SkillCardContextTarget) => {
+  const systemSkills = useMemo(
+    () => skills.filter((skill) => skill.source === 'embedded').sort((a, b) => Number(b.installed) - Number(a.installed) || a.name.localeCompare(b.name)),
+    [skills],
+  )
+
+  const customSkills = useMemo(
+    () => skills.filter((skill) => skill.source === 'custom').sort((a, b) => a.name.localeCompare(b.name)),
+    [skills],
+  )
+
+  const topHeight = `calc((100% - 4px) * ${skillsSplitRatio})`
+  const bottomHeight = `calc((100% - 4px) * ${1 - skillsSplitRatio})`
+
+  const openContextMenu = useCallback((e: React.MouseEvent, skill: SkillState) => {
     e.preventDefault()
     e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, target })
-  }, [])
+    setContextMenu({ x: e.clientX, y: e.clientY, target: { skill, path: getSkillPath(skill) } })
+  }, [getSkillPath])
 
   const contextItems = useMemo<ContextMenuItem[]>(() => {
     if (!contextMenu) return []
-    const base: ContextMenuItem[] = [
+    const { skill, path } = contextMenu.target
+    const items: ContextMenuItem[] = [
       {
         id: 'open-in-finder',
         label: '在 Finder 中打开',
-        icon: <FolderOpen className="w-3.5 h-3.5" />,
-        onClick: () => { void handleOpenPath(contextMenu.target.path) },
+        icon: <FolderOpen style={{ width: 16, height: 16 }} />,
+        onClick: () => { void handleOpenPath(path) },
       },
     ]
-    if (contextMenu.target.type === 'imported') {
-      base.push({
-        id: 'remove-from-list',
-        label: '从列表中移除',
-        icon: <Trash2 className="w-3.5 h-3.5" />,
-        danger: true,
-        onClick: () => handleRemoveImported(contextMenu.target.id),
-      })
+
+    if (skill.source === 'custom') {
+      items.push(
+        {
+          id: 'edit-description',
+          label: '编辑技能说明',
+          icon: <Pen style={{ width: 16, height: 16 }} />,
+          onClick: () => {
+            setEditingSkill(skill)
+            setDescriptionDraft(skill.description || '')
+          },
+        },
+        { id: 'sep-1', label: '', separator: true },
+        {
+          id: 'remove-custom-skill',
+          label: '移除技能',
+          icon: <Trash2 style={{ width: 16, height: 16 }} />,
+          danger: true,
+          onClick: () => { void handleRemoveCustomSkill(skill) },
+        },
+      )
     }
-    return base
-  }, [contextMenu, handleOpenPath, handleRemoveImported])
+    return items
+  }, [contextMenu, handleOpenPath, handleRemoveCustomSkill])
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col" style={{ background: PANEL_COLORS.panelBg }}>
+    <div className="content-surface-panel relative flex h-full min-h-0 flex-col" style={{ background: 'var(--surface-panel-bg)' }}>
       <div
-        className="shrink-0 border-b flex items-center"
-        style={{ borderColor: PANEL_COLORS.border, height: SKILLS_PANEL_DIMENSIONS.headerHeight, padding: '10px 14px' }}
+        className="glass-surface-panel shrink-0 border-b flex items-center"
+        style={{
+          borderColor: PANEL_COLORS.border,
+          height: SKILLS_PANEL_DIMENSIONS.headerHeight,
+          padding: '10px 14px',
+          background: 'var(--surface-toolbar-bg)',
+        }}
       >
         <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
           技能中心
@@ -345,51 +459,54 @@ export default function SkillsCenterPanel() {
                 系统级 Skill
               </p>
 
-              {sortedSkills.length === 0 ? (
+              {systemSkills.length === 0 ? (
                 <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
                   {loading ? '加载技能列表中...' : '暂无系统 Skill'}
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {sortedSkills.map((skill) => {
-                    const skillPath = getSystemSkillPath(skill)
+                  {systemSkills.map((skill) => {
+                    const skillPath = getSkillPath(skill)
                     const cardId = `system:${skill.id}`
                     const selected = selectedCardId === cardId
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer transition-colors duration-150"
+                        className="content-surface-card cursor-pointer transition-colors duration-150"
                         style={{
                           borderRadius: 8,
                           border: `1px solid ${selected ? PANEL_COLORS.blue : PANEL_COLORS.border}`,
                           padding: '10px 12px',
-                          background: selected ? PANEL_COLORS.blueLight : PANEL_COLORS.cardBg,
+                          background: selected ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
-                        onContextMenu={(e) => openContextMenu(e, { type: 'system', id: skill.id, path: skillPath })}
+                        onContextMenu={(e) => openContextMenu(e, skill)}
                         draggable
                         onDragStart={(e) => putSkillDragData(e, {
                           name: skill.name,
                           path: skillPath,
                           skillId: skill.id,
                           source: 'system',
-                          defaultCommand: DEFAULT_ACTION_TEMPLATES[skill.id],
+                          defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 对话框可调用 Skill"
+                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />
                           <p className="truncate" style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, color: PANEL_COLORS.text }}>
                             {skill.name}
                           </p>
+                          <span style={{ marginLeft: 'auto', fontSize: 10, color: PANEL_COLORS.mutedStrong }}>
+                            {skill.installed ? '已安装' : '未安装'}
+                          </span>
                         </div>
                         <p
                           style={{
                             marginTop: 4,
                             fontSize: 11,
                             fontWeight: 500,
-                            lineHeight: 1.4,
+                            lineHeight: 1.45,
                             color: PANEL_COLORS.muted,
                             display: '-webkit-box',
                             WebkitLineClamp: 2,
@@ -409,31 +526,25 @@ export default function SkillsCenterPanel() {
         </section>
 
         <div
-          className="shrink-0 cursor-row-resize hover:bg-[#ECEAE4]"
-          style={{
-            background: PANEL_COLORS.panelBg,
-            height: 4,
-          }}
+          className="shrink-0 cursor-row-resize hover:bg-[var(--bg-hover)]"
+          style={{ background: PANEL_COLORS.panelBg, height: 4 }}
           onMouseDown={handleSplitterMouseDown}
           title="拖拽调整上下分区高度"
         />
 
-        <section
-          className="min-h-0"
-          style={{ height: bottomHeight, minHeight: 156, background: PANEL_COLORS.panelBg }}
-        >
+        <section className="min-h-0" style={{ height: bottomHeight, minHeight: 156, background: PANEL_COLORS.panelBg }}>
           <div className="h-full min-h-0 overflow-auto">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 14px' }}>
               <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle }}>
-                手动导入 Skill
+                用户导入 Skill
               </p>
 
               <div
-                className="shrink-0 flex flex-col items-center justify-center transition-colors cursor-pointer"
+                className="content-surface-card shrink-0 flex flex-col items-center justify-center transition-colors cursor-pointer"
                 style={{
                   borderRadius: 8,
                   border: `1px solid ${importDropActive ? PANEL_COLORS.blue : PANEL_COLORS.dropBorder}`,
-                  background: importDropActive ? '#ECF3FF' : PANEL_COLORS.cardBg,
+                  background: importDropActive ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
                   height: SKILLS_PANEL_DIMENSIONS.dropZoneHeight,
                   gap: 4,
                 }}
@@ -444,54 +555,73 @@ export default function SkillsCenterPanel() {
               >
                 <FolderInput className="h-[16px] w-[16px]" style={{ color: PANEL_COLORS.mutedStrong }} />
                 <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
-                  拖拽 skill 文件夹到这里
+                  拖拽或点击导入 skill 文件夹
                 </p>
               </div>
 
-              {importedFolders.length === 0 ? (
+              {customSkills.length === 0 ? (
                 <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
-                  暂无手动导入目录
+                  {loading ? '加载中...' : '暂无用户导入 Skill'}
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {importedFolders.map((folder) => {
-                    const cardId = `imported:${folder.id}`
+                  {customSkills.map((skill) => {
+                    const cardId = `custom:${skill.id}`
                     const selected = selectedCardId === cardId
+                    const skillPath = getSkillPath(skill)
                     return (
                       <div
-                        key={folder.id}
-                        className="cursor-pointer transition-colors duration-150"
+                        key={skill.id}
+                        className="content-surface-card cursor-pointer transition-colors duration-150"
                         style={{
                           borderRadius: 8,
                           border: `1px solid ${selected ? PANEL_COLORS.blue : PANEL_COLORS.border}`,
                           padding: '10px 12px',
-                          background: selected ? PANEL_COLORS.blueLight : PANEL_COLORS.cardBg,
+                          background: selected ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
-                        onDoubleClick={() => void handleOpenPath(folder.path)}
-                        onContextMenu={(e) => openContextMenu(e, { type: 'imported', id: folder.id, path: folder.path })}
+                        onDoubleClick={() => void handleOpenPath(skillPath)}
+                        onContextMenu={(e) => openContextMenu(e, skill)}
                         draggable
                         onDragStart={(e) => putSkillDragData(e, {
-                          name: folder.name,
-                          path: folder.path,
+                          name: skill.name,
+                          path: skillPath,
+                          skillId: skill.id,
                           source: 'imported',
-                          defaultCommand: `/skill ${folder.name}`,
+                          defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 对话框可作为技能目录引用"
+                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />
                           <p className="truncate" style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, color: PANEL_COLORS.text }}>
-                            {folder.name}
+                            {skill.name}
                           </p>
+                          <span style={{ marginLeft: 'auto', fontSize: 10, color: PANEL_COLORS.mutedStrong }}>
+                            {skill.defaultAction || skill.actions[0]?.name || '无动作'}
+                          </span>
                         </div>
                         <p
                           style={{
                             marginTop: 4,
                             fontSize: 11,
                             fontWeight: 500,
-                            lineHeight: 1.4,
+                            lineHeight: 1.45,
                             color: PANEL_COLORS.muted,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {skill.description || '暂无技能说明'}
+                        </p>
+                        <p
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            lineHeight: 1.4,
+                            color: PANEL_COLORS.mutedStrong,
                             display: '-webkit-box',
                             WebkitLineClamp: 2,
                             WebkitBoxOrient: 'vertical',
@@ -499,7 +629,7 @@ export default function SkillsCenterPanel() {
                             wordBreak: 'break-all',
                           }}
                         >
-                          {folder.path}
+                          {skill.sourcePath || skill.managedPath || runtimeInfo?.customSkillsRoot || ''}
                         </p>
                       </div>
                     )
@@ -514,8 +644,8 @@ export default function SkillsCenterPanel() {
       {message && (
         <div className="pointer-events-none absolute left-[8px] right-[8px] bottom-[8px]">
           <div
-            className="rounded-[7px] px-[8px] py-[4px] text-[10px] font-medium shadow-[0_3px_10px_rgba(0,0,0,0.08)]"
-            style={{ background: '#5B8DEF18', color: PANEL_COLORS.blue }}
+            className="glass-surface-floating rounded-[7px] px-[8px] py-[4px] text-[10px] font-medium"
+            style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.blue, boxShadow: 'var(--shadow-sm)' }}
           >
             {message}
           </div>
@@ -530,6 +660,156 @@ export default function SkillsCenterPanel() {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      <DescriptionEditorDialog
+        open={Boolean(editingSkill)}
+        skillName={editingSkill?.name || ''}
+        value={descriptionDraft}
+        saving={savingDescription}
+        onChange={setDescriptionDraft}
+        onClose={() => {
+          if (savingDescription) return
+          setEditingSkill(null)
+          setDescriptionDraft('')
+        }}
+        onSave={() => { void handleSaveDescription() }}
+      />
+    </div>
+  )
+}
+
+function DescriptionEditorDialog({
+  open,
+  skillName,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  open: boolean
+  skillName: string
+  value: string
+  saving: boolean
+  onChange: (value: string) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setTimeout(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(value.length, value.length)
+    }, 20)
+    return () => window.clearTimeout(timer)
+  }, [open, value])
+
+  useEffect(() => {
+    if (!open) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault()
+        onSave()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose, onSave, open])
+
+  if (!open) return null
+
+  return (
+    <div
+      className="absolute inset-[8px] z-[260] flex items-center justify-center"
+      style={{ background: 'var(--overlay-bg)' }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        style={{
+          width: 460,
+          maxWidth: '100%',
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 14,
+          boxShadow: '0 12px 36px rgba(0, 0, 0, 0.16)',
+          padding: 20,
+        }}
+      >
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-title)' }}>
+          编辑技能说明
+        </h3>
+        <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+          {skillName}
+        </p>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="请输入更清晰的技能说明，帮助 Agent 更准确地选择和调用它。"
+          style={{
+            width: '100%',
+            minHeight: 140,
+            marginTop: 14,
+            resize: 'vertical',
+            padding: '10px 12px',
+            fontSize: 13,
+            lineHeight: 1.6,
+            color: 'var(--text-body)',
+            background: 'var(--bg-editor)',
+            border: '1px solid var(--border-input)',
+            borderRadius: 10,
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 12 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-light)' }}>⌘/Ctrl + Enter 保存</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={onClose}
+              disabled={saving}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                fontWeight: 500,
+                color: 'var(--text-muted)',
+                background: 'transparent',
+                border: '1px solid var(--border-default)',
+                borderRadius: 8,
+                cursor: saving ? 'not-allowed' : 'pointer',
+              }}
+            >
+              取消
+            </button>
+            <button
+              onClick={onSave}
+              disabled={saving}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                fontWeight: 500,
+                color: '#FFFFFF',
+                background: 'var(--color-blue)',
+                border: '1px solid transparent',
+                borderRadius: 8,
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

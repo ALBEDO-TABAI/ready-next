@@ -1,7 +1,7 @@
 import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
-// @ts-ignore - @tailwindcss/vite types require bundler moduleResolution
+// @ts-expect-error - @tailwindcss/vite types require bundler moduleResolution
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
@@ -9,6 +9,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
+        external: ['rsshub', /^rsshub\/.*/, '@puppeteer/browsers', /^@puppeteer\/browsers\/.*/],
         input: {
           index: resolve(__dirname, 'src/main/index.ts')
         }
@@ -30,10 +31,10 @@ export default defineConfig({
       alias: {
         '@': resolve(__dirname, 'src/renderer'),
         '@main': resolve(__dirname, 'src/main'),
-        '@preload': resolve(__dirname, 'src/preload')
+        '@preload': resolve(__dirname, 'src/preload'),
+        '@shared': resolve(__dirname, 'src/shared')
       }
     },
     plugins: [tailwindcss(), react()]
   }
 })
-

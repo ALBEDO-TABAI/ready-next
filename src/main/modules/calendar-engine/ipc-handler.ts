@@ -57,6 +57,25 @@ const mockEvents = [
   }
 ]
 
+// --- Helper: convert incoming date (string | number | Date) to Unix seconds ---
+
+function toUnixSeconds(value: unknown): number {
+  if (typeof value === 'number') {
+    // If already in seconds range (< year 10000 in ms), use as-is;
+    // otherwise assume milliseconds
+    return value > 1e12 ? Math.floor(value / 1000) : value
+  }
+  if (typeof value === 'string') {
+    const d = new Date(value)
+    if (isNaN(d.getTime())) throw new Error(`Invalid date string: ${value}`)
+    return Math.floor(d.getTime() / 1000)
+  }
+  if (value instanceof Date) {
+    return Math.floor(value.getTime() / 1000)
+  }
+  throw new Error(`Cannot convert to date: ${String(value)}`)
+}
+
 // --- IPC Setup ---
 
 export function setupCalendarIPC(useMock = false): void {
@@ -67,12 +86,9 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const db = getDatabase().getDatabase()
-      if (db) {
-        const sources = db.prepare('SELECT * FROM calendar_sources WHERE enabled = 1').all()
-        return createSuccessResponse(sources, false)
-      }
-      return createErrorResponse('Database not available')
+      const dbManager = getDatabase()
+      const sources = dbManager.getCalendarSources()
+      return createSuccessResponse(sources, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return createErrorResponse(errorMessage)
@@ -80,20 +96,18 @@ export function setupCalendarIPC(useMock = false): void {
   })
 
   // Get events in date range
-  ipcMain.handle('calendar:getEvents', async (_, { start, end }: { start: string; end: string }) => {
+  ipcMain.handle('calendar:getEvents', async (_, { start, end }: { start: unknown; end: unknown }) => {
     if (useMock) {
       return createSuccessResponse(mockEvents, true)
     }
 
     try {
-      const db = getDatabase().getDatabase()
-      if (db) {
-        const events = db.prepare(
-          'SELECT * FROM calendar_events WHERE start_time >= ? AND end_time <= ? ORDER BY start_time'
-        ).all(new Date(start).getTime() / 1000, new Date(end).getTime() / 1000)
-        return createSuccessResponse(events, false)
-      }
-      return createErrorResponse('Database not available')
+      const startTs = toUnixSeconds(start)
+      const endTs = toUnixSeconds(end)
+
+      const dbManager = getDatabase()
+      const events = dbManager.getCalendarEvents(startTs, endTs)
+      return createSuccessResponse(events, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return createErrorResponse(errorMessage)
@@ -105,8 +119,9 @@ export function setupCalendarIPC(useMock = false): void {
     calendarId: string
     title: string
     description?: string
-    startTime: string
-    endTime: string
+    location?: string
+    startTime: unknown
+    endTime: unknown
     allDay?: boolean
   }) => {
     if (useMock) {
@@ -114,48 +129,44 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const db = getDatabase().getDatabase()
-      if (db) {
-        const id = `event-${Date.now()}`
-        db.prepare(
-          `INSERT INTO calendar_events
-           (id, calendar_id, title, description, start_time, end_time, all_day)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          id,
-          event.calendarId,
-          event.title,
-          event.description || '',
-          new Date(event.startTime).getTime() / 1000,
-          new Date(event.endTime).getTime() / 1000,
-          event.allDay ? 1 : 0
-        )
-        return createSuccessResponse({ id }, false)
-      }
-      return createErrorResponse('Database not available')
+      const dbManager = getDatabase()
+      const id = dbManager.createCalendarEvent({
+        calendar_id: event.calendarId,
+        title: event.title,
+        description: event.description || null,
+        location: event.location || null,
+        start_time: toUnixSeconds(event.startTime),
+        end_time: toUnixSeconds(event.endTime),
+        all_day: event.allDay ? 1 : 0
+      })
+      return createSuccessResponse({ id }, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return createErrorResponse(errorMessage)
     }
   })
 
-  // Update event
-  ipcMain.handle('calendar:updateEvent', async (_, { id, event }: { id: string; event: unknown }) => {
+  // Update event — supports partial updates for all fields
+  ipcMain.handle('calendar:updateEvent', async (_, { id, event }: { id: string; event: Record<string, unknown> }) => {
     if (useMock) {
       return createSuccessResponse({ updated: true }, true)
     }
 
     try {
-      const db = getDatabase().getDatabase()
-      if (db) {
-        const { title } = event as { title?: string }
-        if (title) {
-          db.prepare('UPDATE calendar_events SET title = ?, updated_at = unixepoch() WHERE id = ?')
-            .run(title, id)
-        }
-        return createSuccessResponse({ updated: true }, false)
-      }
-      return createErrorResponse('Database not available')
+      const dbManager = getDatabase()
+
+      // Build the update object, converting field names from camelCase to snake_case
+      const updates: Record<string, unknown> = {}
+      if (event.title !== undefined) updates.title = event.title
+      if (event.description !== undefined) updates.description = event.description
+      if (event.location !== undefined) updates.location = event.location
+      if (event.calendarId !== undefined) updates.calendar_id = event.calendarId
+      if (event.allDay !== undefined) updates.all_day = event.allDay ? 1 : 0
+      if (event.startTime !== undefined) updates.start_time = toUnixSeconds(event.startTime)
+      if (event.endTime !== undefined) updates.end_time = toUnixSeconds(event.endTime)
+
+      dbManager.updateCalendarEvent(id, updates)
+      return createSuccessResponse({ updated: true }, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return createErrorResponse(errorMessage)
@@ -169,12 +180,9 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const db = getDatabase().getDatabase()
-      if (db) {
-        db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id)
-        return createSuccessResponse({ deleted: true }, false)
-      }
-      return createErrorResponse('Database not available')
+      const dbManager = getDatabase()
+      dbManager.deleteCalendarEvent(id)
+      return createSuccessResponse({ deleted: true }, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return createErrorResponse(errorMessage)

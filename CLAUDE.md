@@ -1,154 +1,121 @@
-# Ready 项目规范 (AI Agent 开发指引)
+# Ready 项目协作指引（CLAUDE）
 
-> 更新日期: 2026-02-25 | 项目版本: V5
+> 更新时间: 2026-03-07
 
-## 项目概述
+## 0. 前置思考
+请使用第一性原理思考。不要默认用户已经把目标、限制和最佳路径都描述完整；当目标不清晰时先澄清，当路径不优时先提出更好的方案。
 
-Ready 是一个面向自媒体创作者的 AI 桌面工作台，基于 Electron + React 构建。
-核心理念是将浏览器、文档编辑、图像处理、视频剪辑、RSS 订阅、日历管理整合到一个统一界面中。
+## 1. 项目定位
+Ready 是一个集成式创作工作台，统一承载：浏览、文稿、设计、剪辑、RSS、日程、AI Agent、技能中心与远程协作。
 
-## 技术栈
+## 2. 技术基线
+- Electron 34
+- React 19
+- TypeScript 5
+- Vite 6 + electron-vite
+- Zustand
+- Tailwind CSS v4 + CSS Variables
+- SQLite（better-sqlite3）
 
-| 层 | 技术 | 版本 |
-|---|---|---|
-| 桌面框架 | Electron | 34 |
-| 前端框架 | React | 19 |
-| 语言 | TypeScript | 5.7 |
-| 构建 | Vite + electron-vite | 6.x |
-| 样式 | Tailwind CSS + CSS Variables | v4 |
-| 状态管理 | Zustand | 5.x |
-| 图标 | Lucide React | - |
-| 数据库 | better-sqlite3 | - |
+## 3. 代码分层
+- Main：`src/main/`
+- Preload：`src/preload/`
+- Renderer：`src/renderer/`
+- Shared：`src/shared/`
 
-## 项目结构
+## 4. 关键入口
+- 主进程：`src/main/index.ts`
+- 预加载：`src/preload/index.ts`
+- 渲染入口：`src/renderer/main.tsx`
+- 应用壳层：`src/renderer/App.tsx`
+- AI 配置能力层：`src/shared/ai-providers.ts`
 
-```
-src/
-├── main/                        # Electron 主进程 (~2200行)
-│   ├── index.ts                 # 入口：窗口管理 + local-file:// 协议注册
-│   └── modules/
-│       ├── database.ts          # SQLite 数据库管理
-│       ├── browser-engine/      # 浏览器引擎 (BrowserView IPC)
-│       ├── calendar-engine/     # 日历模块 IPC
-│       ├── claude-bridge/       # Agent 系统 (manager + worktree + IPC)
-│       ├── document-engine/     # 文档引擎 (读/写/docx/xlsx IPC)
-│       └── rss-engine/          # RSS 引擎 IPC
-│
-├── preload/
-│   └── index.ts                 # IPC API 暴露给 renderer
-│
-└── renderer/                    # React 渲染进程 (~6600行)
-    ├── App.tsx                  # 路由：/workbench, /ready, /settings
-    ├── main.tsx                 # React 入口
-    ├── index.html               # HTML + CSP 策略
-    │
-    ├── stores/                  # Zustand 状态管理 (5个)
-    │   ├── useMode.ts           # 应用模式 (workbench/ready) + 工作台子模式 + 分屏
-    │   ├── useDocTabs.ts        # 文档标签栏 (多标签/分栏/拖拽排序)
-    │   ├── useAgent.ts          # Agent 通信状态
-    │   ├── useWorkspace.ts      # 工作区 (文件树/目录/pinned folders)
-    │   └── useTheme.ts          # 主题切换
-    │
-    ├── components/
-    │   ├── layout/
-    │   │   ├── TopBar.tsx       # 顶栏：模式切换按钮 + 搜索 + 分屏
-    │   │   ├── IconRail.tsx     # 左侧图标栏 (文件/搜索/Agent)
-    │   │   ├── SidePanel.tsx    # 侧边栏：文件树 + 搜索 + 上下文菜单 (~710行)
-    │   │   ├── StatusBar.tsx    # 底部状态栏
-    │   │   ├── ModeSlider.tsx   # 模式滑动指示器
-    │   │   └── ContextMenu.tsx  # 右键菜单组件
-    │   ├── agent/
-    │   │   └── ChatPanel.tsx    # AI 助手对话面板
-    │   └── ErrorBoundary.tsx    # 错误边界
-    │
-    ├── pages/
-    │   ├── WorkbenchMode.tsx    # 工作台模式容器 (含分屏逻辑)
-    │   ├── ReadyMode.tsx        # Ready 模式四面板
-    │   ├── Settings.tsx         # 设置页面
-    │   └── modes/               # 6种工作台子模式
-    │       ├── BrowserMode.tsx  # 浏览器 (Electron BrowserView)
-    │       ├── DocumentMode.tsx # 文档编辑器 (~710行，多标签+分栏+图片/视频/xlsx/pdf)
-    │       ├── ImageMode.tsx    # 图像编辑器 (~838行)
-    │       ├── VideoMode.tsx    # 视频编辑器 (~575行)
-    │       ├── RSSMode.tsx      # RSS 订阅
-    │       └── CalendarMode.tsx # 日历管理
-    │
-    ├── hooks/
-    │   └── useKeyboardShortcuts.ts  # 全局快捷键
-    ├── types/
-    │   └── electron.d.ts        # Electron API 类型定义
-    └── styles/
-        └── index.css            # 全局样式 + 设计系统 (~323行)
-```
+## 5. 工作台子模式
+`useMode` 当前包含：
+- `browser`
+- `document`
+- `design`
+- `video`
+- `rss`
+- `calendar`
 
-## 核心架构
+> 旧 `image` 模式已迁移为 `design`。
 
-### 双模式系统
-- **工作台模式** (Workbench): 6种子模式可切换 — 浏览器/文档/图像/视频/RSS/日历
-- **Ready 模式**: 四面板实时概览（浏览器+文档+RSS+日历）
+## 6. 当前稳定性约定
+### 6.1 白屏防护
+- `src/renderer/main.tsx` 必须保留 bootstrap 级错误兜底 UI
+- `src/renderer/App.tsx` 必须保留 `/workbench` 路由与 `* -> /workbench` fallback
 
-### 分屏机制
-- TopBar 支持 Shift+Click 选择第二个工作模式，左右分栏显示
-- 分隔条可拖拽调整宽度 (20%-80%)
-- 单击回到单模式
+### 6.2 BrowserView 使用原则
+- BrowserView 是原生层覆盖，不受 DOM `z-index` 控制
+- 需要显示纯 DOM 覆盖层时，先 `browser.hideAll()`
+- 恢复浏览内容时，`browser.showActive()` 后同步更新 bounds
 
-### 文档标签系统
-- `useDocTabs` store 管理多个打开的文档标签
-- 支持 Markdown 编辑/预览/分栏、图片预览(缩放)、视频播放、xlsx 表格、docx、PDF
-- 标签可拖拽重排序，Shift+Click 分栏对比
-- 文件通过 `local-file://` 自定义协议加载本地文件
+### 6.3 统一会话 Scope
+- 会话按“来源频道 + 线程/本地 conversation + agent”隔离
+- 左上切换的是频道来源，不是具体历史会话
+- 工具日志只能留在前台运行态 / 胶囊层，不允许混入正文消息
 
-### 浏览器引擎
-- 使用 Electron BrowserView (非 webview 标签)
-- 多标签管理，持久化 session（可登录 Google 等）
-- 导航历史、前进后退、加载状态
+### 6.4 附件安全边界
+- 飞书/远程图片与文件单发：只进入会话资源层，不自动触发 agent
+- 后续文字任务若要消费附件，必须由 planner / workflow 显式选取附件资源
+- 远程消息不能把图片/文件伪造成普通文本
 
-### 文件工作区
-- 多根目录 pinned folders 模式
-- 文件树支持新建/重命名/删除/拖拽导入
-- Finder 拖拽文件/文件夹直接导入
+### 6.5 Browser Agent V7 原则
+- 浏览器任务必须走：任务理解 -> 计划生成 -> 分步执行 -> 结果复核
+- 链接是资源，不是立即执行指令
+- 执行器只按计划推进，不临场重写大方向
+- 上传型任务的最小完成条件：
+  - 页面已挂载附件
+  - Prompt 已进入正确输入区
+  - 页面已提交并出现运行态证据
 
-## 开发命令
+### 6.6 AI 供应商兼容原则
+- 不要假设“OpenAI 兼容”就一定支持原生 function tools
+- 优先通过共享能力层判断协议、wire API、tools/vision/video 能力
+- 若通道不支持原生 tools，应优先复用文本工具桥接，而不是继续写 provider 特判
 
+### 6.7 技能中心原则
+- 系统级 embedded skills 与用户 custom skills 要分层管理
+- Agent 调用 skill 时优先走统一 `skill_*` 工具，而不是绕到手工网页流程
+- 更新 skill 管理逻辑时，要同时考虑运行时、UI、默认命令与说明文案
+
+## 7. 新功能开发最小闭环
+新增跨进程功能时，至少同步修改：
+1. Main IPC handler
+2. Preload API
+3. Renderer 类型声明
+4. Renderer 页面或组件
+5. 至少一份相关文档
+
+## 8. 协作文档索引
+- 项目说明：`PROJECT_OVERVIEW.md`
+- 开发文档：`DOCUMENTATION.md`
+- 经验文档：`LESSONS_LEARNED.md`
+- 开发进展：`PROGRESS.md`
+- 模块地图：`FEATURE_MODULE_MAP.md`
+- 依赖地图：`DEPENDENCY_MAP.md`
+- 结构快照：`PROJECT_STRUCTURE_SNAPSHOT.md`
+- 更新日志：`CHANGELOG.md`
+
+## 9. 常用命令
 ```bash
-npm run dev          # 开发模式 (HMR)
-npm run build        # 生产构建
-npm run typecheck    # TypeScript 类型检查 (node + web 两遍)
-npm run lint         # ESLint 检查
+npm run dev
+npm run typecheck
+npm run test
+npm run verify
+npm run build
 ```
 
-## 关键路径和常见修改
+## 10. 提交前检查
+- `npm run typecheck` 无错误
+- 关键页面可正常渲染与切换
+- Browser / Agent / Settings 关键链路至少做一次基础回归
+- 若改动跨多层，必须同步更新根目录协作文档
 
-| 修改目标 | 文件路径 |
-|---------|---------|
-| 添加新工作台模式 | `stores/useMode.ts` + `pages/modes/` + `TopBar.tsx` |
-| 修改文档编辑器 | `pages/modes/DocumentMode.tsx` + `stores/useDocTabs.ts` |
-| 修改浏览器功能 | `pages/modes/BrowserMode.tsx` + `main/modules/browser-engine/` |
-| 修改文件管理 | `components/layout/SidePanel.tsx` + `stores/useWorkspace.ts` |
-| 修改顶栏 | `components/layout/TopBar.tsx` |
-| 添加新 IPC | `main/modules/xxx/ipc-handler.ts` + `preload/index.ts` + `types/electron.d.ts` |
-| 修改样式/主题 | `styles/index.css` + `stores/useTheme.ts` |
-| 分屏逻辑 | `stores/useMode.ts` + `pages/WorkbenchMode.tsx` + `TopBar.tsx` |
+## 11. 当前关键日志
+- Agent / 浏览器决策：`/tmp/ready-directchat.log`
+- 工具执行：`/tmp/ready-tools.log`
+- BrowserView / popup：`/tmp/ready-browser.log`
 
-## 已知问题 (截至 2026-02-25)
-
-1. **图片/视频在文档标签中预览**: `local-file://` 协议 URL 格式可能还有问题，需要在 Electron 窗口中测试
-2. **PDF 嵌入**: 已实现 `<embed>` 方案但未验证
-3. **Agent 系统**: 依赖 Claude Code CLI，当前使用 mock
-4. **打包/签名**: 未完成 Apple Developer 签名流程
-5. **MaxListenersExceededWarning**: BrowserWindow 上事件监听器超过限制
-
-## 安全约束
-
-- CSP 策略在 `index.html` 中定义
-- `local-file://` 协议需要 `registerSchemesAsPrivileged` 在 `app.whenReady()` 前注册
-- `contextIsolation: true` + `nodeIntegration: false`
-- IPC 通过 preload 脚本暴露白名单 API
-
-## 环境变量 (.env)
-
-```
-ENABLE_MOCK_SERVICES=true   # 启用 mock 模式 (RSS/Calendar/Agent)
-```
-
-文档引擎 (document-engine) 始终使用真实文件系统，不受 mock 控制。
+> 调整 Browser Agent、远程 IM、会话 scope、BrowserView、AI provider 能力层、技能运行时等跨模块行为时，必须同步更新根目录协作文档。

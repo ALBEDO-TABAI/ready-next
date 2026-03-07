@@ -1,23 +1,46 @@
-import { useState, useEffect } from 'react'
-import { RefreshCw, Filter, ExternalLink, Star, X, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { RefreshCw, AlertCircle } from 'lucide-react'
+import RSSFeed from '../../components/rss/RSSFeed'
+import PreviewBrowser from '../../components/rss/PreviewBrowser'
+import AddSourceModal from '../../components/rss/AddSourceModal'
+import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 
-interface RSSItem {
-  id: string
-  title: string
-  source: string
-  sourceId: string
-  summary: string
-  publishedAt: string
-  read: boolean
-  starred: boolean
-  coverImage?: string
-  link: string
+const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
+
+type RSSAnalysisStatus =
+  | 'queued'
+  | 'paused'
+  | 'running_script'
+  | 'running_subagent'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+
+interface RSSItemAnalysisProgressState {
+  itemId: string
+  jobId: string
+  action: 'copy' | 'visual'
+  status: RSSAnalysisStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+  updatedAt: string
 }
 
-interface RSSSource {
+interface RSSAnalysisJobState {
   id: string
-  name: string
-  count: number
+  itemId: string
+  action: 'copy' | 'visual'
+  title: string
+  status: RSSAnalysisStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+  updatedAt: string
 }
 
 export default function RSSMode() {
@@ -26,15 +49,45 @@ export default function RSSMode() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'unread' | 'starred'>('all')
   const [isMock, setIsMock] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
+  const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
+  const previousItemIdsRef = useRef<Set<string>>(new Set())
 
-  useEffect(() => {
-    loadRSSData()
+  const computeUnreadCounts = useCallback((list: RSSItem[]) => {
+    const counts = new Map<string, number>()
+    for (const item of list) {
+      if (!item.read) {
+        counts.set(item.sourceId, (counts.get(item.sourceId) ?? 0) + 1)
+      }
+    }
+    return counts
   }, [])
 
-  const loadRSSData = async () => {
+  const getScopedItems = useCallback(
+    (list: RSSItem[]) =>
+      list.filter((item) => {
+        if (selectedSource && item.sourceId !== selectedSource) return false
+        if (filter === 'unread' && item.read) return false
+        if (filter === 'starred' && !item.starred) return false
+        return true
+      }),
+    [filter, selectedSource],
+  )
+
+  const visibleItemIds = useMemo(() => {
+    return getScopedItems(items)
+      .map((item) => item.id)
+      .slice(0, 240)
+  }, [getScopedItems, items])
+
+  const loadRSSData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -44,54 +97,83 @@ export default function RSSMode() {
           setError(result.error || '获取 RSS 项目失败')
           setItems([])
         } else if (result.data) {
-          setItems(result.data.map((item: { publishedAt: string | number | Date }) => ({
-            ...item,
-            publishedAt: new Date(item.publishedAt).toLocaleString()
-          })))
-          setIsMock(result.mock || false)
-        }
+          const newItems: RSSItem[] = result.data.map((item) => ({
+            id: item.id,
+            sourceId: item.sourceId,
+            title: item.title,
+            link: item.link,
+            summary: item.summary ?? '',
+            author: item.author ?? '',
+            source: item.source ?? '',
+            publishedAt: item.publishedAt ? new Date(item.publishedAt).toLocaleString() : '',
+            read: item.read,
+            starred: item.starred,
+            coverImage: item.coverImage ?? undefined,
+          }))
 
-        const sourcesResult = await window.electronAPI.rss.getSources()
-        if (sourcesResult.success === false) {
-          setError(prev => prev || sourcesResult.error || '获取 RSS 源失败')
-          setSources([])
-        } else if (sourcesResult.data) {
-          setSources(sourcesResult.data.map((s: { id: string; name: string }) => ({
-            ...s,
-            count: Math.floor(Math.random() * 20) + 5
-          })))
+          // Track newly arrived items
+          if (previousItemIdsRef.current.size > 0) {
+            const freshIds = new Set<string>()
+            for (const item of newItems) {
+              if (!previousItemIdsRef.current.has(item.id)) {
+                freshIds.add(item.id)
+              }
+            }
+            if (freshIds.size > 0) {
+              setNewItemIds(freshIds)
+              // Clear new indicator after 30 seconds
+              setTimeout(() => setNewItemIds(new Set()), 30000)
+            }
+          }
+          previousItemIdsRef.current = new Set(newItems.map(i => i.id))
+          setItems(newItems)
+          setIsMock(result.mock || false)
+
+          // Compute source counts from actual unread items
+          const sourcesResult = await window.electronAPI.rss.getSources()
+          if (sourcesResult.success === false) {
+            setError(prev => prev || sourcesResult.error || '获取 RSS 源失败')
+            setSources([])
+          } else if (sourcesResult.data) {
+            const unreadCounts = computeUnreadCounts(newItems)
+            setSources(sourcesResult.data.map((s) => ({
+              id: s.id,
+              name: s.name,
+              count: unreadCounts.get(s.id) ?? 0,
+            })))
+          }
+        } else {
+          // No data but success — load sources anyway
+          const sourcesResult = await window.electronAPI.rss.getSources()
+          if (sourcesResult.success !== false && sourcesResult.data) {
+            setSources(sourcesResult.data.map((s) => ({
+              id: s.id,
+              name: s.name,
+              count: 0,
+            })))
+          }
         }
       } else {
-        // Mock data for development
         setIsMock(true)
         setItems([
           {
-            id: '1',
-            sourceId: '1',
-            title: 'AI 创作工具的下一个十年',
-            link: 'https://36kr.com/p/123456',
-            summary: '探讨 AI 如何改变内容创作行业...',
-            source: '36氪',
-            publishedAt: new Date(Date.now() - 3600000).toLocaleString(),
-            read: false,
-            starred: false
+            id: '1', sourceId: '1', title: 'AI 创作工具的下一个十年',
+            link: 'https://36kr.com/p/123456', summary: '探讨 AI 如何改变内容创作行业...',
+            source: '36氪', publishedAt: new Date(Date.now() - 3600000).toLocaleString(),
+            read: false, starred: false,
           },
           {
-            id: '2',
-            sourceId: '2',
-            title: '自媒体运营的核心方法论',
-            link: 'https://www.huxiu.com/article/789',
-            summary: '从 0 到 1 打造个人 IP 的实战经验...',
-            source: '虎嗅',
-            publishedAt: new Date(Date.now() - 7200000).toLocaleString(),
-            read: false,
-            starred: true
-          }
+            id: '2', sourceId: '2', title: '自媒体运营的核心方法论',
+            link: 'https://www.huxiu.com/article/789', summary: '从 0 到 1 打造个人 IP 的实战经验...',
+            source: '虎嗅', publishedAt: new Date(Date.now() - 7200000).toLocaleString(),
+            read: false, starred: true,
+          },
         ])
         setSources([
           { id: '1', name: '36氪', count: 15 },
-          { id: '2', name: '虎嗅', count: 12 }
+          { id: '2', name: '虎嗅', count: 12 },
         ])
+        previousItemIdsRef.current = new Set(['1', '2'])
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '加载 RSS 数据时发生错误'
@@ -102,26 +184,298 @@ export default function RSSMode() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [computeUnreadCounts])
 
-  const filteredItems = items.filter(item => {
-    if (selectedSource && item.sourceId !== selectedSource) return false
-    if (filter === 'unread' && item.read) return false
-    if (filter === 'starred' && !item.starred) return false
-    return true
-  })
+  useEffect(() => { loadRSSData() }, [loadRSSData])
 
-  const handleItemClick = (item: RSSItem) => {
+  const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
+    if (!window.electronAPI?.rss?.getItemAnalysisProgress) return false
+    if (itemIds.length === 0) {
+      setAnalysisProgressMap({})
+      return false
+    }
+
+    try {
+      const result = await window.electronAPI.rss.getItemAnalysisProgress({ itemIds })
+      if (!result.success || !result.data) return false
+      setAnalysisProgressMap(result.data as Record<string, RSSItemAnalysisProgressState>)
+      return Object.values(result.data).some(
+        (entry) => entry.status === 'queued' || entry.status === 'running_script' || entry.status === 'running_subagent',
+      )
+    } catch {
+      return false
+    }
+  }, [])
+
+  const fetchAnalysisJobs = useCallback(async () => {
+    if (!window.electronAPI?.rss?.listItemAnalysisJobs) return
+    try {
+      const result = await window.electronAPI.rss.listItemAnalysisJobs({ limit: 120 })
+      if (!result.success || !result.data) return
+      const jobs = result.data.map((job) => ({
+        id: job.id,
+        itemId: job.itemId,
+        action: job.action,
+        title: job.title,
+        status: job.status as RSSAnalysisStatus,
+        progress: Number(job.progress) || 0,
+        message: job.message ?? null,
+        error: job.error ?? null,
+        outputDir: job.outputDir,
+        reportPath: job.reportPath,
+        updatedAt: job.updatedAt,
+      }))
+      setAnalysisJobs(jobs)
+    } catch {
+      // silent
+    }
+  }, [])
+
+  useEffect(() => {
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const tick = async () => {
+      const running = await fetchAnalysisProgress(visibleItemIds)
+      await fetchAnalysisJobs()
+      if (disposed) return
+      timer = setTimeout(tick, running ? 1400 : 9000)
+    }
+
+    void tick()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
+
+  // Task 6: Auto-refresh every 15 minutes
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        await window.electronAPI?.rss?.fetchAll()
+        await loadRSSData()
+      } catch {
+        // silent fail on auto-refresh
+      }
+    }, AUTO_REFRESH_INTERVAL)
+    return () => clearInterval(interval)
+  }, [loadRSSData])
+
+  useEffect(() => {
+    if (!statusMessage) return
+    const timer = setTimeout(() => setStatusMessage(null), 4500)
+    return () => clearTimeout(timer)
+  }, [statusMessage])
+
+  useEffect(() => {
+    if (!selectedItem) return
+    const stillExists = items.some((item) => item.id === selectedItem.id)
+    if (!stillExists) {
+      setSelectedItem(null)
+    }
+  }, [items, selectedItem])
+
+  const handleItemClick = useCallback((item: RSSItem) => {
     setSelectedItem(item)
+    // Mark as read locally
+    setItems((prev) => {
+      const next = prev.map((i) => (i.id === item.id ? { ...i, read: true } : i))
+      const unreadCounts = computeUnreadCounts(next)
+      setSources((prevSources) =>
+        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
+      )
+      return next
+    })
+    // Remove from new items
+    setNewItemIds(prev => {
+      if (prev.has(item.id)) {
+        const next = new Set(prev)
+        next.delete(item.id)
+        return next
+      }
+      return prev
+    })
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.rss.markRead(item.id)
     }
-  }
+  }, [computeUnreadCounts])
 
-  // Error UI
+  const handleToggleStar = useCallback((itemId: string) => {
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, starred: !i.starred } : i))
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.rss.toggleStarred(itemId)
+    }
+  }, [])
+
+  // Task 6: Manual refresh with loading state
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        await window.electronAPI.rss.fetchAll()
+      }
+      await loadRSSData()
+    } catch { /* ignore */ } finally {
+      setRefreshing(false)
+    }
+  }, [loadRSSData, refreshing])
+
+  const handleMarkItemRead = useCallback(
+    async (itemId: string) => {
+      const item = items.find((entry) => entry.id === itemId)
+      if (!item || item.read) return
+      setItems((prev) => {
+        const next = prev.map((entry) => (entry.id === itemId ? { ...entry, read: true } : entry))
+        const unreadCounts = computeUnreadCounts(next)
+        setSources((prevSources) =>
+          prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
+        )
+        return next
+      })
+      await window.electronAPI?.rss?.markRead(itemId)
+    },
+    [computeUnreadCounts, items],
+  )
+
+  const handleClearRead = useCallback(async () => {
+    const scoped = getScopedItems(items)
+    const deleteIds = scoped.map((item) => item.id)
+    if (deleteIds.length === 0) {
+      setStatusMessage('当前范围内没有可清空的内容')
+      return
+    }
+
+    const deleteSet = new Set(deleteIds)
+    setItems((prev) => {
+      const next = prev.filter((item) => !deleteSet.has(item.id))
+      const unreadCounts = computeUnreadCounts(next)
+      setSources((prevSources) =>
+        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
+      )
+      return next
+    })
+    setNewItemIds((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const id of deleteIds) {
+        if (next.delete(id)) changed = true
+      }
+      return changed ? next : prev
+    })
+    setSelectedItem((prev) => (prev && deleteSet.has(prev.id) ? null : prev))
+
+    await window.electronAPI?.rss?.deleteItems(deleteIds)
+    setStatusMessage(`已清空 ${deleteIds.length} 条内容`)
+  }, [computeUnreadCounts, getScopedItems, items])
+
+  const handleDeleteItem = useCallback(
+    async (itemId: string) => {
+      const deleteSet = new Set([itemId])
+      setItems((prev) => {
+        const next = prev.filter((item) => !deleteSet.has(item.id))
+        const unreadCounts = computeUnreadCounts(next)
+        setSources((prevSources) =>
+          prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
+        )
+        return next
+      })
+      setNewItemIds((prev) => {
+        if (!prev.has(itemId)) return prev
+        const next = new Set(prev)
+        next.delete(itemId)
+        return next
+      })
+      setSelectedItem((prev) => (prev?.id === itemId ? null : prev))
+      await window.electronAPI?.rss?.deleteItems([itemId])
+    },
+    [computeUnreadCounts],
+  )
+
+  const handleDownloadItem = useCallback(async (item: RSSItem) => {
+    void item
+    if (!window.electronAPI?.document?.openFolder) {
+      setStatusMessage('当前环境暂不支持选择下载目录')
+      return false
+    }
+    const result = await window.electronAPI.document.openFolder()
+    if (!result.success || !result.path) {
+      if (result.error) {
+        setStatusMessage(`目录选择失败：${result.error}`)
+      }
+      return false
+    }
+    setStatusMessage(`已选择目录：${result.path}`)
+    return true
+  }, [])
+
+  const handleOpenAnalysisOutput = useCallback(
+    async (itemId: string) => {
+      const progress = analysisProgressMap[itemId]
+      if (!progress) {
+        setStatusMessage('暂无分析结果')
+        return
+      }
+      const targetPath = progress.reportPath || progress.outputDir
+      if (!targetPath) {
+        setStatusMessage('暂无可打开的分析目录')
+        return
+      }
+      const result = await window.electronAPI?.document?.showInFolder?.(targetPath)
+      if (!result?.success) {
+        setStatusMessage(result?.error ? `打开失败：${result.error}` : '打开目录失败')
+      }
+    },
+    [analysisProgressMap],
+  )
+
+  const handlePauseAnalysisJob = useCallback(async (jobId: string) => {
+    const result = await window.electronAPI?.rss?.pauseAnalysisJob?.({ jobId })
+    if (!result?.success) {
+      setStatusMessage(result?.error ? `暂停失败：${result.error}` : '暂停失败')
+      return
+    }
+    setStatusMessage('任务已暂停')
+    await fetchAnalysisJobs()
+    await fetchAnalysisProgress(visibleItemIds)
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
+
+  const handleResumeAnalysisJob = useCallback(async (jobId: string) => {
+    const result = await window.electronAPI?.rss?.resumeAnalysisJob?.({ jobId })
+    if (!result?.success) {
+      setStatusMessage(result?.error ? `继续失败：${result.error}` : '继续失败')
+      return
+    }
+    setStatusMessage('任务已继续')
+    await fetchAnalysisJobs()
+    await fetchAnalysisProgress(visibleItemIds)
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
+
+  const handleDeleteAnalysisJob = useCallback(async (jobId: string) => {
+    const result = await window.electronAPI?.rss?.deleteAnalysisJob?.({ jobId })
+    if (!result?.success || !result.data?.deleted) {
+      const reason = result?.data?.reason || result?.error || '删除失败'
+      setStatusMessage(`删除失败：${reason}`)
+      return
+    }
+    setStatusMessage('任务记录已删除')
+    await fetchAnalysisJobs()
+    await fetchAnalysisProgress(visibleItemIds)
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
+
+  const handleClosePreview = useCallback(() => {
+    setSelectedItem(null)
+  }, [])
+
+  const handleAddSourceSuccess = useCallback(() => {
+    loadRSSData()
+  }, [loadRSSData])
+
+  // Error state
   if (error && !loading && items.length === 0) {
     return (
-      <div className="flex flex-col h-full items-center justify-center" style={{ background: 'var(--bg-content)' }}>
+      <div className="workbench-mode-root items-center justify-center">
         <div className="text-center p-8">
           <AlertCircle className="w-16 h-16 mx-auto mb-4 text-[var(--color-red)]" />
           <h3 className="text-[16px] font-semibold text-[var(--text-title)] mb-2">加载失败</h3>
@@ -139,173 +493,70 @@ export default function RSSMode() {
   }
 
   return (
-    <div className="flex flex-col h-full" style={{ background: 'var(--bg-content)' }}>
-      {/* Filter Bar — matches design RSSContent header */}
-      <div
-        className="flex items-center justify-between"
-        style={{
-          height: 38,
-          padding: '0 16px',
-          background: '#FAFAF9',
-          borderBottom: '1px solid var(--border-default)'
-        }}
-      >
-        <div className="flex items-center gap-4">
-          <h2 className="text-[13px] font-semibold text-[var(--text-title)]">RSS 订阅源</h2>
-          <span className="px-2 py-0.5 rounded-full bg-[var(--color-blue-light)] text-[var(--color-blue)] text-[11px]">
-            {items.length} 条
-          </span>
-          {isMock && (
-            <span className="px-2 py-0.5 rounded-full bg-[var(--color-orange-light)] text-[var(--color-orange)] text-[11px]">
-              Mock 模式
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Source Filter */}
-          <select
-            value={selectedSource || ''}
-            onChange={(e) => setSelectedSource(e.target.value || null)}
-            className="px-3 py-1.5 rounded-lg border border-[var(--border-input)] text-[12px] bg-[var(--bg-primary)]"
-          >
-            <option value="">全部源</option>
-            {sources.map(source => (
-              <option key={source.id} value={source.id}>{source.name}</option>
-            ))}
-          </select>
-
-          {/* Filter Buttons */}
-          <div className="flex items-center gap-1 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-input)] p-0.5">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-2 py-1 rounded text-[11px] transition-colors ${filter === 'all' ? 'bg-[var(--color-blue-light)] text-[var(--color-blue)]' : 'hover:bg-black/5'}`}
-            >
-              全部
-            </button>
-            <button
-              onClick={() => setFilter('unread')}
-              className={`px-2 py-1 rounded text-[11px] transition-colors ${filter === 'unread' ? 'bg-[var(--color-blue-light)] text-[var(--color-blue)]' : 'hover:bg-black/5'}`}
-            >
-              未读
-            </button>
-            <button
-              onClick={() => setFilter('starred')}
-              className={`px-2 py-1 rounded text-[11px] transition-colors ${filter === 'starred' ? 'bg-[var(--color-blue-light)] text-[var(--color-blue)]' : 'hover:bg-black/5'}`}
-            >
-              收藏
-            </button>
-          </div>
-
-          <button
-            onClick={loadRSSData}
-            className="p-1.5 rounded hover:bg-black/5 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 text-[var(--text-muted)] ${loading ? 'animate-spin' : ''}`} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
+    <div className="workbench-mode-root">
       <div className="flex-1 flex overflow-hidden">
-        {/* RSS List */}
-        <div
-          className={`flex-shrink-0 overflow-auto border-r border-[var(--border-default)] transition-all duration-300 ${selectedItem ? 'w-[300px] opacity-50' : 'flex-1'
-            }`}
-          style={{ background: 'var(--bg-content)' }}
-        >
-          <div className="divide-y divide-[var(--border-default)]">
-            {filteredItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
-                <Filter className="w-10 h-10 mb-3 opacity-50" />
-                <p className="text-[13px]">暂无内容</p>
-              </div>
-            ) : (
-              filteredItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => handleItemClick(item)}
-                  className={`w-full text-left p-4 hover:bg-black/[0.02] transition-colors ${selectedItem?.id === item.id ? 'bg-[var(--color-blue-light)] border-l-2 border-[var(--color-blue)]' : ''
-                    } ${!item.read ? 'bg-[var(--bg-primary)]' : ''}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className={`text-[13px] mb-1 truncate ${!item.read ? 'font-semibold text-[var(--text-title)]' : 'text-[var(--text-body)]'}`}>
-                        {item.title}
-                      </h3>
-                      <p className="text-[12px] text-[var(--text-muted)] line-clamp-2 mb-2">
-                        {item.summary}
-                      </p>
-                      <div className="flex items-center gap-3 text-[11px] text-[var(--text-light)]">
-                        <span>{item.source}</span>
-                        <span>{item.publishedAt}</span>
-                      </div>
-                    </div>
-                    {item.starred && <Star className="w-4 h-4 text-[var(--color-gold)] flex-shrink-0" fill="currentColor" />}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
+        {/* Feed list (shrinks when preview is open) */}
+        <div className={`content-surface-panel flex-shrink-0 overflow-hidden flex flex-col border-r border-[var(--border-default)] transition-all duration-300 relative ${
+          selectedItem ? 'w-[300px]' : 'flex-1'
+        }`}>
+          <RSSFeed
+            items={items}
+            sources={sources}
+            filter={filter}
+            selectedSource={selectedSource}
+            selectedItemId={selectedItem?.id ?? null}
+            loading={loading}
+            refreshing={refreshing}
+            isMock={isMock}
+            hasPreview={!!selectedItem}
+            newItemIds={newItemIds}
+            analysisProgressMap={analysisProgressMap}
+            analysisJobs={analysisJobs}
+            onFilterChange={setFilter}
+            onSourceChange={setSelectedSource}
+            onItemClick={handleItemClick}
+            onMarkItemRead={handleMarkItemRead}
+            onToggleStar={handleToggleStar}
+            onDeleteItem={handleDeleteItem}
+            onDownloadItem={handleDownloadItem}
+            onOpenAnalysisOutput={handleOpenAnalysisOutput}
+            onRefresh={handleRefresh}
+            onAddSource={() => setShowAddModal(true)}
+            onClearRead={handleClearRead}
+            onPauseAnalysisJob={handlePauseAnalysisJob}
+            onResumeAnalysisJob={handleResumeAnalysisJob}
+            onDeleteAnalysisJob={handleDeleteAnalysisJob}
+          />
+          {statusMessage && (
+            <div
+              className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
+              style={{
+                background: 'var(--surface-floating-bg)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              {statusMessage}
+            </div>
+          )}
         </div>
 
         {/* Preview Browser */}
         {selectedItem && (
-          <div className="flex-1 flex flex-col" style={{ background: '#FFFFFF' }}>
-            {/* Browser Toolbar */}
-            <div
-              className="flex items-center justify-between"
-              style={{
-                height: 38,
-                padding: '0 12px',
-                background: '#FAFAF9',
-                borderBottom: '1px solid var(--border-default)'
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedItem(null)}
-                  className="p-1.5 rounded hover:bg-black/5 transition-colors"
-                >
-                  <X className="w-4 h-4" strokeWidth={2} />
-                </button>
-                <span className="text-[12px] text-[var(--text-muted)] truncate max-w-[300px]">
-                  {selectedItem.link}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={loadRSSData}
-                  className="p-1.5 rounded hover:bg-black/5 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" strokeWidth={2} />
-                </button>
-                <button className="p-1.5 rounded hover:bg-black/5 transition-colors">
-                  <ExternalLink className="w-4 h-4" strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-
-            {/* Browser Content */}
-            <div className="flex-1 flex items-center justify-center bg-[var(--bg-canvas)]">
-              <div className="text-center text-[var(--text-light)]">
-                <ExternalLink className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p className="text-[14px] font-medium mb-1">{selectedItem.title}</p>
-                <p className="text-[12px] max-w-[400px] mx-auto mb-4">{selectedItem.summary}</p>
-                <a
-                  href={selectedItem.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[12px] hover:brightness-95 transition-all"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  在浏览器中打开
-                </a>
-              </div>
-            </div>
-          </div>
+          <PreviewBrowser
+            item={selectedItem}
+            onClose={handleClosePreview}
+          />
         )}
       </div>
+
+      {/* Add Source Modal */}
+      <AddSourceModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={handleAddSourceSuccess}
+      />
     </div>
   )
 }

@@ -1,0 +1,173 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+
+type MockedController = Partial<BrowserController> & {
+  calls: {
+    normalized?: Array<{ x: number; y: number }>
+    mouse: Array<Record<string, unknown>>
+    key: Array<Record<string, unknown>>
+    typed: Array<{ text: string; options?: { useShiftEnterForNewline?: boolean } }>
+  }
+}
+
+function createControllerMock(overrides?: Partial<BrowserController>): BrowserController & MockedController {
+  const calls = {
+    normalized: [] as Array<{ x: number; y: number }>,
+    mouse: [] as Array<Record<string, unknown>>,
+    key: [] as Array<Record<string, unknown>>,
+    typed: [] as Array<{ text: string; options?: { useShiftEnterForNewline?: boolean } }>,
+  }
+
+  const mock: MockedController = {
+    calls,
+    getTabList: () => [{ id: 'tab-1', title: 'Gemini', url: 'https://gemini.google.com', active: true }],
+    createTab: async () => ({ success: true, tabId: 'tab-1' }),
+    navigate: async () => ({ success: true }),
+    normalizedToCss: async (_tabId, x, y) => {
+      calls.normalized?.push({ x: Number(x), y: Number(y) })
+      return { x: 120, y: 340, width: 1000, height: 800 }
+    },
+    dispatchMouse: async (_tabId, payload) => {
+      calls.mouse.push(payload as unknown as Record<string, unknown>)
+    },
+    dispatchKey: async (_tabId, payload) => {
+      calls.key.push(payload as unknown as Record<string, unknown>)
+    },
+    typeTextDirectly: async (_tabId, text, options) => {
+      calls.typed.push({ text: String(text), options })
+    },
+    screenshotAdvanced: async () => 'base64-image',
+    getViewportMetrics: async () => ({ width: 1000, height: 800, pageX: 0, pageY: 0, scale: 1 }),
+    executeJS: async (_tabId, code) => {
+      const source = String(code || '')
+      if (source.includes('window.location.href')) return 'https://gemini.google.com/app'
+      if (source.includes("document.readyState === 'interactive'")) return true
+      if (source.includes('readyState') && source.includes('bodyTextLen')) {
+        return { readyState: 'complete', bodyTextLen: 200, matched: true }
+      }
+      if (source.includes('out.sort((a, b) => b.score - a.score)')) {
+        return [{ x: 520, y: 880, score: 99, reason: 'prompt textarea' }]
+      }
+      if (source.includes('responseDetected')) {
+        return {
+          responseDetected: true,
+          responseText: '今晚可以吃番茄牛肉面。',
+          loginRequired: false,
+          captchaRequired: false,
+          editableCount: 2,
+        }
+      }
+      if (source.includes('Smart target not found: no editable element')) {
+        return 'Smart target not found: no editable element'
+      }
+      return null
+    },
+    ...(overrides || {}),
+  }
+
+  return mock as BrowserController & MockedController
+}
+
+describe('browser-tools v2', () => {
+  it('browser_click_at should clamp normalized coordinates', async () => {
+    const controller = createControllerMock()
+    const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)
+    const payload = JSON.parse(result) as { normalized: { x: number; y: number } }
+
+    assert.strictEqual(payload.normalized.x, 0)
+    assert.strictEqual(payload.normalized.y, 999)
+    assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_type_at should clear, type and send enter by default', async () => {
+    const controller = createControllerMock()
+    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 900, text: '今晚吃什么' }, controller)
+    const payload = JSON.parse(result) as { submitted: boolean; text_length: number }
+
+    assert.strictEqual(payload.submitted, true)
+    assert.strictEqual(payload.text_length, 5)
+    assert.ok(controller.calls.typed.some((item) => item.text === '今晚吃什么'))
+    assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'backspace'))
+    assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'enter'))
+  })
+
+  it('browser_query_gemini should fallback to coordinate typing when DOM compose fails', async () => {
+    const controller = createControllerMock()
+    const result = await executeBrowserTool('browser_query_gemini', { text: '今晚吃什么', wait_response_ms: 5000 }, controller)
+    const payload = JSON.parse(result) as {
+      submitted: boolean
+      response_detected: boolean
+      attempted: string[]
+      evidence: { coordinate?: unknown }
+    }
+
+    assert.strictEqual(payload.submitted, true)
+    assert.strictEqual(payload.response_detected, true)
+    assert.ok(payload.attempted.includes('probe-editables'))
+    assert.ok(payload.evidence.coordinate)
+  })
+
+  it('browser_locate_input_targets should surface active input and nearby send targets', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes("const nodes = Array.from(document.querySelectorAll('textarea,input")) {
+          return [
+            {
+              kind: 'prompt_input',
+              label: '提示词输入框',
+              x: 620,
+              y: 812,
+              confidence: 0.96,
+              focused: true,
+              textLength: 18,
+              valuePreview: '温暖 日常感 打工人',
+              evidence: ['active_input'],
+            },
+          ]
+        }
+        if (source.includes('nearActiveInput')) {
+          return [
+            {
+              kind: 'send_button',
+              label: '生成',
+              x: 790,
+              y: 860,
+              confidence: 0.94,
+              nearActiveInput: true,
+              distanceToActiveInput: 104,
+              evidence: ['near_active_input'],
+            },
+            {
+              kind: 'send_button',
+              label: '历史生成',
+              x: 120,
+              y: 220,
+              confidence: 0.88,
+              nearActiveInput: false,
+              distanceToActiveInput: 760,
+              evidence: ['keyword_match'],
+            },
+          ]
+        }
+        return null
+      },
+    })
+
+    const result = await executeBrowserTool('browser_locate_input_targets', { target: '提示词' }, controller)
+    const payload = JSON.parse(result) as {
+      active_target?: { label?: string; focused?: boolean }
+      nearby_send_targets?: Array<{ label?: string; nearActiveInput?: boolean }>
+      targets: Array<{ label?: string }>
+    }
+
+    assert.strictEqual(payload.active_target?.label, '提示词输入框')
+    assert.strictEqual(payload.active_target?.focused, true)
+    assert.strictEqual(payload.targets[0]?.label, '提示词输入框')
+    assert.strictEqual(payload.nearby_send_targets?.length, 1)
+    assert.strictEqual(payload.nearby_send_targets?.[0]?.label, '生成')
+    assert.strictEqual(payload.nearby_send_targets?.[0]?.nearActiveInput, true)
+  })
+})

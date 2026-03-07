@@ -1,0 +1,1 @@
+"""Ready sidecar package."""

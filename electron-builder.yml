@@ -11,6 +11,16 @@ extraResources:
     to: better-sqlite3/build
     filter:
       - "**/*"
+  - from: assets/embedded-skills
+    to: embedded-skills
+    filter:
+      - "**/*"
+  - from: src/main/modules/rss-engine/rsshub-worker.mjs
+    to: rsshub-worker.mjs
+  - from: src/python
+    to: sidecar
+    filter:
+      - "**/*"
 mac:
   category: public.app-category.productivity
   target:
@@ -38,3 +48,5 @@ electronDownload:
 asar: true
 asarUnpack:
   - "node_modules/better-sqlite3/**"
+  - "node_modules/rsshub/**"
+  - "node_modules/@hono/**"

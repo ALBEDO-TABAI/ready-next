@@ -81,4 +81,68 @@ describe('Database Schema Validation', () => {
         assert.ok(schema.columns.includes('title'))
         assert.ok(schema.columns.includes('read'))
     })
+
+    it('should validate RSS analysis job schema structure', () => {
+        const schema = {
+            tableName: 'rss_analysis_jobs',
+            columns: [
+                'id',
+                'item_id',
+                'action',
+                'source_url',
+                'target_dir',
+                'output_dir',
+                'status',
+                'progress',
+                'updated_at'
+            ]
+        }
+        assert.ok(schema.columns.includes('item_id'))
+        assert.ok(schema.columns.includes('action'))
+        assert.ok(schema.columns.includes('progress'))
+    })
+
+    it('should validate agent runtime schema structure', () => {
+        const channelSchema = {
+            tableName: 'agent_channels',
+            columns: ['id', 'type', 'name', 'enabled', 'config_json', 'updated_at']
+        }
+        const scheduleSchema = {
+            tableName: 'agent_schedules',
+            columns: ['id', 'name', 'cron_expr', 'prompt', 'enabled', 'next_run_at']
+        }
+        assert.ok(channelSchema.columns.includes('type'))
+        assert.ok(channelSchema.columns.includes('config_json'))
+        assert.ok(scheduleSchema.columns.includes('cron_expr'))
+        assert.ok(scheduleSchema.columns.includes('prompt'))
+    })
+
+    it('should validate unified conversation scope columns for local and remote sessions', () => {
+        const conversationSchema = {
+            tableName: 'chat_conversations',
+            columns: [
+                'id',
+                'agent',
+                'title',
+                'source_kind',
+                'source_id',
+                'thread_key',
+                'meta_json',
+                'updated_at'
+            ]
+        }
+        const messageSchema = {
+            tableName: 'chat_messages',
+            columns: ['id', 'conversation_id', 'role', 'content', 'timestamp', 'meta_json']
+        }
+        const threadSchema = {
+            tableName: 'agent_channel_threads',
+            columns: ['channel_id', 'remote_thread', 'session_id', 'conversation_id', 'updated_at']
+        }
+        assert.ok(conversationSchema.columns.includes('source_kind'))
+        assert.ok(conversationSchema.columns.includes('thread_key'))
+        assert.ok(conversationSchema.columns.includes('meta_json'))
+        assert.ok(messageSchema.columns.includes('meta_json'))
+        assert.ok(threadSchema.columns.includes('conversation_id'))
+    })
 })

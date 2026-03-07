@@ -21,7 +21,7 @@ dist/
 *.swo
 
 # OS
-.DS_Store
+**/.DS_Store
 Thumbs.db
 
 # Logs
@@ -33,6 +33,9 @@ yarn-error.log*
 
 # Testing
 coverage/
+
+# Exports
+exports/
 
 # Electron
 *.asar

@@ -1,65 +1,62 @@
 import { Folder, Search, Puzzle, Settings } from 'lucide-react'
+import { motion } from 'framer-motion'
+import MorphIconRailGroup from '../motion/MorphIconRailGroup'
+import { useTheme } from '../../stores/useTheme'
 
 interface IconRailProps {
   activeIcon?: string
   onIconClick?: (icon: string) => void
+  hidden?: boolean
 }
 
 const topIcons = [
   { id: 'folder', icon: Folder, label: '文件' },
   { id: 'search', icon: Search, label: '搜索' },
-  { id: 'extensions', icon: Puzzle, label: '插件' }
+  { id: 'skills', icon: Puzzle, label: '技能中心' },
 ]
 
-export default function IconRail({ activeIcon = 'folder', onIconClick }: IconRailProps) {
-  const handleClick = (id: string) => {
-    if (id === 'search') {
-      alert('全局搜索功能即将推出 🔍')
-    } else if (id === 'extensions') {
-      alert('插件市场即将推出 🧩')
-    } else {
-      onIconClick?.(id)
-    }
-  }
+export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false }: IconRailProps) {
+  const handleClick = (id: string) => onIconClick?.(id)
+  const skin = useTheme((state) => state.skin)
+  const isLiquid = skin === 'liquid-glass'
+
+  // Task 4: Conditionally hidden for image/video modes
+  if (hidden) return null
 
   return (
     <div
-      className="w-11 flex flex-col justify-between py-2.5 border-r border-[var(--border-default)]"
+      className="glass-surface-panel flex flex-col justify-between py-[10px] border-r border-[var(--border-default)]"
+      role="toolbar"
+      aria-label="工具栏"
       style={{
-        background: 'var(--bg-panel)',
-        boxShadow: '2px 0 8px rgba(0,0,0,0.04)'
+        width: 44,
+        minWidth: 44,
+        background: 'var(--surface-panel-bg)',
       }}
     >
       {/* Top Icons */}
-      <div className="flex flex-col items-center gap-1.5">
-        {topIcons.map(({ id, icon: Icon, label }) => (
-          <button
-            key={id}
-            onClick={() => handleClick(id)}
-            title={label}
-            className={`
-              w-[34px] h-[34px] rounded-[10px] flex items-center justify-center
-              transition-all duration-200
-              ${activeIcon === id
-                ? 'bg-[var(--color-blue-light)] text-[var(--color-blue)]'
-                : 'text-[#6A6A6A] hover:bg-black/5'
-              }
-            `}
-          >
-            <Icon className="w-[18px] h-[18px]" strokeWidth={2} />
-          </button>
-        ))}
+      <div className="flex flex-col items-center gap-[6px]">
+        <MorphIconRailGroup
+          items={topIcons}
+          activeId={activeIcon}
+          onSelect={handleClick}
+          layoutId="icon-rail-main"
+          className="flex flex-col items-center gap-[6px]"
+        />
       </div>
 
       {/* Bottom Icons */}
       <div className="flex flex-col items-center">
-        <button
+        <motion.button
           onClick={() => onIconClick?.('settings')}
           title="设置"
-          className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[#6A6A6A] hover:bg-black/5 transition-all duration-200"
+          aria-label="设置"
+          whileHover={isLiquid ? { y: -1 } : undefined}
+          whileTap={isLiquid ? { scale: 0.97, y: 0 } : undefined}
+          className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[var(--text-gray)] hover:text-[var(--text-body)] active:scale-[0.98] transition-all duration-200 ease-out"
         >
-          <Settings className="w-[18px] h-[18px]" strokeWidth={2} />
-        </button>
+          <Settings className="w-[15px] h-[15px]" strokeWidth={2} />
+        </motion.button>
       </div>
     </div>
   )

@@ -2,6 +2,7 @@ import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import {
   ChevronRight, ChevronDown, ArrowLeft, Minus, Plus,
   FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2,
+  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2,
 } from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
@@ -94,16 +95,16 @@ function formatSize(bytes: number): string {
 function fileIcon(item: FileItem, expanded = false) {
   if (item.isDirectory) {
     return expanded
-      ? <FolderOpen className="w-[14px] h-[14px]" style={{ color: '#C9A962' }} />
-      : <Folder className="w-[14px] h-[14px]" style={{ color: '#C9A962' }} />
+      ? <FolderOpen className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
+      : <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
   }
   const kind = getFileKind(item)
-  if (kind === 'image') return <Image className="w-[14px] h-[14px]" style={{ color: '#34D399' }} />
-  if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={{ color: '#F5A623' }} />
-  if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={{ color: '#5B8DEF' }} />
-  if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={{ color: '#5B8DEF' }} />
-  if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={{ color: '#5B8DEF' }} />
-  return <FileText className="w-[14px] h-[14px]" style={{ color: '#5B8DEF' }} />
+  if (kind === 'image') return <Image className="w-[14px] h-[14px]" style={{ color: 'var(--color-green)' }} />
+  if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={{ color: 'var(--color-orange)' }} />
+  if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
+  if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
+  if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
+  return <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
 }
 
 interface WorkspaceDragPayload {
@@ -113,6 +114,17 @@ interface WorkspaceDragPayload {
   ext?: string
   size?: number
   isDirectory: boolean
+}
+
+interface RSSDragPayload {
+  type: 'rss-item'
+  id: string
+  name: string
+  title?: string
+  link: string
+  summary?: string
+  source?: string
+  publishedAt?: string
 }
 
 function putDragData(e: React.DragEvent, item: FileItem) {
@@ -140,6 +152,19 @@ function parseWorkspaceDragPayload(dataTransfer: DataTransfer): WorkspaceDragPay
   try {
     const parsed = JSON.parse(raw) as WorkspaceDragPayload
     if (!parsed.path || !parsed.name) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function parseRSSDragPayload(dataTransfer: DataTransfer): RSSDragPayload | null {
+  const raw = dataTransfer.getData('application/x-ready-drag')
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as RSSDragPayload
+    if (parsed.type !== 'rss-item') return null
+    if (!parsed.id || !parsed.name || !parsed.link) return null
     return parsed
   } catch {
     return null
@@ -267,7 +292,12 @@ function FileTreeItem({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      onClick={() => item.isDirectory ? onToggleDir() : onOpenFile()}
+      onClick={() => onOpenFile()}
+      onDoubleClick={() => {
+        if (item.isDirectory) {
+          void onToggleDir()
+        }
+      }}
       onContextMenu={onContextMenu}
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
@@ -277,16 +307,26 @@ function FileTreeItem({
       style={{
         padding: '6px 8px',
         paddingLeft: `${8 + depth * 22}px`,
-        ...(isActive ? { background: '#E8E8E8' } : {}),
+        ...(isActive ? { background: 'var(--bg-hover)' } : {}),
         ...(isDropTarget
           ? { outline: '1px dashed var(--color-blue)', background: 'var(--color-blue-light)' }
           : {}),
       }}
     >
       {item.isDirectory ? (
-        isExpanded
-          ? <ChevronDown className="w-3 h-3 flex-shrink-0" style={{ color: '#6A6A6A' }} />
-          : <ChevronRight className="w-3 h-3 flex-shrink-0" style={{ color: '#6A6A6A' }} />
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onToggleDir()
+          }}
+          className="w-3 h-3 flex-shrink-0 flex items-center justify-center"
+          style={{ color: 'var(--text-light)' }}
+        >
+          {isExpanded
+            ? <ChevronDown className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
+            : <ChevronRight className="w-3 h-3" style={{ color: 'var(--text-light)' }} />}
+        </button>
       ) : (
         <span className="w-3 flex-shrink-0" />
       )}
@@ -303,11 +343,48 @@ function FileTreeItem({
         ) : (
           <span
             className="truncate block font-medium"
-            style={{ color: isActive ? '#1A1A1A' : item.isDirectory ? '#333333' : '#7A7A7A' }}
+            style={{ color: isActive ? 'var(--text-title)' : item.isDirectory ? 'var(--text-body)' : 'var(--text-muted)' }}
           >
             {item.name}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+function InlineCreateRow({
+  type,
+  depth,
+  onConfirm,
+  onCancel,
+}: {
+  type: 'file' | 'folder'
+  depth: number
+  onConfirm: (value: string) => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      className="flex items-center gap-[6px] rounded-[8px]"
+      style={{
+        padding: '6px 8px',
+        paddingLeft: `${8 + depth * 22}px`,
+        background: 'var(--bg-hover)',
+      }}
+    >
+      <span className="w-3 flex-shrink-0" />
+      <span className="flex-shrink-0">
+        {type === 'folder'
+          ? <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
+          : <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />}
+      </span>
+      <div className="flex-1 min-w-0">
+        <InlineInput
+          defaultValue={type === 'folder' ? '新建文件夹' : '新建文件.md'}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+        />
       </div>
     </div>
   )
@@ -352,7 +429,7 @@ function GridItemCard({
       onClick={onOpen}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      className="rounded-[10px] border text-left transition-all hover:bg-[var(--bg-hover)]"
+      className="content-surface-card rounded-[10px] border text-left transition-all hover:bg-[var(--bg-hover)]"
       style={{
         padding: '8px 8px 10px',
         borderColor: isDropTarget ? 'var(--color-blue)' : isActive ? 'var(--color-blue)' : 'var(--border-default)',
@@ -377,11 +454,14 @@ function GridItemCard({
 
 function FileTreeRecursive({
   items,
+  containerPath,
   depth,
   selectedFile,
   expandedDirs,
   dirChildren,
   renamingPath,
+  creatingType,
+  creatingPath,
   queryLower,
   filters,
   moveDropTargetDir,
@@ -392,14 +472,19 @@ function FileTreeRecursive({
   onDirectoryDragLeave,
   onDirectoryDrop,
   onRenameConfirm,
-  onRenameCancel
+  onRenameCancel,
+  onCreateConfirm,
+  onCreateCancel,
 }: {
   items: FileItem[]
+  containerPath: string
   depth: number
   selectedFile: string | null
   expandedDirs: Set<string>
   dirChildren: Map<string, FileItem[]>
   renamingPath: string | null
+  creatingType: 'file' | 'folder' | null
+  creatingPath: string | null
   queryLower: string
   filters: FileFilterMap
   moveDropTargetDir: string | null
@@ -411,6 +496,8 @@ function FileTreeRecursive({
   onDirectoryDrop: (e: React.DragEvent, dirPath: string) => void
   onRenameConfirm: (path: string, newName: string) => void
   onRenameCancel: () => void
+  onCreateConfirm: (newName: string) => void
+  onCreateCancel: () => void
 }) {
   const visibleItems = items.filter((item) => {
     if (!isFileAllowed(item)) return false
@@ -425,6 +512,14 @@ function FileTreeRecursive({
 
   return (
     <>
+      {creatingType && creatingPath === containerPath && (
+        <InlineCreateRow
+          type={creatingType}
+          depth={depth}
+          onConfirm={onCreateConfirm}
+          onCancel={onCreateCancel}
+        />
+      )}
       {visibleItems.map((item) => {
         const isExpanded = expandedDirs.has(item.path)
         const children = dirChildren.get(item.path) || []
@@ -446,14 +541,17 @@ function FileTreeRecursive({
               onRenameConfirm={(newName) => onRenameConfirm(item.path, newName)}
               onRenameCancel={onRenameCancel}
             />
-            {item.isDirectory && isExpanded && children.length > 0 && (
+            {item.isDirectory && isExpanded && (
               <FileTreeRecursive
                 items={children}
+                containerPath={item.path}
                 depth={depth + 1}
                 selectedFile={selectedFile}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
                 renamingPath={renamingPath}
+                creatingType={creatingType}
+                creatingPath={creatingPath}
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
@@ -465,6 +563,8 @@ function FileTreeRecursive({
                 onDirectoryDrop={onDirectoryDrop}
                 onRenameConfirm={onRenameConfirm}
                 onRenameCancel={onRenameCancel}
+                onCreateConfirm={onCreateConfirm}
+                onCreateCancel={onCreateCancel}
               />
             )}
           </div>
@@ -489,6 +589,7 @@ export default function FileTree({
     dirChildren,
     renamingPath,
     creatingType,
+    creatingPath,
     pinnedFolders,
     currentPath,
     toggleDir,
@@ -508,6 +609,12 @@ export default function FileTree({
   const { setWorkbenchMode } = useMode()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
+  const [rssDropMenu, setRssDropMenu] = useState<{
+    x: number
+    y: number
+    dirPath: string
+    payload: RSSDragPayload
+  } | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
   const [gridPath, setGridPath] = useState<string | null>(null)
@@ -525,6 +632,12 @@ export default function FileTree({
   }, [filteredCurrentItems.length, onResultCountChange])
 
   const handleOpenFile = useCallback((item: FileItem) => {
+    if (item.isDirectory) {
+      selectFile(item.path)
+      setCurrentPath(item.path)
+      return
+    }
+
     selectFile(item.path)
     const ext = item.name.split('.').pop()?.toLowerCase() || ''
     const modeMap: Record<string, WorkbenchMode> = {
@@ -540,7 +653,7 @@ export default function FileTree({
     if (modeMap[ext]) {
       setWorkbenchMode(modeMap[ext])
     }
-  }, [selectFile, setWorkbenchMode])
+  }, [selectFile, setCurrentPath, setWorkbenchMode])
 
   const moveWorkspaceItem = useCallback(async (payload: WorkspaceDragPayload, targetDir: string) => {
     if (!canMoveToDirectory(payload, targetDir)) return
@@ -551,10 +664,18 @@ export default function FileTree({
 
   const handleDirectoryDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
-    if (!payload || !canMoveToDirectory(payload, dirPath)) return
+    if (payload && canMoveToDirectory(payload, dirPath)) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
+      return
+    }
+    const rssPayload = parseRSSDragPayload(e.dataTransfer)
+    if (!rssPayload) return
     e.preventDefault()
     e.stopPropagation()
-    e.dataTransfer.dropEffect = 'move'
+    e.dataTransfer.dropEffect = 'copy'
     if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
   }, [moveDropTargetDir])
 
@@ -564,6 +685,21 @@ export default function FileTree({
   }, [moveDropTargetDir])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
+    const rssPayload = parseRSSDragPayload(e.dataTransfer)
+    if (rssPayload) {
+      e.preventDefault()
+      e.stopPropagation()
+      setMoveDropTargetDir(null)
+      setContextMenu(null)
+      setRssDropMenu({
+        x: e.clientX,
+        y: e.clientY,
+        dirPath,
+        payload: rssPayload,
+      })
+      return
+    }
+
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
     if (!payload || !canMoveToDirectory(payload, dirPath)) return
     e.preventDefault()
@@ -580,6 +716,10 @@ export default function FileTree({
       e.dataTransfer.dropEffect = 'move'
       return
     }
+    if (parseRSSDragPayload(e.dataTransfer)) {
+      e.dataTransfer.dropEffect = 'copy'
+      return
+    }
     if (e.dataTransfer.types.includes('Files')) {
       e.dataTransfer.dropEffect = 'copy'
       setIsDragOver(true)
@@ -591,6 +731,7 @@ export default function FileTree({
     e.stopPropagation()
     setIsDragOver(false)
     setMoveDropTargetDir(null)
+    setRssDropMenu(null)
   }, [])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -598,10 +739,15 @@ export default function FileTree({
     e.stopPropagation()
     setIsDragOver(false)
     setMoveDropTargetDir(null)
+    setRssDropMenu(null)
 
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
     if (payload && canMoveToDirectory(payload, currentPath)) {
       await moveWorkspaceItem(payload, currentPath)
+      return
+    }
+
+    if (parseRSSDragPayload(e.dataTransfer)) {
       return
     }
 
@@ -614,6 +760,56 @@ export default function FileTree({
       }
     }
   }, [addPinnedFolder, currentPath, moveWorkspaceItem])
+
+  const handleRssDropAction = useCallback(
+    async (action: 'web-clip' | 'copy-analysis' | 'visual-analysis') => {
+      if (!rssDropMenu) return
+      const { dirPath, payload } = rssDropMenu
+      setRssDropMenu(null)
+
+      const itemTitle = rssDropMenu.payload.title || rssDropMenu.payload.name
+      if (action === 'web-clip') {
+        console.info('[rss-drop-action] web clip placeholder', {
+          action,
+          dirPath,
+          title: itemTitle,
+          link: payload.link,
+        })
+        return
+      }
+
+      if (!window.electronAPI?.rss?.startItemAnalysis) {
+        console.warn('[rss-drop-action] rss.startItemAnalysis not available')
+        return
+      }
+
+      const mappedAction = action === 'copy-analysis' ? 'copy' : 'visual'
+      try {
+        const result = await window.electronAPI.rss.startItemAnalysis({
+          itemId: payload.id,
+          action: mappedAction,
+          link: payload.link,
+          title: itemTitle,
+          targetDir: dirPath,
+          source: payload.source,
+          summary: payload.summary,
+          publishedAt: payload.publishedAt,
+        })
+        if (!result.success) {
+          console.error('[rss-drop-action] failed', result.error)
+          return
+        }
+        console.info('[rss-drop-action] started', {
+          action: mappedAction,
+          itemId: payload.id,
+          outputDir: result.data?.outputDir,
+        })
+      } catch (error) {
+        console.error('[rss-drop-action] start failed', error)
+      }
+    },
+    [rssDropMenu],
+  )
 
   const renderTreeContent = () => {
     if (pinnedFolders.length > 0) {
@@ -656,7 +852,7 @@ export default function FileTree({
               draggableEnabled={false}
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
-              onOpenFile={() => { }}
+              onOpenFile={() => handleOpenFile(pinnedItem)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -668,14 +864,17 @@ export default function FileTree({
               onRenameConfirm={(newName) => renameItem(folderPath, newName)}
               onRenameCancel={cancelRenaming}
             />
-            {isExpanded && children.length > 0 && (
+            {isExpanded && (
               <FileTreeRecursive
                 items={children}
+                containerPath={folderPath}
                 depth={1}
                 selectedFile={selectedFile}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
                 renamingPath={renamingPath}
+                creatingType={creatingType}
+                creatingPath={creatingPath}
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
@@ -691,6 +890,11 @@ export default function FileTree({
                 onDirectoryDrop={handleDirectoryDrop}
                 onRenameConfirm={(path, newName) => renameItem(path, newName)}
                 onRenameCancel={cancelRenaming}
+                onCreateConfirm={(newName) => {
+                  if (creatingType === 'folder') void createFolder(newName)
+                  else if (creatingType === 'file') void createFile(newName)
+                }}
+                onCreateCancel={cancelCreating}
               />
             )}
           </div>
@@ -719,11 +923,14 @@ export default function FileTree({
     return (
       <FileTreeRecursive
         items={filteredCurrentItems}
+        containerPath={currentPath}
         depth={0}
         selectedFile={selectedFile}
         expandedDirs={expandedDirs}
         dirChildren={dirChildren}
         renamingPath={renamingPath}
+        creatingType={creatingType}
+        creatingPath={creatingPath}
         queryLower={queryLower}
         filters={filters}
         moveDropTargetDir={moveDropTargetDir}
@@ -739,6 +946,11 @@ export default function FileTree({
         onDirectoryDrop={handleDirectoryDrop}
         onRenameConfirm={(path, newName) => renameItem(path, newName)}
         onRenameCancel={cancelRenaming}
+        onCreateConfirm={(newName) => {
+          if (creatingType === 'folder') void createFolder(newName)
+          else if (creatingType === 'file') void createFile(newName)
+        }}
+        onCreateCancel={cancelCreating}
       />
     )
   }
@@ -797,6 +1009,7 @@ export default function FileTree({
     if (!gridPath) return null
     return gridPath.split('/').pop() || gridPath
   }, [gridPath])
+  const gridContainerPath = gridPath ?? currentPath
 
   const renderGridContent = () => {
     if (gridItems.length === 0 && !creatingType) {
@@ -844,7 +1057,7 @@ export default function FileTree({
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 18, height: 18, borderRadius: 4,
-                  color: '#AAAAAA', cursor: 'pointer',
+                  color: 'var(--text-placeholder)', cursor: 'pointer',
                   background: 'transparent',
                   border: 'none',
                 }}
@@ -854,8 +1067,8 @@ export default function FileTree({
               <div
                 style={{
                   position: 'relative', width: 56, height: 6, borderRadius: 3,
-                  background: 'rgba(0,0,0,0.04)',
-                  boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.06)',
+                  background: 'var(--bg-hover)',
+                  boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.1)',
                   cursor: 'pointer',
                 }}
                 onMouseDown={(e) => {
@@ -880,7 +1093,7 @@ export default function FileTree({
                   style={{
                     position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 3,
                     width: `${((thumbnailSize - 80) / 140) * 100}%`,
-                    background: 'rgba(0,0,0,0.08)',
+                    background: 'var(--text-light)',
                   }}
                 />
                 <div
@@ -889,9 +1102,9 @@ export default function FileTree({
                     left: `${((thumbnailSize - 80) / 140) * 100}%`,
                     transform: 'translate(-50%, -50%)',
                     width: 10, height: 10, borderRadius: '50%',
-                    background: '#F5F3EE',
-                    boxShadow: '0 0.5px 2px rgba(0,0,0,0.15)',
-                    border: '1px solid #E0DDD6',
+                    background: 'var(--bg-primary)',
+                    boxShadow: 'var(--shadow-sm)',
+                    border: '1px solid var(--border-default)',
                   }}
                 />
               </div>
@@ -901,7 +1114,7 @@ export default function FileTree({
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 18, height: 18, borderRadius: 4,
-                  color: '#AAAAAA', cursor: 'pointer',
+                  color: 'var(--text-placeholder)', cursor: 'pointer',
                   background: 'transparent',
                   border: 'none',
                 }}
@@ -916,6 +1129,35 @@ export default function FileTree({
           className="grid gap-2"
           style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbnailSize}px, 1fr))` }}
         >
+          {creatingType && creatingPath === gridContainerPath && (
+            <div
+              className="content-surface-card rounded-[10px] border"
+              style={{
+                padding: '8px 8px 10px',
+                borderColor: 'var(--color-blue)',
+                background: 'var(--color-blue-light)',
+              }}
+            >
+              <div
+                className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-content)] flex items-center justify-center"
+                style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)) }}
+              >
+                {creatingType === 'folder'
+                  ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--color-gold)' }} />
+                  : <FileText className="w-[16px] h-[16px]" style={{ color: 'var(--color-blue)' }} />}
+              </div>
+              <div className="mt-2 px-1">
+                <InlineInput
+                  defaultValue={creatingType === 'folder' ? '新建文件夹' : '新建文件.md'}
+                  onConfirm={(newName) => {
+                    if (creatingType === 'folder') void createFolder(newName)
+                    else void createFile(newName)
+                  }}
+                  onCancel={cancelCreating}
+                />
+              </div>
+            </div>
+          )}
           {gridItems.map((item) => (
             <GridItemCard
               key={item.path}
@@ -925,7 +1167,7 @@ export default function FileTree({
               thumbnailSize={thumbnailSize}
               onOpen={() => {
                 if (item.isDirectory) {
-                  selectFile(item.path)
+                  handleOpenFile(item)
                 } else {
                   handleOpenFile(item)
                 }
@@ -963,25 +1205,6 @@ export default function FileTree({
         </div>
       )}
 
-      {creatingType && (
-        <div className="px-2 py-1">
-          <div className="flex items-center gap-1">
-            {creatingType === 'folder'
-              ? <Folder className="w-4 h-4 text-[var(--color-blue)] flex-shrink-0" />
-              : <FileText className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
-            }
-            <InlineInput
-              defaultValue={creatingType === 'folder' ? '新建文件夹' : '新建文件.md'}
-              onConfirm={(name) => {
-                if (creatingType === 'folder') void createFolder(name)
-                else void createFile(name)
-              }}
-              onCancel={cancelCreating}
-            />
-          </div>
-        </div>
-      )}
-
       {viewMode === 'grid' ? renderGridContent() : renderTreeContent()}
 
       {contextMenu && (
@@ -989,6 +1212,31 @@ export default function FileTree({
           contextMenu={contextMenu}
           onClose={() => setContextMenu(null)}
           onOpenFile={handleOpenFile}
+        />
+      )}
+
+      {rssDropMenu && (
+        <ContextMenu
+          items={[
+            {
+              id: 'rss-web-clip',
+              label: '网页剪藏',
+              onClick: () => handleRssDropAction('web-clip'),
+            },
+            {
+              id: 'rss-copy-analysis',
+              label: '文案分析',
+              onClick: () => handleRssDropAction('copy-analysis'),
+            },
+            {
+              id: 'rss-visual-analysis',
+              label: '视觉分析',
+              onClick: () => handleRssDropAction('visual-analysis'),
+            },
+          ]}
+          x={rssDropMenu.x}
+          y={rssDropMenu.y}
+          onClose={() => setRssDropMenu(null)}
         />
       )}
     </div>
@@ -1016,27 +1264,78 @@ function ContextMenuBridge({
   const getContextItems = useCallback((item: FileItem | null): ContextMenuItem[] => {
     if (!item) {
       return [
-        { id: 'newFile', label: '新建文件', onClick: () => startCreating('file') },
-        { id: 'newFolder', label: '新建文件夹', onClick: () => startCreating('folder') },
+        {
+          id: 'newFile',
+          label: '新建文件',
+          icon: <FilePlus2 style={{ width: 16, height: 16 }} />,
+          onClick: () => startCreating('file')
+        },
+        {
+          id: 'newFolder',
+          label: '新建文件夹',
+          icon: <FolderPlus style={{ width: 16, height: 16 }} />,
+          onClick: () => startCreating('folder')
+        },
         { id: 'sep1', label: '', separator: true },
-        { id: 'refresh', label: '刷新', onClick: () => void refreshFiles() }
+        {
+          id: 'refresh',
+          label: '刷新',
+          icon: <RefreshCw style={{ width: 16, height: 16 }} />,
+          onClick: () => void refreshFiles()
+        }
       ]
     }
     return [
       ...(item.isDirectory ? [] : [
-        { id: 'open', label: '打开', onClick: () => onOpenFile(item) }
+        {
+          id: 'open',
+          label: '打开',
+          icon: <FileText style={{ width: 16, height: 16 }} />,
+          onClick: () => onOpenFile(item)
+        }
       ]),
       { id: 'sep1', label: '', separator: true },
-      { id: 'rename', label: '重命名', shortcut: 'Enter', onClick: () => startRenaming(item.path) },
-      { id: 'copyPath', label: '复制路径', shortcut: '⌥⌘C', onClick: () => copyPathToClipboard(item.path) },
+      {
+        id: 'rename',
+        label: '重命名',
+        shortcut: 'Enter',
+        icon: <Pen style={{ width: 16, height: 16 }} />,
+        onClick: () => startRenaming(item.path)
+      },
+      {
+        id: 'copyPath',
+        label: '复制路径',
+        shortcut: '⌥⌘C',
+        icon: <Copy style={{ width: 16, height: 16 }} />,
+        onClick: () => copyPathToClipboard(item.path)
+      },
       { id: 'sep2', label: '', separator: true },
-      { id: 'newFile', label: '新建文件', onClick: () => startCreating('file') },
-      { id: 'newFolder', label: '新建文件夹', onClick: () => startCreating('folder') },
+      {
+        id: 'newFile',
+        label: '新建文件',
+        icon: <FilePlus2 style={{ width: 16, height: 16 }} />,
+        onClick: () => startCreating('file')
+      },
+      {
+        id: 'newFolder',
+        label: '新建文件夹',
+        icon: <FolderPlus style={{ width: 16, height: 16 }} />,
+        onClick: () => startCreating('folder')
+      },
       { id: 'sep3', label: '', separator: true },
-      { id: 'showInFinder', label: '在 Finder 中显示', onClick: () => void showInFolder(item.path) },
+      {
+        id: 'showInFinder',
+        label: '在 Finder 中显示',
+        icon: <FolderOpen style={{ width: 16, height: 16 }} />,
+        onClick: () => void showInFolder(item.path)
+      },
       { id: 'sep4', label: '', separator: true },
       {
-        id: 'delete', label: '删除', danger: true, onClick: () => {
+        id: 'delete',
+        label: '删除',
+        icon: <Trash2 style={{ width: 16, height: 16 }} />,
+        danger: true,
+        onClick: () => {
           if (confirm(`确定删除 "${item.name}" 吗？`)) {
             void deleteItem(item.path)
           }
