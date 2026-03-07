@@ -8,6 +8,10 @@ out/
 dist/
 *.tsbuildinfo
 
+# Python caches
+__pycache__/
+*.py[cod]
+
 # Environment files
 .env
 .env.local
