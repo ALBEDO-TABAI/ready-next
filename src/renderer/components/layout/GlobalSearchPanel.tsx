@@ -85,7 +85,7 @@ function snippetFrom(content: string, query: string): string | undefined {
 
 function modeForPath(path: string): WorkbenchMode {
   const ext = getExt(path)
-  if (ext === 'tldr') return 'design'
+  if (ext === 'tldr') return 'document'
   if (['mp4', 'mov', 'mkv', 'avi', 'webm', 'mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg'].includes(ext)) return 'video'
   return 'document'
 }
