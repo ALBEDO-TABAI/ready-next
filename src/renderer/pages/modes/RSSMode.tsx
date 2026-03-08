@@ -76,6 +76,7 @@ export default function RSSMode() {
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
   const previousItemIdsRef = useRef<Set<string>>(new Set())
+  const sourcesRef = useRef<RSSSource[]>([])
   const {
     runtimeStatus,
     runtimeDiagnostics,
@@ -116,6 +117,10 @@ export default function RSSMode() {
       .map((item) => item.id)
       .slice(0, 240)
   }, [getScopedItems, items])
+
+  useEffect(() => {
+    sourcesRef.current = sources
+  }, [sources])
 
   const loadRSSData = useCallback(async () => {
     setLoading(true)
@@ -360,8 +365,9 @@ export default function RSSMode() {
     setRefreshing(true)
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
-        const selectedSourceEntry = selectedSource
-          ? sources.find((source) => source.id === selectedSource) ?? null
+        const latestSelectedSourceId = useRSSSession.getState().selectedSourceId
+        const selectedSourceEntry = latestSelectedSourceId
+          ? sourcesRef.current.find((source) => source.id === latestSelectedSourceId) ?? null
           : null
 
         if (selectedSourceEntry) {
@@ -400,7 +406,7 @@ export default function RSSMode() {
     } finally {
       setRefreshing(false)
     }
-  }, [loadRSSData, loadRuntimeDiagnostics, refreshing, selectedSource, sources])
+  }, [loadRSSData, loadRuntimeDiagnostics, refreshing])
 
   useRSSAgentAdapter({
     items,
