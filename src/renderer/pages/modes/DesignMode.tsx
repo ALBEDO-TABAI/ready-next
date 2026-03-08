@@ -9,6 +9,7 @@ import { useDesignAgentAdapter } from '../../modules/design/useDesignAgentAdapte
 import ComponentPanel from '../../components/design/ComponentPanel'
 import DesignDiagnosticsPanel from '../../components/design/DesignDiagnosticsPanel'
 import DesignProjectTabsBar from '../../components/design/DesignProjectTabsBar'
+import DesignToolbar from '../../components/design/DesignToolbar'
 import { allShapeUtils, allTools } from '../../components/design/shapes'
 import {
   getDroppedFileKind,
@@ -599,17 +600,26 @@ export default function DesignMode() {
         projectTabs={projectTabs}
         activeDesignPath={activeDesignPath}
         isDirty={isDirty}
-        saveStatus={saveStatus}
-        chatPanelVisible={chatPanelVisible}
-        uiHidden={uiHidden}
         getPathBasename={getPathBasename}
         onSelectProjectTab={handleSelectProjectTab}
         onCloseProjectTab={handleCloseProjectTab}
         onProjectTabDragStart={handleProjectTabDragStart}
         onCreateNewDraft={handleCreateNewDraft}
+      />
+
+      <DesignToolbar
+        chatPanelVisible={chatPanelVisible}
+        uiHidden={uiHidden}
+        isDirty={isDirty}
+        saveStatus={saveStatus}
+        onImportImages={() => emitDesignUIEvent('ready-design-import-images')}
+        onToggleLayers={() => emitDesignUIEvent('ready-design-toggle-layers')}
+        onToggleVariables={() => emitDesignUIEvent('ready-design-toggle-variables')}
+        onOpenStyleGuides={() => emitDesignUIEvent('ready-design-open-style-guides')}
         onOpenAgentPanel={handleOpenAgentPanel}
+        onToggleLeftPanel={() => emitDesignUIEvent('ready-design-toggle-left-panel')}
+        onToggleRightPanel={() => emitDesignUIEvent('ready-design-toggle-right-panel')}
         onToggleUiClick={handleToggleUiClick}
-        emitDesignUIEvent={emitDesignUIEvent}
       />
 
       <DesignDiagnosticsPanel

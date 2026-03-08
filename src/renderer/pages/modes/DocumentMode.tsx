@@ -182,45 +182,69 @@ export default function DocumentMode() {
         onTabDragOver={handleDragOver}
         onTabDrop={handleDrop}
         onTabDragEnd={handleDragEnd}
-        rightActions={
-          <div
-            className="glass-surface-card flex items-center"
-            style={{
-              background: 'var(--surface-card-bg)',
-              borderRadius: 6,
-              padding: 2,
-              border: '1px solid var(--surface-border)',
-              height: Math.max(28, WORKBENCH_TOOLBAR_ROW_HEIGHT - 8),
-            }}
-          >
-            {(['edit', 'preview'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setEditorMode(mode)}
-                className="transition-all duration-150 ease-out"
-                style={{
-                  padding: '3px 10px',
-                  fontSize: 12,
-                  borderRadius: 4,
-                  fontWeight: 500,
-                  ...(editorMode === mode ? {
-                    background: 'var(--surface-floating-bg)',
-                    color: 'var(--text-body)',
-                    boxShadow: 'var(--lg-shadow-contact)',
-                    border: '1px solid var(--surface-border)',
-                  } : {
-                    background: 'transparent',
-                    color: 'var(--text-muted)',
-                    border: '1px solid transparent',
-                  }),
-                }}
-              >
-                {mode === 'edit' ? '编辑' : '预览'}
-              </button>
-            ))}
-          </div>
-        }
       />
+
+      <div
+        className="flex items-center justify-between flex-shrink-0"
+        style={{
+          height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
+          padding: '0 12px',
+          background: 'var(--bg-primary)',
+          borderBottom: '1px solid var(--border-default)',
+        }}
+      >
+        <div
+          className="glass-surface-card flex items-center"
+          style={{
+            background: 'var(--surface-card-bg)',
+            borderRadius: 8,
+            padding: 2,
+            border: '1px solid var(--surface-border)',
+            height: Math.max(30, WORKBENCH_TOOLBAR_ROW_HEIGHT - 6),
+          }}
+        >
+          {(['edit', 'preview'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setEditorMode(mode)}
+              className="transition-all duration-150 ease-out"
+              style={{
+                padding: '0 12px',
+                height: 28,
+                fontSize: 12,
+                borderRadius: 6,
+                fontWeight: 500,
+                ...(editorMode === mode ? {
+                  background: 'var(--surface-floating-bg)',
+                  color: 'var(--text-body)',
+                  boxShadow: 'var(--lg-shadow-contact)',
+                  border: '1px solid var(--surface-border)',
+                } : {
+                  background: 'transparent',
+                  color: 'var(--text-muted)',
+                  border: '1px solid transparent',
+                }),
+              }}
+            >
+              {mode === 'edit' ? '编辑' : '预览'}
+            </button>
+          ))}
+        </div>
+
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--text-light)',
+            maxWidth: 320,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={activeTab?.path || activeTab?.title || '未打开文档'}
+        >
+          {activeTab?.path || activeTab?.title || '未打开文档'}
+        </div>
+      </div>
 
       {/* Content Area */}
       {splitTab && activeTab ? (
