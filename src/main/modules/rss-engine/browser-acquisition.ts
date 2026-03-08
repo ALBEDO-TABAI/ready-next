@@ -37,7 +37,10 @@ function isValidBrowserCandidateLink(platform: PlatformType, link: string): bool
   if (!link) return false
 
   if (platform === 'xiaohongshu') {
-    return /xiaohongshu\.com\/(explore|discovery\/item)\/[a-zA-Z0-9]+/i.test(link)
+    return (
+      /xiaohongshu\.com\/(explore|discovery\/item)\/[a-zA-Z0-9]+/i.test(link) ||
+      /xiaohongshu\.com\/user\/profile\/[a-zA-Z0-9_-]+(?:[/?#].*)?$/i.test(link)
+    )
   }
 
   return true
@@ -259,20 +262,28 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           const sections = Array.from(document.querySelectorAll('section.note-item, .note-item'));
           const seen = new Set();
           const items = [];
-          for (const section of sections) {
+          for (const [sectionIndex, section] of sections.entries()) {
             const coverAnchor = section.querySelector('a.cover, a[href*="/explore/"], a[href*="/discovery/item/"]');
             const href = coverAnchor ? abs(coverAnchor.getAttribute('href')) : '';
             const noteId = extractNoteId(href);
-            if (!noteId || seen.has(noteId)) continue;
-            seen.add(noteId);
             const lines = sanitizeTitleLines(section.innerText || '', author);
             const title =
               normalize(coverAnchor?.getAttribute('title') || '') ||
               lines[0] ||
               '小红书内容';
+            const fallbackKey = title
+              ? encodeURIComponent(title.slice(0, 48)).replace(/%/g, '').toLowerCase()
+              : 'section-' + String(sectionIndex + 1);
+            const stableLink = noteId
+              ? abs('/explore/' + noteId)
+              : (targetUserId
+                  ? abs('/user/profile/' + targetUserId + '#note-' + fallbackKey + '-' + String(sectionIndex + 1))
+                  : href);
+            if (!stableLink || seen.has(stableLink)) continue;
+            seen.add(stableLink);
             items.push({
               title: clip(title, 160),
-              link: abs('/explore/' + noteId),
+              link: stableLink,
               description: clip(lines.slice(1, 4).join(' '), 280),
               author: clip(author, 80),
               pubDate: '',
