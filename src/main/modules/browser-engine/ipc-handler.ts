@@ -13,6 +13,7 @@ import type {
 import { AuthPopupManager } from './auth-popup-manager'
 import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
 import { BrowserContextMenuService } from './context-menu-service'
+import { isReusableCaptureTabUrl } from './capture-url-utils'
 import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService } from './download-service'
 import { BROWSER_DIAGNOSTICS_LOG_PATH, BrowserDiagnosticsService } from './diagnostics-service'
@@ -318,15 +319,10 @@ export class BrowserController {
   }
 
   private findReusableTabForCapture(targetUrl: string): Tab | null {
-    const targetDomain = extractBrowserDomain(targetUrl)
-    if (!targetDomain) return null
     const candidates = Array.from(this.tabs.values()).filter((tab) => {
       if (!tab.view) return false
       const currentUrl = tab.view.webContents.getURL() || tab.url
-      const currentDomain = tab.domain || extractBrowserDomain(currentUrl)
-      if (!currentDomain || currentDomain !== targetDomain) return false
-      if (/\/login\b/i.test(currentUrl)) return false
-      return true
+      return isReusableCaptureTabUrl(targetUrl, currentUrl)
     })
     if (candidates.length === 0) return null
     return candidates.find((tab) => tab.id !== this.activeTabId) || candidates[0] || null

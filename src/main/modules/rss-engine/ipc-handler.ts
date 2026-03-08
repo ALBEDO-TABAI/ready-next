@@ -1355,7 +1355,7 @@ export function setupRSSIPC(useMock = false): void {
         published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
         ai_tags: null,
       }))
-      if (platform === 'douyin' && backendUsed === 'browser' && dbItems.length > 0) {
+      if (supportsBrowserSessionAcquisition(platform) && backendUsed === 'browser' && dbItems.length > 0) {
         rssRepository.deleteRSSItemsBySource(source.id)
       }
       const candidateIds = dbItems.map((item) => item.id)

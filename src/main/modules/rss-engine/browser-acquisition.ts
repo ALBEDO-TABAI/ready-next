@@ -33,6 +33,16 @@ function clipText(input: string | undefined, maxChars: number): string {
   return text.slice(0, maxChars)
 }
 
+function isValidBrowserCandidateLink(platform: PlatformType, link: string): boolean {
+  if (!link) return false
+
+  if (platform === 'xiaohongshu') {
+    return /xiaohongshu\.com\/(explore|discovery\/item)\/[a-zA-Z0-9]+/i.test(link)
+  }
+
+  return true
+}
+
 function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionResult): ScrapedItem[] {
   const seen = new Set<string>()
   const rows = Array.isArray(payload.items) ? payload.items : []
@@ -40,7 +50,7 @@ function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionRe
 
   for (const row of rows) {
     const link = clipText(row.link, 500)
-    if (!link || seen.has(link)) continue
+    if (!isValidBrowserCandidateLink(platform, link) || seen.has(link)) continue
     seen.add(link)
     const title = clipText(row.title, 160) || '(Untitled)'
     const description = clipText(row.description, 500)
@@ -139,7 +149,7 @@ export async function normalizeBrowserAcquisitionUrl(
   return resolvedUrl
 }
 
-function buildExtractionScript(platform: PlatformType): string {
+function buildExtractionScript(platform: PlatformType, targetUrl: string): string {
   const commonHelpers = String.raw`
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -180,9 +190,11 @@ function buildExtractionScript(platform: PlatformType): string {
   `
 
   if (platform === 'xiaohongshu') {
+    const targetUserId = extractXiaohongshuUserId(targetUrl) || ''
     return `
       (async () => {
         ${commonHelpers}
+        const targetUserId = ${JSON.stringify(targetUserId)};
         const clickNotesTabIfPresent = () => {
           const preferred = Array.from(document.querySelectorAll('div, button, a'));
           for (const node of preferred) {
@@ -204,19 +216,69 @@ function buildExtractionScript(platform: PlatformType): string {
           return false;
         };
 
-        const collectFromAnchors = () => {
-          const anchors = Array.from(document.querySelectorAll('a[href*="/explore/"], a[href*="/discovery/item/"]'));
-          return anchors.map((anchor) => {
-            const container = anchor.closest('section, article, div') || anchor;
-            const lines = normalize(container.innerText).split(/\\n+/).map((line) => line.trim()).filter(Boolean);
-            return {
-              title: normalize(anchor.getAttribute('title')) || lines[0] || '小红书内容',
-              link: abs(anchor.getAttribute('href')),
-              description: normalize(lines.slice(1, 4).join(' ')) || normalize(container.innerText),
-              author: normalize(document.querySelector('[class*="user"], [class*="author"]')?.textContent || ''),
+        const extractNoteId = (href) => {
+          const decoded = decodeMaybe(String(href || ''));
+          let match = decoded.match(/\\/explore\\/([a-zA-Z0-9]+)/i);
+          if (match) return match[1];
+          match = decoded.match(/\\/discovery\\/item\\/([a-zA-Z0-9]+)/i);
+          if (match) return match[1];
+          match = decoded.match(/\\/([a-f0-9]{24})(?:\\?|$)/i);
+          return match ? match[1] : '';
+        };
+
+        const readProfileAuthor = () => {
+          const selectors = [
+            '.user-name',
+            '.info .username',
+            '.user-nickname',
+            'h1',
+            '[data-testid="user-name"]',
+          ];
+          for (const selector of selectors) {
+            const value = normalize(document.querySelector(selector)?.textContent || '');
+            if (value && value !== '我') return value;
+          }
+          return '';
+        };
+
+        const sanitizeTitleLines = (text, author) => {
+          const lines = normalize(text).split(/\\n+/).map((line) => line.trim()).filter(Boolean);
+          const filtered = lines.filter((line) => {
+            if (!line) return false;
+            if (line === '置顶') return false;
+            if (author && line === author) return false;
+            if (/^[\\d.万w]+$/.test(line)) return false;
+            if (line === '赞' || line === '收藏' || line === '评论' || line === '分享' || line === '笔记' || line === '作品') return false;
+            return true;
+          });
+          return filtered;
+        };
+
+        const collectFromSections = () => {
+          const author = readProfileAuthor();
+          const sections = Array.from(document.querySelectorAll('section.note-item, .note-item'));
+          const seen = new Set();
+          const items = [];
+          for (const section of sections) {
+            const coverAnchor = section.querySelector('a.cover, a[href*="/explore/"], a[href*="/discovery/item/"]');
+            const href = coverAnchor ? abs(coverAnchor.getAttribute('href')) : '';
+            const noteId = extractNoteId(href);
+            if (!noteId || seen.has(noteId)) continue;
+            seen.add(noteId);
+            const lines = sanitizeTitleLines(section.innerText || '', author);
+            const title =
+              normalize(coverAnchor?.getAttribute('title') || '') ||
+              lines[0] ||
+              '小红书内容';
+            items.push({
+              title: clip(title, 160),
+              link: abs('/explore/' + noteId),
+              description: clip(lines.slice(1, 4).join(' '), 280),
+              author: clip(author, 80),
               pubDate: '',
-            };
-          }).filter((item) => item.link);
+            });
+          }
+          return items;
         };
 
         const collectFromInitialState = () => {
@@ -232,6 +294,16 @@ function buildExtractionScript(platform: PlatformType): string {
                 if (!node || typeof node !== 'object' || Array.isArray(node)) return;
                 const noteId = node.noteId || node.note_id || node.id;
                 const title = node.displayTitle || node.title || node.noteTitle || node.desc;
+                const nodeUserId =
+                  node.userId ||
+                  node.user_id ||
+                  node.user?.userId ||
+                  node.user?.user_id ||
+                  node.user?.userid ||
+                  node.user?.id ||
+                  '';
+                if (targetUserId && nodeUserId && String(nodeUserId) !== targetUserId) return;
+                if (typeof noteId !== 'string' || !/^[a-zA-Z0-9]{8,}$/.test(noteId)) return;
                 if (typeof noteId === 'string' && typeof title === 'string') {
                   items.push({
                     title: clip(title, 160),
@@ -272,7 +344,7 @@ function buildExtractionScript(platform: PlatformType): string {
               items: [],
             };
           }
-          const items = collectFromAnchors();
+          const items = collectFromSections();
           if (items.length > 0) {
             return { title: document.title || '', finalUrl: href, state: 'ready', items };
           }
@@ -467,7 +539,7 @@ export async function fetchFeedViaBrowserSession(
   const captureOptions = {
     timeoutMs: platform === 'xiaohongshu' ? 65_000 : 45_000,
     settleMs: 1_000,
-    script: buildExtractionScript(platform),
+    script: buildExtractionScript(platform, acquisitionUrl),
   }
 
   let snapshot: (BrowserFeedExtractionResult & { __readyCaptureError?: string }) | null = null

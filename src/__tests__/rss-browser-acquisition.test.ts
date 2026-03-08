@@ -36,6 +36,11 @@ describe('RSS browser acquisition', () => {
             link: 'https://www.xiaohongshu.com/explore/2',
             description: '描述二',
           },
+          {
+            title: '坏链接',
+            link: 'https://www.xiaohongshu.com/explore/',
+            description: '应当被过滤',
+          },
         ],
       }),
     }
@@ -47,6 +52,27 @@ describe('RSS browser acquisition', () => {
     assert.equal(result.items[0]?.title, '第一条内容')
     assert.equal(result.items[1]?.title, '第二条内容')
     assert.equal(result.error, undefined)
+  })
+
+  it('filters malformed xiaohongshu links returned by browser capture', async () => {
+    const controller = {
+      captureBackgroundPage: async () => ({
+        title: '创作者主页',
+        finalUrl: 'https://www.xiaohongshu.com/user/profile/abc',
+        items: [
+          {
+            title: '坏链接',
+            link: 'https://www.xiaohongshu.com/explore/',
+            description: '应当被过滤',
+          },
+        ],
+      }),
+    }
+
+    const result = await fetchFeedViaBrowserSession(controller as any, 'xiaohongshu', 'https://xhslink.com/demo')
+
+    assert.equal(result.items.length, 0)
+    assert.match(result.error || '', /未提取到可用条目/)
   })
 
   it('normalizes browser acquisition URLs into canonical profile routes', async () => {
