@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getDatabase } from '../database'
+import { CalendarRepository } from '../repositories/calendar-repository'
 
 // --- Unified Response Helpers ---
 
@@ -79,6 +79,8 @@ function toUnixSeconds(value: unknown): number {
 // --- IPC Setup ---
 
 export function setupCalendarIPC(useMock = false): void {
+  const repository = new CalendarRepository()
+
   // Get all calendar sources
   ipcMain.handle('calendar:getSources', async () => {
     if (useMock) {
@@ -86,8 +88,7 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const dbManager = getDatabase()
-      const sources = dbManager.getCalendarSources()
+      const sources = repository.getSources()
       return createSuccessResponse(sources, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -105,8 +106,7 @@ export function setupCalendarIPC(useMock = false): void {
       const startTs = toUnixSeconds(start)
       const endTs = toUnixSeconds(end)
 
-      const dbManager = getDatabase()
-      const events = dbManager.getCalendarEvents(startTs, endTs)
+      const events = repository.getEvents(startTs, endTs)
       return createSuccessResponse(events, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -129,8 +129,7 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const dbManager = getDatabase()
-      const id = dbManager.createCalendarEvent({
+      const id = repository.createEvent({
         calendar_id: event.calendarId,
         title: event.title,
         description: event.description || null,
@@ -153,8 +152,6 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const dbManager = getDatabase()
-
       // Build the update object, converting field names from camelCase to snake_case
       const updates: Record<string, unknown> = {}
       if (event.title !== undefined) updates.title = event.title
@@ -165,7 +162,7 @@ export function setupCalendarIPC(useMock = false): void {
       if (event.startTime !== undefined) updates.start_time = toUnixSeconds(event.startTime)
       if (event.endTime !== undefined) updates.end_time = toUnixSeconds(event.endTime)
 
-      dbManager.updateCalendarEvent(id, updates)
+      repository.updateEvent(id, updates)
       return createSuccessResponse({ updated: true }, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -180,8 +177,7 @@ export function setupCalendarIPC(useMock = false): void {
     }
 
     try {
-      const dbManager = getDatabase()
-      dbManager.deleteCalendarEvent(id)
+      repository.deleteEvent(id)
       return createSuccessResponse({ deleted: true }, false)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)

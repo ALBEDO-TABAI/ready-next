@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { Play } from 'lucide-react'
 import { Player, type PlayerRef } from '@remotion/player'
-import { type TimelineClip, type SubtitleStyle, type SelectedClip } from '../../pages/modes/VideoMode'
+import type { TimelineClip, SubtitleStyle, SelectedClip } from '../../modules/video/types'
 import TimelineRemotionComposition from './remotion/TimelineRemotionComposition'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 

@@ -1,0 +1,122 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
+import type { ConversationScope } from '../main/modules/agent-control/types'
+
+function createScope(): ConversationScope {
+  return {
+    id: 'scope-test-1',
+    agent: 'butler',
+    title: '测试 Scope',
+    sourceKind: 'local',
+    sourceId: 'app',
+    threadKey: 'thread-test-1',
+    meta: {},
+    createdAt: '2026-03-08T10:00:00.000Z',
+    updatedAt: '2026-03-08T10:00:00.000Z',
+    lastMessageAt: '2026-03-08T10:00:00.000Z',
+  }
+}
+
+describe('PromptAssemblyService', () => {
+  it('builds l0/l1 context and keeps generic runs free of l2 trigger payloads', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-assembly-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'memory', '2026-03-08.md'), '## daily\n- drafted a script', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [
+        { role: 'user', content: '请帮我整理今天的选题' },
+        { role: 'assistant', content: '我先给你一版提纲。' },
+      ],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '帮我整理一版内容提纲',
+    })
+
+    assert.match(result.systemPrompt, /L0 常驻记忆/)
+    assert.strictEqual(result.triggerHits.length, 0)
+    assert.ok(result.memoryRefs.some((item) => item.layer === 'l0'))
+    assert.ok(result.memoryRefs.some((item) => item.layer === 'l1'))
+    assert.ok(result.bootstrapMessages.some((item) => item.includes('L1 会话上下文')))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('loads blocking l2 refs when feishu doc trigger is hit', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-feishu-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'feishu-rules.md'), '# Feishu\n必须先确认目标空间。', 'utf8')
+    writeFileSync(join(root, 'docs', 'accounts.md'), '# Accounts\n租户映射仅按需读取。', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请创建飞书文档并插入一张图片',
+    })
+
+    assert.ok(result.triggerHits.some((item) => item.id === 'feishu-doc' && item.blocking))
+    assert.ok(result.triggerHits.some((item) => item.id === 'feishu-image' && item.blocking))
+    assert.ok(result.memoryRefs.some((item) => item.layer === 'l2' && item.title.includes('飞书')))
+    assert.ok(result.bootstrapMessages.some((item) => item.includes('L2 按需规则')))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('drops low-priority l2 refs when trigger payload exceeds budget and records writebacks', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-budget-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const largeBlock = `${'规则段落 '.repeat(1200)}\n`
+    writeFileSync(join(root, 'docs', 'feishu-rules.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'accounts.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'browser-rules.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'document-rules.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'video-rules.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), largeBlock, 'utf8')
+    writeFileSync(join(root, 'docs', 'calendar-rules.md'), largeBlock, 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程',
+    })
+
+    assert.ok(result.contextBudget.totalChars <= 16000)
+    assert.ok(result.contextBudget.droppedRefs.length > 0)
+
+    service.recordRunOutcome({
+      scope: createScope(),
+      finalText: '完成了跨模块动作，保留诊断信息。',
+      usedTools: ['feishu.doc', 'browser.upload', 'calendar.create'],
+      success: true,
+    })
+
+    const outcomePath = join(root, 'memory', '2026-03-08.md')
+    const content = readFileSync(outcomePath, 'utf8')
+    assert.match(content, /scope: 测试 Scope/)
+    assert.match(content, /feishu\.doc/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+})

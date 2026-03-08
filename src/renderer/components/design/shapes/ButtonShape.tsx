@@ -57,6 +57,7 @@ export class ButtonShapeUtil extends BaseBoxShapeUtil<ButtonShape> {
         ? 'inside'
         : 'center'
     const fontWeight = meta.readyFontWeight === 'bold' ? 700 : meta.readyFontWeight === 'medium' ? 600 : 600
+    const fontSize = typeof meta.readyFontSize === 'number' ? Math.max(10, Number(meta.readyFontSize)) : 13
     const fontFamily = meta.readyFontFamily === 'serif'
       ? 'ui-serif, Georgia, serif'
       : meta.readyFontFamily === 'mono'
@@ -115,7 +116,7 @@ export class ButtonShapeUtil extends BaseBoxShapeUtil<ButtonShape> {
           alignItems: justifyContent,
           justifyContent: 'center',
           textAlign,
-          fontSize: 13,
+          fontSize,
           fontWeight,
           fontFamily,
           lineHeight,

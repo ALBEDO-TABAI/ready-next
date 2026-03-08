@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
-import { getDatabase } from '../database'
 import { AIModelConfig, getProviderDef, normalizeAIConfig, normalizeProviderId, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -9,12 +9,12 @@ interface SettingsIPCResponse<T = unknown> {
 }
 
 export function setupSettingsIPC(): void {
-  const db = getDatabase()
+  const repository = new AppSettingsRepository()
 
   // Get a single setting by key
   ipcMain.handle('settings:get', (_, key: string): SettingsIPCResponse<string | null> => {
     try {
-      const value = db.getSetting(key)
+      const value = repository.getSetting(key)
       return { success: true, data: value ?? null }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -24,7 +24,7 @@ export function setupSettingsIPC(): void {
   // Set a setting
   ipcMain.handle('settings:set', (_, { key, value }: { key: string; value: string }): SettingsIPCResponse => {
     try {
-      db.setSetting(key, value)
+      repository.setSetting(key, value)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -34,7 +34,7 @@ export function setupSettingsIPC(): void {
   // Get all settings
   ipcMain.handle('settings:getAll', (): SettingsIPCResponse<Record<string, string>> => {
     try {
-      const all = db.getAllSettings()
+      const all = repository.getAllSettings()
       return { success: true, data: all }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -44,9 +44,7 @@ export function setupSettingsIPC(): void {
   // Get AI model config
   ipcMain.handle('settings:getAIConfig', (): SettingsIPCResponse<AIModelConfig | null> => {
     try {
-      const raw = db.getSetting('ai_model_config')
-      if (!raw) return { success: true, data: null }
-      return { success: true, data: normalizeAIConfig(JSON.parse(raw) as AIModelConfig) }
+      return { success: true, data: repository.getAIConfig() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -55,7 +53,7 @@ export function setupSettingsIPC(): void {
   // Save AI model config
   ipcMain.handle('settings:setAIConfig', (_, config: AIModelConfig): SettingsIPCResponse => {
     try {
-      db.setSetting('ai_model_config', JSON.stringify(normalizeAIConfig(config)))
+      repository.setAIConfig(normalizeAIConfig(config))
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

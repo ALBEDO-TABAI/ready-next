@@ -1,8 +1,8 @@
 import { spawn, spawnSync, ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { WorktreePool } from './worktree-pool'
-import { getDatabase } from '../database'
 import { type AIModelConfig, normalizeAIConfig } from '../../../shared/ai-providers'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 export interface AgentInstance {
   name: string
@@ -114,6 +114,8 @@ const AGENT_TOOLS: AgentToolDef[] = [
     }
   }
 ]
+
+const settingsRepository = new AppSettingsRepository()
 
 function buildToolSystemPrompt(): string {
   const toolDescriptions = AGENT_TOOLS.map(t => {
@@ -544,7 +546,7 @@ export class AgentManager extends EventEmitter {
    */
   private getAIConfig(): AIModelConfig | null {
     try {
-      const raw = getDatabase().getSetting('ai_model_config')
+      const raw = settingsRepository.getSetting('ai_model_config')
       if (raw) return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
     } catch {
       // ignore parse errors

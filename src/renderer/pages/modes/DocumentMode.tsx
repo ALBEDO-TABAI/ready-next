@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
-import { FileText, X, Plus, Loader2 } from 'lucide-react'
+import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import FilePreview from '../../components/document/FilePreview'
-import { MorphTabButton, MorphTabStrip } from '../../components/motion/MorphTabStrip'
+import WorkbenchProjectTabs from '../../components/workbench/WorkbenchProjectTabs'
+import { WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -109,8 +110,6 @@ export default function DocumentMode() {
 
   // Drag & drop reorder
   const dragIndexRef = useRef<number | null>(null)
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null)
-
   const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
     dragIndexRef.current = index
     e.dataTransfer.effectAllowed = 'move'
@@ -131,7 +130,7 @@ export default function DocumentMode() {
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDropTargetIndex(index)
+    void index
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent, index: number) => {
@@ -140,12 +139,10 @@ export default function DocumentMode() {
       reorderTabs(dragIndexRef.current, index)
     }
     dragIndexRef.current = null
-    setDropTargetIndex(null)
   }, [reorderTabs])
 
   const handleDragEnd = useCallback(() => {
     dragIndexRef.current = null
-    setDropTargetIndex(null)
   }, [])
 
   // Split resize
@@ -159,101 +156,33 @@ export default function DocumentMode() {
 
   return (
     <div className="workbench-mode-root">
-      {/* Tab Bar & Header Row */}
-      <div
-        className="glass-surface-panel flex items-center justify-between flex-shrink-0"
-        style={{
-          height: 42,
-          background: 'var(--surface-toolbar-bg)',
-          borderBottom: '1px solid var(--border-default)',
+      <WorkbenchProjectTabs
+        layoutId="document-tabs"
+        tabs={tabs.map((tab) => {
+          const isPrimary = tab.id === activeTabId
+          const isSplit = tab.id === splitTabId
+          const isSplitOnly = isSplit && !isPrimary
+          return {
+            id: tab.id,
+            label: tab.title,
+            title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
+            dotColor: getFileTypeColor(tab.path),
+            active: isPrimary,
+            secondaryActive: isSplitOnly,
+            dirty: tab.isDirty,
+          }
+        })}
+        onTabClick={(id, event) => handleTabClick(id, event)}
+        onTabClose={(id) => closeTab(id)}
+        onNewTab={() => openTab('')}
+        onTabDragStart={(event, id) => {
+          const index = tabs.findIndex((tab) => tab.id === id)
+          if (index >= 0) handleDragStart(event, index)
         }}
-      >
-        {/* Left: File Tabs */}
-        <div className="flex items-end h-full min-w-0 flex-1 overflow-hidden" style={{ paddingLeft: 8 }}>
-          <MorphTabStrip
-            layoutId="document-tabs"
-            className="flex items-end h-full min-w-0 flex-1 overflow-hidden gap-[1px]"
-          >
-            {tabs.map((tab, index) => {
-              const isPrimary = tab.id === activeTabId
-              const isSplit = tab.id === splitTabId
-              const isSplitOnly = isSplit && !isPrimary
-              const isActive = isPrimary || isSplitOnly
-              const showDropIndicator = dropTargetIndex === index && dragIndexRef.current !== null && dragIndexRef.current !== index
-              const dotColor = getFileTypeColor(tab.path)
-              return (
-                <div key={tab.id} className="relative flex items-end min-w-0 flex-1 max-w-[220px]">
-                  {showDropIndicator && (
-                    <div
-                      className="absolute left-0 top-[6px] bottom-[2px] w-[2px] rounded-full"
-                      style={{ background: 'var(--color-blue)', zIndex: 10 }}
-                    />
-                  )}
-                  <MorphTabButton
-                    layoutId="document-tabs"
-                    active={isPrimary}
-                    secondaryActive={isSplitOnly}
-                    onClick={(e) => handleTabClick(tab.id, e)}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, index)}
-                    onDragOver={(e) => handleDragOver(e, index)}
-                    onDrop={(e) => handleDrop(e, index)}
-                    onDragEnd={handleDragEnd}
-                    className="group flex w-full min-w-0 items-center rounded-t-[8px] text-[12px] transition-all duration-150 ease-out"
-                    style={{
-                      gap: 6,
-                      padding: '6px 12px',
-                      cursor: 'grab',
-                      marginBottom: -1,
-                      background: isActive ? 'var(--surface-card-bg)' : 'transparent',
-                      color: isActive ? 'var(--text-body)' : 'var(--text-muted)',
-                      border: '1px solid var(--border-default)',
-                      borderBottom: isPrimary
-                        ? '1px solid var(--surface-card-bg)'
-                        : isSplitOnly
-                          ? '2px solid var(--color-blue)'
-                          : '1px solid var(--border-default)',
-                    }}
-                    contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
-                    title={`${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`}
-                  >
-                    <span
-                      className="flex-shrink-0 rounded-full"
-                      style={{ width: 8, height: 8, background: dotColor }}
-                    />
-                    <span className="truncate flex-1 min-w-0">
-                      {tab.title}
-                      {tab.isDirty && <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span>}
-                    </span>
-                    <span
-                      role="button"
-                      onClick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
-                      className="rounded transition-all duration-150 ease-out cursor-pointer opacity-0 group-hover:opacity-100 flex-shrink-0 active:scale-[0.95]"
-                      style={{ padding: 2, color: 'var(--text-light)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-body)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-light)')}
-                    >
-                      <X style={{ width: 11, height: 11 }} strokeWidth={2} />
-                    </span>
-                  </MorphTabButton>
-                </div>
-              )
-            })}
-          </MorphTabStrip>
-
-          {/* Add tab button */}
-          <button
-            onClick={() => openTab('')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, marginLeft: 2, marginBottom: 3 }}
-            title="新建文档"
-          >
-            <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={1.8} />
-          </button>
-        </div>
-
-        {/* Right: Edit/Preview Switcher */}
-        <div className="flex items-center flex-shrink-0" style={{ paddingRight: 16 }}>
+        onTabDragOver={handleDragOver}
+        onTabDrop={handleDrop}
+        onTabDragEnd={handleDragEnd}
+        rightActions={
           <div
             className="glass-surface-card flex items-center"
             style={{
@@ -261,6 +190,7 @@ export default function DocumentMode() {
               borderRadius: 6,
               padding: 2,
               border: '1px solid var(--surface-border)',
+              height: Math.max(28, WORKBENCH_TOOLBAR_ROW_HEIGHT - 8),
             }}
           >
             {(['edit', 'preview'] as const).map((mode) => (
@@ -289,8 +219,8 @@ export default function DocumentMode() {
               </button>
             ))}
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Content Area */}
       {splitTab && activeTab ? (

@@ -3,6 +3,7 @@ import {
   Plus, X, Globe, Loader2, ChevronLeft, ChevronRight, Lock
 } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
+import { WORKBENCH_ROW_PADDING_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface Tab {
   id: string
@@ -128,8 +129,8 @@ export default function BrowserTabBar({
     <div
       className="glass-surface-panel flex items-center no-drag"
       style={{
-        height: 34,
-        padding: '0 8px',
+        height: WORKBENCH_TAB_ROW_HEIGHT,
+        padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
         background: 'var(--surface-toolbar-bg)',
         borderBottom: '1px solid var(--border-default)',
         gap: 0,
@@ -173,7 +174,7 @@ export default function BrowserTabBar({
                   gap: 6,
                   height: isActive ? 33 : 28,
                   flex: '1 1 0',
-                  maxWidth: 220,
+                  maxWidth: WORKBENCH_TAB_MAX_WIDTH,
                   minWidth: 0,
                   background: isActive ? 'var(--surface-card-bg)' : 'transparent',
                   color: isActive ? 'var(--text-title)' : 'var(--text-gray)',

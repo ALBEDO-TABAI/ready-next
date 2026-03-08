@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
+const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
+
 export interface ContextMenuItem {
   id: string
   label: string
@@ -21,6 +23,22 @@ interface ContextMenuProps {
 export default function ContextMenu({ items, x, y, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [adjustedPos, setAdjustedPos] = useState({ x, y })
+
+  useLayoutEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, {
+        detail: { source: 'context-menu', locked: true },
+      }),
+    )
+
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, {
+          detail: { source: 'context-menu', locked: false },
+        }),
+      )
+    }
+  }, [])
 
   useLayoutEffect(() => {
     if (!menuRef.current) return

@@ -6,6 +6,7 @@ import { getDatabase } from '../database'
 import { appendFileSync, readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime'
+import { ChatRepository } from '../repositories/chat-repository'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -66,6 +67,7 @@ export interface IPCResponse<T = unknown> {
 }
 
 let runtime: AgentControlRuntime | null = null
+const chatRepository = new ChatRepository()
 
 export async function cleanupAgentRuntime(): Promise<void> {
   if (!runtime) return
@@ -407,8 +409,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('chat:getConversations', (_, agent: string): IPCResponse => {
     try {
-      const db = getDatabase()
-      const conversations = db.getConversations(agent)
+      const conversations = chatRepository.getConversations(agent)
       return { success: true, data: conversations }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -417,8 +418,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('chat:getMessages', (_, conversationId: string): IPCResponse => {
     try {
-      const db = getDatabase()
-      const messages = db.getChatMessages(conversationId)
+      const messages = chatRepository.getMessages(conversationId)
       return { success: true, data: messages }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -427,8 +427,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('chat:deleteConversation', (_, conversationId: string): IPCResponse => {
     try {
-      const db = getDatabase()
-      db.deleteConversation(conversationId)
+      chatRepository.deleteConversation(conversationId)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -439,8 +438,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     id: string; conversationId: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown>
   }): IPCResponse => {
     try {
-      const db = getDatabase()
-      db.addChatMessage(data.id, data.conversationId, data.role, data.content, data.timestamp, data.meta)
+      chatRepository.saveMessage(data)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -451,8 +449,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     id: string; agent: string; title: string
   }): IPCResponse => {
     try {
-      const db = getDatabase()
-      db.createConversation(data.id, data.agent, data.title)
+      chatRepository.createConversation(data)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -463,8 +460,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     id: string; title: string
   }): IPCResponse => {
     try {
-      const db = getDatabase()
-      db.updateConversationTitle(data.id, data.title)
+      chatRepository.updateConversationTitle(data)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -786,6 +782,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   runtime.on('conversationEvent', (data) => {
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:conversationEvent', data)
+    }
+  })
+
+  runtime.on('scopeRunEvent', (data) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:scopeRunEvent', data)
     }
   })
 

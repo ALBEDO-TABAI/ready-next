@@ -11,7 +11,6 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFil
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
-import { getDatabase } from '../database'
 import { AIModelConfig, type AIWireAPI, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
@@ -35,17 +34,21 @@ import {
   executeToolCall,
 } from '../tools'
 import { findSkillToolBySkillAction } from '../tools/skills-tools'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import {
   buildTextToolBridgePrompt,
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
   parseTextToolBridgeResponse,
 } from './tool-bridge'
+import { ChatRepository } from '../repositories/chat-repository'
 
 const LOG = '/tmp/ready-directchat.log'
 const execFileAsync = promisify(execFile)
 const DEFAULT_KIMI_CODING_USER_AGENT = 'KimiCLI/1.14.0'
 const API_REQUEST_TIMEOUT_MS = 45_000
+const settingsRepository = new AppSettingsRepository()
+const chatRepository = new ChatRepository()
 
 interface NamedBrowserSite {
   id: string
@@ -827,7 +830,7 @@ export class DirectChatEngine extends EventEmitter {
 
   getAIConfig(): AIModelConfig | null {
     try {
-      const raw = getDatabase().getSetting('ai_model_config')
+      const raw = settingsRepository.getSetting('ai_model_config')
       if (raw) return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
     } catch { /* ignore */ }
     return null
@@ -840,7 +843,7 @@ export class DirectChatEngine extends EventEmitter {
       return !(normalizedEnv === 'false' || normalizedEnv === '0' || normalizedEnv === 'off')
     }
     try {
-      const raw = getDatabase().getSetting('browser_agent_v3_enabled')
+      const raw = settingsRepository.getSetting('browser_agent_v3_enabled')
       if (raw == null || raw === '') return true
       const normalized = String(raw).trim().toLowerCase()
       return !(normalized === 'false' || normalized === '0' || normalized === 'off')
@@ -872,7 +875,7 @@ export class DirectChatEngine extends EventEmitter {
   private getSessionAttachmentResources(sessionId?: string): BrowserTaskAttachmentResource[] {
     if (!sessionId) return []
     try {
-      return getDatabase()
+      return chatRepository
         .listConversationAttachments(sessionId)
         .filter((item) => item.path && existsSync(item.path))
         .map((item) => ({
@@ -1997,11 +2000,22 @@ export class DirectChatEngine extends EventEmitter {
     this.sessions.set(name, {
       messages: [],
       abortController: null,
-      systemPrompt: basePrompt + '\n' + TOOL_SYSTEM_PROMPT,
+      systemPrompt: `${basePrompt}\n${TOOL_SYSTEM_PROMPT}`,
       generation: 0,
       activeRunId: null,
       preferTextToolBridge: false,
     })
+  }
+
+  setSystemPrompt(name: string, systemPrompt?: string): void {
+    const basePrompt = systemPrompt ||
+      '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。'
+    if (!this.sessions.has(name)) {
+      this.newSession(name, basePrompt)
+      return
+    }
+    const session = this.sessions.get(name)!
+    session.systemPrompt = `${basePrompt}\n${TOOL_SYSTEM_PROMPT}`
   }
 
   stopGeneration(name: string): void {

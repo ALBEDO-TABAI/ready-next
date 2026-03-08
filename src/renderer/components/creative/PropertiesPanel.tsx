@@ -7,7 +7,7 @@ import {
   AlignEndVertical,
   RotateCcw,
 } from 'lucide-react'
-import { type TimelineClip, type SelectedClip, type ClipType, type SubtitleStyle } from '../../pages/modes/VideoMode'
+import type { TimelineClip, SelectedClip, ClipType, SubtitleStyle } from '../../modules/video/types'
 
 interface PropertiesPanelProps {
   selectedClip: SelectedClip | null

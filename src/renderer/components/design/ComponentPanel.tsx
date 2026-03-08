@@ -747,6 +747,7 @@ export default function ComponentPanel() {
       : null
     const metaInspectorContext = typeof meta.readyInspectorContext === 'string' ? meta.readyInspectorContext : null
     const metaFontFamily = typeof meta.readyFontFamily === 'string' ? meta.readyFontFamily as TLDefaultFontStyle : null
+    const metaFontSize = typeof meta.readyFontSize === 'number' ? meta.readyFontSize : null
     const metaFillVisible = typeof meta.readyFillVisible === 'boolean' ? meta.readyFillVisible : null
     const metaFontWeight = typeof meta.readyFontWeight === 'string'
       ? meta.readyFontWeight as 'regular' | 'medium' | 'bold'
@@ -787,6 +788,7 @@ export default function ComponentPanel() {
     if (metaGridType) setGridType(metaGridType)
     if (metaInspectorContext) setContextInfo(metaInspectorContext)
     if (metaFontFamily) setFontFamily(metaFontFamily)
+    if (metaFontSize !== null) setFontSize(Math.max(10, metaFontSize))
     if (metaFillVisible !== null) setFillVisible(metaFillVisible)
     if (metaFontWeight) setFontWeight(metaFontWeight)
     if (metaTextAlign) setParagraphAlign(metaTextAlign)
@@ -803,6 +805,15 @@ export default function ComponentPanel() {
     if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-text-block') {
       setFontSize(selectedShape.props.fontSize)
       setTextColor(selectedShape.props.color)
+    }
+    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-button' && metaFontSize === null) {
+      setFontSize(13)
+    }
+    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-input' && metaFontSize === null) {
+      setFontSize(12)
+    }
+    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-card' && metaFontSize === null) {
+      setFontSize(14)
     }
     if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-button') {
       setCornerRadius(selectedShape.props.cornerRadius)
@@ -905,16 +916,34 @@ export default function ComponentPanel() {
     setFontSize(nextSize)
     if (!selectedShape) return
 
-    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-text-block') {
-      editor.updateShape({
-        id: selectedShape.id,
-        type: selectedShape.type,
-        props: {
-          ...selectedShape.props,
-          fontSize: nextSize,
-        },
-      } as never)
-      return
+    if (isDesignCustomShape(selectedShape)) {
+      if (selectedShape.type === 'ui-text-block') {
+        editor.updateShape({
+          id: selectedShape.id,
+          type: selectedShape.type,
+          props: {
+            ...selectedShape.props,
+            fontSize: nextSize,
+          },
+          meta: {
+            ...(selectedShape.meta || {}),
+            readyFontSize: nextSize,
+          },
+        } as never)
+        return
+      }
+
+      if (selectedShape.type === 'ui-button' || selectedShape.type === 'ui-input' || selectedShape.type === 'ui-card') {
+        editor.updateShape({
+          id: selectedShape.id,
+          type: selectedShape.type,
+          meta: {
+            ...(selectedShape.meta || {}),
+            readyFontSize: nextSize,
+          },
+        } as never)
+        return
+      }
     }
 
     if (selectedShape.type === 'text') {
@@ -1670,10 +1699,10 @@ export default function ComponentPanel() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [uiHidden])
 
-  const isTextSelected = Boolean(
+  const supportsTypographyControls = Boolean(
     selectedShape && (
       selectedShape.type === 'text' ||
-      (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-text-block')
+      (isDesignCustomShape(selectedShape) && ['ui-text-block', 'ui-button', 'ui-input', 'ui-card'].includes(selectedShape.type))
     )
   )
 
@@ -2283,7 +2312,7 @@ export default function ComponentPanel() {
             </div>
           </Section>
 
-          {isTextSelected ? (
+          {supportsTypographyControls ? (
             <Section title="Typography" open={openSections.typography} onToggle={() => toggleSection('typography')}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

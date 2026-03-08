@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Eye, EyeOff, Lock, LockOpen, Volume2, VolumeX, Plus } from 'lucide-react'
-import { type TimelineClip, type ClipType, type SelectedClip } from '../../pages/modes/VideoMode'
+import type { TimelineClip, ClipType, SelectedClip } from '../../modules/video/types'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,

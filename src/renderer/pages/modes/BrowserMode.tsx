@@ -1,73 +1,22 @@
 import { useCallback, useRef, useEffect, useState, useMemo } from 'react'
-import { Globe, Plus, AlertTriangle, CheckCircle, RefreshCw, X, Trash2, ExternalLink, Clock } from 'lucide-react'
+import { Globe, Plus } from 'lucide-react'
 import BrowserTabBar from '../../components/browser/BrowserTabBar'
 import BrowserAddressBar from '../../components/browser/BrowserAddressBar'
+import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
+import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
+import type {
+  AdblockState,
+  BrowserDiagnosticsData,
+  BookmarkItem,
+  DownloadItem,
+  HistoryItem,
+  PanelType,
+  TabUpdateEvent,
+} from '../../modules/browser/types'
 import { useMode } from '../../stores/useMode'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
-
-type PanelType = 'bookmarks' | 'downloads' | 'history' | null
-
-interface BookmarkItem {
-  id: string
-  url: string
-  title: string
-  favicon: string | null
-  created_at: number
-}
-
-interface HistoryItem {
-  id: string
-  url: string
-  title: string
-  favicon?: string | null
-  domain?: string
-  visit_count?: number
-  last_visit_time?: number
-  visited_at: number
-}
-
-interface DownloadItem {
-  id: string
-  url: string
-  filename: string
-  save_path: string
-  total_bytes: number
-  received_bytes: number
-  state: string
-  mime_type?: string | null
-  error?: string | null
-  end_time?: number | null
-  can_resume?: number
-  created_at: number
-}
-
-interface TabUpdateEvent {
-  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta'
-  tabId: string
-  title?: string
-  url?: string
-  domain?: string
-  favicon?: string | null
-  owner?: 'manual' | 'agent'
-  required?: boolean
-  activity?: 'idle' | 'running' | 'attention'
-  lastAuditedAt?: number | null
-  loading?: boolean
-  canGoBack?: boolean
-  canGoForward?: boolean
-  error?: string
-}
-
-interface AdblockState {
-  enabled: boolean
-  previewEnabled: boolean
-  whitelistDomains: string[]
-  rulesVersion: string
-  networkBlockedCount: number
-  lastUpdatedAt: number | null
-}
 
 const DEFAULT_URL = 'https://gemini.google.com'
 const SEARCH_URL = 'https://www.google.com/search?q='
@@ -123,15 +72,11 @@ export default function BrowserMode() {
     networkBlockedCount: 0,
     lastUpdatedAt: null,
   })
+  const [browserDiagnostics, setBrowserDiagnostics] = useState<BrowserDiagnosticsData | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI
   const shownDomainsRef = useRef<Set<string>>(new Set())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const boundsRafRef = useRef<number | null>(null)
-  const lastBoundsKeyRef = useRef('')
-  const lastSentBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const lastBoundsSentAtRef = useRef(0)
-  const layoutTransitionUntilRef = useRef(0)
   const prevLoadingRef = useRef<Record<string, boolean>>({})
 
   const workbenchMode = useMode(s => s.workbenchMode)
@@ -152,6 +97,20 @@ export default function BrowserMode() {
     if (!currentDomain) return false
     return adblockState.whitelistDomains.some((domain) => currentDomain === domain || currentDomain.endsWith(`.${domain}`))
   }, [adblockState.whitelistDomains, currentDomain])
+  const hasError = !!activeTab?.error
+  const { sendBounds, sendBoundsImmediate } = useBrowserViewBounds({
+    isElectron,
+    contentRef,
+    workbenchMode,
+    sidebarVisible,
+    sidePanelVariant,
+    effectiveSidePanelWidth,
+    skillsSplitRatio,
+    chatPanelVisible,
+    chatPanelWidth,
+    activePanel,
+    hasError,
+  })
 
   // URL helpers — auto-Google for non-URL input (Task 2)
   const normalizeUrl = useCallback((input: string): string => {
@@ -254,9 +213,15 @@ export default function BrowserMode() {
 
   const refreshAdblockState = useCallback(async () => {
     if (!isElectron) return
-    const result = await window.electronAPI?.browser?.getAdblockState()
-    if (result?.success && result.data) {
-      setAdblockState(result.data as AdblockState)
+    const [adblockResult, diagnosticsResult] = await Promise.all([
+      window.electronAPI?.browser?.getAdblockState(),
+      window.electronAPI?.browser?.getDiagnostics?.(),
+    ])
+    if (adblockResult?.success && adblockResult.data) {
+      setAdblockState(adblockResult.data as AdblockState)
+    }
+    if (diagnosticsResult?.success && diagnosticsResult.data) {
+      setBrowserDiagnostics(diagnosticsResult.data as BrowserDiagnosticsData)
     }
   }, [isElectron])
 
@@ -439,145 +404,6 @@ export default function BrowserMode() {
     reorderTabs(fromIndex, toIndex)
   }, [reorderTabs])
 
-  // == Bounds management ==
-  // BrowserView is a native OS-level overlay, NOT in the DOM.
-  // We must keep its bounds pixel-perfect with the content area at all times.
-  const sendBoundsImmediate = useCallback((options?: { forceExact?: boolean }) => {
-    if (!isElectron || !contentRef.current) return
-    const CHAT_PANEL_RESIZE_HANDLE_WIDTH = 4
-    const rect = contentRef.current.getBoundingClientRect()
-    const shellRect = contentRef.current.closest('[data-workbench-shell="true"]')?.getBoundingClientRect()
-    const shellRight = shellRect?.right ?? window.innerWidth
-    const chatPanelRect = document.querySelector<HTMLElement>('[data-chat-panel-root="true"]')?.getBoundingClientRect()
-    const chatPanelVisuallyOccupiesSpace = Boolean(chatPanelRect && chatPanelRect.width > CHAT_PANEL_RESIZE_HANDLE_WIDTH + 1)
-    const safeRightFromDom = chatPanelVisuallyOccupiesSpace && chatPanelRect
-      ? chatPanelRect.left - CHAT_PANEL_RESIZE_HANDLE_WIDTH
-      : Number.POSITIVE_INFINITY
-    const safeRightFromState = chatPanelVisible
-      ? shellRight - chatPanelWidth - CHAT_PANEL_RESIZE_HANDLE_WIDTH
-      : shellRight
-    const safeRight = chatPanelVisuallyOccupiesSpace
-      ? Math.min(shellRight, safeRightFromDom)
-      : Math.min(shellRight, safeRightFromState)
-    const x = Math.round(rect.left)
-    const y = Math.round(rect.top)
-    const exactWidth = Math.round(Math.max(0, safeRight - rect.left))
-    const height = Math.round(rect.height)
-    if (exactWidth <= 0 || height <= 0) return
-
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    const isManualResizing = document.body.classList.contains('resizing')
-    const isLayoutTransitionActive = now < layoutTransitionUntilRef.current
-    const shouldSoftenResize = !options?.forceExact && (isManualResizing || isLayoutTransitionActive)
-    const widthStep = isManualResizing ? 24 : 36
-    const minSendInterval = isManualResizing ? 28 : 42
-    const width = shouldSoftenResize
-      ? Math.max(1, Math.floor(exactWidth / widthStep) * widthStep || exactWidth)
-      : exactWidth
-
-    const last = lastSentBoundsRef.current
-    if (shouldSoftenResize && last) {
-      const widthDelta = Math.abs(width - last.width)
-      const xDelta = Math.abs(x - last.x)
-      const elapsed = now - lastBoundsSentAtRef.current
-      if (elapsed < minSendInterval && widthDelta < widthStep && xDelta < 10) {
-        return
-      }
-    }
-
-    const boundsKey = `${x}:${y}:${width}:${height}`
-    if (lastBoundsKeyRef.current === boundsKey) return
-    lastBoundsKeyRef.current = boundsKey
-    lastSentBoundsRef.current = { x, y, width, height }
-    lastBoundsSentAtRef.current = now
-    window.electronAPI?.browser?.updateBounds({
-      x,
-      y,
-      width,
-      height,
-    })
-  }, [chatPanelVisible, chatPanelWidth, isElectron])
-
-  const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
-    if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
-    boundsRafRef.current = requestAnimationFrame(() => {
-      boundsRafRef.current = null
-      sendBoundsImmediate(options)
-    })
-  }, [sendBoundsImmediate])
-
-  // Observe content area size changes + window resize
-  useEffect(() => {
-    const el = contentRef.current
-    if (!el) return
-    const observer = new ResizeObserver(() => {
-      sendBounds()
-    })
-    observer.observe(el)
-    const handleResize = () => sendBounds()
-    window.addEventListener('resize', handleResize)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', handleResize)
-      if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
-    }
-  }, [sendBounds])
-
-  // Layout transition sync: quantize live width updates during panel animation,
-  // then send an exact correction once the layout settles.
-  useEffect(() => {
-    if (workbenchMode !== 'browser') return
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    layoutTransitionUntilRef.current = now + 380
-    if (document.body.classList.contains('resizing')) {
-      sendBounds()
-      return
-    }
-    const timers = [
-      window.setTimeout(() => sendBounds(), 0),
-      window.setTimeout(() => sendBounds(), 120),
-      window.setTimeout(() => sendBounds(), 240),
-      window.setTimeout(() => sendBounds({ forceExact: true }), 380),
-    ]
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [
-    sidebarVisible,
-    sidePanelVariant,
-    effectiveSidePanelWidth,
-    skillsSplitRatio,
-    chatPanelVisible,
-    chatPanelWidth,
-    activePanel,
-    workbenchMode,
-    sendBounds,
-  ])
-
-  // Show/hide BrowserView when workbenchMode changes
-  useEffect(() => {
-    if (!isElectron) return
-    if (workbenchMode === 'browser') {
-      window.electronAPI?.browser?.showActive()
-      // Delay first bounds send slightly to let layout settle
-      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
-    } else {
-      window.electronAPI?.browser?.hideAll()
-    }
-  }, [workbenchMode, isElectron, sendBoundsImmediate])
-
-  // Only hide BrowserView for true full-page error states.
-  const hasError = !!activeTab?.error
-  useEffect(() => {
-    if (!isElectron || workbenchMode !== 'browser') return
-    if (hasError) {
-      window.electronAPI?.browser?.hideAll()
-    } else {
-      window.electronAPI?.browser?.showActive()
-      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
-    }
-  }, [hasError, isElectron, workbenchMode, sendBoundsImmediate])
-
   // Task 6: Listen to tab update events from backend
   useEffect(() => {
     if (!isElectron) return
@@ -663,6 +489,15 @@ export default function BrowserMode() {
 
   useEffect(() => {
     if (!isElectron) return
+    void window.electronAPI?.browser?.getDiagnostics?.().then((result) => {
+      if (result?.success && result.data) {
+        setBrowserDiagnostics(result.data as BrowserDiagnosticsData)
+      }
+    })
+  }, [isElectron, activeTabId, tabs.length, adblockState.networkBlockedCount])
+
+  useEffect(() => {
+    if (!isElectron) return
     const cleanup = window.electronAPI?.browser?.onBookmarksChanged(async () => {
       const res = await window.electronAPI?.browser?.getBookmarks()
       if (res?.success && res.data) {
@@ -727,7 +562,6 @@ export default function BrowserMode() {
       // Only hide BrowserView on unmount — tab state persists in store
       window.electronAPI?.browser?.hideAll()
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-      if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -822,337 +656,33 @@ export default function BrowserMode() {
         onPrint={handlePrint}
       />
 
-      {/* Loading bar — placed OUTSIDE contentRef so it renders above native BrowserView */}
-      {activeTab?.loading && (
-        <div className="h-0.5 flex-shrink-0 relative overflow-hidden" style={{ background: 'var(--border-default)' }}>
-          <div
-            className="h-full rounded-r absolute top-0 left-0"
-            style={{
-              background: 'var(--color-blue)',
-              animation: 'browserContentProgress 1.5s ease-in-out infinite',
-            }}
-          />
-        </div>
-      )}
-
-      <div className="flex min-h-0 flex-1">
-        {/* Browser Content Area — BrowserView renders here natively */}
-        <div
-          ref={contentRef}
-          className="relative min-w-0 flex-1"
-          onDragOver={handleContentDragOver}
-          onDrop={handleContentDrop}
-        >
-          {/* BrowserView is positioned by Electron over this area */}
-          {!isElectron && (
-            <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
-              <div className="text-center">
-                <Globe className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p className="text-[13px]">Browser requires Electron environment</p>
-              </div>
-            </div>
-          )}
-
-          {/* Error page overlay — BrowserView is hidden via useEffect when error is active */}
-          {activeTab?.error && (
-            <div
-              className="absolute inset-0 flex items-center justify-center"
-              style={{ background: 'var(--bg-content)' }}
-            >
-              <div className="text-center" style={{ maxWidth: 360 }}>
-                <AlertTriangle
-                  className="mx-auto mb-4"
-                  style={{ width: 48, height: 48, color: 'var(--color-orange)' }}
-                  strokeWidth={1.5}
-                />
-                <p className="text-[15px] font-medium mb-2" style={{ color: 'var(--text-title)' }}>
-                  Page failed to load
-                </p>
-                <p className="text-[12px] mb-4" style={{ color: 'var(--text-gray)', lineHeight: 1.6 }}>
-                  {activeTab.error}
-                </p>
-                <button
-                  onClick={handleRetry}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--color-blue-light)]"
-                  style={{
-                    color: 'var(--color-blue)',
-                    fontSize: 13,
-                    border: '1px solid var(--color-blue)',
-                    background: 'transparent',
-                  }}
-                >
-                  <RefreshCw style={{ width: 14, height: 14 }} strokeWidth={2} />
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Task 7: Cookie persistence toast */}
-          {toastVisible && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 16,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'var(--surface-floating-bg)',
-                color: 'var(--text-body)',
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                zIndex: 30,
-                animation: 'cookieToastFade 3s ease-in-out forwards',
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-                border: '1px solid var(--surface-border)',
-                backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-                WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-              }}
-            >
-              <CheckCircle
-                style={{ width: 16, height: 16, color: 'var(--color-green)', flexShrink: 0 }}
-                strokeWidth={2}
-              />
-              已保存登录状态
-            </div>
-          )}
-        </div>
-
-        {activePanel && (
-          <aside
-            className="content-surface-panel flex h-full w-[320px] flex-shrink-0 flex-col overflow-hidden border-l"
-            style={{
-              borderColor: 'var(--border-default)',
-              background: 'var(--surface-panel-bg)',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div
-              className="glass-surface-panel flex items-center justify-between"
-              style={{
-                padding: '10px 14px',
-                background: 'var(--surface-toolbar-bg)',
-                borderBottom: '1px solid var(--border-default)',
-              }}
-            >
-              <div>
-                <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                  {activePanel === 'bookmarks' ? '收藏夹' : activePanel === 'downloads' ? '下载' : '历史记录'}
-                </div>
-                <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                  {activePanel === 'bookmarks'
-                    ? `${bookmarks.length} 条收藏`
-                    : activePanel === 'downloads'
-                      ? `${downloads.length} 条下载`
-                      : `${historyItems.length} 条记录`}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {activePanel === 'bookmarks' && selectedBookmarkUrl && (
-                  <>
-                    <button
-                      onClick={() => void handleNavigateFromPanel(selectedBookmarkUrl)}
-                      className="rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                      style={{ color: 'var(--color-blue)' }}
-                    >
-                      打开
-                    </button>
-                    <button
-                      onClick={() => void handleRemoveBookmark(selectedBookmarkUrl)}
-                      className="rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                      style={{ color: 'var(--color-red)' }}
-                    >
-                      移除
-                    </button>
-                  </>
-                )}
-                {activePanel === 'history' && historyItems.length > 0 && (
-                  <button
-                    onClick={handleClearHistory}
-                    className="rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                    style={{ color: 'var(--color-red)' }}
-                  >
-                    清空
-                  </button>
-                )}
-                {activePanel === 'downloads' && downloads.length > 0 && (
-                  <button
-                    onClick={handleClearDownloads}
-                    className="rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                    style={{ color: 'var(--color-red)' }}
-                  >
-                    清空
-                  </button>
-                )}
-                <button
-                  onClick={() => setActivePanel(null)}
-                  className="flex items-center justify-center rounded hover:bg-[var(--bg-hover)] transition-colors"
-                  style={{ width: 22, height: 22 }}
-                >
-                  <X style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-
-            <div
-              className="flex items-center justify-between border-b px-3 py-2"
-              style={{
-                borderColor: 'var(--border-default)',
-                background: 'var(--surface-card-bg)',
-              }}
-            >
-              <div>
-                <div className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  Adblock
-                </div>
-                <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                  {adblockState.enabled ? '已开启' : '已关闭'} · 已拦截 {adblockState.networkBlockedCount} 次
-                </div>
-              </div>
-              <button
-                onClick={handleToggleAdblock}
-                className="rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                style={{ color: adblockState.enabled ? 'var(--color-blue)' : 'var(--color-orange)' }}
-              >
-                {adblockState.enabled ? '关闭' : '开启'}
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto">
-              {activePanel === 'bookmarks' && (
-                bookmarks.length === 0 ? (
-                  <div className="flex items-center justify-center py-8" style={{ color: 'var(--text-light)' }}>
-                    <div className="text-center">
-                      <Globe className="w-8 h-8 mx-auto mb-2 opacity-30" strokeWidth={1.5} />
-                      <p className="text-[12px]">暂无收藏</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2">
-                    {bookmarks.map((item) => {
-                      const isSelected = selectedBookmarkUrl === item.url
-                      return (
-                        <div
-                          key={item.id}
-                          className="mb-1 cursor-pointer rounded-[10px] border px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
-                          style={{
-                            borderColor: isSelected ? 'var(--color-blue)' : 'transparent',
-                            background: isSelected ? 'var(--color-blue-light)' : 'transparent',
-                          }}
-                          onClick={() => setSelectedBookmarkUrl(item.url)}
-                          onDoubleClick={() => void handleNavigateFromPanel(item.url)}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Globe style={{ width: 14, height: 14, flexShrink: 0 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-[12px]" style={{ color: 'var(--text-title)' }}>{item.title}</div>
-                              <div className="truncate text-[10px]" style={{ color: 'var(--text-light)' }}>{item.url}</div>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              )}
-
-              {activePanel === 'history' && (
-                historyItems.length === 0 ? (
-                  <div className="flex items-center justify-center py-8" style={{ color: 'var(--text-light)' }}>
-                    <div className="text-center">
-                      <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" strokeWidth={1.5} />
-                      <p className="text-[12px]">暂无历史记录</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2">
-                    {historyItems.map(item => (
-                      <div
-                        key={item.id}
-                        className="mb-1 flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
-                        onClick={() => void handleNavigateFromPanel(item.url)}
-                      >
-                        <Globe style={{ width: 14, height: 14, flexShrink: 0 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[12px]" style={{ color: 'var(--text-title)' }}>{item.title}</div>
-                          <div className="truncate text-[10px]" style={{ color: 'var(--text-light)' }}>{item.url}</div>
-                        </div>
-                        <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-light)' }}>
-                          {new Date((item.last_visit_time || item.visited_at) * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
-
-              {activePanel === 'downloads' && (
-                downloads.length === 0 ? (
-                  <div className="flex items-center justify-center py-8" style={{ color: 'var(--text-light)' }}>
-                    <div className="text-center">
-                      <ExternalLink className="w-8 h-8 mx-auto mb-2 opacity-30" strokeWidth={1.5} />
-                      <p className="text-[12px]">暂无下载</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2">
-                    {downloads.map(item => (
-                      <div
-                        key={item.id}
-                        className="mb-1 rounded-[10px] px-3 py-2"
-                        style={{ background: 'var(--surface-card-bg)' }}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12px]" style={{ color: 'var(--text-title)' }}>{item.filename}</div>
-                            <div className="truncate text-[10px]" style={{ color: 'var(--text-light)' }}>
-                              {item.state === 'completed' ? '已完成' : item.state === 'cancelled' ? '已取消' : '下载中...'}
-                              {item.total_bytes > 0 && ` · ${(item.total_bytes / 1024 / 1024).toFixed(1)} MB`}
-                              {item.mime_type ? ` · ${item.mime_type}` : ''}
-                            </div>
-                            {item.error && (
-                              <div className="truncate text-[10px]" style={{ color: 'var(--color-red)' }}>
-                                {item.error}
-                              </div>
-                            )}
-                          </div>
-                          <span
-                            className="text-[10px] flex-shrink-0 px-2 py-0.5 rounded-full"
-                            style={{
-                              background: item.state === 'completed' ? 'var(--color-green-light)' : 'var(--bg-canvas)',
-                              color: item.state === 'completed' ? 'var(--color-green)' : 'var(--text-light)',
-                            }}
-                          >
-                            {item.state === 'completed' ? '完成' : item.state === 'cancelled' ? '取消' : `${Math.round((item.received_bytes / Math.max(item.total_bytes, 1)) * 100)}%`}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
-            </div>
-          </aside>
-        )}
-
-        <style>{`
-          @keyframes browserContentProgress {
-            0% { width: 5%; }
-            50% { width: 65%; }
-            100% { width: 95%; }
-          }
-          @keyframes cookieToastFade {
-            0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
-            10% { opacity: 1; transform: translateX(-50%) translateY(0); }
-            80% { opacity: 1; transform: translateX(-50%) translateY(0); }
-            100% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
-          }
-        `}</style>
-      </div>
+      <BrowserShellLayout
+        isElectron={isElectron}
+        contentRef={contentRef}
+        activeTab={activeTab}
+        activePanel={activePanel}
+        bookmarks={bookmarks}
+        selectedBookmarkUrl={selectedBookmarkUrl}
+        historyItems={historyItems}
+        downloads={downloads}
+        adblockState={adblockState}
+        browserDiagnostics={browserDiagnostics}
+        toastVisible={toastVisible}
+        currentDomain={currentDomain}
+        currentDomainAdblockWhitelisted={currentDomainAdblockWhitelisted}
+        onDragOver={handleContentDragOver}
+        onDrop={handleContentDrop}
+        onRetry={() => void handleRetry()}
+        onClosePanel={() => setActivePanel(null)}
+        onNavigateFromPanel={(url) => void handleNavigateFromPanel(url)}
+        onRemoveBookmark={(url) => void handleRemoveBookmark(url)}
+        onClearHistory={() => void handleClearHistory()}
+        onClearDownloads={() => void handleClearDownloads()}
+        onSelectBookmark={setSelectedBookmarkUrl}
+        onToggleAdblock={() => void handleToggleAdblock()}
+        onRefreshAdblock={() => void refreshAdblockState()}
+        onSyncBounds={() => sendBoundsImmediate({ forceExact: true })}
+      />
     </div>
   )
 }

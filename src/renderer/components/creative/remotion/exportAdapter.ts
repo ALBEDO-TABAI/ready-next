@@ -1,14 +1,5 @@
-import { type TimelineClip } from '../../../pages/modes/VideoMode'
-
-export interface TimelineExportProject {
-  videoClips: TimelineClip[]
-  subtitleClips: TimelineClip[]
-  audioClips: TimelineClip[]
-  duration: number
-  fps: number
-  width: number
-  height: number
-}
+import { buildRenderTimelineRequest } from '../../../modules/video/schema'
+import type { VideoProjectSchema } from '../../../modules/video/types'
 
 interface ExportSuccessResult {
   success: true
@@ -27,10 +18,10 @@ function toExportPathFromSource(inputPath: string): string {
   return inputPath.replace(/\.[^.]+$/, '') + `_export_${Date.now()}.mp4`
 }
 
-export async function exportTimelineWithFallback(project: TimelineExportProject): Promise<TimelineExportResult> {
-  const firstVideoSource = project.videoClips.find((clip) => clip.source)?.source
-  const firstAudioSource = project.audioClips.find((clip) => clip.source)?.source
-  const primarySource = firstVideoSource || firstAudioSource
+export async function exportTimelineWithFallback(project: VideoProjectSchema): Promise<TimelineExportResult> {
+  const firstVideoSource = project.composition.videoClips.find((clip) => clip.source)?.source
+  const firstAudioSource = project.composition.audioClips.find((clip) => clip.source)?.source
+  const primarySource = project.primarySourcePath || firstVideoSource || firstAudioSource
 
   if (!primarySource) {
     return { success: false, error: 'No source file found. Import a video or image clip first.' }
@@ -42,18 +33,7 @@ export async function exportTimelineWithFallback(project: TimelineExportProject)
   // use it first and keep this fallback for environments without renderer support.
   const advancedRenderer = window.electronAPI?.video?.renderTimeline
   if (advancedRenderer) {
-    const advancedResult = await advancedRenderer({
-      output: outputPath,
-      width: project.width,
-      height: project.height,
-      fps: project.fps,
-      duration: project.duration,
-      tracks: {
-        video: project.videoClips,
-        subtitle: project.subtitleClips,
-        audio: project.audioClips,
-      },
-    })
+    const advancedResult = await advancedRenderer(buildRenderTimelineRequest(project, outputPath))
     if (advancedResult?.success && advancedResult.path) {
       const warningSuffix = advancedResult.warning ? ` (${advancedResult.warning})` : ''
       return { success: true, path: advancedResult.path, message: `Exported: ${advancedResult.path}${warningSuffix}` }
@@ -61,7 +41,7 @@ export async function exportTimelineWithFallback(project: TimelineExportProject)
   }
 
   // Fallback: preserve existing behavior (trim first source clip).
-  const firstSourceClip = project.videoClips.find((clip) => clip.source)
+  const firstSourceClip = project.composition.videoClips.find((clip) => clip.source)
   if (!firstSourceClip?.source) {
     return { success: false, error: 'Advanced renderer unavailable and no video clip for trim fallback.' }
   }

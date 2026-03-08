@@ -69,6 +69,7 @@ export class CardShapeUtil extends BaseBoxShapeUtil<CardShape> {
             : fillMain
       : 'transparent'
     const titleAlign = meta.readyTextAlign === 'middle' ? 'center' : meta.readyTextAlign === 'end' ? 'right' : 'left'
+    const titleFontSize = typeof meta.readyFontSize === 'number' ? Math.max(10, Number(meta.readyFontSize)) : 14
     const titleWeight = meta.readyFontWeight === 'bold' ? 700 : meta.readyFontWeight === 'medium' ? 600 : 500
     const titleColor = typeof meta.readyTextColor === 'string' ? String(meta.readyTextColor) : 'var(--text-title)'
     const titleFont = meta.readyFontFamily === 'serif'
@@ -102,7 +103,7 @@ export class CardShapeUtil extends BaseBoxShapeUtil<CardShape> {
       >
         <div
           style={{
-            fontSize: 14,
+            fontSize: titleFontSize,
             fontWeight: titleWeight,
             color: titleColor,
             textAlign: titleAlign,

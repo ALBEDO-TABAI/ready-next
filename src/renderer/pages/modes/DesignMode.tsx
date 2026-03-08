@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AssetRecordType, Tldraw, createShapeId, type Editor, type TLComponents } from 'tldraw'
 import type { TLEditorSnapshot } from '@tldraw/editor'
 import 'tldraw/tldraw.css'
-import { Bot, EyeOff, ImagePlus, Layers3, PanelLeftClose, PanelRightClose, Palette, Plus, SlidersHorizontal, X } from 'lucide-react'
 import { useTheme } from '../../stores/useTheme'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDesignSession } from '../../stores/useDesignSession'
+import { useDesignAgentAdapter } from '../../modules/design/useDesignAgentAdapter'
 import ComponentPanel from '../../components/design/ComponentPanel'
+import DesignDiagnosticsPanel from '../../components/design/DesignDiagnosticsPanel'
+import DesignProjectTabsBar from '../../components/design/DesignProjectTabsBar'
 import { allShapeUtils, allTools } from '../../components/design/shapes'
-import { MorphTabButton, MorphTabStrip } from '../../components/motion/MorphTabStrip'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -52,6 +53,17 @@ function emitDesignUIEvent(eventName: string) {
   window.dispatchEvent(new CustomEvent(eventName))
 }
 
+function hashDesignSnapshot(snapshot: TLEditorSnapshot | null): string | null {
+  if (!snapshot) return null
+  const raw = JSON.stringify(snapshot)
+  let hash = 0
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = ((hash << 5) - hash) + raw.charCodeAt(i)
+    hash |= 0
+  }
+  return `tldr-${Math.abs(hash).toString(36)}`
+}
+
 export default function DesignMode() {
   const editorRef = useRef<Editor | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
@@ -67,8 +79,16 @@ export default function DesignMode() {
   const markSaving = useDesignSession((state) => state.markSaving)
   const markSaved = useDesignSession((state) => state.markSaved)
   const markError = useDesignSession((state) => state.markError)
+  const setSnapshotMeta = useDesignSession((state) => state.setSnapshotMeta)
+  const setLastExportArtifactPath = useDesignSession((state) => state.setLastExportArtifactPath)
   const isDirty = useDesignSession((state) => state.isDirty)
   const saveStatus = useDesignSession((state) => state.saveStatus)
+  const lastSavedAt = useDesignSession((state) => state.lastSavedAt)
+  const lastError = useDesignSession((state) => state.lastError)
+  const snapshotHash = useDesignSession((state) => state.snapshotHash)
+  const selectionSummary = useDesignSession((state) => state.selectionSummary)
+  const currentToolContext = useDesignSession((state) => state.currentToolContext)
+  const lastExportArtifactPath = useDesignSession((state) => state.lastExportArtifactPath)
   const resetSession = useDesignSession((state) => state.reset)
   const [projectTabs, setProjectTabs] = useState<string[]>(() => [...openedDesignTabs])
   const [uiHidden, setUiHidden] = useState<boolean>(() => localStorage.getItem('ready-design-ui-hidden') === 'true')
@@ -141,6 +161,86 @@ export default function DesignMode() {
       void saveSnapshot(path, snapshot)
     }, 1500)
   }, [isDesignFile, saveSnapshot])
+
+  const loadDesignFileIntoEditor = useCallback(async (path: string) => {
+    const editor = editorRef.current
+    if (!editor || !isDesignFile(path)) return false
+
+    activeFileRef.current = path
+    setActiveFile(path)
+    selectWorkspaceFile(path)
+
+    const cached = fileSnapshotCache.get(path)
+    if (cached) {
+      applySnapshot(editor, cached)
+      return true
+    }
+
+    if (typeof window === 'undefined' || !window.electronAPI?.design) {
+      applySnapshot(editor, baseSnapshot)
+      return true
+    }
+
+    const readResult = await window.electronAPI.design.read(path)
+    if (readResult.success && readResult.data) {
+      const snapshot = readResult.data as TLEditorSnapshot
+      fileSnapshotCache.set(path, snapshot)
+      applySnapshot(editor, snapshot)
+      return true
+    }
+
+    applySnapshot(editor, baseSnapshot)
+    return false
+  }, [applySnapshot, isDesignFile, selectWorkspaceFile, setActiveFile])
+
+  const exportCurrentDesign = useCallback(async (payload: {
+    format: 'png' | 'svg'
+    path?: string
+    defaultName?: string
+  }) => {
+    const editor = editorRef.current
+    if (!editor) {
+      throw new Error('Design editor is not ready')
+    }
+    const selected = editor.getSelectedShapeIds() as never[]
+    const all = Array.from(editor.getCurrentPageShapeIds()) as never[]
+    const targetIds = selected.length > 0 ? selected : all
+    if (targetIds.length === 0) {
+      throw new Error('当前画布没有可导出的元素')
+    }
+
+    const fallbackName = payload.defaultName || `${getPathBasename(activeFileRef.current || 'design')}.${payload.format}`
+    const exportResult = payload.format === 'svg'
+      ? await (async () => {
+        const svgResult = await editor.getSvgString(targetIds, { background: false })
+        if (!svgResult) throw new Error('无法生成 SVG 导出结果')
+        return window.electronAPI?.design?.export({
+          format: 'svg',
+          data: svgResult.svg,
+          path: payload.path,
+          defaultName: fallbackName,
+        })
+      })()
+      : await (async () => {
+        const imageResult = await editor.toImageDataUrl(targetIds, {
+          format: 'png',
+          background: true,
+          scale: 1,
+        })
+        return window.electronAPI?.design?.export({
+          format: 'png',
+          data: imageResult.url,
+          path: payload.path,
+          defaultName: fallbackName,
+        })
+      })()
+
+    if (!exportResult?.success || !exportResult.path) {
+      throw new Error(exportResult?.error || '导出失败')
+    }
+    setLastExportArtifactPath(exportResult.path)
+    return exportResult.path
+  }, [setLastExportArtifactPath])
 
   useEffect(() => {
     return () => {
@@ -235,6 +335,20 @@ export default function DesignMode() {
     openedDesignTabs = [...openedDesignTabs, selectedFile]
     setProjectTabs([...openedDesignTabs])
   }, [isDesignFile, selectedFile])
+
+  useDesignAgentAdapter({
+    editorRef,
+    activeFileRef,
+    isDirty,
+    saveStatus,
+    loadDesignFileIntoEditor,
+    flushSave,
+    exportCurrentDesign,
+    markDirty,
+    markSaved,
+    selectWorkspaceFile,
+    setActiveFile,
+  })
 
   useEffect(() => {
     const handleManualSave = () => {
@@ -361,16 +475,23 @@ export default function DesignMode() {
       unsubscribeRef.current()
     }
     unsubscribeRef.current = editor.store.listen(() => {
+      const snapshot = editor.getSnapshot()
+      const selectedCount = editor.getSelectedShapeIds().length
+      setSnapshotMeta({
+        snapshotHash: hashDesignSnapshot(snapshot),
+        selectionSummary: selectedCount > 0 ? `已选中 ${selectedCount} 个元素` : '未选中元素',
+        currentToolContext: String((editor as Editor & { getCurrentToolId?: () => string }).getCurrentToolId?.() || 'select'),
+      })
       if (restoringRef.current) return
       const activeFile = activeFileRef.current
       if (!activeFile || !isDesignFile(activeFile)) {
-        transientSnapshot = editor.getSnapshot()
+        transientSnapshot = snapshot
         return
       }
       markDirty()
       schedulePersist()
     }, { source: 'user', scope: 'document' })
-  }, [resolvedTheme, applySnapshot, isDesignFile, markDirty, schedulePersist, setActiveFile])
+  }, [resolvedTheme, applySnapshot, isDesignFile, markDirty, schedulePersist, setActiveFile, setSnapshotMeta])
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     const types = new Set(Array.from(e.dataTransfer.types || []))
@@ -474,186 +595,34 @@ export default function DesignMode() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div
-        className="glass-surface-panel flex items-center justify-between flex-shrink-0"
-        style={{
-          height: 42,
-          padding: '0 8px',
-          borderBottom: '1px solid var(--border-default)',
-          background: 'var(--surface-toolbar-bg)',
-        }}
-      >
-        <div className="flex items-end h-full min-w-0 flex-1 overflow-hidden" style={{ paddingLeft: 0 }}>
-          <MorphTabStrip
-            layoutId="design-tabs"
-            className="flex items-end h-full min-w-0 flex-1 overflow-hidden gap-[1px]"
-          >
-            {projectTabs.map((path) => {
-              const isActive = activeDesignPath === path
-              return (
-                <div key={path} className="relative flex items-end min-w-0 flex-1 max-w-[220px]">
-                  <MorphTabButton
-                    layoutId="design-tabs"
-                    active={isActive}
-                    draggable
-                    onDragStart={(e) => handleProjectTabDragStart(e, path)}
-                    onClick={() => handleSelectProjectTab(path)}
-                    className="group flex w-full min-w-0 items-center rounded-t-[8px] text-[12px] transition-all duration-150 ease-out"
-                    style={{
-                      gap: 6,
-                      padding: '6px 12px',
-                      cursor: 'grab',
-                      marginBottom: -1,
-                      background: isActive ? 'var(--surface-card-bg)' : 'transparent',
-                      color: isActive ? 'var(--text-body)' : 'var(--text-muted)',
-                      border: '1px solid var(--border-default)',
-                      borderBottom: isActive ? '1px solid var(--surface-card-bg)' : '1px solid var(--border-default)',
-                    }}
-                    contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
-                    title={path}
-                  >
-                    <span
-                      className="flex-shrink-0 rounded-full"
-                      style={{ width: 8, height: 8, background: 'var(--color-purple)' }}
-                    />
-                    <span className="truncate flex-1 min-w-0">
-                      {getPathBasename(path)}
-                      {isActive && isDirty && <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span>}
-                    </span>
-                    <span
-                      role="button"
-                      onClick={(e) => { e.stopPropagation(); handleCloseProjectTab(path) }}
-                      className="rounded transition-all duration-150 ease-out cursor-pointer opacity-0 group-hover:opacity-100 flex-shrink-0 active:scale-[0.95]"
-                      style={{ padding: 2, color: 'var(--text-light)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-body)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-light)')}
-                    >
-                      <X style={{ width: 11, height: 11 }} strokeWidth={2} />
-                    </span>
-                  </MorphTabButton>
-                </div>
-              )
-            })}
-          </MorphTabStrip>
-          {projectTabs.length === 0 && (
-            <div
-              draggable
-              onDragStart={(e) => {
-                const payload = JSON.stringify({
-                  type: 'design-project' as const,
-                  name: '设计草稿',
-                  dirty: isDirty,
-                  saveStatus,
-                  draggedAt: Date.now(),
-                })
-                e.dataTransfer.setData('application/x-ready-drag', payload)
-                e.dataTransfer.effectAllowed = 'copy'
-              }}
-              className="flex items-center transition-all duration-150 ease-out"
-              style={{
-                gap: 6,
-                padding: '6px 12px',
-                fontSize: 12,
-                marginBottom: -1,
-                background: 'var(--bg-primary)',
-                color: 'var(--text-muted)',
-                borderRadius: '8px 8px 0 0',
-                border: '1px solid var(--border-default)',
-                borderBottom: '1px solid var(--bg-primary)',
-              }}
-            >
-              <span
-                className="flex-shrink-0 rounded-full"
-                style={{ width: 8, height: 8, background: 'var(--color-purple)' }}
-              />
-              设计草稿
-            </div>
-          )}
+      <DesignProjectTabsBar
+        projectTabs={projectTabs}
+        activeDesignPath={activeDesignPath}
+        isDirty={isDirty}
+        saveStatus={saveStatus}
+        chatPanelVisible={chatPanelVisible}
+        uiHidden={uiHidden}
+        getPathBasename={getPathBasename}
+        onSelectProjectTab={handleSelectProjectTab}
+        onCloseProjectTab={handleCloseProjectTab}
+        onProjectTabDragStart={handleProjectTabDragStart}
+        onCreateNewDraft={handleCreateNewDraft}
+        onOpenAgentPanel={handleOpenAgentPanel}
+        onToggleUiClick={handleToggleUiClick}
+        emitDesignUIEvent={emitDesignUIEvent}
+      />
 
-          {/* New draft button */}
-          <button
-            onClick={() => void handleCreateNewDraft()}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, marginLeft: 2, marginBottom: 3 }}
-            title="新建"
-          >
-            <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={1.8} />
-          </button>
-        </div>
-
-        {/* Right: icon-only toolbar buttons */}
-        <div className="flex items-center gap-1 flex-shrink-0" style={{ paddingRight: 4 }}>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-import-images')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="导入图片"
-          >
-            <ImagePlus style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-toggle-layers')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="图层"
-          >
-            <Layers3 style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-toggle-variables')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="变量"
-          >
-            <SlidersHorizontal style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-open-style-guides')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="设计套件"
-          >
-            <Palette style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={handleOpenAgentPanel}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: chatPanelVisible ? 'var(--color-blue)' : 'var(--text-muted)' }}
-            title={chatPanelVisible ? 'Agent 已开' : '连接 Agent'}
-          >
-            <Bot style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-toggle-left-panel')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="切换左侧面板"
-          >
-            <PanelLeftClose style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => emitDesignUIEvent('ready-design-toggle-right-panel')}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title="切换右侧面板"
-          >
-            <PanelRightClose style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={handleToggleUiClick}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] active:scale-[0.95] transition-all duration-150 ease-out rounded-md"
-            style={{ width: 28, height: 28, color: 'var(--text-muted)' }}
-            title={uiHidden ? '显示 UI (Cmd+\\)' : '隐藏 UI (Cmd+\\)'}
-          >
-            <EyeOff style={{ width: 15, height: 15 }} strokeWidth={1.8} />
-          </button>
-          {saveStatus !== 'idle' && (
-            <span className="text-[10px] pl-1" style={{ color: 'var(--text-light)' }}>
-              {saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : isDirty ? '未保存' : ''}
-            </span>
-          )}
-        </div>
-      </div>
+      <DesignDiagnosticsPanel
+        activeFile={activeDesignPath}
+        isDirty={isDirty}
+        saveStatus={saveStatus}
+        lastSavedAt={lastSavedAt}
+        lastError={lastError}
+        snapshotHash={snapshotHash}
+        selectionSummary={selectionSummary}
+        currentToolContext={currentToolContext}
+        lastExportArtifactPath={lastExportArtifactPath}
+      />
 
       <div className="flex-1 min-h-0">
         <Tldraw

@@ -1,5 +1,6 @@
 import { type AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
+import { SettingsRepository } from '../repositories/settings-repository'
 
 export interface BrowserViewportAnalysisTarget {
   kind: 'text_button' | 'icon_button' | 'upload_launcher' | 'send_button' | 'close_button' | 'back_button' | 'prompt_input'
@@ -19,8 +20,8 @@ export interface BrowserViewportAnalysis {
 
 async function readAIConfig(): Promise<AIModelConfig | null> {
   try {
-    const databaseModule = await import('../database')
-    const raw = databaseModule.getDatabase().getSetting('ai_model_config')
+    const repository = new SettingsRepository()
+    const raw = await repository.getSetting('ai_model_config')
     if (!raw) return null
     return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
   } catch {

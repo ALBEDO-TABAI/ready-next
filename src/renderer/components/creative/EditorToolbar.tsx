@@ -8,6 +8,7 @@ import {
   Redo2,
   Share2,
 } from 'lucide-react'
+import { WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface EditorToolbarProps {
   title: string
@@ -64,7 +65,7 @@ export default function EditorToolbar({
     <div
       className="flex items-center justify-between"
       style={{
-        height: 46,
+        height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
         flexShrink: 0,
         padding: '0 12px',
         background: colors.panelBg,

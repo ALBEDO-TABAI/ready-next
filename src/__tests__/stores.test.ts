@@ -707,6 +707,123 @@ describe('useAgent Store', () => {
 
         cleanup()
     })
+
+    it('should keep streaming chunks keyed by runId and scopeId even after switching active scope', async () => {
+        const listeners: {
+            onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
+            onStatusChange?: (data: unknown) => void
+            onError?: (data: unknown) => void
+            onToolAction?: (data: unknown) => void
+            onScopeRunEvent?: (data: unknown) => void
+            onConversationEvent?: (data: unknown) => void
+        } = {}
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                onStream: (cb: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
+                    listeners.onStream = cb
+                    return () => { listeners.onStream = undefined }
+                },
+                onStatusChange: (cb: (data: unknown) => void) => {
+                    listeners.onStatusChange = cb
+                    return () => { listeners.onStatusChange = undefined }
+                },
+                onError: (cb: (data: unknown) => void) => {
+                    listeners.onError = cb
+                    return () => { listeners.onError = undefined }
+                },
+                onToolAction: (cb: (data: unknown) => void) => {
+                    listeners.onToolAction = cb
+                    return () => { listeners.onToolAction = undefined }
+                },
+                onScopeRunEvent: (cb: (data: unknown) => void) => {
+                    listeners.onScopeRunEvent = cb
+                    return () => { listeners.onScopeRunEvent = undefined }
+                },
+                onConversationEvent: (cb: (data: unknown) => void) => {
+                    listeners.onConversationEvent = cb
+                    return () => { listeners.onConversationEvent = undefined }
+                },
+            },
+        }
+
+        const cleanup = (await import('../renderer/stores/useAgent')).initAgentListeners()
+
+        useAgent.setState({
+            currentScopeId: 'scope-b',
+            currentScope: {
+                id: 'scope-b',
+                agent: 'copywriter',
+                title: 'Scope B',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'scope-b',
+                meta: {},
+                createdAt: '2026-03-07T10:00:00.000Z',
+                updatedAt: '2026-03-07T10:00:00.000Z',
+            },
+            scopes: [
+                {
+                    id: 'scope-a',
+                    agent: 'butler',
+                    title: 'Scope A',
+                    sourceKind: 'local',
+                    sourceId: 'app',
+                    threadKey: 'scope-a',
+                    meta: {},
+                    createdAt: '2026-03-07T09:00:00.000Z',
+                    updatedAt: '2026-03-07T09:00:00.000Z',
+                },
+                {
+                    id: 'scope-b',
+                    agent: 'copywriter',
+                    title: 'Scope B',
+                    sourceKind: 'local',
+                    sourceId: 'app',
+                    threadKey: 'scope-b',
+                    meta: {},
+                    createdAt: '2026-03-07T10:00:00.000Z',
+                    updatedAt: '2026-03-07T10:00:00.000Z',
+                },
+            ],
+            messages: [],
+            scopeRunStates: {
+                'scope-a': {
+                    scopeId: 'scope-a',
+                    agent: 'butler',
+                    requestId: 'req-a',
+                    phase: 'planning',
+                    toolTrace: [],
+                    startedAt: '2026-03-07T09:00:00.000Z',
+                    updatedAt: '2026-03-07T09:00:00.000Z',
+                    latestText: null,
+                    blockedReason: null,
+                    controllerId: null,
+                    ownerTabId: null,
+                    checkpointExpiresAt: null,
+                    responseMessageId: 'msg-a',
+                    responseBuffer: '',
+                    stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+                    error: null,
+                },
+            },
+        })
+
+        listeners.onStream?.({
+            agent: 'butler',
+            sessionId: 'scope-a',
+            runId: 'req-a',
+            chunk: '后台流式输出',
+            type: 'text',
+        })
+
+        const state = useAgent.getState()
+        assert.strictEqual(state.currentScopeId, 'scope-b')
+        assert.strictEqual(state.scopeRunStates['scope-a']?.responseBuffer, '后台流式输出')
+        assert.strictEqual(state.scopeRunStates['scope-a']?.latestText, '后台流式输出')
+
+        cleanup()
+    })
 })
 
 // ============================================================

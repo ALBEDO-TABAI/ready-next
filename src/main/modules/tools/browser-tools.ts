@@ -12,6 +12,7 @@ import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
 import { domainsLikelyMatch, findRecentBrowserAction, rememberBrowserAction } from '../agent-control/session-continuity'
+import { AgentRepository } from '../repositories/agent-repository'
 
 const LOG = '/tmp/ready-tools.log'
 function log(msg: string) {
@@ -2252,9 +2253,10 @@ const RECENT_SCOPE_UPLOAD_TTL_MS = 2 * 60 * 1000
 async function listScopeAttachmentsForTool(sessionId?: string): Promise<ScopeAttachmentCandidate[]> {
   const scopeId = String(sessionId || '').trim()
   if (!scopeId) return []
-  const databaseModule = await import('../database')
-  return databaseModule.getDatabase()
+  const repository = new AgentRepository()
+  return repository
     .listConversationAttachments(scopeId)
+    .then((items) => items
     .filter((item) => item.path && existsSync(item.path))
     .map((item) => ({
       attachmentId: item.attachment_id,
@@ -2264,7 +2266,7 @@ async function listScopeAttachmentsForTool(sessionId?: string): Promise<ScopeAtt
       size: Number(item.size || 0),
       ext: String(item.ext || ''),
       createdAt: item.created_at,
-    }))
+    })))
 }
 
 function selectScopeAttachment(

@@ -9,6 +9,7 @@ import { createCalendarControlsPlugin } from '@schedule-x/calendar-controls'
 import { Temporal } from '@js-temporal/polyfill'
 
 import MiniCalendar from '../../components/calendar/MiniCalendar'
+import CalendarDiagnosticsPanel from '../../components/calendar/CalendarDiagnosticsPanel'
 import CalendarSources from '../../components/calendar/CalendarSources'
 import EventModal from '../../components/calendar/EventModal'
 import { NewEventMenu, NewEventCard } from '../../components/calendar/NewEventMenu'
@@ -26,7 +27,9 @@ import {
   SX_VIEW_NAMES,
 } from '../../components/calendar/schedule-x-utils'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
+import { useCalendarAgentAdapter } from '../../modules/calendar/useCalendarAgentAdapter'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
+import { useCalendarSession } from '../../stores/useCalendarSession'
 
 import '@schedule-x/theme-default/dist/index.css'
 import '../../styles/schedule-x.css'
@@ -186,6 +189,16 @@ function ViewSelector({ viewType, onViewTypeChange }: { viewType: ViewType; onVi
 // --- Component ---
 
 export default function CalendarMode() {
+  const visibleRangeStart = useCalendarSession((state) => state.visibleRangeStart)
+  const visibleRangeEnd = useCalendarSession((state) => state.visibleRangeEnd)
+  const selectedEventId = useCalendarSession((state) => state.selectedEventId)
+  const selectedEventTitle = useCalendarSession((state) => state.selectedEventTitle)
+  const lastMutationAt = useCalendarSession((state) => state.lastMutationAt)
+  const conflictSnapshot = useCalendarSession((state) => state.conflictState)
+  const setVisibleRange = useCalendarSession((state) => state.setVisibleRange)
+  const setSelectedSessionEvent = useCalendarSession((state) => state.setSelectedEvent)
+  const setConflictState = useCalendarSession((state) => state.setConflictState)
+  const markSessionMutation = useCalendarSession((state) => state.markMutation)
   const [currentDate, setCurrentDate] = useState(cachedState?.currentDate ?? new Date())
   const [events, setEvents] = useState<CalendarEvent[]>(cachedState?.events ?? [])
   const [sources, setSources] = useState<CalendarSource[]>(cachedState?.sources?.length ? cachedState.sources : DEFAULT_SOURCES)
@@ -392,8 +405,8 @@ export default function CalendarMode() {
   }, [])
 
   // --- Load data only once ---
-  const loadCalendarData = useCallback(async () => {
-    if (dataLoaded) return
+  const loadCalendarData = useCallback(async (force = false) => {
+    if (dataLoaded && !force) return
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
@@ -438,6 +451,20 @@ export default function CalendarMode() {
   }, [dataLoaded])
 
   useEffect(() => { loadCalendarData() }, [loadCalendarData])
+
+  useCalendarAgentAdapter({
+    currentDate,
+    viewType,
+    editingEvent,
+    sources,
+    eventsRef,
+    loadCalendarData,
+    setVisibleRange,
+    setSelectedSessionEvent,
+    setConflictState,
+    markSessionMutation,
+    getDateRange,
+  })
 
   // --- Sync events to Schedule-X ---
   const enabledSourceIds = useMemo(
@@ -809,6 +836,23 @@ export default function CalendarMode() {
               onAddSource={addSource}
               onUpdateSource={updateSource}
               onDeleteSource={deleteSource}
+            />
+
+            <CalendarDiagnosticsPanel
+              isMock={isMock}
+              dataLoaded={dataLoaded}
+              viewType={viewType}
+              currentDate={currentDate}
+              totalSources={sources.length}
+              enabledSources={sources.filter((source) => source.enabled).length}
+              totalEvents={events.length}
+              visibleRangeStart={visibleRangeStart}
+              visibleRangeEnd={visibleRangeEnd}
+              selectedEventId={selectedEventId}
+              selectedEventTitle={selectedEventTitle}
+              lastMutationAt={lastMutationAt}
+              conflictState={conflictSnapshot}
+              onRefresh={() => loadCalendarData(true)}
             />
           </div>
 

@@ -41,6 +41,8 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
         ? 'inside'
         : 'center'
     const cornerRadius = typeof meta.readyCornerRadius === 'number' ? Math.max(0, Number(meta.readyCornerRadius)) : 8
+    const fontSize = typeof meta.readyFontSize === 'number' ? Math.max(10, Number(meta.readyFontSize)) : 12
+    const labelFontSize = Math.max(10, fontSize - 1)
     const fontWeight = meta.readyFontWeight === 'bold' ? 700 : meta.readyFontWeight === 'medium' ? 500 : 400
     const fontFamily = meta.readyFontFamily === 'serif'
       ? 'ui-serif, Georgia, serif'
@@ -98,7 +100,7 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
           overflow: clipContent ? 'hidden' : 'visible',
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'color-mix(in srgb, var(--text-muted) 86%, black)', textAlign }}>{label || 'Label'}</div>
+        <div style={{ fontSize: labelFontSize, fontWeight: 600, color: 'color-mix(in srgb, var(--text-muted) 86%, black)', textAlign }}>{label || 'Label'}</div>
         <div
           style={{
             flex: 1,
@@ -109,7 +111,7 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
             border,
             boxShadow,
             background: computedFill,
-            fontSize: 12,
+            fontSize,
             color: `color-mix(in srgb, ${textColor} 70%, var(--text-muted))`,
             display: 'flex',
             alignItems: 'center',

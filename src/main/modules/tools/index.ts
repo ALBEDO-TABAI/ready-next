@@ -4,10 +4,25 @@ import {
   executeBrowserTool,
 } from './browser-tools'
 import {
+  getCalendarAnthropicTools,
+  getCalendarOpenAITools,
+  executeCalendarTool,
+} from './calendar-tools'
+import {
+  getDesignAnthropicTools,
+  getDesignOpenAITools,
+  executeDesignTool,
+} from './design-tools'
+import {
   getDocumentAnthropicTools,
   getDocumentOpenAITools,
   executeDocumentTool,
 } from './document-tools'
+import {
+  getRSSAnthropicTools,
+  getRSSOpenAITools,
+  executeRSSTool,
+} from './rss-tools'
 import {
   getSkillAnthropicTools,
   getSkillOpenAITools,
@@ -18,11 +33,20 @@ import {
   getSystemOpenAITools,
   executeSystemTool,
 } from './system-tools'
+import {
+  getVideoAnthropicTools,
+  getVideoOpenAITools,
+  executeVideoTool,
+} from './video-tools'
 
 export function getAnthropicTools(): Array<Record<string, unknown>> {
   return [
     ...getBrowserAnthropicTools(),
     ...getDocumentAnthropicTools(),
+    ...getDesignAnthropicTools(),
+    ...getVideoAnthropicTools(),
+    ...getRSSAnthropicTools(),
+    ...getCalendarAnthropicTools(),
     ...getSkillAnthropicTools(),
     ...getSystemAnthropicTools(),
   ]
@@ -32,6 +56,10 @@ export function getOpenAITools(): Array<Record<string, unknown>> {
   return [
     ...getBrowserOpenAITools(),
     ...getDocumentOpenAITools(),
+    ...getDesignOpenAITools(),
+    ...getVideoOpenAITools(),
+    ...getRSSOpenAITools(),
+    ...getCalendarOpenAITools(),
     ...getSkillOpenAITools(),
     ...getSystemOpenAITools(),
   ]
@@ -39,6 +67,10 @@ export function getOpenAITools(): Array<Record<string, unknown>> {
 
 export { executeBrowserTool, executeSkillTool }
 export { executeDocumentTool }
+export { executeDesignTool }
+export { executeVideoTool }
+export { executeRSSTool }
+export { executeCalendarTool }
 export { executeSystemTool }
 export { getDocumentAnthropicTools, getDocumentOpenAITools }
 export { executeToolCall } from './tool-executor'

@@ -157,15 +157,72 @@ export interface ScopeRunTraceItem {
   timestamp: string
 }
 
+export interface ScopeRunMemoryRef {
+  id: string
+  layer: 'l0' | 'l1' | 'l2'
+  title: string
+  summary?: string | null
+  path?: string | null
+  triggerId?: string | null
+  sensitive?: boolean
+  loadedAt: string
+}
+
+export interface ScopeRunTriggerHit {
+  id: string
+  label: string
+  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  blocking: boolean
+  refs: string[]
+}
+
+export interface ScopeRunContextBudget {
+  totalChars: number
+  l0Chars: number
+  l1Chars: number
+  l2Chars: number
+  droppedRefs: string[]
+}
+
 export interface ScopeRunEventPayload {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
   agent: string
   runId?: string
-  phase: 'queued' | 'planning' | 'tool_running' | 'responding' | 'done' | 'error' | 'cancelled'
+  phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
   latestText?: string
+  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  intent?: string
+  executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
+  jobId?: string
+  artifactRefs?: Array<{
+    id: string
+    module: string
+    kind: string
+    label: string
+    path?: string | null
+    url?: string | null
+    mimeType?: string | null
+    sourceRunId?: string | null
+    createdAt: string
+    meta?: Record<string, unknown>
+  }>
+  memoryRefs?: ScopeRunMemoryRef[]
+  triggerHits?: ScopeRunTriggerHit[]
+  contextBudget?: ScopeRunContextBudget | null
+  ownerResourceId?: string
+  lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItem
   error?: string
+  blockedReason?: string
+  controllerId?: string
+  ownerTabId?: string
+  checkpointExpiresAt?: number
+  stepMetrics?: {
+    toolCalls: number
+    toolResults: number
+    lastToolAt: string | null
+  }
   timestamp: string
 }
 

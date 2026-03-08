@@ -1,7 +1,7 @@
 import { AbsoluteFill, Img, Sequence, interpolate, useCurrentFrame } from 'remotion'
 import { Audio, Video } from '@remotion/media'
 import { type CSSProperties } from 'react'
-import { type SubtitleStyle, type TimelineClip } from '../../../pages/modes/VideoMode'
+import type { SubtitleStyle, TimelineClip } from '../../../modules/video/types'
 import { getDroppedFileKind, toLocalFileUrl } from '../../../utils/dragDrop'
 
 export interface TimelineRemotionCompositionProps {
