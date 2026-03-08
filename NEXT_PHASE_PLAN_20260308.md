@@ -10,11 +10,12 @@
 ## Immediate next work
 1. Finish RSS source acquisition on the current stack.
 - Weibo: keep the current browser-backed path stable under Chromium/session conditions.
-- Xiaohongshu: keep app-browser acquisition as the source of truth, finish login/live-tab reuse, and harden profile-card extraction when note ids are not exposed.
-- Douyin: keep app-browser acquisition as the source of truth, finish source-specific extractor hardening, and keep live refresh correctness after the account-post-area scoping fix.
+- Xiaohongshu: keep app-browser acquisition as the source of truth, treat the logged-in Ready browser session as the only supported auth path, and verify the real in-app refresh loop after the extraction-script fix.
+- Douyin: keep app-browser acquisition as the source of truth and verify the real in-app refresh loop now that the account-post-area extractor is live-validated.
 
 2. Finish the shared workbench visual baseline.
 - Strictly align the top three workbench rows.
+- Keep the first row mode strip wider and visually closer to the content chrome.
 - Unify tabs for browser/document/design/video against the browser baseline.
 - Keep document and design on dedicated toolbar rows instead of tab-strip action piles, then finish the remaining diagnostics-row alignment.
 - Continue removing overlay/stacking edge cases.

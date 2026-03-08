@@ -15,8 +15,8 @@
 | Twitter/X | Stable | native / syndication | No heavier fallback needed |
 | Zsxq | Stable | native / API | No heavier fallback needed |
 | Weibo | Conditionally stable | browser-backed / Chromium dependent | Keep current path and finish session stability |
-| Xiaohongshu | Not signed off | app-browser-backed acquisition | Main blocker is login/session/live-tab reuse; no silent RSSHub fallback now |
-| Douyin | Not signed off | app-browser-backed acquisition | Extractor and route handling improved; no silent RSSHub fallback now |
+| Xiaohongshu | Conditionally stable | app-browser-backed acquisition | Real Electron session capture now works on a logged-in Ready browser session; keep it in the conditional bucket until the in-app refresh path is rechecked end-to-end after restart |
+| Douyin | Conditionally stable | app-browser-backed acquisition | Account-post-area extractor is now live-validated in the app browser session |
 
 ## Creator-watchlist notes
 ### Stable today on current stack
@@ -34,11 +34,12 @@
 - 歸藏的AI工具箱
   - viable when browser/Chromium session provisioning is healthy
 - UmeDesign_wanying
+  - live-validated through a real Electron `persist:browser` session after the extraction-script fix
 - DiDi_OK
 - Nio尼奥
-  - all remain in the Xiaohongshu unfinished bucket
+  - remaining Xiaohongshu profiles still need explicit in-app refresh confirmation, but the shared extractor path is no longer blocked by syntax errors
 - Kou悠悠
-  - Douyin account-path extraction has been tightened, but the source is still not treated as fully stable in the UI refresh path
+  - live-validated through a real Electron `persist:browser` session on the account post area
 
 ## Implementation status by platform
 ### Weibo
@@ -50,16 +51,17 @@
 - Continue on top of the app browser module.
 - Do not silently accept RSSHub fallback content for this platform.
 - Current work should focus on:
-  - logged-in session reuse
+  - logged-in session reuse through the app browser only
   - same-profile live-tab capture reuse only
   - profile-card extraction when cards do not expose note ids directly
-  - reliable note-list extraction once the page is in the correct logged-in state
+  - keeping the in-app refresh path aligned with the now-fixed extraction script
   - replacing stale source items after a successful browser refresh so old wrong-account content does not linger
 
 ### Douyin
 - Share-link and account-route handling have already been tightened.
 - Extraction should stay scoped to the account post area instead of page-wide recommendations.
 - Do not silently accept RSSHub fallback content for this platform.
+- The current extractor now returns the correct account page in a real Electron browser session.
 - Remaining work is live refresh correctness and final hardening, not another parser reset.
 
 ## Scrapling position

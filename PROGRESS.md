@@ -30,11 +30,15 @@
 - browser-backed RSS refresh now replaces stale source items for browser platforms after a successful fetch.
 - Xiaohongshu live-tab reuse has been narrowed to same-profile matching instead of same-domain matching.
 - Xiaohongshu and Douyin no longer silently fall back to RSSHub when app-browser acquisition fails.
+- the Xiaohongshu extraction script regression is fixed and covered by test.
+- Xiaohongshu capture now succeeds again in a real Electron `persist:browser` session when the Ready browser session is logged in.
+- Douyin account-post-area extraction is live-validated in a real Electron `persist:browser` session.
+- shared workbench chrome now uses a wider first-row mode strip and a common horizontal gutter for tabs, toolbars, and diagnostics rows.
 
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
 - Workbench top-row vertical alignment and tab baseline still need a final polish pass.
-- Workbench top-row vertical alignment has improved, but the remaining diagnostics-row and browser parity cleanup is still unfinished.
+- Workbench top-row vertical alignment has improved, but the remaining browser/document/calendar parity cleanup is still unfinished.
 - Design inspector still lacks several high-frequency controls.
 - Browser diagnostics are not yet full labs.
 - Memory layering and Feishu replacement are still ahead on the mainline.

@@ -42,19 +42,25 @@ The RSS stack remains:
 - Weibo
   - browser-backed / Chromium-dependent
   - current path is viable, but still depends on stable browser session provisioning
+- Xiaohongshu
+  - the browser-backed extraction script compiles again and has been live-validated in a real Electron `persist:browser` session
+  - the platform still depends on an already logged-in Ready browser session, so it remains conditional until the in-app refresh loop is rechecked end-to-end after restart
+- Douyin
+  - the browser-backed extractor has been live-validated against the account post area in a real Electron `persist:browser` session
+  - keep it conditional while the in-app refresh loop is rechecked end-to-end after restart
 
 ### Still not signed off
 - Xiaohongshu
-  - current blocker is login/session/live-tab reuse through the app browser path
   - same-domain live-tab reuse has been narrowed to same-profile matching, so cross-account contamination is no longer an intended code path
   - profile-card extraction now supports note-id-missing cards by emitting stable profile-fragment links instead of dropping them
+  - the previous extraction-script syntax error has been removed and covered by test
   - browser-backed refresh now replaces the source's old items once a valid browser result is returned
   - the default path no longer silently falls back to RSSHub when app-browser acquisition fails
-  - failure is now diagnosable instead of opaque
+  - remaining sign-off work is the real in-app refresh loop after restart, not another parser rewrite
 - Douyin
   - browser-backed extractor has been tightened to target the account post area instead of page-wide recommendations
   - the default path no longer silently accepts RSSHub fallback content when the browser route fails
-  - route and extractor quality improved, but live refresh flow still needs final hardening before it can be called stable
+  - remaining sign-off work is final in-app refresh hardening, not another route reset
 
 ## Architecture changes already landed
 1. RSS diagnostics logic is isolated in `source-diagnostics.ts`.
