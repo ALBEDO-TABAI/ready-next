@@ -49,14 +49,32 @@ export const useRSSSession = create<RSSSessionState>((set) => ({
   lastFetchAt: null,
   lastAnalysis: INITIAL_ANALYSIS,
   setSelection: (payload) => set((state) => ({
-    selectedSourceId: payload.selectedSourceId ?? state.selectedSourceId,
-    selectedItemId: payload.selectedItemId ?? state.selectedItemId,
-    selectedItemTitle: payload.selectedItemTitle ?? state.selectedItemTitle,
+    selectedSourceId:
+      Object.prototype.hasOwnProperty.call(payload, 'selectedSourceId')
+        ? payload.selectedSourceId ?? null
+        : state.selectedSourceId,
+    selectedItemId:
+      Object.prototype.hasOwnProperty.call(payload, 'selectedItemId')
+        ? payload.selectedItemId ?? null
+        : state.selectedItemId,
+    selectedItemTitle:
+      Object.prototype.hasOwnProperty.call(payload, 'selectedItemTitle')
+        ? payload.selectedItemTitle ?? null
+        : state.selectedItemTitle,
   })),
   setFeedSnapshot: (payload) => set((state) => ({
-    totalItems: payload.totalItems ?? state.totalItems,
-    unreadItems: payload.unreadItems ?? state.unreadItems,
-    lastFetchAt: payload.lastFetchAt ?? state.lastFetchAt,
+    totalItems:
+      Object.prototype.hasOwnProperty.call(payload, 'totalItems')
+        ? payload.totalItems ?? 0
+        : state.totalItems,
+    unreadItems:
+      Object.prototype.hasOwnProperty.call(payload, 'unreadItems')
+        ? payload.unreadItems ?? 0
+        : state.unreadItems,
+    lastFetchAt:
+      Object.prototype.hasOwnProperty.call(payload, 'lastFetchAt')
+        ? payload.lastFetchAt ?? null
+        : state.lastFetchAt,
   })),
   setLastAnalysis: (payload) => set((state) => ({
     lastAnalysis: {

@@ -10,7 +10,7 @@
 ## Immediate next work
 1. Finish RSS source acquisition on the current stack.
 - Weibo: keep the current browser-backed path stable under Chromium/session conditions.
-- Xiaohongshu: keep app-browser acquisition as the source of truth, treat the logged-in Ready browser session as the only supported auth path, and verify the real in-app refresh loop after the extraction-script fix.
+- Xiaohongshu: keep app-browser acquisition as the source of truth, treat the logged-in Ready browser session as the only supported auth path, and finish end-to-end verification now that selected-source refresh no longer diverges between local page state and session state.
 - Douyin: keep app-browser acquisition as the source of truth and verify the real in-app refresh loop now that the account-post-area extractor is live-validated.
 
 2. Finish the shared workbench visual baseline.

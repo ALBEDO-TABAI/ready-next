@@ -76,6 +76,7 @@ const { useAgent } = await import('../renderer/stores/useAgent')
 const { useWorkspace } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useDesignSession } = await import('../renderer/stores/useDesignSession')
+const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 
 // ============================================================
 // Existing Type Validation Tests (preserved from original)
@@ -256,6 +257,48 @@ describe('useMode Store', () => {
         assert.strictEqual(state.workbenchMode, 'browser')
         assert.strictEqual(state.splitMode, 'document')
         assert.notStrictEqual(state.workbenchMode, state.splitMode)
+    })
+})
+
+describe('useRSSSession Store', () => {
+    beforeEach(() => {
+        useRSSSession.getState().reset()
+    })
+
+    it('should allow clearing selected fields back to null', () => {
+        useRSSSession.getState().setSelection({
+            selectedSourceId: 'source-1',
+            selectedItemId: 'item-1',
+            selectedItemTitle: 'Title 1',
+        })
+        assert.strictEqual(useRSSSession.getState().selectedSourceId, 'source-1')
+        assert.strictEqual(useRSSSession.getState().selectedItemId, 'item-1')
+        assert.strictEqual(useRSSSession.getState().selectedItemTitle, 'Title 1')
+
+        useRSSSession.getState().setSelection({
+            selectedSourceId: null,
+            selectedItemId: null,
+            selectedItemTitle: null,
+        })
+        assert.strictEqual(useRSSSession.getState().selectedSourceId, null)
+        assert.strictEqual(useRSSSession.getState().selectedItemId, null)
+        assert.strictEqual(useRSSSession.getState().selectedItemTitle, null)
+    })
+
+    it('should allow explicitly clearing lastFetchAt', () => {
+        useRSSSession.getState().setFeedSnapshot({
+            totalItems: 12,
+            unreadItems: 4,
+            lastFetchAt: 123456,
+        })
+        assert.strictEqual(useRSSSession.getState().lastFetchAt, 123456)
+
+        useRSSSession.getState().setFeedSnapshot({
+            lastFetchAt: null,
+        })
+        assert.strictEqual(useRSSSession.getState().lastFetchAt, null)
+        assert.strictEqual(useRSSSession.getState().totalItems, 12)
+        assert.strictEqual(useRSSSession.getState().unreadItems, 4)
     })
 })
 

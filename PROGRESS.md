@@ -33,12 +33,12 @@
 - the Xiaohongshu extraction script regression is fixed and covered by test.
 - Xiaohongshu capture now succeeds again in a real Electron `persist:browser` session when the Ready browser session is logged in.
 - Douyin account-post-area extraction is live-validated in a real Electron `persist:browser` session.
-- shared workbench chrome now keeps the first-row mode strip compact, while the second-row tab rail and third-row toolbar rail are being pulled onto a tighter shared visual boundary instead of drifting by component-local padding.
+- RSS selected-source state now uses the session store as a single source of truth instead of diverging between local page state and diagnostics state.
+- shared workbench chrome now keeps the first-row mode strip compact, while the second-row tab rail and third-row toolbar rail are locked back onto the same content boundary instead of drifting by component-local padding.
 
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
-- Workbench top-row vertical alignment and tab baseline still need a final polish pass.
-- Workbench top-row vertical alignment has improved, but the remaining browser/document/calendar parity cleanup is still unfinished.
+- Workbench top-row vertical alignment still needs a final polish pass, but the second/third-row boundary mismatch is no longer intentional code.
 - Design inspector still lacks several high-frequency controls.
 - Browser diagnostics are not yet full labs.
 - Memory layering and Feishu replacement are still ahead on the mainline.

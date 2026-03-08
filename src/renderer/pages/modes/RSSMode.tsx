@@ -61,9 +61,9 @@ export default function RSSMode() {
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
   const setSelection = useRSSSession((state) => state.setSelection)
   const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
+  const selectedSource = selectedSourceId
   const [items, setItems] = useState<RSSItem[]>([])
   const [sources, setSources] = useState<RSSSource[]>([])
-  const [selectedSource, setSelectedSource] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -309,6 +309,18 @@ export default function RSSMode() {
       setSelectedItem(null)
     }
   }, [items, selectedItem])
+
+  useEffect(() => {
+    if (!selectedSourceId) return
+    const stillExists = sources.some((source) => source.id === selectedSourceId)
+    if (!stillExists) {
+      setSelection({ selectedSourceId: null })
+    }
+  }, [selectedSourceId, setSelection, sources])
+
+  const handleSourceChange = useCallback((sourceId: string | null) => {
+    setSelection({ selectedSourceId: sourceId })
+  }, [setSelection])
 
   const handleItemClick = useCallback((item: RSSItem) => {
     setSelectedItem(item)
@@ -618,7 +630,7 @@ export default function RSSMode() {
             analysisProgressMap={analysisProgressMap}
             analysisJobs={analysisJobs}
             onFilterChange={setFilter}
-            onSourceChange={setSelectedSource}
+            onSourceChange={handleSourceChange}
             onItemClick={handleItemClick}
             onMarkItemRead={handleMarkItemRead}
             onToggleStar={handleToggleStar}

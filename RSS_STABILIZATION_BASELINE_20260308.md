@@ -28,6 +28,7 @@ The RSS stack remains:
    - selected source => refresh that source
    - no selected source => refresh all
 6. RSS preview close no longer leaves a browser layer over the RSS pane.
+7. RSS selected-source refresh state no longer depends on a separate page-local source id that could drift away from the session diagnostics state after remount.
 
 ## Current platform status
 ### Stable on current stack
@@ -44,10 +45,10 @@ The RSS stack remains:
   - current path is viable, but still depends on stable browser session provisioning
 - Xiaohongshu
   - the browser-backed extraction script compiles again and has been live-validated in a real Electron `persist:browser` session
-  - the platform still depends on an already logged-in Ready browser session, so it remains conditional until the in-app refresh loop is rechecked end-to-end after restart
+  - the platform still depends on an already logged-in Ready browser session, so it remains conditional until the in-app refresh loop is rechecked end-to-end after the selected-source refresh state fix
 - Douyin
   - the browser-backed extractor has been live-validated against the account post area in a real Electron `persist:browser` session
-  - keep it conditional while the in-app refresh loop is rechecked end-to-end after restart
+  - keep it conditional while the in-app refresh loop is rechecked end-to-end after the selected-source refresh state fix
 
 ### Still not signed off
 - Xiaohongshu
@@ -56,11 +57,11 @@ The RSS stack remains:
   - the previous extraction-script syntax error has been removed and covered by test
   - browser-backed refresh now replaces the source's old items once a valid browser result is returned
   - the default path no longer silently falls back to RSSHub when app-browser acquisition fails
-  - remaining sign-off work is the real in-app refresh loop after restart, not another parser rewrite
+  - remaining sign-off work is the real in-app refresh loop after the selected-source refresh-state fix, not another parser rewrite
 - Douyin
   - browser-backed extractor has been tightened to target the account post area instead of page-wide recommendations
   - the default path no longer silently accepts RSSHub fallback content when the browser route fails
-  - remaining sign-off work is final in-app refresh hardening, not another route reset
+  - remaining sign-off work is final in-app refresh hardening after the selected-source refresh-state fix, not another route reset
 
 ## Architecture changes already landed
 1. RSS diagnostics logic is isolated in `source-diagnostics.ts`.
