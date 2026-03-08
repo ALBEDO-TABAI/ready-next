@@ -1,0 +1,301 @@
+import { useRef, useEffect, useState, useCallback } from 'react'
+import { useAgent } from '../../stores/useAgent'
+
+interface MeetingChatProps {
+  onFileDrop?: (filePath: string, fileName: string) => void
+}
+
+/**
+ * MeetingChat (420px) — Multi-agent group chat panel.
+ * - User messages: right-aligned, blue background
+ * - Agent replies: left-aligned, white background with avatar
+ * - System notifications: centered, gray
+ * - Auto-scroll + typing indicator
+ * - File drop zone for drag-from-FilePanel
+ * - Listens for new-file events and shows notifications
+ * - Detects file paths in agent messages and highlights them
+ */
+export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
+  const { agents, messages, isStreaming, addMessage } = useAgent()
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, isStreaming])
+
+  // Listen for new-file events from FilePanel (Task 8)
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ name: string; path: string }>) => {
+      addMessage({
+        id: `newfile-${Date.now()}`,
+        agent: 'system',
+        content: `新文件已创建: ${e.detail.name}`,
+        type: 'system',
+        timestamp: new Date()
+      })
+    }
+    window.addEventListener('ready:new-file', handler as EventListener)
+    return () => window.removeEventListener('ready:new-file', handler as EventListener)
+  }, [addMessage])
+
+  // Detect file paths in agent messages and dispatch highlight event (Task 8)
+  useEffect(() => {
+    if (messages.length === 0) return
+    const lastMsg = messages[messages.length - 1]
+    if (lastMsg.type !== 'agent') return
+    // Simple file path detection: matches /path/to/file.ext patterns
+    const filePathRegex = /(?:^|\s)(\/[\w\-./]+\.\w+)/g
+    let match: RegExpExecArray | null
+    while ((match = filePathRegex.exec(lastMsg.content)) !== null) {
+      window.dispatchEvent(
+        new CustomEvent('ready:highlight-file', { detail: { path: match[1] } })
+      )
+    }
+  }, [messages])
+
+  const getAgent = (name: string) => agents.find(a => a.name === name)
+
+  // File drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.dataTransfer.types.includes('application/x-ready-file')) {
+      setIsDragOver(true)
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    const fileData = e.dataTransfer.getData('application/x-ready-file')
+    if (fileData) {
+      try {
+        const { path, name } = JSON.parse(fileData)
+        onFileDrop?.(path, name)
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, [onFileDrop])
+
+  return (
+    <div
+      className="flex-shrink-0 flex flex-col"
+      style={{
+        width: 420,
+        background: 'var(--bg-content)',
+        borderRight: '1px solid var(--border-default)',
+        position: 'relative'
+      }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drop overlay */}
+      {isDragOver && (
+        <div
+          style={{
+            position: 'absolute', inset: 0, zIndex: 20,
+            background: 'rgba(52,211,153,0.08)',
+            border: '2px dashed var(--color-green)',
+            borderRadius: 8,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none'
+          }}
+        >
+          <div style={{
+            padding: '12px 24px', borderRadius: 12,
+            background: 'var(--bg-primary)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            fontSize: 13, fontWeight: 500, color: 'var(--color-green)'
+          }}>
+            拖放文件到此处添加附件
+          </div>
+        </div>
+      )}
+
+      {/* Chat Header */}
+      <div
+        className="flex items-center justify-between flex-shrink-0"
+        style={{
+          padding: '10px 16px',
+          borderBottom: '1px solid var(--border-default)'
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
+          会议聊天
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--text-light)' }}>
+          {agents.filter(a => a.selected).length} 位 Agent 参与
+        </span>
+      </div>
+
+      {/* Chat Messages */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto"
+        style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}
+      >
+        {/* Welcome */}
+        <div className="text-center" style={{ padding: '32px 16px' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-title)', marginBottom: 8 }}>
+            FlowAI — Agent 正在互动
+          </div>
+          <div style={{ fontSize: 12, color: '#8A8A8A', lineHeight: '1.6' }}>
+            你的多位 Agent 正在准备各自的运营方案。
+            <br />
+            你可以在此查看他们的实时讨论进度。
+          </div>
+        </div>
+
+        {/* Message List */}
+        {messages.map((msg) => {
+          // System notifications — centered gray
+          if (msg.type === 'system') {
+            return (
+              <div key={msg.id} className="flex justify-center" style={{ padding: '4px 0' }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-light)',
+                    background: 'var(--bg-panel)',
+                    padding: '4px 12px',
+                    borderRadius: 10,
+                    maxWidth: '80%',
+                    textAlign: 'center'
+                  }}
+                >
+                  {msg.content}
+                </span>
+              </div>
+            )
+          }
+
+          // User messages — right-aligned, blue
+          if (msg.type === 'user') {
+            return (
+              <div key={msg.id} className="flex justify-end">
+                <div style={{ maxWidth: '75%' }}>
+                  <div className="flex items-center justify-end" style={{ gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, color: '#999999' }}>
+                      {msg.timestamp.toLocaleTimeString()}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
+                      我
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12, color: 'var(--color-blue)', lineHeight: '1.5',
+                      background: 'var(--color-blue-light)',
+                      borderRadius: '12px 4px 12px 12px',
+                      padding: '8px 12px',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          // Agent replies — left-aligned, white with avatar
+          const agent = getAgent(msg.agent)
+          return (
+            <div key={msg.id} className="flex" style={{ gap: 8 }}>
+              <div
+                className="flex items-center justify-center flex-shrink-0"
+                style={{
+                  width: 28, height: 28,
+                  borderRadius: 8,
+                  background: '#E8E8E8',
+                  marginTop: 2
+                }}
+              >
+                <span style={{ fontSize: 12 }}>
+                  {agent?.avatar || '\u{1F916}'}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0" style={{ maxWidth: '75%' }}>
+                <div className="flex items-center" style={{ gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
+                    {agent?.displayName || msg.agent}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#999999' }}>
+                    {msg.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 12, color: 'var(--text-body)', lineHeight: '1.5',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '4px 12px 12px 12px',
+                    padding: '8px 12px',
+                    wordBreak: 'break-word',
+                    whiteSpace: 'pre-wrap'
+                  }}
+                >
+                  {msg.content}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Typing indicator */}
+        {isStreaming && (
+          <div className="flex items-center" style={{ gap: 8, padding: '4px 0' }}>
+            <div
+              className="flex items-center justify-center flex-shrink-0"
+              style={{
+                width: 28, height: 28,
+                borderRadius: 8,
+                background: '#E8E8E8'
+              }}
+            >
+              <span style={{ fontSize: 12 }}>{'\u{1F916}'}</span>
+            </div>
+            <div
+              className="flex items-center"
+              style={{
+                gap: 4,
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 12,
+                padding: '8px 14px'
+              }}
+            >
+              <span
+                className="animate-pulse"
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block' }}
+              />
+              <span
+                className="animate-pulse"
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block', animationDelay: '0.15s' }}
+              />
+              <span
+                className="animate-pulse"
+                style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-light)', display: 'inline-block', animationDelay: '0.3s' }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

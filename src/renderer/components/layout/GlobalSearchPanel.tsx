@@ -34,11 +34,14 @@ const PANEL_COLORS = {
   title: PANEL_TOKENS.title,
   mutedStrong: PANEL_TOKENS.mutedStrong,
   muted: PANEL_TOKENS.muted,
+  text: PANEL_TOKENS.text,
   inputBorder: PANEL_TOKENS.inputBorder,
   cardBorder: PANEL_TOKENS.border,
   cardBg: PANEL_TOKENS.cardBg,
-  replaceInputBg: '#F5F5F5',
-  replaceButtonBg: '#F8F8F8',
+  replaceInputBg: 'var(--bg-toolbar)',
+  replaceButtonBg: 'var(--bg-editor)',
+  blue: PANEL_TOKENS.blue,
+  blueLight: PANEL_TOKENS.blueLight,
 }
 
 function getExt(path: string): string {
@@ -112,7 +115,7 @@ function highlightText(source: string, query: string): ReactNode {
       <mark
         key={`hl-${key++}`}
         className="px-0.5 rounded-[4px]"
-        style={{ background: 'rgba(91, 141, 239, 0.18)', color: PANEL_COLORS.title }}
+        style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.title }}
       >
         {source.slice(idx, idx + keyword.length)}
       </mark>,
@@ -285,12 +288,13 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col" style={{ background: PANEL_COLORS.panelBg }}>
+    <div className="content-surface-panel flex h-full min-h-0 flex-col" style={{ background: 'var(--surface-panel-bg)' }}>
       <div
-        className="flex items-center justify-between border-b"
+        className="glass-surface-panel flex items-center justify-between border-b"
         style={{
           height: GLOBAL_SEARCH_DIMENSIONS.headerHeight,
           borderColor: PANEL_COLORS.cardBorder,
+          background: 'var(--surface-toolbar-bg)',
           padding: '10px 14px',
         }}
       >
@@ -325,10 +329,10 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
         </p>
 
         <label
-          className="w-full border px-[10px] flex items-center"
+          className="content-surface-card w-full border px-[10px] flex items-center"
           style={{
             borderColor: PANEL_COLORS.inputBorder,
-            background: PANEL_COLORS.cardBg,
+            background: 'var(--surface-card-bg)',
             height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
             borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
           }}
@@ -338,17 +342,17 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索文件名或内容..."
-            className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[#AAAAAA]"
-            style={{ color: '#333333' }}
+            className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-placeholder)]"
+            style={{ color: PANEL_COLORS.text }}
           />
         </label>
 
         <div className="flex items-center gap-[8px]">
           <label
-            className="flex-1 border px-[10px] flex items-center"
+            className="content-surface-card flex-1 border px-[10px] flex items-center"
             style={{
               borderColor: PANEL_COLORS.inputBorder,
-              background: PANEL_COLORS.replaceInputBg,
+              background: 'var(--surface-card-bg)',
               height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
               borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
             }}
@@ -358,19 +362,19 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
               value={replaceText}
               onChange={(e) => setReplaceText(e.target.value)}
               placeholder="替换为..."
-              className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[#8A8A8A]"
-              style={{ color: '#333333' }}
+              className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-light)]"
+              style={{ color: PANEL_COLORS.text }}
             />
           </label>
           <button
             type="button"
             onClick={() => void replaceAll()}
             disabled={isReplacing || !query.trim()}
-            className="border px-[10px] text-[10px] font-medium disabled:opacity-45"
+            className="content-surface-card border px-[10px] text-[10px] font-medium disabled:opacity-45"
             style={{
               borderColor: PANEL_COLORS.inputBorder,
               color: PANEL_COLORS.muted,
-              background: PANEL_COLORS.replaceButtonBg,
+              background: 'var(--surface-card-bg)',
               height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
               borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
             }}
@@ -380,7 +384,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
         </div>
 
         {message && (
-          <p className="text-[10px] font-medium" style={{ color: '#5B8DEF' }}>
+          <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.blue }}>
             {message}
           </p>
         )}
@@ -400,12 +404,12 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
                     <button
                       key={`${item.path}-${item.snippet || ''}`}
                       onClick={() => openResult(item)}
-                      className="w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[#FAFAFA]"
-                      style={{ borderColor: PANEL_COLORS.cardBorder, background: PANEL_COLORS.cardBg }}
+                      className="content-surface-card w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--bg-hover)]"
+                      style={{ borderColor: PANEL_COLORS.cardBorder, background: 'var(--surface-card-bg)' }}
                     >
                       <div className="flex items-center gap-[6px] min-w-0">
                         <FileText className="h-[13px] w-[13px] shrink-0" style={{ color: PANEL_COLORS.mutedStrong }} />
-                        <span className="truncate text-[12px] font-medium leading-[1.25]" style={{ color: '#333333' }}>
+                        <span className="truncate text-[12px] font-medium leading-[1.25]" style={{ color: PANEL_COLORS.text }}>
                           {highlightText(item.name, query)}
                         </span>
                       </div>
@@ -413,7 +417,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
                         {item.path}
                       </p>
                       {item.snippet && (
-                        <p className="mt-0.5 text-[11px] leading-[1.35]" style={{ color: '#666666' }}>
+                        <p className="mt-0.5 text-[11px] leading-[1.35]" style={{ color: PANEL_COLORS.muted }}>
                           {highlightText(item.snippet, query)}
                         </p>
                       )}

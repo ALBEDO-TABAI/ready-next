@@ -3,6 +3,7 @@ import {
   ArrowLeft, ArrowRight, RefreshCw, Loader2, Lock, Globe, ExternalLink,
   Star, Bookmark, Download, History, Printer, Shield, ShieldOff
 } from 'lucide-react'
+import { WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 type PanelType = 'bookmarks' | 'downloads' | 'history' | null
 
@@ -83,7 +84,7 @@ export default function BrowserAddressBar({
     <div
       className="glass-surface-panel flex items-center no-drag"
       style={{
-        height: 38,
+        height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
         padding: '0 12px',
         gap: 6,
         background: 'var(--surface-toolbar-bg)',

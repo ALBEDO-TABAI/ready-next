@@ -1,0 +1,10 @@
+yt-dlp
+requests
+pysrt
+python-dotenv
+funasr
+modelscope
+torch
+torchaudio
+rapidocr-onnxruntime
+openai-whisper

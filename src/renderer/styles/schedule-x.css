@@ -1,0 +1,271 @@
+/*
+ * Schedule-X CSS overrides — match Ready's design system
+ * Import AFTER @schedule-x/theme-default/dist/index.css
+ *
+ * CRITICAL: Tailwind v4 preflight sets `border: 0 solid` on ALL elements via `*`.
+ * SX relies on `border: var(--sx-border)` which expands into border-width/style/color.
+ * But Tailwind's reset can clobber the width. We must explicitly restore border-width
+ * on all SX grid elements.
+ */
+
+/* ========== CSS Variable overrides ========== */
+:root {
+  --sx-color-primary: var(--color-blue);
+  --sx-color-on-primary: #FFFFFF;
+  --sx-color-primary-container: var(--color-blue-light);
+  --sx-color-on-primary-container: var(--color-blue);
+
+  --sx-color-surface: var(--bg-primary);
+  --sx-color-surface-dim: var(--bg-canvas);
+  --sx-color-surface-bright: var(--bg-primary);
+  --sx-color-on-surface: var(--text-title);
+  --sx-color-surface-container: var(--bg-toolbar);
+  --sx-color-surface-container-low: var(--bg-content);
+  --sx-color-surface-container-high: var(--bg-panel);
+  --sx-color-background: var(--bg-primary);
+  --sx-color-on-background: var(--text-title);
+
+  --sx-color-outline: var(--border-default);
+  --sx-color-outline-variant: var(--border-default);
+  --sx-color-neutral: var(--text-muted);
+
+  --sx-color-secondary: var(--text-muted);
+  --sx-color-on-secondary: #FFFFFF;
+  --sx-color-secondary-container: var(--bg-hover);
+  --sx-color-on-secondary-container: var(--text-body);
+
+  --sx-color-shadow: rgba(0, 0, 0, 0.08);
+  --sx-color-surface-tint: var(--color-blue);
+}
+
+html[data-theme='dark'] {
+  --sx-color-shadow: rgba(0, 0, 0, 0.3);
+}
+
+/* ========== Undo Tailwind v4 preflight border reset inside SX ========== */
+.sx__calendar-wrapper *,
+.sx__calendar-wrapper *::before,
+.sx__calendar-wrapper *::after {
+  border-style: solid;
+}
+
+/* ========== Font ========== */
+.sx__calendar-wrapper,
+.sx__calendar-wrapper * {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== Hide default SX header (we build our own) ========== */
+.sx__calendar-wrapper .sx__calendar-header {
+  display: none !important;
+}
+
+/* ========== Wrapper sizing ========== */
+.sx-react-calendar-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.sx__calendar-wrapper {
+  border: none !important;
+  border-radius: 0 !important;
+  background: var(--lg-content-card-bg, var(--surface-card-bg)) !important;
+  height: 100% !important;
+  overflow: hidden;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.sx__calendar {
+  height: 100% !important;
+}
+
+/* ========== Week/Day view ========== */
+.sx__week-wrapper,
+.sx__day-wrapper {
+  background: var(--lg-content-card-bg, var(--surface-card-bg));
+}
+
+.sx__time-axis {
+  background: var(--lg-content-card-bg, var(--surface-card-bg));
+}
+
+.sx__time-axis-hour {
+  font-size: 10px !important;
+  color: var(--text-light) !important;
+  font-weight: 400 !important;
+}
+
+/* Grid hour lines */
+.sx__week-grid__hour-line,
+.sx__time-grid-day__hour-line {
+  border-top: 1px solid var(--border-default) !important;
+}
+
+/* Day column borders */
+.sx__week-grid__day {
+  border-right: 1px solid var(--border-default) !important;
+}
+
+/* Week header */
+.sx__week-header {
+  border-bottom: 1px solid var(--border-default) !important;
+}
+
+.sx__week-header .sx__week-header-day {
+  font-size: 11px !important;
+  color: var(--text-gray) !important;
+}
+
+.sx__week-header .sx__week-header-day--is-today {
+  color: var(--color-red) !important;
+}
+
+.sx__week-header .sx__week-header-day-date {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--text-title) !important;
+}
+
+.sx__week-header .sx__week-header-day--is-today .sx__week-header-day-date {
+  background: var(--color-red) !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  width: 24px !important;
+  height: 24px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Today column highlight */
+.sx__week-grid__day--is-today {
+  background: color-mix(in srgb, var(--color-blue) 7%, transparent) !important;
+}
+
+/* ========== Time grid events ========== */
+.sx__time-grid-event {
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  opacity: 0.92;
+  transition: none !important;
+}
+
+.sx__time-grid-event-inner {
+  padding: 0 !important;
+  height: 100% !important;
+}
+
+.sx__time-grid-event .sx__time-grid-event-inner > div {
+  height: 100%;
+}
+
+/* All-day events */
+.sx__date-grid-event {
+  border-radius: 6px !important;
+  font-size: 11px !important;
+}
+
+/* ========== Month grid ========== */
+.sx__month-grid-wrapper {
+  background: var(--lg-content-card-bg, var(--surface-card-bg)) !important;
+}
+
+.sx__month-grid-cell {
+  border: 1px solid var(--border-default) !important;
+}
+
+.sx__month-grid-day {
+  border-bottom: 1px solid var(--border-default) !important;
+}
+
+.sx__month-grid-day__header-date {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--text-title) !important;
+}
+
+.sx__month-grid-day__header-date--is-today {
+  background: var(--color-red) !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.sx__month-grid-day--not-in-month .sx__month-grid-day__header-date {
+  color: var(--text-placeholder) !important;
+}
+
+.sx__month-grid-day--not-in-month {
+  background: var(--bg-canvas) !important;
+}
+
+.sx__month-grid-event {
+  border-radius: 4px !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 1px !important;
+}
+
+.sx__month-grid-event-inner {
+  padding: 0 !important;
+}
+
+.sx__month-grid-wrapper .sx__month-grid-week-day-name {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: var(--text-gray) !important;
+}
+
+/* ========== Current time indicator ========== */
+.sx__current-time-indicator {
+  background: var(--color-red) !important;
+  height: 2px !important;
+}
+
+.sx__current-time-indicator::before {
+  background: var(--color-red) !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 4px !important;
+  top: -3px !important;
+}
+
+/* ========== +N more in month ========== */
+.sx__month-grid-day__events-more {
+  font-size: 10px !important;
+  color: var(--text-light) !important;
+}
+
+/* ========== Scrollbar ========== */
+.sx__calendar-wrapper ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.sx__calendar-wrapper ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sx__calendar-wrapper ::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+.sx__calendar-wrapper ::-webkit-scrollbar-thumb:hover {
+  background: var(--border-input);
+}
+
+/* ========== Drag/hover ========== */
+.sx__time-grid-event--is-dragging {
+  z-index: 100 !important;
+  opacity: 0.9;
+  box-shadow: var(--surface-shadow) !important;
+}
+
+.sx__week-grid__date-cell:hover,
+.sx__time-grid-day__date-cell:hover {
+  background: color-mix(in srgb, var(--color-blue) 8%, transparent);
+}

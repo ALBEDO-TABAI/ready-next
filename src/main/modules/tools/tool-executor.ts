@@ -5,9 +5,13 @@
 
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { executeBrowserTool } from './browser-tools'
+import { executeCalendarTool } from './calendar-tools'
+import { executeDesignTool } from './design-tools'
 import { executeDocumentTool } from './document-tools'
+import { executeRSSTool } from './rss-tools'
 import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
+import { executeVideoTool } from './video-tools'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -32,6 +36,22 @@ export async function executeToolCall(
     return executeDocumentTool(toolName, args, { emitToolAction: context.emitToolAction })
   }
 
+  if (toolName.startsWith('design_')) {
+    return executeDesignTool(toolName, args, { emitToolAction: context.emitToolAction })
+  }
+
+  if (toolName.startsWith('video_')) {
+    return executeVideoTool(toolName, args, { emitToolAction: context.emitToolAction })
+  }
+
+  if (toolName.startsWith('rss_')) {
+    return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
+  }
+
+  if (toolName.startsWith('calendar_')) {
+    return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
+  }
+
   if (toolName.startsWith('skill_')) {
     return executeSkillTool(toolName, args, context.sessionId)
   }
@@ -40,6 +60,5 @@ export async function executeToolCall(
     return executeSystemTool(toolName, args)
   }
 
-  // Future: calendar_*, rss_* tool families
   return `Unknown tool: ${toolName}`
 }

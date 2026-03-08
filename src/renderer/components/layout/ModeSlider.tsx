@@ -1,9 +1,15 @@
 import { useMode } from '../../stores/useMode'
 import { useNavigate } from 'react-router-dom'
+import { motion, useReducedMotion } from 'framer-motion'
+import { useTheme } from '../../stores/useTheme'
 
 export default function ModeSlider() {
   const { appMode, toggleMode } = useMode()
   const navigate = useNavigate()
+  const skin = useTheme((state) => state.skin)
+  const isLiquid = skin === 'liquid-glass'
+  const reduceMotion = useReducedMotion()
+  const isReady = appMode === 'ready'
 
   const handleToggle = () => {
     toggleMode()
@@ -12,36 +18,54 @@ export default function ModeSlider() {
   }
 
   return (
-    <button
+    <motion.button
       onClick={handleToggle}
-      className="relative w-[63px] h-[28px] rounded-2xl flex items-center px-1 transition-all duration-300"
+      whileHover={isLiquid && !reduceMotion ? { y: -1 } : undefined}
+      whileTap={isLiquid && !reduceMotion ? { scale: 0.985, y: 0 } : undefined}
+      className="glass-surface-card morph-segmented-track relative h-[28px] w-[90px] overflow-hidden rounded-[16px]"
       style={{
-        background: appMode === 'ready' ? 'rgba(52, 211, 153, 0.15)' : '#EBE8E1',
-        border: `1px solid ${appMode === 'ready' ? 'rgba(52, 211, 153, 0.3)' : 'var(--border-default)'}`
+        border: '1px solid var(--surface-border)',
       }}
     >
-      {/* Knob */}
-      <div
-        className="absolute w-[22px] h-[22px] rounded-[11px] bg-[var(--bg-primary)] shadow-sm transition-all duration-300 ease-out"
+      <motion.span
+        className="pointer-events-none absolute"
+        animate={{
+          x: isReady ? 0 : 38,
+          opacity: 1,
+        }}
+        transition={reduceMotion ? { duration: 0.01 } : { duration: 0.18, ease: 'easeOut' }}
         style={{
-          transform: appMode === 'ready' ? 'translateX(34px)' : 'translateX(2px)',
-          border: '1px solid var(--border-input)'
+          left: 10,
+          top: 9,
+          zIndex: 2,
+          fontSize: 11,
+          lineHeight: 1,
+          fontWeight: 600,
+          color: isReady ? 'var(--text-secondary)' : 'var(--color-green)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {isReady ? '工作台' : 'Ready'}
+      </motion.span>
+
+      {/* Knob */}
+      <motion.div
+        animate={{ x: isReady ? 50 : 2 }}
+        transition={reduceMotion
+          ? { duration: 0.01 }
+          : { type: 'spring', stiffness: 420, damping: 22, mass: 0.62 }}
+        className="absolute h-[22px] w-[30px] rounded-[11px]"
+        style={{
+          left: 2,
+          top: 2,
+          zIndex: 1,
+          border: '1px solid var(--surface-border)',
+          background: isReady
+            ? 'color-mix(in srgb, var(--color-green-light) 45%, var(--surface-floating-bg))'
+            : 'var(--surface-floating-bg)',
+          boxShadow: 'var(--lg-shadow-contact)',
         }}
       />
-
-      {/* Labels */}
-      <span
-        className={`absolute left-2 transition-opacity duration-200 ${appMode === 'workbench' ? 'opacity-100' : 'opacity-0'}`}
-        style={{ fontSize: 11, fontWeight: 600, color: '#3D3D3D' }}
-      >
-        工作台
-      </span>
-      <span
-        className={`absolute right-2 transition-opacity duration-200 ${appMode === 'ready' ? 'opacity-100' : 'opacity-0'}`}
-        style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-green)' }}
-      >
-        Ready
-      </span>
-    </button>
+    </motion.button>
   )
 }

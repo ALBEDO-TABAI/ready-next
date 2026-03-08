@@ -1,18 +1,13 @@
-import { useEffect, useCallback, useRef, useState } from 'react'
+import { useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useMode } from '../stores/useMode'
 import TopBar from '../components/layout/TopBar'
 import IconRail from '../components/layout/IconRail'
-import SidePanel from '../components/layout/SidePanel'
+import SidePanel, { type SidePanelVariant } from '../components/layout/SidePanel'
+import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
-import BrowserMode from './modes/BrowserMode'
-import DocumentMode from './modes/DocumentMode'
-import ImageMode from './modes/ImageMode'
-import VideoMode from './modes/VideoMode'
-import RSSMode from './modes/RSSMode'
-import CalendarMode from './modes/CalendarMode'
 
 // --- Resize Handle ---
 function ResizeHandle({
@@ -71,10 +66,11 @@ export default function WorkbenchMode() {
     sidePanelWidths,
     sidebarVisible,
     chatPanelVisible,
+    sidePanelVariant,
+    setSidePanelVariant,
   } = useWorkspace()
-  const { workbenchMode, splitMode } = useMode()
+  const { workbenchMode, splitMode, splitRatio, setSplitRatio } = useMode()
   const navigate = useNavigate()
-  const [splitRatio, setSplitRatio] = useState(50)
   const splitContainerRef = useRef<HTMLDivElement>(null)
 
   const handleSplitResize = useCallback((delta: number) => {
@@ -82,8 +78,8 @@ export default function WorkbenchMode() {
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    setSplitRatio(prev => Math.max(20, Math.min(80, prev + deltaPercent)))
-  }, [])
+    setSplitRatio(splitRatio + deltaPercent)
+  }, [splitRatio, setSplitRatio])
 
   // Initialize workspace on mount
   useEffect(() => {
@@ -115,14 +111,34 @@ export default function WorkbenchMode() {
   const handleIconClick = (icon: string) => {
     if (icon === 'settings') {
       navigate('/settings')
-    } else if (icon === 'folder') {
+      return
+    }
+
+    const iconVariantMap: Record<string, SidePanelVariant> = {
+      folder: 'files',
+      search: 'search',
+      skills: 'skills',
+    }
+    const targetVariant = iconVariantMap[icon]
+    if (!targetVariant) return
+
+    if (sidebarVisible && sidePanelVariant === targetVariant) {
+      toggleSidebar()
+      return
+    }
+
+    setSidePanelVariant(targetVariant)
+    if (!sidebarVisible) {
       toggleSidebar()
     }
   }
 
   const handleSidebarResize = useCallback((delta: number) => {
-    setSidePanelWidth('files', Math.max(160, Math.min(400, sidePanelWidths.files + delta)))
-  }, [setSidePanelWidth, sidePanelWidths.files])
+    if (!['files', 'search', 'skills'].includes(sidePanelVariant)) return
+    const key = sidePanelVariant as 'files' | 'search' | 'skills'
+    const current = sidePanelWidths[key]
+    setSidePanelWidth(key, current + delta)
+  }, [setSidePanelWidth, sidePanelVariant, sidePanelWidths])
 
   const handleChatResize = useCallback((delta: number) => {
     useWorkspace.setState((state) => ({
@@ -130,33 +146,22 @@ export default function WorkbenchMode() {
     }))
   }, [])
 
-  const renderModeComponent = (mode: string) => {
-    switch (mode) {
-      case 'browser':
-        return <BrowserMode />
-      case 'document':
-        return <DocumentMode />
-      case 'image':
-        return <ImageMode />
-      case 'video':
-        return <VideoMode />
-      case 'rss':
-        return <RSSMode />
-      case 'calendar':
-        return <CalendarMode />
-      default:
-        return <BrowserMode />
-    }
-  }
+  // IconRail always visible
+  const hideIconRail = false
+  const activeIcon = useMemo(() => {
+    if (sidePanelVariant === 'search') return 'search'
+    if (sidePanelVariant === 'skills') return 'skills'
+    return 'folder'
+  }, [sidePanelVariant])
 
   return (
-    <div className="flex flex-col h-full">
-      {/* TopBar: right ⊟ button toggles ChatPanel */}
-      <TopBar onToggleSidebar={toggleChatPanel} />
+    <div className="workbench-mode-root flex flex-col h-full">
+      {/* TopBar: right button toggles ChatPanel */}
+      <TopBar onToggleChatPanel={toggleChatPanel} />
 
-      <div className="flex flex-1 overflow-hidden">
-        <IconRail onIconClick={handleIconClick} />
-        <SidePanel />
+      <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
+        <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} />
+        <SidePanel variant={sidePanelVariant} />
 
         {/* Sidebar resize handle */}
         {sidebarVisible && (
@@ -171,17 +176,17 @@ export default function WorkbenchMode() {
               className="flex flex-col min-w-0 bg-[var(--bg-content)]"
               style={{ flexBasis: `${splitRatio}%`, flexShrink: 0, flexGrow: 0 }}
             >
-              {renderModeComponent(workbenchMode)}
+              <WorkbenchModeOutlet mode={workbenchMode} />
             </div>
             <ResizeHandle onResize={handleSplitResize} direction="right" />
             <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-              {renderModeComponent(splitMode)}
+              <WorkbenchModeOutlet mode={splitMode} />
             </div>
           </div>
         ) : (
           /* Single mode */
           <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-            {renderModeComponent(workbenchMode)}
+            <WorkbenchModeOutlet mode={workbenchMode} />
           </div>
         )}
 

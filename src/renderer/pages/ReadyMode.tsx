@@ -1,312 +1,147 @@
+import { useState, useCallback } from 'react'
 import {
-  Users, Settings, Plus, Send, Globe, FileText, Image,
-  Scissors, Rss, Calendar, Search, ChevronDown, Folder
+  Users, Settings, Globe, FileText, Pen,
+  Scissors, Rss, Calendar
 } from 'lucide-react'
-import { useMode } from '../stores/useMode'
+import { motion } from 'framer-motion'
+import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useAgent } from '../stores/useAgent'
 import ModeSlider from '../components/layout/ModeSlider'
+import MorphSegmentedControl, { type MorphSegmentedItem } from '../components/motion/MorphSegmentedControl'
 import TaskPanel from '../components/ready/TaskPanel'
-import BrowserMode from './modes/BrowserMode'
-import DocumentMode from './modes/DocumentMode'
-import ImageMode from './modes/ImageMode'
-import VideoMode from './modes/VideoMode'
-import RSSMode from './modes/RSSMode'
-import CalendarMode from './modes/CalendarMode'
+import MeetingChat from '../components/ready/MeetingChat'
+import LiveFollowPanel from '../components/ready/LiveFollowPanel'
+import FilePanel from '../components/ready/FilePanel'
 
-const subModes: { id: string; label: string; icon: React.ElementType }[] = [
-  { id: 'browser', label: '浏览器', icon: Globe },
-  { id: 'document', label: '文档', icon: FileText },
-  { id: 'image', label: '图像', icon: Image },
-  { id: 'video', label: '剪辑', icon: Scissors },
-  { id: 'rss', label: 'RSS', icon: Rss },
-  { id: 'calendar', label: '日程', icon: Calendar }
+/* ─── Sub-mode tab definitions ─── */
+const subModes: { id: WorkbenchMode; label: string; icon: React.ElementType }[] = [
+  { id: 'browser',  label: '浏览器', icon: Globe },
+  { id: 'document', label: '文档',   icon: FileText },
+  { id: 'design',   label: '设计',   icon: Pen },
+  { id: 'video',    label: '剪辑',   icon: Scissors },
+  { id: 'rss',      label: 'RSS',    icon: Rss },
+  { id: 'calendar', label: '日程',   icon: Calendar }
 ]
 
+/**
+ * ReadyMode — four-panel Ready mode container.
+ *
+ * Layout:
+ *   ReadyTopBar (40px)
+ *   ┌──────────┬──────────┬──────────────┬─────────┐
+ *   │TaskPanel │MeetingChat│LiveFollowPanel│FilePanel│
+ *   │  200px   │  420px   │    fill       │  180px  │
+ *   └──────────┴──────────┴──────────────┴─────────┘
+ */
 export default function ReadyMode() {
   const { readySubMode, setReadySubMode } = useMode()
-  const { agents, messages, inputValue, isStreaming, setInputValue, sendMessage } = useAgent()
+  const { addMessage } = useAgent()
+  const [isFollowMode, setIsFollowMode] = useState(false)
 
-  const renderSubMode = () => {
-    switch (readySubMode) {
-      case 'browser': return <BrowserMode />
-      case 'document': return <DocumentMode />
-      case 'image': return <ImageMode />
-      case 'video': return <VideoMode />
-      case 'rss': return <RSSMode />
-      case 'calendar': return <CalendarMode />
-      default: return <BrowserMode />
+  const subModeItems: MorphSegmentedItem[] = subModes.map((mode) => ({
+    id: mode.id,
+    label: mode.label,
+    icon: mode.icon,
+    active: readySubMode === mode.id && !isFollowMode,
+    onClick: () => {
+      setReadySubMode(mode.id)
+      setIsFollowMode(false)
+    },
+  }))
+
+  /** Handle file drop from FilePanel onto MeetingChat */
+  const handleFileDrop = useCallback((filePath: string, fileName: string) => {
+    addMessage({
+      id: `file-${Date.now()}`,
+      agent: 'system',
+      content: `📎 附件: ${fileName}\n路径: ${filePath}`,
+      type: 'system',
+      timestamp: new Date()
+    })
+  }, [addMessage])
+
+  /** Handle file click in FilePanel — open in LiveFollowPanel document mode */
+  const handleFileOpen = useCallback((filePath: string) => {
+    // Switch LiveFollowPanel to document mode when a file is clicked
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+    const designExts = ['tldr']
+    const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm']
+
+    if (designExts.includes(ext)) {
+      setReadySubMode('design')
+    } else if (videoExts.includes(ext)) {
+      setReadySubMode('video')
+    } else {
+      setReadySubMode('document')
     }
-  }
-
-  const handleSend = async () => {
-    if (!inputValue.trim() || isStreaming) return
-    await sendMessage(inputValue)
-    setInputValue('')
-  }
+    setIsFollowMode(false)
+  }, [setReadySubMode])
 
   return (
     <div className="flex flex-col h-full">
-      {/* UnifiedTopBar — matches design HXeCj */}
+      {/* ═══ ReadyTopBar (40px) ═══ */}
       <div
-        className="flex items-center justify-between"
+        className="glass-surface-panel flex items-center justify-between flex-shrink-0"
         style={{
           height: 40,
           padding: '0 16px 0 72px',
-          background: 'var(--bg-panel)',
+          background: 'var(--surface-toolbar-bg)',
           borderBottom: '1px solid var(--border-default)',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+          boxShadow: 'var(--shadow-md)'
         }}
       >
-        {/* Left: ModeSlider */}
+        {/* Left: Green-themed ModeSlider */}
         <div className="flex items-center" style={{ gap: 12 }}>
           <ModeSlider />
         </div>
 
-        {/* Center: Sub mode tabs */}
+        {/* Center: Sub-mode tabs */}
         <div className="flex items-center" style={{ gap: 8 }}>
-          <button
-            className="flex items-center"
+          {/* Live Follow tab — toggleable green */}
+          <motion.button
+            onClick={() => setIsFollowMode(!isFollowMode)}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.985, y: 0 }}
+            className="flex items-center transition-all duration-200"
             style={{
               padding: '4px 10px',
               borderRadius: 10,
-              background: 'rgba(52,211,153,0.09)',
-              fontSize: 11, fontWeight: 500, color: 'var(--color-green)'
+              background: isFollowMode ? 'var(--color-green-medium)' : 'var(--color-green-subtle)',
+              fontSize: 11, fontWeight: 500, color: 'var(--color-green)',
+              border: isFollowMode ? '1px solid var(--color-green)' : '1px solid transparent'
             }}
           >
             实时跟随
-          </button>
-          {subModes.map((mode) => {
-            const Icon = mode.icon
-            const isActive = readySubMode === mode.id
-            return (
-              <button
-                key={mode.id}
-                onClick={() => setReadySubMode(mode.id as typeof readySubMode)}
-                className="flex items-center transition-all duration-200"
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: 10,
-                  gap: 4,
-                  background: isActive ? 'rgba(91,141,239,0.09)' : 'transparent',
-                  color: isActive ? '#5B8DEF' : '#8A8A8A',
-                  fontSize: 11, fontWeight: 500
-                }}
-              >
-                <Icon style={{ width: 12, height: 12 }} strokeWidth={2} />
-                <span>{mode.label}</span>
-              </button>
-            )
-          })}
+          </motion.button>
+
+          <div className="glass-surface-card morph-segmented-track flex items-center rounded-[12px] p-[2px]">
+            <MorphSegmentedControl
+              layoutId="ready-submodes"
+              items={subModeItems}
+              className="flex items-center gap-1"
+              itemClassName="relative flex h-[26px] items-center justify-center rounded-[10px] px-[10px]"
+              contentClassName="relative z-[1] flex h-full items-center justify-center gap-1 text-[11px] leading-none"
+            />
+          </div>
         </div>
 
-        {/* Right: users + settings */}
+        {/* Right: collaboration + settings */}
         <div className="flex items-center" style={{ gap: 8 }}>
-          <button className="p-1 rounded hover:bg-black/5 transition-colors">
-            <Users style={{ width: 15, height: 15 }} className="text-[#999999]" strokeWidth={2} />
+          <button className="p-1 rounded hover:bg-[var(--bg-hover)] transition-colors" aria-label="协作">
+            <Users style={{ width: 15, height: 15 }} className="text-[var(--text-light)]" strokeWidth={2} />
           </button>
-          <button className="p-1 rounded hover:bg-black/5 transition-colors">
-            <Settings style={{ width: 15, height: 15 }} className="text-[#999999]" strokeWidth={2} />
+          <button className="p-1 rounded hover:bg-[var(--bg-hover)] transition-colors" aria-label="设置">
+            <Settings style={{ width: 15, height: 15 }} className="text-[var(--text-light)]" strokeWidth={2} />
           </button>
         </div>
       </div>
 
-      {/* ContentBody — matches design Z58Gf */}
+      {/* ═══ Four-panel content body ═══ */}
       <div className="flex-1 flex overflow-hidden">
         <TaskPanel />
-
-        {/* MeetingChat — matches design bLNSY */}
-        <div
-          className="flex-shrink-0 flex flex-col justify-between"
-          style={{
-            width: 420,
-            background: 'var(--bg-content)',
-            borderRight: '1px solid var(--border-default)'
-          }}
-        >
-          {/* Chat Messages */}
-          <div
-            className="flex-1 overflow-auto"
-            style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}
-          >
-            {/* Welcome */}
-            <div className="text-center" style={{ padding: '40px 16px' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-title)', marginBottom: 8 }}>
-                FlowAI — Agent 正在互动
-              </div>
-              <div style={{ fontSize: 12, color: '#8A8A8A', lineHeight: '1.6' }}>
-                你的多位 Agent 正在准备各自的运营方案。
-                <br />
-                你可以在此查看他们的实时讨论进度。
-              </div>
-            </div>
-
-            {/* Message List */}
-            {messages.map((msg) => (
-              <div key={msg.id} className="flex" style={{ gap: 8 }}>
-                <div
-                  className="flex items-center justify-center flex-shrink-0"
-                  style={{
-                    width: 28, height: 28,
-                    borderRadius: 8,
-                    background: '#E8E8E8'
-                  }}
-                >
-                  <span style={{ fontSize: 12 }}>
-                    {agents.find(a => a.name === msg.agent)?.avatar || '🤖'}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center" style={{ gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-title)' }}>
-                      {agents.find(a => a.name === msg.agent)?.displayName || msg.agent}
-                    </span>
-                    <span style={{ fontSize: 10, color: '#999999' }}>
-                      {msg.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12, color: 'var(--text-body)', lineHeight: '1.5',
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border-default)',
-                      borderRadius: 8, padding: '8px 12px'
-                    }}
-                  >
-                    {msg.content}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Chat Input */}
-          <div
-            style={{
-              padding: '10px 14px',
-              borderTop: '1px solid var(--border-default)',
-              display: 'flex', flexDirection: 'column', gap: 6
-            }}
-          >
-            {/* Agent tags */}
-            <div className="flex items-center flex-wrap" style={{ gap: 4 }}>
-              <span style={{ fontSize: 11, color: '#8A8A8A' }}>@</span>
-              {agents.filter(a => a.selected).map(agent => (
-                <span
-                  key={agent.name}
-                  className="flex items-center"
-                  style={{
-                    padding: '2px 6px',
-                    borderRadius: 10,
-                    fontSize: 10,
-                    background: 'var(--color-blue-light)',
-                    color: 'var(--color-blue)',
-                    gap: 2
-                  }}
-                >
-                  {agent.avatar} {agent.displayName}
-                </span>
-              ))}
-            </div>
-            {/* Input */}
-            <div className="flex items-center" style={{ gap: 8 }}>
-              <div
-                className="flex-1 flex items-center"
-                style={{
-                  borderRadius: 10,
-                  border: '1px solid var(--border-input)',
-                  padding: '8px 12px',
-                  background: 'var(--bg-primary)'
-                }}
-              >
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                  placeholder="给 Agent 们发送指令..."
-                  className="flex-1 bg-transparent border-none outline-none"
-                  style={{ fontSize: 12, color: 'var(--text-body)' }}
-                />
-              </div>
-              <button
-                onClick={handleSend}
-                disabled={!inputValue.trim() || isStreaming}
-                className="flex items-center justify-center text-white hover:brightness-95 disabled:opacity-40 transition-all"
-                style={{ width: 26, height: 26, borderRadius: 13, background: 'var(--color-blue)' }}
-              >
-                <Send style={{ width: 12, height: 12 }} strokeWidth={2} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* LiveFollowPanel — matches design qCIIl */}
-        <div
-          className="flex-1 flex flex-col min-w-0"
-          style={{ background: 'var(--bg-content)' }}
-        >
-          {renderSubMode()}
-        </div>
-
-        {/* FilePanel — matches design GZBjq */}
-        <div
-          className="flex-shrink-0 flex flex-col"
-          style={{
-            width: 180,
-            background: 'var(--bg-panel)',
-            borderLeft: '1px solid var(--border-default)',
-            padding: '12px 10px',
-            gap: 8
-          }}
-        >
-          {/* Title */}
-          <div className="flex items-center justify-between">
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>文件管理</span>
-            <Plus style={{ width: 12, height: 12 }} className="text-[#999999]" strokeWidth={2} />
-          </div>
-
-          {/* Search */}
-          <div
-            className="flex items-center"
-            style={{
-              height: 28, borderRadius: 10,
-              background: '#EEEEEE',
-              padding: '0 8px', gap: 4
-            }}
-          >
-            <Search style={{ width: 11, height: 11 }} className="text-[#999999]" strokeWidth={2} />
-            <input
-              type="text"
-              placeholder="搜索..."
-              className="flex-1 bg-transparent border-none outline-none"
-              style={{ fontSize: 11, color: 'var(--text-body)' }}
-            />
-          </div>
-
-          {/* File List */}
-          <div className="flex-1 overflow-auto flex flex-col" style={{ gap: 6 }}>
-            {[
-              { name: '视频素材', icon: Folder },
-              { name: '文案输出', icon: Folder },
-              { name: '需求文档.md', icon: FileText },
-              { name: 'RSS数据', icon: Folder },
-              { name: '封面设计.png', icon: Image },
-              { name: '日程安排.md', icon: FileText }
-            ].map((file) => {
-              const Icon = file.icon
-              return (
-                <button
-                  key={file.name}
-                  className="flex items-center w-full rounded-lg hover:bg-black/5 transition-colors text-left"
-                  style={{ padding: '6px 8px', gap: 6 }}
-                >
-                  <Icon style={{ width: 14, height: 14, flexShrink: 0 }} className="text-[var(--text-muted)]" strokeWidth={2} />
-                  <span className="truncate" style={{ fontSize: 11, color: 'var(--text-body)' }}>{file.name}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        <MeetingChat onFileDrop={handleFileDrop} />
+        <LiveFollowPanel isFollowMode={isFollowMode} />
+        <FilePanel onFileDrop={handleFileDrop} onFileOpen={handleFileOpen} />
       </div>
     </div>
   )

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Plus, X, Globe, Loader2, ChevronLeft, ChevronRight, Lock
 } from 'lucide-react'
+import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
+import { WORKBENCH_ROW_PADDING_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface Tab {
   id: string
@@ -127,8 +129,8 @@ export default function BrowserTabBar({
     <div
       className="glass-surface-panel flex items-center no-drag"
       style={{
-        height: 34,
-        padding: '0 8px',
+        height: WORKBENCH_TAB_ROW_HEIGHT,
+        padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
         background: 'var(--surface-toolbar-bg)',
         borderBottom: '1px solid var(--border-default)',
         gap: 0,
@@ -151,14 +153,15 @@ export default function BrowserTabBar({
         className="flex items-end flex-1 overflow-x-hidden"
         style={{ gap: 1, minWidth: 0 }}
       >
-        <div className="flex min-w-0 flex-1 items-end gap-[1px]">
+        <MorphTabStrip layoutId="browser-tabs" className="flex min-w-0 flex-1 items-end gap-[1px]">
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
             return (
-              <button
+              <MorphTabButton
                 key={tab.id}
-                type="button"
+                layoutId="browser-tabs"
+                active={isActive}
                 draggable
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragEnd={handleDragEnd}
@@ -171,87 +174,86 @@ export default function BrowserTabBar({
                   gap: 6,
                   height: isActive ? 33 : 28,
                   flex: '1 1 0',
-                  maxWidth: 220,
+                  maxWidth: WORKBENCH_TAB_MAX_WIDTH,
                   minWidth: 0,
                   background: isActive ? 'var(--surface-card-bg)' : 'transparent',
                   color: isActive ? 'var(--text-title)' : 'var(--text-gray)',
                   borderLeft: isDragOver ? '2px solid var(--color-blue)' : '2px solid transparent',
                   alignSelf: 'flex-end',
                 }}
+                contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
               >
-                <span className="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]">
-                  {tab.loading ? (
-                    <Loader2
-                      style={{ width: 14, height: 14 }}
-                      className="text-[var(--color-blue)] animate-spin flex-shrink-0"
-                      strokeWidth={2}
-                    />
-                  ) : tab.favicon ? (
-                    <img
-                      src={tab.favicon}
-                      alt=""
-                      className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
-                    />
-                  ) : (
-                    <Globe
-                      style={{ width: 14, height: 14 }}
-                      className="flex-shrink-0"
-                      strokeWidth={2}
-                    />
-                  )}
+                {tab.loading ? (
+                  <Loader2
+                    style={{ width: 14, height: 14 }}
+                    className="text-[var(--color-blue)] animate-spin flex-shrink-0"
+                    strokeWidth={2}
+                  />
+                ) : tab.favicon ? (
+                  <img
+                    src={tab.favicon}
+                    alt=""
+                    className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
+                  />
+                ) : (
+                  <Globe
+                    style={{ width: 14, height: 14 }}
+                    className="flex-shrink-0"
+                    strokeWidth={2}
+                  />
+                )}
 
-                  <span className="truncate flex-1" style={{ lineHeight: '28px' }}>
-                    {tab.title || 'New Tab'}
-                  </span>
-
-                  {tab.owner === 'agent' && (
-                    <span
-                      className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
-                      style={{
-                        background: 'var(--color-blue-light)',
-                        color: 'var(--color-blue)',
-                      }}
-                    >
-                      Agent
-                    </span>
-                  )}
-
-                  {tab.required && (
-                    <Lock
-                      style={{ width: 10, height: 10 }}
-                      className="flex-shrink-0 text-[var(--text-light)]"
-                      strokeWidth={2}
-                    />
-                  )}
-
-                  {tab.activity && tab.activity !== 'idle' && (
-                    <span
-                      className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
-                      style={{
-                        background: tab.activity === 'attention'
-                          ? 'var(--color-orange)'
-                          : 'var(--color-blue)',
-                      }}
-                    />
-                  )}
-
-                  <span
-                    role="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onTabClose(tab.id)
-                    }}
-                    className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
-                    style={{ padding: 2 }}
-                    title="Close tab"
-                  >
-                    <X style={{ width: 10, height: 10 }} strokeWidth={2} />
-                  </span>
+                <span className="truncate flex-1" style={{ lineHeight: '28px' }}>
+                  {tab.title || 'New Tab'}
                 </span>
-              </button>
+
+                {tab.owner === 'agent' && (
+                  <span
+                    className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
+                    style={{
+                      background: 'var(--color-blue-light)',
+                      color: 'var(--color-blue)',
+                    }}
+                  >
+                    Agent
+                  </span>
+                )}
+
+                {tab.required && (
+                  <Lock
+                    style={{ width: 10, height: 10 }}
+                    className="flex-shrink-0 text-[var(--text-light)]"
+                    strokeWidth={2}
+                  />
+                )}
+
+                {tab.activity && tab.activity !== 'idle' && (
+                  <span
+                    className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
+                    style={{
+                      background: tab.activity === 'attention'
+                        ? 'var(--color-orange)'
+                        : 'var(--color-blue)',
+                    }}
+                  />
+                )}
+
+                <span
+                  role="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onTabClose(tab.id)
+                  }}
+                  className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
+                  style={{ padding: 2 }}
+                  title="Close tab"
+                >
+                  <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                </span>
+              </MorphTabButton>
             )
           })}
-        </div>
+        </MorphTabStrip>
 
         {/* New Tab button — adjacent to the last tab */}
         <button

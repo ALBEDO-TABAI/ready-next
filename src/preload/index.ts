@@ -113,6 +113,7 @@ const browserAPI = {
   showActive: () => ipcRenderer.invoke('browser:showActive'),
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
+  getDiagnostics: () => ipcRenderer.invoke('browser:getDiagnostics'),
   setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
     ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
@@ -210,11 +211,15 @@ const rssAPI = {
   markReadBatch: (itemIds: string[]) => ipcRenderer.invoke('rss:markReadBatch', itemIds),
   deleteItems: (itemIds: string[]) => ipcRenderer.invoke('rss:deleteItems', itemIds),
   toggleStarred: (itemId: string) => ipcRenderer.invoke('rss:toggleStarred', itemId),
-  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none' }) =>
+  refreshSource: (sourceId: string) => ipcRenderer.invoke('rss:refreshSource', { sourceId }),
+  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
     ipcRenderer.invoke('rss:fetchAll', options),
   status: () => ipcRenderer.invoke('rss:status'),
   stats: () => ipcRenderer.invoke('rss:stats'),
   diagnostics: () => ipcRenderer.invoke('rss:diagnostics'),
+  benchmarkSources: (options?: { group?: string; sourceIds?: string[] }) =>
+    ipcRenderer.invoke('rss:benchmarkSources', options),
+  repairRuntime: () => ipcRenderer.invoke('rss:repairRuntime'),
   exportOpml: () => ipcRenderer.invoke('rss:exportOpml'),
   exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') =>
     ipcRenderer.invoke('rss:exportFeed', type),

@@ -1,0 +1,740 @@
+import { useMemo, useState } from 'react'
+import {
+  Filter,
+  Star,
+  Plus,
+  Sparkles,
+  ChevronDown,
+  ArrowDownToLine,
+  Check,
+  CircleDashed,
+  Loader2,
+  TriangleAlert,
+  X,
+  Play,
+  Pause,
+  Trash2,
+} from 'lucide-react'
+
+export interface RSSItem {
+  id: string
+  title: string
+  source: string
+  sourceId: string
+  summary: string
+  publishedAt: string
+  read: boolean
+  starred: boolean
+  coverImage?: string
+  link: string
+}
+
+export interface RSSSource {
+  id: string
+  name: string
+  count: number
+  platform?: string
+  url?: string
+}
+
+type AnalysisStatus =
+  | 'queued'
+  | 'paused'
+  | 'running_script'
+  | 'running_subagent'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+
+interface ItemAnalysisProgress {
+  itemId: string
+  jobId: string
+  action: 'copy' | 'visual'
+  status: AnalysisStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+  updatedAt: string
+}
+
+interface AnalysisJobItem {
+  id: string
+  itemId: string
+  action: 'copy' | 'visual'
+  title: string
+  status: AnalysisStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+  updatedAt: string
+}
+
+interface RSSFeedProps {
+  items: RSSItem[]
+  sources: RSSSource[]
+  filter: 'all' | 'unread' | 'starred'
+  selectedSource: string | null
+  selectedItemId: string | null
+  loading: boolean
+  refreshing: boolean
+  isMock: boolean
+  hasPreview: boolean
+  newItemIds: Set<string>
+  analysisProgressMap: Record<string, ItemAnalysisProgress>
+  analysisJobs: AnalysisJobItem[]
+  onFilterChange: (filter: 'all' | 'unread' | 'starred') => void
+  onSourceChange: (sourceId: string | null) => void
+  onItemClick: (item: RSSItem) => void
+  onMarkItemRead: (itemId: string) => void
+  onToggleStar: (itemId: string) => void
+  onDeleteItem: (itemId: string) => void
+  onDownloadItem: (item: RSSItem) => Promise<boolean> | boolean
+  onOpenAnalysisOutput: (itemId: string) => void
+  onRefresh: () => void
+  onAddSource: () => void
+  onClearRead: () => void
+  onPauseAnalysisJob: (jobId: string) => void
+  onResumeAnalysisJob: (jobId: string) => void
+  onDeleteAnalysisJob: (jobId: string) => void
+}
+
+function progressStroke(status: AnalysisStatus | undefined): string {
+  if (status === 'success') return 'var(--color-green)'
+  if (status === 'failed') return 'var(--color-red)'
+  if (status === 'paused') return 'var(--color-orange)'
+  if (status === 'running_script' || status === 'running_subagent' || status === 'queued') {
+    return 'var(--color-blue)'
+  }
+  return 'var(--text-light)'
+}
+
+function progressLabel(entry: ItemAnalysisProgress | undefined): string {
+  if (!entry) return '暂无分析任务'
+  const stageText: Record<AnalysisStatus, string> = {
+    queued: '排队中',
+    paused: '已暂停',
+    running_script: '脚本处理中',
+    running_subagent: 'AI 总结中',
+    success: '已完成',
+    failed: '已失败',
+    skipped: '已跳过',
+  }
+  const stage = stageText[entry.status] || entry.status
+  const detail = entry.error || entry.message || ''
+  return detail ? `${stage} ${entry.progress}% · ${detail}` : `${stage} ${entry.progress}%`
+}
+
+function taskTypeLabel(action: 'copy' | 'visual' | string): string {
+  if (action === 'visual') return '视觉分析'
+  if (action === 'copy') return '文案分析'
+  return '剪藏'
+}
+
+function taskStageLabel(status: AnalysisStatus): string {
+  const map: Record<AnalysisStatus, string> = {
+    queued: '排队中',
+    paused: '已暂停',
+    running_script: '脚本处理中',
+    running_subagent: 'agent 分析中',
+    success: '已完成',
+    failed: '已失败',
+    skipped: '已跳过',
+  }
+  return map[status] || status
+}
+
+function AnalysisProgressRing({ entry }: { entry?: ItemAnalysisProgress }) {
+  const value = Math.max(0, Math.min(100, entry?.progress ?? 0))
+  const radius = 7
+  const circumference = 2 * Math.PI * radius
+  const dash = circumference * (1 - value / 100)
+  const status = entry?.status
+  const running = status === 'queued' || status === 'running_script' || status === 'running_subagent'
+
+  return (
+    <div className="relative w-[18px] h-[18px] flex items-center justify-center">
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <circle
+          cx="9"
+          cy="9"
+          r={radius}
+          fill="none"
+          stroke="var(--border-default)"
+          strokeWidth="2"
+          opacity="0.6"
+        />
+        <circle
+          cx="9"
+          cy="9"
+          r={radius}
+          fill="none"
+          stroke={progressStroke(status)}
+          strokeWidth="2"
+          strokeLinecap="round"
+          transform="rotate(-90 9 9)"
+          strokeDasharray={circumference}
+          strokeDashoffset={dash}
+          style={{ transition: 'stroke-dashoffset 240ms ease' }}
+        />
+      </svg>
+
+      {!entry && <CircleDashed className="absolute w-[10px] h-[10px] text-[var(--text-light)] opacity-70" />}
+      {running && <Loader2 className="absolute w-[9px] h-[9px] text-[var(--color-blue)] animate-spin" />}
+      {status === 'success' && <Check className="absolute w-[10px] h-[10px] text-[var(--color-green)]" />}
+      {status === 'failed' && <TriangleAlert className="absolute w-[10px] h-[10px] text-[var(--color-red)]" />}
+      {status === 'paused' && <CircleDashed className="absolute w-[10px] h-[10px] text-[var(--color-orange)]" />}
+    </div>
+  )
+}
+
+export default function RSSFeed({
+  items,
+  sources,
+  filter,
+  selectedSource,
+  selectedItemId,
+  loading,
+  refreshing,
+  isMock,
+  hasPreview,
+  newItemIds,
+  analysisProgressMap,
+  analysisJobs,
+  onFilterChange,
+  onSourceChange,
+  onItemClick,
+  onMarkItemRead,
+  onToggleStar,
+  onDeleteItem,
+  onDownloadItem,
+  onOpenAnalysisOutput,
+  onRefresh,
+  onAddSource,
+  onClearRead,
+  onPauseAnalysisJob,
+  onResumeAnalysisJob,
+  onDeleteAnalysisJob,
+}: RSSFeedProps) {
+  const [downloadedItemIds, setDownloadedItemIds] = useState<Set<string>>(new Set())
+  const [taskMenuOpen, setTaskMenuOpen] = useState(false)
+
+  // Apply filters
+  const filteredItems = items.filter(item => {
+    if (selectedSource && item.sourceId !== selectedSource) return false
+    if (filter === 'unread' && item.read) return false
+    if (filter === 'starred' && !item.starred) return false
+    return true
+  })
+
+  const isRefreshing = loading || refreshing
+  const unreadCount = useMemo(() => items.filter(i => !i.read).length, [items])
+  const selectedSourceEntry = useMemo(
+    () => sources.find((source) => source.id === selectedSource) ?? null,
+    [selectedSource, sources],
+  )
+  const refreshLabel = isRefreshing
+    ? '刷新中'
+    : selectedSourceEntry
+      ? `刷新 ${selectedSourceEntry.name}`
+      : '刷新全部'
+  const activeJobsCount = useMemo(
+    () =>
+      analysisJobs.filter(
+        (job) => job.status === 'queued' || job.status === 'running_script' || job.status === 'running_subagent',
+      ).length,
+    [analysisJobs],
+  )
+
+  return (
+    <div
+      className="content-surface-panel flex flex-col h-full"
+      style={{ padding: '20px 24px 0', background: 'var(--surface-panel-bg)' }}
+    >
+      {/* Header Bar */}
+      <div
+        className="flex items-center justify-between flex-shrink-0"
+        style={{
+          minHeight: 56,
+          padding: '0 0 16px',
+          background: 'transparent',
+          borderBottom: '1px solid var(--border-default)',
+        }}
+      >
+        {/* Left: Title & Badge */}
+        <div className="flex items-center" style={{ gap: 12 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-title)', lineHeight: 1 }}>RSS 订阅源</h2>
+          {unreadCount > 0 && (
+            <span
+              className="rounded-full text-white"
+              style={{
+                background: 'var(--color-red)',
+                fontSize: 12,
+                fontWeight: 500,
+                padding: '2px 8px',
+                lineHeight: '16px',
+              }}
+            >
+              {unreadCount} 新
+            </span>
+          )}
+          {isMock && (
+            <span className="px-2 py-0.5 rounded-full bg-[var(--color-orange-light)] text-[var(--color-orange)] text-[10px]">
+              Mock 模式
+            </span>
+          )}
+        </div>
+
+        {/* Right: Action Controls */}
+        <div className="flex items-center" style={{ gap: 8 }}>
+          {/* Primary: + 添加源 */}
+          <button
+            onClick={onAddSource}
+            className="flex items-center transition-colors duration-150"
+            style={{
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              fontSize: 13,
+              fontWeight: 500,
+              color: '#FFFFFF',
+              background: 'var(--color-blue)',
+            }}
+            title="添加 RSS 源"
+          >
+            <Plus style={{ width: 14, height: 14 }} strokeWidth={2} />
+            <span>添加源</span>
+          </button>
+
+          {/* Secondary dropdown: 全部源 */}
+          <div className="relative">
+            <select
+              value={selectedSource || ''}
+              onChange={(e) => onSourceChange(e.target.value || null)}
+              className="appearance-none cursor-pointer transition-colors duration-150"
+              style={{
+                padding: '6px 28px 6px 12px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 13,
+                width: 92,
+                minWidth: 92,
+                maxWidth: 92,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                background: 'var(--bg-canvas)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <option value="">全部源</option>
+              {sources.map(source => (
+                <option key={source.id} value={source.id}>{source.name}</option>
+              ))}
+            </select>
+            <ChevronDown
+              style={{
+                width: 14, height: 14,
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                pointerEvents: 'none', color: 'var(--text-muted)',
+              }}
+              strokeWidth={2}
+            />
+          </div>
+
+          {/* Secondary dropdown-style: 全部/未读/收藏 */}
+          <div className="relative">
+            <select
+              value={filter}
+              onChange={(e) => onFilterChange(e.target.value as 'all' | 'unread' | 'starred')}
+              className="appearance-none cursor-pointer transition-colors duration-150"
+              style={{
+                padding: '6px 28px 6px 12px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 13,
+                background: 'var(--bg-canvas)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <option value="all">全部</option>
+              <option value="unread">未读</option>
+              <option value="starred">收藏</option>
+            </select>
+            <ChevronDown
+              style={{
+                width: 14, height: 14,
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                pointerEvents: 'none', color: 'var(--text-muted)',
+              }}
+              strokeWidth={2}
+            />
+          </div>
+
+          {/* 任务下拉列表 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setTaskMenuOpen((prev) => !prev)}
+              className="flex items-center transition-colors duration-150"
+              style={{
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 13,
+                background: 'var(--bg-canvas)',
+                color: 'var(--text-secondary)',
+              }}
+              title="查看分析任务"
+            >
+              <span>任务</span>
+              {activeJobsCount > 0 && (
+                <span
+                  className="rounded-full text-white"
+                  style={{
+                    minWidth: 16,
+                    padding: '0 5px',
+                    lineHeight: '16px',
+                    fontSize: 10,
+                    background: 'var(--color-blue)',
+                  }}
+                >
+                  {activeJobsCount}
+                </span>
+              )}
+              <ChevronDown style={{ width: 14, height: 14, color: 'var(--text-muted)' }} strokeWidth={2} />
+            </button>
+
+            {taskMenuOpen && (
+              <div
+                className="absolute right-0 top-[calc(100%+8px)] z-20 overflow-y-auto overflow-x-hidden rounded-xl border"
+                style={{
+                  width: 460,
+                  maxHeight: 420,
+                  background: 'var(--surface-floating-bg)',
+                  borderColor: 'var(--border-default)',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div
+                  className="sticky top-0 flex items-center justify-between border-b px-4 py-3"
+                  style={{
+                    background: 'var(--surface-floating-bg)',
+                    borderColor: 'var(--border-default)',
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>分析任务</span>
+                  <button
+                    type="button"
+                    onClick={() => setTaskMenuOpen(false)}
+                    className="rounded p-1 hover:bg-[var(--bg-hover)]"
+                    title="关闭"
+                  >
+                    <X style={{ width: 14, height: 14, color: 'var(--text-muted)' }} />
+                  </button>
+                </div>
+                {analysisJobs.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    暂无任务记录
+                  </div>
+                ) : (
+                  <div className="p-3" style={{ display: 'grid', gap: 10 }}>
+                    {analysisJobs.map((job) => {
+                      const isQueued = job.status === 'queued'
+                      const isPaused = job.status === 'paused'
+                      const isRunning = job.status === 'running_script' || job.status === 'running_subagent'
+                      const canDelete = !isRunning
+                      const canToggle = isQueued || isPaused
+                      return (
+                        <div
+                          key={job.id}
+                          className="rounded-md border transition-colors"
+                          style={{
+                            borderColor: 'var(--border-default)',
+                            background: 'var(--surface-card-bg)',
+                            borderRadius: 10,
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-4 px-4 py-3">
+                            <div className="min-w-0 flex-1">
+                              <div
+                                className="text-[13px] font-medium"
+                                style={{
+                                  color: 'var(--text-title)',
+                                  display: '-webkit-box',
+                                  overflow: 'hidden',
+                                  WebkitBoxOrient: 'vertical',
+                                  WebkitLineClamp: 2,
+                                  lineHeight: 1.35,
+                                }}
+                                title={job.title}
+                              >
+                                {job.title}
+                              </div>
+                              <div
+                                className="mt-1 flex items-center gap-2 text-[12px]"
+                                style={{ color: 'var(--text-muted)' }}
+                              >
+                                <span>{taskTypeLabel(job.action)}</span>
+                                <span>·</span>
+                                <span>{taskStageLabel(job.status)}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={!canToggle}
+                                onClick={() => {
+                                  if (isPaused) {
+                                    onResumeAnalysisJob(job.id)
+                                  } else if (isQueued) {
+                                    onPauseAnalysisJob(job.id)
+                                  }
+                                }}
+                                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                                style={{ color: isPaused ? 'var(--color-orange)' : 'var(--color-blue)' }}
+                                title={isPaused ? '继续任务' : isQueued ? '暂停任务' : '当前阶段不可切换'}
+                              >
+                                {isPaused ? (
+                                  <Pause className="h-[15px] w-[15px]" />
+                                ) : (
+                                  <Play className="h-[15px] w-[15px]" />
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={!canDelete}
+                                onClick={() => onDeleteAnalysisJob(job.id)}
+                                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                                style={{ color: 'var(--color-red)' }}
+                                title={canDelete ? '删除任务' : '运行中任务暂不可删除'}
+                              >
+                                <Trash2 className="h-[15px] w-[15px]" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Secondary: 刷新 */}
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="flex items-center transition-colors duration-150 disabled:opacity-50"
+            style={{
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              fontSize: 13,
+              background: 'var(--bg-canvas)',
+              color: 'var(--text-secondary)',
+            }}
+            title={selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'}
+          >
+            <span>{refreshLabel}</span>
+          </button>
+
+          <button
+            onClick={onClearRead}
+            className="flex items-center transition-colors duration-150"
+            style={{
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              fontSize: 13,
+              background: 'var(--bg-canvas)',
+              color: 'var(--text-secondary)',
+            }}
+            title="清空当前筛选范围中的全部内容"
+          >
+            <span>清空</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Item List */}
+      <div
+        className="rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
+        style={{ background: 'var(--surface-card-bg)' }}
+      >
+        <div className="divide-y divide-[var(--border-default)]">
+          {filteredItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
+              <Filter className="w-10 h-10 mb-3 opacity-50" />
+              <p className="text-[13px]">暂无内容</p>
+            </div>
+          ) : (
+            filteredItems.map((item) => {
+              const isNew = newItemIds.has(item.id)
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onItemClick(item)}
+                  className={`w-full text-left transition-colors relative ${
+                    selectedItemId === item.id
+                      ? 'bg-[var(--color-blue-light)] border-l-2 border-[var(--color-blue)]'
+                      : ''
+                  } ${!item.read ? 'bg-[var(--bg-primary)]' : ''}`}
+                  style={{ padding: '12px 0' }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2 min-w-0 basis-[82%] max-w-[82%]">
+                      <div
+                        draggable
+                        onDragStart={(e) => {
+                          const payload = JSON.stringify({
+                            type: 'rss-item' as const,
+                            id: item.id,
+                            name: item.title,
+                            title: item.title,
+                            link: item.link,
+                            summary: item.summary,
+                            source: item.source,
+                            publishedAt: item.publishedAt,
+                          })
+                          e.dataTransfer.setData('application/x-ready-drag', payload)
+                          e.dataTransfer.setData('application/x-ready-rss-item', payload)
+                          e.dataTransfer.setData('text/plain', `${item.title}\n${item.link}`)
+                          e.dataTransfer.setData('text/uri-list', item.link)
+                          e.dataTransfer.effectAllowed = 'copy'
+                          e.stopPropagation()
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-0.5 w-4 h-7 rounded cursor-grab active:cursor-grabbing hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                        title="拖拽到文件管理文件夹"
+                      >
+                        <span
+                          className="block h-4 w-[2px] rounded-full"
+                          style={{ background: 'var(--text-light)', opacity: 0.55 }}
+                        />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3
+                            className={`text-[13px] truncate ${
+                              !item.read
+                                ? 'font-semibold text-[var(--text-title)]'
+                                : 'text-[var(--text-body)]'
+                            }`}
+                          >
+                            {item.title}
+                          </h3>
+                          {isNew && (
+                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-white text-[9px] flex-shrink-0" style={{ background: 'var(--color-red)' }}>
+                              <Sparkles className="w-2.5 h-2.5" />
+                              新
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[12px] text-[var(--text-muted)] truncate mb-1.5">
+                          {item.summary}
+                        </p>
+                        <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--text-gray)' }}>
+                          <span>{item.source}</span>
+                          <span>{item.publishedAt}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0 pl-2 min-w-[128px] justify-end">
+                      {(() => {
+                        const analysis = analysisProgressMap[item.id]
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onOpenAnalysisOutput(item.id)
+                            }}
+                            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                            title={progressLabel(analysis)}
+                          >
+                            <AnalysisProgressRing entry={analysis} />
+                          </button>
+                        )
+                      })()}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!item.read) onMarkItemRead(item.id)
+                        }}
+                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                        title={item.read ? '已读' : '标记为已读'}
+                      >
+                        <Check
+                          className={`w-[16px] h-[16px] ${
+                            item.read ? 'text-[var(--color-green)]' : 'text-[var(--text-muted)]'
+                          }`}
+                        />
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          const ok = await onDownloadItem(item)
+                          if (ok) {
+                            setDownloadedItemIds((prev) => {
+                              if (prev.has(item.id)) return prev
+                              const next = new Set(prev)
+                              next.add(item.id)
+                              return next
+                            })
+                          }
+                        }}
+                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                        title="选择目录并下载内容（后续完善）"
+                      >
+                        <ArrowDownToLine className="w-[16px] h-[16px] text-[var(--text-muted)]" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onToggleStar(item.id)
+                        }}
+                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                        title={item.starred ? '取消收藏' : '收藏'}
+                      >
+                        <Star
+                          className={`w-[16px] h-[16px] ${
+                            item.starred
+                              ? 'text-[var(--color-gold)]'
+                              : 'text-[var(--text-light)] opacity-60 hover:opacity-90'
+                          }`}
+                          fill={item.starred ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDeleteItem(item.id)
+                        }}
+                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+                        title="删除此条推送"
+                      >
+                        <X className="w-[16px] h-[16px] text-[var(--text-light)] opacity-80" />
+                      </button>
+                    </div>
+                  </div>
+                </button>
+              )
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

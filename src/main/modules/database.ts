@@ -445,6 +445,12 @@ export class DatabaseManager {
     return result.changes ?? 0
   }
 
+  deleteRSSItemsBySource(sourceId: string): number {
+    if (!this.db) throw new Error('Database not available')
+    const result = this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(sourceId) as { changes?: number }
+    return result.changes ?? 0
+  }
+
   toggleRSSStarred(itemId: string): void {
     if (!this.db) throw new Error('Database not available')
     this.db.prepare('UPDATE rss_items SET starred = CASE WHEN starred = 0 THEN 1 ELSE 0 END WHERE id = ?').run(itemId)

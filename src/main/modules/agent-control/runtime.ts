@@ -16,6 +16,7 @@ import {
   type ConversationSourceKind,
 } from '../database'
 import { ClaudeSdkOrchestrator } from './orchestrator'
+import { PromptAssemblyService } from './prompt-assembly'
 import { SidecarManager } from './sidecar-manager'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
@@ -30,6 +31,7 @@ import type {
   ConversationScopeMessage,
   CronTask,
   HeartbeatSnapshot,
+  ScopeRunEventPayload,
 } from './types'
 
 export interface UpsertChannelPayload {
@@ -55,6 +57,9 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly sidecar = new SidecarManager()
   private readonly orchestrator: ClaudeSdkOrchestrator
   private readonly toolGateway = new ToolGateway()
+  private readonly promptAssembly = new PromptAssemblyService({
+    getMemoryRoot: () => join(app.getPath('userData'), 'agent-memory'),
+  })
   private readonly agentManager: AgentManager
   private readonly pendingInboundChannels = new Map<string, {
     channelId: string
@@ -314,15 +319,50 @@ export class AgentControlRuntime extends EventEmitter {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }
     const scope = this.mapConversationRow(scopeRow)
+    const promptAssembly = await this.promptAssembly.buildForScopedRun({
+      scope,
+      message: payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+    })
+    const messageWithBootstrap = this.promptAssembly.applyToMessage(
+      payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+      promptAssembly,
+    ) as string | MultimodalBlock[]
+    this.emitScopeRunEvent({
+      type: 'started',
+      scopeId: scope.id,
+      agent: scope.agent,
+      runId: payload.requestId,
+      phase: 'planning',
+      module: promptAssembly.triggerHits[0]?.module,
+      latestText: 'Prompt assembly ready',
+      memoryRefs: promptAssembly.memoryRefs,
+      triggerHits: promptAssembly.triggerHits,
+      contextBudget: promptAssembly.contextBudget,
+      timestamp: new Date().toISOString(),
+    })
     const result = await this.orchestrator.sendAndCollect(
       scope.agent,
-      payload.message,
+      messageWithBootstrap,
       scope.id,
       payload.requestId,
+      promptAssembly.systemPrompt,
     )
     if (!result.success) {
+      this.promptAssembly.recordRunOutcome({
+        scope,
+        finalText: result.finalText,
+        usedTools: result.usedTools,
+        success: false,
+      })
       return { success: false, error: result.error || 'Agent execution failed' }
     }
+
+    this.promptAssembly.recordRunOutcome({
+      scope,
+      finalText: result.finalText,
+      usedTools: result.usedTools,
+      success: true,
+    })
 
     if (scope.sourceKind === 'channel') {
       const outboundText = result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
@@ -925,6 +965,10 @@ export class AgentControlRuntime extends EventEmitter {
 
   private emitConversationEvent(payload: ConversationEventPayload): void {
     this.emit('conversationEvent', payload)
+  }
+
+  private emitScopeRunEvent(payload: ScopeRunEventPayload): void {
+    this.emit('scopeRunEvent', payload)
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {

@@ -126,6 +126,7 @@ const resolveCreationBaseDir = (state: Pick<
 
   return state.currentPath || '/'
 }
+
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
 const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
 const DEFAULT_SIDE_PANEL_WIDTH = 220

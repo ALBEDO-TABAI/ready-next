@@ -1,3 +1,13 @@
+import type { BrowserDiagnosticsData } from '../modules/browser/types'
+import type {
+  RSSBenchmarkResultData,
+  RSSDiagnosticsData,
+  RSSHubChromiumStatusData,
+  RSSHubRuntimeStatusData,
+  RSSStatusData,
+  RSSUpdateTaskStatusData,
+} from '../modules/rss/types'
+
 // Type declarations for window.electronAPI exposed by preload
 
 // =============================================================================
@@ -162,6 +172,33 @@ interface ScopeRunTraceItemData {
   timestamp: string
 }
 
+interface ScopeRunMemoryRefData {
+  id: string
+  layer: 'l0' | 'l1' | 'l2'
+  title: string
+  summary?: string | null
+  path?: string | null
+  triggerId?: string | null
+  sensitive?: boolean
+  loadedAt: string
+}
+
+interface ScopeRunTriggerHitData {
+  id: string
+  label: string
+  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  blocking: boolean
+  refs: string[]
+}
+
+interface ScopeRunContextBudgetData {
+  totalChars: number
+  l0Chars: number
+  l1Chars: number
+  l2Chars: number
+  droppedRefs: string[]
+}
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -169,12 +206,38 @@ interface ScopeRunEventData {
   runId?: string
   phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
   latestText?: string
+  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  intent?: string
+  executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
+  jobId?: string
+  artifactRefs?: Array<{
+    id: string
+    module: string
+    kind: string
+    label: string
+    path?: string | null
+    url?: string | null
+    mimeType?: string | null
+    sourceRunId?: string | null
+    createdAt: string
+    meta?: Record<string, unknown>
+  }>
+  memoryRefs?: ScopeRunMemoryRefData[]
+  triggerHits?: ScopeRunTriggerHitData[]
+  contextBudget?: ScopeRunContextBudgetData | null
+  ownerResourceId?: string
+  lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItemData
   error?: string
   blockedReason?: string
   controllerId?: string
   ownerTabId?: string
   checkpointExpiresAt?: number
+  stepMetrics?: {
+    toolCalls: number
+    toolResults: number
+    lastToolAt: string | null
+  }
   timestamp: string
 }
 
@@ -376,6 +439,7 @@ interface ElectronBrowserAPI {
   showActive: () => Promise<{ success: boolean }>
   getTabs: () => Promise<BrowserTabInfo[]>
   getAdblockState: () => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
+  getDiagnostics: () => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
   setAdblockEnabled: (
     enabled: boolean,
     scope?: 'main' | 'preview' | 'all',
@@ -694,9 +758,10 @@ interface ElectronRSSAPI {
   markReadBatch: (itemIds: string[]) => Promise<RSSResponse<{ marked: number }>>
   deleteItems: (itemIds: string[]) => Promise<RSSResponse<{ deleted: number }>>
   toggleStarred: (itemId: string) => Promise<RSSResponse<{ toggled: boolean }>>
-  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none' }) =>
+  refreshSource: (sourceId: string) => Promise<RSSResponse<import('../modules/rss/types').RSSRefreshSourceResultData>>
+  fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
     Promise<RSSResponse<{ message: string; fetched: number; digest?: boolean; running?: boolean; errors?: string[]; status?: unknown }>>
-  status: () => Promise<RSSResponse<unknown>>
+  status: () => Promise<RSSResponse<RSSStatusData>>
   stats: () => Promise<RSSResponse<{
     totalSources: number
     totalItems: number
@@ -704,7 +769,9 @@ interface ElectronRSSAPI {
     platformDistribution: Record<string, number>
     categoryDistribution: Record<string, number>
   }>>
-  diagnostics: () => Promise<RSSResponse<unknown>>
+  diagnostics: () => Promise<RSSResponse<RSSDiagnosticsData>>
+  benchmarkSources: (options?: { group?: string; sourceIds?: string[] }) => Promise<RSSResponse<RSSBenchmarkResultData>>
+  repairRuntime: () => Promise<RSSResponse<{ repaired: boolean; mock?: boolean; rsshub?: RSSHubRuntimeStatusData }>>
   exportOpml: () => Promise<RSSResponse<{ path: string }>>
   exportFeed: (type?: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others') => Promise<RSSResponse<{ path: string }>>
   startItemAnalysis: (payload: {

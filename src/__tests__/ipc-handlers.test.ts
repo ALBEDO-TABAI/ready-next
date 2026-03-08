@@ -79,6 +79,50 @@ describe('IPC Operation Results', () => {
         assert.strictEqual(result.mock, true)
         assert.ok(Array.isArray(result.data))
     })
+
+    it('should validate RSS analysis IPC payload shape', () => {
+        const payload = {
+            itemId: 'item-1',
+            action: 'copy',
+            link: 'https://example.com/post',
+            title: '示例内容',
+            targetDir: '/tmp/output'
+        }
+        assert.strictEqual(typeof payload.itemId, 'string')
+        assert.ok(payload.action === 'copy' || payload.action === 'visual')
+        assert.ok(payload.link.startsWith('http'))
+    })
+
+    it('should validate conversation scope payload shape', () => {
+        const scope = {
+            id: 'conv-feishu-1',
+            agent: 'butler',
+            title: '飞书 · 张三',
+            sourceKind: 'channel',
+            sourceId: 'channel-feishu-default',
+            threadKey: 'om_xxx',
+            meta: {
+                sourceLabel: '飞书',
+                sender: '张三',
+                channelType: 'feishu-app',
+            },
+        }
+        const message = {
+            id: 'msg-1',
+            conversationId: scope.id,
+            role: 'assistant',
+            content: '这是最终回复',
+            timestamp: new Date().toISOString(),
+            meta: {
+                direction: 'outbound',
+            },
+        }
+        assert.ok(scope.sourceKind === 'local' || scope.sourceKind === 'channel')
+        assert.strictEqual(typeof scope.threadKey, 'string')
+        assert.strictEqual(typeof scope.meta.sourceLabel, 'string')
+        assert.strictEqual(message.conversationId, scope.id)
+        assert.strictEqual(typeof message.meta.direction, 'string')
+    })
 })
 
 describe('Error Handling', () => {

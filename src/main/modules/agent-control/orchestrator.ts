@@ -112,11 +112,15 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     message: string | MultimodalBlock[],
     sessionId?: string,
     requestId?: string,
+    systemPrompt?: string,
   ): Promise<{ success: boolean; error?: string }> {
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
+    if (systemPrompt) {
+      this.engine.setSystemPrompt(internalKey, systemPrompt)
+    }
     const result = await this.engine.sendMessage(internalKey, message, requestId)
     if (!result.success) {
       this.sessions.setState(taskKey, 'failed', result.error)
@@ -129,6 +133,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     message: string | MultimodalBlock[],
     sessionId?: string,
     requestId?: string,
+    systemPrompt?: string,
   ): Promise<SendAndCollectResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -140,7 +145,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     cleanupFns.push(() => this.off('status', collector.handleStatus))
     cleanupFns.push(() => this.off('error', collector.handleError))
 
-    void this.send(agent, message, sessionId, requestId).then((result) => {
+    void this.send(agent, message, sessionId, requestId, systemPrompt).then((result) => {
       if (!result.success) {
         collector.handleError({
           agent,

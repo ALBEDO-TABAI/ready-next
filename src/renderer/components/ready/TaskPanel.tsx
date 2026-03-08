@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Plus, Send } from 'lucide-react'
-import { useAgent, type ScopeRunState, type ToolTraceEvent } from '../../stores/useAgent'
+import { useAgent, type AgentArtifact, type ScopeRunState, type ToolTraceEvent } from '../../stores/useAgent'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 
@@ -85,7 +85,49 @@ function phaseTone(phase: ScopeRunState['phase'] | undefined): { bg: string; col
 }
 
 function summarizeTraceItem(item: ToolTraceEvent): string {
+  try {
+    const parsed = JSON.parse(item.text) as Record<string, unknown>
+    const summary = typeof parsed.message === 'string'
+      ? parsed.message
+      : typeof parsed.summary === 'string'
+        ? parsed.summary
+        : ''
+    if (summary) {
+      return summary.replace(/\s+/g, ' ').trim().slice(0, 180)
+    }
+  } catch {
+    // ignore structured payload parse errors
+  }
   return item.text.replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+
+function moduleLabel(module: ScopeRunState['module'] | undefined): string {
+  switch (module) {
+    case 'browser':
+      return '浏览器'
+    case 'document':
+      return '文档'
+    case 'design':
+      return '设计'
+    case 'video':
+      return '剪辑'
+    case 'rss':
+      return 'RSS'
+    case 'calendar':
+      return '日程'
+    case 'feishu':
+      return '飞书'
+    case 'system':
+      return '系统'
+    default:
+      return '通用'
+  }
+}
+
+async function revealArtifact(artifact: AgentArtifact): Promise<void> {
+  const path = artifact.path || artifact.url
+  if (!path || !window.electronAPI?.document) return
+  await window.electronAPI.document.showInFolder(path).catch(() => undefined)
 }
 
 export default function TaskPanel() {
@@ -116,6 +158,10 @@ export default function TaskPanel() {
       summary: summarizeTraceItem(item),
     }))
   }, [activeRun])
+
+  const artifactItems = useMemo(() => activeRun?.artifactRefs?.slice(-6) || [], [activeRun])
+  const memoryRefs = useMemo(() => activeRun?.memoryRefs?.slice(-6) || [], [activeRun])
+  const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -174,6 +220,21 @@ export default function TaskPanel() {
                 工具 {activeRun.stepMetrics?.toolCalls || 0}/{activeRun.stepMetrics?.toolResults || 0}
               </span>
             </div>
+            <div className="flex items-center justify-between" style={{ gap: 8 }}>
+              <span className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                模块：{moduleLabel(activeRun.module)}
+              </span>
+              {activeRun.executionKind && (
+                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                  {activeRun.executionKind}
+                </span>
+              )}
+            </div>
+            {activeRun.ownerResourceId && (
+              <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                资源：{String(activeRun.ownerResourceId).slice(0, 48)}
+              </div>
+            )}
             {activeRun.blockedReason && (
               <div
                 className="rounded-[10px] border px-2.5 py-2"
@@ -188,6 +249,76 @@ export default function TaskPanel() {
                 <div className="mt-1 text-[11px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
                   {activeRun.blockedReason}
                 </div>
+              </div>
+            )}
+            {artifactItems.length > 0 && (
+              <div className="flex flex-col" style={{ gap: 6 }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                  Artifacts
+                </div>
+                <div className="flex flex-col" style={{ gap: 6 }}>
+                  {artifactItems.map((artifact) => (
+                    <button
+                      key={artifact.id}
+                      onClick={() => { void revealArtifact(artifact) }}
+                      className="rounded-[10px] border px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
+                      style={{ borderColor: 'var(--border-default)' }}
+                    >
+                      <div className="text-[11px] font-medium" style={{ color: 'var(--text-body)' }}>
+                        {artifact.label}
+                      </div>
+                      <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                        {artifact.kind}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(memoryRefs.length > 0 || triggerHits.length > 0 || activeRun.contextBudget) && (
+              <div className="flex flex-col" style={{ gap: 6 }}>
+                {triggerHits.length > 0 && (
+                  <div className="flex flex-col" style={{ gap: 4 }}>
+                    <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                      Triggers
+                    </div>
+                    {triggerHits.map((trigger) => (
+                      <div
+                        key={trigger.id}
+                        className="rounded-[10px] border px-2.5 py-2"
+                        style={{ borderColor: 'var(--border-default)', background: 'var(--surface-card-bg)' }}
+                      >
+                        <div className="text-[11px] font-medium" style={{ color: 'var(--text-body)' }}>
+                          {trigger.label}
+                        </div>
+                        <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                          {trigger.blocking ? 'blocking' : 'advisory'} · refs {trigger.refs.length}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {memoryRefs.length > 0 && (
+                  <div className="flex flex-col" style={{ gap: 4 }}>
+                    <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                      Memory
+                    </div>
+                    {memoryRefs.map((ref) => (
+                      <div key={ref.id} className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                        {ref.layer.toUpperCase()} · {ref.title}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {activeRun.contextBudget && (
+                  <div className="text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                    Budget：{activeRun.contextBudget.totalChars} chars
+                    {' · '}L0 {activeRun.contextBudget.l0Chars}
+                    {' · '}L1 {activeRun.contextBudget.l1Chars}
+                    {' · '}L2 {activeRun.contextBudget.l2Chars}
+                    {activeRun.contextBudget.droppedRefs.length > 0 ? ` · dropped ${activeRun.contextBudget.droppedRefs.length}` : ''}
+                  </div>
+                )}
               </div>
             )}
             {activeRun.latestText && !activeRun.blockedReason && (

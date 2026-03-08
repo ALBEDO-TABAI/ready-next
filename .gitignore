@@ -8,6 +8,10 @@ out/
 dist/
 *.tsbuildinfo
 
+# Python caches
+__pycache__/
+*.py[cod]
+
 # Environment files
 .env
 .env.local
@@ -21,7 +25,7 @@ dist/
 *.swo
 
 # OS
-.DS_Store
+**/.DS_Store
 Thumbs.db
 
 # Logs
@@ -33,6 +37,9 @@ yarn-error.log*
 
 # Testing
 coverage/
+
+# Exports
+exports/
 
 # Electron
 *.asar
