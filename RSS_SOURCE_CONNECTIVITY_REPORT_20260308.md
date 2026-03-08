@@ -50,8 +50,9 @@
 - Continue on top of the app browser module.
 - Current work should focus on:
   - logged-in session reuse
-  - live-tab capture reuse
+  - same-profile live-tab capture reuse only
   - reliable note-list extraction once the page is in the correct logged-in state
+  - replacing stale source items after a successful browser refresh so old wrong-account content does not linger
 
 ### Douyin
 - Share-link and account-route handling have already been tightened.

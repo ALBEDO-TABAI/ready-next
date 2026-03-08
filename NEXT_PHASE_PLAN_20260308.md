@@ -10,8 +10,8 @@
 ## Immediate next work
 1. Finish RSS source acquisition on the current stack.
 - Weibo: keep the current browser-backed path stable under Chromium/session conditions.
-- Xiaohongshu: finish the app-browser login/live-tab reuse path.
-- Douyin: finish source-specific extractor hardening and live refresh correctness.
+- Xiaohongshu: finish the app-browser login/live-tab reuse path on top of same-profile tab matching and note-list-only extraction.
+- Douyin: finish source-specific extractor hardening and live refresh correctness after the account-post-area scoping fix.
 
 2. Finish the shared workbench visual baseline.
 - Strictly align the top three workbench rows.

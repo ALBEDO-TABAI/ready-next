@@ -46,6 +46,8 @@ The RSS stack remains:
 ### Still not signed off
 - Xiaohongshu
   - current blocker is login/session/live-tab reuse through the app browser path
+  - same-domain live-tab reuse has been narrowed to same-profile matching, so cross-account contamination is no longer an intended code path
+  - browser-backed refresh now replaces the source's old items once a valid browser result is returned
   - failure is now diagnosable instead of opaque
 - Douyin
   - browser-backed extractor has been tightened to target the account post area instead of page-wide recommendations

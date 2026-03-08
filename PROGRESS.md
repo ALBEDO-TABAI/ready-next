@@ -26,6 +26,8 @@
 - packaged/runtime RSSHub behavior is fixed enough to be observable and repairable in-product.
 - route diagnostics and benchmark results persist.
 - browser-backed acquisition now prefers the app browser stack.
+- browser-backed RSS refresh now replaces stale source items for browser platforms after a successful fetch.
+- Xiaohongshu live-tab reuse has been narrowed to same-profile matching instead of same-domain matching.
 
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
