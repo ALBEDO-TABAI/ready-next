@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react'
 import type { RSSDiagnosticsData, RSSHubChromiumSource, RSSStatusData } from '../../modules/rss/types'
+import { WORKBENCH_ROW_PADDING_X } from '../../modules/workbench/chrome'
 
 interface RSSRuntimeDiagnosticsProps {
   status: RSSStatusData | null
@@ -80,13 +81,15 @@ export default function RSSRuntimeDiagnostics({
 
   return (
     <div
-      className="flex flex-col gap-3 border-b px-5 py-4"
+      className="flex flex-col gap-3 border-b py-4"
       style={{
         borderColor: 'var(--border-default)',
         background:
           tone === 'warning'
             ? 'linear-gradient(180deg, rgba(255,248,235,0.94) 0%, rgba(255,255,255,0.94) 100%)'
             : 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.92) 100%)',
+        paddingLeft: WORKBENCH_ROW_PADDING_X,
+        paddingRight: WORKBENCH_ROW_PADDING_X,
       }}
     >
       <div className="flex items-start justify-between gap-3">

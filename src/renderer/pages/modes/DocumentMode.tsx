@@ -5,7 +5,7 @@ import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import FilePreview from '../../components/document/FilePreview'
 import WorkbenchProjectTabs from '../../components/workbench/WorkbenchProjectTabs'
-import { WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_ROW_PADDING_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -188,7 +188,7 @@ export default function DocumentMode() {
         className="flex items-center justify-between flex-shrink-0"
         style={{
           height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
-          padding: '0 12px',
+          padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
           background: 'var(--bg-primary)',
           borderBottom: '1px solid var(--border-default)',
         }}

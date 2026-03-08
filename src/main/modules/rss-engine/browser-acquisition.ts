@@ -221,11 +221,11 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
 
         const extractNoteId = (href) => {
           const decoded = decodeMaybe(String(href || ''));
-          let match = decoded.match(/\\/explore\\/([a-zA-Z0-9]+)/i);
+          let match = decoded.match(new RegExp('/explore/([a-zA-Z0-9]+)', 'i'));
           if (match) return match[1];
-          match = decoded.match(/\\/discovery\\/item\\/([a-zA-Z0-9]+)/i);
+          match = decoded.match(new RegExp('/discovery/item/([a-zA-Z0-9]+)', 'i'));
           if (match) return match[1];
-          match = decoded.match(/\\/([a-f0-9]{24})(?:\\?|$)/i);
+          match = decoded.match(new RegExp('/([a-f0-9]{24})(?:\\\\?|$)', 'i'));
           return match ? match[1] : '';
         };
 
@@ -296,7 +296,7 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           const author = readProfileAuthor();
           const profileHrefPattern = targetUserId
             ? new RegExp('/user/profile/' + targetUserId + '(?:[/?#]|$)', 'i')
-            : /\/user\/profile\//i;
+            : new RegExp('/user/profile/', 'i');
           const cardAnchors = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'));
           const seen = new Set();
           const items = [];
@@ -558,6 +558,10 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
       };
     })()
   `
+}
+
+export function buildExtractionScriptForTest(platform: PlatformType, targetUrl: string): string {
+  return buildExtractionScript(platform, targetUrl)
 }
 
 function describeBrowserFailure(platform: PlatformType, payload: BrowserFeedExtractionResult): string {

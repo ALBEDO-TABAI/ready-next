@@ -1,3 +1,5 @@
+import { WORKBENCH_ROW_PADDING_X } from '../../modules/workbench/chrome'
+
 interface DesignDiagnosticsPanelProps {
   activeFile: string | null
   isDirty: boolean
@@ -34,11 +36,13 @@ export default function DesignDiagnosticsPanel({
 }: DesignDiagnosticsPanelProps) {
   return (
     <div
-      className="border-b px-4 py-3 text-[11px]"
+      className="border-b py-3 text-[11px]"
       style={{
         borderColor: 'var(--border-default)',
         background: 'rgba(255,255,255,0.74)',
         color: 'var(--text-secondary)',
+        paddingLeft: WORKBENCH_ROW_PADDING_X,
+        paddingRight: WORKBENCH_ROW_PADDING_X,
       }}
     >
       <div className="mb-2 text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-light)' }}>

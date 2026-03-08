@@ -6,6 +6,7 @@ import type {
   SourceBackend,
   SourceBackendState,
 } from '../../modules/rss/types'
+import { WORKBENCH_ROW_PADDING_X } from '../../modules/workbench/chrome'
 
 interface RSSSourceCapabilityMatrixProps {
   diagnostics: RSSDiagnosticsData | null
@@ -86,10 +87,12 @@ export default function RSSSourceCapabilityMatrix({
 
   return (
     <div
-      className="border-b px-5 py-3"
+      className="border-b py-3"
       style={{
         borderColor: 'var(--border-default)',
         background: 'rgba(255,255,255,0.82)',
+        paddingLeft: WORKBENCH_ROW_PADDING_X,
+        paddingRight: WORKBENCH_ROW_PADDING_X,
       }}
     >
       <div className="mb-3 flex items-start justify-between gap-3">

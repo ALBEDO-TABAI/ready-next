@@ -6,6 +6,13 @@ import ModeSlider from './ModeSlider'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import MorphSegmentedControl, { type MorphSegmentedItem } from '../motion/MorphSegmentedControl'
+import {
+  WORKBENCH_MODE_ITEM_MIN_WIDTH,
+  WORKBENCH_MODE_TRACK_MAX_WIDTH,
+  WORKBENCH_TOPBAR_HEIGHT,
+  WORKBENCH_TOPBAR_PADDING_LEFT,
+  WORKBENCH_TOPBAR_PADDING_RIGHT,
+} from '../../modules/workbench/chrome'
 
 const modes: { id: WorkbenchMode; label: string; icon: React.ElementType }[] = [
   { id: 'browser', label: '浏览器', icon: Globe },
@@ -84,15 +91,15 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
       className="h-[38px] flex items-center justify-between drag-region glass-surface-panel"
       style={{
         background: 'var(--surface-toolbar-bg)',
-        height: 40,
-        paddingLeft: 76,
-        paddingRight: 14,
+        height: WORKBENCH_TOPBAR_HEIGHT,
+        paddingLeft: WORKBENCH_TOPBAR_PADDING_LEFT,
+        paddingRight: WORKBENCH_TOPBAR_PADDING_RIGHT,
         boxShadow: 'var(--shadow-md)',
         borderBottom: '1px solid var(--border-default)',
       }}
     >
       {/* Left: Mode Slider + Mode Tabs */}
-      <div className="flex items-center gap-4 no-drag min-w-0">
+      <div className="flex items-center gap-3 no-drag min-w-0 flex-1">
         <ModeSlider />
 
         {appMode === 'workbench' && (
@@ -100,14 +107,18 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
             className="glass-surface-card morph-segmented-track flex items-center gap-1 rounded-[12px] p-[2px]"
             role="tablist"
             aria-label="工作台模式"
-            style={{ maxWidth: 'calc(100vw - 350px)', overflowX: 'auto' }}
+            style={{
+              width: WORKBENCH_MODE_TRACK_MAX_WIDTH,
+              maxWidth: '100%',
+              overflowX: 'auto',
+            }}
           >
             <MorphSegmentedControl
               layoutId="topbar-modes"
               items={modeItems}
               className="flex items-center gap-[4px]"
               itemClassName="relative flex h-[30px] items-center justify-center rounded-[11px] px-[16px]"
-              itemStyle={{ flexShrink: 0, minWidth: 72 }}
+              itemStyle={{ flexShrink: 0, minWidth: WORKBENCH_MODE_ITEM_MIN_WIDTH }}
               contentClassName="relative z-[1] flex h-full items-center justify-center gap-[7px] text-[12px] leading-none"
             />
           </div>
@@ -115,7 +126,7 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
       </div>
 
       {/* Right: Search + User + Toggle */}
-      <div className="flex items-center gap-[10px] no-drag">
+      <div className="flex items-center gap-[10px] no-drag flex-shrink-0">
         <button
           title="全局搜索 (Cmd+K)"
           aria-label="全局搜索"

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import vm from 'node:vm'
 
 import {
+  buildExtractionScriptForTest,
   fetchFeedViaBrowserSession,
   normalizeBrowserAcquisitionUrl,
   supportsBrowserSessionAcquisition,
@@ -133,6 +135,17 @@ describe('RSS browser acquisition', () => {
     )
     assert.equal(xiaohongshu, 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60')
     assert.equal(weibo, 'https://weibo.com/u/6182606334')
+  })
+
+  it('compiles the xiaohongshu browser extraction script', () => {
+    const script = buildExtractionScriptForTest(
+      'xiaohongshu',
+      'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60',
+    )
+
+    assert.doesNotThrow(() => {
+      new vm.Script(script)
+    })
   })
 
   it('surfaces a useful error when the page loads but no feed-like items are found', async () => {

@@ -1,3 +1,5 @@
+import { WORKBENCH_ROW_PADDING_X } from '../../modules/workbench/chrome'
+
 interface RSSSessionDiagnosticsProps {
   selectedSourceId: string | null
   selectedItemId: string | null
@@ -39,11 +41,13 @@ export default function RSSSessionDiagnostics({
 }: RSSSessionDiagnosticsProps) {
   return (
     <div
-      className="border-b px-5 py-3 text-[11px]"
+      className="border-b py-3 text-[11px]"
       style={{
         borderColor: 'var(--border-default)',
         background: 'rgba(255,255,255,0.78)',
         color: 'var(--text-secondary)',
+        paddingLeft: WORKBENCH_ROW_PADDING_X,
+        paddingRight: WORKBENCH_ROW_PADDING_X,
       }}
     >
       <div className="mb-2 text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-light)' }}>
