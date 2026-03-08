@@ -15,8 +15,8 @@
 | Twitter/X | Stable | native / syndication | No heavier fallback needed |
 | Zsxq | Stable | native / API | No heavier fallback needed |
 | Weibo | Conditionally stable | browser-backed / Chromium dependent | Keep current path and finish session stability |
-| Xiaohongshu | Not signed off | app-browser-backed acquisition | Main blocker is login/session/live-tab reuse |
-| Douyin | Not signed off | app-browser-backed acquisition | Extractor and route handling improved, but live refresh quality still needs final hardening |
+| Xiaohongshu | Not signed off | app-browser-backed acquisition | Main blocker is login/session/live-tab reuse; no silent RSSHub fallback now |
+| Douyin | Not signed off | app-browser-backed acquisition | Extractor and route handling improved; no silent RSSHub fallback now |
 
 ## Creator-watchlist notes
 ### Stable today on current stack
@@ -48,15 +48,18 @@
 ### Xiaohongshu
 - Do not fall back to a parallel browser runtime.
 - Continue on top of the app browser module.
+- Do not silently accept RSSHub fallback content for this platform.
 - Current work should focus on:
   - logged-in session reuse
   - same-profile live-tab capture reuse only
+  - profile-card extraction when cards do not expose note ids directly
   - reliable note-list extraction once the page is in the correct logged-in state
   - replacing stale source items after a successful browser refresh so old wrong-account content does not linger
 
 ### Douyin
 - Share-link and account-route handling have already been tightened.
 - Extraction should stay scoped to the account post area instead of page-wide recommendations.
+- Do not silently accept RSSHub fallback content for this platform.
 - Remaining work is live refresh correctness and final hardening, not another parser reset.
 
 ## Scrapling position

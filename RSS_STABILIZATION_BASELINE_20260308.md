@@ -47,17 +47,21 @@ The RSS stack remains:
 - Xiaohongshu
   - current blocker is login/session/live-tab reuse through the app browser path
   - same-domain live-tab reuse has been narrowed to same-profile matching, so cross-account contamination is no longer an intended code path
+  - profile-card extraction now supports note-id-missing cards by emitting stable profile-fragment links instead of dropping them
   - browser-backed refresh now replaces the source's old items once a valid browser result is returned
+  - the default path no longer silently falls back to RSSHub when app-browser acquisition fails
   - failure is now diagnosable instead of opaque
 - Douyin
   - browser-backed extractor has been tightened to target the account post area instead of page-wide recommendations
+  - the default path no longer silently accepts RSSHub fallback content when the browser route fails
   - route and extractor quality improved, but live refresh flow still needs final hardening before it can be called stable
 
 ## Architecture changes already landed
 1. RSS diagnostics logic is isolated in `source-diagnostics.ts`.
 2. Browser-backed fallback now prefers the app's own browser/session path instead of introducing another parallel browser runtime.
-3. RSS runtime and benchmark state is isolated in renderer hooks and dedicated diagnostics components.
-4. Scrapling is represented only as a sidecar contract and benchmark candidate.
+3. Xiaohongshu and Douyin now treat app-browser acquisition as the source of truth instead of silently swapping in RSSHub fallback results.
+4. RSS runtime and benchmark state is isolated in renderer hooks and dedicated diagnostics components.
+5. Scrapling is represented only as a sidecar contract and benchmark candidate.
 
 ## What remains intentionally unfinished
 1. Scrapling is not wired into production fetch flow.

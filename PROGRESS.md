@@ -28,6 +28,7 @@
 - browser-backed acquisition now prefers the app browser stack.
 - browser-backed RSS refresh now replaces stale source items for browser platforms after a successful fetch.
 - Xiaohongshu live-tab reuse has been narrowed to same-profile matching instead of same-domain matching.
+- Xiaohongshu and Douyin no longer silently fall back to RSSHub when app-browser acquisition fails.
 
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
