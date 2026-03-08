@@ -62,6 +62,8 @@ export default function WorkbenchMode() {
     refreshFiles,
     toggleSidebar,
     toggleChatPanel,
+    setSidePanelWidth,
+    sidePanelWidths,
     sidebarVisible,
     chatPanelVisible,
     sidePanelVariant,

@@ -648,7 +648,7 @@ export default function FileTree({
       mp4: 'video', mov: 'video', mkv: 'video', avi: 'video', webm: 'video', ogg: 'video', m4v: 'video',
       mp3: 'video', wav: 'video', aac: 'video', flac: 'video', m4a: 'video', wma: 'video', opus: 'video',
       pdf: 'document',
-      tldr: 'design'
+      tldr: 'document'
     }
     if (modeMap[ext]) {
       setWorkbenchMode(modeMap[ext])
