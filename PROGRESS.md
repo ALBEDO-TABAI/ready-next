@@ -33,7 +33,7 @@
 - the Xiaohongshu extraction script regression is fixed and covered by test.
 - Xiaohongshu capture now succeeds again in a real Electron `persist:browser` session when the Ready browser session is logged in.
 - Douyin account-post-area extraction is live-validated in a real Electron `persist:browser` session.
-- shared workbench chrome now uses a wider first-row mode strip and a common horizontal gutter for tabs, toolbars, and diagnostics rows.
+- shared workbench chrome now uses a common horizontal gutter for tabs, toolbars, and diagnostics rows, while the first-row mode strip has been pulled back to a more compact width.
 
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.

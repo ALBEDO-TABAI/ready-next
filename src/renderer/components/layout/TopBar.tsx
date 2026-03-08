@@ -99,7 +99,7 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
       }}
     >
       {/* Left: Mode Slider + Mode Tabs */}
-      <div className="flex items-center gap-3 no-drag min-w-0 flex-1">
+      <div className="flex items-center gap-4 no-drag min-w-0">
         <ModeSlider />
 
         {appMode === 'workbench' && (
@@ -108,8 +108,7 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
             role="tablist"
             aria-label="工作台模式"
             style={{
-              width: WORKBENCH_MODE_TRACK_MAX_WIDTH,
-              maxWidth: '100%',
+              maxWidth: WORKBENCH_MODE_TRACK_MAX_WIDTH,
               overflowX: 'auto',
             }}
           >
