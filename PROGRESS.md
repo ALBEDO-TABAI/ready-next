@@ -1,48 +1,41 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-07
+> 更新时间: 2026-03-08
 
-## 本轮完成
-1. AI 供应商能力层收口
-- 统一引入 `agentProtocol / wireApi / toolUseMode / visionMode / nativeVideoMode`
-- 设置页可显式控制 Agent 接口、OpenAI API 形式、工具调用、网页视觉
-- `gpt-5.4` 已补入模型选项
+## 2026-03-08 Integration Baseline
+1. Agent/runtime baseline has been restructured.
+- `useAgent` no longer owns the whole execution pipeline alone.
+- runtime routing, message composition, command execution, and scope-run patching are split into dedicated modules.
+- structured run state now carries module-aware execution metadata.
 
-2. OpenAI 兼容工具降级链路
-- `fox / code.newcli.com/codex/v1` 已按 `responses` 通道识别
-- 修复 `responses` 事件流解析与消息序列化兼容
-- 新增文本工具桥接与桥接纠偏逻辑，避免在不支持原生 tools 的通道直接失效
+2. Browser architecture has been materially reduced.
+- main-process browser logic is split into focused services.
+- renderer browser shell/layout and diagnostics entry are separated from the page container.
+- browser-related overlay bugs around preview/context-menu layering have been explicitly addressed.
 
-3. Browser Agent V7 主链继续稳定
-- 任务图、页面证据、附件资源化与结果复核仍是当前主线
-- 连续性上下文已接入浏览器决策与 planner，目标是减少重复搜索与重复跳转
+3. Repository access is now separated by domain.
+- browser/chat/rss/calendar/settings/agent access no longer depends on direct cross-domain database calls in the old style.
+- the previous mixed static/dynamic database import warning has been removed.
 
-4. 技能中心与运行时保持可用
-- 系统级 embedded skills 与用户导入 custom skills 并行存在
-- 技能说明、默认命令、运行时调度和计划任务链路已具备基础能力
+4. Workbench modules are on a more consistent execution model.
+- design/video/rss/calendar module handlers are extracted from page components.
+- diagnostics panels exist for browser, RSS, calendar, design, and video.
+- browser/document/design/video tab chrome is now on a shared path instead of fully separate styling.
 
-5. 协作文档刷新
-- 根目录所有核心项目文档已统一按当前代码状态重写并对齐
+5. RSS is now a standalone prepared subsystem.
+- packaged/runtime RSSHub behavior is fixed enough to be observable and repairable in-product.
+- route diagnostics and benchmark results persist.
+- browser-backed acquisition now prefers the app browser stack.
 
-## 当前可用主模块
-- Browser
-- Document
-- Design
-- Video
-- RSS
-- Calendar
-- Agent
-- Skills
-- Settings
+## Current known unfinished work
+- Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
+- Workbench top-row vertical alignment and tab baseline still need a final polish pass.
+- Design inspector still lacks several high-frequency controls.
+- Browser diagnostics are not yet full labs.
+- Memory layering and Feishu replacement are still ahead on the mainline.
 
-## 当前已知待优化
-- Browser Agent 在复杂网页中的上传、输入、提交证据判定仍在收口
-- 文本工具桥接能兜底，但仍受供应商模型是否遵守桥接协议影响
-- 远程 IM 的断线恢复与附件消费体验仍需继续增强
-- Design / Video 的交互细节与导出链路仍需持续迭代
-
-## 下一步建议
-1. 为 Browser Agent 建立更可重复的 smoke 回归样例
-2. 继续增强“当前页面可复用”的识别与 planner 约束
-3. 对文本工具桥接增加更强的首步动作引导与失败分类
-4. 继续完善技能中心、远程 IM 与浏览器工作流之间的上下文贯通
+## Next recommended sequence
+1. Finish RSS source acquisition quality.
+2. Finish workbench UI alignment and tabs.
+3. Continue browser orchestration reduction and diagnostics lab work.
+4. Return to layered memory and Feishu replacement.
