@@ -1,6 +1,6 @@
-import { getDatabase } from '../database'
 import { type AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 interface CompletionRequest {
   system: string
@@ -32,7 +32,7 @@ function clipText(input: string, maxChars: number): string {
 
 function readAIConfig(): AIModelConfig | null {
   try {
-    const raw = getDatabase().getSetting('ai_model_config')
+    const raw = settingsRepository.getSetting('ai_model_config')
     if (!raw) return null
     return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
   } catch {
@@ -318,3 +318,4 @@ export class RSSSubagentRunner {
 }
 
 export const rssSubagentRunner = new RSSSubagentRunner()
+const settingsRepository = new AppSettingsRepository()

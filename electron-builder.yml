@@ -5,7 +5,8 @@ directories:
   output: dist
 files:
   - out/**/*
-  - "!node_modules/**/*"
+  - package.json
+  - node_modules/**/*
 extraResources:
   - from: node_modules/better-sqlite3/build
     to: better-sqlite3/build
@@ -47,6 +48,5 @@ electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 asar: true
 asarUnpack:
-  - "node_modules/better-sqlite3/**"
   - "node_modules/rsshub/**"
-  - "node_modules/@hono/**"
+  - "node_modules/better-sqlite3/**"

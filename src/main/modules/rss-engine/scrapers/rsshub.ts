@@ -26,6 +26,55 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+function isTransientBrowserRouteError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('targetcloseerror') ||
+    lower.includes('frame got detached') ||
+    lower.includes('execution context was destroyed') ||
+    lower.includes('session closed') ||
+    lower.includes('browser has disconnected') ||
+    lower.includes('http 500') ||
+    lower.includes('http 502') ||
+    lower.includes('http 503') ||
+    lower.includes('http 504')
+  )
+}
+
+function isChromiumDependencyError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('could not find chrome') ||
+    lower.includes('chromium') ||
+    lower.includes('browser platform') ||
+    lower.includes('executable path') ||
+    lower.includes('chrome path')
+  )
+}
+
+function isLoginOrCookieError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('login') ||
+    lower.includes('sign in') ||
+    lower.includes('unauthorized') ||
+    lower.includes('forbidden') ||
+    lower.includes('cookie') ||
+    lower.includes('登录')
+  )
+}
+
+function isWafRouteError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('empty post data') ||
+    lower.includes('waf') ||
+    lower.includes('risk control') ||
+    lower.includes('-352') ||
+    lower.includes('-799')
+  )
+}
+
 class RSSHubScraper extends BaseScraper {
   protected rsshubBase: string
   protected routeTemplate: string
@@ -74,7 +123,10 @@ class RSSHubScraper extends BaseScraper {
     const route = routePath.startsWith('/') ? routePath : `/${routePath}`
     const url = `${this.rsshubBase}${route}`
     try {
-      const { text, headers } = await this.httpGet(url)
+      const { text, headers } = await this.httpGet(url, {
+        timeout: this.getRouteTimeoutMs(),
+        retries: this.getRouteRequestRetries(),
+      })
       const contentType = (headers.get('content-type') || '').toLowerCase()
 
       if (contentType.includes('json')) {
@@ -93,6 +145,32 @@ class RSSHubScraper extends BaseScraper {
     }
   }
 
+  protected getRouteTimeoutMs(): number {
+    return this.timeout
+  }
+
+  protected getRouteRequestRetries(): number {
+    return 1
+  }
+
+  protected shouldRetryRouteError(_message: string): boolean {
+    return false
+  }
+
+  protected normalizeRouteError(message: string, _url: string): string {
+    return message
+  }
+
+  protected async fetchRouteWithRecovery(routePath: string, platform: string): Promise<ScrapeResult> {
+    const first = await this.fetchRoute(routePath, platform)
+    if (!first.error || first.items.length > 0 || !this.shouldRetryRouteError(first.error)) {
+      return first
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, this.retryBackoff))
+    return this.fetchRoute(routePath, platform)
+  }
+
   async fetchItems(url: string): Promise<ScrapeResult> {
     const userId = this.extractUserId(url)
     if (!userId) {
@@ -100,12 +178,17 @@ class RSSHubScraper extends BaseScraper {
         items: [],
         feedTitle: '',
         platform: this.platform,
-        error: `Cannot extract user ID from ${url}`,
+        error: this.normalizeRouteError(`Cannot extract user ID from ${url}`, url),
       }
     }
 
     const route = this.routeTemplate.replace('{id}', userId)
-    return this.fetchRoute(route, this.platform)
+    const result = await this.fetchRouteWithRecovery(route, this.platform)
+    if (!result.error) return result
+    return {
+      ...result,
+      error: this.normalizeRouteError(result.error, url),
+    }
   }
 }
 
@@ -473,11 +556,60 @@ export class WeiboScraper extends RSSHubScraper {
     return 'weibo'
   }
 
+  protected getRouteTimeoutMs(): number {
+    return 35_000
+  }
+
   extractUserId(url: string): string | null {
     let match = url.match(/weibo\.com\/u\/(\d+)/i)
     if (match) return match[1]
+    match = url.match(/m\.weibo\.cn\/u\/(\d+)/i)
+    if (match) return match[1]
+    match = url.match(/m\.weibo\.cn\/profile\/(\d+)/i)
+    if (match) return match[1]
+    match = url.match(/[?&]containerid=100505(\d+)/i)
+    if (match) return match[1]
     match = url.match(/weibo\.com\/(\d+)/i)
     return match ? match[1] : null
+  }
+
+  protected shouldRetryRouteError(message: string): boolean {
+    return (
+      isTransientBrowserRouteError(message) &&
+      !isChromiumDependencyError(message) &&
+      !isLoginOrCookieError(message)
+    )
+  }
+
+  protected normalizeRouteError(message: string, url: string): string {
+    if (isChromiumDependencyError(message)) {
+      return `微博抓取依赖 Chromium/session，可先修复 RSS 运行时后重试：${message}`
+    }
+    if (isLoginOrCookieError(message)) {
+      return `微博当前需要有效登录态或访客会话：${message}`
+    }
+    if (isTransientBrowserRouteError(message)) {
+      return `微博浏览器抓取链路出现瞬时错误，已自动重试一次：${message}`
+    }
+    if (message.includes('Cannot extract user ID')) {
+      return `微博链接未解析到用户主页 ID，请优先使用 /u/{id} 或 mobile profile 链接：${url}`
+    }
+    return message
+  }
+
+  async fetchItems(url: string): Promise<ScrapeResult> {
+    let normalizedUrl = url
+    const lower = url.toLowerCase()
+    const shouldResolve = lower.includes('t.cn/') || lower.includes('m.weibo.cn') || !this.extractUserId(url)
+    if (shouldResolve) {
+      try {
+        const resolved = await this.resolveFinalUrl(url)
+        if (resolved) normalizedUrl = resolved
+      } catch {
+        // Keep original URL and surface a normalized scraper error later.
+      }
+    }
+    return super.fetchItems(normalizedUrl)
   }
 }
 
@@ -490,15 +622,60 @@ export class DouyinScraper extends RSSHubScraper {
     return 'douyin'
   }
 
+  protected getRouteTimeoutMs(): number {
+    return 35_000
+  }
+
   extractUserId(url: string): string | null {
-    const match = url.match(/douyin\.com\/user\/([A-Za-z0-9_-]+)/i)
-    return match ? match[1] : null
+    let match = url.match(/douyin\.com\/user\/([A-Za-z0-9_-]+)/i)
+    if (match) return match[1]
+
+    match = url.match(/iesdouyin\.com\/share\/user\/([A-Za-z0-9._-]+)/i)
+    if (match) return match[1]
+
+    match = url.match(/[?&]sec_uid=([A-Za-z0-9._%-]+)/i)
+    if (match) {
+      try {
+        return decodeURIComponent(match[1])
+      } catch {
+        return match[1]
+      }
+    }
+
+    return null
+  }
+
+  protected shouldRetryRouteError(message: string): boolean {
+    return (
+      isTransientBrowserRouteError(message) &&
+      !isWafRouteError(message) &&
+      !isChromiumDependencyError(message)
+    )
+  }
+
+  protected normalizeRouteError(message: string, url: string): string {
+    if (isWafRouteError(message)) {
+      return `抖音当前被上游风控/WAF 拦截，现有浏览器链路暂不可稳定获取：${message}`
+    }
+    if (isChromiumDependencyError(message)) {
+      return `抖音抓取依赖 Chromium/session，可先修复 RSS 运行时后重试：${message}`
+    }
+    if (isTransientBrowserRouteError(message)) {
+      return `抖音浏览器抓取链路出现瞬时错误，已自动重试一次：${message}`
+    }
+    if (message.includes('Cannot extract user ID')) {
+      return `抖音链接未解析到 sec_uid/用户 ID，请优先使用用户主页或 share user 链接：${url}`
+    }
+    return message
   }
 
   async fetchItems(url: string): Promise<ScrapeResult> {
     let normalizedUrl = url
     const lower = url.toLowerCase()
-    const shouldResolve = lower.includes('v.douyin.com') || !this.extractUserId(url)
+    const shouldResolve =
+      lower.includes('v.douyin.com') ||
+      lower.includes('iesdouyin.com/share/') ||
+      !this.extractUserId(url)
     if (shouldResolve && lower.includes('douyin.com')) {
       try {
         const resolved = await this.resolveFinalUrl(url)
@@ -520,10 +697,53 @@ export class XiaohongshuScraper extends RSSHubScraper {
     return 'xiaohongshu'
   }
 
+  protected getRouteTimeoutMs(): number {
+    return 35_000
+  }
+
   extractUserId(url: string): string | null {
-    let match = url.match(/user\/profile\/([a-zA-Z0-9]+)/i)
+    let match = url.match(/user\/profile\/([a-zA-Z0-9_-]+)/i)
     if (match) return match[1]
-    match = url.match(/xiaohongshu\.com\/([a-zA-Z0-9]+)/i)
+    match = url.match(/xiaohongshu\.com\/([a-zA-Z0-9_-]+)/i)
     return match ? match[1] : null
+  }
+
+  protected shouldRetryRouteError(message: string): boolean {
+    return (
+      isTransientBrowserRouteError(message) &&
+      !isChromiumDependencyError(message) &&
+      !isLoginOrCookieError(message)
+    )
+  }
+
+  protected normalizeRouteError(message: string, url: string): string {
+    if (isChromiumDependencyError(message)) {
+      return `小红书抓取依赖 Chromium/session，可先修复 RSS 运行时后重试：${message}`
+    }
+    if (isLoginOrCookieError(message)) {
+      return `小红书当前需要有效登录态或访客会话：${message}`
+    }
+    if (isTransientBrowserRouteError(message)) {
+      return `小红书浏览器抓取链路不稳定，已自动重试一次：${message}`
+    }
+    if (message.includes('Cannot extract user ID')) {
+      return `小红书当前仅支持用户主页订阅，请使用 /user/profile/{id} 链接：${url}`
+    }
+    return message
+  }
+
+  async fetchItems(url: string): Promise<ScrapeResult> {
+    let normalizedUrl = url
+    const lower = url.toLowerCase()
+    const shouldResolve = lower.includes('xhslink.com') || lower.includes('xhsurl.cn') || !this.extractUserId(url)
+    if (shouldResolve) {
+      try {
+        const resolved = await this.resolveFinalUrl(url)
+        if (resolved) normalizedUrl = resolved
+      } catch {
+        // Keep original URL and surface a normalized scraper error later.
+      }
+    }
+    return super.fetchItems(normalizedUrl)
   }
 }

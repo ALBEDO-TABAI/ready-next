@@ -3,6 +3,7 @@ import { join } from 'path'
 import { app } from 'electron'
 import { generateMasterFeed, generateCategoryFeeds } from './feed-generator'
 import { generateSubscriptionsOpml } from './opml'
+import type { RSSSourceBenchmarkEntry, RSSSourceBenchmarkSummary } from './source-diagnostics'
 
 interface RSSSourceForReport {
   id: string
@@ -32,6 +33,14 @@ export interface RSSArtifactsResult {
     masterFeed: string
     categoryFeeds: Record<string, string>
     subscriptionsOpml: string
+  }
+}
+
+export interface RSSBenchmarkArtifactsResult {
+  rootDir: string
+  files: {
+    benchmarkJson: string
+    benchmarkMarkdown: string
   }
 }
 
@@ -142,6 +151,87 @@ export async function generateRSSArtifacts(params: {
       masterFeed: masterFeedPath,
       categoryFeeds: categoryFeedPaths,
       subscriptionsOpml: opmlPath,
+    },
+  }
+}
+
+function renderBenchmarkMarkdown(params: {
+  startedAt: string
+  finishedAt: string
+  entries: RSSSourceBenchmarkEntry[]
+  summary: RSSSourceBenchmarkSummary
+}): string {
+  const lines = [
+    '# RSS Source Benchmark',
+    '',
+    `开始时间：${new Date(params.startedAt).toLocaleString('zh-CN')}`,
+    `完成时间：${new Date(params.finishedAt).toLocaleString('zh-CN')}`,
+    '',
+    '## 总览',
+    `- 源数：${params.summary.sourceCount}`,
+    `- 成功：${params.summary.successCount}`,
+    `- 失败：${params.summary.failureCount}`,
+    `- p50：${params.summary.p50DurationMs ?? '未记录'} ms`,
+    `- p95：${params.summary.p95DurationMs ?? '未记录'} ms`,
+    `- Scrapling 候选平台：${params.summary.scraplingCandidatePlatforms.join(', ') || '无'}`,
+    '',
+    '## 平台汇总',
+  ]
+
+  for (const platform of params.summary.platforms) {
+    lines.push(
+      `- ${platform.label}: ${platform.successCount}/${platform.sourceCount} 成功 · backend=${platform.backend} · p95=${platform.p95DurationMs ?? '未记录'}ms`,
+    )
+  }
+
+  lines.push('', '## 源明细')
+
+  for (const entry of params.entries) {
+    lines.push(
+      `- ${entry.sourceName} [${entry.platform}] backend=${entry.backend} success=${entry.success} items=${entry.itemCount} duration=${entry.durationMs}ms`,
+    )
+    if (entry.error) {
+      lines.push(`  - error: ${entry.error}`)
+    }
+    if (entry.failureKind) {
+      lines.push(`  - failureKind: ${entry.failureKind}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+export async function generateRSSBenchmarkArtifacts(params: {
+  startedAt: string
+  finishedAt: string
+  entries: RSSSourceBenchmarkEntry[]
+  summary: RSSSourceBenchmarkSummary
+}): Promise<RSSBenchmarkArtifactsResult> {
+  const rootDir = join(app.getPath('userData'), 'rss-artifacts')
+  await mkdir(rootDir, { recursive: true })
+
+  const benchmarkJsonPath = join(rootDir, 'benchmark.latest.json')
+  const benchmarkMarkdownPath = join(rootDir, 'benchmark.latest.md')
+
+  await writeFile(
+    benchmarkJsonPath,
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        ...params,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  await writeFile(benchmarkMarkdownPath, renderBenchmarkMarkdown(params), 'utf8')
+
+  return {
+    rootDir,
+    files: {
+      benchmarkJson: benchmarkJsonPath,
+      benchmarkMarkdown: benchmarkMarkdownPath,
     },
   }
 }

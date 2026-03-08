@@ -11,7 +11,8 @@ export default defineConfig({
       rollupOptions: {
         external: ['rsshub', /^rsshub\/.*/, '@puppeteer/browsers', /^@puppeteer\/browsers\/.*/],
         input: {
-          index: resolve(__dirname, 'src/main/index.ts')
+          index: resolve(__dirname, 'src/main/index.ts'),
+          'rsshub-worker': resolve(__dirname, 'src/main/modules/rss-engine/rsshub-worker.mjs'),
         }
       }
     }

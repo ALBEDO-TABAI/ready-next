@@ -58,7 +58,16 @@ export abstract class BaseScraper {
         })
         clearTimeout(timer)
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+          let detail = ''
+          try {
+            detail = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 320)
+          } catch {
+            // ignore body extraction failures
+          }
+          const message = detail
+            ? `HTTP ${response.status}: ${response.statusText} | ${detail}`
+            : `HTTP ${response.status}: ${response.statusText}`
+          throw new Error(message)
         }
         const text = await response.text()
         return { text, status: response.status, headers: response.headers }

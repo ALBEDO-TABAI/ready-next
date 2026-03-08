@@ -29,9 +29,9 @@ export function detectPlatform(url: string): PlatformType {
 
   if (lower.includes('youtube.com') || lower.includes('youtu.be')) return 'youtube'
   if (lower.includes('bilibili.com') || lower.includes('b23.tv') || lower.includes('bili2233.cn')) return 'bilibili'
-  if (lower.includes('weibo.com')) return 'weibo'
+  if (lower.includes('weibo.com') || lower.includes('weibo.cn') || lower.includes('m.weibo.cn')) return 'weibo'
   if (lower.includes('douyin.com')) return 'douyin'
-  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com')) return 'xiaohongshu'
+  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com') || lower.includes('xhsurl.cn')) return 'xiaohongshu'
   if (lower.includes('x.com') || lower.includes('twitter.com')) return 'twitter'
   if (lower.includes('vimeo.com')) return 'vimeo'
   if (lower.includes('behance.net')) return 'behance'

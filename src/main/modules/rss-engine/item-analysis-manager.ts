@@ -3,11 +3,11 @@ import { mkdirSync } from 'fs'
 import { readFile, readdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import {
-  getDatabase,
   type RSSAnalysisAction,
   type RSSAnalysisJob,
   type RSSAnalysisJobStatus,
 } from '../database'
+import { RSSRepository } from '../repositories/rss-repository'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { extractWebContentToFile } from './content-extractor'
 import { rssSubagentRunner } from './subagent-runner'
@@ -149,6 +149,7 @@ function toProgress(job: RSSAnalysisJob): RSSItemAnalysisProgress {
 }
 
 export class RSSItemAnalysisManager {
+  private readonly repository = new RSSRepository()
   private readonly queues: Record<RSSAnalysisAction, Array<{ jobId: string; run: () => Promise<void> }>> = {
     copy: [],
     visual: [],
@@ -162,17 +163,15 @@ export class RSSItemAnalysisManager {
   private ensureInitialized(): void {
     if (this.initialized) return
     this.initialized = true
-    const db = getDatabase()
-    const interrupted = db.markInterruptedRSSAnalysisJobs()
+    const interrupted = this.repository.markInterruptedRSSAnalysisJobs()
     if (interrupted > 0) {
       console.log(`[rss:analysis] marked interrupted jobs=${interrupted}`)
     }
-    db.cleanupRSSAnalysisJobs(30, 500)
+    this.repository.cleanupRSSAnalysisJobs(30, 500)
   }
 
   async startItemAnalysis(payload: StartRSSItemAnalysisPayload): Promise<RSSAnalysisJob> {
     this.ensureInitialized()
-    const db = getDatabase()
     const safeTitle = sanitizeName(payload.title)
     const folderSuffix = payload.itemId.slice(0, 8)
     const rootDir = join(payload.targetDir, `${safeTitle}-${folderSuffix}`)
@@ -180,12 +179,12 @@ export class RSSItemAnalysisManager {
     mkdirSync(outputDir, { recursive: true })
 
     if (!payload.force) {
-      const active = db.findActiveRSSAnalysisJob(payload.itemId, payload.action)
+      const active = this.repository.findActiveRSSAnalysisJob(payload.itemId, payload.action)
       if (active) return active
     }
 
     const now = new Date().toISOString()
-    const job = db.createRSSAnalysisJob({
+    const job = this.repository.createRSSAnalysisJob({
       id: randomUUID(),
       itemId: payload.itemId,
       action: payload.action,
@@ -212,12 +211,11 @@ export class RSSItemAnalysisManager {
 
   getItemProgress(itemIds?: string[]): Record<string, RSSItemAnalysisProgress> {
     this.ensureInitialized()
-    const db = getDatabase()
     let latest: Record<string, RSSAnalysisJob> = {}
     if (Array.isArray(itemIds) && itemIds.length > 0) {
-      latest = db.getLatestRSSAnalysisByItemIds(itemIds)
+      latest = this.repository.getLatestRSSAnalysisByItemIds(itemIds)
     } else {
-      const rows = db.listRSSAnalysisJobs(undefined, 400)
+      const rows = this.repository.listRSSAnalysisJobs(undefined, 400)
       for (const row of rows) {
         if (!latest[row.item_id]) latest[row.item_id] = row
       }
@@ -232,13 +230,12 @@ export class RSSItemAnalysisManager {
 
   listJobs(itemId?: string, limit = 50): RSSAnalysisJob[] {
     this.ensureInitialized()
-    return getDatabase().listRSSAnalysisJobs(itemId, limit)
+    return this.repository.listRSSAnalysisJobs(itemId, limit)
   }
 
   pauseJob(jobId: string): RSSAnalysisJob {
     this.ensureInitialized()
-    const db = getDatabase()
-    const job = db.getRSSAnalysisJob(jobId)
+    const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       throw new Error('任务不存在')
     }
@@ -249,7 +246,7 @@ export class RSSItemAnalysisManager {
       throw new Error('仅排队中的任务可暂停')
     }
     this.queues[job.action] = this.queues[job.action].filter((task) => task.jobId !== jobId)
-    const updated = db.updateRSSAnalysisJob(jobId, {
+    const updated = this.repository.updateRSSAnalysisJob(jobId, {
       status: 'paused',
       message: '任务已暂停',
     })
@@ -259,8 +256,7 @@ export class RSSItemAnalysisManager {
 
   resumeJob(jobId: string): RSSAnalysisJob {
     this.ensureInitialized()
-    const db = getDatabase()
-    const job = db.getRSSAnalysisJob(jobId)
+    const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       throw new Error('任务不存在')
     }
@@ -280,7 +276,7 @@ export class RSSItemAnalysisManager {
       publishedAt: typeof meta.publishedAt === 'string' ? meta.publishedAt : undefined,
       force: true,
     }
-    const updated = db.updateRSSAnalysisJob(jobId, {
+    const updated = this.repository.updateRSSAnalysisJob(jobId, {
       status: 'queued',
       progress: Math.max(5, Number(job.progress) || 5),
       message: '已继续，等待执行',
@@ -299,8 +295,7 @@ export class RSSItemAnalysisManager {
 
   deleteJob(jobId: string): { deleted: boolean; reason?: string } {
     this.ensureInitialized()
-    const db = getDatabase()
-    const job = db.getRSSAnalysisJob(jobId)
+    const job = this.repository.getRSSAnalysisJob(jobId)
     if (!job) {
       return { deleted: false, reason: '任务不存在' }
     }
@@ -310,7 +305,7 @@ export class RSSItemAnalysisManager {
     if (job.status === 'queued') {
       this.queues[job.action] = this.queues[job.action].filter((task) => task.jobId !== jobId)
     }
-    return { deleted: db.deleteRSSAnalysisJob(jobId) }
+    return { deleted: this.repository.deleteRSSAnalysisJob(jobId) }
   }
 
   private enqueue(action: RSSAnalysisAction, jobId: string, task: () => Promise<void>): void {
@@ -370,7 +365,7 @@ export class RSSItemAnalysisManager {
       })
       console.error('[rss:analysis] job failed', jobId, message)
     } finally {
-      getDatabase().cleanupRSSAnalysisJobs(30, 500)
+      this.repository.cleanupRSSAnalysisJobs(30, 500)
     }
   }
 
@@ -621,7 +616,7 @@ export class RSSItemAnalysisManager {
       startedAt: string | null
     }>,
   ): RSSAnalysisJob | null {
-    return getDatabase().updateRSSAnalysisJob(jobId, patch)
+    return this.repository.updateRSSAnalysisJob(jobId, patch)
   }
 }
 

@@ -2,35 +2,21 @@
 // Runs as a child process and exposes a local HTTP service on 127.0.0.1.
 
 import { createServer } from 'node:http'
-import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { readdir, readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { readFile } from 'node:fs/promises'
 import { init } from 'rsshub'
 
 const PORT = Number.parseInt(process.env.RSSHUB_PORT || '1200', 10)
 const HOST = '127.0.0.1'
 
-/**
- * RSSHub package exports `init()` but not the initialized app instance.
- * We dynamically find the internal app module by locating the generated file
- * that imports app-bootstrap, then call `app.fetch(request)`.
- */
-async function resolveRSSHubApp() {
-  const pkgEntryUrl = await import.meta.resolve('rsshub')
-  const pkgEntryPath = fileURLToPath(pkgEntryUrl)
-  const distDir = dirname(pkgEntryPath)
-  const files = await readdir(distDir)
-
-  for (const fileName of files) {
-    if (!/^app-[A-Za-z0-9_-]+\.mjs$/.test(fileName)) continue
-    const fullPath = join(distDir, fileName)
-    const source = await readFile(fullPath, 'utf8')
-    if (!source.includes('app-bootstrap-') || !source.includes('app_default')) continue
-    const mod = await import(pathToFileURL(fullPath).href)
-    if (mod?.default?.fetch) return mod.default
+function reportWorkerError(error, context = 'rsshub-worker') {
+  const message = error instanceof Error ? error.message : String(error)
+  const stack = error instanceof Error ? error.stack : undefined
+  console.error(`[${context}] ${message}`)
+  if (stack) {
+    console.error(stack)
   }
-
-  throw new Error('Unable to resolve RSSHub app module')
+  process.send?.({ type: 'error', message })
 }
 
 async function toNodeResponse(res, response) {
@@ -58,7 +44,21 @@ async function start() {
     NODE_ENV: 'production',
   })
 
-  const app = await resolveRSSHubApp()
+  const pkgEntryUrl = await import.meta.resolve('rsshub')
+  const pkgSource = await readFile(fileURLToPath(pkgEntryUrl), 'utf8')
+  const match = pkgSource.match(/import\("(\.\/app-[^"]+\.mjs)"\)/)
+
+  if (!match?.[1]) {
+    throw new Error('Unable to resolve RSSHub app module from package entry')
+  }
+
+  const appUrl = new URL(match[1], pkgEntryUrl).href
+  const mod = await import(appUrl)
+  if (!mod?.default?.request) {
+    throw new Error('Resolved RSSHub app module is missing request()')
+  }
+
+  const rsshubApp = mod.default
 
   const server = createServer(async (req, res) => {
     try {
@@ -71,9 +71,24 @@ async function start() {
         return
       }
 
+      if (reqUrl.pathname === '/shutdown') {
+        res.statusCode = 202
+        res.setHeader('content-type', 'application/json; charset=utf-8')
+        res.end(JSON.stringify({ ok: true, service: 'rsshub-embedded', shuttingDown: true }))
+        setTimeout(() => {
+          server.close(() => process.exit(0))
+          setTimeout(() => process.exit(1), 5000)
+        }, 50)
+        return
+      }
+
       const method = req.method || 'GET'
       const headers = new Headers()
       for (const [key, value] of Object.entries(req.headers)) {
+        const lowerKey = key.toLowerCase()
+        if (lowerKey === 'host' || lowerKey === 'connection' || lowerKey === 'content-length') {
+          continue
+        }
         if (Array.isArray(value)) {
           headers.set(key, value.join(', '))
         } else if (typeof value === 'string') {
@@ -90,18 +105,17 @@ async function start() {
       }
 
       const timeout = createAbortableTimeout(30_000)
-      const request = new Request(reqUrl.toString(), {
+      const response = await rsshubApp.request(`${reqUrl.pathname}${reqUrl.search}`, {
         method,
         headers,
         body,
         signal: timeout.controller.signal,
       })
-
-      const response = await app.fetch(request)
       timeout.clear()
       await toNodeResponse(res, response)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      reportWorkerError(error, 'rsshub-worker:request')
       res.statusCode = 500
       res.setHeader('content-type', 'application/json; charset=utf-8')
       res.end(JSON.stringify({ error: message }))
@@ -114,11 +128,7 @@ async function start() {
 
   server.on('error', (error) => {
     const err = error
-    process.send?.({
-      type: 'error',
-      message: err?.message || String(err),
-      code: err?.code,
-    })
+    reportWorkerError(err, 'rsshub-worker:server')
     process.exit(1)
   })
 
@@ -129,10 +139,17 @@ async function start() {
   })
 }
 
+process.on('uncaughtException', (error) => {
+  reportWorkerError(error, 'rsshub-worker:uncaughtException')
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (error) => {
+  reportWorkerError(error, 'rsshub-worker:unhandledRejection')
+  process.exit(1)
+})
+
 start().catch((error) => {
-  process.send?.({
-    type: 'error',
-    message: error instanceof Error ? error.message : String(error),
-  })
+  reportWorkerError(error, 'rsshub-worker:start')
   process.exit(1)
 })

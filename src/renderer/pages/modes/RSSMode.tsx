@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
+import RSSRuntimeDiagnostics from '../../components/rss/RSSRuntimeDiagnostics'
+import RSSSessionDiagnostics from '../../components/rss/RSSSessionDiagnostics'
+import RSSSourceCapabilityMatrix from '../../components/rss/RSSSourceCapabilityMatrix'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
+import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
+import { useRSSRuntimeDiagnostics } from '../../modules/rss/useRSSRuntimeDiagnostics'
+import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
+const BROWSER_BACKED_PLATFORMS = new Set(['weibo', 'xiaohongshu', 'douyin'])
 
 type RSSAnalysisStatus =
   | 'queued'
@@ -44,6 +51,16 @@ interface RSSAnalysisJobState {
 }
 
 export default function RSSMode() {
+  const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
+  const selectedItemId = useRSSSession((state) => state.selectedItemId)
+  const selectedItemTitle = useRSSSession((state) => state.selectedItemTitle)
+  const totalItemsSnapshot = useRSSSession((state) => state.totalItems)
+  const unreadItemsSnapshot = useRSSSession((state) => state.unreadItems)
+  const lastFetchAt = useRSSSession((state) => state.lastFetchAt)
+  const lastAnalysisSnapshot = useRSSSession((state) => state.lastAnalysis)
+  const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
+  const setSelection = useRSSSession((state) => state.setSelection)
+  const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
   const [items, setItems] = useState<RSSItem[]>([])
   const [sources, setSources] = useState<RSSSource[]>([])
   const [selectedSource, setSelectedSource] = useState<string | null>(null)
@@ -59,6 +76,19 @@ export default function RSSMode() {
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
   const previousItemIdsRef = useRef<Set<string>>(new Set())
+  const {
+    runtimeStatus,
+    runtimeDiagnostics,
+    runtimeLoading,
+    runtimeRepairing,
+    benchmarkResult,
+    benchmarking,
+    loadRuntimeDiagnostics,
+    runBenchmark,
+    repairRuntime,
+  } = useRSSRuntimeDiagnostics({
+    onStatusMessage: setStatusMessage,
+  })
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -140,6 +170,8 @@ export default function RSSMode() {
               id: s.id,
               name: s.name,
               count: unreadCounts.get(s.id) ?? 0,
+              platform: s.platform,
+              url: s.url,
             })))
           }
         } else {
@@ -150,6 +182,8 @@ export default function RSSMode() {
               id: s.id,
               name: s.name,
               count: 0,
+              platform: s.platform,
+              url: s.url,
             })))
           }
         }
@@ -314,13 +348,46 @@ export default function RSSMode() {
     setRefreshing(true)
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
-        await window.electronAPI.rss.fetchAll()
+        const selectedSourceEntry = selectedSource
+          ? sources.find((source) => source.id === selectedSource) ?? null
+          : null
+
+        const result = selectedSourceEntry
+          ? await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
+          : await window.electronAPI.rss.fetchAll()
+
+        if (!result.success) {
+          setStatusMessage(result.error || '刷新失败')
+        } else if (result.data?.running) {
+          setStatusMessage(selectedSourceEntry ? `${selectedSourceEntry.name} 正在刷新中` : result.data.message || 'RSS 正在刷新中')
+        } else if (result.data?.errors?.length) {
+          const prefix = selectedSourceEntry ? `${selectedSourceEntry.name} 刷新完成，但存在错误` : '刷新完成，但存在错误'
+          setStatusMessage(`${prefix}：${result.data.errors[0]}`)
+        } else {
+          setStatusMessage(result.data?.message || (selectedSourceEntry ? `${selectedSourceEntry.name} 已刷新` : '刷新完成'))
+        }
       }
       await loadRSSData()
-    } catch { /* ignore */ } finally {
+      await loadRuntimeDiagnostics()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : '刷新失败')
+    } finally {
       setRefreshing(false)
     }
-  }, [loadRSSData, refreshing])
+  }, [loadRSSData, loadRuntimeDiagnostics, refreshing, selectedSource, sources])
+
+  useRSSAgentAdapter({
+    items,
+    selectedSource,
+    selectedItem,
+    loadRSSData,
+    handleRefresh,
+    handleItemClick,
+    setFeedSnapshot,
+    setSelection,
+    setLastAnalysis,
+    setAnalysisProgressMap,
+  })
 
   const handleMarkItemRead = useCallback(
     async (itemId: string) => {
@@ -499,6 +566,30 @@ export default function RSSMode() {
         <div className={`content-surface-panel flex-shrink-0 overflow-hidden flex flex-col border-r border-[var(--border-default)] transition-all duration-300 relative ${
           selectedItem ? 'w-[300px]' : 'flex-1'
         }`}>
+          <RSSRuntimeDiagnostics
+            status={runtimeStatus}
+            diagnostics={runtimeDiagnostics}
+            loading={runtimeLoading}
+            onRefresh={loadRuntimeDiagnostics}
+            onRepair={repairRuntime}
+            repairing={runtimeRepairing}
+          />
+          <RSSSessionDiagnostics
+            selectedSourceId={selectedSourceId}
+            selectedItemId={selectedItemId}
+            selectedItemTitle={selectedItemTitle}
+            totalItems={totalItemsSnapshot}
+            unreadItems={unreadItemsSnapshot}
+            visibleItems={visibleItemIds.length}
+            lastFetchAt={lastFetchAt}
+            lastAnalysis={lastAnalysisSnapshot}
+          />
+          <RSSSourceCapabilityMatrix
+            diagnostics={runtimeDiagnostics}
+            benchmark={benchmarkResult}
+            benchmarking={benchmarking}
+            onBenchmark={runBenchmark}
+          />
           <RSSFeed
             items={items}
             sources={sources}

@@ -33,6 +33,8 @@ export interface RSSSource {
   id: string
   name: string
   count: number
+  platform?: string
+  url?: string
 }
 
 type AnalysisStatus =
@@ -230,6 +232,15 @@ export default function RSSFeed({
 
   const isRefreshing = loading || refreshing
   const unreadCount = useMemo(() => items.filter(i => !i.read).length, [items])
+  const selectedSourceEntry = useMemo(
+    () => sources.find((source) => source.id === selectedSource) ?? null,
+    [selectedSource, sources],
+  )
+  const refreshLabel = isRefreshing
+    ? '刷新中'
+    : selectedSourceEntry
+      ? `刷新 ${selectedSourceEntry.name}`
+      : '刷新全部'
   const activeJobsCount = useMemo(
     () =>
       analysisJobs.filter(
@@ -532,9 +543,9 @@ export default function RSSFeed({
               background: 'var(--bg-canvas)',
               color: 'var(--text-secondary)',
             }}
-            title="刷新"
+            title={selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'}
           >
-            <span>{isRefreshing ? '刷新中' : '刷新'}</span>
+            <span>{refreshLabel}</span>
           </button>
 
           <button

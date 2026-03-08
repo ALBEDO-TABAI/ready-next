@@ -15,7 +15,7 @@ import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
-import { setupRSSIPC } from './modules/rss-engine/ipc-handler'
+import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupVideoIPC } from './modules/video-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
@@ -37,6 +37,10 @@ const ENABLE_MOCK_SERVICES = is.dev
 
 // Document engine always uses real fs, regardless of mock setting
 const DOCUMENT_USE_MOCK = false
+// RSS uses the embedded/local pipeline by default even in packaged builds.
+// Keep mock opt-in only so packaged apps don't silently report a fake runtime.
+const RSS_USE_MOCK = process.env.ENABLE_MOCK_RSS === 'true'
+const CALENDAR_USE_MOCK = ENABLE_MOCK_SERVICES
 
 // Initialize agent manager
 const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
@@ -167,6 +171,7 @@ function createWindow(): void {
   // which cannot be registered twice without error)
   if (!windowIPCRegistered) {
     browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES)
+    setRSSBrowserController(browserController)
     setupAgentIPC(agentManager, mainWindow, browserController)
     windowIPCRegistered = true
   }
@@ -182,8 +187,8 @@ function createWindow(): void {
 function setupGlobalIPC(): void {
   // Module IPC handlers (no window dependency)
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
-  setupRSSIPC(ENABLE_MOCK_SERVICES)
-  setupCalendarIPC(ENABLE_MOCK_SERVICES)
+  setupRSSIPC(RSS_USE_MOCK)
+  setupCalendarIPC(CALENDAR_USE_MOCK)
   setupVideoIPC()
   setupSettingsIPC()
   setupDesignIPC()
@@ -452,10 +457,12 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Start embedded RSSHub instance (non-blocking)
-  rsshubManager.start().catch((err) => {
-    console.error('[rsshub] Failed to start embedded RSSHub:', err)
-  })
+  // Start embedded RSSHub instance (non-blocking) unless explicitly mocked.
+  if (!RSS_USE_MOCK) {
+    rsshubManager.start().catch((err) => {
+      console.error('[rsshub] Failed to start embedded RSSHub:', err)
+    })
+  }
 
   // Register global IPC handlers once, before any window is created
   setupGlobalIPC()
