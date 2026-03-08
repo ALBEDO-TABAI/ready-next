@@ -67,9 +67,7 @@ export default function WorkbenchMode() {
     sidebarVisible,
     chatPanelVisible,
     sidePanelVariant,
-    sidePanelWidths,
     setSidePanelVariant,
-    setSidePanelWidth,
   } = useWorkspace()
   const { workbenchMode, splitMode, splitRatio, setSplitRatio } = useMode()
   const navigate = useNavigate()
