@@ -1387,7 +1387,7 @@ export function setupRSSIPC(useMock = false): void {
 
       return createSuccessResponse(
         {
-          message: `Fetched 1 source, ${inserted} new items`,
+          message: `Refreshed 1 source via ${backendUsed}, ${result.items.length} items, ${inserted} written`,
           fetched: inserted,
           sourceId,
           sourceName: source.name,

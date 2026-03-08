@@ -9,7 +9,7 @@ import {
   PanelRightClose,
   SlidersHorizontal,
 } from 'lucide-react'
-import { WORKBENCH_ROW_PADDING_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_CONTENT_RAIL_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface DesignToolbarProps {
   chatPanelVisible: boolean
@@ -79,7 +79,7 @@ export default function DesignToolbar({
       className="flex items-center justify-between flex-shrink-0"
       style={{
         height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
-        padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
+        padding: `0 ${WORKBENCH_CONTENT_RAIL_X}px`,
         background: 'var(--bg-primary)',
         borderBottom: '1px solid var(--border-default)',
       }}

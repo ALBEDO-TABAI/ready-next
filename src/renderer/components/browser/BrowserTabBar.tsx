@@ -3,7 +3,7 @@ import {
   Plus, X, Globe, Loader2, ChevronLeft, ChevronRight, Lock
 } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
-import { WORKBENCH_ROW_PADDING_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_TAB_RAIL_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface Tab {
   id: string
@@ -130,12 +130,15 @@ export default function BrowserTabBar({
       className="glass-surface-panel flex items-center no-drag"
       style={{
         height: WORKBENCH_TAB_ROW_HEIGHT,
-        padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
         background: 'var(--surface-toolbar-bg)',
         borderBottom: '1px solid var(--border-default)',
         gap: 0,
       }}
     >
+      <div
+        className="flex items-center flex-1 min-w-0"
+        style={{ padding: `0 ${WORKBENCH_TAB_RAIL_X}px`, gap: 0 }}
+      >
       {/* Scroll left arrow */}
       {showLeftArrow && (
         <button
@@ -276,6 +279,7 @@ export default function BrowserTabBar({
           <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
         </button>
       )}
+      </div>
     </div>
   )
 }

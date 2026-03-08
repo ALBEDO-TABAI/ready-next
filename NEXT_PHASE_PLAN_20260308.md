@@ -15,7 +15,8 @@
 
 2. Finish the shared workbench visual baseline.
 - Strictly align the top three workbench rows.
-- Keep the first row mode strip compact, and align the second and third rows to the same content-width boundary.
+- Keep the first row mode strip compact.
+- Keep the second-row tab rail and third-row toolbar rail locked to the same visible content boundary instead of widening the first row.
 - Unify tabs for browser/document/design/video against the browser baseline.
 - Keep document and design on dedicated toolbar rows instead of tab-strip action piles, then finish the remaining diagnostics-row alignment.
 - Continue removing overlay/stacking edge cases.

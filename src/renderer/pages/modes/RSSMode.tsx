@@ -352,19 +352,33 @@ export default function RSSMode() {
           ? sources.find((source) => source.id === selectedSource) ?? null
           : null
 
-        const result = selectedSourceEntry
-          ? await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
-          : await window.electronAPI.rss.fetchAll()
-
-        if (!result.success) {
-          setStatusMessage(result.error || '刷新失败')
-        } else if (result.data?.running) {
-          setStatusMessage(selectedSourceEntry ? `${selectedSourceEntry.name} 正在刷新中` : result.data.message || 'RSS 正在刷新中')
-        } else if (result.data?.errors?.length) {
-          const prefix = selectedSourceEntry ? `${selectedSourceEntry.name} 刷新完成，但存在错误` : '刷新完成，但存在错误'
-          setStatusMessage(`${prefix}：${result.data.errors[0]}`)
+        if (selectedSourceEntry) {
+          const result = await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
+          if (!result.success) {
+            setStatusMessage(result.error || '刷新失败')
+          } else if (result.data?.running) {
+            setStatusMessage(`${selectedSourceEntry.name} 正在刷新中`)
+          } else if (result.data?.errors?.length) {
+            setStatusMessage(`${selectedSourceEntry.name} 刷新完成，但存在错误：${result.data.errors[0]}`)
+          } else if (typeof result.data?.itemCount === 'number') {
+            const writtenLabel = typeof result.data?.fetched === 'number'
+              ? `，写入 ${result.data.fetched} 条`
+              : ''
+            setStatusMessage(`${selectedSourceEntry.name} 已刷新，共 ${result.data.itemCount} 条${writtenLabel}`)
+          } else {
+            setStatusMessage(result.data?.message || `${selectedSourceEntry.name} 已刷新`)
+          }
         } else {
-          setStatusMessage(result.data?.message || (selectedSourceEntry ? `${selectedSourceEntry.name} 已刷新` : '刷新完成'))
+          const result = await window.electronAPI.rss.fetchAll()
+          if (!result.success) {
+            setStatusMessage(result.error || '刷新失败')
+          } else if (result.data?.running) {
+            setStatusMessage(result.data.message || 'RSS 正在刷新中')
+          } else if (result.data?.errors?.length) {
+            setStatusMessage(`刷新完成，但存在错误：${result.data.errors[0]}`)
+          } else {
+            setStatusMessage(result.data?.message || '刷新完成')
+          }
         }
       }
       await loadRSSData()

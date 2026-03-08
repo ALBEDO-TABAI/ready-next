@@ -2,7 +2,7 @@ import type { DragEvent, MouseEvent, ReactNode } from 'react'
 import { Plus, X } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
 import {
-  WORKBENCH_ROW_PADDING_X,
+  WORKBENCH_TAB_RAIL_X,
   WORKBENCH_TAB_MAX_WIDTH,
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
@@ -49,12 +49,14 @@ export default function WorkbenchProjectTabs({
       className="glass-surface-panel flex items-center justify-between flex-shrink-0"
       style={{
         height: WORKBENCH_TAB_ROW_HEIGHT,
-        padding: `0 ${WORKBENCH_ROW_PADDING_X}px`,
         borderBottom: '1px solid var(--border-default)',
         background: 'var(--surface-toolbar-bg)',
       }}
     >
-      <div className="flex items-end h-full min-w-0 flex-1 overflow-hidden">
+      <div
+        className="flex items-end h-full min-w-0 flex-1 overflow-hidden"
+        style={{ padding: `0 ${WORKBENCH_TAB_RAIL_X}px` }}
+      >
         <MorphTabStrip
           layoutId={layoutId}
           className="flex min-w-0 flex-1 items-end h-full overflow-hidden gap-[1px]"
