@@ -16,6 +16,7 @@
 2. Finish the shared workbench visual baseline.
 - Strictly align the top three workbench rows.
 - Unify tabs for browser/document/design/video against the browser baseline.
+- Keep document and design on dedicated toolbar rows instead of tab-strip action piles, then finish the remaining diagnostics-row alignment.
 - Continue removing overlay/stacking edge cases.
 
 3. Finish the highest-frequency design inspector gaps.

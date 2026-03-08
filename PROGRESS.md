@@ -21,6 +21,7 @@
 - design/video/rss/calendar module handlers are extracted from page components.
 - diagnostics panels exist for browser, RSS, calendar, design, and video.
 - browser/document/design/video tab chrome is now on a shared path instead of fully separate styling.
+- document and design controls are now split out of the tab strip into dedicated toolbar rows, moving the workbench closer to a consistent tabs + toolbar structure.
 
 5. RSS is now a standalone prepared subsystem.
 - packaged/runtime RSSHub behavior is fixed enough to be observable and repairable in-product.
@@ -33,6 +34,7 @@
 ## Current known unfinished work
 - Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
 - Workbench top-row vertical alignment and tab baseline still need a final polish pass.
+- Workbench top-row vertical alignment has improved, but the remaining diagnostics-row and browser parity cleanup is still unfinished.
 - Design inspector still lacks several high-frequency controls.
 - Browser diagnostics are not yet full labs.
 - Memory layering and Feishu replacement are still ahead on the mainline.
