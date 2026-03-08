@@ -292,6 +292,45 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           return items;
         };
 
+        const collectFromProfileAnchors = () => {
+          const author = readProfileAuthor();
+          const profileHrefPattern = targetUserId
+            ? new RegExp('/user/profile/' + targetUserId + '(?:[/?#]|$)', 'i')
+            : /\/user\/profile\//i;
+          const cardAnchors = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'));
+          const seen = new Set();
+          const items = [];
+          for (const [anchorIndex, anchor] of cardAnchors.entries()) {
+            const href = abs(anchor.getAttribute('href'));
+            if (!href || !profileHrefPattern.test(href)) continue;
+            const ownerLink = /xsec_source=pc_note/i.test(href);
+            const coverLink = /xsec_source=pc_user/i.test(href);
+            if (!ownerLink && !coverLink) continue;
+            const container =
+              anchor.closest('section.note-item, .note-item, [class*="note-item"]') ||
+              anchor.parentElement?.parentElement ||
+              anchor.parentElement ||
+              anchor;
+            const lines = sanitizeTitleLines(container?.innerText || anchor.textContent || '', author);
+            const title = lines[0] || '';
+            if (!title || title === author) continue;
+            const fallbackKey = encodeURIComponent(title.slice(0, 48)).replace(/%/g, '').toLowerCase() || 'card';
+            const stableLink = targetUserId
+              ? abs('/user/profile/' + targetUserId + '#note-' + fallbackKey + '-' + String(anchorIndex + 1))
+              : href;
+            if (!stableLink || seen.has(stableLink)) continue;
+            seen.add(stableLink);
+            items.push({
+              title: clip(title, 160),
+              link: stableLink,
+              description: clip(lines.slice(1, 4).join(' '), 280),
+              author: clip(author, 80),
+              pubDate: '',
+            });
+          }
+          return items;
+        };
+
         const collectFromInitialState = () => {
           const scripts = Array.from(document.scripts).map((node) => node.textContent || '');
           const items = [];
@@ -358,6 +397,10 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           const items = collectFromSections();
           if (items.length > 0) {
             return { title: document.title || '', finalUrl: href, state: 'ready', items };
+          }
+          const profileItems = collectFromProfileAnchors();
+          if (profileItems.length > 0) {
+            return { title: document.title || '', finalUrl: href, state: 'ready', items: profileItems };
           }
           const stateItems = collectFromInitialState();
           if (stateItems.length > 0) {

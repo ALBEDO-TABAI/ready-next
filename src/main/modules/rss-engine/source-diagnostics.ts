@@ -132,6 +132,10 @@ interface RouteAttemptInput {
 
 const routeAttemptStore = new Map<string, RecordedRouteAttempt>()
 
+export function allowsRSSHubFallbackAfterBrowser(platform: PlatformType): boolean {
+  return platform === 'weibo'
+}
+
 const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = {
   rss: {
     platform: 'rss',
@@ -182,19 +186,19 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
     platform: 'douyin',
     label: platformLabel('douyin'),
     backend: 'browser',
-    fallbackOrder: ['browser', 'rsshub', 'scrapling'],
+    fallbackOrder: ['browser', 'scrapling'],
     chromiumRequired: true,
     scraplingEligible: true,
-    notes: '优先使用应用内浏览器获取；若页面风控持续失败，再评估 RSSHub 或 Scrapling fallback。',
+    notes: '优先使用应用内浏览器获取；默认不再静默回退 RSSHub，页面风控持续失败时再单独评估 Scrapling fallback。',
   },
   xiaohongshu: {
     platform: 'xiaohongshu',
     label: platformLabel('xiaohongshu'),
     backend: 'browser',
-    fallbackOrder: ['browser', 'rsshub', 'scrapling'],
+    fallbackOrder: ['browser', 'scrapling'],
     chromiumRequired: true,
     scraplingEligible: true,
-    notes: '优先使用应用内浏览器获取；若 browser route 仍不稳，再评估 RSSHub 或 Scrapling fallback。',
+    notes: '优先使用应用内浏览器获取；默认不再静默回退 RSSHub，browser route 仍不稳时再评估 Scrapling fallback。',
   },
   vimeo: {
     platform: 'vimeo',

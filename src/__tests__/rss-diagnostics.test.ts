@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
   buildSourceDiagnostics,
   getRouteCapabilityMatrix,
@@ -107,12 +108,20 @@ describe('RSS benchmark summary', () => {
   it('exposes the fixed route capability matrix', () => {
     const matrix = getRouteCapabilityMatrix()
     const douyin = matrix.find((entry) => entry.platform === 'douyin')
+    const xiaohongshu = matrix.find((entry) => entry.platform === 'xiaohongshu')
     const behance = matrix.find((entry) => entry.platform === 'behance')
 
     assert.equal(douyin?.backend, 'browser')
-    assert.deepEqual(douyin?.fallbackOrder, ['browser', 'rsshub', 'scrapling'])
+    assert.deepEqual(douyin?.fallbackOrder, ['browser', 'scrapling'])
+    assert.deepEqual(xiaohongshu?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(douyin?.scraplingEligible, true)
     assert.equal(behance?.backend, 'native')
     assert.equal(behance?.scraplingEligible, false)
+  })
+
+  it('allows RSSHub fallback after browser only for weibo', () => {
+    assert.equal(allowsRSSHubFallbackAfterBrowser('weibo'), true)
+    assert.equal(allowsRSSHubFallbackAfterBrowser('douyin'), false)
+    assert.equal(allowsRSSHubFallbackAfterBrowser('xiaohongshu'), false)
   })
 })

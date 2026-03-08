@@ -20,6 +20,7 @@ import { rssUpdateLock } from './update-lock'
 import { getRSSItemAnalysisManager } from './item-analysis-manager'
 import { fetchFeedViaBrowserSession, supportsBrowserSessionAcquisition } from './browser-acquisition'
 import {
+  allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
   buildSourceDiagnostics,
   getRouteCapabilityMatrix,
@@ -459,6 +460,7 @@ async function fetchSourceWithCurrentStack(
   rsshubBase?: string,
 ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
   const scraper = createScraper(platform, rsshubBase)
+  const allowRSSHubFallback = allowsRSSHubFallbackAfterBrowser(platform)
 
   if (rssBrowserController && supportsBrowserSessionAcquisition(platform)) {
     try {
@@ -470,7 +472,7 @@ async function fetchSourceWithCurrentStack(
         }
       }
 
-      if (!rsshubBase) {
+      if (!rsshubBase || !allowRSSHubFallback) {
         return {
           result: browserResult,
           backendUsed: 'browser',
@@ -499,7 +501,7 @@ async function fetchSourceWithCurrentStack(
       }
     } catch (error) {
       const browserMessage = error instanceof Error ? error.message : String(error)
-      if (!rsshubBase) {
+      if (!rsshubBase || !allowRSSHubFallback) {
         return {
           result: {
             items: [],
