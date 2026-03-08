@@ -53,6 +53,15 @@ export interface RSSDiagnosticsData {
   rsshub: RSSHubRuntimeStatusData
   rsshubRequired: boolean
   update: RSSUpdateTaskStatusData
+  lastFetchInvocation: {
+    recordedAt: string | null
+    mode: 'refreshSource' | 'fetchAll' | null
+    sourceId: string | null
+    sourceIds: string[]
+    group: string | null
+    digest: boolean | null
+    classification: 'simple' | 'none' | null
+  } | null
   artifacts: {
     root: string
     hasOpml: boolean

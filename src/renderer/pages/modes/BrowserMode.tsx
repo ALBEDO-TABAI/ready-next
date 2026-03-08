@@ -4,6 +4,7 @@ import BrowserTabBar from '../../components/browser/BrowserTabBar'
 import BrowserAddressBar from '../../components/browser/BrowserAddressBar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
+import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import type {
   AdblockState,
   BrowserDiagnosticsData,
@@ -573,8 +574,8 @@ export default function BrowserMode() {
         <div
           className="glass-surface-panel flex items-center no-drag"
           style={{
-            height: 34,
-            padding: '0 8px',
+            height: WORKBENCH_TAB_ROW_HEIGHT,
+            padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
             background: 'var(--surface-toolbar-bg)',
             borderBottom: '1px solid var(--border-default)',
           }}

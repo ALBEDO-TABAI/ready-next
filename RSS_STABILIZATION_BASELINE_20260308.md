@@ -29,6 +29,7 @@ The RSS stack remains:
    - no selected source => refresh all
 6. RSS preview close no longer leaves a browser layer over the RSS pane.
 7. RSS selected-source refresh state no longer depends on a separate page-local source id that could drift away from the session diagnostics state after remount.
+8. RSS diagnostics now expose the last fetch invocation payload, so a missed `refreshSource` click can be distinguished from a real backend fetch failure.
 
 ## Current platform status
 ### Stable on current stack

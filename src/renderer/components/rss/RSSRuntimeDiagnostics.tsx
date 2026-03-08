@@ -50,6 +50,7 @@ export default function RSSRuntimeDiagnostics({
   const update = status.update
   const chromium = runtime.chromium
   const rsshubRequired = status.rsshubRequired
+  const lastFetchInvocation = diagnostics?.lastFetchInvocation ?? null
 
   const tone = !rsshubRequired
     ? 'muted'
@@ -196,6 +197,31 @@ export default function RSSRuntimeDiagnostics({
           </div>
         </div>
       </div>
+
+      {lastFetchInvocation ? (
+        <div
+          className="rounded-[12px] border px-3 py-2 text-[11px]"
+          style={{
+            borderColor: 'rgba(59,130,246,0.18)',
+            background: 'rgba(239,246,255,0.5)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <div className="mb-1 font-medium" style={{ color: 'var(--text-title)' }}>最后一次刷新调用</div>
+          <div>
+            {lastFetchInvocation.mode === 'refreshSource'
+              ? `单源刷新 · ${lastFetchInvocation.sourceId || '未知源'}`
+              : lastFetchInvocation.mode === 'fetchAll'
+                ? `全量刷新 · ${lastFetchInvocation.sourceIds.length > 0 ? `${lastFetchInvocation.sourceIds.length} 个源` : lastFetchInvocation.group ? `分组 ${lastFetchInvocation.group}` : '全部源'}`
+                : '未记录模式'}
+          </div>
+          <div style={{ color: 'var(--text-light)' }}>
+            {formatWhen(lastFetchInvocation.recordedAt)}
+            {lastFetchInvocation.classification ? ` · 分类 ${lastFetchInvocation.classification}` : ''}
+            {typeof lastFetchInvocation.digest === 'boolean' ? ` · digest ${lastFetchInvocation.digest ? 'on' : 'off'}` : ''}
+          </div>
+        </div>
+      ) : null}
 
       {blockingErrors.length > 0 ? (
         <div

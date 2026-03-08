@@ -2,7 +2,7 @@ import type { DragEvent, MouseEvent, ReactNode } from 'react'
 import { Plus, X } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
 import {
-  WORKBENCH_CONTENT_RAIL_X,
+  WORKBENCH_HEADER_EDGE_X,
   WORKBENCH_TAB_MAX_WIDTH,
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
@@ -55,7 +55,7 @@ export default function WorkbenchProjectTabs({
     >
       <div
         className="flex items-end h-full min-w-0 flex-1 overflow-hidden"
-        style={{ padding: `0 ${WORKBENCH_CONTENT_RAIL_X}px` }}
+        style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X }}
       >
         <MorphTabStrip
           layoutId={layoutId}
@@ -123,25 +123,24 @@ export default function WorkbenchProjectTabs({
         </MorphTabStrip>
 
         {renderAfterTabs}
-
-        {onNewTab ? (
-          <button
-            onClick={() => void onNewTab()}
-            className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-            style={{ width: 26, height: 26, borderRadius: 6, marginLeft: 2, alignSelf: 'center' }}
-            title="新建"
-          >
-            <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
-          </button>
-        ) : null}
       </div>
 
-      {rightActions ? (
+      {rightActions || onNewTab ? (
         <div
           className="flex items-center flex-shrink-0"
-          style={{ paddingLeft: 8, paddingRight: WORKBENCH_CONTENT_RAIL_X }}
+          style={{ gap: 8, paddingLeft: 8, paddingRight: WORKBENCH_HEADER_EDGE_X }}
         >
           {rightActions}
+          {onNewTab ? (
+            <button
+              onClick={() => void onNewTab()}
+              className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
+              style={{ width: 26, height: 26, borderRadius: 6 }}
+              title="新建"
+            >
+              <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

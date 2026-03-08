@@ -3,7 +3,7 @@ import {
   Plus, X, Globe, Loader2, ChevronLeft, ChevronRight, Lock
 } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
-import { WORKBENCH_CONTENT_RAIL_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_MAX_WIDTH, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface Tab {
   id: string
@@ -137,7 +137,7 @@ export default function BrowserTabBar({
     >
       <div
         className="flex items-center flex-1 min-w-0"
-        style={{ padding: `0 ${WORKBENCH_CONTENT_RAIL_X}px`, gap: 0 }}
+        style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X, paddingRight: WORKBENCH_HEADER_EDGE_X, gap: 0 }}
       >
       {/* Scroll left arrow */}
       {showLeftArrow && (
@@ -150,7 +150,7 @@ export default function BrowserTabBar({
         </button>
       )}
 
-      {/* Tabs scroll container — + button is inside, right after the last tab */}
+      {/* Tabs scroll container */}
       <div
         ref={scrollRef}
         className="flex items-end flex-1 overflow-x-hidden"
@@ -258,27 +258,29 @@ export default function BrowserTabBar({
           })}
         </MorphTabStrip>
 
-        {/* New Tab button — adjacent to the last tab */}
+      </div>
+
+      <div className="flex items-center flex-shrink-0" style={{ gap: 2 }}>
         <button
           onClick={onNewTab}
           className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-          style={{ width: 26, height: 26, borderRadius: 6, marginLeft: 2, alignSelf: 'center' }}
+          style={{ width: 26, height: 26, borderRadius: 6 }}
           title="New tab"
         >
           <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
         </button>
-      </div>
 
-      {/* Scroll right arrow */}
-      {showRightArrow && (
-        <button
-          onClick={scrollRight}
-          className="flex items-center justify-center flex-shrink-0 hover:bg-[var(--bg-hover)] transition-colors"
-          style={{ width: 20, height: 26, borderRadius: 4 }}
-        >
-          <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-        </button>
-      )}
+        {/* Scroll right arrow */}
+        {showRightArrow && (
+          <button
+            onClick={scrollRight}
+            className="flex items-center justify-center flex-shrink-0 hover:bg-[var(--bg-hover)] transition-colors"
+            style={{ width: 20, height: 26, borderRadius: 4 }}
+          >
+            <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+          </button>
+        )}
+      </div>
       </div>
     </div>
   )

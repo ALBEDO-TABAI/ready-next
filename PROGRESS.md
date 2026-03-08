@@ -34,6 +34,7 @@
 - Xiaohongshu capture now succeeds again in a real Electron `persist:browser` session when the Ready browser session is logged in.
 - Douyin account-post-area extraction is live-validated in a real Electron `persist:browser` session.
 - RSS selected-source state now uses the session store as a single source of truth instead of diverging between local page state and diagnostics state.
+- RSS diagnostics now surface the last refresh invocation so renderer-side refresh wiring can be verified without tailing logs.
 - shared workbench chrome now keeps the first-row mode strip compact, while the second-row tab rail and third-row toolbar rail are locked back onto the same content boundary instead of drifting by component-local padding.
 
 ## Current known unfinished work

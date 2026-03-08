@@ -145,6 +145,7 @@ interface RSSAnalysisProgressPayload {
 
 const DIGEST_SNAPSHOT_KEY = 'rss:last_digest_snapshot'
 const ROUTE_DIAGNOSTICS_SNAPSHOT_KEY = 'rss:last_route_diagnostics'
+const FETCH_INVOCATION_SNAPSHOT_KEY = 'rss:last_fetch_invocation'
 const rssRepository = new RSSRepository()
 const appSettingsRepository = new AppSettingsRepository()
 let rssBrowserController: BrowserController | null = null
@@ -403,12 +404,44 @@ function persistRouteDiagnosticsSnapshot(): void {
 
 function persistFetchInvocation(payload: Record<string, unknown>): void {
   appSettingsRepository.setSetting(
-    'rss:last_fetch_invocation',
+    FETCH_INVOCATION_SNAPSHOT_KEY,
     JSON.stringify({
       recordedAt: new Date().toISOString(),
       ...payload,
     }),
   )
+}
+
+function loadFetchInvocationSnapshot(): {
+  recordedAt: string | null
+  mode: 'refreshSource' | 'fetchAll' | null
+  sourceId: string | null
+  sourceIds: string[]
+  group: string | null
+  digest: boolean | null
+  classification: 'simple' | 'none' | null
+} | null {
+  const raw = appSettingsRepository.getSetting(FETCH_INVOCATION_SNAPSHOT_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      recordedAt: typeof parsed.recordedAt === 'string' ? parsed.recordedAt : null,
+      mode: parsed.mode === 'refreshSource' || parsed.mode === 'fetchAll' ? parsed.mode : null,
+      sourceId: typeof parsed.sourceId === 'string' ? parsed.sourceId : null,
+      sourceIds: Array.isArray(parsed.sourceIds)
+        ? parsed.sourceIds.filter((value): value is string => typeof value === 'string')
+        : [],
+      group: typeof parsed.group === 'string' ? parsed.group : null,
+      digest: typeof parsed.digest === 'boolean' ? parsed.digest : null,
+      classification:
+        parsed.classification === 'simple' || parsed.classification === 'none'
+          ? parsed.classification
+          : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 function normalizeSourcePlatform(source: DBRSSSource): PlatformType {
@@ -1625,6 +1658,7 @@ export function setupRSSIPC(useMock = false): void {
             },
           },
           update: rssUpdateLock.getStatus(),
+          lastFetchInvocation: loadFetchInvocationSnapshot(),
           artifacts: {
             root: getArtifactsRootDir(),
             hasOpml: false,
@@ -1660,6 +1694,7 @@ export function setupRSSIPC(useMock = false): void {
           rsshub: rsshubStatus,
           rsshubRequired,
           update: rssUpdateLock.getStatus(),
+          lastFetchInvocation: loadFetchInvocationSnapshot(),
           artifacts: {
             root: getArtifactsRootDir(),
             hasOpml,

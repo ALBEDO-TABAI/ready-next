@@ -8,7 +8,7 @@ import {
   Redo2,
   Share2,
 } from 'lucide-react'
-import { WORKBENCH_CONTENT_RAIL_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
 interface EditorToolbarProps {
   title: string
@@ -67,7 +67,7 @@ export default function EditorToolbar({
       style={{
         height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
         flexShrink: 0,
-        padding: `0 ${WORKBENCH_CONTENT_RAIL_X}px`,
+        padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
         background: colors.panelBg,
         borderBottom: `1px solid ${colors.panelBorder}`,
       }}
