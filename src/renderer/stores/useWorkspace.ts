@@ -181,17 +181,24 @@ const loadSkillsSplitRatioFromStorage = (): number => {
 }
 
 const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
-  if (typeof localStorage === 'undefined') return 'files'
+  if (typeof localStorage === 'undefined') {
+    console.log('[SidePanelVariant] localStorage undefined, returning default')
+    return 'files'
+  }
   try {
     const raw = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
+    console.log('[SidePanelVariant] Loaded from storage:', raw)
     if (!raw) return 'files'
     const parsed = raw as WorkspaceSidePanelVariant
     // Validate the variant
     if (['files', 'search', 'skills', 'calendar', 'hidden'].includes(parsed)) {
+      console.log('[SidePanelVariant] Valid variant loaded:', parsed)
       return parsed
     }
+    console.log('[SidePanelVariant] Invalid variant, returning default')
     return 'files'
-  } catch {
+  } catch (err) {
+    console.error('[SidePanelVariant] Error loading from storage:', err)
     return 'files'
   }
 }
@@ -234,9 +241,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
   setSidePanelVariant: (variant) => {
+    console.log('[SidePanelVariant] Setting variant:', variant)
     set({ sidePanelVariant: variant })
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(SIDE_PANEL_VARIANT_KEY, variant)
+      try {
+        localStorage.setItem(SIDE_PANEL_VARIANT_KEY, variant)
+        console.log('[SidePanelVariant] Saved to storage:', variant)
+        // Verify it was saved
+        const saved = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
+        console.log('[SidePanelVariant] Verification read:', saved)
+      } catch (err) {
+        console.error('[SidePanelVariant] Error saving to storage:', err)
+      }
     }
   },
 
