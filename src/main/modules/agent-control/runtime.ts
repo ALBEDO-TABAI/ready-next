@@ -93,7 +93,10 @@ export class AgentControlRuntime extends EventEmitter {
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
-    this.orchestrator = new ClaudeSdkOrchestrator({ browserController })
+    this.orchestrator = new ClaudeSdkOrchestrator({
+      browserController,
+      sidecarManager: this.sidecar,
+    })
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {

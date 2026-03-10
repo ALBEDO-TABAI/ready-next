@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import { DirectChatEngine, type MultimodalBlock } from '../claude-bridge/direct-chat'
 import type { BrowserController } from '../browser-engine/ipc-handler'
+import type { SidecarManager } from './sidecar-manager'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 
@@ -14,13 +15,17 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
   private readonly sessions: AgentSessionManager
   private readonly descriptors = new Map<string, SessionDescriptor>()
 
-  constructor(options?: { browserController?: BrowserController }) {
+  constructor(options?: { browserController?: BrowserController; sidecarManager?: SidecarManager }) {
     super()
     this.engine = new DirectChatEngine()
     this.sessions = new AgentSessionManager()
 
     if (options?.browserController) {
       this.engine.setBrowserController(options.browserController)
+    }
+
+    if (options?.sidecarManager) {
+      this.engine.setSidecarManager(options.sidecarManager)
     }
 
     this.engine.on('output', (payload) => {
@@ -105,6 +110,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
 
   setBrowserController(controller: BrowserController): void {
     this.engine.setBrowserController(controller)
+  }
+
+  setSidecarManager(manager: SidecarManager): void {
+    this.engine.setSidecarManager(manager)
   }
 
   setRendererToolActionRequester(

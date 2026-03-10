@@ -4,6 +4,7 @@
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
+import type { SidecarManager } from '../agent-control/sidecar-manager'
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDesignTool } from './design-tools'
@@ -12,9 +13,11 @@ import { executeRSSTool } from './rss-tools'
 import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeVideoTool } from './video-tools'
+import { executeFeishuTool } from './feishu-tools'
 
 export interface ToolContext {
   browserController?: BrowserController | null
+  sidecarManager?: SidecarManager | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
@@ -62,6 +65,10 @@ export async function executeToolCall(
 
   if (toolName.startsWith('system_')) {
     return executeSystemTool(toolName, args)
+  }
+
+  if (toolName.startsWith('feishu_')) {
+    return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
   }
 
   return `Unknown tool: ${toolName}`

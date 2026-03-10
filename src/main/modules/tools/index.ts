@@ -38,6 +38,11 @@ import {
   getVideoOpenAITools,
   executeVideoTool,
 } from './video-tools'
+import {
+  getFeishuAnthropicTools,
+  getFeishuOpenAITools,
+  executeFeishuTool,
+} from './feishu-tools'
 
 export function getAnthropicTools(): Array<Record<string, unknown>> {
   return [
@@ -49,6 +54,7 @@ export function getAnthropicTools(): Array<Record<string, unknown>> {
     ...getCalendarAnthropicTools(),
     ...getSkillAnthropicTools(),
     ...getSystemAnthropicTools(),
+    ...getFeishuAnthropicTools(),
   ]
 }
 
@@ -62,10 +68,11 @@ export function getOpenAITools(): Array<Record<string, unknown>> {
     ...getCalendarOpenAITools(),
     ...getSkillOpenAITools(),
     ...getSystemOpenAITools(),
+    ...getFeishuOpenAITools(),
   ]
 }
 
-export { executeBrowserTool, executeSkillTool }
+export { executeBrowserTool, executeSkillTool, executeFeishuTool }
 export { executeDocumentTool }
 export { executeDesignTool }
 export { executeVideoTool }

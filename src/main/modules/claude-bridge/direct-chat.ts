@@ -13,6 +13,7 @@ import { join } from 'path'
 import { promisify } from 'util'
 import { AIModelConfig, type AIWireAPI, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
+import type { SidecarManager } from '../agent-control/sidecar-manager'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
 import {
   domainsLikelyMatch,
@@ -816,6 +817,7 @@ function rewriteSectionInDocument(
 export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
   private browserController: BrowserController | null = null
+  private sidecarManager: SidecarManager | null = null
   private rendererToolActionRequester: ((payload: {
     agent?: string
     sessionId?: string
@@ -864,6 +866,11 @@ export class DirectChatEngine extends EventEmitter {
   setBrowserController(controller: BrowserController): void {
     this.browserController = controller
     log('BrowserController set on DirectChatEngine')
+  }
+
+  setSidecarManager(manager: SidecarManager): void {
+    this.sidecarManager = manager
+    log('SidecarManager set on DirectChatEngine')
   }
 
   setRendererToolActionRequester(
@@ -1078,6 +1085,7 @@ export class DirectChatEngine extends EventEmitter {
       params.emitOutput(`${tool.name}(${JSON.stringify(args)})`, 'tool_use')
       const result = await executeToolCall(tool.name, args, {
         browserController: this.browserController,
+        sidecarManager: this.sidecarManager,
         emitToolAction: params.emitToolAction,
         requestModuleToolAction: params.requestModuleToolAction,
         abortSignal: params.abortSignal,
@@ -2522,6 +2530,7 @@ export class DirectChatEngine extends EventEmitter {
       if (hasTools && openclawCommand) {
         const toolContext = {
           browserController: this.browserController,
+          sidecarManager: this.sidecarManager,
           emitToolAction: (tool: string, args: Record<string, unknown>) => {
             emitToolAction(tool, args)
           },
@@ -2615,6 +2624,7 @@ export class DirectChatEngine extends EventEmitter {
           log(`Tool loop iteration ${iterations}`)
           const toolContext = {
             browserController: this.browserController,
+            sidecarManager: this.sidecarManager,
             emitToolAction: (tool: string, args: Record<string, unknown>) => {
               emitToolAction(tool, args)
             },
@@ -4020,6 +4030,7 @@ export class DirectChatEngine extends EventEmitter {
       const targetPath = this.extractDocumentPathFromUserText(userText)
       const toolContext = {
         browserController: this.browserController,
+        sidecarManager: this.sidecarManager,
         emitToolAction: (tool: string, args: Record<string, unknown>) => {
           this.emit('toolAction', { agent: agentName, tool, args })
         },
@@ -4143,6 +4154,7 @@ export class DirectChatEngine extends EventEmitter {
 
       const toolContext = {
         browserController: this.browserController,
+        sidecarManager: this.sidecarManager,
         emitToolAction: (tool: string, args: Record<string, unknown>) => {
           this.emit('toolAction', { agent: agentName, tool, args })
         },

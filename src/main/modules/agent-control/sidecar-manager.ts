@@ -484,4 +484,120 @@ export class SidecarManager {
       })
     })
   }
+
+  // ============================================================
+  // Feishu Plugin Operations
+  // ============================================================
+
+  async feishuDocRead(docToken: string, docType: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/doc/read', {
+      method: 'POST',
+      body: JSON.stringify({ doc_token: docToken, doc_type: docType }),
+    })
+  }
+
+  async feishuDocCreate(title: string, docType: string, content: unknown, folderToken?: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/doc/create', {
+      method: 'POST',
+      body: JSON.stringify({ title, doc_type: docType, content, folder_token: folderToken }),
+    })
+  }
+
+  async feishuDocUpdate(docToken: string, docType: string, updates: unknown): Promise<Record<string, unknown>> {
+    return this.request('/feishu/doc/update', {
+      method: 'POST',
+      body: JSON.stringify({ doc_token: docToken, doc_type: docType, updates }),
+    })
+  }
+
+  async feishuDocList(folderToken?: string, docType?: string, limit?: number): Promise<Record<string, unknown>> {
+    return this.request('/feishu/doc/list', {
+      method: 'POST',
+      body: JSON.stringify({ folder_token: folderToken, doc_type: docType, limit }),
+    })
+  }
+
+  async feishuMessageSend(chatId: string, content: unknown, msgType: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/message/send', {
+      method: 'POST',
+      body: JSON.stringify({ chat_id: chatId, content, msg_type: msgType }),
+    })
+  }
+
+  async feishuMessageGetContext(chatId: string, limit?: number, startTime?: string, endTime?: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/message/context', {
+      method: 'POST',
+      body: JSON.stringify({ chat_id: chatId, limit, start_time: startTime, end_time: endTime }),
+    })
+  }
+
+  async feishuMessageReply(messageId: string, content: unknown, msgType: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/message/reply', {
+      method: 'POST',
+      body: JSON.stringify({ message_id: messageId, content, msg_type: msgType }),
+    })
+  }
+
+  async feishuCalendarListEvents(calendarId: string, startTime: string, endTime: string, limit?: number): Promise<Record<string, unknown>> {
+    return this.request('/feishu/calendar/events', {
+      method: 'POST',
+      body: JSON.stringify({ calendar_id: calendarId, start_time: startTime, end_time: endTime, limit }),
+    })
+  }
+
+  async feishuCalendarCreateEvent(event: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/feishu/calendar/event/create', {
+      method: 'POST',
+      body: JSON.stringify(event),
+    })
+  }
+
+  async feishuCalendarUpdateEvent(eventId: string, calendarId: string | undefined, updates: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/feishu/calendar/event/update', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: eventId, calendar_id: calendarId, updates }),
+    })
+  }
+
+  async feishuCalendarDeleteEvent(eventId: string, calendarId?: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/calendar/event/delete', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: eventId, calendar_id: calendarId }),
+    })
+  }
+
+  async feishuChatList(limit?: number): Promise<Record<string, unknown>> {
+    return this.request('/feishu/chat/list', {
+      method: 'POST',
+      body: JSON.stringify({ limit }),
+    })
+  }
+
+  async feishuChatGetMembers(chatId: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/chat/members', {
+      method: 'POST',
+      body: JSON.stringify({ chat_id: chatId }),
+    })
+  }
+
+  async feishuChatGetInfo(chatId: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/chat/info', {
+      method: 'POST',
+      body: JSON.stringify({ chat_id: chatId }),
+    })
+  }
+
+  async feishuFileUpload(filePath: string, fileType: string, parentToken?: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/file/upload', {
+      method: 'POST',
+      body: JSON.stringify({ file_path: filePath, file_type: fileType, parent_token: parentToken }),
+    })
+  }
+
+  async feishuFileDownload(fileToken: string, savePath: string): Promise<Record<string, unknown>> {
+    return this.request('/feishu/file/download', {
+      method: 'POST',
+      body: JSON.stringify({ file_token: fileToken, save_path: savePath }),
+    })
+  }
 }
