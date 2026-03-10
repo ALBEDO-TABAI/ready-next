@@ -160,7 +160,7 @@ export default function BrowserTabBar({
         className="flex items-end flex-1 overflow-x-hidden"
         style={{ gap: 1, minWidth: 0 }}
       >
-        <MorphTabStrip layoutId="browser-tabs" className="flex min-w-0 flex-1 items-end gap-[1px]">
+        <MorphTabStrip layoutId="browser-tabs" className="flex min-w-0 items-end gap-[1px]">
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
@@ -284,7 +284,7 @@ export default function BrowserTabBar({
         <button
           onClick={onNewTab}
           className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-          style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 6 }}
+          style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 4 }}
           title="New tab"
         >
           <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />

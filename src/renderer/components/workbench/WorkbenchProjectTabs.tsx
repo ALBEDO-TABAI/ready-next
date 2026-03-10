@@ -50,7 +50,7 @@ export default function WorkbenchProjectTabs({
     <button
       onClick={() => void onNewTab()}
       className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-      style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 6 }}
+      style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 4 }}
       title="新建"
     >
       <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
@@ -67,12 +67,12 @@ export default function WorkbenchProjectTabs({
       }}
     >
       <div
-        className="flex items-end h-full min-w-0 flex-1 overflow-hidden"
+        className="flex items-end h-full min-w-0 overflow-hidden"
         style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X }}
       >
         <MorphTabStrip
           layoutId={layoutId}
-          className="flex min-w-0 flex-1 items-end h-full overflow-hidden gap-[1px]"
+          className="flex min-w-0 items-end h-full overflow-hidden gap-[1px]"
         >
           {tabs.map((tab, index) => {
             const isActive = Boolean(tab.active)
