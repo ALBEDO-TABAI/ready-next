@@ -129,6 +129,7 @@ const resolveCreationBaseDir = (state: Pick<
 
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
 const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
+const SIDE_PANEL_VARIANT_KEY = 'ready-side-panel-variant-v1'
 const DEFAULT_SIDE_PANEL_WIDTH = 220
 const MIN_SIDE_PANEL_WIDTH = 220
 const MAX_SIDE_PANEL_WIDTH = 420
@@ -174,6 +175,22 @@ const loadSkillsSplitRatioFromStorage = (): number => {
   return clampSkillsSplitRatio(parsed)
 }
 
+const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
+  if (typeof localStorage === 'undefined') return 'files'
+  try {
+    const raw = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
+    if (!raw) return 'files'
+    const parsed = raw as WorkspaceSidePanelVariant
+    // Validate the variant
+    if (['files', 'search', 'skills', 'calendar', 'hidden'].includes(parsed)) {
+      return parsed
+    }
+    return 'files'
+  } catch {
+    return 'files'
+  }
+}
+
 const remapPathAfterMove = (value: string | null, src: string, dest: string): string | null => {
   if (!value) return value
   if (value === src) return dest
@@ -191,7 +208,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: JSON.parse(localStorage.getItem('ready-pinned-folders') || '[]') as string[],
   sidebarVisible: true,
-  sidePanelVariant: 'files',
+  sidePanelVariant: loadSidePanelVariantFromStorage(),
   sidePanelWidths: loadSidePanelWidthsFromStorage(),
   skillsSplitRatio: loadSkillsSplitRatioFromStorage(),
   chatPanelVisible: true,
@@ -211,7 +228,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
-  setSidePanelVariant: (variant) => set({ sidePanelVariant: variant }),
+  setSidePanelVariant: (variant) => {
+    set({ sidePanelVariant: variant })
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SIDE_PANEL_VARIANT_KEY, variant)
+    }
+  },
 
   setSidePanelWidth: (variant, width) => {
     const clamped = clampSidePanelWidth(width)
