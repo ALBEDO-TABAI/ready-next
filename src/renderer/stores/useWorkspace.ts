@@ -671,3 +671,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   },
   cancelCreating: () => set({ creatingType: null, creatingPath: null })
 }})
+
+// 订阅 sidePanelVariant 变化，自动保存到 localStorage
+// 这样即使有其他地方直接修改了状态，也能被捕获
+if (typeof window !== 'undefined') {
+  let previousVariant = useWorkspace.getState().sidePanelVariant
+  useWorkspace.subscribe((state) => {
+    if (state.sidePanelVariant !== previousVariant) {
+      console.log('[SidePanelVariant] Detected variant change via subscription:', previousVariant, '->', state.sidePanelVariant)
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(SIDE_PANEL_VARIANT_KEY, state.sidePanelVariant)
+          console.log('[SidePanelVariant] Auto-saved to storage via subscription:', state.sidePanelVariant)
+        } catch (err) {
+          console.error('[SidePanelVariant] Auto-save via subscription failed:', err)
+        }
+      }
+      previousVariant = state.sidePanelVariant
+    }
+  })
+}

@@ -63,19 +63,19 @@ export function useBrowserViewBounds({
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const isManualResizing = document.body.classList.contains('resizing')
     const isLayoutTransitionActive = now < layoutTransitionUntilRef.current
-    const shouldSoftenResize = !options?.forceExact && (isManualResizing || isLayoutTransitionActive)
-    const widthStep = isManualResizing ? 32 : 36
-    const minSendInterval = isManualResizing ? 40 : 42
-    const width = shouldSoftenResize
-      ? Math.max(1, Math.floor(exactWidth / widthStep) * widthStep || exactWidth)
-      : exactWidth
 
+    // 拖拽时使用精确宽度，避免露底
+    const width = exactWidth
+
+    // 拖拽时限制更新频率，避免过于频繁
+    const minSendInterval = isManualResizing ? 16 : 42
     const last = lastSentBoundsRef.current
-    if (shouldSoftenResize && last) {
+    if (isManualResizing && last && !options?.forceExact) {
       const widthDelta = Math.abs(width - last.width)
       const xDelta = Math.abs(x - last.x)
       const elapsed = now - lastBoundsSentAtRef.current
-      if (elapsed < minSendInterval && widthDelta < widthStep && xDelta < 10) {
+      // 只在变化足够大或时间足够长时才更新
+      if (elapsed < minSendInterval && widthDelta < 4 && xDelta < 4) {
         return
       }
     }
