@@ -15,6 +15,7 @@ import uvicorn
 
 from ready_sidecar.channels import ChannelConfigModel, ChannelManager
 from ready_sidecar.channels.feishu_app_adapter import FeishuAppAdapter
+from ready_sidecar.channels.feishu_plugin_ops import FeishuPluginOperations
 
 
 def now_iso() -> str:
@@ -320,6 +321,264 @@ async def feishu_callback(channel_id: str, request: Request) -> Response:
     for key, value in headers.items():
         response.headers[key] = value
     return response
+
+
+# ============================================================
+# Feishu Plugin Operations Endpoints
+# ============================================================
+
+
+def _get_feishu_plugin_ops(channel_id: str) -> Optional[FeishuPluginOperations]:
+    """Get Feishu plugin operations instance for a channel"""
+    channel = state.channels.get(channel_id)
+    if not channel or channel.type != "feishu-app":
+        return None
+
+    app_id = str(channel.config.get("appId") or "").strip()
+    app_secret = str(channel.config.get("appSecret") or "").strip()
+    domain = str(channel.config.get("domain") or "https://open.feishu.cn").rstrip("/")
+
+    if not app_id or not app_secret:
+        return None
+
+    return FeishuPluginOperations(app_id, app_secret, domain)
+
+
+class FeishuDocReadPayload(BaseModel):
+    channel_id: str
+    doc_token: str
+    doc_type: str
+
+
+class FeishuDocCreatePayload(BaseModel):
+    channel_id: str
+    title: str
+    doc_type: str
+    content: Optional[Dict[str, Any]] = None
+    folder_token: Optional[str] = None
+
+
+class FeishuDocUpdatePayload(BaseModel):
+    channel_id: str
+    doc_token: str
+    doc_type: str
+    updates: Dict[str, Any]
+
+
+class FeishuDocListPayload(BaseModel):
+    channel_id: str
+    folder_token: Optional[str] = None
+    doc_type: Optional[str] = None
+    limit: int = 50
+
+
+class FeishuMessageSendPayload(BaseModel):
+    channel_id: str
+    chat_id: str
+    content: Dict[str, Any]
+    msg_type: str
+
+
+class FeishuMessageContextPayload(BaseModel):
+    channel_id: str
+    chat_id: str
+    limit: int = 50
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+
+
+class FeishuMessageReplyPayload(BaseModel):
+    channel_id: str
+    message_id: str
+    content: Dict[str, Any]
+    msg_type: str
+
+
+class FeishuCalendarListEventsPayload(BaseModel):
+    channel_id: str
+    calendar_id: str
+    start_time: str
+    end_time: str
+    limit: int = 50
+
+
+class FeishuCalendarCreateEventPayload(BaseModel):
+    channel_id: str
+    event: Dict[str, Any]
+
+
+class FeishuCalendarUpdateEventPayload(BaseModel):
+    channel_id: str
+    event_id: str
+    calendar_id: Optional[str] = None
+    updates: Dict[str, Any]
+
+
+class FeishuCalendarDeleteEventPayload(BaseModel):
+    channel_id: str
+    event_id: str
+    calendar_id: Optional[str] = None
+
+
+class FeishuChatListPayload(BaseModel):
+    channel_id: str
+    limit: int = 50
+
+
+class FeishuChatGetMembersPayload(BaseModel):
+    channel_id: str
+    chat_id: str
+
+
+class FeishuChatGetInfoPayload(BaseModel):
+    channel_id: str
+    chat_id: str
+
+
+class FeishuFileUploadPayload(BaseModel):
+    channel_id: str
+    file_path: str
+    file_type: str
+    parent_token: Optional[str] = None
+
+
+class FeishuFileDownloadPayload(BaseModel):
+    channel_id: str
+    file_token: str
+    save_path: str
+
+
+# Document operations
+@app.post("/feishu/doc/read")
+async def feishu_doc_read(payload: FeishuDocReadPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.read_document(payload.doc_token, payload.doc_type)
+
+
+@app.post("/feishu/doc/create")
+async def feishu_doc_create(payload: FeishuDocCreatePayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.create_document(payload.title, payload.doc_type, payload.content, payload.folder_token)
+
+
+@app.post("/feishu/doc/update")
+async def feishu_doc_update(payload: FeishuDocUpdatePayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.update_document(payload.doc_token, payload.doc_type, payload.updates)
+
+
+@app.post("/feishu/doc/list")
+async def feishu_doc_list(payload: FeishuDocListPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.list_documents(payload.folder_token, payload.doc_type, payload.limit)
+
+
+# Message operations
+@app.post("/feishu/message/send")
+async def feishu_message_send(payload: FeishuMessageSendPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.send_message(payload.chat_id, payload.content, payload.msg_type)
+
+
+@app.post("/feishu/message/context")
+async def feishu_message_context(payload: FeishuMessageContextPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.get_message_context(payload.chat_id, payload.limit, payload.start_time, payload.end_time)
+
+
+@app.post("/feishu/message/reply")
+async def feishu_message_reply(payload: FeishuMessageReplyPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.reply_message(payload.message_id, payload.content, payload.msg_type)
+
+
+# Calendar operations
+@app.post("/feishu/calendar/events")
+async def feishu_calendar_events(payload: FeishuCalendarListEventsPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.list_calendar_events(payload.calendar_id, payload.start_time, payload.end_time, payload.limit)
+
+
+@app.post("/feishu/calendar/event/create")
+async def feishu_calendar_event_create(payload: FeishuCalendarCreateEventPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.create_calendar_event(payload.event)
+
+
+@app.post("/feishu/calendar/event/update")
+async def feishu_calendar_event_update(payload: FeishuCalendarUpdateEventPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.update_calendar_event(payload.event_id, payload.calendar_id, payload.updates)
+
+
+@app.post("/feishu/calendar/event/delete")
+async def feishu_calendar_event_delete(payload: FeishuCalendarDeleteEventPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.delete_calendar_event(payload.event_id, payload.calendar_id)
+
+
+# Chat operations
+@app.post("/feishu/chat/list")
+async def feishu_chat_list(payload: FeishuChatListPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.list_chats(payload.limit)
+
+
+@app.post("/feishu/chat/members")
+async def feishu_chat_members(payload: FeishuChatGetMembersPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.get_chat_members(payload.chat_id)
+
+
+@app.post("/feishu/chat/info")
+async def feishu_chat_info(payload: FeishuChatGetInfoPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.get_chat_info(payload.chat_id)
+
+
+# File operations
+@app.post("/feishu/file/upload")
+async def feishu_file_upload(payload: FeishuFileUploadPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.file_upload(payload.file_path, payload.file_type, payload.parent_token)
+
+
+@app.post("/feishu/file/download")
+async def feishu_file_download(payload: FeishuFileDownloadPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    ops = _get_feishu_plugin_ops(payload.channel_id)
+    if not ops:
+        return {"success": False, "error": "Feishu channel not found or not configured"}
+    return await ops.file_download(payload.file_token, payload.save_path)
 
 
 if __name__ == "__main__":

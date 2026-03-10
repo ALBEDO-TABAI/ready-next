@@ -16,23 +16,24 @@ interface FeishuToolDef {
 
 interface FeishuToolContext {
   sidecarManager?: {
-    feishuDocRead: (docToken: string, docType: string) => Promise<Record<string, unknown>>
-    feishuDocCreate: (title: string, docType: string, content: unknown, folderToken?: string) => Promise<Record<string, unknown>>
-    feishuDocUpdate: (docToken: string, docType: string, updates: unknown) => Promise<Record<string, unknown>>
-    feishuDocList: (folderToken?: string, docType?: string, limit?: number) => Promise<Record<string, unknown>>
-    feishuMessageSend: (chatId: string, content: unknown, msgType: string) => Promise<Record<string, unknown>>
-    feishuMessageGetContext: (chatId: string, limit?: number, startTime?: string, endTime?: string) => Promise<Record<string, unknown>>
-    feishuMessageReply: (messageId: string, content: unknown, msgType: string) => Promise<Record<string, unknown>>
-    feishuCalendarListEvents: (calendarId: string, startTime: string, endTime: string, limit?: number) => Promise<Record<string, unknown>>
-    feishuCalendarCreateEvent: (event: Record<string, unknown>) => Promise<Record<string, unknown>>
-    feishuCalendarUpdateEvent: (eventId: string, calendarId: string | undefined, updates: Record<string, unknown>) => Promise<Record<string, unknown>>
-    feishuCalendarDeleteEvent: (eventId: string, calendarId?: string) => Promise<Record<string, unknown>>
-    feishuChatList: (limit?: number) => Promise<Record<string, unknown>>
-    feishuChatGetMembers: (chatId: string) => Promise<Record<string, unknown>>
-    feishuChatGetInfo: (chatId: string) => Promise<Record<string, unknown>>
-    feishuFileUpload: (filePath: string, fileType: string, parentToken?: string) => Promise<Record<string, unknown>>
-    feishuFileDownload: (fileToken: string, savePath: string) => Promise<Record<string, unknown>>
+    feishuDocRead: (channelId: string, docToken: string, docType: string) => Promise<Record<string, unknown>>
+    feishuDocCreate: (channelId: string, title: string, docType: string, content: unknown, folderToken?: string) => Promise<Record<string, unknown>>
+    feishuDocUpdate: (channelId: string, docToken: string, docType: string, updates: unknown) => Promise<Record<string, unknown>>
+    feishuDocList: (channelId: string, folderToken?: string, docType?: string, limit?: number) => Promise<Record<string, unknown>>
+    feishuMessageSend: (channelId: string, chatId: string, content: unknown, msgType: string) => Promise<Record<string, unknown>>
+    feishuMessageGetContext: (channelId: string, chatId: string, limit?: number, startTime?: string, endTime?: string) => Promise<Record<string, unknown>>
+    feishuMessageReply: (channelId: string, messageId: string, content: unknown, msgType: string) => Promise<Record<string, unknown>>
+    feishuCalendarListEvents: (channelId: string, calendarId: string, startTime: string, endTime: string, limit?: number) => Promise<Record<string, unknown>>
+    feishuCalendarCreateEvent: (channelId: string, event: Record<string, unknown>) => Promise<Record<string, unknown>>
+    feishuCalendarUpdateEvent: (channelId: string, eventId: string, calendarId: string | undefined, updates: Record<string, unknown>) => Promise<Record<string, unknown>>
+    feishuCalendarDeleteEvent: (channelId: string, eventId: string, calendarId?: string) => Promise<Record<string, unknown>>
+    feishuChatList: (channelId: string, limit?: number) => Promise<Record<string, unknown>>
+    feishuChatGetMembers: (channelId: string, chatId: string) => Promise<Record<string, unknown>>
+    feishuChatGetInfo: (channelId: string, chatId: string) => Promise<Record<string, unknown>>
+    feishuFileUpload: (channelId: string, filePath: string, fileType: string, parentToken?: string) => Promise<Record<string, unknown>>
+    feishuFileDownload: (channelId: string, fileToken: string, savePath: string) => Promise<Record<string, unknown>>
   } | null
+  channelId?: string
 }
 
 /**
@@ -57,6 +58,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'read_feishu_document',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'doc_token', type: 'string', description: '文档 token，从文档 URL 中提取', required: true },
       { name: 'doc_type', type: 'string', description: '文档类型：doc(旧版文档), docx(新版文档), sheet(电子表格), bitable(多维表格)', required: true },
     ],
@@ -68,6 +70,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'create_feishu_document',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'title', type: 'string', description: '文档标题', required: true },
       { name: 'doc_type', type: 'string', description: '文档类型', required: true },
       { name: 'content', type: 'object', description: '文档内容，格式根据文档类型而定', required: false },
@@ -81,6 +84,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'update_feishu_document',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'doc_token', type: 'string', description: '文档 token', required: true },
       { name: 'doc_type', type: 'string', description: '文档类型', required: true },
       { name: 'updates', type: 'object', description: '更新内容，格式根据文档类型而定', required: true },
@@ -93,6 +97,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'list_feishu_documents',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'folder_token', type: 'string', description: '可选：文件夹 token，不提供则列出根目录', required: false },
       { name: 'doc_type', type: 'string', description: '可选：筛选文档类型，默认 all', required: false },
       { name: 'limit', type: 'number', description: '可选：返回数量限制，默认 50', required: false },
@@ -109,6 +114,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'send_feishu_message',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'chat_id', type: 'string', description: '群聊 ID 或用户 open_id', required: true },
       { name: 'content', type: 'object', description: '消息内容，支持文本、富文本、卡片等格式', required: true },
       { name: 'msg_type', type: 'string', description: '消息类型', required: true },
@@ -121,6 +127,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'get_feishu_message_context',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
       { name: 'limit', type: 'number', description: '可选：获取消息数量，默认 50', required: false },
       { name: 'start_time', type: 'string', description: '可选：起始时间戳（秒）', required: false },
@@ -134,6 +141,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'reply_feishu_message',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'message_id', type: 'string', description: '要回复的消息 ID', required: true },
       { name: 'content', type: 'object', description: '回复内容', required: true },
       { name: 'msg_type', type: 'string', description: '消息类型', required: true },
@@ -150,6 +158,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'list_feishu_calendar_events',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'calendar_id', type: 'string', description: '日历 ID，不提供则使用主日历', required: false },
       { name: 'start_time', type: 'string', description: '起始时间（ISO 8601 格式）', required: true },
       { name: 'end_time', type: 'string', description: '结束时间（ISO 8601 格式）', required: true },
@@ -163,6 +172,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'create_feishu_calendar_event',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'calendar_id', type: 'string', description: '可选：日历 ID，不提供则使用主日历', required: false },
       { name: 'summary', type: 'string', description: '事件标题', required: true },
       { name: 'description', type: 'string', description: '可选：事件描述', required: false },
@@ -179,6 +189,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'update_feishu_calendar_event',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'event_id', type: 'string', description: '事件 ID', required: true },
       { name: 'calendar_id', type: 'string', description: '可选：日历 ID', required: false },
       { name: 'updates', type: 'object', description: '更新内容（summary, description, start_time, end_time, location, attendees）', required: true },
@@ -191,6 +202,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'delete_feishu_calendar_event',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'event_id', type: 'string', description: '事件 ID', required: true },
       { name: 'calendar_id', type: 'string', description: '可选：日历 ID', required: false },
     ],
@@ -206,6 +218,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'list_feishu_chats',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'limit', type: 'number', description: '可选：返回数量限制，默认 50', required: false },
     ],
   },
@@ -216,6 +229,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'get_feishu_chat_members',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
     ],
   },
@@ -226,6 +240,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'get_feishu_chat_info',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
     ],
   },
@@ -240,6 +255,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'upload_feishu_file',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'file_path', type: 'string', description: '本地文件路径', required: true },
       { name: 'file_type', type: 'string', description: '文件类型', required: true },
       { name: 'parent_token', type: 'string', description: '可选：父文件夹 token', required: false },
@@ -252,6 +268,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     intent: 'download_feishu_file',
     executionKind: 'deterministic',
     params: [
+      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
       { name: 'file_token', type: 'string', description: '文件 token', required: true },
       { name: 'save_path', type: 'string', description: '保存路径', required: true },
     ],
@@ -317,6 +334,11 @@ export async function executeFeishuTool(
     return toStructuredResult(tool, 'Feishu sidecar manager not available')
   }
 
+  const channelId = String(args.channel_id || context.channelId || '')
+  if (!channelId) {
+    return toStructuredResult(tool, 'Feishu channel_id is required')
+  }
+
   try {
     let result: Record<string, unknown>
 
@@ -324,6 +346,7 @@ export async function executeFeishuTool(
       // Document operations
       case 'feishu.docRead':
         result = await context.sidecarManager.feishuDocRead(
+          channelId,
           String(args.doc_token),
           String(args.doc_type)
         )
@@ -331,6 +354,7 @@ export async function executeFeishuTool(
 
       case 'feishu.docCreate':
         result = await context.sidecarManager.feishuDocCreate(
+          channelId,
           String(args.title),
           String(args.doc_type),
           args.content,
@@ -340,6 +364,7 @@ export async function executeFeishuTool(
 
       case 'feishu.docUpdate':
         result = await context.sidecarManager.feishuDocUpdate(
+          channelId,
           String(args.doc_token),
           String(args.doc_type),
           args.updates
@@ -348,6 +373,7 @@ export async function executeFeishuTool(
 
       case 'feishu.docList':
         result = await context.sidecarManager.feishuDocList(
+          channelId,
           args.folder_token ? String(args.folder_token) : undefined,
           args.doc_type ? String(args.doc_type) : undefined,
           args.limit ? Number(args.limit) : undefined
@@ -357,6 +383,7 @@ export async function executeFeishuTool(
       // Message operations
       case 'feishu.messageSend':
         result = await context.sidecarManager.feishuMessageSend(
+          channelId,
           String(args.chat_id),
           args.content,
           String(args.msg_type)
@@ -365,6 +392,7 @@ export async function executeFeishuTool(
 
       case 'feishu.messageGetContext':
         result = await context.sidecarManager.feishuMessageGetContext(
+          channelId,
           String(args.chat_id),
           args.limit ? Number(args.limit) : undefined,
           args.start_time ? String(args.start_time) : undefined,
@@ -374,6 +402,7 @@ export async function executeFeishuTool(
 
       case 'feishu.messageReply':
         result = await context.sidecarManager.feishuMessageReply(
+          channelId,
           String(args.message_id),
           args.content,
           String(args.msg_type)
@@ -383,6 +412,7 @@ export async function executeFeishuTool(
       // Calendar operations
       case 'feishu.calendarListEvents':
         result = await context.sidecarManager.feishuCalendarListEvents(
+          channelId,
           args.calendar_id ? String(args.calendar_id) : '',
           String(args.start_time),
           String(args.end_time),
@@ -391,11 +421,15 @@ export async function executeFeishuTool(
         break
 
       case 'feishu.calendarCreateEvent':
-        result = await context.sidecarManager.feishuCalendarCreateEvent(args as Record<string, unknown>)
+        result = await context.sidecarManager.feishuCalendarCreateEvent(
+          channelId,
+          args as Record<string, unknown>
+        )
         break
 
       case 'feishu.calendarUpdateEvent':
         result = await context.sidecarManager.feishuCalendarUpdateEvent(
+          channelId,
           String(args.event_id),
           args.calendar_id ? String(args.calendar_id) : undefined,
           args.updates as Record<string, unknown>
@@ -404,6 +438,7 @@ export async function executeFeishuTool(
 
       case 'feishu.calendarDeleteEvent':
         result = await context.sidecarManager.feishuCalendarDeleteEvent(
+          channelId,
           String(args.event_id),
           args.calendar_id ? String(args.calendar_id) : undefined
         )
@@ -412,21 +447,29 @@ export async function executeFeishuTool(
       // Chat operations
       case 'feishu.chatList':
         result = await context.sidecarManager.feishuChatList(
+          channelId,
           args.limit ? Number(args.limit) : undefined
         )
         break
 
       case 'feishu.chatGetMembers':
-        result = await context.sidecarManager.feishuChatGetMembers(String(args.chat_id))
+        result = await context.sidecarManager.feishuChatGetMembers(
+          channelId,
+          String(args.chat_id)
+        )
         break
 
       case 'feishu.chatGetInfo':
-        result = await context.sidecarManager.feishuChatGetInfo(String(args.chat_id))
+        result = await context.sidecarManager.feishuChatGetInfo(
+          channelId,
+          String(args.chat_id)
+        )
         break
 
       // File operations
       case 'feishu.fileUpload':
         result = await context.sidecarManager.feishuFileUpload(
+          channelId,
           String(args.file_path),
           String(args.file_type),
           args.parent_token ? String(args.parent_token) : undefined
@@ -435,6 +478,7 @@ export async function executeFeishuTool(
 
       case 'feishu.fileDownload':
         result = await context.sidecarManager.feishuFileDownload(
+          channelId,
           String(args.file_token),
           String(args.save_path)
         )
