@@ -64,8 +64,8 @@ export function useBrowserViewBounds({
     const isManualResizing = document.body.classList.contains('resizing')
     const isLayoutTransitionActive = now < layoutTransitionUntilRef.current
     const shouldSoftenResize = !options?.forceExact && (isManualResizing || isLayoutTransitionActive)
-    const widthStep = isManualResizing ? 24 : 36
-    const minSendInterval = isManualResizing ? 28 : 42
+    const widthStep = isManualResizing ? 32 : 36
+    const minSendInterval = isManualResizing ? 40 : 42
     const width = shouldSoftenResize
       ? Math.max(1, Math.floor(exactWidth / widthStep) * widthStep || exactWidth)
       : exactWidth

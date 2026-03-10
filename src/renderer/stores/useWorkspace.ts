@@ -211,7 +211,11 @@ const remapPathAfterMove = (value: string | null, src: string, dest: string): st
   return value
 }
 
-export const useWorkspace = create<WorkspaceState>((set, get) => ({
+export const useWorkspace = create<WorkspaceState>((set, get) => {
+  const initialVariant = loadSidePanelVariantFromStorage()
+  console.log('[SidePanelVariant] Store initialized with variant:', initialVariant)
+
+  return {
   workspaceRoot: null,
   currentPath: '/',
   files: [],
@@ -220,7 +224,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: JSON.parse(localStorage.getItem('ready-pinned-folders') || '[]') as string[],
   sidebarVisible: true,
-  sidePanelVariant: loadSidePanelVariantFromStorage(),
+  sidePanelVariant: initialVariant,
   sidePanelWidths: loadSidePanelWidthsFromStorage(),
   skillsSplitRatio: loadSkillsSplitRatioFromStorage(),
   chatPanelVisible: true,
@@ -242,18 +246,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   setSidePanelVariant: (variant) => {
     console.log('[SidePanelVariant] Setting variant:', variant)
-    set({ sidePanelVariant: variant })
+
+    // 先保存到 localStorage，确保持久化
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem(SIDE_PANEL_VARIANT_KEY, variant)
         console.log('[SidePanelVariant] Saved to storage:', variant)
-        // Verify it was saved
+        // 立即验证写入是否成功
         const saved = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
         console.log('[SidePanelVariant] Verification read:', saved)
+        if (saved !== variant) {
+          console.error('[SidePanelVariant] Verification failed! Expected:', variant, 'Got:', saved)
+        }
       } catch (err) {
         console.error('[SidePanelVariant] Error saving to storage:', err)
       }
     }
+
+    // 然后更新 store 状态
+    set({ sidePanelVariant: variant })
   },
 
   setSidePanelWidth: (variant, width) => {
@@ -659,4 +670,4 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ creatingType: type, creatingPath: targetDir })
   },
   cancelCreating: () => set({ creatingType: null, creatingPath: null })
-}))
+}})
