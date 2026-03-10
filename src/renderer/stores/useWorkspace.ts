@@ -12,9 +12,8 @@ export type SidePanelWidthKey = 'files' | 'search' | 'skills'
 export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'calendar' | 'hidden'
 
 interface SidePanelWidths {
-  files: number
-  search: number
-  skills: number
+  // 三个面板共享一个宽度，避免切换时跳跃
+  shared: number
 }
 
 interface WorkspaceState {
@@ -149,19 +148,25 @@ const clampSkillsSplitRatio = (ratio: number): number => {
 
 const loadSidePanelWidthsFromStorage = (): SidePanelWidths => {
   const fallback: SidePanelWidths = {
-    files: DEFAULT_SIDE_PANEL_WIDTH,
-    search: DEFAULT_SIDE_PANEL_WIDTH,
-    skills: DEFAULT_SIDE_PANEL_WIDTH,
+    shared: DEFAULT_SIDE_PANEL_WIDTH,
   }
   if (typeof localStorage === 'undefined') return fallback
   try {
     const raw = localStorage.getItem(SIDE_PANEL_WIDTHS_KEY)
     if (!raw) return fallback
-    const parsed = JSON.parse(raw) as Partial<SidePanelWidths>
+    const parsed = JSON.parse(raw) as Partial<SidePanelWidths> | { files?: number; search?: number; skills?: number }
+
+    // 向后兼容：如果是旧格式，取第一个有效值
+    if ('files' in parsed || 'search' in parsed || 'skills' in parsed) {
+      const oldParsed = parsed as { files?: number; search?: number; skills?: number }
+      const width = oldParsed.files ?? oldParsed.search ?? oldParsed.skills ?? fallback.shared
+      return { shared: clampSidePanelWidth(width) }
+    }
+
+    // 新格式
+    const newParsed = parsed as Partial<SidePanelWidths>
     return {
-      files: clampSidePanelWidth(parsed.files ?? fallback.files),
-      search: clampSidePanelWidth(parsed.search ?? fallback.search),
-      skills: clampSidePanelWidth(parsed.skills ?? fallback.skills),
+      shared: clampSidePanelWidth(newParsed.shared ?? fallback.shared),
     }
   } catch {
     return fallback
@@ -239,8 +244,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const clamped = clampSidePanelWidth(width)
     set((state) => {
       const next: SidePanelWidths = {
-        ...state.sidePanelWidths,
-        [variant]: clamped,
+        shared: clamped,
       }
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(SIDE_PANEL_WIDTHS_KEY, JSON.stringify(next))

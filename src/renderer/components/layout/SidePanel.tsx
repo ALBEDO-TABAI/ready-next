@@ -48,11 +48,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   const isVisible = variant !== 'hidden' && sidebarVisible
-  const panelWidth = variant === 'skills'
-    ? sidePanelWidths.skills
-    : variant === 'search'
-      ? sidePanelWidths.search
-      : sidePanelWidths.files
+  const panelWidth = sidePanelWidths.shared
 
   const isConnected = useMemo(() => {
     if (workspaceRoot) return true

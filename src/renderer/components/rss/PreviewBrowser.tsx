@@ -39,11 +39,7 @@ export default function PreviewBrowser({ item, onClose }: PreviewBrowserProps) {
   const skillsSplitRatio = useWorkspace((state) => state.skillsSplitRatio)
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
   const chatPanelWidth = useWorkspace((state) => state.chatPanelWidth)
-  const effectiveSidePanelWidth = useMemo(() => {
-    if (sidePanelVariant === 'skills') return sidePanelWidths.skills
-    if (sidePanelVariant === 'search') return sidePanelWidths.search
-    return sidePanelWidths.files
-  }, [sidePanelVariant, sidePanelWidths.files, sidePanelWidths.search, sidePanelWidths.skills])
+  const effectiveSidePanelWidth = sidePanelWidths.shared
 
   const sendBoundsImmediate = useCallback(() => {
     const container = contentRef.current

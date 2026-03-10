@@ -87,11 +87,7 @@ export default function BrowserMode() {
   const skillsSplitRatio = useWorkspace(s => s.skillsSplitRatio)
   const chatPanelVisible = useWorkspace(s => s.chatPanelVisible)
   const chatPanelWidth = useWorkspace(s => s.chatPanelWidth)
-  const effectiveSidePanelWidth = useMemo(() => {
-    if (sidePanelVariant === 'skills') return sidePanelWidths.skills
-    if (sidePanelVariant === 'search') return sidePanelWidths.search
-    return sidePanelWidths.files
-  }, [sidePanelVariant, sidePanelWidths.files, sidePanelWidths.search, sidePanelWidths.skills])
+  const effectiveSidePanelWidth = sidePanelWidths.shared
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const currentDomain = activeTab?.domain || extractDomain(activeTab?.url || '')
   const currentDomainAdblockWhitelisted = useMemo(() => {

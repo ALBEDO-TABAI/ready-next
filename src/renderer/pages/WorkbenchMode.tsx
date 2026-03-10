@@ -135,9 +135,8 @@ export default function WorkbenchMode() {
 
   const handleSidebarResize = useCallback((delta: number) => {
     if (!['files', 'search', 'skills'].includes(sidePanelVariant)) return
-    const key = sidePanelVariant as 'files' | 'search' | 'skills'
-    const current = sidePanelWidths[key]
-    setSidePanelWidth(key, current + delta)
+    const current = sidePanelWidths.shared
+    setSidePanelWidth(sidePanelVariant as 'files' | 'search' | 'skills', current + delta)
   }, [setSidePanelWidth, sidePanelVariant, sidePanelWidths])
 
   const handleChatResize = useCallback((delta: number) => {
