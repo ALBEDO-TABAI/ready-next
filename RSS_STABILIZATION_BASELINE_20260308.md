@@ -1,38 +1,42 @@
 # RSS Stabilization Baseline - 2026-03-08
 
-## Current scope and architecture
-The RSS stack remains:
+## 当前架构基线
+RSS 主链仍然保持为：
 1. `native feed / simple scraper`
 2. `lets-go-rss style scraper`
 3. `RSSHub`
-4. `browser-backed acquisition` only where necessary
+4. `browser-backed acquisition` 仅在确实需要时启用
 
-`Scrapling` remains a benchmark-gated fallback candidate only. It is not in the production default path.
+`Scrapling` 仍然只是 benchmark-gated 候选 fallback，不在默认生产链路中。
 
-## Landed runtime and packaging work
-1. RSS now defaults to real runtime unless `ENABLE_MOCK_RSS=true` is explicitly set.
-2. The embedded `rsshub-worker` is bundled into the main build output.
-3. Worker lookup now prefers bundled artifacts and only falls back when needed.
-4. Worker lifecycle now supports health reuse, wider port scan, explicit shutdown, and runtime repair from the UI.
-5. RSSHub logging and runtime placement were tightened to stop repository-size blowups from runaway local log files.
+## 已落地的 runtime 与打包收口
+1. RSS 默认走真实 runtime，只有显式 `ENABLE_MOCK_RSS=true` 才进入 mock。
+2. 内嵌 `rsshub-worker` 已进入主构建产物。
+3. worker 查找与生命周期支持 bundled artifact、健康复用、端口扫描、显式 shutdown、runtime repair。
+4. RSSHub 日志与运行目录已收紧，之前导致仓库异常膨胀的日志风暴不再是当前主路径。
 
-## Landed diagnostics and UX work
-1. RSS diagnostics now separate:
-   - runtime state
-   - source capability state
-   - benchmark state
-2. Route diagnostics persist across restarts.
-3. Benchmark results persist under `rss-artifacts` and reload automatically.
-4. Source capability UI now shows backend, backend state, failure kind, Chromium requirement, and Scrapling eligibility.
-5. Manual refresh now follows current selection semantics:
-   - selected source => refresh that source
-   - no selected source => refresh all
-6. RSS preview close no longer leaves a browser layer over the RSS pane.
-7. RSS selected-source refresh state no longer depends on a separate page-local source id that could drift away from the session diagnostics state after remount.
-8. RSS diagnostics now expose the last fetch invocation payload, so a missed `refreshSource` click can be distinguished from a real backend fetch failure.
+## 已落地的诊断与交互收口
+1. RSS diagnostics 已拆成：
+- runtime state
+- source capability state
+- benchmark state
+2. route diagnostics 可跨重启持久化。
+3. benchmark 结果会落到 `rss-artifacts` 并自动恢复展示。
+4. source capability UI 会显示：
+- backend
+- backendState
+- failureKind
+- chromiumRequired
+- scraplingEligible
+5. 手动刷新语义已固定：
+- 选中 source => 刷新该 source
+- 未选中 source => 刷新全部
+6. RSS preview 关闭后不再留下 browser layer 覆盖 RSS pane。
+7. `lastFetchInvocation` 已暴露到 diagnostics，用来区分“没触发刷新”和“触发了但抓取失败”。
+8. browser-backed acquisition 已明确优先复用应用内浏览器路线。
 
-## Current platform status
-### Stable on current stack
+## 当前稳定性分档
+### 已可用
 - Bilibili
 - YouTube
 - Vimeo
@@ -40,48 +44,47 @@ The RSS stack remains:
 - Twitter/X
 - Zsxq
 
-### Conditionally stable
+### 条件可用
 - Weibo
-  - browser-backed / Chromium-dependent
-  - current path is viable, but still depends on stable browser session provisioning
+  - 当前主方向是 browser-backed / Chromium-dependent。
+  - 路线可行，但仍依赖 Chromium/session 供应稳定。
 - Xiaohongshu
-  - the browser-backed extraction script compiles again and has been live-validated in a real Electron `persist:browser` session
-  - the platform still depends on an already logged-in Ready browser session, so it remains conditional until the in-app refresh loop is rechecked end-to-end after the selected-source refresh state fix
+  - 主线已切到 app browser acquisition。
+  - 提取脚本语法回归已修，真实 Electron `persist:browser` 会话下已验证可抓到结果。
+  - 仍需在应用内真实刷新链完成最终签收。
 - Douyin
-  - the browser-backed extractor has been live-validated against the account post area in a real Electron `persist:browser` session
-  - keep it conditional while the in-app refresh loop is rechecked end-to-end after the selected-source refresh state fix
+  - 主线已切到 app browser acquisition。
+  - 账号作品区 extractor 已在真实 Electron `persist:browser` 会话下验证过。
+  - 仍需在应用内真实刷新链完成最终签收。
 
-### Still not signed off
+### 未稳定完成
+- Weibo
+  - 还没有把 Chromium/session 默认恢复路径做成“开箱即稳”的程度。
 - Xiaohongshu
-  - same-domain live-tab reuse has been narrowed to same-profile matching, so cross-account contamination is no longer an intended code path
-  - profile-card extraction now supports note-id-missing cards by emitting stable profile-fragment links instead of dropping them
-  - the previous extraction-script syntax error has been removed and covered by test
-  - browser-backed refresh now replaces the source's old items once a valid browser result is returned
-  - the default path no longer silently falls back to RSSHub when app-browser acquisition fails
-  - remaining sign-off work is the real in-app refresh loop after the selected-source refresh-state fix, not another parser rewrite
+  - 仍需完成应用内真实刷新链签收，而不是只看底层隐藏窗口抓取成功。
+  - 已明确禁止回退到外部 cookie 方案作为主路径。
 - Douyin
-  - browser-backed extractor has been tightened to target the account post area instead of page-wide recommendations
-  - the default path no longer silently accepts RSSHub fallback content when the browser route fails
-  - remaining sign-off work is final in-app refresh hardening after the selected-source refresh-state fix, not another route reset
+  - browser-backed 已打通，但账号作品区 extractor 还需要最终硬化与实际 UI 刷新签收。
+  - 已明确禁止再把 page-wide 推荐内容当成账号作品结果。
 
-## Architecture changes already landed
-1. RSS diagnostics logic is isolated in `source-diagnostics.ts`.
-2. Browser-backed fallback now prefers the app's own browser/session path instead of introducing another parallel browser runtime.
-3. Xiaohongshu and Douyin now treat app-browser acquisition as the source of truth instead of silently swapping in RSSHub fallback results.
-4. RSS runtime and benchmark state is isolated in renderer hooks and dedicated diagnostics components.
-5. Scrapling is represented only as a sidecar contract and benchmark candidate.
+## 已落地的架构变化
+1. RSS diagnostics 逻辑已集中到 `source-diagnostics.ts`。
+2. Browser-backed acquisition 以应用内 browser/session 为准，不再引入平行浏览器 runtime 作为默认路径。
+3. Xiaohongshu / Douyin 已不再静默接受 RSSHub fallback 结果作为主结果。
+4. RSS runtime 与 benchmark 状态已在 renderer 中通过专门 diagnostics 组件承载。
+5. Scrapling 只保留 sidecar contract 和 benchmark 候选身份。
 
-## What remains intentionally unfinished
-1. Scrapling is not wired into production fetch flow.
-2. Weibo, Xiaohongshu, and Douyin still need final source-specific hardening on the current stack.
-3. RSS diagnostics are still part of RSS IPC and UI modules; a full standalone lab/service split is still available as cleanup work.
+## 仍然故意未做的内容
+1. Scrapling 未接入生产默认链路。
+2. Weibo / Xiaohongshu / Douyin 仍需平台专用收尾。
+3. RSS diagnostics 仍属于应用内 diagnostics panel，而不是完整独立 lab。
 
-## Rejoin point for the main plan
-RSS is now a prepared subsystem:
-1. runtime is observable
-2. repair exists
-3. source failures are classified
-4. benchmark results persist
-5. browser-backed acquisition is integrated with the app browser stack
+## 重新并回主线前的判断
+RSS 已经不是“需要重新摸底的脆弱模块”，而是一个可独立维护的子系统：
+1. runtime 可观察
+2. repair 已存在
+3. source failure 已可分类
+4. benchmark 已可持久化
+5. browser-backed acquisition 已接入应用内 browser stack
 
-The next RSS-specific step is to finish Weibo/Xiaohongshu/Douyin acquisition quality on the current stack before introducing any heavier fallback.
+下一步不该重做架构，而是把 Weibo / Xiaohongshu / Douyin 的最终质量收尾做完。

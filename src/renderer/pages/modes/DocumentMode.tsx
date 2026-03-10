@@ -166,7 +166,7 @@ export default function DocumentMode() {
             id: tab.id,
             label: tab.title,
             title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
-            dotColor: getFileTypeColor(tab.path),
+            dotColor: isPrimary ? getFileTypeColor(tab.path) : undefined,
             active: isPrimary,
             secondaryActive: isSplitOnly,
             dirty: tab.isDirty,

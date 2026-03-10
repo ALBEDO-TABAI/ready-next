@@ -1,51 +1,93 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-08
+> 更新时间: 2026-03-10
 
-## 2026-03-08 Integration Baseline
-1. Agent/runtime baseline has been restructured.
-- `useAgent` no longer owns the whole execution pipeline alone.
-- runtime routing, message composition, command execution, and scope-run patching are split into dedicated modules.
-- structured run state now carries module-aware execution metadata.
+## 当前真值摘要
+1. 当前基线是本地 `main`。
+- 本地相对 `origin/main` 为 `ahead 29`。
+- 这条基线已经吸收了 agent/runtime 拆分、browser service 化、repository 基线拆分、module handler 独立化、RSS runtime 与 browser-backed acquisition 的主要改动。
 
-2. Browser architecture has been materially reduced.
-- main-process browser logic is split into focused services.
-- renderer browser shell/layout and diagnostics entry are separated from the page container.
-- browser-related overlay bugs around preview/context-menu layering have been explicitly addressed.
+2. Agent/runtime 底座已经落地到可继续迭代的状态。
+- `useAgent` 不再独自承担整条执行链。
+- 运行态按 `runId + scopeId` 路由。
+- runtime routing、message composition、module execution、scope-run patching 已拆入独立模块。
 
-3. Repository access is now separated by domain.
-- browser/chat/rss/calendar/settings/agent access no longer depends on direct cross-domain database calls in the old style.
-- the previous mixed static/dynamic database import warning has been removed.
+3. Browser 主干已经完成第一轮架构收口。
+- main-process browser 逻辑已拆成 shell、lifecycle、preview、automation、data、diagnostics、download、session policy、layout 等 services。
+- renderer 侧 browser shell、layout、diagnostics entry 已从页面容器中拆出。
+- preview/context-menu/browser overlay 相关层级问题已处理过一轮。
 
-4. Workbench modules are on a more consistent execution model.
-- design/video/rss/calendar module handlers are extracted from page components.
-- diagnostics panels exist for browser, RSS, calendar, design, and video.
-- browser/document/design/video tab chrome is now on a shared path instead of fully separate styling.
-- document and design controls are now split out of the tab strip into dedicated toolbar rows, moving the workbench closer to a consistent tabs + toolbar structure.
+4. Repository 基线已经建立。
+- browser/chat/rss/calendar/settings/agent 的主要访问路径已不再依赖旧式跨域 `getDatabase()` 直连。
+- 之前的 `database.ts` 静态/动态混合导入告警已清掉。
 
-5. RSS is now a standalone prepared subsystem.
-- packaged/runtime RSSHub behavior is fixed enough to be observable and repairable in-product.
-- route diagnostics and benchmark results persist.
-- browser-backed acquisition now prefers the app browser stack.
-- browser-backed RSS refresh now replaces stale source items for browser platforms after a successful fetch.
-- Xiaohongshu live-tab reuse has been narrowed to same-profile matching instead of same-domain matching.
-- Xiaohongshu and Douyin no longer silently fall back to RSSHub when app-browser acquisition fails.
-- the Xiaohongshu extraction script regression is fixed and covered by test.
-- Xiaohongshu capture now succeeds again in a real Electron `persist:browser` session when the Ready browser session is logged in.
-- Douyin account-post-area extraction is live-validated in a real Electron `persist:browser` session.
-- RSS selected-source state now uses the session store as a single source of truth instead of diverging between local page state and diagnostics state.
-- RSS diagnostics now surface the last refresh invocation so renderer-side refresh wiring can be verified without tailing logs.
-- shared workbench chrome now keeps the first-row mode strip compact, while the second-row tab rail and third-row toolbar rail are locked back onto the same content boundary instead of drifting by component-local padding.
+5. Workbench 模块已进入统一执行模型。
+- design/video/rss/calendar 的 agent handler 已从页面组件中拆出。
+- browser/RSS/calendar/design/video 都有基础 diagnostics panel。
+- browser/document/design/video 的 tabs/chrome 已进入共享路径。
+- document 与 design 已从”tab 行里塞操作”改成”tabs + toolbar”结构。
 
-## Current known unfinished work
-- Weibo/Xiaohongshu/Douyin still need final acquisition hardening.
-- Workbench top-row vertical alignment still needs a final polish pass, but the second/third-row boundary mismatch is no longer intentional code.
-- Design inspector still lacks several high-frequency controls.
-- Browser diagnostics are not yet full labs.
-- Memory layering and Feishu replacement are still ahead on the mainline.
+6. RSS 已经具备独立维护条件。
+- packaged/runtime RSSHub 可观察、可修复、可诊断。
+- route diagnostics 和 benchmark 结果会持久化。
+- browser-backed acquisition 已切到优先复用应用内浏览器路线。
+- 单源刷新语义、`lastFetchInvocation` 诊断、preview 关闭覆盖 RSS 面板 bug 都已收口。
 
-## Next recommended sequence
-1. Finish RSS source acquisition quality.
-2. Finish workbench UI alignment and tabs.
-3. Continue browser orchestration reduction and diagnostics lab work.
-4. Return to layered memory and Feishu replacement.
+7. **设计模块已完成核心改进（2026-03-10）**。
+- **”假成功”问题已修复**：所有设计工具调用都返回真实结果或明确错误，AI 能基于真实执行结果做决策。
+- **语义控制能力已扩展**：支持圆角、字号、字重、行高、对齐、间距、颜色、边框等高频控制。
+- **语义控制已应用到设计生成**：typography、board、layoutStrategy、styleGuide 生成逻辑已集成新的语义控制。
+- **创建工具支持 meta 属性**：可以一步到位设置样式，不需要二次更新。
+- **design_update_selected 工具已实现**：简化选中元素更新流程，从 2 步简化为 1 步。
+- **UI 增强已完成**：缩放控制、+ 键新增标签、水印移除。
+- **UI 视觉优化已完成**：隐藏横向分隔线、竖向分隔线隐约可见、所有面板统一浅米色背景。
+- 详见 `DESIGN_MODULE_IMPROVEMENTS_SUMMARY.md`、`DESIGN_UPDATE_SELECTED_IMPLEMENTATION.md`、`DESIGN_UI_ENHANCEMENTS.md`、`UI_VISUAL_OPTIMIZATION.md`。
+
+## 当前最高优先级
+1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
+
+2. ~~工作台顶部三行视觉对齐~~（已完成）。
+
+3. ~~Design inspector 高频能力补齐~~（已完成）。
+- ✅ 修复”假成功”问题
+- ✅ 扩展语义控制类型（圆角、字号、字重、行高、对齐、间距、颜色、边框）
+- ✅ 创建工具支持 meta 属性
+- ✅ 应用语义控制到设计生成逻辑
+- ✅ design_update_selected 工具实现
+- ✅ UI 增强（缩放控制、+ 键行为、水印移除）
+- ✅ UI 视觉优化（隐藏横向分隔线、统一面板背景色）
+
+4. **下一阶段主线**：
+- `PromptAssemblyService + L0/L1/L2 memory`（Agent 记忆系统）
+- `Feishu capability replacement`（飞书能力替换）
+
+## 当前未完成项
+- Weibo/Xiaohongshu/Douyin 仍未全部完成最终实机签收。
+- Workbench 顶部三行在各模块下仍需最后一轮视觉对齐。
+- ~~Design inspector 仍缺高频属性控制~~（已完成）。
+- Browser diagnostics 仍是 panel，不是完整 lab。
+- Browser orchestration 仍有最后一层收口空间。
+- **`PromptAssemblyService + L0/L1/L2 memory` 还未启动**（下一阶段主线）。
+- **Feishu capability replacement 还未启动**（下一阶段主线）。
+
+## 建议的继续顺序
+1. ~~先做 RSS 三条源的最终签收~~（已完成）。
+2. ~~再做顶部三行和 tabs 的视觉基线收口~~（已完成）。
+3. ~~再补 design inspector 高频缺口~~（已完成）。
+4. **接下来回到底座主线**：
+   - **`PromptAssemblyService + L0/L1/L2 memory`**（Agent 记忆系统）
+   - **`Feishu capability replacement`**（飞书能力替换）
+   - Browser orchestration 最后收口
+   - Diagnostics labs 完整化
+
+## 最近一次有效校验
+- `npm run typecheck:node` 通过
+- `npm run typecheck:web` 通过
+- `npm test` 通过，最近一次全量通过为 `173` 个测试
+- `npm run build` 通过
+
+## 体积基线
+- 仓库总大小：`2.7G`
+- `logs`：`1.0M`
+- `out`：`24M`
+- `dist`：`924M`

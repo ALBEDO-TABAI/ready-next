@@ -1,5 +1,8 @@
 import type { AgentArtifact, ChatAttachment, ConversationScope } from './types'
 import { buildActiveDocumentContext } from './documentActions'
+import { useMode } from '../../stores/useMode'
+import { useDesignSession } from '../../stores/useDesignSession'
+import { coerceDesignLayoutDigest, formatDesignLayoutDigest, type DesignLayoutDigest } from '../../../shared/design-agent'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
@@ -10,6 +13,15 @@ function normalizeAttachmentType(value: unknown): ChatAttachment['type'] {
   if (normalized === 'text') return 'text'
   if (normalized === 'spreadsheet') return 'spreadsheet'
   return 'other'
+}
+
+function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
+  const normalized = String(value || '').toLowerCase()
+  if (normalized === 'browser-tab') return 'browser-tab'
+  if (normalized === 'skill-folder') return 'skill-folder'
+  if (normalized === 'design-project') return 'design-project'
+  if (normalized === 'file') return 'file'
+  return 'channel'
 }
 
 export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): ChatAttachment[] | undefined {
@@ -30,8 +42,20 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         type: normalizeAttachmentType(record.type),
         size: Number(record.size || 0),
         ext: String(record.ext || ''),
-        source: 'channel' as const,
+        source: normalizeAttachmentSource(record.source),
         url: typeof record.url === 'string' ? record.url : undefined,
+        dirty: typeof record.dirty === 'boolean' ? record.dirty : undefined,
+        saveStatus: typeof record.saveStatus === 'string' ? record.saveStatus : undefined,
+        snapshotHash: typeof record.snapshotHash === 'string' ? record.snapshotHash : undefined,
+        selectionSummary: typeof record.selectionSummary === 'string' ? record.selectionSummary : undefined,
+        selectedElementCount: typeof record.selectedElementCount === 'number' ? Number(record.selectedElementCount) : undefined,
+        selectionBounds: record.selectionBounds && typeof record.selectionBounds === 'object'
+          ? record.selectionBounds as ChatAttachment['selectionBounds']
+          : undefined,
+        currentToolContext: typeof record.currentToolContext === 'string' ? record.currentToolContext : undefined,
+        layoutDigest: coerceDesignLayoutDigest(record.layoutDigest),
+        latestReviewSummary: typeof record.latestReviewSummary === 'string' ? record.latestReviewSummary : undefined,
+        repairScope: typeof record.repairScope === 'string' ? record.repairScope as ChatAttachment['repairScope'] : undefined,
       }
     })
     .filter(Boolean) as ChatAttachment[]
@@ -54,6 +78,63 @@ function formatBrowserTabReference(payload: {
     payload.heading ? `- 主标题: ${payload.heading}` : null,
     payload.selection ? `- 当前选中文本: ${payload.selection.slice(0, 2400)}` : null,
     payload.excerpt ? `- 页面摘要: ${payload.excerpt.slice(0, 6000)}` : null,
+  ].filter(Boolean)
+
+  return lines.join('\n')
+}
+
+function formatDesignProjectReference(payload: {
+  name?: string
+  path?: string
+  dirty?: boolean
+  saveStatus?: string
+  snapshotHash?: string
+  selectionSummary?: string
+  selectedElementCount?: number
+  selectionBounds?: ChatAttachment['selectionBounds']
+  currentToolContext?: string
+  layoutDigest?: DesignLayoutDigest | null
+  latestReviewSummary?: string
+  repairScope?: ChatAttachment['repairScope']
+}): string {
+  const lines = [
+    '### 当前设计画布上下文',
+    `- 项目: ${payload.name || '设计草稿'}`,
+    payload.path && payload.path.startsWith('/') ? `- 文件: ${payload.path}` : '- 文件: (未保存草稿)',
+    payload.dirty ? '- 状态: 有未保存更改' : payload.saveStatus ? `- 状态: ${payload.saveStatus}` : null,
+    payload.selectionSummary ? `- 选择状态: ${payload.selectionSummary}` : null,
+    typeof payload.selectedElementCount === 'number' ? `- 选择元素数: ${payload.selectedElementCount}` : null,
+    payload.selectionBounds ? `- 选择边界: (${payload.selectionBounds.x}, ${payload.selectionBounds.y}) ${payload.selectionBounds.w}x${payload.selectionBounds.h}` : null,
+    payload.currentToolContext ? `- 当前工具: ${payload.currentToolContext}` : null,
+    payload.snapshotHash ? `- 快照哈希: ${payload.snapshotHash}` : null,
+    payload.latestReviewSummary ? `- 最近复查: ${payload.latestReviewSummary}` : null,
+    payload.repairScope ? `- 修正范围: ${payload.repairScope}` : null,
+    ...formatDesignLayoutDigest(payload.layoutDigest),
+    '- 这是设计画布引用，不是文档；涉及封面、海报、版式、布局时应优先调用 design_* 工具。',
+  ].filter(Boolean)
+
+  return lines.join('\n')
+}
+
+export function buildActiveDesignContext(): string | null {
+  const mode = useMode.getState().workbenchMode
+  if (mode !== 'design') return null
+
+  const designState = useDesignSession.getState()
+  const lines = [
+    '### 当前设计画布上下文',
+    `- 项目: ${designState.activeFile?.split(/[\\/]/).pop() || '设计草稿'}`,
+    designState.activeFile ? `- 文件: ${designState.activeFile}` : '- 文件: (未保存草稿)',
+    designState.isDirty ? '- 状态: 有未保存更改' : designState.saveStatus ? `- 状态: ${designState.saveStatus}` : null,
+    designState.selectionSummary ? `- 选择状态: ${designState.selectionSummary}` : null,
+    typeof designState.selectedElementCount === 'number' ? `- 选择元素数: ${designState.selectedElementCount}` : null,
+    designState.selectionBounds ? `- 选择边界: (${designState.selectionBounds.x}, ${designState.selectionBounds.y}) ${designState.selectionBounds.w}x${designState.selectionBounds.h}` : null,
+    designState.currentToolContext ? `- 当前工具: ${designState.currentToolContext}` : null,
+    designState.snapshotHash ? `- 快照哈希: ${designState.snapshotHash}` : null,
+    designState.latestReviewSummary ? `- 最近复查: ${designState.latestReviewSummary}` : null,
+    designState.repairScope ? `- 修正范围: ${designState.repairScope}` : null,
+    ...formatDesignLayoutDigest(designState.layoutDigest),
+    '- 这是设计画布上下文，不是文档编辑上下文；如果用户要新建封面、海报、版式或视觉框架，应优先调用 design_* 工具。',
   ].filter(Boolean)
 
   return lines.join('\n')
@@ -96,7 +177,18 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       type: attachment.type,
       size: attachment.size,
       ext: attachment.ext,
+      source: attachment.source,
       url: attachment.url,
+      dirty: attachment.dirty,
+      saveStatus: attachment.saveStatus,
+      snapshotHash: attachment.snapshotHash,
+      selectionSummary: attachment.selectionSummary,
+      selectedElementCount: attachment.selectedElementCount,
+      selectionBounds: attachment.selectionBounds,
+      currentToolContext: attachment.currentToolContext,
+      layoutDigest: attachment.layoutDigest,
+      latestReviewSummary: attachment.latestReviewSummary,
+      repairScope: attachment.repairScope,
     }))
 }
 
@@ -128,7 +220,9 @@ export async function buildComposedAgentInput(params: {
 }): Promise<string | MultimodalBlock[]> {
   const { content, attachments, filePool } = params
   const activeDocContext = buildActiveDocumentContext()
-  const baseUserMessage = activeDocContext ? `${content}\n\n${activeDocContext}` : content
+  const activeDesignContext = buildActiveDesignContext()
+  const activeWorkbenchContext = activeDesignContext || activeDocContext
+  const baseUserMessage = activeWorkbenchContext ? `${content}\n\n${activeWorkbenchContext}` : content
   let finalMessage: string | MultimodalBlock[] = baseUserMessage
 
   if (typeof window === 'undefined' || !window.electronAPI) {
@@ -190,6 +284,23 @@ export async function buildComposedAgentInput(params: {
               heading: snapshot.heading,
               selection: snapshot.selection,
               excerpt: snapshot.excerpt,
+            })}`,
+          })
+          continue
+        }
+
+        if (att.source === 'design-project') {
+          blocks.push({
+            type: 'text',
+            text: `\n\n${formatDesignProjectReference({
+              name: att.name,
+              path: att.path,
+              dirty: att.dirty,
+              saveStatus: att.saveStatus,
+              snapshotHash: att.snapshotHash,
+              selectionSummary: att.selectionSummary,
+              currentToolContext: att.currentToolContext,
+              layoutDigest: att.layoutDigest,
             })}`,
           })
           continue
@@ -271,6 +382,23 @@ export async function buildComposedAgentInput(params: {
               heading: snapshot.heading,
               selection: snapshot.selection,
               excerpt: snapshot.excerpt,
+            })}`,
+          )
+          continue
+        }
+
+        if (poolFile.source === 'design-project') {
+          finalMessage = appendTextBlock(
+            finalMessage,
+            `\n\n--- 引用设计项目: ${poolFile.name} ---\n${formatDesignProjectReference({
+              name: poolFile.name,
+              path: poolFile.path,
+              dirty: poolFile.dirty,
+              saveStatus: poolFile.saveStatus,
+              snapshotHash: poolFile.snapshotHash,
+              selectionSummary: poolFile.selectionSummary,
+              currentToolContext: poolFile.currentToolContext,
+              layoutDigest: poolFile.layoutDigest,
             })}`,
           )
           continue

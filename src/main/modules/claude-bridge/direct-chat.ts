@@ -31,6 +31,8 @@ import {
   getOpenAITools,
   getDocumentAnthropicTools,
   getDocumentOpenAITools,
+  getDesignAnthropicTools,
+  getDesignOpenAITools,
   executeToolCall,
 } from '../tools'
 import { findSkillToolBySkillAction } from '../tools/skills-tools'
@@ -41,6 +43,15 @@ import {
   looksLikeMissingNativeToolsReply,
   parseTextToolBridgeResponse,
 } from './tool-bridge'
+import {
+  extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
+  inferPreferredDesignTool as inferPreferredDesignToolFromText,
+  shouldAllowMultipleDesignArtifacts as shouldAllowMultipleDesignArtifactsFromText,
+  shouldForceDesignToolCall as shouldForceDesignToolCallFromText,
+  shouldForceDocumentToolCall as shouldForceDocumentToolCallFromText,
+  shouldPreferFormatOnly as shouldPreferFormatOnlyFromText,
+  shouldPreferSectionRewrite as shouldPreferSectionRewriteFromText,
+} from './tool-policy-heuristics'
 import { ChatRepository } from '../repositories/chat-repository'
 
 const LOG = '/tmp/ready-directchat.log'
@@ -102,10 +113,30 @@ interface APIResponse {
 
 interface ToolPolicy {
   forceDocumentTool: boolean
+  forceDesignTool: boolean
+  preferredDesignTool: string | null
+  primaryDesignInstruction: string | null
+  allowMultipleDesignArtifacts: boolean
   preferSectionRewrite: boolean
   preferFormatOnly: boolean
   allowBrowserTools: boolean
 }
+
+const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
+  'design_open_file',
+  'design_capture_session',
+  'design_get_editor_state',
+  'design_get_style_guide',
+  'design_snapshot_layout',
+  'design_find_empty_space_on_canvas',
+  'design_capture_canvas_screenshot',
+  'design_verify_layout',
+  'design_list_owned_nodes',
+  'design_batch_design',
+  'design_create_geo_shape',
+  'design_save_project',
+  'design_export_artifact',
+])
 
 interface BrowserTaskDecision {
   mode: 'free_tool_loop' | 'browser_workflow' | 'browser_upload_workflow' | 'clarify_first'
@@ -785,6 +816,13 @@ function rewriteSectionInDocument(
 export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
   private browserController: BrowserController | null = null
+  private rendererToolActionRequester: ((payload: {
+    agent?: string
+    sessionId?: string
+    runId?: string
+    tool: string
+    args: Record<string, unknown>
+  }) => Promise<Record<string, unknown>>) | null = null
   private maxToolIterations = 24
   private cachedFfmpegPath: string | null = null
 
@@ -826,6 +864,18 @@ export class DirectChatEngine extends EventEmitter {
   setBrowserController(controller: BrowserController): void {
     this.browserController = controller
     log('BrowserController set on DirectChatEngine')
+  }
+
+  setRendererToolActionRequester(
+    requester: ((payload: {
+      agent?: string
+      sessionId?: string
+      runId?: string
+      tool: string
+      args: Record<string, unknown>
+    }) => Promise<Record<string, unknown>>) | null,
+  ): void {
+    this.rendererToolActionRequester = requester
   }
 
   getAIConfig(): AIModelConfig | null {
@@ -1001,6 +1051,7 @@ export class DirectChatEngine extends EventEmitter {
     abortSignal: AbortSignal
     emitOutput: (chunk: string, type: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
+    requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   }): Promise<void> {
     const explicitSkills = this.findExplicitlyRequestedSkills(params.userText)
     if (explicitSkills.length === 0) return
@@ -1028,6 +1079,7 @@ export class DirectChatEngine extends EventEmitter {
       const result = await executeToolCall(tool.name, args, {
         browserController: this.browserController,
         emitToolAction: params.emitToolAction,
+        requestModuleToolAction: params.requestModuleToolAction,
         abortSignal: params.abortSignal,
         sessionId: params.sessionId,
       })
@@ -1044,6 +1096,97 @@ export class DirectChatEngine extends EventEmitter {
       })
       log(`Injected explicit skill context for ${skill.id} via ${tool.name}`)
     }
+  }
+
+  private buildForceDesignNudge(policy: ToolPolicy): string {
+    return [
+      '系统检查：你还没有执行真实设计工具。',
+      policy.primaryDesignInstruction
+        ? `当前用户要求：${policy.primaryDesignInstruction}`
+        : '当前用户要求是设计画板上的封面/版式创建。',
+      `优先动作：${policy.preferredDesignTool || 'design_run_task_controller'}`,
+      '直接调用 design_run_task_controller 或对应 design_* 工具，在设计画布执行观察、规划、落位、批次生成与复查。',
+      '如果仍缺少画布信息，先调用 design_get_editor_state 或 design_snapshot_layout。',
+      '不要输出纯说明，也不要改走 document_*。',
+    ].join('\n')
+  }
+
+  private applyDesignSourceInput(
+    toolCall: ToolCall,
+    policy: ToolPolicy,
+  ): ToolCall {
+    if (!policy.forceDesignTool) return toolCall
+    if (!toolCall.name.startsWith('design_')) return toolCall
+    if (!policy.primaryDesignInstruction) return toolCall
+
+    return {
+      ...toolCall,
+      input: {
+        ...toolCall.input,
+        designDirectiveText: typeof toolCall.input.designDirectiveText === 'string' && toolCall.input.designDirectiveText.trim()
+          ? toolCall.input.designDirectiveText
+          : policy.primaryDesignInstruction,
+      },
+    }
+  }
+
+  private parseStructuredToolResult(result: string): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(result) as unknown
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    } catch {
+      return null
+    }
+  }
+
+  private buildActualDesignCompletionText(
+    payload: Record<string, unknown> | null,
+    rawResult?: string | null,
+  ): string | null {
+    const status = payload && typeof payload.status === 'string' ? payload.status : null
+    const summary = payload && typeof payload.summary === 'string' && payload.summary.trim()
+      ? payload.summary.trim()
+      : payload && typeof payload.message === 'string' && payload.message.trim()
+        ? payload.message.trim()
+        : ''
+    const reviewSummary = payload && payload.review && typeof payload.review === 'object' && typeof (payload.review as { summary?: unknown }).summary === 'string'
+      ? String((payload.review as { summary?: unknown }).summary)
+      : ''
+    const parts = [
+      summary,
+      reviewSummary && reviewSummary !== summary ? reviewSummary : null,
+      status === 'failed' ? '本轮验收未通过，已停止继续自动重做；请根据当前结果继续修订。' : null,
+      status === 'cancelled' ? '本轮设计已停止。' : null,
+    ].filter(Boolean)
+    if (parts.length > 0) return parts.join(' ')
+    if (rawResult && /\bcancel(?:led)?\b/i.test(rawResult)) return '本轮设计已停止。'
+    if (rawResult) return '本轮设计已执行完成，请基于当前结果继续修订。'
+    return null
+  }
+
+  private isPrimaryDesignArtifactTool(toolName: string, policy: ToolPolicy): boolean {
+    if (!policy.forceDesignTool) return false
+    if (!policy.preferredDesignTool) return false
+    return toolName === policy.preferredDesignTool
+  }
+
+  private filterSingleArtifactDesignToolCalls(toolCalls: ToolCall[], policy: ToolPolicy): ToolCall[] {
+    if (!policy.forceDesignTool || policy.allowMultipleDesignArtifacts) return toolCalls
+    if (!policy.preferredDesignTool) return toolCalls
+
+    let keptPrimary = false
+    const filtered: ToolCall[] = []
+    for (const toolCall of toolCalls) {
+      if (toolCall.name !== policy.preferredDesignTool) {
+        filtered.push(toolCall)
+        continue
+      }
+      if (!keptPrimary) {
+        filtered.push(toolCall)
+        keptPrimary = true
+      }
+    }
+    return filtered
   }
 
   private isContinuationIntent(userText: string): boolean {
@@ -2145,21 +2288,37 @@ export class DirectChatEngine extends EventEmitter {
       const userText = this.extractIncomingText(content)
       const userInstructionText = this.extractPrimaryUserInstruction(userText)
       const sessionId = this.extractSessionIdFromInternalName(name)
+      const publicAgentName = name.includes('::') ? name.slice(0, name.indexOf('::')) : name
+      const requestModuleToolAction = this.rendererToolActionRequester
+        ? (tool: string, args: Record<string, unknown>) => this.rendererToolActionRequester!({
+          agent: publicAgentName,
+          sessionId,
+          runId,
+          tool,
+          args,
+        })
+        : undefined
       const incomingAttachmentHints = this.getIncomingAttachmentHints(content)
       let browserDecision = hasTools && this.browserController && this.isBrowserAgentV3Enabled()
         ? this.decideBrowserTask(userText, session, sessionId, incomingAttachmentHints)
         : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
+      const forceDesignTool = hasTools && this.shouldForceDesignToolCall(userText)
+      const preferredDesignTool = forceDesignTool ? this.inferPreferredDesignTool(userText) : null
       const toolPolicy: ToolPolicy = {
-        forceDocumentTool: hasTools && this.shouldForceDocumentToolCall(userText),
-        preferSectionRewrite: hasTools && this.shouldPreferSectionRewrite(userInstructionText),
-        preferFormatOnly: hasTools && this.shouldPreferFormatOnly(userInstructionText),
+        forceDocumentTool: hasTools && !forceDesignTool && this.shouldForceDocumentToolCall(userText),
+        forceDesignTool,
+        preferredDesignTool,
+        primaryDesignInstruction: forceDesignTool ? userInstructionText : null,
+        allowMultipleDesignArtifacts: forceDesignTool && this.shouldAllowMultipleDesignArtifacts(userInstructionText),
+        preferSectionRewrite: hasTools && !forceDesignTool && this.shouldPreferSectionRewrite(userInstructionText),
+        preferFormatOnly: hasTools && !forceDesignTool && this.shouldPreferFormatOnly(userInstructionText),
         allowBrowserTools: hasTools && (
           browserDecision.mode === 'browser_workflow' ||
           browserDecision.mode === 'browser_upload_workflow'
         ),
       }
 
-      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, allowBrowserTools=${toolPolicy.allowBrowserTools}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, allowBrowserTools=${toolPolicy.allowBrowserTools}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
 
       if (hasTools) {
         await this.maybeInjectExplicitSkillContext({
@@ -2169,6 +2328,7 @@ export class DirectChatEngine extends EventEmitter {
           abortSignal: abortController.signal,
           emitOutput,
           emitToolAction,
+          requestModuleToolAction,
         })
       }
 
@@ -2365,6 +2525,7 @@ export class DirectChatEngine extends EventEmitter {
           emitToolAction: (tool: string, args: Record<string, unknown>) => {
             emitToolAction(tool, args)
           },
+          requestModuleToolAction,
           abortSignal: abortController.signal,
           sessionId,
         }
@@ -2435,6 +2596,7 @@ export class DirectChatEngine extends EventEmitter {
         let iterations = 0
         let finishedBeforeLimit = false
         let forceDocNudges = 0
+        let forceDesignNudges = 0
         let forceDocMutationNudges = 0
         let forceDocSaveNudges = 0
         let textToolBridgeNudges = 0
@@ -2445,6 +2607,7 @@ export class DirectChatEngine extends EventEmitter {
         const browserSteps = browserDecision.plan?.steps || []
         let browserStepIndex = 0
         let browserToolCallCount = 0
+        let primaryDesignArtifactProduced = false
 
         while (iterations < effectiveMaxToolIterations) {
           ensureNotAborted()
@@ -2455,6 +2618,7 @@ export class DirectChatEngine extends EventEmitter {
             emitToolAction: (tool: string, args: Record<string, unknown>) => {
               emitToolAction(tool, args)
             },
+            requestModuleToolAction,
             abortSignal: abortController.signal,
             sessionId,
           }
@@ -2493,6 +2657,18 @@ export class DirectChatEngine extends EventEmitter {
               log(`No tool call under forceDocumentTool, nudge=${forceDocNudges}`)
               continue
             }
+            if (toolPolicy.forceDesignTool && forceDesignNudges < 2) {
+              forceDesignNudges += 1
+              if (response.text && response.toolTransport !== 'text') {
+                session.messages.push({ role: 'assistant', content: response.text })
+              }
+              session.messages.push({
+                role: 'user',
+                content: this.buildForceDesignNudge(toolPolicy),
+              })
+              log(`No tool call under forceDesignTool, nudge=${forceDesignNudges}`)
+              continue
+            }
             if (response.text) {
               emitOutput(response.text, 'text')
             }
@@ -2503,11 +2679,39 @@ export class DirectChatEngine extends EventEmitter {
             break
           }
 
+          const firstPassFilteredToolCalls = this.filterSingleArtifactDesignToolCalls(response.toolCalls, toolPolicy)
+          if (firstPassFilteredToolCalls.length !== response.toolCalls.length) {
+            log(`Single-artifact design guard dropped ${response.toolCalls.length - firstPassFilteredToolCalls.length} extra design tool call(s)`)
+          }
+          const rawToolCallsForIteration = (
+            toolPolicy.forceDesignTool &&
+            !toolPolicy.allowMultipleDesignArtifacts &&
+            primaryDesignArtifactProduced &&
+            toolPolicy.preferredDesignTool
+          )
+            ? firstPassFilteredToolCalls.filter((toolCall) => toolCall.name !== toolPolicy.preferredDesignTool)
+            : firstPassFilteredToolCalls
+
+          if (rawToolCallsForIteration.length === 0 && response.toolCalls.length > 0) {
+            session.messages.push({
+              role: 'user',
+              content: '系统检查：本轮已经生成过主版式，不要再次新建额外版面。请基于当前真实设计结果总结，或只调用 design_verify_layout / design_list_owned_nodes 这类复查工具。',
+            })
+            log('Dropped repeated primary design artifact call after artifact already existed')
+            continue
+          }
+
+          const toolCallsForIteration = rawToolCallsForIteration
+            .map((toolCall) => this.applyDesignSourceInput(toolCall, toolPolicy))
+
           // Execute tool calls
           let executedDocActionCount = 0
           let executedMutatingDocActionCount = 0
           let executedSaveDocActionCount = 0
           let executedBrowserToolsThisIteration = 0
+          let executedPrimaryDesignToolThisIteration = false
+          let lastPrimaryDesignToolPayload: Record<string, unknown> | null = null
+          let lastPrimaryDesignToolRawResult: string | null = null
           if (useAnthropicProtocol) {
             // For Anthropic: assistant message contains both text + tool_use blocks
             const assistantContent: Array<Record<string, unknown>> = []
@@ -2515,14 +2719,14 @@ export class DirectChatEngine extends EventEmitter {
               emitOutput(response.text, 'text')
               assistantContent.push({ type: 'text', text: response.text })
             }
-            for (const tc of response.toolCalls) {
+            for (const tc of toolCallsForIteration) {
               assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input })
             }
             session.messages.push({ role: 'assistant', content: assistantContent })
 
             // Execute each tool and collect results
             const toolResults: Array<Record<string, unknown>> = []
-            for (const tc of response.toolCalls) {
+            for (const tc of toolCallsForIteration) {
               ensureNotAborted()
               emitOutput(`${tc.name}(${JSON.stringify(tc.input).slice(0, 100)})`, 'tool_use')
               const result = await executeToolCall(tc.name, tc.input, toolContext)
@@ -2540,6 +2744,12 @@ export class DirectChatEngine extends EventEmitter {
               if (tc.name.startsWith('browser_')) {
                 executedBrowserToolsThisIteration += 1
               }
+              if (this.isPrimaryDesignArtifactTool(tc.name, toolPolicy)) {
+                executedPrimaryDesignToolThisIteration = true
+                primaryDesignArtifactProduced = true
+                lastPrimaryDesignToolPayload = this.parseStructuredToolResult(result)
+                lastPrimaryDesignToolRawResult = result
+              }
               emitOutput(result.slice(0, 200), 'tool_result')
               toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: result })
             }
@@ -2555,7 +2765,7 @@ export class DirectChatEngine extends EventEmitter {
               }
 
               const textBridgeResults: Array<{ id: string; name: string; result: string }> = []
-              for (const tc of response.toolCalls) {
+              for (const tc of toolCallsForIteration) {
                 ensureNotAborted()
                 emitOutput(`${tc.name}(${JSON.stringify(tc.input).slice(0, 100)})`, 'tool_use')
                 const result = await executeToolCall(tc.name, tc.input, toolContext)
@@ -2573,6 +2783,12 @@ export class DirectChatEngine extends EventEmitter {
                 if (tc.name.startsWith('browser_')) {
                   executedBrowserToolsThisIteration += 1
                 }
+                if (this.isPrimaryDesignArtifactTool(tc.name, toolPolicy)) {
+                  executedPrimaryDesignToolThisIteration = true
+                  primaryDesignArtifactProduced = true
+                  lastPrimaryDesignToolPayload = this.parseStructuredToolResult(result)
+                  lastPrimaryDesignToolRawResult = result
+                }
                 emitOutput(result.slice(0, 200), 'tool_result')
                 textBridgeResults.push({ id: tc.id, name: tc.name, result })
               }
@@ -2584,7 +2800,7 @@ export class DirectChatEngine extends EventEmitter {
               const assistantMsg: Record<string, unknown> = {
                 role: 'assistant',
                 content: response.text || null,
-                tool_calls: response.toolCalls.map(tc => ({
+                  tool_calls: toolCallsForIteration.map(tc => ({
                   id: tc.id,
                   type: 'function',
                   function: { name: tc.name, arguments: JSON.stringify(tc.input) }
@@ -2601,7 +2817,7 @@ export class DirectChatEngine extends EventEmitter {
                 emitOutput(response.text, 'text')
               }
 
-              for (const tc of response.toolCalls) {
+              for (const tc of toolCallsForIteration) {
                 ensureNotAborted()
                 emitOutput(`${tc.name}(${JSON.stringify(tc.input).slice(0, 100)})`, 'tool_use')
                 const result = await executeToolCall(tc.name, tc.input, toolContext)
@@ -2618,6 +2834,12 @@ export class DirectChatEngine extends EventEmitter {
                 }
                 if (tc.name.startsWith('browser_')) {
                   executedBrowserToolsThisIteration += 1
+                }
+                if (this.isPrimaryDesignArtifactTool(tc.name, toolPolicy)) {
+                  executedPrimaryDesignToolThisIteration = true
+                  primaryDesignArtifactProduced = true
+                  lastPrimaryDesignToolPayload = this.parseStructuredToolResult(result)
+                  lastPrimaryDesignToolRawResult = result
                 }
                 emitOutput(result.slice(0, 200), 'tool_result')
                 session.messages.push({ role: 'tool' as 'system', content: result, ...({ tool_call_id: tc.id } as Record<string, unknown>) } as ChatMessage)
@@ -2697,6 +2919,25 @@ export class DirectChatEngine extends EventEmitter {
           if (toolPolicy.forceDocumentTool && executedMutatingDocActionCount > 0) {
             documentMutationCompleted = true
           }
+
+          if (
+            toolPolicy.forceDesignTool &&
+            !toolPolicy.allowMultipleDesignArtifacts &&
+            executedPrimaryDesignToolThisIteration
+          ) {
+            const completionText = this.buildActualDesignCompletionText(
+              lastPrimaryDesignToolPayload,
+              lastPrimaryDesignToolRawResult,
+            )
+            if (completionText) {
+              emitOutput(completionText, 'text')
+              session.messages.push({ role: 'assistant', content: completionText })
+            }
+            finishedBeforeLimit = true
+            log(`Completed single-artifact design run after primary design tool with status=${String(lastPrimaryDesignToolPayload?.status || 'unknown')}`)
+            break
+          }
+
         }
 
         if (!finishedBeforeLimit && iterations >= effectiveMaxToolIterations) {
@@ -2742,11 +2983,41 @@ export class DirectChatEngine extends EventEmitter {
     return baseUrl.replace(/\/+$/, '').includes('api.kimi.com/coding')
   }
 
-  private getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-    let tools = !policy?.forceDocumentTool ? getAnthropicTools() : getDocumentAnthropicTools().filter((tool) => {
+  private filterPreferredDesignAnthropicTools(
+    tools: Array<Record<string, unknown>>,
+    preferredDesignTool: string | null,
+  ): Array<Record<string, unknown>> {
+    if (!preferredDesignTool) return tools
+    return tools.filter((tool) => {
       const name = typeof tool.name === 'string' ? tool.name : ''
-      return FORCE_DOCUMENT_TOOL_NAMES.has(name)
+      return name === preferredDesignTool || PREFERRED_DESIGN_FALLBACK_TOOL_NAMES.has(name)
     })
+  }
+
+  private filterPreferredDesignOpenAITools(
+    tools: Array<Record<string, unknown>>,
+    preferredDesignTool: string | null,
+  ): Array<Record<string, unknown>> {
+    if (!preferredDesignTool) return tools
+    return tools.filter((tool) => {
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string'
+        ? fn === preferredDesignTool || PREFERRED_DESIGN_FALLBACK_TOOL_NAMES.has(fn)
+        : false
+    })
+  }
+
+  private getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
+    let tools = getAnthropicTools()
+    if (policy?.forceDocumentTool) {
+      tools = getDocumentAnthropicTools().filter((tool) => {
+        const name = typeof tool.name === 'string' ? tool.name : ''
+        return FORCE_DOCUMENT_TOOL_NAMES.has(name)
+      })
+    } else if (policy?.forceDesignTool) {
+      tools = getDesignAnthropicTools()
+      tools = this.filterPreferredDesignAnthropicTools(tools, policy.preferredDesignTool)
+    }
     if (policy?.allowBrowserTools === false) {
       tools = tools.filter((tool) => {
         const name = typeof tool.name === 'string' ? tool.name : ''
@@ -2757,11 +3028,17 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-    let tools = !policy?.forceDocumentTool ? getOpenAITools() : getDocumentOpenAITools().filter((tool) => {
-      const fn = (tool.function as { name?: unknown } | undefined)?.name
-      if (typeof fn !== 'string') return false
-      return FORCE_DOCUMENT_TOOL_NAMES.has(fn)
-    })
+    let tools = getOpenAITools()
+    if (policy?.forceDocumentTool) {
+      tools = getDocumentOpenAITools().filter((tool) => {
+        const fn = (tool.function as { name?: unknown } | undefined)?.name
+        if (typeof fn !== 'string') return false
+        return FORCE_DOCUMENT_TOOL_NAMES.has(fn)
+      })
+    } else if (policy?.forceDesignTool) {
+      tools = getDesignOpenAITools()
+      tools = this.filterPreferredDesignOpenAITools(tools, policy.preferredDesignTool)
+    }
     if (policy?.allowBrowserTools === false) {
       tools = tools.filter((tool) => {
         const fn = (tool.function as { name?: unknown } | undefined)?.name
@@ -2932,6 +3209,9 @@ export class DirectChatEngine extends EventEmitter {
     if (policy?.forceDocumentTool) {
       log(`forceDocumentTool anthropic tools=${this.collectToolNames(tools, 'anthropic').join(',')}`)
     }
+    if (policy?.forceDesignTool) {
+      log(`forceDesignTool anthropic tools=${this.collectToolNames(tools, 'anthropic').join(',')}`)
+    }
     const reqBody: Record<string, unknown> = {
       model,
       max_tokens: 4096,
@@ -2939,7 +3219,7 @@ export class DirectChatEngine extends EventEmitter {
       messages: this.serializeMessages(session.messages, 'anthropic'),
       tools,
     }
-    if (policy?.forceDocumentTool) {
+    if (policy?.forceDocumentTool || policy?.forceDesignTool) {
       reqBody.tool_choice = { type: 'any' }
     }
 
@@ -3379,46 +3659,27 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private extractPrimaryUserInstruction(raw: string): string {
-    if (!raw) return ''
-    const markers = ['### 当前文档上下文', '--- 文档内容开始 ---', '--- 附件:']
-    let cut = raw.length
-    for (const marker of markers) {
-      const index = raw.indexOf(marker)
-      if (index >= 0) cut = Math.min(cut, index)
-    }
-    const primary = raw.slice(0, cut).trim()
-    if (primary) return primary
-    return raw.trim()
+    return extractPrimaryUserInstructionFromText(raw)
   }
 
   private shouldForceDocumentToolCall(userText: string): boolean {
-    if (!userText) return false
-    const primaryInstruction = this.extractPrimaryUserInstruction(userText)
-    if (!primaryInstruction) return false
-    const normalized = userText.toLowerCase()
-    const hasDocContext =
-      userText.includes('### 当前文档上下文') ||
-      userText.includes('--- 文档内容开始 ---') ||
-      normalized.includes('current document context')
-    const editIntent = /(直接|帮我|请|请你)?(修改|改写|重写|润色|整理|优化|调整|写入|追加|替换|保存|新建|编辑)|\b(edit|rewrite|refine|update|replace|append|save)\b/i
-    if (hasDocContext && editIntent.test(primaryInstruction)) return true
+    return shouldForceDocumentToolCallFromText(userText)
+  }
 
-    const hasDocKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
-    const strongDirectness = /(直接|立刻|马上|立即|在原文中|就地)/i
-    return (
-      hasDocKeyword.test(primaryInstruction) &&
-      strongDirectness.test(primaryInstruction) &&
-      editIntent.test(primaryInstruction)
-    )
+  private shouldForceDesignToolCall(userText: string): boolean {
+    return shouldForceDesignToolCallFromText(userText)
+  }
+
+  private inferPreferredDesignTool(userText: string): string | null {
+    return inferPreferredDesignToolFromText(userText)
+  }
+
+  private shouldAllowMultipleDesignArtifacts(userText: string): boolean {
+    return shouldAllowMultipleDesignArtifactsFromText(userText)
   }
 
   private shouldPreferFormatOnly(userText: string): boolean {
-    if (!userText) return false
-    const formatIntent =
-      /(格式|排版|版式|结构清晰|阅读流畅|可读性|美观|整洁|格式化|format|layout|typography|readability)/i
-    const rewriteIntent =
-      /(改写|重写|重构|总结|缩写|扩写|重述|rewrite|paraphrase|summarize|rephrase)/i
-    return formatIntent.test(userText) && !rewriteIntent.test(userText)
+    return shouldPreferFormatOnlyFromText(userText)
   }
 
   private extractOpenclawPairingCommand(userText: string): string | null {
@@ -3432,13 +3693,7 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private shouldPreferSectionRewrite(userText: string): boolean {
-    if (!userText) return false
-    if (this.shouldPreferFormatOnly(userText)) return false
-    const sectionHint =
-      /(第[一二三四五六七八九十百0-9]+部分|第[一二三四五六七八九十百0-9]+章|章节|段落|开头|结尾|引言|摘要|第一部分|第二部分|第三部分)/i
-    const scopedEditIntent =
-      /(修改|改写|重写|润色|优化|整理|调整|替换|rewrite|refine|polish|revise|section|paragraph)/i
-    return sectionHint.test(userText) && scopedEditIntent.test(userText)
+    return shouldPreferSectionRewriteFromText(userText)
   }
 
   private parseSectionRewritePlan(raw: string): SectionRewritePlan | null {
@@ -4195,6 +4450,9 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     if (policy?.forceDocumentTool) {
       log(`forceDocumentTool openai tools=${this.collectToolNames(tools, 'openai').join(',')}`)
     }
+    if (policy?.forceDesignTool) {
+      log(`forceDesignTool openai tools=${this.collectToolNames(tools, 'openai').join(',')}`)
+    }
 
     if (this.shouldUseTextToolBridge(session, config)) {
       session.preferTextToolBridge = true
@@ -4205,7 +4463,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     if (wireApi === 'responses') {
       const continuation = this.getResponsesContinuationState(session)
       const url = `${openAIBase}/responses`
-      log(`POST ${url}, model=${model}, with tools, wireApi=responses${policy?.forceDocumentTool ? ' (force document)' : ''}`)
+      log(`POST ${url}, model=${model}, with tools, wireApi=responses${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}`)
       const reqBody: Record<string, unknown> = {
         model,
         tools: this.convertOpenAIToolsToResponses(tools),
@@ -4257,14 +4515,14 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     ]
 
     const url = `${openAIBase}/chat/completions`
-    log(`POST ${url}, model=${model}, with tools${policy?.forceDocumentTool ? ' (force document)' : ''}`)
+    log(`POST ${url}, model=${model}, with tools${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}`)
 
     const reqBody: Record<string, unknown> = {
       model,
       messages,
       tools,
     }
-    if (policy?.forceDocumentTool && !isKimiCodingBase) {
+    if ((policy?.forceDocumentTool || policy?.forceDesignTool) && !isKimiCodingBase) {
       reqBody.tool_choice = 'required'
     }
 
@@ -4275,7 +4533,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
       signal,
     }, signal, 'openai tools')
 
-    if (!resp.ok && policy?.forceDocumentTool && reqBody.tool_choice) {
+    if (!resp.ok && (policy?.forceDocumentTool || policy?.forceDesignTool) && reqBody.tool_choice) {
       const errBody = await resp.text().catch(() => '')
       if (/tool[_-]?choice|required/i.test(errBody)) {
         log(`OpenAI tool_choice unsupported, retry without tool_choice: ${errBody.slice(0, 180)}`)

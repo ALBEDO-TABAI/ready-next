@@ -8,6 +8,8 @@ files:
   - package.json
   - node_modules/**/*
 extraResources:
+  - from: build/runtime-seeds/ai-settings.seed.json
+    to: ai-settings.seed.json
   - from: node_modules/better-sqlite3/build
     to: better-sqlite3/build
     filter:

@@ -1,4 +1,5 @@
 import { WORKBENCH_ROW_PADDING_X } from '../../modules/workbench/chrome'
+import type { DesignLayoutDigest } from '../../../shared/design-agent'
 
 interface DesignDiagnosticsPanelProps {
   activeFile: string | null
@@ -8,6 +9,7 @@ interface DesignDiagnosticsPanelProps {
   lastError: string | null
   snapshotHash: string | null
   selectionSummary: string | null
+  layoutDigest: DesignLayoutDigest | null
   currentToolContext: string | null
   lastExportArtifactPath: string | null
 }
@@ -31,6 +33,7 @@ export default function DesignDiagnosticsPanel({
   lastError,
   snapshotHash,
   selectionSummary,
+  layoutDigest,
   currentToolContext,
   lastExportArtifactPath,
 }: DesignDiagnosticsPanelProps) {
@@ -54,9 +57,11 @@ export default function DesignDiagnosticsPanel({
           <div>保存状态：{saveStatus}{isDirty ? ' · dirty' : ''}</div>
           <div>当前工具：{currentToolContext || '未记录'}</div>
           <div>选择状态：{selectionSummary || '未记录'}</div>
+          <div>画布元素：{layoutDigest?.topLevelElementCount ?? 0}</div>
         </div>
         <div>
           <div>快照哈希：{snapshotHash || '未生成'}</div>
+          <div>主边界框：{layoutDigest?.mainBounds ? `${layoutDigest.mainBounds.w}×${layoutDigest.mainBounds.h}` : '未生成'}</div>
           <div>最近保存：{formatWhen(lastSavedAt)}</div>
           <div className="truncate">最近导出：{lastExportArtifactPath || '未导出'}</div>
           <div style={{ color: lastError ? 'var(--color-orange)' : 'var(--text-secondary)' }}>

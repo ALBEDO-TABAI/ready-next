@@ -530,6 +530,101 @@ const migrations: Migration[] = [
         ON CONFLICT(key) DO NOTHING
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 015
+  {
+    name: '015_create_memory_system_tables',
+    up: (db) => {
+      // Memory metadata and lifecycle tracking
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_memory_metadata (
+          id TEXT PRIMARY KEY,
+          layer TEXT NOT NULL CHECK(layer IN ('l0', 'l1', 'l2')),
+          scope_id TEXT,
+          category TEXT NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT,
+          content_key TEXT NOT NULL,
+          priority INTEGER DEFAULT 0,
+          access_count INTEGER DEFAULT 0,
+          last_accessed_at INTEGER,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch()),
+          expires_at INTEGER,
+          archived_at INTEGER,
+          tags TEXT,
+          meta_json TEXT DEFAULT '{}'
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_layer_scope ON agent_memory_metadata(layer, scope_id, archived_at)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_category_priority ON agent_memory_metadata(category, priority DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_expires ON agent_memory_metadata(expires_at) WHERE expires_at IS NOT NULL')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access ON agent_memory_metadata(last_accessed_at DESC)')
+
+      // Dynamic trigger definitions
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_triggers (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL,
+          module TEXT,
+          pattern TEXT NOT NULL,
+          pattern_flags TEXT DEFAULT 'i',
+          blocking INTEGER DEFAULT 0,
+          priority INTEGER DEFAULT 0,
+          enabled INTEGER DEFAULT 1,
+          hit_count INTEGER DEFAULT 0,
+          last_hit_at INTEGER,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch()),
+          meta_json TEXT DEFAULT '{}'
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_triggers_enabled_priority ON agent_triggers(enabled, priority DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_triggers_module ON agent_triggers(module)')
+
+      // Trigger-to-memory associations
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_trigger_refs (
+          trigger_id TEXT NOT NULL,
+          memory_id TEXT NOT NULL,
+          priority INTEGER DEFAULT 0,
+          created_at INTEGER DEFAULT (unixepoch()),
+          PRIMARY KEY (trigger_id, memory_id),
+          FOREIGN KEY (trigger_id) REFERENCES agent_triggers(id) ON DELETE CASCADE,
+          FOREIGN KEY (memory_id) REFERENCES agent_memory_metadata(id) ON DELETE CASCADE
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_trigger_refs_priority ON agent_trigger_refs(trigger_id, priority DESC)')
+
+      // Memory access log for analytics
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_memory_access_log (
+          id TEXT PRIMARY KEY,
+          memory_id TEXT NOT NULL,
+          scope_id TEXT,
+          accessed_at INTEGER DEFAULT (unixepoch()),
+          context_chars INTEGER,
+          was_useful INTEGER,
+          FOREIGN KEY (memory_id) REFERENCES agent_memory_metadata(id) ON DELETE CASCADE
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access_log_time ON agent_memory_access_log(accessed_at DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access_log_memory ON agent_memory_access_log(memory_id, accessed_at DESC)')
+
+      // Seed with existing hardcoded triggers
+      db.exec(`
+        INSERT INTO agent_triggers (id, label, module, pattern, blocking, priority) VALUES
+          ('feishu-doc', '飞书文档操作', 'feishu', '(飞书).*(文档|doc)|创建飞书文档|改写飞书文档|写入飞书', 1, 0),
+          ('feishu-image', '飞书插图操作', 'feishu', '(飞书).*(图片|插图|上传)', 1, 0),
+          ('browser-upload', '浏览器上传流程', 'browser', '(上传|发送|提交|浏览器|网页)', 0, 0),
+          ('document-write', '文档改写操作', 'document', '(文档|文件).*(写|改|保存|格式)', 0, 0),
+          ('video-render', '视频渲染操作', 'video', '(视频|剪辑|渲染|导出)', 0, 0),
+          ('rss-analysis', 'RSS 分析操作', 'rss', '(rss|订阅|抓取|分析)', 0, 0),
+          ('calendar-write', '日程写入操作', 'calendar', '(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程', 1, 0)
+        ON CONFLICT(id) DO NOTHING
+      `)
+    }
   }
 ]
 

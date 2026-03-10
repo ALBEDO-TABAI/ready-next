@@ -44,6 +44,19 @@ export default function WorkbenchProjectTabs({
   renderAfterTabs,
   rightActions,
 }: WorkbenchProjectTabsProps) {
+  const activeTabHeight = WORKBENCH_TAB_ROW_HEIGHT - 1
+  const inactiveTabHeight = Math.max(28, WORKBENCH_TAB_ROW_HEIGHT - 6)
+  const inlineNewTabButton = onNewTab ? (
+    <button
+      onClick={() => void onNewTab()}
+      className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
+      style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 6 }}
+      title="新建"
+    >
+      <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
+    </button>
+  ) : null
+
   return (
     <div
       className="glass-surface-panel flex items-center justify-between flex-shrink-0"
@@ -79,7 +92,7 @@ export default function WorkbenchProjectTabs({
                   className="group relative flex min-w-0 flex-1 cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
                   style={{
                     gap: 6,
-                    height: isActive ? 33 : 28,
+                    height: isActive ? activeTabHeight : inactiveTabHeight,
                     background: isActive || isSecondaryActive ? 'var(--surface-card-bg)' : 'transparent',
                     color: isActive || isSecondaryActive ? 'var(--text-title)' : 'var(--text-gray)',
                     borderBottom: isActive
@@ -122,25 +135,16 @@ export default function WorkbenchProjectTabs({
           })}
         </MorphTabStrip>
 
+        {inlineNewTabButton}
         {renderAfterTabs}
       </div>
 
-      {rightActions || onNewTab ? (
+      {rightActions ? (
         <div
           className="flex items-center flex-shrink-0"
           style={{ gap: 8, paddingLeft: 8, paddingRight: WORKBENCH_HEADER_EDGE_X }}
         >
           {rightActions}
-          {onNewTab ? (
-            <button
-              onClick={() => void onNewTab()}
-              className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-              style={{ width: 26, height: 26, borderRadius: 6 }}
-              title="新建"
-            >
-              <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
-            </button>
-          ) : null}
         </div>
       ) : null}
     </div>

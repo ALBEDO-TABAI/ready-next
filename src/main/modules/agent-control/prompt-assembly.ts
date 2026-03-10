@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { AgentRepository } from '../repositories/agent-repository'
+import { MemoryRepository } from '../repositories/memory-repository'
 import type { ConversationScope } from './types'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2'
@@ -44,6 +45,8 @@ export interface PromptAssemblyDeps {
   getMemoryRoot?: () => string
   getScopeMessages?: (scopeId: string) => Promise<Array<{ role: string; content: string }>> | Array<{ role: string; content: string }>
   now?: () => Date
+  memoryRepository?: MemoryRepository
+  enableDatabaseMemory?: boolean
 }
 
 interface TriggerDefinition {
@@ -253,6 +256,11 @@ function applyBudget(parts: {
 
 function defaultGetMemoryRoot(): string {
   const root = join(process.cwd(), '.ready-agent-memory')
+  ensureMemoryRootStructure(root)
+  return root
+}
+
+function ensureMemoryRootStructure(root: string): string {
   mkdirSync(join(root, 'docs'), { recursive: true })
   mkdirSync(join(root, 'memory'), { recursive: true })
   return root
@@ -274,7 +282,7 @@ export class PromptAssemblyService {
   }
 
   private getMemoryRoot(): string {
-    return this.deps.getMemoryRoot?.() ?? defaultGetMemoryRoot()
+    return ensureMemoryRootStructure(this.deps.getMemoryRoot?.() ?? defaultGetMemoryRoot())
   }
 
   private async getScopeMessages(scopeId: string): Promise<Array<{ role: string; content: string }>> {
@@ -284,12 +292,21 @@ export class PromptAssemblyService {
     return await defaultGetScopeMessages(scopeId)
   }
 
-  private readMemoryFile(path: string): string {
-    const fullPath = join(this.getMemoryRoot(), path)
+  private readMemoryFile(path: string, root = this.getMemoryRoot()): string {
+    const fullPath = join(root, path)
     if (existsSync(fullPath)) {
       return readFileSync(fullPath, 'utf8')
     }
     return DEFAULT_FILES[path] || ''
+  }
+
+  private ensureMemoryRefFile(path: string, root = this.getMemoryRoot()): void {
+    if (!path.startsWith('memory/')) return
+    try {
+      appendFileSync(join(root, path), '', 'utf8')
+    } catch {
+      // Keep prompt assembly resilient even if the memory ref file cannot be created.
+    }
   }
 
   private makeMemoryRef(
@@ -328,6 +345,7 @@ export class PromptAssemblyService {
   }
 
   private async loadL1(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
+    // Load from file-based system (backward compatibility)
     const messages = (await this.getScopeMessages(scope.id)).slice(-6)
     const transcript = messages
       .map((item) => `${item.role === 'user' ? '用户' : item.role === 'assistant' ? '助手' : '系统'}: ${String(item.content || '').slice(0, 240)}`)
@@ -335,29 +353,135 @@ export class PromptAssemblyService {
     const now = this.now()
     const day = now.toISOString().slice(0, 10)
     const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
+    const memoryRoot = this.getMemoryRoot()
     const dayFiles = [`memory/${day}.md`, `memory/${yesterday}.md`]
+    dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
     const dailySections = dayFiles
       .map((path) => {
-        const content = this.readMemoryFile(path).trim()
+        const content = this.readMemoryFile(path, memoryRoot).trim()
         return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
       })
       .filter(Boolean)
       .join('\n\n')
-    const text = clip([
+
+    const sections: string[] = [
       formatMemorySection('当前 Scope', [`- 标题: ${scope.title}`, `- 来源: ${scope.sourceKind}`, `- 线程: ${scope.threadKey}`].join('\n')),
       transcript ? formatMemorySection('最近会话摘要', transcript) : '',
       dailySections,
-    ].filter(Boolean).join('\n\n'), MAX_L1_CHARS)
+    ].filter(Boolean)
 
-    const refs = [
+    const refs: PromptMemoryRef[] = [
       this.makeMemoryRef('l1', 'Scope 会话摘要', null, `Scope ${scope.title} 的最近会话摘要`),
       ...dayFiles.map((path) => this.makeMemoryRef('l1', path.split('/').pop() || path, path, '当日操作日志')),
     ]
+
+    // Load from database if enabled
+    if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
+      try {
+        // Load scope-specific memories
+        const scopeMemories = await this.deps.memoryRepository.queryMemories({
+          layer: 'l1',
+          scopeId: scope.id,
+          includeArchived: false,
+          limit: 5,
+        })
+
+        for (const memory of scopeMemories) {
+          const content = await this.loadMemoryContent(memory.contentKey)
+          if (content) {
+            sections.push(formatMemorySection(memory.title, content))
+            refs.push(this.makeMemoryRef('l1', memory.title, null, memory.summary || memory.title))
+            await this.deps.memoryRepository.incrementAccessCount(memory.id)
+          }
+        }
+
+        // Load global learnings (cross-scope)
+        const globalLearnings = await this.deps.memoryRepository.queryMemories({
+          layer: 'l1',
+          scopeId: null,
+          category: 'learning',
+          includeArchived: false,
+          limit: 3,
+        })
+
+        for (const learning of globalLearnings) {
+          const content = await this.loadMemoryContent(learning.contentKey)
+          if (content) {
+            sections.push(formatMemorySection(`[全局] ${learning.title}`, content))
+            refs.push(this.makeMemoryRef('l1', learning.title, null, learning.summary || learning.title))
+            await this.deps.memoryRepository.incrementAccessCount(learning.id)
+          }
+        }
+      } catch (error) {
+        console.error('[PromptAssembly] Failed to load database memories:', error)
+      }
+    }
+
+    const text = clip(sections.join('\n\n'), MAX_L1_CHARS)
     return { text, refs, chars: text.length }
   }
 
-  private resolveTriggers(text: string): Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> {
+  private async loadMemoryContent(contentKey: string): Promise<string | null> {
+    try {
+      // Try to load from agent_knowledge table
+      const { getDatabase } = await import('../database')
+      const dbManager = getDatabase()
+      const db = dbManager.getRawDb()
+      if (!db) return null
+      const row = db.prepare('SELECT value FROM agent_knowledge WHERE key = ?').get<{ value: string }>(contentKey)
+      return row?.value || null
+    } catch {
+      return null
+    }
+  }
+
+  private async resolveTriggers(text: string): Promise<Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }>> {
     const hits: Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> = []
+
+    // Load dynamic triggers from database if enabled
+    if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
+      try {
+        const dbTriggers = await this.deps.memoryRepository.listTriggers({ enabled: true })
+
+        for (const dbTrigger of dbTriggers) {
+          const pattern = new RegExp(dbTrigger.pattern, dbTrigger.patternFlags)
+          pattern.lastIndex = 0
+          if (!pattern.test(text)) continue
+
+          await this.deps.memoryRepository.incrementTriggerHitCount(dbTrigger.id)
+
+          const sections: string[] = []
+          const refs: PromptMemoryRef[] = []
+
+          // Load associated memories
+          const memories = await this.deps.memoryRepository.getTriggerRefs(dbTrigger.id)
+          for (const memory of memories) {
+            const content = await this.loadMemoryContent(memory.contentKey)
+            if (!content) continue
+            sections.push(formatMemorySection(memory.title, content))
+            refs.push(this.makeMemoryRef('l2', memory.title, null, memory.summary || memory.title, dbTrigger.id))
+            await this.deps.memoryRepository.incrementAccessCount(memory.id)
+          }
+
+          hits.push({
+            trigger: {
+              id: dbTrigger.id,
+              label: dbTrigger.label,
+              module: dbTrigger.module as TriggerDefinition['module'],
+              pattern,
+              blocking: dbTrigger.blocking,
+              refs: memories.map((m) => ({ path: m.contentKey, title: m.title, summary: m.summary || '' })),
+            },
+            sections,
+            refs,
+          })
+        }
+      } catch (error) {
+        console.error('[PromptAssembly] Failed to load database triggers:', error)
+      }
+    }
+
+    // Fallback to hardcoded triggers (backward compatibility)
     for (const trigger of TRIGGERS) {
       trigger.pattern.lastIndex = 0
       if (!trigger.pattern.test(text)) continue
@@ -371,6 +495,7 @@ export class PromptAssemblyService {
       }
       hits.push({ trigger, sections, refs })
     }
+
     return hits
   }
 
@@ -381,7 +506,7 @@ export class PromptAssemblyService {
     const l0 = this.loadL0()
     const l1 = await this.loadL1(params.scope)
     const userText = extractTextFromMessage(params.message)
-    const triggerMatches = this.resolveTriggers(userText)
+    const triggerMatches = await this.resolveTriggers(userText)
     const l2Sections = triggerMatches.flatMap((item) => item.sections)
     const { l1Text, l2Text, budget } = applyBudget({ l0Text: l0.text, l1Text: l1.text, l2Sections })
 
@@ -424,7 +549,8 @@ export class PromptAssemblyService {
 
   recordRunOutcome(params: { scope: ConversationScope; finalText: string; usedTools: string[]; success: boolean }): void {
     const day = this.now().toISOString().slice(0, 10)
-    const path = join(this.getMemoryRoot(), 'memory', `${day}.md`)
+    const memoryDir = join(this.getMemoryRoot(), 'memory')
+    const path = join(memoryDir, `${day}.md`)
     const lines = [
       `## ${this.now().toISOString()}`,
       `- scope: ${params.scope.title}`,
@@ -433,6 +559,11 @@ export class PromptAssemblyService {
       params.finalText.trim() ? `- summary: ${clip(params.finalText.trim(), 600).replace(/\n+/g, ' ')}` : null,
       '',
     ].filter(Boolean)
-    appendFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+    try {
+      mkdirSync(memoryDir, { recursive: true })
+      appendFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+    } catch {
+      // Keep memory writebacks non-blocking; the main run should still succeed.
+    }
   }
 }

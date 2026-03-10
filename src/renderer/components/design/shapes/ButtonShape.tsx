@@ -1,5 +1,5 @@
 import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
-import { BUTTON_DEFAULT_PROPS, type ButtonShape } from './types'
+import { BUTTON_DEFAULT_PADDING, BUTTON_DEFAULT_PROPS, type ButtonShape } from './types'
 
 export class ButtonShapeUtil extends BaseBoxShapeUtil<ButtonShape> {
   static type = 'ui-button' as const
@@ -90,6 +90,12 @@ export class ButtonShapeUtil extends BaseBoxShapeUtil<ButtonShape> {
     const resolvedCornerRadius = typeof meta.readyCornerRadius === 'number'
       ? Math.max(0, Number(meta.readyCornerRadius))
       : Math.max(0, cornerRadius)
+    const paddingH = typeof meta.readyPaddingH === 'number'
+      ? Math.max(0, Number(meta.readyPaddingH))
+      : BUTTON_DEFAULT_PADDING.horizontal
+    const paddingV = typeof meta.readyPaddingV === 'number'
+      ? Math.max(0, Number(meta.readyPaddingV))
+      : BUTTON_DEFAULT_PADDING.vertical
     const strokePaint = `color-mix(in srgb, ${strokeColor} ${strokeOpacity}%, transparent)`
     const fillMain = `color-mix(in srgb, ${fillColor} ${fillOpacity}%, transparent)`
     const fillSoft = `color-mix(in srgb, ${fillColor} ${Math.max(0, Math.round(fillOpacity * 0.62))}%, white)`
@@ -122,6 +128,7 @@ export class ButtonShapeUtil extends BaseBoxShapeUtil<ButtonShape> {
           lineHeight,
           letterSpacing,
           boxSizing: 'border-box',
+          padding: `${paddingV}px ${paddingH}px`,
           color: textColor,
           background: computedFill,
           border,

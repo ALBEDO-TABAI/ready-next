@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
@@ -116,6 +116,54 @@ describe('PromptAssemblyService', () => {
     const content = readFileSync(outcomePath, 'utf8')
     assert.match(content, /scope: 测试 Scope/)
     assert.match(content, /feishu\.doc/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('creates memory directory on demand and keeps writebacks non-blocking', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-writeback-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    service.recordRunOutcome({
+      scope: createScope(),
+      finalText: '第一次写回仍应成功。',
+      usedTools: ['design.composeSocialCover'],
+      success: true,
+    })
+
+    const outcomePath = join(root, 'memory', '2026-03-08.md')
+    const content = readFileSync(outcomePath, 'utf8')
+    assert.match(content, /design\.composeSocialCover/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('ensures custom memory roots materialize daily memory files before emitting refs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-custom-root-'))
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '帮我继续整理今天的设计思路',
+    })
+
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-07.md'))
+    assert.equal(existsSync(join(root, 'docs')), true)
+    assert.equal(existsSync(join(root, 'memory')), true)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), true)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-07.md')), true)
 
     rmSync(root, { recursive: true, force: true })
   })

@@ -86,6 +86,17 @@ const agentAPI = {
     ipcRenderer.on('agent:toolAction', handler)
     return () => { ipcRenderer.removeListener('agent:toolAction', handler) }
   },
+  onToolActionRequest: (callback: (data: { requestId: string; agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
+    const handler = (_: unknown, data: { requestId: string; agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
+    ipcRenderer.on('agent:toolActionRequest', handler)
+    return () => { ipcRenderer.removeListener('agent:toolActionRequest', handler) }
+  },
+  completeToolActionRequest: (payload: {
+    requestId: string
+    handled: boolean
+    payload?: Record<string, unknown>
+    error?: string
+  }) => ipcRenderer.invoke('agent:completeToolActionRequest', payload),
   onConversationEvent: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown) => callback(data)
     ipcRenderer.on('agent:conversationEvent', handler)

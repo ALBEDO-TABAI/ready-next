@@ -1,9 +1,10 @@
-export const WORKBENCH_TAB_ROW_HEIGHT = 34
+export const WORKBENCH_TAB_ROW_HEIGHT = 38
 export const WORKBENCH_TOOLBAR_ROW_HEIGHT = 38
 export const WORKBENCH_TOPBAR_HEIGHT = 40
 export const WORKBENCH_ROW_PADDING_X = 12
 export const WORKBENCH_CONTENT_RAIL_X = 16
-export const WORKBENCH_HEADER_EDGE_X = 0
+// Keep mode headers aligned with the files panel header rail ("Connected" badge edge).
+export const WORKBENCH_HEADER_EDGE_X = 14
 export const WORKBENCH_TAB_RAIL_X = WORKBENCH_HEADER_EDGE_X
 export const WORKBENCH_TOPBAR_PADDING_LEFT = 76
 export const WORKBENCH_TOPBAR_PADDING_RIGHT = 16

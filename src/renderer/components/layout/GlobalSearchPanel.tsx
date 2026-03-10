@@ -295,7 +295,8 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
           height: GLOBAL_SEARCH_DIMENSIONS.headerHeight,
           borderColor: PANEL_COLORS.cardBorder,
           background: 'var(--surface-toolbar-bg)',
-          padding: '10px 14px',
+          padding: `0 ${GLOBAL_SEARCH_DIMENSIONS.bodyPaddingX}px`,
+          boxSizing: 'border-box',
         }}
       >
         <div className="min-w-0 flex items-center gap-[6px]">

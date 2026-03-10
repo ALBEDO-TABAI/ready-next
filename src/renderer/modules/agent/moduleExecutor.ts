@@ -15,7 +15,8 @@ async function dispatchModuleAction(
   action: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  return await requestModuleAgentAction({ module, action, args }, { timeoutMs: 4000, pollIntervalMs: 40 }) as Record<string, unknown>
+  const timeoutMs = module === 'design' ? 12000 : 4000
+  return await requestModuleAgentAction({ module, action, args }, { timeoutMs, pollIntervalMs: 40 }) as Record<string, unknown>
 }
 
 function normalizeArtifacts(
@@ -40,11 +41,19 @@ interface HandleModuleToolActionParams {
   runId: string | null
   activateWorkbenchMode: (mode: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar') => void
   upsertScopeRunState: (scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState) => void
+  getScopeRunState?: () => ScopeRunState | null
 }
 
-export async function handleModuleToolAction(params: HandleModuleToolActionParams): Promise<boolean> {
-  const { scopeId, agentName, tool, args, runId, activateWorkbenchMode, upsertScopeRunState } = params
-  if (!tool) return false
+export interface ModuleToolActionExecutionResult {
+  handled: boolean
+  payload?: Record<string, unknown>
+}
+
+export async function executeModuleToolAction(
+  params: HandleModuleToolActionParams,
+): Promise<ModuleToolActionExecutionResult> {
+  const { scopeId, agentName, tool, args, runId, activateWorkbenchMode, upsertScopeRunState, getScopeRunState } = params
+  if (!tool) return { handled: false }
 
   const pushTrace = (
     kind: ToolTraceEvent['kind'],
@@ -90,6 +99,16 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
         toolResults: 0,
         lastToolAt: null,
       },
+      designPhase: patch?.designPhase ?? previous?.designPhase ?? null,
+      designTodo: patch?.designTodo ?? previous?.designTodo ?? [],
+      designReviewSummary: patch?.designReviewSummary ?? previous?.designReviewSummary ?? null,
+      ownedNodeIds: patch?.ownedNodeIds ?? previous?.ownedNodeIds ?? [],
+      repairScope: patch?.repairScope ?? previous?.repairScope ?? null,
+      scenePlanId: patch?.scenePlanId ?? previous?.scenePlanId ?? null,
+      boardId: patch?.boardId ?? previous?.boardId ?? null,
+      styleSystem: patch?.styleSystem ?? previous?.styleSystem ?? null,
+      reviewFailures: patch?.reviewFailures ?? previous?.reviewFailures ?? [],
+      lastAcceptedScreenshot: patch?.lastAcceptedScreenshot ?? previous?.lastAcceptedScreenshot ?? null,
       error: previous?.error || null,
       ...patch,
     }))
@@ -101,13 +120,25 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
       activateWorkbenchMode(mode as 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar')
     }
     pushTrace('result', `已切换到 ${String(mode || '指定')} 模式。`)
-    return true
+    return {
+      handled: true,
+      payload: {
+        intent: 'app.switchMode',
+        summary: `已切换到 ${String(mode || '指定')} 模式。`,
+      },
+    }
   }
 
   if (tool === 'app.notify') {
     const text = typeof args.message === 'string' ? args.message : ''
     if (text) pushTrace('result', `通知：${text}`)
-    return true
+    return {
+      handled: true,
+      payload: {
+        intent: 'app.notify',
+        summary: text ? `通知：${text}` : '通知已发送。',
+      },
+    }
   }
 
   if (tool === 'document.writeFile') {
@@ -115,7 +146,14 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
     const content = typeof args.content === 'string' ? args.content : ''
     if (!path) {
       pushTrace('result', '文档工具执行失败：document.writeFile 缺少 path。', 'error')
-      return true
+      return {
+        handled: true,
+        payload: {
+          intent: 'write_document_file',
+          summary: '文档工具执行失败：document.writeFile 缺少 path。',
+          status: 'failed',
+        },
+      }
     }
     pushTrace('call', `写入文档：${path}`)
     const summaries = [
@@ -132,7 +170,13 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
       artifactRefs: artifact ? [artifact] : [],
       lastEvidenceAt: new Date().toISOString(),
     })
-    return true
+    return {
+      handled: true,
+      payload: {
+        intent: 'write_document_file',
+        summary: summaries.join('；'),
+      },
+    }
   }
 
   const docAction = mapToolActionToDocAction(tool, args)
@@ -145,7 +189,13 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
       executionKind: 'deterministic',
       lastEvidenceAt: new Date().toISOString(),
     })
-    return true
+    return {
+      handled: true,
+      payload: {
+        intent: tool,
+        summary,
+      },
+    }
   }
 
   if (tool.startsWith('design.') || tool.startsWith('video.') || tool.startsWith('rss.') || tool.startsWith('calendar.')) {
@@ -158,7 +208,83 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
           : 'calendar'
     activateWorkbenchMode(module)
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module, executionKind: toExecutionKind(tool) })
-    const payload = await dispatchModuleAction(module, tool, args)
+    const progress = module === 'design'
+      ? (event: Record<string, unknown>) => {
+        const kind = event.kind === 'call' ? 'call' : 'result'
+        const text = typeof event.text === 'string' ? event.text : ''
+        if (!text) return
+        pushTrace(kind, text, 'tool_running', {
+          module,
+          executionKind: toExecutionKind(tool),
+          designPhase: typeof event.designPhase === 'string' ? event.designPhase as ScopeRunState['designPhase'] : undefined,
+          designTodo: Array.isArray(event.designTodo) ? event.designTodo as ScopeRunState['designTodo'] : undefined,
+          designReviewSummary: typeof event.designReviewSummary === 'string' ? event.designReviewSummary : undefined,
+          ownedNodeIds: Array.isArray(event.ownedNodeIds) ? event.ownedNodeIds as string[] : undefined,
+          repairScope: typeof event.repairScope === 'string' ? event.repairScope as ScopeRunState['repairScope'] : undefined,
+        })
+      }
+      : undefined
+    const currentScopeRunState = getScopeRunState?.()
+    const designContinuationArgs = module === 'design'
+      ? {
+        __currentScenePlanId: currentScopeRunState?.scenePlanId ?? null,
+        __currentBoardId: currentScopeRunState?.boardId ?? null,
+        __currentOwnedNodeIds: currentScopeRunState?.ownedNodeIds ?? [],
+        __currentStyleSystem: currentScopeRunState?.styleSystem ?? null,
+        __currentReviewFailures: currentScopeRunState?.reviewFailures ?? [],
+        __currentLastAcceptedScreenshot: currentScopeRunState?.lastAcceptedScreenshot ?? null,
+        __currentRepairScope: currentScopeRunState?.repairScope ?? null,
+        __currentDesignReviewSummary: currentScopeRunState?.designReviewSummary ?? null,
+      }
+      : {}
+    let payload: Record<string, unknown>
+    try {
+      payload = await dispatchModuleAction(module, tool, {
+        ...args,
+        ...designContinuationArgs,
+        __scopeRunId: runId,
+        __scopeId: scopeId,
+        ...(progress ? { __onProgress: progress } : {}),
+        ...(module === 'design'
+          ? { __shouldCancel: () => getScopeRunState?.()?.phase === 'cancelled' }
+          : {}),
+      })
+    } catch (error) {
+      if (module === 'design' && error instanceof Error && error.name === 'AbortError') {
+        pushTrace('result', '已停止当前设计执行。', 'cancelled', {
+          module,
+          intent: tool,
+          executionKind: toExecutionKind(tool),
+          blockedReason: '用户已停止',
+        })
+        return {
+          handled: true,
+          payload: {
+            intent: tool,
+            status: 'cancelled',
+            summary: '已停止当前设计执行。',
+          },
+        }
+      }
+      throw error
+    }
+    if (Array.isArray(payload.toolEvents) && payload.streamedToolEvents !== true) {
+      for (const event of payload.toolEvents) {
+        if (!event || typeof event !== 'object') continue
+        const kind = event.kind === 'call' ? 'call' : 'result'
+        const text = typeof event.text === 'string' ? event.text : ''
+        if (!text) continue
+        pushTrace(kind, text, 'tool_running', {
+          module,
+          executionKind: toExecutionKind(tool),
+          designPhase: typeof event.designPhase === 'string' ? event.designPhase as ScopeRunState['designPhase'] : undefined,
+          designTodo: Array.isArray(payload.designTodo) ? payload.designTodo as ScopeRunState['designTodo'] : undefined,
+          designReviewSummary: typeof payload.designReviewSummary === 'string' ? payload.designReviewSummary : undefined,
+          ownedNodeIds: Array.isArray(payload.ownedNodeIds) ? payload.ownedNodeIds as string[] : undefined,
+          repairScope: typeof payload.repairScope === 'string' ? payload.repairScope as ScopeRunState['repairScope'] : undefined,
+        })
+      }
+    }
     const artifacts = normalizeArtifacts(payload, module, runId)
     pushTrace('result', String(payload.summary || `${tool} 已完成`), 'tool_running', {
       module,
@@ -168,9 +294,27 @@ export async function handleModuleToolAction(params: HandleModuleToolActionParam
       artifactRefs: artifacts,
       ownerResourceId: typeof payload.ownerResourceId === 'string' ? payload.ownerResourceId : null,
       lastEvidenceAt: new Date().toISOString(),
+      designPhase: typeof payload.designPhase === 'string' ? payload.designPhase as ScopeRunState['designPhase'] : undefined,
+      designTodo: Array.isArray(payload.designTodo) ? payload.designTodo as ScopeRunState['designTodo'] : undefined,
+      designReviewSummary: typeof payload.designReviewSummary === 'string' ? payload.designReviewSummary : undefined,
+      ownedNodeIds: Array.isArray(payload.ownedNodeIds) ? payload.ownedNodeIds as string[] : undefined,
+      repairScope: typeof payload.repairScope === 'string' ? payload.repairScope as ScopeRunState['repairScope'] : undefined,
+      scenePlanId: typeof payload.scenePlanId === 'string' ? payload.scenePlanId : undefined,
+      boardId: typeof payload.boardId === 'string' ? payload.boardId : undefined,
+      styleSystem: payload.styleSystem && typeof payload.styleSystem === 'object' ? payload.styleSystem as ScopeRunState['styleSystem'] : undefined,
+      reviewFailures: Array.isArray(payload.reviewFailures) ? payload.reviewFailures as string[] : undefined,
+      lastAcceptedScreenshot: typeof payload.lastAcceptedScreenshot === 'string' ? payload.lastAcceptedScreenshot : undefined,
     })
-    return true
+    return {
+      handled: true,
+      payload,
+    }
   }
 
-  return false
+  return { handled: false }
+}
+
+export async function handleModuleToolAction(params: HandleModuleToolActionParams): Promise<boolean> {
+  const result = await executeModuleToolAction(params)
+  return result.handled
 }

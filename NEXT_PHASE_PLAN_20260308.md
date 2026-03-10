@@ -1,46 +1,45 @@
 # Ready Next Phase Plan - 2026-03-08
 
-## Current baseline after integration
-1. Core agent/runtime splitting is landed.
-2. Browser main-process services and renderer shell splitting are landed.
-3. Repository separation is landed enough to stop the old `database.ts` import warning and direct-coupling pattern.
-4. Module handlers for design, video, RSS, and calendar are extracted from page components.
-5. RSS runtime, diagnostics, benchmark, and browser-backed acquisition baseline are landed.
+## 当前执行前提
+1. agent/runtime 拆分已落地。
+2. browser main-process service 化与 renderer shell 拆分已落地。
+3. repository 基线已落地，并清掉了旧 `database.ts` 告警。
+4. design/video/rss/calendar 的 module handler 已从页面组件中抽离。
+5. RSS runtime、diagnostics、benchmark、browser-backed acquisition 基线已落地。
 
-## Immediate next work
-1. Finish RSS source acquisition on the current stack.
-- Weibo: keep the current browser-backed path stable under Chromium/session conditions.
-- Xiaohongshu: keep app-browser acquisition as the source of truth, treat the logged-in Ready browser session as the only supported auth path, and finish end-to-end verification now that selected-source refresh no longer diverges between local page state and session state.
-- Douyin: keep app-browser acquisition as the source of truth and verify the real in-app refresh loop now that the account-post-area extractor is live-validated.
+## 接力执行顺序
+1. RSS 三条源收尾。
+- Weibo：把 Chromium/session 默认恢复路径做稳。
+- Xiaohongshu：继续以 app browser acquisition 为主线，完成应用内真实刷新链签收。
+- Douyin：继续以 app browser acquisition 为主线，完成账号作品区 extractor 与 UI 刷新结果的一致性签收。
 
-2. Finish the shared workbench visual baseline.
-- Strictly align the top three workbench rows.
-- Keep the first row mode strip compact.
-- Keep the second-row tab rail and third-row toolbar rail locked to the same visible content boundary instead of widening the first row.
-- Unify tabs for browser/document/design/video against the browser baseline.
-- Keep document and design on dedicated toolbar rows instead of tab-strip action piles, then finish the remaining diagnostics-row alignment.
-- Continue removing overlay/stacking edge cases.
+2. 工作台顶部三行与 tabs 视觉基线收口。
+- 严格对齐用户标出的左右边界。
+- 第一行保持紧凑，不再额外放宽。
+- 第二行 tab rail 与第三行 toolbar rail 必须在 browser/document/design/calendar 下都共线。
+- tabs 视觉继续以 browser baseline 为准。
 
-3. Finish the highest-frequency design inspector gaps.
-- radius
-- font size
-- font weight
-- line height
-- alignment
-- basic layout controls across common shapes
+3. Design inspector 高频能力补齐。
+- 圆角
+- 字号
+- 字重
+- 行高
+- 对齐
+- 常用版式与基础布局控制
 
-4. Continue shrinking the remaining browser orchestration layer.
-- keep promoting browser diagnostics toward a proper lab entry
-- keep reducing orchestration hidden inside the remaining controller surface
+4. Browser orchestration 与 diagnostics lab。
+- 继续收紧 browser controller 剩余 orchestration。
+- 把当前 diagnostics panel 逐步提升为真正 lab 入口。
 
-## Mainline work after the above
-1. `PromptAssemblyService` with `L0/L1/L2` memory layering and trigger runtime.
-2. Feishu capability replacement path.
-3. Full diagnostics/lab coverage across browser/document/design/video/rss/calendar.
-4. Deeper `Remotion schema-first` completion for video.
+5. `PromptAssemblyService + L0/L1/L2 memory`。
+- 这是下一条尚未启动的主线，不再和前面的 UI/RSS 收尾混做。
 
-## Defaults and constraints
-- Keep `lets-go-rss / native / RSSHub` as the main RSS stack.
-- Only consider Scrapling again after current-stack fixes are benchmarked.
-- Prefer the app's own browser controller/session for browser-backed acquisition.
-- Do not reintroduce parallel browser runtimes for RSS unless a later benchmark proves current architecture cannot be made stable.
+6. `Feishu capability replacement`。
+- 等 memory 路线起稳后再接入。
+
+## 默认约束
+- RSS 主链继续保持 `lets-go-rss / native / RSSHub`。
+- Scrapling 仍然只是候选 fallback，不是默认主链。
+- `Weibo / Xiaohongshu / Douyin` 的 browser-backed acquisition 继续优先复用应用内 browser controller/session。
+- 不要重新引入外部 cookie 方案作为小红书主路径。
+- 不要回头重复做已经完成的 runtime/repository/browser-service 重构。

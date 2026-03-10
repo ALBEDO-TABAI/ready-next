@@ -303,6 +303,13 @@ interface ElectronAgentAPI {
   onStatusChange: (callback: (data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => void) => () => void
   onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => void) => () => void
   onToolAction: (callback: (data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => () => void
+  onToolActionRequest: (callback: (data: { requestId: string; agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => () => void
+  completeToolActionRequest: (payload: {
+    requestId: string
+    handled: boolean
+    payload?: Record<string, unknown>
+    error?: string
+  }) => Promise<IPCResponse<{ acknowledged: boolean }>>
   onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
   onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
 }

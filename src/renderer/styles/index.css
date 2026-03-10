@@ -20,6 +20,15 @@
   --text-light: #999999;
   --text-placeholder: #AAAAAA;
 
+  /* UI Optimization: Unified panel color (light beige) */
+  --panel-unified-bg: #F6F5F1;
+
+  /* UI Optimization: Subtle vertical borders */
+  --border-vertical: rgba(232, 229, 222, 0.4);
+
+  /* UI Optimization: Hide horizontal borders */
+  --border-horizontal: transparent;
+
   /* Semantic colors */
   --color-blue: #5B8DEF;
   --color-blue-light: rgba(91, 141, 239, 0.1);
@@ -50,9 +59,9 @@
   --bg-code: rgba(0,0,0,0.06);
 
   /* Surface tokens */
-  --surface-panel-bg: var(--bg-panel);
+  --surface-panel-bg: var(--panel-unified-bg);
   --surface-card-bg: var(--bg-primary);
-  --surface-toolbar-bg: var(--bg-toolbar);
+  --surface-toolbar-bg: var(--panel-unified-bg);
   --surface-floating-bg: var(--bg-primary);
   --surface-border: var(--border-default);
   --surface-shadow: var(--shadow-sm);
@@ -60,10 +69,10 @@
   --surface-saturate: 100%;
   --glass-highlight: rgba(255,255,255,0);
   --app-bg-overlay-opacity: 0;
-  --lg-material-panel: var(--surface-panel-bg);
-  --lg-material-card: var(--surface-card-bg);
-  --lg-material-toolbar: var(--surface-toolbar-bg);
-  --lg-material-floating: var(--surface-floating-bg);
+  --lg-material-panel: var(--panel-unified-bg);
+  --lg-material-card: var(--panel-unified-bg);
+  --lg-material-toolbar: var(--panel-unified-bg);
+  --lg-material-floating: var(--bg-primary);
   --lg-blur-soft: 0px;
   --lg-blur-medium: 0px;
   --lg-blur-strong: 0px;
@@ -73,8 +82,8 @@
   --lg-shadow-contact: var(--shadow-sm);
   --lg-specular-top: rgba(255, 255, 255, 0);
   --lg-specular-angle: rgba(255, 255, 255, 0);
-  --lg-content-bg: var(--bg-content);
-  --lg-content-card-bg: var(--bg-primary);
+  --lg-content-bg: var(--panel-unified-bg);
+  --lg-content-card-bg: var(--panel-unified-bg);
   --lg-content-border: var(--border-default);
   --lg-content-shadow: none;
 
@@ -128,6 +137,15 @@ html[data-theme='dark'] {
   --text-light: #555555;
   --text-placeholder: #555555;
 
+  /* UI Optimization: Dark mode panel color */
+  --panel-unified-bg: #202124;
+
+  /* UI Optimization: Subtle vertical borders in dark mode */
+  --border-vertical: rgba(51, 53, 56, 0.4);
+
+  /* UI Optimization: Hide horizontal borders */
+  --border-horizontal: transparent;
+
   --color-blue: #6B9BFF;
   --color-blue-light: rgba(107, 155, 255, 0.15);
   --color-green: #3EE8A8;
@@ -157,9 +175,9 @@ html[data-theme='dark'] {
   --bg-code: rgba(255,255,255,0.06);
 
   /* Surface tokens dark */
-  --surface-panel-bg: var(--bg-panel);
+  --surface-panel-bg: var(--panel-unified-bg);
   --surface-card-bg: var(--bg-primary);
-  --surface-toolbar-bg: var(--bg-toolbar);
+  --surface-toolbar-bg: var(--panel-unified-bg);
   --surface-floating-bg: var(--bg-primary);
   --surface-border: var(--border-default);
   --surface-shadow: var(--shadow-sm);
@@ -167,10 +185,10 @@ html[data-theme='dark'] {
   --surface-saturate: 100%;
   --glass-highlight: rgba(255,255,255,0);
   --app-bg-overlay-opacity: 0;
-  --lg-material-panel: var(--surface-panel-bg);
-  --lg-material-card: var(--surface-card-bg);
-  --lg-material-toolbar: var(--surface-toolbar-bg);
-  --lg-material-floating: var(--surface-floating-bg);
+  --lg-material-panel: var(--panel-unified-bg);
+  --lg-material-card: var(--panel-unified-bg);
+  --lg-material-toolbar: var(--panel-unified-bg);
+  --lg-material-floating: var(--bg-primary);
   --lg-blur-soft: 0px;
   --lg-blur-medium: 0px;
   --lg-blur-strong: 0px;
@@ -180,8 +198,8 @@ html[data-theme='dark'] {
   --lg-shadow-contact: var(--shadow-sm);
   --lg-specular-top: rgba(255, 255, 255, 0);
   --lg-specular-angle: rgba(255, 255, 255, 0);
-  --lg-content-bg: var(--bg-content);
-  --lg-content-card-bg: var(--bg-primary);
+  --lg-content-bg: var(--panel-unified-bg);
+  --lg-content-card-bg: var(--panel-unified-bg);
   --lg-content-border: var(--border-default);
   --lg-content-shadow: none;
 
@@ -867,4 +885,114 @@ html[data-theme='dark'] .ready-design-tool-button:hover {
   border-color: #0d99ff !important;
   box-shadow: 0 0 0 1px rgba(13, 153, 255, 0.18);
   outline: none;
+}
+
+/* Hide TLDraw license watermark for non-commercial project */
+/* Using multiple selectors and !important to ensure watermark is hidden */
+.tlui-debug-panel,
+.tlui-debug-panel__current-state,
+a[href*="tldraw.com"],
+a[href*="license"],
+[data-testid="tl-watermark-unlicensed"],
+[data-testid="tl-watermark-licensed"],
+[data-unlicensed="true"],
+.tl-watermark_SEE-LICENSE,
+.tl-watermark_SEE-LICENSE *,
+div[class*="tl-watermark"],
+div[class*="tl-watermark"] * {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+}
+
+/* Additional z-index override to ensure watermark stays hidden */
+.tl-container .tl-watermark_SEE-LICENSE {
+  z-index: -9999 !important;
+}
+
+/* ============================================
+   UI OPTIMIZATION: Clean Visual Hierarchy
+   ============================================ */
+
+/* Hide all horizontal borders (border-bottom) */
+[style*="border-bottom"],
+[class*="border-bottom"],
+.workbench-toolbar-row,
+.glass-surface-panel,
+.workbench-panel,
+.drag-region {
+  border-bottom-color: var(--border-horizontal) !important;
+}
+
+/* Make vertical borders subtle (border-right, border-left) */
+[style*="border-right"],
+[style*="border-left"],
+[class*="border-right"],
+[class*="border-left"] {
+  border-right-color: var(--border-vertical) !important;
+  border-left-color: var(--border-vertical) !important;
+}
+
+.resize-handle::before {
+  background: var(--border-vertical) !important;
+}
+
+/* Unified panel background (light beige for all panels except main content) */
+.glass-surface-panel,
+.glass-surface-card,
+.content-surface-panel,
+.content-surface-card,
+[class*="panel"]:not([class*="content"]),
+[class*="sidebar"],
+[class*="side-panel"],
+.drag-region,
+[data-chat-panel-root="true"],
+[data-side-panel="true"] {
+  background: var(--panel-unified-bg) !important;
+}
+
+/* Override surface tokens for unified look */
+:root {
+  --surface-toolbar-bg: var(--panel-unified-bg);
+  --surface-panel-bg: var(--panel-unified-bg);
+  --lg-content-bg: var(--panel-unified-bg);
+  --lg-content-card-bg: var(--panel-unified-bg);
+}
+
+/* Specific panel overrides */
+.content-surface-panel,
+.content-surface-card {
+  background: var(--panel-unified-bg) !important;
+}
+
+/* Keep main content area white */
+.workbench-content,
+.workbench-mode-root,
+[class*="content-area"],
+[class*="editor-area"],
+.tl-container {
+  background: var(--bg-primary) !important;
+}
+
+/* Specific component overrides */
+.browser-address-bar,
+.design-toolbar,
+.editor-toolbar,
+.playback-controls {
+  border-bottom-color: var(--border-horizontal) !important;
+}
+
+/* Tab bars - remove bottom border */
+[class*="tab-bar"],
+[class*="tabs-bar"],
+[style*="borderBottom"] {
+  border-bottom-color: var(--border-horizontal) !important;
+  background: var(--panel-unified-bg) !important;
 }

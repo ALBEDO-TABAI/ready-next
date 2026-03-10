@@ -434,7 +434,8 @@ export default function SkillsCenterPanel() {
         style={{
           borderColor: PANEL_COLORS.border,
           height: SKILLS_PANEL_DIMENSIONS.headerHeight,
-          padding: '10px 14px',
+          padding: `0 ${SKILLS_PANEL_DIMENSIONS.sectionPaddingX}px`,
+          boxSizing: 'border-box',
           background: 'var(--surface-toolbar-bg)',
         }}
       >

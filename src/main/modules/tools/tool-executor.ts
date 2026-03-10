@@ -16,6 +16,7 @@ import { executeVideoTool } from './video-tools'
 export interface ToolContext {
   browserController?: BrowserController | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
+  requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
   sessionId?: string
 }
@@ -37,7 +38,10 @@ export async function executeToolCall(
   }
 
   if (toolName.startsWith('design_')) {
-    return executeDesignTool(toolName, args, { emitToolAction: context.emitToolAction })
+    return executeDesignTool(toolName, args, {
+      emitToolAction: context.emitToolAction,
+      requestToolAction: context.requestModuleToolAction,
+    })
   }
 
   if (toolName.startsWith('video_')) {

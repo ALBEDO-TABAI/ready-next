@@ -1,5 +1,5 @@
 import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
-import { INPUT_DEFAULT_PROPS, type InputShape } from './types'
+import { INPUT_DEFAULT_PADDING, INPUT_DEFAULT_PROPS, type InputShape } from './types'
 
 export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
   static type = 'ui-input' as const
@@ -58,6 +58,12 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
     const textAlign = meta.readyTextAlign === 'middle' ? 'center' : meta.readyTextAlign === 'end' ? 'right' : 'left'
     const textColor = typeof meta.readyTextColor === 'string' ? String(meta.readyTextColor) : 'var(--text-title)'
     const clipContent = meta.readyClipContent === true
+    const paddingH = typeof meta.readyPaddingH === 'number'
+      ? Math.max(0, Number(meta.readyPaddingH))
+      : INPUT_DEFAULT_PADDING.horizontal
+    const paddingV = typeof meta.readyPaddingV === 'number'
+      ? Math.max(0, Number(meta.readyPaddingV))
+      : INPUT_DEFAULT_PADDING.vertical
     const strokePaint = `color-mix(in srgb, ${strokeColor} ${strokeOpacity}%, transparent)`
     const border = !strokeVisible || strokePosition === 'outside' ? 'none' : `${strokeWidth}px ${strokeDash} ${strokePaint}`
     const outsideStroke = strokeVisible && strokePosition === 'outside' && strokeWidth > 0 ? `0 0 0 ${strokeWidth}px ${strokePaint}` : ''
@@ -94,7 +100,7 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          gap: 6,
+          gap: Math.max(4, Math.round(paddingV * 0.75)),
           color: textColor,
           fontFamily: 'inherit',
           overflow: clipContent ? 'hidden' : 'visible',
@@ -106,7 +112,7 @@ export class InputShapeUtil extends BaseBoxShapeUtil<InputShape> {
             flex: 1,
             minHeight: 26,
             borderRadius: cornerRadius,
-            padding: '8px 10px',
+            padding: `${paddingV}px ${paddingH}px`,
             boxSizing: 'border-box',
             border,
             boxShadow,

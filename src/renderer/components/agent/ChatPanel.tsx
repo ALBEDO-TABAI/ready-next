@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { History, Minus, AtSign, Plus, Send, ChevronDown, Maximize2, RotateCcw, Square, Undo2, X, FileText, Image, Film, Table, Globe, Puzzle, ChevronRight, Wrench, CheckCircle2, CircleDashed, Copy, Check } from 'lucide-react'
+import { History, Minus, AtSign, Plus, Send, ChevronDown, Maximize2, RotateCcw, Square, Undo2, X, FileText, Image, Film, Table, Globe, Puzzle, Pen, ChevronRight, Wrench, CheckCircle2, CircleDashed, Copy, Check } from 'lucide-react'
 import { useAgent, initAgentListeners, ChatAttachment, AgentMessage, ConversationScope, ToolTraceEvent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings } from '../../stores/useSettings'
 import { toLocalFileUrl } from '../../utils/dragDrop'
+import { coerceDesignLayoutDigest, formatDesignLayoutDigest } from '../../../shared/design-agent'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
@@ -287,6 +288,9 @@ function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment;
   if (attachment.source === 'browser-tab') {
     return <Globe style={style} className={cls} strokeWidth={2} />
   }
+  if (attachment.source === 'design-project') {
+    return <Pen style={style} className={cls} strokeWidth={2} />
+  }
   if (attachment.source === 'skill-folder') {
     return <Puzzle style={style} className={cls} strokeWidth={2} />
   }
@@ -302,6 +306,19 @@ function getAttachmentPreviewSrc(attachment: ChatAttachment): string | null {
   if (attachment.type !== 'image') return null
   if (!attachment.path || !attachment.path.startsWith('/')) return null
   return `file://${encodeURI(attachment.path)}`
+}
+
+function formatDesignAttachmentSummary(attachment: ChatAttachment): string {
+  return [
+    '### 设计项目引用',
+    `- 项目: ${attachment.name}`,
+    attachment.path && attachment.path.startsWith('/') ? `- 文件: ${attachment.path}` : '- 文件: (未保存草稿)',
+    attachment.dirty ? '- 状态: 有未保存更改' : attachment.saveStatus ? `- 状态: ${attachment.saveStatus}` : null,
+    attachment.selectionSummary ? `- 选择状态: ${attachment.selectionSummary}` : null,
+    attachment.currentToolContext ? `- 当前工具: ${attachment.currentToolContext}` : null,
+    attachment.snapshotHash ? `- 快照哈希: ${attachment.snapshotHash}` : null,
+    ...formatDesignLayoutDigest(attachment.layoutDigest),
+  ].filter(Boolean).join('\n')
 }
 
 interface ConversationChannelOption {
@@ -485,6 +502,14 @@ export default function ChatPanel() {
 
   const handleAttachmentPreview = useCallback(async (attachment: ChatAttachment) => {
     if (!attachment.path) return
+    if (attachment.source === 'design-project') {
+      setActiveAttachmentPreview({
+        attachment,
+        mode: 'text',
+        content: formatDesignAttachmentSummary(attachment),
+      })
+      return
+    }
     if (attachment.type === 'image') {
       setActiveAttachmentPreview({ attachment, mode: 'image' })
       return
@@ -519,12 +544,12 @@ export default function ChatPanel() {
   }, [setActiveAttachmentPreview])
 
   const handleOpenAttachment = useCallback(async (attachment: ChatAttachment) => {
-    if (!attachment.path) return
+    if (!attachment.path || !attachment.path.startsWith('/')) return
     await window.electronAPI.document.openPath(attachment.path).catch(() => undefined)
   }, [])
 
   const handleRevealAttachment = useCallback(async (attachment: ChatAttachment) => {
-    if (!attachment.path) return
+    if (!attachment.path || !attachment.path.startsWith('/')) return
     await window.electronAPI.document.showInFolder(attachment.path).catch(() => undefined)
   }, [])
 
@@ -739,6 +764,10 @@ export default function ChatPanel() {
           audioClipCount?: number
           dirty?: boolean
           saveStatus?: string
+          snapshotHash?: string
+          selectionSummary?: string
+          currentToolContext?: string
+          layoutDigest?: unknown
           source?: 'system' | 'imported'
           skillId?: string
           defaultCommand?: string
@@ -817,15 +846,38 @@ export default function ChatPanel() {
             focusInputWithResize()
           })()
         } else if (data.type === 'design-project') {
-          const lines = [
-            '### 设计项目引用',
-            `- 项目: ${data.name}`,
-            data.path ? `- 文件: ${data.path}` : '- 文件: (未保存草稿)',
-            data.dirty ? '- 状态: 有未保存更改' : data.saveStatus ? `- 状态: ${data.saveStatus}` : null,
-          ].filter(Boolean)
-          const currentInput = useAgent.getState().inputValue
-          const snippet = lines.join('\n')
-          setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
+          const designData = data as typeof data & {
+            selectedElementCount?: number
+            selectionBounds?: { x: number; y: number; w: number; h: number }
+            latestReviewSummary?: string
+            repairScope?: string
+          }
+          const fallbackPath = data.path && data.path.startsWith('/')
+            ? data.path
+            : `design-project://${encodeURIComponent(data.name || 'draft')}#${encodeURIComponent(String(data.snapshotHash || Date.now()))}`
+          addAttachments([{
+            id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: data.name || '设计草稿',
+            path: fallbackPath,
+            type: 'text',
+            size: 0,
+            ext: '.tldr',
+            source: 'design-project',
+            dirty: typeof data.dirty === 'boolean' ? data.dirty : undefined,
+            saveStatus: typeof data.saveStatus === 'string' ? data.saveStatus : undefined,
+            snapshotHash: typeof data.snapshotHash === 'string' ? data.snapshotHash : undefined,
+            selectionSummary: typeof data.selectionSummary === 'string' ? data.selectionSummary : undefined,
+            selectedElementCount: typeof designData.selectedElementCount === 'number' ? designData.selectedElementCount : undefined,
+            selectionBounds: designData.selectionBounds && typeof designData.selectionBounds === 'object'
+              ? designData.selectionBounds as { x: number; y: number; w: number; h: number }
+              : undefined,
+            currentToolContext: typeof data.currentToolContext === 'string' ? data.currentToolContext : undefined,
+            layoutDigest: coerceDesignLayoutDigest(data.layoutDigest) || undefined,
+            latestReviewSummary: typeof designData.latestReviewSummary === 'string' ? designData.latestReviewSummary : undefined,
+            repairScope: designData.repairScope === 'run-owned' || designData.repairScope === 'selected'
+              ? designData.repairScope
+              : undefined,
+          }])
           focusInputWithResize()
         } else if (data.type === 'video-project') {
           const lines = [

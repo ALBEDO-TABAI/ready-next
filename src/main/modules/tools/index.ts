@@ -73,5 +73,6 @@ export { executeRSSTool }
 export { executeCalendarTool }
 export { executeSystemTool }
 export { getDocumentAnthropicTools, getDocumentOpenAITools }
+export { getDesignAnthropicTools, getDesignOpenAITools }
 export { executeToolCall } from './tool-executor'
 export type { ToolContext } from './tool-executor'

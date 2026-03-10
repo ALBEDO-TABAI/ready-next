@@ -1,6 +1,6 @@
 import { deriveScopeRunStatePatch, getActiveScopeRunState, isActiveScopePhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
-import { handleModuleToolAction } from './moduleExecutor'
+import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
 
@@ -145,6 +145,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         responseMessageId: previous?.responseMessageId || null,
         responseBuffer: nextBuffer,
         stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+        designPhase: previous?.designPhase || null,
+        designTodo: previous?.designTodo || [],
+        designReviewSummary: previous?.designReviewSummary || null,
+        ownedNodeIds: previous?.ownedNodeIds || [],
+        repairScope: previous?.repairScope || null,
         error: previous?.error || null,
       }))
     })
@@ -197,6 +202,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         responseMessageId: previous?.responseMessageId || null,
         responseBuffer: previous?.responseBuffer || '',
         stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+        designPhase: previous?.designPhase || null,
+        designTodo: previous?.designTodo || [],
+        designReviewSummary: previous?.designReviewSummary || null,
+        ownedNodeIds: previous?.ownedNodeIds || [],
+        repairScope: previous?.repairScope || null,
         error: data.error,
       }))
       void persistAssistantMessageForRun(scopeId, runState)
@@ -220,6 +230,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             runId,
             activateWorkbenchMode,
             upsertScopeRunState,
+            getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
           })
           if (!handled) return
         })
@@ -260,10 +271,104 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             responseMessageId: previous?.responseMessageId || null,
             responseBuffer: previous?.responseBuffer || '',
             stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+            designPhase: previous?.designPhase || null,
+            designTodo: previous?.designTodo || [],
+            designReviewSummary: previous?.designReviewSummary || null,
+            ownedNodeIds: previous?.ownedNodeIds || [],
+            repairScope: previous?.repairScope || null,
             error: error instanceof Error ? error.message : String(error),
           }))
         })
     })
+
+    let toolActionRequestQueue: Promise<void> = Promise.resolve()
+    const cleanupToolActionRequest = window.electronAPI.agent.onToolActionRequest
+      ? window.electronAPI.agent.onToolActionRequest((data) => {
+        toolActionRequestQueue = toolActionRequestQueue
+          .then(async () => {
+            const scopeId = resolveScopeIdForRunPayload(data)
+            if (!scopeId) {
+              await window.electronAPI.agent.completeToolActionRequest({
+                requestId: data.requestId,
+                handled: false,
+                error: 'Scope run not found for tool action request',
+              })
+              return
+            }
+
+            const agentName = typeof data.agent === 'string' && data.agent.trim() ? data.agent : store.getState().currentAgent
+            const tool = String(data.tool || '').trim()
+            const args = (data.args || {}) as Record<string, unknown>
+            const runId = typeof data.runId === 'string' ? data.runId : null
+            const result = await executeModuleToolAction({
+              scopeId,
+              agentName,
+              tool,
+              args,
+              runId,
+              activateWorkbenchMode,
+              upsertScopeRunState,
+              getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
+            })
+            await window.electronAPI.agent.completeToolActionRequest({
+              requestId: data.requestId,
+              handled: result.handled,
+              payload: result.payload,
+            })
+          })
+          .catch(async (error) => {
+            const scopeId = resolveScopeIdForRunPayload(data)
+            if (scopeId) {
+              upsertScopeRunState(scopeId, (previous) => ({
+                scopeId,
+                agent: previous?.agent || store.getState().currentAgent,
+                requestId: previous?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+                phase: 'error',
+                toolTrace: [
+                  ...(previous?.toolTrace || []),
+                  {
+                    id: `toolreqerr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    kind: 'result',
+                    text: `工具执行失败：${error instanceof Error ? error.message : String(error)}`,
+                    timestamp: new Date(),
+                  },
+                ],
+                startedAt: previous?.startedAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                latestText: previous?.latestText || null,
+                module: previous?.module || null,
+                intent: previous?.intent || null,
+                executionKind: previous?.executionKind || null,
+                jobId: previous?.jobId || null,
+                artifactRefs: previous?.artifactRefs || [],
+                memoryRefs: previous?.memoryRefs || [],
+                triggerHits: previous?.triggerHits || [],
+                contextBudget: previous?.contextBudget || null,
+                ownerResourceId: previous?.ownerResourceId || null,
+                lastEvidenceAt: previous?.lastEvidenceAt || null,
+                blockedReason: error instanceof Error ? error.message : String(error),
+                controllerId: previous?.controllerId || null,
+                ownerTabId: previous?.ownerTabId || null,
+                checkpointExpiresAt: previous?.checkpointExpiresAt || null,
+                responseMessageId: previous?.responseMessageId || null,
+                responseBuffer: previous?.responseBuffer || '',
+                stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+                designPhase: previous?.designPhase || null,
+                designTodo: previous?.designTodo || [],
+                designReviewSummary: previous?.designReviewSummary || null,
+                ownedNodeIds: previous?.ownedNodeIds || [],
+                repairScope: previous?.repairScope || null,
+                error: error instanceof Error ? error.message : String(error),
+              }))
+            }
+            await window.electronAPI.agent.completeToolActionRequest({
+              requestId: data.requestId,
+              handled: false,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
+      })
+      : () => { /* older test stubs */ }
 
     const cleanupScopeRunEvent = window.electronAPI.agent.onScopeRunEvent
       ? window.electronAPI.agent.onScopeRunEvent((event: any) => {
@@ -310,6 +415,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             responseMessageId: previous?.responseMessageId || null,
             responseBuffer: previous?.responseBuffer || '',
             stepMetrics: patch.stepMetrics ?? previous?.stepMetrics ?? { toolCalls: 0, toolResults: 0, lastToolAt: null },
+            designPhase: patch.designPhase ?? previous?.designPhase ?? null,
+            designTodo: patch.designTodo ?? previous?.designTodo ?? [],
+            designReviewSummary: patch.designReviewSummary ?? previous?.designReviewSummary ?? null,
+            ownedNodeIds: patch.ownedNodeIds ?? previous?.ownedNodeIds ?? [],
+            repairScope: patch.repairScope ?? previous?.repairScope ?? null,
             error: patch.error ?? event.error ?? previous?.error ?? null,
           }
         })
@@ -382,6 +492,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       cleanupStatus()
       cleanupError()
       cleanupToolAction()
+      cleanupToolActionRequest()
       cleanupScopeRunEvent()
       cleanupConversationEvent()
     }

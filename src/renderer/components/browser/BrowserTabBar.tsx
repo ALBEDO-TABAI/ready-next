@@ -36,6 +36,8 @@ export default function BrowserTabBar({
   onNewTab,
   onReorder,
 }: BrowserTabBarProps) {
+  const activeTabHeight = WORKBENCH_TAB_ROW_HEIGHT - 1
+  const inactiveTabHeight = Math.max(28, WORKBENCH_TAB_ROW_HEIGHT - 6)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
   const [showRightArrow, setShowRightArrow] = useState(false)
@@ -125,6 +127,8 @@ export default function BrowserTabBar({
     }
   }
 
+  const baseUtilityCount = 1
+
   return (
     <div
       className="glass-surface-panel flex items-center no-drag"
@@ -160,6 +164,12 @@ export default function BrowserTabBar({
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
+            const utilityCount =
+              baseUtilityCount +
+              (tab.owner === 'agent' ? 1 : 0) +
+              (tab.required ? 1 : 0) +
+              (tab.activity && tab.activity !== 'idle' ? 1 : 0)
+            const rightReserve = 16 + utilityCount * 18
             return (
               <MorphTabButton
                 key={tab.id}
@@ -175,7 +185,7 @@ export default function BrowserTabBar({
                 className="group relative flex min-w-0 flex-1 cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
                 style={{
                   gap: 6,
-                  height: isActive ? 33 : 28,
+                  height: isActive ? activeTabHeight : inactiveTabHeight,
                   flex: '1 1 0',
                   maxWidth: WORKBENCH_TAB_MAX_WIDTH,
                   minWidth: 0,
@@ -184,91 +194,104 @@ export default function BrowserTabBar({
                   borderLeft: isDragOver ? '2px solid var(--color-blue)' : '2px solid transparent',
                   alignSelf: 'flex-end',
                 }}
-                contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
+                contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
               >
-                {tab.loading ? (
-                  <Loader2
-                    style={{ width: 14, height: 14 }}
-                    className="text-[var(--color-blue)] animate-spin flex-shrink-0"
-                    strokeWidth={2}
-                  />
-                ) : tab.favicon ? (
-                  <img
-                    src={tab.favicon}
-                    alt=""
-                    className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
-                  />
-                ) : (
-                  <Globe
-                    style={{ width: 14, height: 14 }}
-                    className="flex-shrink-0"
-                    strokeWidth={2}
-                  />
-                )}
+                <span
+                  className="flex min-w-0 items-center justify-center gap-[6px]"
+                  style={{
+                    maxWidth: `calc(100% - ${rightReserve}px)`,
+                    marginRight: rightReserve,
+                  }}
+                >
+                  {tab.loading ? (
+                    <Loader2
+                      style={{ width: 14, height: 14 }}
+                      className="text-[var(--color-blue)] animate-spin flex-shrink-0"
+                      strokeWidth={2}
+                    />
+                  ) : tab.favicon ? (
+                    <img
+                      src={tab.favicon}
+                      alt=""
+                      className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
+                    />
+                  ) : (
+                    <Globe
+                      style={{ width: 14, height: 14 }}
+                      className="flex-shrink-0"
+                      strokeWidth={2}
+                    />
+                  )}
 
-                <span className="truncate flex-1" style={{ lineHeight: '28px' }}>
-                  {tab.title || 'New Tab'}
+                  <span className="truncate min-w-0" style={{ lineHeight: '28px' }}>
+                    {tab.title || 'New Tab'}
+                  </span>
                 </span>
 
-                {tab.owner === 'agent' && (
-                  <span
-                    className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
-                    style={{
-                      background: 'var(--color-blue-light)',
-                      color: 'var(--color-blue)',
-                    }}
-                  >
-                    Agent
-                  </span>
-                )}
-
-                {tab.required && (
-                  <Lock
-                    style={{ width: 10, height: 10 }}
-                    className="flex-shrink-0 text-[var(--text-light)]"
-                    strokeWidth={2}
-                  />
-                )}
-
-                {tab.activity && tab.activity !== 'idle' && (
-                  <span
-                    className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
-                    style={{
-                      background: tab.activity === 'attention'
-                        ? 'var(--color-orange)'
-                        : 'var(--color-blue)',
-                    }}
-                  />
-                )}
-
                 <span
-                  role="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onTabClose(tab.id)
-                  }}
-                  className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
-                  style={{ padding: 2 }}
-                  title="Close tab"
+                  className="absolute right-0 top-1/2 flex items-center gap-[4px]"
+                  style={{ transform: 'translateY(-50%)' }}
                 >
-                  <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                  {tab.owner === 'agent' && (
+                    <span
+                      className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
+                      style={{
+                        background: 'var(--color-blue-light)',
+                        color: 'var(--color-blue)',
+                      }}
+                    >
+                      Agent
+                    </span>
+                  )}
+
+                  {tab.required && (
+                    <Lock
+                      style={{ width: 10, height: 10 }}
+                      className="flex-shrink-0 text-[var(--text-light)]"
+                      strokeWidth={2}
+                    />
+                  )}
+
+                  {tab.activity && tab.activity !== 'idle' && (
+                    <span
+                      className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
+                      style={{
+                        background: tab.activity === 'attention'
+                          ? 'var(--color-orange)'
+                          : 'var(--color-blue)',
+                      }}
+                    />
+                  )}
+
+                  <span
+                    role="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onTabClose(tab.id)
+                    }}
+                    className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
+                    style={{ padding: 2 }}
+                    title="Close tab"
+                  >
+                    <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                  </span>
                 </span>
               </MorphTabButton>
             )
           })}
         </MorphTabStrip>
 
-      </div>
-
-      <div className="flex items-center flex-shrink-0" style={{ gap: 2 }}>
         <button
           onClick={onNewTab}
           className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
-          style={{ width: 26, height: 26, borderRadius: 6 }}
+          style={{ width: 26, height: 26, borderRadius: 6, alignSelf: 'center', marginLeft: 6 }}
           title="New tab"
         >
           <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
         </button>
+      </div>
+
+      <div className="flex items-center flex-shrink-0" style={{ gap: 2 }}>
 
         {/* Scroll right arrow */}
         {showRightArrow && (

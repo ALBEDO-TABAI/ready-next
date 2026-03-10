@@ -13,7 +13,7 @@ import {
   persistMessage as persistChatMessage,
   serializePersistedAttachments as serializeAttachments,
 } from '../modules/agent/messageComposer'
-import { createAgentRuntimeDriver } from '../modules/agent/runtimeDriver'
+import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import type {
   Agent,
   AgentMessage,
@@ -286,6 +286,49 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   stopStreaming: () => {
     const { currentAgent, currentScopeId } = get()
+    if (currentScopeId) {
+      set((state) => {
+        const previous = state.scopeRunStates[currentScopeId] || createEmptyScopeRunState({
+          scopeId: currentScopeId,
+          agent: state.currentAgent,
+        })
+        const nextRun: ScopeRunState = {
+          ...previous,
+          phase: 'cancelled',
+          updatedAt: new Date().toISOString(),
+          blockedReason: '用户已停止',
+          toolTrace: [
+            ...(previous.toolTrace || []),
+            {
+              id: `cancel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              kind: 'result',
+              text: '已停止当前运行。',
+              timestamp: new Date(),
+            },
+          ],
+        }
+        const nextScopeRunStates = {
+          ...state.scopeRunStates,
+          [currentScopeId]: nextRun,
+        }
+        return {
+          scopeRunStates: nextScopeRunStates,
+          streamingMessageId: null,
+          streamingRequestId: null,
+          ...syncActiveScopeRunAliases({
+            currentScopeId: state.currentScopeId,
+            scopeRunStates: nextScopeRunStates,
+          }),
+        }
+      })
+    } else {
+      set({
+        isStreaming: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+        toolTraceStatus: 'cancelled',
+      })
+    }
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.agent.kill(currentAgent, currentScopeId || undefined).catch(console.error)
     }

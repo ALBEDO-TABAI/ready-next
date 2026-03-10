@@ -307,6 +307,10 @@ export class DatabaseManager {
     }
   }
 
+  getRawDb(): DatabaseConnection | null {
+    return this.db
+  }
+
   private createTables(): void {
     if (!this.db) return
 

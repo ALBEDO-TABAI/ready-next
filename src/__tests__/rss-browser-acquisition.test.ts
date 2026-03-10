@@ -148,6 +148,53 @@ describe('RSS browser acquisition', () => {
     })
   })
 
+  it('compiles the weibo browser extraction script', () => {
+    const script = buildExtractionScriptForTest(
+      'weibo',
+      'https://weibo.com/u/6182606334',
+    )
+
+    assert.doesNotThrow(() => {
+      new vm.Script(script)
+    })
+  })
+
+  it('prefers reusable live tabs before background capture for weibo', async () => {
+    let liveCalled = 0
+    let backgroundCalled = 0
+    const controller = {
+      captureLiveTabPage: async () => {
+        liveCalled += 1
+        return {
+          title: '微博主页',
+          finalUrl: 'https://weibo.com/u/6182606334',
+          items: [
+            {
+              title: '微博内容一',
+              link: 'https://weibo.com/detail/Pabc123',
+              description: '内容一',
+            },
+          ],
+        }
+      },
+      captureBackgroundPage: async () => {
+        backgroundCalled += 1
+        return null
+      },
+    }
+
+    const result = await fetchFeedViaBrowserSession(
+      controller as any,
+      'weibo',
+      'https://weibo.com/u/6182606334',
+    )
+
+    assert.equal(liveCalled, 1)
+    assert.equal(backgroundCalled, 0)
+    assert.equal(result.items.length, 1)
+    assert.equal(result.items[0]?.link, 'https://weibo.com/detail/Pabc123')
+  })
+
   it('surfaces a useful error when the page loads but no feed-like items are found', async () => {
     const controller = {
       captureBackgroundPage: async () => ({

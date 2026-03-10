@@ -43,3 +43,4 @@ exports/
 
 # Electron
 *.asar
+build/runtime-seeds/

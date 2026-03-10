@@ -6,6 +6,7 @@ import { useTheme } from '../../stores/useTheme'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDesignSession } from '../../stores/useDesignSession'
 import { useDesignAgentAdapter } from '../../modules/design/useDesignAgentAdapter'
+import { buildDesignLayoutDigest, hashDesignSnapshot } from '../../modules/design/layout-digest'
 import ComponentPanel from '../../components/design/ComponentPanel'
 import DesignDiagnosticsPanel from '../../components/design/DesignDiagnosticsPanel'
 import DesignProjectTabsBar from '../../components/design/DesignProjectTabsBar'
@@ -54,23 +55,15 @@ function emitDesignUIEvent(eventName: string) {
   window.dispatchEvent(new CustomEvent(eventName))
 }
 
-function hashDesignSnapshot(snapshot: TLEditorSnapshot | null): string | null {
-  if (!snapshot) return null
-  const raw = JSON.stringify(snapshot)
-  let hash = 0
-  for (let i = 0; i < raw.length; i += 1) {
-    hash = ((hash << 5) - hash) + raw.charCodeAt(i)
-    hash |= 0
-  }
-  return `tldr-${Math.abs(hash).toString(36)}`
-}
-
 export default function DesignMode() {
   const editorRef = useRef<Editor | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const restoringRef = useRef(false)
   const activeFileRef = useRef<string | null>(null)
+  const lastContentHashRef = useRef<string | null>(null)
+  const lastSelectionSignatureRef = useRef<string>('')
+  const lastToolContextRef = useRef<string>('select')
   const resolvedTheme = useTheme((state) => state.resolvedTheme)
   const selectedFile = useWorkspace((state) => state.selectedFile)
   const selectWorkspaceFile = useWorkspace((state) => state.selectFile)
@@ -88,7 +81,12 @@ export default function DesignMode() {
   const lastError = useDesignSession((state) => state.lastError)
   const snapshotHash = useDesignSession((state) => state.snapshotHash)
   const selectionSummary = useDesignSession((state) => state.selectionSummary)
+  const selectedElementCount = useDesignSession((state) => state.selectedElementCount)
+  const selectionBounds = useDesignSession((state) => state.selectionBounds)
+  const layoutDigest = useDesignSession((state) => state.layoutDigest)
   const currentToolContext = useDesignSession((state) => state.currentToolContext)
+  const latestReviewSummary = useDesignSession((state) => state.latestReviewSummary)
+  const repairScope = useDesignSession((state) => state.repairScope)
   const lastExportArtifactPath = useDesignSession((state) => state.lastExportArtifactPath)
   const resetSession = useDesignSession((state) => state.reset)
   const [projectTabs, setProjectTabs] = useState<string[]>(() => [...openedDesignTabs])
@@ -103,6 +101,9 @@ export default function DesignMode() {
     try {
       restoringRef.current = true
       editor.loadSnapshot(snapshot)
+      lastContentHashRef.current = hashDesignSnapshot(snapshot)
+      lastSelectionSignatureRef.current = Array.from(editor.getSelectedShapeIds()).join('|')
+      lastToolContextRef.current = String((editor as Editor & { getCurrentToolId?: () => string }).getCurrentToolId?.() || 'select')
     } catch (error) {
       console.warn('Failed to load design snapshot:', error)
     } finally {
@@ -378,28 +379,6 @@ export default function DesignMode() {
     return () => window.removeEventListener('ready-design-save', handleManualSave as EventListener)
   }, [flushSave, isDesignFile, selectWorkspaceFile, selectedFile])
 
-  useEffect(() => {
-    const onToggleUI = () => {
-      setUiHidden((prev) => {
-        const next = !prev
-        localStorage.setItem('ready-design-ui-hidden', String(next))
-        return next
-      })
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
-        e.preventDefault()
-        emitDesignUIEvent('ready-design-toggle-ui')
-      }
-    }
-    window.addEventListener('ready-design-toggle-ui', onToggleUI as EventListener)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('ready-design-toggle-ui', onToggleUI as EventListener)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [])
-
   const activeDesignPath = useMemo(
     () => (selectedFile && isDesignFile(selectedFile) ? selectedFile : null),
     [isDesignFile, selectedFile],
@@ -426,12 +405,33 @@ export default function DesignMode() {
       path,
       dirty: isActive ? isDirty : false,
       saveStatus: isActive ? saveStatus : 'idle',
+      snapshotHash: isActive ? snapshotHash : null,
+      selectionSummary: isActive ? selectionSummary : null,
+      selectedElementCount: isActive ? selectedElementCount : 0,
+      selectionBounds: isActive ? selectionBounds : null,
+      layoutDigest: isActive ? layoutDigest : null,
+      currentToolContext: isActive ? currentToolContext : null,
+      latestReviewSummary: isActive ? latestReviewSummary : null,
+      repairScope: isActive ? repairScope : 'run-owned',
       draggedAt: Date.now(),
     })
     e.dataTransfer.setData('application/x-ready-drag', payload)
     e.dataTransfer.setData('text/plain', path)
     e.dataTransfer.effectAllowed = 'copy'
-  }, [activeDesignPath, isDirty, saveStatus])
+  }, [
+    activeDesignPath,
+    currentToolContext,
+    getPathBasename,
+    isDirty,
+    layoutDigest,
+    latestReviewSummary,
+    repairScope,
+    saveStatus,
+    selectedElementCount,
+    selectionBounds,
+    selectionSummary,
+    snapshotHash,
+  ])
 
   const handleMount = useCallback((editor: Editor) => {
     editorRef.current = editor
@@ -477,14 +477,38 @@ export default function DesignMode() {
     }
     unsubscribeRef.current = editor.store.listen(() => {
       const snapshot = editor.getSnapshot()
-      const selectedCount = editor.getSelectedShapeIds().length
+      const nextSnapshotHash = hashDesignSnapshot(snapshot)
+      const selectedIds = Array.from(editor.getSelectedShapeIds())
+      const selectedCount = selectedIds.length
+      const nextSelectionSummary = selectedCount > 0 ? `已选中 ${selectedCount} 个元素` : '未选中元素'
+      const nextToolContext = String((editor as Editor & { getCurrentToolId?: () => string }).getCurrentToolId?.() || 'select')
+      const selectionSignature = selectedIds.join('|')
+      const contentChanged = nextSnapshotHash !== lastContentHashRef.current
+      const selectionChanged = selectionSignature !== lastSelectionSignatureRef.current
+      const toolChanged = nextToolContext !== lastToolContextRef.current
+
+      if (!contentChanged && !selectionChanged && !toolChanged) {
+        return
+      }
+
+      const reviewSummary = useDesignSession.getState().latestReviewSummary
+      const nextLayoutDigest = buildDesignLayoutDigest(editor, nextSelectionSummary, reviewSummary)
       setSnapshotMeta({
-        snapshotHash: hashDesignSnapshot(snapshot),
-        selectionSummary: selectedCount > 0 ? `已选中 ${selectedCount} 个元素` : '未选中元素',
-        currentToolContext: String((editor as Editor & { getCurrentToolId?: () => string }).getCurrentToolId?.() || 'select'),
+        snapshotHash: nextSnapshotHash,
+        selectionSummary: nextSelectionSummary,
+        selectedElementCount: selectedCount,
+        selectionBounds: nextLayoutDigest.selectionBounds ?? null,
+        layoutDigest: nextLayoutDigest,
+        currentToolContext: nextToolContext,
       })
+      lastContentHashRef.current = nextSnapshotHash
+      lastSelectionSignatureRef.current = selectionSignature
+      lastToolContextRef.current = nextToolContext
       if (restoringRef.current) return
       const activeFile = activeFileRef.current
+      if (!contentChanged) {
+        return
+      }
       if (!activeFile || !isDesignFile(activeFile)) {
         transientSnapshot = snapshot
         return
@@ -589,6 +613,68 @@ export default function DesignMode() {
     useWorkspace.setState({ chatPanelVisible: true })
   }, [])
 
+  const handleZoomIn = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.zoomIn(undefined, { animation: { duration: 220 } })
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.zoomOut(undefined, { animation: { duration: 220 } })
+  }, [])
+
+  const handleZoomToFit = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.resetZoom(undefined, { animation: { duration: 220 } })
+  }, [])
+
+  useEffect(() => {
+    const onToggleUI = () => {
+      setUiHidden((prev) => {
+        const next = !prev
+        localStorage.setItem('ready-design-ui-hidden', String(next))
+        return next
+      })
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        emitDesignUIEvent('ready-design-toggle-ui')
+      }
+      // Handle zoom shortcuts
+      if ((e.metaKey || e.ctrlKey) && e.key === '=') {
+        e.preventDefault()
+        handleZoomIn()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        handleZoomOut()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        handleZoomToFit()
+      }
+      // Handle + key for new tab (instead of closing and refreshing)
+      if (e.key === '+' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const target = e.target as HTMLElement
+        // Only trigger if not in an input field
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && !target.isContentEditable) {
+          e.preventDefault()
+          void handleCreateNewDraft()
+        }
+      }
+    }
+    window.addEventListener('ready-design-toggle-ui', onToggleUI as EventListener)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('ready-design-toggle-ui', onToggleUI as EventListener)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [handleZoomIn, handleZoomOut, handleZoomToFit, handleCreateNewDraft])
+
   return (
     <div
       className="workbench-mode-root"
@@ -600,6 +686,15 @@ export default function DesignMode() {
         projectTabs={projectTabs}
         activeDesignPath={activeDesignPath}
         isDirty={isDirty}
+        saveStatus={saveStatus}
+        snapshotHash={snapshotHash}
+        selectionSummary={selectionSummary}
+        selectedElementCount={selectedElementCount}
+        selectionBounds={selectionBounds}
+        layoutDigest={layoutDigest}
+        currentToolContext={currentToolContext}
+        latestReviewSummary={latestReviewSummary}
+        repairScope={repairScope}
         getPathBasename={getPathBasename}
         onSelectProjectTab={handleSelectProjectTab}
         onCloseProjectTab={handleCloseProjectTab}
@@ -620,6 +715,9 @@ export default function DesignMode() {
         onToggleLeftPanel={() => emitDesignUIEvent('ready-design-toggle-left-panel')}
         onToggleRightPanel={() => emitDesignUIEvent('ready-design-toggle-right-panel')}
         onToggleUiClick={handleToggleUiClick}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onZoomToFit={handleZoomToFit}
       />
 
       <DesignDiagnosticsPanel
@@ -630,6 +728,7 @@ export default function DesignMode() {
         lastError={lastError}
         snapshotHash={snapshotHash}
         selectionSummary={selectionSummary}
+        layoutDigest={layoutDigest}
         currentToolContext={currentToolContext}
         lastExportArtifactPath={lastExportArtifactPath}
       />

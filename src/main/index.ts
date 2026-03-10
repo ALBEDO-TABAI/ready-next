@@ -19,6 +19,7 @@ import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-h
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupVideoIPC } from './modules/video-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupDesignIPC } from './modules/design-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -466,6 +467,7 @@ app.whenReady().then(() => {
 
   // Register global IPC handlers once, before any window is created
   setupGlobalIPC()
+  applyBundledAISettingsSeed()
 
   createWindow()
 

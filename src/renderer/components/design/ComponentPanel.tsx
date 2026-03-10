@@ -62,6 +62,13 @@ import {
 import { useWorkspace } from '../../stores/useWorkspace'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import {
+  BUTTON_DEFAULT_PADDING,
+  INPUT_DEFAULT_PADDING,
+  LIST_ITEM_DEFAULT_PADDING,
+  PAGE_HEADER_DEFAULT_PADDING,
+  SECTION_BLOCK_DEFAULT_PADDING,
+  STAT_CARD_DEFAULT_PADDING,
+  TEXT_BLOCK_DEFAULT_PADDING,
   designComponentCatalog,
   getComponentDefaults,
   isDesignCustomShape,
@@ -79,6 +86,36 @@ interface StyleGuidePreset {
   name: string
   description: string
   prompt: string
+}
+
+interface TypographyPreset {
+  id: string
+  label: string
+  description: string
+  fontSize: number
+  fontWeight: 'regular' | 'medium' | 'bold'
+  lineHeight: number
+  letterSpacing: number
+  textAlign: 'start' | 'middle' | 'end'
+}
+
+interface LayoutPreset {
+  id: string
+  label: string
+  description: string
+  cornerRadius: number
+  paddingH: number
+  paddingV: number
+  textAlign?: 'start' | 'middle' | 'end'
+  verticalAlign?: 'start' | 'middle' | 'end'
+}
+
+interface ContentField {
+  key: string
+  label: string
+  value: string
+  kind: 'text' | 'textarea'
+  rows?: number
 }
 
 type InspectorSection =
@@ -148,6 +185,19 @@ const STYLE_GUIDES: StyleGuidePreset[] = [
       '- 筛选与时间维度固定在上方',
     ].join('\n'),
   },
+]
+
+const TYPOGRAPHY_PRESETS: TypographyPreset[] = [
+  { id: 'caption', label: 'Caption', description: '11 / Regular', fontSize: 11, fontWeight: 'regular', lineHeight: 16, letterSpacing: 0.2, textAlign: 'start' },
+  { id: 'body', label: 'Body', description: '13 / Regular', fontSize: 13, fontWeight: 'regular', lineHeight: 20, letterSpacing: 0, textAlign: 'start' },
+  { id: 'title', label: 'Title', description: '18 / Medium', fontSize: 18, fontWeight: 'medium', lineHeight: 26, letterSpacing: -0.2, textAlign: 'start' },
+  { id: 'display', label: 'Display', description: '24 / Bold', fontSize: 24, fontWeight: 'bold', lineHeight: 32, letterSpacing: -0.4, textAlign: 'start' },
+]
+
+const LAYOUT_PRESETS: LayoutPreset[] = [
+  { id: 'dense', label: 'Dense', description: '紧凑控件', cornerRadius: 8, paddingH: 10, paddingV: 8, verticalAlign: 'middle' },
+  { id: 'comfortable', label: 'Comfort', description: '常规内容块', cornerRadius: 12, paddingH: 16, paddingV: 12, verticalAlign: 'middle' },
+  { id: 'hero', label: 'Hero', description: '大留白展示', cornerRadius: 20, paddingH: 24, paddingV: 20, textAlign: 'start', verticalAlign: 'middle' },
 ]
 
 const VARIABLE_KEYS = [
@@ -281,6 +331,14 @@ function getShapeLabel(shape: TLShape): string {
         return shape.props.content.split('\n')[0]?.slice(0, 20) || 'Text Block'
       case 'ui-image-placeholder':
         return shape.props.label || 'Image Placeholder'
+      case 'ui-page-header':
+        return shape.props.title || 'Page Header'
+      case 'ui-section-block':
+        return shape.props.title || 'Section Block'
+      case 'ui-stat-card':
+        return shape.props.label || 'Stat Card'
+      case 'ui-list-item':
+        return shape.props.title || 'List Item'
     }
   }
   if (shape.type === 'text') return 'Text'
@@ -630,6 +688,14 @@ export default function ComponentPanel() {
 
   const selectedCount = selectedShapeIds.length
   const zoomPercent = useMemo(() => Math.round(editor.getZoomLevel() * 100), [editor])
+  const selectedCustomShape = useMemo(
+    () => (selectedShape && isDesignCustomShape(selectedShape) ? selectedShape : null),
+    [selectedShape],
+  )
+  const selectedCustomShapeType = useMemo(
+    () => selectedCustomShape?.type || null,
+    [selectedCustomShape],
+  )
 
   const [posX, setPosX] = useState(0)
   const [posY, setPosY] = useState(0)
@@ -806,14 +872,14 @@ export default function ComponentPanel() {
       setFontSize(selectedShape.props.fontSize)
       setTextColor(selectedShape.props.color)
     }
-    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-button' && metaFontSize === null) {
-      setFontSize(13)
-    }
-    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-input' && metaFontSize === null) {
-      setFontSize(12)
-    }
-    if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-card' && metaFontSize === null) {
-      setFontSize(14)
+    if (isDesignCustomShape(selectedShape) && metaFontSize === null) {
+      if (selectedShape.type === 'ui-button') setFontSize(13)
+      if (selectedShape.type === 'ui-input') setFontSize(12)
+      if (selectedShape.type === 'ui-card') setFontSize(14)
+      if (selectedShape.type === 'ui-page-header') setFontSize(28)
+      if (selectedShape.type === 'ui-section-block') setFontSize(18)
+      if (selectedShape.type === 'ui-stat-card') setFontSize(28)
+      if (selectedShape.type === 'ui-list-item') setFontSize(15)
     }
     if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-button') {
       setCornerRadius(selectedShape.props.cornerRadius)
@@ -827,6 +893,33 @@ export default function ComponentPanel() {
     if (isDesignCustomShape(selectedShape) && selectedShape.type === 'ui-card') {
       setShadowOpacity(selectedShape.props.hasShadow ? 25 : 0)
       setShadowBlur(selectedShape.props.hasShadow ? 4 : 0)
+    }
+    if (isDesignCustomShape(selectedShape) && metaPaddingH === null && metaPaddingV === null) {
+      if (selectedShape.type === 'ui-button') {
+        setPaddingH(BUTTON_DEFAULT_PADDING.horizontal)
+        setPaddingV(BUTTON_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-input') {
+        setPaddingH(INPUT_DEFAULT_PADDING.horizontal)
+        setPaddingV(INPUT_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-text-block') {
+        setPaddingH(TEXT_BLOCK_DEFAULT_PADDING.horizontal)
+        setPaddingV(TEXT_BLOCK_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-card') {
+        setPaddingH(selectedShape.props.padding)
+        setPaddingV(selectedShape.props.padding)
+      } else if (selectedShape.type === 'ui-page-header') {
+        setPaddingH(PAGE_HEADER_DEFAULT_PADDING.horizontal)
+        setPaddingV(PAGE_HEADER_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-section-block') {
+        setPaddingH(SECTION_BLOCK_DEFAULT_PADDING.horizontal)
+        setPaddingV(SECTION_BLOCK_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-stat-card') {
+        setPaddingH(STAT_CARD_DEFAULT_PADDING.horizontal)
+        setPaddingV(STAT_CARD_DEFAULT_PADDING.vertical)
+      } else if (selectedShape.type === 'ui-list-item') {
+        setPaddingH(LIST_ITEM_DEFAULT_PADDING.horizontal)
+        setPaddingV(LIST_ITEM_DEFAULT_PADDING.vertical)
+      }
     }
   }, [editor, selectedShape, selectedBounds])
 
@@ -933,7 +1026,7 @@ export default function ComponentPanel() {
         return
       }
 
-      if (selectedShape.type === 'ui-button' || selectedShape.type === 'ui-input' || selectedShape.type === 'ui-card') {
+      if (selectedShape.type !== 'ui-image-placeholder') {
         editor.updateShape({
           id: selectedShape.id,
           type: selectedShape.type,
@@ -959,6 +1052,18 @@ export default function ComponentPanel() {
       meta: {
         ...(selectedShape.meta || {}),
         ...partialMeta,
+      },
+    } as never)
+  }, [editor, selectedShape])
+
+  const updateSelectedCustomShapeProps = useCallback((partialProps: Record<string, unknown>) => {
+    if (!selectedShape || !isDesignCustomShape(selectedShape)) return
+    editor.updateShape({
+      id: selectedShape.id,
+      type: selectedShape.type,
+      props: {
+        ...selectedShape.props,
+        ...partialProps,
       },
     } as never)
   }, [editor, selectedShape])
@@ -1226,11 +1331,91 @@ export default function ComponentPanel() {
           ...selectedShape.props,
           padding: nextPadding,
         },
+        meta: {
+          ...(selectedShape.meta || {}),
+          readyPaddingH: horizontal,
+          readyPaddingV: vertical,
+        },
       } as never)
       return
     }
     updateSelectedMeta({ readyPaddingH: horizontal, readyPaddingV: vertical })
   }, [editor, selectedShape, updateSelectedMeta])
+
+  const applyTypographyPreset = useCallback((preset: TypographyPreset) => {
+    updateTextSize(preset.fontSize)
+    setFontWeight(preset.fontWeight)
+    setLineHeightValue(preset.lineHeight)
+    setLetterSpacing(preset.letterSpacing)
+    applyParagraphAlign(preset.textAlign)
+
+    if (selectedShape && isDesignCustomShape(selectedShape)) {
+      updateSelectedMeta({
+        readyFontWeight: preset.fontWeight,
+        readyLineHeight: preset.lineHeight,
+        readyLetterSpacing: preset.letterSpacing,
+      })
+    }
+  }, [applyParagraphAlign, selectedShape, updateSelectedMeta, updateTextSize])
+
+  const applyLayoutPreset = useCallback((preset: LayoutPreset) => {
+    updateCornerRadius(preset.cornerRadius)
+    setPaddingH(preset.paddingH)
+    setPaddingV(preset.paddingV)
+    applyPadding(preset.paddingH, preset.paddingV)
+    if (preset.textAlign) {
+      applyParagraphAlign(preset.textAlign)
+    }
+    if (preset.verticalAlign) {
+      applyVerticalAlign(preset.verticalAlign)
+    }
+  }, [applyPadding, applyParagraphAlign, applyVerticalAlign, updateCornerRadius])
+
+  const contentFields = useMemo<ContentField[]>(() => {
+    if (!selectedShape || !isDesignCustomShape(selectedShape)) return []
+
+    switch (selectedShape.type) {
+      case 'ui-button':
+        return [{ key: 'label', label: 'Label', value: selectedShape.props.label, kind: 'text' }]
+      case 'ui-input':
+        return [
+          { key: 'label', label: 'Label', value: selectedShape.props.label, kind: 'text' },
+          { key: 'placeholder', label: 'Placeholder', value: selectedShape.props.placeholder, kind: 'text' },
+        ]
+      case 'ui-card':
+        return [{ key: 'title', label: 'Title', value: selectedShape.props.title, kind: 'text' }]
+      case 'ui-text-block':
+        return [{ key: 'content', label: 'Content', value: selectedShape.props.content, kind: 'textarea', rows: 4 }]
+      case 'ui-image-placeholder':
+        return [{ key: 'label', label: 'Label', value: selectedShape.props.label, kind: 'text' }]
+      case 'ui-page-header':
+        return [
+          { key: 'eyebrow', label: 'Eyebrow', value: selectedShape.props.eyebrow, kind: 'text' },
+          { key: 'title', label: 'Title', value: selectedShape.props.title, kind: 'textarea', rows: 2 },
+          { key: 'meta', label: 'Meta', value: selectedShape.props.meta, kind: 'text' },
+          { key: 'actionLabel', label: 'Action', value: selectedShape.props.actionLabel, kind: 'text' },
+        ]
+      case 'ui-section-block':
+        return [
+          { key: 'title', label: 'Title', value: selectedShape.props.title, kind: 'text' },
+          { key: 'description', label: 'Description', value: selectedShape.props.description, kind: 'textarea', rows: 3 },
+        ]
+      case 'ui-stat-card':
+        return [
+          { key: 'label', label: 'Label', value: selectedShape.props.label, kind: 'text' },
+          { key: 'value', label: 'Value', value: selectedShape.props.value, kind: 'text' },
+          { key: 'delta', label: 'Delta', value: selectedShape.props.delta, kind: 'text' },
+        ]
+      case 'ui-list-item':
+        return [
+          { key: 'title', label: 'Title', value: selectedShape.props.title, kind: 'text' },
+          { key: 'meta', label: 'Meta', value: selectedShape.props.meta, kind: 'text' },
+          { key: 'description', label: 'Description', value: selectedShape.props.description, kind: 'textarea', rows: 3 },
+        ]
+      default:
+        return []
+    }
+  }, [selectedShape])
 
   const applyShadowEnabled = useCallback((enabled: boolean) => {
     if (!selectedShape) return
@@ -1320,6 +1505,18 @@ export default function ComponentPanel() {
       if (selectedShape.type === 'ui-card') {
         nextProps.w = Math.max(180, Math.round((selectedShape.props.title.length || 10) * 9 + 120))
       }
+      if (selectedShape.type === 'ui-page-header') {
+        nextProps.w = Math.max(360, Math.round((selectedShape.props.title.length || 12) * 15 + 220))
+      }
+      if (selectedShape.type === 'ui-section-block') {
+        nextProps.w = Math.max(360, 220 * Math.max(1, Number(selectedShape.props.columns || 1)) + 80)
+      }
+      if (selectedShape.type === 'ui-stat-card') {
+        nextProps.w = Math.max(180, Math.round((selectedShape.props.value.length || 4) * 20 + 72))
+      }
+      if (selectedShape.type === 'ui-list-item') {
+        nextProps.w = Math.max(280, Math.round((selectedShape.props.title.length || 10) * 9 + 170))
+      }
       if (selectedShape.type === 'ui-text-block') {
         const longestLine = selectedShape.props.content
           .split('\n')
@@ -1337,6 +1534,10 @@ export default function ComponentPanel() {
       if (selectedShape.type === 'ui-button') nextProps.h = 40
       if (selectedShape.type === 'ui-input') nextProps.h = 56
       if (selectedShape.type === 'ui-card') nextProps.h = 200
+      if (selectedShape.type === 'ui-page-header') nextProps.h = 132
+      if (selectedShape.type === 'ui-section-block') nextProps.h = 240
+      if (selectedShape.type === 'ui-stat-card') nextProps.h = 140
+      if (selectedShape.type === 'ui-list-item') nextProps.h = 94
       if (selectedShape.type === 'ui-text-block') {
         const lines = selectedShape.props.content.split('\n').length
         const lineHeight = Math.max(16, selectedShape.props.fontSize * 1.4)
@@ -1702,8 +1903,29 @@ export default function ComponentPanel() {
   const supportsTypographyControls = Boolean(
     selectedShape && (
       selectedShape.type === 'text' ||
-      (isDesignCustomShape(selectedShape) && ['ui-text-block', 'ui-button', 'ui-input', 'ui-card'].includes(selectedShape.type))
+      (isDesignCustomShape(selectedShape) && [
+        'ui-text-block',
+        'ui-button',
+        'ui-input',
+        'ui-card',
+        'ui-page-header',
+        'ui-section-block',
+        'ui-stat-card',
+        'ui-list-item',
+      ].includes(selectedShape.type))
     )
+  )
+  const supportsLayoutPresets = Boolean(
+    selectedShape && isDesignCustomShape(selectedShape) && [
+      'ui-button',
+      'ui-input',
+      'ui-card',
+      'ui-text-block',
+      'ui-page-header',
+      'ui-section-block',
+      'ui-stat-card',
+      'ui-list-item',
+    ].includes(selectedShape.type)
   )
 
   const leftDockWidth = leftPanelVisible
@@ -2098,6 +2320,108 @@ export default function ComponentPanel() {
               <option>Typography</option>
               <option>Visual Style</option>
             </select>
+
+            {contentFields.length > 0 ? (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>Content Fields</div>
+                {contentFields.map((field) => (
+                  <label key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>{field.label}</span>
+                    {field.kind === 'textarea' ? (
+                      <textarea
+                        value={field.value}
+                        rows={field.rows || 3}
+                        onChange={(e) => updateSelectedCustomShapeProps({ [field.key]: e.target.value })}
+                        style={{
+                          resize: 'vertical',
+                          borderRadius: 8,
+                          border: `1px solid ${LIGHT_COLORS.border}`,
+                          background: LIGHT_COLORS.inputBg,
+                          padding: '8px 10px',
+                          color: LIGHT_COLORS.text,
+                          fontSize: 12,
+                          fontFamily: 'inherit',
+                        }}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={field.value}
+                        onChange={(e) => updateSelectedCustomShapeProps({ [field.key]: e.target.value })}
+                        style={{
+                          height: 32,
+                          borderRadius: 8,
+                          border: `1px solid ${LIGHT_COLORS.border}`,
+                          background: LIGHT_COLORS.inputBg,
+                          padding: '0 10px',
+                          color: LIGHT_COLORS.text,
+                          fontSize: 12,
+                        }}
+                      />
+                    )}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
+            {selectedCustomShapeType === 'ui-button' && selectedCustomShape ? (
+              <label style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>Button Variant</span>
+                <select
+                  value={selectedCustomShape.type === 'ui-button' ? selectedCustomShape.props.variant : 'primary'}
+                  onChange={(e) => updateSelectedCustomShapeProps({ variant: e.target.value })}
+                  style={{ height: 32, borderRadius: 8, border: `1px solid ${LIGHT_COLORS.border}`, background: LIGHT_COLORS.inputBg, padding: '0 8px', color: LIGHT_COLORS.text, fontSize: 12 }}
+                >
+                  <option value="primary">Primary</option>
+                  <option value="secondary">Secondary</option>
+                  <option value="ghost">Ghost</option>
+                </select>
+              </label>
+            ) : null}
+
+            {selectedCustomShapeType === 'ui-input' && selectedCustomShape ? (
+              <label style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>Input Variant</span>
+                <select
+                  value={selectedCustomShape.type === 'ui-input' ? selectedCustomShape.props.variant : 'default'}
+                  onChange={(e) => updateSelectedCustomShapeProps({ variant: e.target.value })}
+                  style={{ height: 32, borderRadius: 8, border: `1px solid ${LIGHT_COLORS.border}`, background: LIGHT_COLORS.inputBg, padding: '0 8px', color: LIGHT_COLORS.text, fontSize: 12 }}
+                >
+                  <option value="default">Default</option>
+                  <option value="filled">Filled</option>
+                </select>
+              </label>
+            ) : null}
+
+            {selectedCustomShapeType === 'ui-image-placeholder' && selectedCustomShape ? (
+              <label style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>Aspect Ratio</span>
+                <select
+                  value={selectedCustomShape.type === 'ui-image-placeholder' ? selectedCustomShape.props.aspectRatio : '4:3'}
+                  onChange={(e) => updateSelectedCustomShapeProps({ aspectRatio: e.target.value })}
+                  style={{ height: 32, borderRadius: 8, border: `1px solid ${LIGHT_COLORS.border}`, background: LIGHT_COLORS.inputBg, padding: '0 8px', color: LIGHT_COLORS.text, fontSize: 12 }}
+                >
+                  <option value="16:9">16:9</option>
+                  <option value="4:3">4:3</option>
+                  <option value="1:1">1:1</option>
+                </select>
+              </label>
+            ) : null}
+
+            {selectedCustomShapeType === 'ui-section-block' && selectedCustomShape ? (
+              <label style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle }}>Columns</span>
+                <select
+                  value={String(selectedCustomShape.type === 'ui-section-block' ? selectedCustomShape.props.columns : 3)}
+                  onChange={(e) => updateSelectedCustomShapeProps({ columns: Number(e.target.value) })}
+                  style={{ height: 32, borderRadius: 8, border: `1px solid ${LIGHT_COLORS.border}`, background: LIGHT_COLORS.inputBg, padding: '0 8px', color: LIGHT_COLORS.text, fontSize: 12 }}
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
+              </label>
+            ) : null}
           </Section>
 
           <Section title="Alignment" open={openSections.alignment} onToggle={() => toggleSection('alignment')}>
@@ -2310,6 +2634,31 @@ export default function ComponentPanel() {
               <NumberInput label="Opacity" value={opacityPercent} onChange={applyOpacity} suffix="%" />
               <NumberInput label="Corner Radius" value={cornerRadius} onChange={updateCornerRadius} />
             </div>
+            {supportsLayoutPresets ? (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle, marginBottom: 6 }}>Layout Presets</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                  {LAYOUT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => applyLayoutPreset(preset)}
+                      style={{
+                        minHeight: 46,
+                        borderRadius: 8,
+                        border: `1px solid ${LIGHT_COLORS.border}`,
+                        background: LIGHT_COLORS.sidebar,
+                        textAlign: 'left',
+                        padding: '6px 8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 600, color: LIGHT_COLORS.text }}>{preset.label}</div>
+                      <div style={{ marginTop: 2, fontSize: 10, color: LIGHT_COLORS.textSubtle }}>{preset.description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </Section>
 
           {supportsTypographyControls ? (
@@ -2357,6 +2706,30 @@ export default function ComponentPanel() {
                     updateSelectedMeta({ readyLetterSpacing: value })
                   }}
                 />
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 10, color: LIGHT_COLORS.textSubtle, marginBottom: 6 }}>Type Presets</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                  {TYPOGRAPHY_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => applyTypographyPreset(preset)}
+                      style={{
+                        minHeight: 44,
+                        borderRadius: 8,
+                        border: `1px solid ${LIGHT_COLORS.border}`,
+                        background: LIGHT_COLORS.sidebar,
+                        textAlign: 'left',
+                        padding: '6px 8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 600, color: LIGHT_COLORS.text }}>{preset.label}</div>
+                      <div style={{ marginTop: 2, fontSize: 10, color: LIGHT_COLORS.textSubtle }}>{preset.description}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div style={{ marginTop: 8 }}>

@@ -1,3 +1,11 @@
+import type {
+  DesignControllerPhase,
+  DesignLayoutBounds,
+  DesignLayoutDigest,
+  DesignRepairScope,
+  DesignStyleSystem,
+} from '../../../shared/design-agent'
+
 export interface AgentMessage {
   id: string
   agent: string
@@ -23,7 +31,7 @@ export interface ChatAttachment {
   type: 'image' | 'video' | 'text' | 'spreadsheet' | 'other'
   size: number
   ext: string
-  source?: 'file' | 'browser-tab' | 'skill-folder' | 'channel'
+  source?: 'file' | 'browser-tab' | 'skill-folder' | 'design-project' | 'channel'
   browserTabId?: string
   url?: string
   title?: string
@@ -33,6 +41,16 @@ export interface ChatAttachment {
   capturedAt?: number
   skillId?: string
   skillFolderPath?: string
+  dirty?: boolean
+  saveStatus?: string
+  snapshotHash?: string
+  selectionSummary?: string
+  selectedElementCount?: number
+  selectionBounds?: DesignLayoutBounds | null
+  currentToolContext?: string
+  layoutDigest?: DesignLayoutDigest
+  latestReviewSummary?: string
+  repairScope?: DesignRepairScope
 }
 
 export interface ChatConversation {
@@ -140,6 +158,16 @@ export interface ScopeRunState {
   responseBuffer?: string
   stepMetrics?: ScopeRunStepMetrics
   error?: string | null
+  designPhase?: DesignControllerPhase | null
+  designTodo?: Array<{ id: string; title: string; status: 'pending' | 'running' | 'done' | 'error' }>
+  designReviewSummary?: string | null
+  ownedNodeIds?: string[]
+  repairScope?: DesignRepairScope | null
+  scenePlanId?: string | null
+  boardId?: string | null
+  styleSystem?: DesignStyleSystem | null
+  reviewFailures?: string[]
+  lastAcceptedScreenshot?: string | null
 }
 
 export interface AttachmentPreviewState {

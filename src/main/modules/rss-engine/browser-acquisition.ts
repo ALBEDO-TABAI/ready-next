@@ -504,24 +504,144 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
   return `
     (async () => {
       ${commonHelpers}
+      const targetUserId = ${JSON.stringify(extractWeiboUserId(targetUrl) || '')};
+      const clickTabIfPresent = () => {
+        const labels = ['全部微博', '最新微博', '微博'];
+        for (const node of Array.from(document.querySelectorAll('a, button, div, span'))) {
+          const label = normalize(node.textContent || '');
+          if (!label) continue;
+          if (!labels.some((item) => label === item || label.includes(item))) continue;
+          node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          return true;
+        }
+        return false;
+      };
+      const author = normalize(
+        document.querySelector('h1, h2, [class*="ProfileHeader_name"], [class*="woo-font--extraBold"]')?.textContent || '',
+      );
+      const isPostHref = (href) => {
+        const decoded = decodeMaybe(String(href || ''));
+        if (!decoded) return false;
+        if (/\\/detail\\/[a-zA-Z0-9]+/i.test(decoded) || /\\/status\\/[a-zA-Z0-9]+/i.test(decoded)) return true;
+        if (/m\\.weibo\\.cn\\/(detail|status)\\/[a-zA-Z0-9]+/i.test(decoded)) return true;
+        if (/weibo\\.com\\/\\d+\\/[a-zA-Z0-9]+/i.test(decoded)) return true;
+        return false;
+      };
+      const sanitizeLines = (text) => {
+        return normalize(text)
+          .split(/\\n+/)
+          .map((line) => line.trim())
+          .filter((line) => {
+            if (!line) return false;
+            if (author && line === author) return false;
+            if (line === '置顶' || line === '展开' || line === '收起') return false;
+            if (line === '赞' || line === '评论' || line === '转发' || line === '收藏') return false;
+            if (/^[\\d.万亿wW+]+$/.test(line)) return false;
+            return true;
+          });
+      };
+      const buildItemFromContainer = (container, href, fallbackIndex) => {
+        const stableLink = abs(href);
+        if (!isPostHref(stableLink)) return null;
+        const lines = sanitizeLines(container?.innerText || container?.textContent || '');
+        const title = lines[0] || normalize(container?.querySelector('a[title]')?.getAttribute('title') || '') || '微博内容';
+        const description = clip(lines.slice(0, 4).join(' '), 280);
+        return {
+          title: clip(title, 160),
+          link: stableLink || (location.href + '#weibo-post-' + String(fallbackIndex + 1)),
+          description,
+          author,
+          pubDate: '',
+        };
+      };
+      const collectFromFeedCards = () => {
+        const selectors = [
+          '[mid]',
+          '[action-type="feed_list_item"]',
+          '.WB_feed_type',
+          '.card-wrap',
+          'article',
+          '[class*="Feed_wrap"]',
+          '[class*="Feed_body"]',
+        ];
+        const cards = Array.from(document.querySelectorAll(selectors.join(',')));
+        const seen = new Set();
+        const items = [];
+        for (const [index, card] of cards.entries()) {
+          const anchors = Array.from(card.querySelectorAll('a[href]'));
+          const postAnchor = anchors.find((anchor) => isPostHref(abs(anchor.getAttribute('href'))));
+          if (!postAnchor) continue;
+          const item = buildItemFromContainer(card, postAnchor.getAttribute('href') || '', index);
+          if (!item || !item.link || seen.has(item.link)) continue;
+          seen.add(item.link);
+          items.push(item);
+          if (items.length >= 20) break;
+        }
+        return items;
+      };
       const collectFromAnchors = () => {
-        const anchors = Array.from(document.querySelectorAll('a[href*="/status/"], article a[href*="/status/"]'));
-        return anchors.map((anchor) => {
-          const container = anchor.closest('article, div[role="article"], .card, .card-wrap') || anchor;
-          const text = normalize(container.innerText);
-          return {
-            title: text.split(/\\n+/)[0] || '微博内容',
-            link: abs(anchor.getAttribute('href')),
-            description: text,
-            author: normalize(document.querySelector('h1, h2')?.textContent || ''),
-            pubDate: '',
-          };
-        }).filter((item) => item.link);
+        const seen = new Set();
+        const items = [];
+        const anchors = Array.from(document.querySelectorAll('a[href]'));
+        for (const [index, anchor] of anchors.entries()) {
+          const href = abs(anchor.getAttribute('href'));
+          if (!isPostHref(href) || seen.has(href)) continue;
+          const container =
+            anchor.closest('article, div[role="article"], [mid], [action-type="feed_list_item"], .card, .card-wrap, .WB_feed_type') ||
+            anchor.parentElement ||
+            anchor;
+          const item = buildItemFromContainer(container, href, index);
+          if (!item) continue;
+          seen.add(item.link);
+          items.push(item);
+          if (items.length >= 20) break;
+        }
+        return items;
+      };
+      const collectFromEmbeddedState = () => {
+        const scripts = Array.from(document.scripts).map((node) => node.textContent || '');
+        const items = [];
+        const seen = new Set();
+        const patterns = [
+          /"mblogid":"([^"]+)".{0,600}?"text_raw":"([^"]+)".{0,600}?"user":\\{"id(?:str)?":("?\\d+"?)/g,
+          /"bid":"([^"]+)".{0,600}?"text_raw":"([^"]+)".{0,600}?"user":\\{"id(?:str)?":("?\\d+"?)/g,
+        ];
+        for (const raw of scripts) {
+          for (const pattern of patterns) {
+            pattern.lastIndex = 0;
+            let match;
+            while ((match = pattern.exec(raw)) !== null) {
+              const postId = String(match[1] || '').replace(/^"+|"+$/g, '');
+              const text = String(match[2] || '').replace(/\\\\n/g, ' ').replace(/\\"/g, '"');
+              const userId = String(match[3] || '').replace(/^"+|"+$/g, '');
+              if (targetUserId && userId && userId !== targetUserId) continue;
+              if (!postId || !text) continue;
+              const link = abs('/detail/' + postId);
+              if (seen.has(link)) continue;
+              seen.add(link);
+              items.push({
+                title: clip(sanitizeLines(text)[0] || text, 160),
+                link,
+                description: clip(text, 280),
+                author,
+                pubDate: '',
+              });
+              if (items.length >= 20) return items;
+            }
+          }
+        }
+        return items;
       };
 
+      let tabClicked = false;
       for (let attempt = 0; attempt < 50; attempt += 1) {
         const href = location.href;
-        if (href.includes('passport.weibo.com/visitor') || href.includes('/login') || textHas(['登录', 'visitor system', '访问异常'])) {
+        if (
+          href.includes('passport.weibo.com/visitor') ||
+          href.includes('/login') ||
+          document.querySelector('input[type="password"], input[name*="username"], form[action*="login"]') ||
+          textHas(['visitor system', '扫码登录', '账号登录'])
+        ) {
           return {
             title: document.title || '',
             finalUrl: href,
@@ -541,10 +661,22 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
             items: [],
           };
         }
+        const feedCardItems = collectFromFeedCards();
+        if (feedCardItems.length > 0) {
+          return { title: document.title || '', finalUrl: href, state: 'ready', items: feedCardItems };
+        }
         const items = collectFromAnchors();
         if (items.length > 0) {
           return { title: document.title || '', finalUrl: href, state: 'ready', items };
         }
+        const stateItems = collectFromEmbeddedState();
+        if (stateItems.length > 0) {
+          return { title: document.title || '', finalUrl: href, state: 'ready', items: stateItems };
+        }
+        if (!tabClicked && attempt >= 2) {
+          tabClicked = clickTabIfPresent();
+        }
+        window.scrollTo(0, Math.min(document.body?.scrollHeight || 0, (attempt + 1) * 720));
         await sleep(400);
       }
 
@@ -601,7 +733,7 @@ export async function fetchFeedViaBrowserSession(
   }
 
   let snapshot: (BrowserFeedExtractionResult & { __readyCaptureError?: string }) | null = null
-  if (platform === 'xiaohongshu' && typeof (controller as BrowserController & {
+  if (typeof (controller as BrowserController & {
     captureLiveTabPage?: (url: string, options?: typeof captureOptions) => Promise<unknown | null>
   }).captureLiveTabPage === 'function') {
     try {

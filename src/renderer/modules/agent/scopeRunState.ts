@@ -219,6 +219,16 @@ export function createEmptyScopeRunState(params: {
     responseBuffer: '',
     stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
     error: null,
+    designPhase: null,
+    designTodo: [],
+    designReviewSummary: null,
+    ownedNodeIds: [],
+    repairScope: null,
+    scenePlanId: null,
+    boardId: null,
+    styleSystem: null,
+    reviewFailures: [],
+    lastAcceptedScreenshot: null,
   }
 }
 
@@ -285,6 +295,32 @@ export function deriveScopeRunStatePatch(
       lastToolAt: null,
     },
     error: event.error || previous?.error || null,
+    designPhase: typeof structuredPayload?.designPhase === 'string' ? structuredPayload.designPhase as ScopeRunState['designPhase'] : previous?.designPhase || null,
+    designTodo: Array.isArray(structuredPayload?.designTodo) ? structuredPayload.designTodo as ScopeRunState['designTodo'] : previous?.designTodo || [],
+    designReviewSummary: typeof structuredPayload?.designReviewSummary === 'string'
+      ? structuredPayload.designReviewSummary
+      : previous?.designReviewSummary || null,
+    ownedNodeIds: Array.isArray(structuredPayload?.ownedNodeIds)
+      ? structuredPayload.ownedNodeIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : previous?.ownedNodeIds || [],
+    repairScope: typeof structuredPayload?.repairScope === 'string'
+      ? structuredPayload.repairScope as ScopeRunState['repairScope']
+      : previous?.repairScope || null,
+    scenePlanId: typeof structuredPayload?.scenePlanId === 'string'
+      ? structuredPayload.scenePlanId
+      : previous?.scenePlanId || null,
+    boardId: typeof structuredPayload?.boardId === 'string'
+      ? structuredPayload.boardId
+      : previous?.boardId || null,
+    styleSystem: structuredPayload?.styleSystem && typeof structuredPayload.styleSystem === 'object'
+      ? structuredPayload.styleSystem as ScopeRunState['styleSystem']
+      : previous?.styleSystem || null,
+    reviewFailures: Array.isArray(structuredPayload?.reviewFailures)
+      ? structuredPayload.reviewFailures.map((item) => String(item || '').trim()).filter(Boolean)
+      : previous?.reviewFailures || [],
+    lastAcceptedScreenshot: typeof structuredPayload?.lastAcceptedScreenshot === 'string'
+      ? structuredPayload.lastAcceptedScreenshot
+      : previous?.lastAcceptedScreenshot || null,
   }
 
   if (event.toolEvent) {

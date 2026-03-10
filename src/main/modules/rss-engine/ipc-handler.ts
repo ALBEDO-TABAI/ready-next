@@ -455,6 +455,13 @@ function classifyBackend(source: DBRSSSource): SourceBackend {
 }
 
 function requiresRSSHubWarmup(platform: PlatformType): boolean {
+  return (
+    allowsRSSHubFallbackAfterBrowser(platform) ||
+    (needsRSSHub(platform) && !(rssBrowserController && supportsBrowserSessionAcquisition(platform)))
+  )
+}
+
+function requiresStrictRSSHubAvailability(platform: PlatformType): boolean {
   return needsRSSHub(platform) && !(rssBrowserController && supportsBrowserSessionAcquisition(platform))
 }
 
@@ -1135,7 +1142,7 @@ export function setupRSSIPC(useMock = false): void {
             )
           }
 
-          if (requiresRSSHubWarmup(platform) && platform !== 'bilibili' && !rsshubBase) {
+          if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
             const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
             recordSourceRouteAttempt({
               sourceId: source.id,
@@ -1314,6 +1321,7 @@ export function setupRSSIPC(useMock = false): void {
     persistFetchInvocation({
       mode: 'refreshSource',
       sourceId,
+      sourceIds: [sourceId],
     })
 
     try {
@@ -1341,7 +1349,7 @@ export function setupRSSIPC(useMock = false): void {
         }
       }
 
-      if (requiresRSSHubWarmup(platform) && platform !== 'bilibili' && !rsshubBase) {
+      if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
         const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
         recordSourceRouteAttempt({
           sourceId: source.id,
@@ -1509,7 +1517,7 @@ export function setupRSSIPC(useMock = false): void {
         const started = Date.now()
 
         try {
-          if (requiresRSSHubWarmup(platform) && platform !== 'bilibili' && !rsshubBase) {
+          if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
             throw new Error(`RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`)
           }
 

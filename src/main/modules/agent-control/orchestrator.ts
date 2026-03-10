@@ -107,6 +107,18 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     this.engine.setBrowserController(controller)
   }
 
+  setRendererToolActionRequester(
+    requester: ((payload: {
+      agent?: string
+      sessionId?: string
+      runId?: string
+      tool: string
+      args: Record<string, unknown>
+    }) => Promise<Record<string, unknown>>) | null,
+  ): void {
+    this.engine.setRendererToolActionRequester(requester)
+  }
+
   async send(
     agent: string,
     message: string | MultimodalBlock[],

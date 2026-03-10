@@ -8,6 +8,8 @@ import {
   PanelLeftClose,
   PanelRightClose,
   SlidersHorizontal,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
@@ -24,6 +26,9 @@ interface DesignToolbarProps {
   onToggleLeftPanel: () => void
   onToggleRightPanel: () => void
   onToggleUiClick: () => void
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onZoomToFit: () => void
 }
 
 function toolbarIconButton(
@@ -63,6 +68,9 @@ export default function DesignToolbar({
   onToggleLeftPanel,
   onToggleRightPanel,
   onToggleUiClick,
+  onZoomIn,
+  onZoomOut,
+  onZoomToFit,
 }: DesignToolbarProps) {
   const saveLabel = saveStatus === 'saving'
     ? '保存中...'
@@ -89,6 +97,17 @@ export default function DesignToolbar({
         {toolbarIconButton('图层', false, onToggleLayers, <Layers3 style={{ width: 16, height: 16 }} strokeWidth={1.8} />)}
         {toolbarIconButton('变量', false, onToggleVariables, <SlidersHorizontal style={{ width: 16, height: 16 }} strokeWidth={1.8} />)}
         {toolbarIconButton('设计套件', false, onOpenStyleGuides, <Palette style={{ width: 16, height: 16 }} strokeWidth={1.8} />)}
+        <div
+          style={{
+            width: 1,
+            height: 20,
+            background: 'var(--border-default)',
+            margin: '0 8px',
+          }}
+        />
+        {toolbarIconButton('放大 (Cmd+=)', false, onZoomIn, <ZoomIn style={{ width: 16, height: 16 }} strokeWidth={1.8} />)}
+        {toolbarIconButton('缩小 (Cmd+-)', false, onZoomOut, <ZoomOut style={{ width: 16, height: 16 }} strokeWidth={1.8} />)}
+        {toolbarIconButton('适应画布 (Cmd+0)', false, onZoomToFit, <span style={{ fontSize: 11, fontWeight: 600 }}>1:1</span>)}
         <div
           style={{
             width: 1,

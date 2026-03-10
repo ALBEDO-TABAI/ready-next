@@ -11,6 +11,7 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "build:dist": "npm run build && electron-builder --config electron-builder.yml",
+    "build:dist:seeded": "node ./scripts/export-ai-settings-seed.mjs && npm run build:dist",
     "build:dir": "npm run build && electron-builder --config electron-builder.yml --dir",
     "preview": "electron-vite preview",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

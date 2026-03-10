@@ -28,7 +28,7 @@ import {
 } from '../../components/calendar/schedule-x-utils'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
 import { useCalendarAgentAdapter } from '../../modules/calendar/useCalendarAgentAdapter'
-import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
+import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
 import { useCalendarSession } from '../../stores/useCalendarSession'
 
@@ -867,10 +867,11 @@ export default function CalendarMode() {
             <div
               className="glass-surface-panel flex items-center justify-between flex-shrink-0"
               style={{
-                height: 48,
+                height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                 padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
                 borderBottom: '1px solid var(--border-default)',
                 background: 'var(--surface-toolbar-bg)',
+                boxSizing: 'border-box',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

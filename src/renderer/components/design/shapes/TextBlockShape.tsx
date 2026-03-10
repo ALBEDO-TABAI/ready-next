@@ -1,5 +1,5 @@
 import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
-import { TEXT_BLOCK_DEFAULT_PROPS, type TextBlockShape } from './types'
+import { TEXT_BLOCK_DEFAULT_PADDING, TEXT_BLOCK_DEFAULT_PROPS, type TextBlockShape } from './types'
 
 export class TextBlockShapeUtil extends BaseBoxShapeUtil<TextBlockShape> {
   static type = 'ui-text-block' as const
@@ -56,6 +56,12 @@ export class TextBlockShapeUtil extends BaseBoxShapeUtil<TextBlockShape> {
     const fillColor = typeof meta.readyFillColor === 'string' ? String(meta.readyFillColor) : 'transparent'
     const cornerRadius = typeof meta.readyCornerRadius === 'number' ? Math.max(0, Number(meta.readyCornerRadius)) : 6
     const clipContent = meta.readyClipContent === true
+    const paddingH = typeof meta.readyPaddingH === 'number'
+      ? Math.max(0, Number(meta.readyPaddingH))
+      : TEXT_BLOCK_DEFAULT_PADDING.horizontal
+    const paddingV = typeof meta.readyPaddingV === 'number'
+      ? Math.max(0, Number(meta.readyPaddingV))
+      : TEXT_BLOCK_DEFAULT_PADDING.vertical
     const textColor = typeof meta.readyTextColor === 'string' ? String(meta.readyTextColor) : (color || 'var(--text-title)')
     const shadowEnabled = meta.readyDropShadowEnabled === true
     const shadowColor = typeof meta.readyDropShadowColor === 'string' ? String(meta.readyDropShadowColor) : '#000000'
@@ -93,7 +99,7 @@ export class TextBlockShapeUtil extends BaseBoxShapeUtil<TextBlockShape> {
           width: Math.max(40, w),
           height: Math.max(20, h),
           boxSizing: 'border-box',
-          padding: 6,
+          padding: `${paddingV}px ${paddingH}px`,
           fontSize: Math.max(10, fontSize),
           lineHeight,
           letterSpacing,

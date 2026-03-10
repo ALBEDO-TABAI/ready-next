@@ -9,6 +9,7 @@ import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode }
 import GlobalSearchPanel from './GlobalSearchPanel'
 import SkillsCenterPanel from './SkillsCenterPanel'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
+import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
 
 export type SidePanelVariant = 'files' | 'search' | 'skills' | 'calendar' | 'hidden'
 
@@ -136,7 +137,8 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
             style={{
               height: FILES_PANEL_DIMENSIONS.headerHeight,
               borderColor: PANEL_TOKENS.border,
-              padding: `${FILES_PANEL_DIMENSIONS.headerPaddingY}px ${FILES_PANEL_DIMENSIONS.headerPaddingX}px`,
+              padding: `0 ${FILES_PANEL_DIMENSIONS.headerPaddingX}px`,
+              boxSizing: 'border-box',
             }}
           >
             <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
@@ -169,8 +171,10 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
           <div
             className="shrink-0 border-b flex items-center justify-between"
             style={{
+              height: FILES_PANEL_DIMENSIONS.toolbarHeight,
               borderColor: PANEL_TOKENS.border,
-              padding: '6px 14px',
+              padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
+              boxSizing: 'border-box',
             }}
           >
             {/* Left: view mode + filter */}

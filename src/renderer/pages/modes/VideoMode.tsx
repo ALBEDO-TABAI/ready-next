@@ -101,7 +101,7 @@ export default function VideoMode() {
           id: tab.id,
           label: tab.name,
           title: tab.path || tab.name,
-          dotColor: 'var(--color-blue)',
+          dotColor: tab.id === timeline.activeProjectTabId ? 'var(--color-blue)' : undefined,
           active: tab.id === timeline.activeProjectTabId,
         }))}
         onTabClick={(id) => {

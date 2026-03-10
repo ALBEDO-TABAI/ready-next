@@ -1,49 +1,51 @@
 # Agent Refactor Baseline 2026-03-07
 
-## Current landed baseline
-- Renderer run routing now resolves by `runId + scopeId` and no longer depends on the currently selected scope.
-- `useAgent` is no longer the old single-file controller. Runtime routing, message composition, command execution, and scope-run patching have been split into dedicated modules.
-- Browser main-process code has been split into services for shell commands, tab lifecycle, preview, automation/CDP, data access, diagnostics, downloads, popup handling, and session policy.
-- Repository access is now separated by domain instead of routing everything through direct `getDatabase()` calls.
-- Tool families now cover browser, document, design, video, RSS, and calendar.
-- Renderer-side module handlers for design, video, RSS, and calendar are extracted from page components into dedicated adapter/handler modules.
-- TaskPanel now renders structured run state, module labels, tool trace, and artifact state from typed payloads.
+## 当前已落地的底座
+1. Run routing 已按 `runId + scopeId` 固化。
+- renderer 不再依赖当前 UI 选中的 scope 才能正确接流。
+- 这条前提已经是后续多模块 agent 执行的既有事实。
 
-## Closed-loop coverage currently available
-- Browser
-  - existing browser workflow path kept
-  - browser shell/layout and diagnostics entry are now separated from the page container
-- Document
-  - deterministic document action loop remains available
-  - document page now shares the unified workbench tab chrome
-- Design
-  - open/save/export/session capture loop is available
-  - diagnostics panel and shared tab chrome are in place
-- Video
-  - import/inspect/export/session capture loop is available
-  - schema helpers and diagnostics panel are in place
-- RSS
-  - add source, fetch updates, select item, trigger analysis, diagnostics, benchmark, and session capture are available
-- Calendar
-  - list/create/update/delete/capture loop is available
-  - agent handler and diagnostics panel are in place
+2. `useAgent` 已完成第一轮拆层。
+- `useAgent` 不再是旧式单文件 controller。
+- runtime routing、message composition、command execution、scope-run patching 已拆入独立模块。
+- store 仍存在，但已经不是整条执行链的唯一承载点。
 
-## What is still not final architecture
-- `useAgent` is split, but the store is still large and not yet reduced to a minimal pure-state surface.
-- Browser controller orchestration still has a final coordination layer left to shrink.
-- Diagnostics exist as in-product panels, not yet as full dedicated labs across every module.
-- Video is moving toward `Remotion schema-first`, but renderer state is still not fully derived from one canonical project schema.
-- Design inspector still lacks several high-frequency controls and consistency across shape types.
-- RSS and Calendar are much less coupled to page components now, but their end-state adapter/lab story is not complete.
-- Memory layering (`L0/L1/L2`) and the Feishu replacement path have not started in earnest.
+3. Browser main-process 已服务化。
+- 壳层命令、tab lifecycle、preview、automation/CDP、data access、diagnostics、downloads、popup/window-open、session policy、host layout 已拆出独立 services。
+- renderer 侧 browser shell/layout/diagnostics entry 也已从页面容器中拆出。
 
-## Recommended next execution order
-1. Finish the remaining RSS source-acquisition work for Weibo, Xiaohongshu, and Douyin on top of the app browser module.
-2. Finish the shared workbench visual baseline:
-   - strict top-row alignment
-   - unified tabs/chrome
-   - missing design inspector controls
-3. Continue shrinking the remaining browser controller orchestration and promote diagnostics panels into proper labs.
-4. Return to the next untouched mainline items:
-   - PromptAssemblyService and layered memory
-   - Feishu capability adapter replacement
+4. Repository 分层基线已建立。
+- browser/chat/rss/calendar/settings/agent 访问路径已具备独立 repository。
+- 旧的 `database.ts` 直接穿透式访问和静态/动态导入告警已不再是当前主路径。
+
+5. 模块 handler 已基本独立。
+- design、video、RSS、calendar 的 agent handler 已从页面组件中抽离。
+- 这些模块已经可以在统一 run model 上继续深化，而不必先回头拆页面内逻辑。
+
+6. TaskPanel 和结构化 run state 已可用。
+- TaskPanel 能显示结构化 run state、module label、tool trace、artifact state。
+- 这部分已经从“消息猜状态”转向“typed payload 驱动”。
+
+## 当前可用的闭环基线
+- Browser：既有 workflow 路径可用，shell/layout/diagnostics 已分离。
+- Document：确定性文档动作闭环可用，并接入共享 workbench chrome。
+- Design：open/save/export/session capture 可用，已有 diagnostics panel。
+- Video：import/inspect/export/session capture 可用，已有 schema helper 与 diagnostics panel。
+- RSS：add source / fetch / select / analyze / diagnostics / benchmark / session capture 可用。
+- Calendar：list/create/update/delete/capture 闭环可用，已有 agent handler 与 diagnostics panel。
+
+## 当前仍未完成的底座项
+- `useAgent` 仍然偏大，还没有被收敛成最小纯状态 surface。
+- Browser orchestration 还剩最后一层协调逻辑可继续下沉。
+- Diagnostics 目前是 panel，不是完整的跨模块 lab。
+- Video 仍未完全达到 `Remotion schema-first` 终态。
+- Design inspector 仍缺高频属性控制和 shape 一致性。
+- RSS / Calendar 的最终 adapter + lab 终态还没完全收口。
+- `PromptAssemblyService + L0/L1/L2 memory` 还没开始。
+- Feishu capability replacement 还没开始。
+
+## 下一阶段建议顺序
+1. 先完成 RSS 三条源在应用内浏览器路径上的最终签收。
+2. 再完成 workbench 顶部三行、tabs、toolbar 的视觉基线。
+3. 然后继续收 browser orchestration，并把 diagnostics panel 升级为真正 lab 入口。
+4. 最后回到尚未启动的主线：layered memory 与 Feishu replacement。

@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { randomUUID } from 'crypto'
 import { AgentManager } from './agent-manager'
 import type { MultimodalBlock } from './direct-chat'
 import { BrowserController } from '../browser-engine/ipc-handler'
@@ -83,7 +84,69 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     runtime.getOrchestrator().setBrowserController(browserController)
   }
   const orchestrator = runtime.getOrchestrator()
+  const pendingToolActionRequests = new Map<string, {
+    resolve: (payload: Record<string, unknown>) => void
+    reject: (error: Error) => void
+    timer: NodeJS.Timeout
+  }>()
+  const requestRendererToolAction = async (payload: {
+    agent?: string
+    sessionId?: string
+    runId?: string
+    tool: string
+    args: Record<string, unknown>
+  }): Promise<Record<string, unknown>> => {
+    if (mainWindow.isDestroyed()) {
+      throw new Error('Main window is not available for design tool execution')
+    }
+    const requestId = randomUUID()
+    return await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingToolActionRequests.delete(requestId)
+        reject(new Error(`Timed out waiting for renderer tool action result: ${payload.tool}`))
+      }, 120_000)
+      pendingToolActionRequests.set(requestId, { resolve, reject, timer })
+      mainWindow.webContents.send('agent:toolActionRequest', {
+        requestId,
+        ...payload,
+      })
+    })
+  }
+  orchestrator.setRendererToolActionRequester(requestRendererToolAction)
   log('setupAgentIPC called, Claude SDK runtime initialized')
+
+  ipcMain.removeHandler('agent:completeToolActionRequest')
+  ipcMain.handle('agent:completeToolActionRequest', async (_, payload: {
+    requestId: string
+    handled: boolean
+    payload?: Record<string, unknown>
+    error?: string
+  }): Promise<IPCResponse<{ acknowledged: boolean }>> => {
+    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : ''
+    const pending = pendingToolActionRequests.get(requestId)
+    if (!pending) {
+      return { success: false, error: `Unknown tool action request: ${requestId}` }
+    }
+    pendingToolActionRequests.delete(requestId)
+    clearTimeout(pending.timer)
+    if (payload?.error) {
+      pending.reject(new Error(payload.error))
+    } else if (!payload?.handled) {
+      pending.reject(new Error(`Renderer did not handle tool action request: ${requestId}`))
+    } else {
+      const resultPayload = payload.payload && typeof payload.payload === 'object' ? payload.payload : {}
+      try {
+        const capture = (resultPayload as { runCapture?: unknown }).runCapture
+        if (capture && typeof capture === 'object') {
+          appendFileSync('/tmp/ready-design-run-captures.ndjson', `${JSON.stringify(capture)}\n`)
+        }
+      } catch {
+        // ignore diagnostic persistence failures
+      }
+      pending.resolve(resultPayload)
+    }
+    return { success: true, data: { acknowledged: true } }
+  })
 
   // Send message to agent — use direct HTTP streaming
   ipcMain.handle('agent:send', async (_, { agent, message, sessionId, requestId }: {
@@ -857,5 +920,152 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
     // Feed result back to the agent
     agentManager.feedToolResult(data.agent, data.toolId, result)
+  })
+
+  // ===================== Memory System IPC =====================
+
+  ipcMain.removeHandler('agent:memory:query')
+  ipcMain.handle('agent:memory:query', async (_, filters): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      const memories = await memoryRepo.queryMemories(filters)
+      return { success: true, data: memories }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:create')
+  ipcMain.handle('agent:memory:create', async (_, entry): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      const created = await memoryRepo.createMemory(entry)
+      return { success: true, data: created }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:update')
+  ipcMain.handle('agent:memory:update', async (_, payload: { id: string; updates: Record<string, unknown> }): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      await memoryRepo.updateMemory(payload.id, payload.updates)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:delete')
+  ipcMain.handle('agent:memory:delete', async (_, id: string): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      await memoryRepo.deleteMemory(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:stats')
+  ipcMain.handle('agent:memory:stats', async (): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      const stats = await memoryRepo.getMemoryStats()
+      return { success: true, data: stats }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:trigger:list')
+  ipcMain.handle('agent:trigger:list', async (_, filters): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      const triggers = await memoryRepo.listTriggers(filters)
+      return { success: true, data: triggers }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:trigger:create')
+  ipcMain.handle('agent:trigger:create', async (_, trigger): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      const created = await memoryRepo.createTrigger(trigger)
+      return { success: true, data: created }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:trigger:update')
+  ipcMain.handle('agent:trigger:update', async (_, payload: { id: string; updates: Record<string, unknown> }): Promise<IPCResponse> => {
+    try {
+      const memoryRepo = runtime?.getMemoryRepository()
+      if (!memoryRepo) {
+        return { success: false, error: 'Memory repository not available' }
+      }
+      await memoryRepo.updateTrigger(payload.id, payload.updates)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:lifecycle:status')
+  ipcMain.handle('agent:memory:lifecycle:status', async (): Promise<IPCResponse> => {
+    try {
+      const lifecycle = runtime?.getMemoryLifecycleManager()
+      if (!lifecycle) {
+        return { success: false, error: 'Memory lifecycle manager not available' }
+      }
+      return {
+        success: true,
+        data: {
+          running: lifecycle.isRunning(),
+          lastMaintenanceAt: lifecycle.getLastMaintenanceAt()?.toISOString() || null,
+        },
+      }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:lifecycle:runMaintenance')
+  ipcMain.handle('agent:memory:lifecycle:runMaintenance', async (): Promise<IPCResponse> => {
+    try {
+      const lifecycle = runtime?.getMemoryLifecycleManager()
+      if (!lifecycle) {
+        return { success: false, error: 'Memory lifecycle manager not available' }
+      }
+      const result = await lifecycle.runMaintenance()
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   })
 }

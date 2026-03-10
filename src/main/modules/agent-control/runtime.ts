@@ -18,6 +18,8 @@ import {
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { SidecarManager } from './sidecar-manager'
+import { MemoryRepository } from '../repositories/memory-repository'
+import { MemoryLifecycleManager } from './memory-lifecycle'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import type {
@@ -57,8 +59,12 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly sidecar = new SidecarManager()
   private readonly orchestrator: ClaudeSdkOrchestrator
   private readonly toolGateway = new ToolGateway()
+  private readonly memoryRepository = new MemoryRepository()
+  private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
   private readonly promptAssembly = new PromptAssemblyService({
     getMemoryRoot: () => join(app.getPath('userData'), 'agent-memory'),
+    memoryRepository: this.memoryRepository,
+    enableDatabaseMemory: true,
   })
   private readonly agentManager: AgentManager
   private readonly pendingInboundChannels = new Map<string, {
@@ -94,8 +100,20 @@ export class AgentControlRuntime extends EventEmitter {
     return this.orchestrator
   }
 
+  getMemoryRepository(): MemoryRepository {
+    return this.memoryRepository
+  }
+
+  getMemoryLifecycleManager(): MemoryLifecycleManager {
+    return this.memoryLifecycle
+  }
+
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
+
+    // Start memory lifecycle manager
+    this.memoryLifecycle.start()
+
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
     const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
@@ -110,6 +128,10 @@ export class AgentControlRuntime extends EventEmitter {
       clearInterval(this.pollTimer)
       this.pollTimer = null
     }
+
+    // Stop memory lifecycle manager
+    this.memoryLifecycle.stop()
+
     await this.sidecar.stop()
   }
 
