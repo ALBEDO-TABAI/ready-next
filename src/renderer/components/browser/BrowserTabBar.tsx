@@ -182,13 +182,13 @@ export default function BrowserTabBar({
                 onDrop={(e) => handleDrop(e, index)}
                 onClick={() => onTabClick(tab.id)}
                 onAuxClick={(e) => handleAuxClick(e, tab.id)}
-                className="group relative flex min-w-0 flex-1 cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
+                className="group relative flex min-w-0 cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
                 style={{
                   gap: 6,
                   height: isActive ? activeTabHeight : inactiveTabHeight,
-                  flex: '1 1 0',
+                  width: WORKBENCH_TAB_MAX_WIDTH,
+                  minWidth: 120,
                   maxWidth: WORKBENCH_TAB_MAX_WIDTH,
-                  minWidth: 0,
                   background: isActive ? 'var(--surface-card-bg)' : 'transparent',
                   color: isActive ? 'var(--text-title)' : 'var(--text-gray)',
                   borderLeft: isDragOver ? '2px solid var(--color-blue)' : '2px solid transparent',
@@ -269,8 +269,8 @@ export default function BrowserTabBar({
                       e.stopPropagation()
                       onTabClose(tab.id)
                     }}
-                    className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
-                    style={{ padding: 2 }}
+                    className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0 flex items-center justify-center"
+                    style={{ width: 18, height: 18 }}
                     title="Close tab"
                   >
                     <X style={{ width: 10, height: 10 }} strokeWidth={2} />

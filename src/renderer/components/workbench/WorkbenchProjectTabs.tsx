@@ -78,7 +78,7 @@ export default function WorkbenchProjectTabs({
             const isActive = Boolean(tab.active)
             const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
             return (
-              <div key={tab.id} className="relative flex min-w-0 flex-1 items-end" style={{ maxWidth: WORKBENCH_TAB_MAX_WIDTH }}>
+              <div key={tab.id} className="relative flex min-w-0 items-end" style={{ width: WORKBENCH_TAB_MAX_WIDTH, minWidth: 120, maxWidth: WORKBENCH_TAB_MAX_WIDTH }}>
                 <MorphTabButton
                   layoutId={layoutId}
                   active={isActive}
@@ -89,7 +89,7 @@ export default function WorkbenchProjectTabs({
                   onDrop={onTabDrop ? (event) => onTabDrop(event, index) : undefined}
                   onDragEnd={onTabDragEnd}
                   onClick={(event) => onTabClick(tab.id, event)}
-                  className="group relative flex min-w-0 flex-1 cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
+                  className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
                   style={{
                     gap: 6,
                     height: isActive ? activeTabHeight : inactiveTabHeight,
@@ -122,8 +122,8 @@ export default function WorkbenchProjectTabs({
                         event.stopPropagation()
                         onTabClose(tab.id, event)
                       }}
-                      className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0"
-                      style={{ padding: 2 }}
+                      className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0 flex items-center justify-center"
+                      style={{ width: 18, height: 18 }}
                       title="Close"
                     >
                       <X style={{ width: 10, height: 10 }} strokeWidth={2} />
