@@ -1,0 +1,3 @@
+```show-widget
+{"title":"trend_line_chart","widget_code":"<div class=\"card stack\" style=\"max-width:560px;margin:0 auto;\"><div class=\"title\">研究趋势</div><canvas id=\"trendLine\" height=\"220\"></canvas><script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script><script>const ctx=document.getElementById('trendLine'); if(ctx){ new Chart(ctx,{type:'line',data:{labels:['周一','周二','周三','周四','周五'],datasets:[{data:[14,22,18,27,31],borderColor:'#5B8DEF',backgroundColor:'rgba(91,141,239,0.14)',fill:true,tension:0.36}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}}); }</script></div>"}
+```

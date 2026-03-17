@@ -24,6 +24,18 @@ describe('document widget guidance', () => {
     assert.equal(profile?.titleHint, 'score_calculator')
   })
 
+  it('maps high-frequency research and investment phrases into stronger chart defaults', () => {
+    const research = inferDocumentWidgetProfile('做一个科研绘图，用更学术一点的趋势图展示实验结果')
+    const investment = inferDocumentWidgetProfile('做一个投资趋向图，偏数据面板风格')
+    const dynamic = inferDocumentWidgetProfile('我想看这个主题的数据动态变化')
+
+    assert.equal(research?.family, 'line_chart')
+    assert.equal(research?.style, 'academic')
+    assert.equal(investment?.family, 'line_chart')
+    assert.equal(investment?.style, 'dashboard')
+    assert.equal(dynamic?.family, 'line_chart')
+  })
+
   it('builds readable widget guidance snippets for agent prompts', () => {
     const profile = inferDocumentWidgetProfile('做一个本周下周对比图，像周报')
     const snippet = buildDocumentWidgetGuidanceSnippet(profile)
@@ -40,5 +52,24 @@ describe('document widget guidance', () => {
 
     assert.match(baselines, /Weekly Focus Chart/i)
     assert.match(baselines, /Style Vocabulary/i)
+    assert.match(baselines, /科研绘图/)
+    assert.match(baselines, /投资趋向/)
+  })
+
+  it('publishes a widget fixture library and capability matrix', () => {
+    const matrix = readFileSync(
+      resolve(process.cwd(), 'docs/DOCUMENT_WIDGET_CAPABILITY_MATRIX.md'),
+      'utf8',
+    )
+    const fixtureIndex = readFileSync(
+      resolve(process.cwd(), 'docs/widget-fixtures/README.md'),
+      'utf8',
+    )
+
+    assert.match(matrix, /stats_card/)
+    assert.match(matrix, /weekly_focus_chart/)
+    assert.match(matrix, /partial|planned/i)
+    assert.match(fixtureIndex, /score_calculator/)
+    assert.match(fixtureIndex, /weekly_focus_chart/)
   })
 })

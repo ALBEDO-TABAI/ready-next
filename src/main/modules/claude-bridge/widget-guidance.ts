@@ -30,6 +30,7 @@ function inferWidgetFamily(userText: string): DocumentWidgetFamily {
   if (/(本周|下周|周报|周计划|weekly|week)/i.test(userText)) return 'weekly_focus_chart'
   if (/(评分|打分|计算器|预算|估算|score|calculator|estimate|budget)/i.test(userText)) return 'mini_calculator'
   if (/(流程|步骤|架构图|关系图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
+  if (/(科研绘图|研究结果|实验结果|investment trend|投资趋向|数据动态|动态变化|走势分析)/i.test(userText)) return 'line_chart'
   if (/(趋势|折线|line chart|time series|走势)/i.test(userText)) return 'line_chart'
   if (/(柱状|条形|分类对比|bar chart|compare|comparison)/i.test(userText)) return 'bar_chart'
   if (/(切换卡|tab|标签切换|状态块|分组信息)/i.test(userText)) return 'tab_info_block'
@@ -39,11 +40,11 @@ function inferWidgetFamily(userText: string): DocumentWidgetFamily {
 
 function inferWidgetStyle(userText: string): DocumentWidgetStyle {
   if (/(米白|奶油|暖色|温和|柔和|warm|minimal|淡米|浅米)/i.test(userText)) return 'warm_minimal'
-  if (/(研究|学术|论文|academic|research)/i.test(userText)) return 'academic'
+  if (/(研究|学术|论文|academic|research|科研绘图|实验结果)/i.test(userText)) return 'academic'
   if (/(笔记|notebook|文稿|卡片笔记)/i.test(userText)) return 'notebook'
-  if (/(周报|dashboard|仪表盘|数据面板|saas)/i.test(userText)) return 'dashboard'
+  if (/(周报|dashboard|仪表盘|数据面板|saas|投资趋向|行情|趋势面板)/i.test(userText)) return 'dashboard'
   if (/(杂志|editorial|海报感|封面感)/i.test(userText)) return 'editorial'
-  if (/(高对比|科技感|bold|炫酷|霓虹)/i.test(userText)) return 'bold_data'
+  if (/(高对比|科技感|bold|炫酷|霓虹|数据动态)/i.test(userText)) return 'bold_data'
   return null
 }
 
@@ -102,6 +103,7 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
         implementationHint: 'Chart.js 或 SVG polyline',
         guidanceBullets: [
           '强调趋势和关键拐点，不要塞太多序列。',
+          '适合科研绘图、投资趋向、数据动态这类高频需求。',
         ],
       }
     case 'tab_info_block':

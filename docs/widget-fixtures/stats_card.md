@@ -1,0 +1,3 @@
+```show-widget
+{"title":"stats_summary_card","widget_code":"<svg viewBox=\"0 0 640 180\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"640\" height=\"180\" rx=\"20\" fill=\"#F7F3EB\"/><text x=\"36\" y=\"48\" font-size=\"18\" font-weight=\"700\" fill=\"#1F2937\">Weekly Snapshot</text><text x=\"36\" y=\"92\" font-size=\"28\" font-weight=\"700\" fill=\"#2563EB\">12</text><text x=\"36\" y=\"122\" font-size=\"13\" fill=\"#6B7280\">核心事项</text><text x=\"240\" y=\"92\" font-size=\"28\" font-weight=\"700\" fill=\"#059669\">86%</text><text x=\"240\" y=\"122\" font-size=\"13\" fill=\"#6B7280\">完成率</text><text x=\"460\" y=\"92\" font-size=\"28\" font-weight=\"700\" fill=\"#D97706\">4.2h</text><text x=\"460\" y=\"122\" font-size=\"13\" fill=\"#6B7280\">平均专注</text></svg>"}
+```

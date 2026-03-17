@@ -41,6 +41,10 @@ Prompt pattern:
 
 ### 3. Line Chart
 - Best for: trend tracking, time series summaries
+- High-frequency asks:
+  - 科研绘图
+  - 投资趋向
+  - 数据动态
 - Preferred implementation: `Chart.js`
 - Fallback: `SVG polyline`
 

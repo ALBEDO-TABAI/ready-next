@@ -1,0 +1,3 @@
+```show-widget
+{"title":"category_bar_chart","widget_code":"<div class=\"card stack\" style=\"max-width:560px;margin:0 auto;\"><div class=\"title\">渠道对比</div><canvas id=\"categoryBar\" height=\"220\"></canvas><script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script><script>const ctx=document.getElementById('categoryBar'); if(ctx){ new Chart(ctx,{type:'bar',data:{labels:['搜索','私域','短视频','推荐'],datasets:[{data:[42,31,58,36],backgroundColor:['#5B8DEF','#82C8A0','#F0B86E','#8E8CD8'],borderRadius:10}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:80},x:{grid:{display:false}}}}}); }</script></div>"}
+```
