@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
 import { clampNumericInputValue } from './widget-runtime-helpers'
+import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 
 interface WidgetDomRuntimeProps {
+  title?: string
   widgetCode: string
   onOpenHref: (href: string) => void
   onRuntimeError?: (message: string) => void
@@ -38,6 +40,7 @@ function executeScripts(container: HTMLElement): Promise<void> {
 }
 
 export default function WidgetDomRuntime({
+  title,
   widgetCode,
   onOpenHref,
   onRuntimeError,
@@ -47,6 +50,9 @@ export default function WidgetDomRuntime({
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
+    const widgetWindow = window as typeof window & {
+      __readyWidgetSendMessage?: (text: string) => void
+    }
 
     const renderRuntime = () => {
       const themePayload = resolveWidgetThemePayload()
@@ -73,6 +79,13 @@ export default function WidgetDomRuntime({
 
     const handleClick = (event: Event) => {
       const target = event.target as HTMLElement | null
+      const messageNode = target?.closest?.('[data-ready-agent-message]') as HTMLElement | null
+      const widgetMessage = messageNode?.getAttribute('data-ready-agent-message')?.trim()
+      if (widgetMessage) {
+        event.preventDefault()
+        appendWidgetMessageToAgentInput(widgetMessage, title)
+        return
+      }
       const link = target?.closest?.('a[href]') as HTMLAnchorElement | null
       if (!link?.href) return
       if (/^\s*javascript\s*:/i.test(link.href)) return
@@ -94,6 +107,12 @@ export default function WidgetDomRuntime({
       }
     }
 
+    const previousBridge = widgetWindow.__readyWidgetSendMessage
+    const nextBridge = (text: string) => {
+      appendWidgetMessageToAgentInput(text, title)
+    }
+    widgetWindow.__readyWidgetSendMessage = nextBridge
+
     renderRuntime()
     host.addEventListener('click', handleClick)
     host.addEventListener('input', handleNumericBounds, true)
@@ -112,8 +131,11 @@ export default function WidgetDomRuntime({
       host.removeEventListener('click', handleClick)
       host.removeEventListener('input', handleNumericBounds, true)
       host.removeEventListener('change', handleNumericBounds, true)
+      if (widgetWindow.__readyWidgetSendMessage === nextBridge) {
+        widgetWindow.__readyWidgetSendMessage = previousBridge
+      }
     }
-  }, [onOpenHref, onRuntimeError, widgetCode])
+  }, [onOpenHref, onRuntimeError, title, widgetCode])
 
   return <div ref={hostRef} className="document-widget-dom-runtime" />
 }

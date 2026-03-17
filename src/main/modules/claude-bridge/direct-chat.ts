@@ -32,8 +32,6 @@ import {
   getOpenAITools,
   getDocumentAnthropicTools,
   getDocumentOpenAITools,
-  getDesignAnthropicTools,
-  getDesignOpenAITools,
   executeToolCall,
 } from '../tools'
 import { findSkillToolBySkillAction } from '../tools/skills-tools'
@@ -46,16 +44,17 @@ import {
 } from './tool-bridge'
 import {
   extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
-  inferPreferredDesignTool as inferPreferredDesignToolFromText,
-  shouldAllowMultipleDesignArtifacts as shouldAllowMultipleDesignArtifactsFromText,
-  shouldForceDesignToolCall as shouldForceDesignToolCallFromText,
+  inferDocumentWidgetTaskKind as inferDocumentWidgetTaskKindFromText,
   shouldForceDocumentToolCall as shouldForceDocumentToolCallFromText,
   shouldPreferFormatOnly as shouldPreferFormatOnlyFromText,
   shouldPreferSectionRewrite as shouldPreferSectionRewriteFromText,
+  type DocumentWidgetTaskKind,
 } from './tool-policy-heuristics'
 import { ChatRepository } from '../repositories/chat-repository'
+import type { ConversationScope } from '../agent-control/types'
+import { getLogPath, getWhichCommand } from '../../utils/platform'
 
-const LOG = '/tmp/ready-directchat.log'
+const LOG = getLogPath('ready-directchat.log')
 const execFileAsync = promisify(execFile)
 const DEFAULT_KIMI_CODING_USER_AGENT = 'KimiCLI/1.14.0'
 const API_REQUEST_TIMEOUT_MS = 45_000
@@ -120,7 +119,9 @@ interface ToolPolicy {
   allowMultipleDesignArtifacts: boolean
   preferSectionRewrite: boolean
   preferFormatOnly: boolean
+  documentWidgetTaskKind?: DocumentWidgetTaskKind
   allowBrowserTools: boolean
+  preferredSkillToolNames?: string[] | null
 }
 
 const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
@@ -270,15 +271,24 @@ interface DocumentSnapshot {
 const CONTENT_MUTATING_DOCUMENT_TOOL_NAMES = new Set([
   'document_set_content',
   'document_append_content',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
   'document_replace_text',
+  'document_replace_exact',
   'document_format_section',
   'document_rewrite_section',
+])
+
+const DOCUMENT_INSPECTION_TOOL_NAMES = new Set([
+  'document_list_widgets',
 ])
 
 const FORCE_DOCUMENT_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
   'document_rename_tab',
+  'document_list_widgets',
   ...CONTENT_MUTATING_DOCUMENT_TOOL_NAMES,
   'document_save_tab',
 ])
@@ -299,6 +309,53 @@ const SECTION_REWRITE_DOCUMENT_TOOL_NAMES = new Set([
   'document_rewrite_section',
   'document_save_tab',
 ])
+
+const DOCUMENT_WIDGET_CREATE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_save_tab',
+])
+
+const DOCUMENT_WIDGET_INSPECT_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+])
+
+const DOCUMENT_WIDGET_UPDATE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_update_widget',
+  'document_save_tab',
+])
+
+const DOCUMENT_WIDGET_REMOVE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_remove_widget',
+  'document_save_tab',
+])
+
+function shouldPreferDocumentInspectionResult(
+  responseText: string | undefined,
+  inspectionResult: string | null,
+): boolean {
+  if (!inspectionResult) return false
+  const trimmed = (responseText || '').trim()
+  if (!trimmed) return true
+  if (trimmed.includes(inspectionResult)) return false
+  return [
+    /调用了\s*`?document_list_widgets`?/i,
+    /这是一个查询操作/i,
+    /任务已完成/i,
+    /如果用户需要我执行其他文档修改操作/i,
+  ].some((pattern) => pattern.test(trimmed))
+}
 
 export interface MultimodalBlock {
   type: 'text' | 'image' | 'video'
@@ -331,8 +388,21 @@ const TOOL_SYSTEM_PROMPT = `
 当消息中包含 [🌐 标题](url) 格式的网页引用时，请主动使用 browser_read_page 工具读取该 URL 的内容，然后基于页面内容回答用户。
 你可以直接使用文档工具来编辑文稿，优先使用 document_* 工具而不是只给文字建议：
 - document_new_tab / document_open_tab / document_switch_tab / document_rename_tab
-- document_set_content / document_append_content / document_replace_text / document_format_section / document_rewrite_section / document_save_tab
+- document_set_content / document_append_content / document_insert_widget / document_list_widgets / document_update_widget / document_remove_widget / document_replace_text / document_replace_exact / document_format_section / document_rewrite_section / document_save_tab
 当用户要求“直接改文档”“帮我写入并保存”时，请先基于用户语义做简短执行计划，再调用这些 document_* 工具执行真实操作。
+如果用户给出了明确的原文片段、句子、选区或精确引用，优先使用 document_replace_exact，避免整篇覆盖或误改重复片段。
+如果用户明确要求在文档里生成图表、交互组件、可视化说明、小工具或生成式 UI，优先使用 document_insert_widget，把 show-widget 围栏写入原文档。
+如果用户要求“看看现在有哪些 widget / 更新这个 widget / 删除这个 widget”，优先使用 document_list_widgets / document_update_widget / document_remove_widget，不要退回整篇覆盖。
+show-widget 规则：
+- 使用 \`\`\`show-widget 围栏
+- JSON 结构为 {"title":"snake_case_id","widget_code":"<div>...</div>"}
+- widget_code 可使用本地内联事件（如 oninput / onclick）完成简单交互
+- 复杂本地交互可追加小型内联 <script>，但不要依赖网络
+- 如需把 widget 内交互结果发回 agent，可使用 \`window.__readyWidgetSendMessage("...")\` 或 \`data-ready-agent-message="..."\` 触发
+- 单个 widget 控制在 3000 字以内
+- 仅允许白名单 CDN：cdnjs.cloudflare.com / cdn.jsdelivr.net / unpkg.com / esm.sh
+- 禁止 iframe 嵌套、fetch / XMLHttpRequest / WebSocket、form 提交、任意外链脚本、全局样式污染
+- 默认优先 SVG 图解、简单 HTML+CSS、Chart.js 图表
 如果用户只要求“优化格式/排版/可读性”，请保持原意，不要总结、删减或改写观点。
 请根据上下文自主决定操作顺序与工具组合，不要输出模板化固定回复。
 你还可以使用技能工具：
@@ -342,8 +412,54 @@ const TOOL_SYSTEM_PROMPT = `
 如果工具列表里出现新的自定义 skill_* 工具，也把它们视为可直接执行的技能能力。
 当用户明确提出这些任务时，优先调用对应 skill_* 工具，不要只给口头建议；若已有匹配 skill，则优先复用它而不是改走手工网页路径。
 当用户明确点名某个 skill（例如“使用 lifepho skill”）时，必须先调用对应的 skill_* 工具或读取其说明，再把 skill 的方法真正用到后续浏览器/文档任务里。
+不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用真实 skill_* 工具或 execution 管理工具。
 如果用户只提到站点名（例如“即梦”）但没有给 URL，且当前页也不能明确复用，先搜索该站点的官方入口并确认，再继续；若搜索结果仍不唯一，先向用户澄清，不要在无关页面反复进出。
-当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似“openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
+当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似”openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
+
+## 设计工具使用指导
+
+当用户需要创建带文字的矩形或控制排版布局时，请使用以下工作流：
+
+**创建自适应文字矩形**：
+1. 使用 design_measure_text 预先计算文本尺寸（可选但推荐）
+2. 使用 design_create_geo_shape 创建矩形，省略 h 参数让系统自动计算高度
+3. 通过 meta 参数精确控制字号、行高和内边距：
+   - meta.readyFontSize: 字号（如 16）
+   - meta.readyLineHeight: 行高倍数（如 1.6）
+   - meta.readyPaddingH: 水平内边距（如 12）
+   - meta.readyPaddingV: 垂直内边距（如 12）
+
+**使用排版占位符**：
+- 使用 design_create_rhythm_spacer 创建隐形占位符来控制段落间距和栅格对齐
+- 推荐尺寸：小间距 h=20-30，中间距 h=40-60，大间距 h=80-120
+- 占位符完全透明但占据空间，可用于维持视觉节奏
+
+**示例 - 标题 + 间距 + 正文**：
+\`\`\`
+design_create_geo_shape({
+  shape: 'rectangle',
+  label: '文章标题',
+  w: 760, x: 20, y: 20,
+  meta: { readyFontSize: 32, readyLineHeight: 1.2 }
+})
+
+design_create_rhythm_spacer({
+  w: 760, h: 40, x: 20, y: 80
+})
+
+design_create_geo_shape({
+  shape: 'rectangle',
+  label: '这是正文内容，会自动换行以适应宽度...',
+  w: 760, x: 20, y: 120,
+  meta: { readyFontSize: 16, readyLineHeight: 1.6 }
+})
+\`\`\`
+
+**注意事项**：
+- 双击矩形可直接编辑文字（tldraw 原生支持）
+- 自适应高度仅在创建时生效，编辑后需要手动调整或重新创建
+- 文字会自动换行，无需手动插入换行符（除非需要强制换行）
+
 如果系统当前未启用工具，请不要伪造工具调用，直接给出文本回答。
 `
 
@@ -818,6 +934,7 @@ export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
   private browserController: BrowserController | null = null
   private sidecarManager: SidecarManager | null = null
+  private runtime: import('../agent-control/runtime').AgentControlRuntime | null = null
   private rendererToolActionRequester: ((payload: {
     agent?: string
     sessionId?: string
@@ -871,6 +988,11 @@ export class DirectChatEngine extends EventEmitter {
   setSidecarManager(manager: SidecarManager): void {
     this.sidecarManager = manager
     log('SidecarManager set on DirectChatEngine')
+  }
+
+  setRuntime(runtime: import('../agent-control/runtime').AgentControlRuntime): void {
+    this.runtime = runtime
+    log('Runtime set on DirectChatEngine')
   }
 
   setRendererToolActionRequester(
@@ -1064,6 +1186,33 @@ export class DirectChatEngine extends EventEmitter {
     if (explicitSkills.length === 0) return
 
     for (const skill of explicitSkills) {
+      const activeExecution = params.sessionId
+        ? getSkillsRuntimeManager().listExecutions(10, params.sessionId, true).find((item) => item.skillId === skill.id)
+        : null
+      if (activeExecution) {
+        const args: Record<string, unknown> = { executionId: activeExecution.id }
+        params.emitToolAction('skill_get_state', args)
+        params.emitOutput(`skill_get_state(${JSON.stringify(args)})`, 'tool_use')
+        const result = await executeToolCall('skill_get_state', args, {
+          browserController: this.browserController,
+          sidecarManager: this.sidecarManager,
+          emitToolAction: params.emitToolAction,
+          requestModuleToolAction: params.requestModuleToolAction,
+          abortSignal: params.abortSignal,
+          sessionId: params.sessionId,
+        })
+        params.emitOutput(result.slice(0, 600), 'tool_result')
+        params.session.messages.push({
+          role: 'user',
+          content: [
+            `系统补充：技能 "${skill.name}" 在当前会话已有活跃 execution。`,
+            '必须先基于以下 execution 状态继续推进，而不是重新启动一个新的 workflow：',
+            result,
+          ].join('\n'),
+        })
+        continue
+      }
+
       const tool = findSkillToolBySkillAction(skill.id, skill.defaultAction)
       const actionDef = skill.actions.find((action) => action.name === (tool?.action || skill.defaultAction || ''))
       if (!tool || !actionDef) continue
@@ -1104,6 +1253,245 @@ export class DirectChatEngine extends EventEmitter {
       })
       log(`Injected explicit skill context for ${skill.id} via ${tool.name}`)
     }
+  }
+
+  private hasActiveSkillExecution(sessionId?: string): boolean {
+    if (!sessionId) return false
+    try {
+      return getSkillsRuntimeManager().listExecutions(5, sessionId, true).length > 0
+    } catch {
+      return false
+    }
+  }
+
+  private shouldKeepToolsWithVideo(userText: string, sessionId?: string): boolean {
+    const primary = this.extractPrimaryUserInstruction(userText)
+    if (!primary) return this.hasActiveSkillExecution(sessionId)
+    const normalized = primary.toLowerCase()
+    if (normalized.includes('/skill')) return true
+    if (/(skill_|skill\s+get\s+state|skill_submit_|skill_restart_|skill_cancel_|技能|重跑|重做某一步|继续执行|继续这个 skill)/i.test(primary)) {
+      return true
+    }
+    if (/(python|py\b|脚本|运行 python|执行 python|embedded python|内置 python)/i.test(primary)) {
+      return true
+    }
+    if (this.findExplicitlyRequestedSkills(primary).length > 0) {
+      return true
+    }
+    return this.hasActiveSkillExecution(sessionId)
+  }
+
+  private buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
+    const toolNames = new Set<string>([
+      'skill_get_state',
+      'skill_submit_input',
+      'skill_submit_confirmation',
+      'skill_submit_agent_result',
+      'skill_restart_from_step',
+      'skill_cancel_execution',
+      'system_run_embedded_python',
+    ])
+
+    const explicitSkills = this.findExplicitlyRequestedSkills(userText)
+    for (const skill of explicitSkills) {
+      for (const action of skill.actions.filter((item) => item.visibility !== 'internal')) {
+        const tool = findSkillToolBySkillAction(skill.id, action.name)
+        if (tool?.name) toolNames.add(tool.name)
+      }
+    }
+
+    if (sessionId) {
+      const activeExecutions = getSkillsRuntimeManager().listExecutions(10, sessionId, true)
+      for (const execution of activeExecutions) {
+        const tool = findSkillToolBySkillAction(execution.skillId, execution.entryAction)
+        if (tool?.name) toolNames.add(tool.name)
+      }
+    }
+
+    return Array.from(toolNames)
+  }
+
+  /**
+   * Extract pure user input (remove auto-injected environment context and assistant messages)
+   */
+  private extractPureUserInput(userText: string): string {
+    // First, check if there's a "用户:" prefix - extract only user's input
+    const userPrefixMatch = userText.match(/用户:\s*(.+?)(?:\n|$)/s)
+    if (userPrefixMatch) {
+      return userPrefixMatch[1].trim()
+    }
+
+    // Remove environment information blocks
+    const envMarkers = [
+      '## 环境信息',
+      '### 当前设计画布上下文',
+      '### 设计项目引用',
+      '### 当前文档上下文',
+      '--- 引用设计项目:',
+      '--- 文档内容开始 ---',
+    ]
+
+    let pureInput = userText
+    for (const marker of envMarkers) {
+      const index = pureInput.indexOf(marker)
+      if (index >= 0) {
+        pureInput = pureInput.slice(0, index).trim()
+      }
+    }
+
+    return pureInput
+  }
+
+  /**
+   * Build tool usage guidance based on intent (suggestion, not forcing)
+   */
+  private buildToolGuidance(policy: ToolPolicy): string {
+    const guidance: string[] = []
+
+    if (policy.forceDesignTool) {
+      guidance.push(`
+## 工具使用建议
+
+当前用户的请求可能涉及设计操作。如果用户明确要求创建、修改或调整设计，请使用 design_* 工具。
+
+**判断标准**:
+- "创建一个封面" → 使用 design_run_task_controller 或相关 design_* 工具
+- "调整标题大小" → 使用 design_update_selected 或相关工具
+- "你是谁" → 直接回答，不使用工具
+- "这个设计怎么样" → 直接回答，不使用工具
+- "解释一下这个设计" → 直接回答，不使用工具
+
+**重要**: 只在用户明确要求设计操作时才使用设计工具。对话、询问、解释等请直接回答。
+
+## 文本排版任务指导
+
+当用户提供文本内容需要排版时，**必须使用 design_run_task_controller 的 text-layout 任务类型**：
+
+**核心规则**:
+1. ✅ 读取 typography skill（如果有）- 提取字号、行高、间距规则
+2. ✅ 读取 ui-ux-pro-max-skill（如果有）- 提取视觉层次、留白原则
+3. ✅ 调用 design_run_task_controller({
+     taskType: 'text-layout',
+     designDirectiveText: "完整文本内容",
+     ratio: '9:16',
+     typography: {
+       baseFontSize: 16,      // 从 skill 提取
+       lineHeight: 1.8,       // 从 skill 提取
+       paragraphSpacing: 28,  // 从 skill 提取
+       headingScale: [32, 24, 20]  // 从 skill 提取
+     },
+     palette: {
+       text: '#333333',       // 从 skill 提取
+       heading: '#000000',    // 从 skill 提取
+       background: '#FFFFFF'  // 从 skill 提取
+     }
+   })
+4. ✅ 工具会自动创建 frame 容器
+5. ✅ 工具会自动使用 ui-text-block 创建文本
+6. ✅ 工具会自动应用字号、行高、间距、字重
+7. ✅ 工具会自动验证布局
+8. ❌ **严格禁止**使用 design_create_text 逐个创建
+9. ❌ **严格禁止**使用 design_compose_text_layout（已废弃）
+10. ❌ **严格禁止**手动创建 frame 和文本
+
+**Typography 参数说明**:
+- baseFontSize: 正文字号（px），默认 16
+- lineHeight: 行高倍数，默认 1.6
+- paragraphSpacing: 段落间距（px），默认 24
+- headingScale: 标题字号数组 [H1, H2, H3]，默认 [32, 24, 20]
+- emphasis: 强调方式 'bold' | 'color' | 'size'，默认 'bold'
+
+**Palette 参数说明**:
+- text: 正文颜色（hex）
+- heading: 标题颜色（hex）
+- background: 背景颜色（hex）
+- accent: 强调色（hex）
+
+**成功标准**:
+- 工具返回包含 "✅ 文本排版已完成" 的消息
+- 工具返回 status: 'success'
+- 工具返回 boardId 和 ownedNodeIds
+
+**如果工具返回成功，排版任务已 100% 完成，直接向用户报告结果，不要继续添加任何元素。**
+
+**示例 1 - 诗歌排版**:
+用户: "/skill typography read_skill\\n在设计画板里好好排版，变成美观优雅的小红书长图文\\n\\n被命名之日\\n凌晨的代码不再是\\"未命名\\"\\n..."
+✅ 正确流程:
+  1. 读取 typography skill，提取规则：
+     - 标题 24px 粗体
+     - 正文 16px
+     - 行高 1.8
+     - 段落间距 32px
+  2. 调用 design_run_task_controller({
+       taskType: 'text-layout',
+       designDirectiveText: "被命名之日\\n凌晨的代码不再是\\"未命名\\"\\n...",
+       ratio: '9:16',
+       typography: {
+         baseFontSize: 16,
+         lineHeight: 1.8,
+         paragraphSpacing: 32,
+         headingScale: [24, 20, 18]
+       }
+     })
+  3. 工具自动应用 typography 规则
+  4. 工具返回 "✅ 文本排版已完成"
+  5. 向用户报告："已完成排版，创建了 X 个文本块，应用了 typography 规则"
+  6. **停止** - 不要继续添加任何元素
+
+❌ 错误流程:
+  1. 读取 typography skill
+  2. 调用 design_run_task_controller
+  3. 工具返回成功
+  4. 继续调用 design_create_text 添加更多文本 ← **禁止！**
+
+**示例 2 - 应用 Typography + UI/UX Skill**:
+用户: "/skill typography read_skill\\n/skill ui_ux_pro_max_skill read_skill\\n在设计画板里好好排版..."
+✅ 正确流程:
+  1. 读取 typography skill，提取字号、行高规则
+  2. 读取 ui-ux-pro-max-skill，提取配色、间距规则
+  3. 调用 design_run_task_controller({
+       taskType: 'text-layout',
+       designDirectiveText: "...",
+       ratio: '9:16',
+       typography: { baseFontSize: 16, lineHeight: 1.8, ... },
+       palette: { text: '#333', heading: '#000', ... }
+     })
+  4. 工具自动应用所有规则
+  5. 任务完成
+
+**重要**: design_run_task_controller 的 text-layout 任务类型会自动处理所有排版细节，包括：
+- 解析 Markdown 内容（标题、段落、列表、引用）
+- 应用 typography 规则（字号、行高、间距、字重）
+- 应用 palette 配色
+- 创建 frame 容器和背景
+- 使用 ui-text-block 创建文本元素
+- 验证最终布局
+
+**不要尝试手动实现这些步骤，工具已经全部自动化处理。**
+
+`)
+    }
+
+    if (policy.forceDocumentTool) {
+      guidance.push(`
+## 工具使用建议
+
+当前用户的请求可能涉及文档操作。如果用户明确要求编辑、修改或保存文档，请使用 document_* 工具。
+
+**判断标准**:
+- "修改第一段" → 使用 document_update_section
+- "把这段原文精准改掉" → 使用 document_replace_exact
+- "在文档里做一个交互图表/组件" → 使用 document_insert_widget
+- "看看文档里有哪些 widget" → 使用 document_list_widgets
+- "更新这个 widget / 改图表内容" → 使用 document_update_widget
+- "删掉这个 widget" → 使用 document_remove_widget
+- "保存文档" → 使用 document_save
+- "你是谁" → 直接回答，不使用工具
+- "这篇文章怎么样" → 直接回答，不使用工具
+`)
+    }
+
+    return guidance.join('\n\n')
   }
 
   private buildForceDesignNudge(policy: ToolPolicy): string {
@@ -2289,13 +2677,19 @@ export class DirectChatEngine extends EventEmitter {
       // isKimi: Kimi's own OpenAI-protocol endpoint (provider=moonshot). Uses $web_search, not browser tools.
       // Note: api.kimi.com/coding with provider=anthropic is Anthropic-compatible and DOES support tools.
       const isKimi = isKimiCoding || (!useAnthropicProtocol && (baseUrl.includes('kimi') || baseUrl.includes('moonshot')))
-      const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
-      // Avoid tools when video exists, so simple media tasks don't get routed into skill/tool loops.
-      // Keep tools enabled for Kimi/non-Kimi so document_* can execute real edits.
-      const hasTools = (capabilities?.supportsToolCalls ?? true) && !hasVideoInputs && !hasRawVideoInIncoming
-      const userText = this.extractIncomingText(content)
-      const userInstructionText = this.extractPrimaryUserInstruction(userText)
       const sessionId = this.extractSessionIdFromInternalName(name)
+      const userText = this.extractIncomingText(content)
+      const pureUserInput = this.extractPureUserInput(userText)
+      const userInstructionText = this.extractPrimaryUserInstruction(pureUserInput)
+      const documentWidgetTaskKind = this.inferDocumentWidgetTaskKind(pureUserInput)
+      const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
+      const keepToolsWithVideo = this.shouldKeepToolsWithVideo(pureUserInput, sessionId)
+      // Avoid tools when video exists, so simple media tasks don't get routed into skill/tool loops.
+      // Keep tools enabled when the user is explicitly controlling skill execution or embedded Python.
+      const hasTools = (capabilities?.supportsToolCalls ?? true) && (
+        (!hasVideoInputs && !hasRawVideoInIncoming) ||
+        keepToolsWithVideo
+      )
       const publicAgentName = name.includes('::') ? name.slice(0, name.indexOf('::')) : name
       const requestModuleToolAction = this.rendererToolActionRequester
         ? (tool: string, args: Record<string, unknown>) => this.rendererToolActionRequester!({
@@ -2308,25 +2702,36 @@ export class DirectChatEngine extends EventEmitter {
         : undefined
       const incomingAttachmentHints = this.getIncomingAttachmentHints(content)
       let browserDecision = hasTools && this.browserController && this.isBrowserAgentV3Enabled()
-        ? this.decideBrowserTask(userText, session, sessionId, incomingAttachmentHints)
+        ? this.decideBrowserTask(pureUserInput, session, sessionId, incomingAttachmentHints)
         : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
-      const forceDesignTool = hasTools && this.shouldForceDesignToolCall(userText)
-      const preferredDesignTool = forceDesignTool ? this.inferPreferredDesignTool(userText) : null
+
+      // Detect environment
+      const hasDesignEnvironment = false // Design mode removed
+      const hasDocumentEnvironment = userText.includes('## 环境信息') && userText.includes('当前模式: 文档模式')
+
+      // Judge intent based on pure input (not polluted by environment context)
+      const forceDesignTool = false // Design tools removed
+      const preferredDesignTool = null
+      const preferredSkillToolNames = hasTools && (this.findExplicitlyRequestedSkills(pureUserInput).length > 0 || this.hasActiveSkillExecution(sessionId))
+        ? this.buildPreferredSkillToolNames(pureUserInput, sessionId)
+        : null
       const toolPolicy: ToolPolicy = {
-        forceDocumentTool: hasTools && !forceDesignTool && this.shouldForceDocumentToolCall(userText),
-        forceDesignTool,
-        preferredDesignTool,
-        primaryDesignInstruction: forceDesignTool ? userInstructionText : null,
-        allowMultipleDesignArtifacts: forceDesignTool && this.shouldAllowMultipleDesignArtifacts(userInstructionText),
-        preferSectionRewrite: hasTools && !forceDesignTool && this.shouldPreferSectionRewrite(userInstructionText),
-        preferFormatOnly: hasTools && !forceDesignTool && this.shouldPreferFormatOnly(userInstructionText),
+        forceDocumentTool: hasTools && this.shouldForceDocumentToolCall(pureUserInput),
+        forceDesignTool: false,
+        preferredDesignTool: null,
+        primaryDesignInstruction: null,
+        allowMultipleDesignArtifacts: false,
+        preferSectionRewrite: hasTools && this.shouldPreferSectionRewrite(userInstructionText),
+        preferFormatOnly: hasTools && this.shouldPreferFormatOnly(userInstructionText),
+        documentWidgetTaskKind,
         allowBrowserTools: hasTools && (
           browserDecision.mode === 'browser_workflow' ||
           browserDecision.mode === 'browser_upload_workflow'
         ),
+        preferredSkillToolNames,
       }
 
-      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, allowBrowserTools=${toolPolicy.allowBrowserTools}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, documentWidgetTaskKind=${toolPolicy.documentWidgetTaskKind || 'none'}, allowBrowserTools=${toolPolicy.allowBrowserTools}, preferredSkillTools=${toolPolicy.preferredSkillToolNames?.join('|') || 'all'}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, keepToolsWithVideo=${keepToolsWithVideo}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
 
       if (hasTools) {
         await this.maybeInjectExplicitSkillContext({
@@ -2531,6 +2936,8 @@ export class DirectChatEngine extends EventEmitter {
         const toolContext = {
           browserController: this.browserController,
           sidecarManager: this.sidecarManager,
+          runtime: this.runtime,
+          scope: undefined,
           emitToolAction: (tool: string, args: Record<string, unknown>) => {
             emitToolAction(tool, args)
           },
@@ -2608,8 +3015,20 @@ export class DirectChatEngine extends EventEmitter {
         let forceDesignNudges = 0
         let forceDocMutationNudges = 0
         let forceDocSaveNudges = 0
+        let forceDocInspectionResultNudges = 0
+        let forceDocWidgetRecoveryNudges = 0
         let textToolBridgeNudges = 0
         let documentMutationCompleted = false
+        let documentToolTaskCompleted = false
+        let lastDocumentInspectionResult: string | null = null
+        let lastWidgetValidationError: string | null = null
+
+        // Inject tool guidance into system prompt based on intent
+        const toolGuidance = this.buildToolGuidance(toolPolicy)
+        if (toolGuidance) {
+          session.systemPrompt = `${session.systemPrompt}\n\n${toolGuidance}`
+          log('Injected tool guidance into system prompt')
+        }
 
         // 浏览器步骤追踪
         const isBrowserTask = browserDecision.mode === 'browser_workflow' || browserDecision.mode === 'browser_upload_workflow'
@@ -2622,9 +3041,23 @@ export class DirectChatEngine extends EventEmitter {
           ensureNotAborted()
           iterations++
           log(`Tool loop iteration ${iterations}`)
+
+          // Get scope from runtime if available
+          let scope: ConversationScope | undefined
+          if (sessionId && this.runtime) {
+            try {
+              const result = this.runtime.getConversationScope(sessionId)
+              scope = result || undefined
+            } catch {
+              scope = undefined
+            }
+          }
+
           const toolContext = {
             browserController: this.browserController,
             sidecarManager: this.sidecarManager,
+            runtime: this.runtime,
+            scope,
             emitToolAction: (tool: string, args: Record<string, unknown>) => {
               emitToolAction(tool, args)
             },
@@ -2636,9 +3069,29 @@ export class DirectChatEngine extends EventEmitter {
           let response: APIResponse
           ensureNotAborted()
           if (useAnthropicProtocol) {
-            response = await this.callAnthropicWithTools(session, config, baseUrl, abortController.signal, toolPolicy)
+            try {
+              response = await this.callAnthropicWithTools(session, config, baseUrl, abortController.signal, toolPolicy)
+            } catch (error) {
+              if (!hasVideoInputs || !this.shouldRetryWithVideoFallback(error)) {
+                throw error
+              }
+              log('Anthropic tool request with video blocks failed, retrying with extracted image frames fallback')
+              const fallbackMessages = await this.buildVideoFrameFallbackMessages(session.messages)
+              session.messages = fallbackMessages
+              response = await this.callAnthropicWithTools(session, config, baseUrl, abortController.signal, toolPolicy)
+            }
           } else {
-            response = await this.callOpenAIWithTools(session, config, baseUrl, provider!, abortController.signal, toolPolicy)
+            try {
+              response = await this.callOpenAIWithTools(session, config, baseUrl, provider!, abortController.signal, toolPolicy)
+            } catch (error) {
+              if (!hasVideoInputs || !this.shouldRetryWithVideoFallback(error)) {
+                throw error
+              }
+              log('OpenAI tool request with video blocks failed, retrying with extracted image frames fallback')
+              const fallbackMessages = await this.buildVideoFrameFallbackMessages(session.messages)
+              session.messages = fallbackMessages
+              response = await this.callOpenAIWithTools(session, config, baseUrl, provider!, abortController.signal, toolPolicy)
+            }
           }
 
           // No tool calls — done
@@ -2655,7 +3108,30 @@ export class DirectChatEngine extends EventEmitter {
                 continue
               }
             }
-            if (toolPolicy.forceDocumentTool && !documentMutationCompleted && forceDocNudges < 2) {
+            if (
+              toolPolicy.forceDocumentTool &&
+              lastDocumentInspectionResult &&
+              shouldPreferDocumentInspectionResult(response.text, lastDocumentInspectionResult)
+            ) {
+              if (forceDocInspectionResultNudges < 1) {
+                forceDocInspectionResultNudges += 1
+                if (response.text && response.toolTransport !== 'text') {
+                  session.messages.push({ role: 'assistant', content: response.text })
+                }
+                session.messages.push({
+                  role: 'user',
+                  content: '系统检查：你刚执行了 document_list_widgets。请直接把工具返回的列表结果交付给用户，不要解释过程，也不要只描述你调用了工具。',
+                })
+                log(`forceDocumentTool inspection result nudge=${forceDocInspectionResultNudges}`)
+                continue
+              }
+              emitOutput(lastDocumentInspectionResult, 'text')
+              session.messages.push({ role: 'assistant', content: lastDocumentInspectionResult })
+              finishedBeforeLimit = true
+              log('forceDocumentTool inspection result fallback emitted directly')
+              break
+            }
+            if (toolPolicy.forceDocumentTool && !documentToolTaskCompleted && forceDocNudges < 2) {
               forceDocNudges += 1
               if (response.text && response.toolTransport !== 'text') {
                 session.messages.push({ role: 'assistant', content: response.text })
@@ -2667,18 +3143,8 @@ export class DirectChatEngine extends EventEmitter {
               log(`No tool call under forceDocumentTool, nudge=${forceDocNudges}`)
               continue
             }
-            if (toolPolicy.forceDesignTool && forceDesignNudges < 2) {
-              forceDesignNudges += 1
-              if (response.text && response.toolTransport !== 'text') {
-                session.messages.push({ role: 'assistant', content: response.text })
-              }
-              session.messages.push({
-                role: 'user',
-                content: this.buildForceDesignNudge(toolPolicy),
-              })
-              log(`No tool call under forceDesignTool, nudge=${forceDesignNudges}`)
-              continue
-            }
+            // REMOVED: forceDesignTool nudge mechanism
+            // If LLM decides not to use tools, respect that decision
             if (response.text) {
               emitOutput(response.text, 'text')
             }
@@ -2717,6 +3183,7 @@ export class DirectChatEngine extends EventEmitter {
           // Execute tool calls
           let executedDocActionCount = 0
           let executedMutatingDocActionCount = 0
+          let executedInspectionDocActionCount = 0
           let executedSaveDocActionCount = 0
           let executedBrowserToolsThisIteration = 0
           let executedPrimaryDesignToolThisIteration = false
@@ -2746,6 +3213,16 @@ export class DirectChatEngine extends EventEmitter {
                 executedDocActionCount += 1
                 if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                   executedMutatingDocActionCount += 1
+                  lastDocumentInspectionResult = null
+                  if (/widget (写入已拒绝|更新失败|删除失败)/.test(result)) {
+                    lastWidgetValidationError = result
+                  } else {
+                    lastWidgetValidationError = null
+                  }
+                }
+                if (DOCUMENT_INSPECTION_TOOL_NAMES.has(tc.name)) {
+                  executedInspectionDocActionCount += 1
+                  lastDocumentInspectionResult = result
                 }
                 if (tc.name === 'document_save_tab') {
                   executedSaveDocActionCount += 1
@@ -2785,6 +3262,16 @@ export class DirectChatEngine extends EventEmitter {
                   executedDocActionCount += 1
                   if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                     executedMutatingDocActionCount += 1
+                    lastDocumentInspectionResult = null
+                    if (/widget (写入已拒绝|更新失败|删除失败)/.test(result)) {
+                      lastWidgetValidationError = result
+                    } else {
+                      lastWidgetValidationError = null
+                    }
+                  }
+                  if (DOCUMENT_INSPECTION_TOOL_NAMES.has(tc.name)) {
+                    executedInspectionDocActionCount += 1
+                    lastDocumentInspectionResult = result
                   }
                   if (tc.name === 'document_save_tab') {
                     executedSaveDocActionCount += 1
@@ -2837,6 +3324,16 @@ export class DirectChatEngine extends EventEmitter {
                   executedDocActionCount += 1
                   if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                     executedMutatingDocActionCount += 1
+                    lastDocumentInspectionResult = null
+                    if (/widget (写入已拒绝|更新失败|删除失败)/.test(result)) {
+                      lastWidgetValidationError = result
+                    } else {
+                      lastWidgetValidationError = null
+                    }
+                  }
+                  if (DOCUMENT_INSPECTION_TOOL_NAMES.has(tc.name)) {
+                    executedInspectionDocActionCount += 1
+                    lastDocumentInspectionResult = result
                   }
                   if (tc.name === 'document_save_tab') {
                     executedSaveDocActionCount += 1
@@ -2896,8 +3393,24 @@ export class DirectChatEngine extends EventEmitter {
 
           if (
             toolPolicy.forceDocumentTool &&
+            toolPolicy.documentWidgetTaskKind &&
+            lastWidgetValidationError &&
+            forceDocWidgetRecoveryNudges < 1
+          ) {
+            forceDocWidgetRecoveryNudges += 1
+            session.messages.push({
+              role: 'user',
+              content: `系统检查：你刚生成的 widget 结果不合格：${lastWidgetValidationError}。请不要结束，改用更稳妥的实现方式重新生成并再次调用正确的 widget 工具。优先保留简洁结构，避免继续使用 document_append_content。`,
+            })
+            log(`forceDocumentTool widget recovery nudge=${forceDocWidgetRecoveryNudges}`)
+            continue
+          }
+
+          if (
+            toolPolicy.forceDocumentTool &&
             executedDocActionCount > 0 &&
             executedMutatingDocActionCount === 0 &&
+            executedInspectionDocActionCount === 0 &&
             forceDocMutationNudges < 2
           ) {
             forceDocMutationNudges += 1
@@ -2928,6 +3441,10 @@ export class DirectChatEngine extends EventEmitter {
 
           if (toolPolicy.forceDocumentTool && executedMutatingDocActionCount > 0) {
             documentMutationCompleted = true
+          }
+
+          if (toolPolicy.forceDocumentTool && (executedMutatingDocActionCount > 0 || executedInspectionDocActionCount > 0)) {
+            documentToolTaskCompleted = true
           }
 
           if (
@@ -3017,15 +3534,45 @@ export class DirectChatEngine extends EventEmitter {
     })
   }
 
+  private filterAnthropicToolsByAllowedNames(
+    tools: Array<Record<string, unknown>>,
+    allowedNames: Set<string>,
+  ): Array<Record<string, unknown>> {
+    return tools.filter((tool) => {
+      const name = typeof tool.name === 'string' ? tool.name : ''
+      return allowedNames.has(name)
+    })
+  }
+
+  private filterOpenAIToolsByAllowedNames(
+    tools: Array<Record<string, unknown>>,
+    allowedNames: Set<string>,
+  ): Array<Record<string, unknown>> {
+    return tools.filter((tool) => {
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? allowedNames.has(fn) : false
+    })
+  }
+
   private getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
     let tools = getAnthropicTools()
     if (policy?.forceDocumentTool) {
-      tools = getDocumentAnthropicTools().filter((tool) => {
-        const name = typeof tool.name === 'string' ? tool.name : ''
-        return FORCE_DOCUMENT_TOOL_NAMES.has(name)
-      })
-    } else if (policy?.forceDesignTool) {
-      tools = getDesignAnthropicTools()
+      const allowedNames = policy.documentWidgetTaskKind === 'create'
+        ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
+        : policy.documentWidgetTaskKind === 'inspect'
+          ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
+          : policy.documentWidgetTaskKind === 'update'
+            ? DOCUMENT_WIDGET_UPDATE_TOOL_NAMES
+            : policy.documentWidgetTaskKind === 'remove'
+              ? DOCUMENT_WIDGET_REMOVE_TOOL_NAMES
+              : policy.preferSectionRewrite
+                ? SECTION_REWRITE_DOCUMENT_TOOL_NAMES
+                : policy.preferFormatOnly
+                  ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
+                  : FORCE_DOCUMENT_TOOL_NAMES
+      tools = this.filterAnthropicToolsByAllowedNames(tools, allowedNames)
+    }
+    if (policy?.forceDesignTool) {
       tools = this.filterPreferredDesignAnthropicTools(tools, policy.preferredDesignTool)
     }
     if (policy?.allowBrowserTools === false) {
@@ -3034,25 +3581,48 @@ export class DirectChatEngine extends EventEmitter {
         return !name.startsWith('browser_')
       })
     }
+    if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
+      const allowed = new Set(policy.preferredSkillToolNames)
+      tools = tools.filter((tool) => {
+        const name = typeof tool.name === 'string' ? tool.name : ''
+        return allowed.has(name)
+      })
+    }
     return tools
   }
 
   private getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
     let tools = getOpenAITools()
     if (policy?.forceDocumentTool) {
-      tools = getDocumentOpenAITools().filter((tool) => {
-        const fn = (tool.function as { name?: unknown } | undefined)?.name
-        if (typeof fn !== 'string') return false
-        return FORCE_DOCUMENT_TOOL_NAMES.has(fn)
-      })
-    } else if (policy?.forceDesignTool) {
-      tools = getDesignOpenAITools()
+      const allowedNames = policy.documentWidgetTaskKind === 'create'
+        ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
+        : policy.documentWidgetTaskKind === 'inspect'
+          ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
+          : policy.documentWidgetTaskKind === 'update'
+            ? DOCUMENT_WIDGET_UPDATE_TOOL_NAMES
+            : policy.documentWidgetTaskKind === 'remove'
+              ? DOCUMENT_WIDGET_REMOVE_TOOL_NAMES
+              : policy.preferSectionRewrite
+                ? SECTION_REWRITE_DOCUMENT_TOOL_NAMES
+                : policy.preferFormatOnly
+                  ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
+                  : FORCE_DOCUMENT_TOOL_NAMES
+      tools = this.filterOpenAIToolsByAllowedNames(tools, allowedNames)
+    }
+    if (policy?.forceDesignTool) {
       tools = this.filterPreferredDesignOpenAITools(tools, policy.preferredDesignTool)
     }
     if (policy?.allowBrowserTools === false) {
       tools = tools.filter((tool) => {
         const fn = (tool.function as { name?: unknown } | undefined)?.name
         return typeof fn === 'string' ? !fn.startsWith('browser_') : true
+      })
+    }
+    if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
+      const allowed = new Set(policy.preferredSkillToolNames)
+      tools = tools.filter((tool) => {
+        const fn = (tool.function as { name?: unknown } | undefined)?.name
+        return typeof fn === 'string' ? allowed.has(fn) : false
       })
     }
     return tools
@@ -3229,9 +3799,10 @@ export class DirectChatEngine extends EventEmitter {
       messages: this.serializeMessages(session.messages, 'anthropic'),
       tools,
     }
-    if (policy?.forceDocumentTool || policy?.forceDesignTool) {
-      reqBody.tool_choice = { type: 'any' }
-    }
+    // 不再强制工具调用，改为让 LLM 自主判断
+    // if (policy?.forceDocumentTool || policy?.forceDesignTool) {
+    //   reqBody.tool_choice = { type: 'any' }
+    // }
 
     const resp = await this.fetchWithTimeout(url, {
       method: 'POST',
@@ -3632,7 +4203,7 @@ export class DirectChatEngine extends EventEmitter {
     previousResponseId: string
     input: Array<Record<string, unknown>>
   } | null {
-    const rawMessages = session.messages as unknown as Array<Record<string, unknown>>
+    const rawMessages = this.repairOpenAIToolMessageHistory(session.messages)
     let assistantIndex = -1
     for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
       const item = rawMessages[i]
@@ -3660,6 +4231,47 @@ export class DirectChatEngine extends EventEmitter {
     return { previousResponseId, input }
   }
 
+  private repairOpenAIToolMessageHistory(messages: ChatMessage[]): Array<Record<string, unknown>> {
+    const rawMessages = messages.map((message) => ({ ...(message as unknown as Record<string, unknown>) }))
+    const repaired: Array<Record<string, unknown>> = []
+    let index = 0
+    while (index < rawMessages.length) {
+      const current = rawMessages[index]
+      repaired.push(current)
+      const toolCalls = Array.isArray(current?.tool_calls) ? current.tool_calls as Array<Record<string, unknown>> : []
+      if (current?.role !== 'assistant' || toolCalls.length === 0) {
+        index += 1
+        continue
+      }
+
+      const expectedIds = toolCalls
+        .map((call) => typeof call.id === 'string' ? call.id : '')
+        .filter(Boolean)
+      const seenIds = new Set<string>()
+      let nextIndex = index + 1
+      while (nextIndex < rawMessages.length) {
+        const next = rawMessages[nextIndex]
+        if (next?.role !== 'tool') break
+        repaired.push(next)
+        if (typeof next.tool_call_id === 'string') {
+          seenIds.add(next.tool_call_id)
+        }
+        nextIndex += 1
+      }
+
+      for (const toolCallId of expectedIds) {
+        if (seenIds.has(toolCallId)) continue
+        repaired.push({
+          role: 'tool',
+          content: '[missing tool output repaired by host]',
+          tool_call_id: toolCallId,
+        })
+      }
+      index = nextIndex
+    }
+    return repaired
+  }
+
   private extractIncomingText(content: string | MultimodalBlock[]): string {
     if (typeof content === 'string') return content
     return content
@@ -3676,16 +4288,8 @@ export class DirectChatEngine extends EventEmitter {
     return shouldForceDocumentToolCallFromText(userText)
   }
 
-  private shouldForceDesignToolCall(userText: string): boolean {
-    return shouldForceDesignToolCallFromText(userText)
-  }
-
-  private inferPreferredDesignTool(userText: string): string | null {
-    return inferPreferredDesignToolFromText(userText)
-  }
-
-  private shouldAllowMultipleDesignArtifacts(userText: string): boolean {
-    return shouldAllowMultipleDesignArtifactsFromText(userText)
+  private inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTaskKind {
+    return inferDocumentWidgetTaskKindFromText(userText)
   }
 
   private shouldPreferFormatOnly(userText: string): boolean {
@@ -4031,6 +4635,8 @@ export class DirectChatEngine extends EventEmitter {
       const toolContext = {
         browserController: this.browserController,
         sidecarManager: this.sidecarManager,
+        runtime: this.runtime,
+        scope: undefined,
         emitToolAction: (tool: string, args: Record<string, unknown>) => {
           this.emit('toolAction', { agent: agentName, tool, args })
         },
@@ -4155,6 +4761,8 @@ export class DirectChatEngine extends EventEmitter {
       const toolContext = {
         browserController: this.browserController,
         sidecarManager: this.sidecarManager,
+        runtime: this.runtime,
+        scope: undefined,
         emitToolAction: (tool: string, args: Record<string, unknown>) => {
           this.emit('toolAction', { agent: agentName, tool, args })
         },
@@ -4260,13 +4868,14 @@ export class DirectChatEngine extends EventEmitter {
 
     const wireApi = this.resolveOpenAIWireApi(config, provider, baseUrl)
     const reasoningEffort = this.resolveReasoningEffort(config, provider)
+    const repairedMessages = this.repairOpenAIToolMessageHistory(session.messages) as unknown as ChatMessage[]
     if (wireApi === 'responses') {
       const url = `${baseUrl}/responses`
       log(`POST ${url}, model=${model}, wireApi=responses, stream=false`)
       const reqBody: Record<string, unknown> = {
         model,
         instructions: session.systemPrompt,
-        input: this.serializeMessagesForResponses(session.messages),
+        input: this.serializeMessagesForResponses(repairedMessages),
         stream: false,
       }
       if (reasoningEffort) {
@@ -4289,7 +4898,7 @@ export class DirectChatEngine extends EventEmitter {
 
     const messages = [
       { role: 'system' as const, content: session.systemPrompt },
-      ...this.serializeMessages(session.messages, 'openai')
+      ...this.serializeMessages(repairedMessages, 'openai')
     ]
 
     const url = `${baseUrl}/chat/completions`
@@ -4353,6 +4962,7 @@ export class DirectChatEngine extends EventEmitter {
     const systemPrompt = `${session.systemPrompt}
 
 ${this.buildTextToolBridgeSystemPrompt(policy)}`
+    const repairedMessages = this.repairOpenAIToolMessageHistory(session.messages) as unknown as ChatMessage[]
 
     if (wireApi === 'responses') {
       const url = `${baseUrl}/responses`
@@ -4360,7 +4970,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
       const reqBody: Record<string, unknown> = {
         model,
         instructions: systemPrompt,
-        input: this.serializeMessagesForResponses(session.messages),
+        input: this.serializeMessagesForResponses(repairedMessages),
         stream: false,
       }
       if (reasoningEffort) {
@@ -4389,7 +4999,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.serializeMessages(session.messages, 'openai'),
+      ...this.serializeMessages(repairedMessages, 'openai'),
     ]
 
     const url = `${baseUrl}/chat/completions`
@@ -4459,6 +5069,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     const wireApi = this.resolveOpenAIWireApi(config, provider, openAIBase)
     const reasoningEffort = this.resolveReasoningEffort(config, provider)
     const tools = this.getPolicyOpenAITools(policy)
+    const repairedMessages = this.repairOpenAIToolMessageHistory(session.messages) as unknown as ChatMessage[]
     if (policy?.forceDocumentTool) {
       log(`forceDocumentTool openai tools=${this.collectToolNames(tools, 'openai').join(',')}`)
     }
@@ -4489,7 +5100,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
         reqBody.input = continuation.input
       } else {
         reqBody.instructions = session.systemPrompt
-        reqBody.input = this.serializeMessagesForResponses(session.messages)
+        reqBody.input = this.serializeMessagesForResponses(repairedMessages)
       }
 
       const resp = await this.fetchWithTimeout(url, {
@@ -4523,7 +5134,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
 
     const messages = [
       { role: 'system' as const, content: session.systemPrompt },
-      ...this.serializeMessages(session.messages, 'openai')
+      ...this.serializeMessages(repairedMessages, 'openai')
     ]
 
     const url = `${openAIBase}/chat/completions`
@@ -4534,9 +5145,10 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
       messages,
       tools,
     }
-    if ((policy?.forceDocumentTool || policy?.forceDesignTool) && !isKimiCodingBase) {
-      reqBody.tool_choice = 'required'
-    }
+    // 不再强制工具调用，改为让 LLM 自主判断
+    // if ((policy?.forceDocumentTool || policy?.forceDesignTool) && !isKimiCodingBase) {
+    //   reqBody.tool_choice = 'required'
+    // }
 
     let resp = await this.fetchWithTimeout(url, {
       method: 'POST',
@@ -4545,21 +5157,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
       signal,
     }, signal, 'openai tools')
 
-    if (!resp.ok && (policy?.forceDocumentTool || policy?.forceDesignTool) && reqBody.tool_choice) {
-      const errBody = await resp.text().catch(() => '')
-      if (/tool[_-]?choice|required/i.test(errBody)) {
-        log(`OpenAI tool_choice unsupported, retry without tool_choice: ${errBody.slice(0, 180)}`)
-        delete reqBody.tool_choice
-        resp = await this.fetchWithTimeout(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(reqBody),
-          signal,
-        }, signal, 'openai tools retry')
-      } else {
-        throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-      }
-    }
+    // 移除了 tool_choice 相关的错误处理，因为我们不再强制工具调用
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')
@@ -4671,8 +5269,9 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     }
 
     try {
-      const { stdout } = await execFileAsync('which', ['ffmpeg'])
-      const candidate = stdout.trim()
+      const { stdout } = await execFileAsync(getWhichCommand(), ['ffmpeg'])
+      // Windows 'where' may return multiple lines, take the first one
+      const candidate = stdout.trim().split('\n')[0]
       if (candidate && existsSync(candidate)) {
         this.cachedFfmpegPath = candidate
         return candidate

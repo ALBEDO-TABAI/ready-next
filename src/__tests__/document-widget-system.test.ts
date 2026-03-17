@@ -173,6 +173,7 @@ describe('document widget renderer contract', () => {
     )
 
     assert.match(directChatSource, /内联事件|oninput|onclick/)
+    assert.match(directChatSource, /readyWidgetSendMessage|data-ready-agent-message/)
     assert.match(documentToolsSource, /HTML\/SVG\/本地交互脚本|HTML\/SVG\/脚本/)
   })
 
@@ -212,5 +213,25 @@ describe('document widget renderer contract', () => {
     )
 
     assert.doesNotMatch(source, /已切换到兼容运行态/)
+  })
+
+  it('bridges widget interactions back into the agent input pipeline', () => {
+    const rendererSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/WidgetRenderer.tsx'),
+      'utf8',
+    )
+    const receiverSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/widget-sanitizer.ts'),
+      'utf8',
+    )
+    const domRuntimeSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/WidgetDomRuntime.tsx'),
+      'utf8',
+    )
+
+    assert.match(rendererSource, /widget:message/)
+    assert.match(receiverSource, /data-ready-agent-message/)
+    assert.match(receiverSource, /__readyWidgetSendMessage/)
+    assert.match(domRuntimeSource, /__readyWidgetSendMessage/)
   })
 })

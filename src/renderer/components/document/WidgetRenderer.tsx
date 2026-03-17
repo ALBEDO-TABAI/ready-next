@@ -5,6 +5,7 @@ import { useMode } from '../../stores/useMode'
 import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } from './widget-sanitizer'
 import WidgetDomRuntime from './WidgetDomRuntime'
+import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 
 interface WidgetRendererProps {
   title?: string
@@ -95,6 +96,11 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
         return
       }
 
+      if (event.data.type === 'widget:message' && typeof event.data.text === 'string') {
+        appendWidgetMessageToAgentInput(event.data.text, title)
+        return
+      }
+
       if (event.data.type === 'widget:link' && typeof event.data.href === 'string') {
         void openHref(event.data.href)
       }
@@ -162,6 +168,7 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
             </div>
           ) : null}
           <WidgetDomRuntime
+            title={title}
             widgetCode={sanitizedWidgetCode}
             onOpenHref={(href) => {
               void openHref(href)

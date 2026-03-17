@@ -121,6 +121,15 @@ if (typeof ResizeObserver === 'function') {
 }
 
 document.addEventListener('click',function(event){
+  var messageNode=event.target && event.target.closest ? event.target.closest('[data-ready-agent-message]') : null;
+  if(messageNode){
+    var widgetMessage = messageNode.getAttribute('data-ready-agent-message');
+    if(widgetMessage){
+      event.preventDefault();
+      parent.postMessage({type:'widget:message',text:String(widgetMessage),token:widgetToken},'*');
+      return;
+    }
+  }
   var link=event.target && event.target.closest ? event.target.closest('a[href]') : null;
   if(!link) return;
   var href=link.getAttribute('href');
@@ -128,6 +137,12 @@ document.addEventListener('click',function(event){
   event.preventDefault();
   parent.postMessage({type:'widget:link',href:href,token:widgetToken},'*');
 });
+window.__readyWidgetSendMessage=function(text){
+  if(typeof text !== 'string') return;
+  var trimmed = text.trim();
+  if(!trimmed) return;
+  parent.postMessage({type:'widget:message',text:trimmed,token:widgetToken},'*');
+};
 document.addEventListener('input',function(event){
   clampNumericInput(event.target);
 }, true);
