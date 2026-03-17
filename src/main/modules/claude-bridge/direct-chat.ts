@@ -101,6 +101,7 @@ interface DirectChatSession {
   generation: number
   activeRunId: string | null
   preferTextToolBridge: boolean
+  lastDocumentContextInput?: string | null
 }
 
 interface ToolCall {
@@ -2572,6 +2573,7 @@ export class DirectChatEngine extends EventEmitter {
       generation: 0,
       activeRunId: null,
       preferTextToolBridge: false,
+      lastDocumentContextInput: null,
     })
   }
 
@@ -2711,7 +2713,7 @@ export class DirectChatEngine extends EventEmitter {
       const pureUserInput = this.extractPureUserInput(userText)
       const contextualUserInput = resolveToolPolicyInput(
         pureUserInput,
-        this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
+        session.lastDocumentContextInput ? [session.lastDocumentContextInput, ...this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)] : this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
       )
       if (contextualUserInput !== pureUserInput) {
         log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
@@ -2768,6 +2770,9 @@ export class DirectChatEngine extends EventEmitter {
           browserDecision.mode === 'browser_upload_workflow'
         ),
         preferredSkillToolNames,
+      }
+      if (toolPolicy.forceDocumentTool) {
+        session.lastDocumentContextInput = contextualUserInput
       }
 
       log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, documentWidgetTaskKind=${toolPolicy.documentWidgetTaskKind || 'none'}, allowBrowserTools=${toolPolicy.allowBrowserTools}, preferredSkillTools=${toolPolicy.preferredSkillToolNames?.join('|') || 'all'}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, keepToolsWithVideo=${keepToolsWithVideo}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
