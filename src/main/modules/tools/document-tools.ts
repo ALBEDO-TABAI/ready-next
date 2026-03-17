@@ -59,12 +59,63 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
     ],
   },
   {
+    name: 'document_insert_widget',
+    description: '向文档插入一个 show-widget 可视化组件代码围栏。',
+    action: 'document.insertWidget',
+    params: [
+      { name: 'title', type: 'string', description: 'widget 标题（建议 snake_case 或简短标题）', required: true },
+      { name: 'widgetCode', type: 'string', description: 'widget 的 HTML/SVG/本地交互脚本内容（允许 oninput/onclick 等本地内联事件）', required: true },
+      { name: 'position', type: 'string', description: '插入位置：append_end 或 after_section', required: true },
+      { name: 'sectionTitle', type: 'string', description: '当 position=after_section 时，目标章节标题', required: false },
+      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
+    ],
+  },
+  {
+    name: 'document_list_widgets',
+    description: '列出当前文档中的 show-widget 组件，便于后续更新或删除。',
+    action: 'document.listWidgets',
+    params: [{ name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false }],
+  },
+  {
+    name: 'document_update_widget',
+    description: '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。',
+    action: 'document.updateWidget',
+    params: [
+      { name: 'target', type: 'string', description: '目标 widget 标题关键词或 1-based 序号', required: true },
+      { name: 'widgetCode', type: 'string', description: '新的 widget HTML/SVG/本地交互脚本内容（允许 oninput/onclick 等本地内联事件）', required: true },
+      { name: 'title', type: 'string', description: '可选，更新后的新标题', required: false },
+      { name: 'occurrence', type: 'number', description: '当标题命中多个 widget 时，指定第几处（从 1 开始）', required: false },
+      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
+    ],
+  },
+  {
+    name: 'document_remove_widget',
+    description: '删除文档中某个已有 widget，可按标题或序号定位。',
+    action: 'document.removeWidget',
+    params: [
+      { name: 'target', type: 'string', description: '目标 widget 标题关键词或 1-based 序号', required: true },
+      { name: 'occurrence', type: 'number', description: '当标题命中多个 widget 时，指定第几处（从 1 开始）', required: false },
+      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
+    ],
+  },
+  {
     name: 'document_replace_text',
     description: '在文档中查找并替换文本。',
     action: 'document.replaceText',
     params: [
       { name: 'from', type: 'string', description: '要替换的原文', required: true },
       { name: 'to', type: 'string', description: '替换后的文本', required: true },
+      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
+    ],
+  },
+  {
+    name: 'document_replace_exact',
+    description: '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。',
+    action: 'document.replaceExact',
+    params: [
+      { name: 'target', type: 'string', description: '要精准替换的原文片段', required: true },
+      { name: 'replacement', type: 'string', description: '替换后的新内容', required: true },
+      { name: 'occurrence', type: 'number', description: '可选，第几处匹配（从 1 开始）', required: false },
       { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
     ],
   },
@@ -132,6 +183,7 @@ export function getDocumentOpenAITools(): Array<Record<string, unknown>> {
 
 interface DocumentToolContext {
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
+  requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 export async function executeDocumentTool(
@@ -157,9 +209,29 @@ export async function executeDocumentTool(
   if (toolName === 'document_set_content' || toolName === 'document_append_content') {
     if (typeof args.content !== 'string') return 'Error: content is required'
   }
+  if (toolName === 'document_insert_widget') {
+    if (typeof args.title !== 'string' || typeof args.widgetCode !== 'string' || typeof args.position !== 'string') {
+      return 'Error: title, widgetCode and position are required'
+    }
+  }
+  if (toolName === 'document_update_widget') {
+    if (typeof args.target !== 'string' || typeof args.widgetCode !== 'string') {
+      return 'Error: target and widgetCode are required'
+    }
+  }
+  if (toolName === 'document_remove_widget') {
+    if (typeof args.target !== 'string') {
+      return 'Error: target is required'
+    }
+  }
   if (toolName === 'document_replace_text') {
     if (typeof args.from !== 'string' || typeof args.to !== 'string') {
       return 'Error: from and to are required'
+    }
+  }
+  if (toolName === 'document_replace_exact') {
+    if (typeof args.target !== 'string' || typeof args.replacement !== 'string') {
+      return 'Error: target and replacement are required'
     }
   }
   if (toolName === 'document_format_section') {
@@ -174,13 +246,30 @@ export async function executeDocumentTool(
   }
 
   context?.emitToolAction?.(tool.action, args)
+  if (context?.requestModuleToolAction) {
+    try {
+      const payload = await context.requestModuleToolAction(tool.action, args)
+      const summary = typeof payload.summary === 'string' ? payload.summary.trim() : ''
+      if (summary) return summary
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return `Document action failed: ${tool.action} - ${message}`
+    }
+  }
   if (toolName === 'document_open_tab' || toolName === 'document_switch_tab') {
     return `Document navigation queued: ${tool.action}. This does NOT modify content yet.`
+  }
+  if (toolName === 'document_list_widgets') {
+    return `Document inspection queued: ${tool.action}`
   }
   if (
     toolName === 'document_set_content' ||
     toolName === 'document_append_content' ||
+    toolName === 'document_insert_widget' ||
+    toolName === 'document_update_widget' ||
+    toolName === 'document_remove_widget' ||
     toolName === 'document_replace_text' ||
+    toolName === 'document_replace_exact' ||
     toolName === 'document_format_section' ||
     toolName === 'document_rewrite_section'
   ) {
