@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   compactToolPolicyHistory,
+  isContextDependentEditPrompt,
   isHostInjectedUserPrompt,
   isRetryOnlyPrompt,
   resolveToolPolicyInput,
@@ -27,6 +28,7 @@ describe('tool policy context', () => {
     assert.equal(isRetryOnlyPrompt('再试一次'), true)
     assert.equal(isRetryOnlyPrompt('continue'), true)
     assert.equal(isRetryOnlyPrompt('在图里增加输入栏'), false)
+    assert.equal(isContextDependentEditPrompt('再把细边框也去掉'), true)
   })
 
   it('skips host-injected follow-up prompts when resolving retry context', () => {
@@ -51,5 +53,14 @@ describe('tool policy context', () => {
 
     const retry = resolveToolPolicyInput('继续', noisyInputs)
     assert.match(retry, /股票价格趋势图/)
+  })
+
+  it('merges short follow-up edit instructions onto the previous widget request', () => {
+    const merged = resolveToolPolicyInput('再把细边框也去掉', [
+      '把收益计算的部分的设计风格和上面股价收益图的设计风格统一一下',
+    ])
+
+    assert.match(merged, /股价收益图/)
+    assert.match(merged, /追加要求：再把细边框也去掉/)
   })
 })
