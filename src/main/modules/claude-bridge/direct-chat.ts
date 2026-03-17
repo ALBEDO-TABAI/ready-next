@@ -56,6 +56,7 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
+import { resolveToolPolicyInput } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS, resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
@@ -1348,6 +1349,15 @@ export class DirectChatEngine extends EventEmitter {
     }
 
     return pureInput
+  }
+
+  private collectRecentPureUserInputs(messages: ChatMessage[], limit = 6): string[] {
+    return messages
+      .filter((message) => message.role === 'user')
+      .slice(-limit)
+      .reverse()
+      .map((message) => this.extractPureUserInput(this.extractIncomingText(message.content)))
+      .filter((input) => input.trim().length > 0)
   }
 
   /**
@@ -2698,11 +2708,18 @@ export class DirectChatEngine extends EventEmitter {
       const sessionId = this.extractSessionIdFromInternalName(name)
       const userText = this.extractIncomingText(content)
       const pureUserInput = this.extractPureUserInput(userText)
-      const userInstructionText = this.extractPrimaryUserInstruction(pureUserInput)
-      const documentWidgetTaskKind = this.inferDocumentWidgetTaskKind(pureUserInput)
-      const documentWidgetProfile = inferDocumentWidgetProfile(pureUserInput)
+      const contextualUserInput = resolveToolPolicyInput(
+        pureUserInput,
+        this.collectRecentPureUserInputs(session.messages.slice(0, -1)),
+      )
+      if (contextualUserInput !== pureUserInput) {
+        log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
+      }
+      const userInstructionText = this.extractPrimaryUserInstruction(contextualUserInput)
+      const documentWidgetTaskKind = this.inferDocumentWidgetTaskKind(contextualUserInput)
+      const documentWidgetProfile = inferDocumentWidgetProfile(contextualUserInput)
       const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
-      const keepToolsWithVideo = this.shouldKeepToolsWithVideo(pureUserInput, sessionId)
+      const keepToolsWithVideo = this.shouldKeepToolsWithVideo(contextualUserInput, sessionId)
       // Avoid tools when video exists, so simple media tasks don't get routed into skill/tool loops.
       // Keep tools enabled when the user is explicitly controlling skill execution or embedded Python.
       const hasTools = (capabilities?.supportsToolCalls ?? true) && (
@@ -2731,11 +2748,11 @@ export class DirectChatEngine extends EventEmitter {
       // Judge intent based on pure input (not polluted by environment context)
       const forceDesignTool = false // Design tools removed
       const preferredDesignTool = null
-      const preferredSkillToolNames = hasTools && (this.findExplicitlyRequestedSkills(pureUserInput).length > 0 || this.hasActiveSkillExecution(sessionId))
-        ? this.buildPreferredSkillToolNames(pureUserInput, sessionId)
+      const preferredSkillToolNames = hasTools && (this.findExplicitlyRequestedSkills(contextualUserInput).length > 0 || this.hasActiveSkillExecution(sessionId))
+        ? this.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null
       const toolPolicy: ToolPolicy = {
-        forceDocumentTool: hasTools && this.shouldForceDocumentToolCall(pureUserInput),
+        forceDocumentTool: hasTools && this.shouldForceDocumentToolCall(contextualUserInput),
         forceDesignTool: false,
         preferredDesignTool: null,
         primaryDesignInstruction: null,
@@ -2744,7 +2761,7 @@ export class DirectChatEngine extends EventEmitter {
         preferFormatOnly: hasTools && this.shouldPreferFormatOnly(userInstructionText),
         documentWidgetTaskKind,
         documentWidgetProfile,
-        documentWidgetSourceText: pureUserInput,
+        documentWidgetSourceText: contextualUserInput,
         allowBrowserTools: hasTools && (
           browserDecision.mode === 'browser_workflow' ||
           browserDecision.mode === 'browser_upload_workflow'
@@ -4294,11 +4311,11 @@ export class DirectChatEngine extends EventEmitter {
     return repaired
   }
 
-  private extractIncomingText(content: string | MultimodalBlock[]): string {
+  private extractIncomingText(content: string | MultimodalBlock[] | Array<Record<string, unknown>>): string {
     if (typeof content === 'string') return content
     return content
-      .filter((block) => block.type === 'text' && typeof block.text === 'string')
-      .map((block) => block.text || '')
+      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+      .map((block) => String(block.text || ''))
       .join('\n')
   }
 
