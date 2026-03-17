@@ -3576,7 +3576,7 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-    let tools = getAnthropicTools()
+    let tools = policy?.forceDocumentTool ? getDocumentAnthropicTools() : getAnthropicTools()
     if (policy?.forceDocumentTool) {
       const allowedNames = policy.documentWidgetTaskKind === 'create'
         ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -3613,7 +3613,7 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-    let tools = getOpenAITools()
+    let tools = policy?.forceDocumentTool ? getDocumentOpenAITools() : getOpenAITools()
     if (policy?.forceDocumentTool) {
       const allowedNames = policy.documentWidgetTaskKind === 'create'
         ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
