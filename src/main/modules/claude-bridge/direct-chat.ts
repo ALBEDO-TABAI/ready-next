@@ -50,6 +50,11 @@ import {
   shouldPreferSectionRewrite as shouldPreferSectionRewriteFromText,
   type DocumentWidgetTaskKind,
 } from './tool-policy-heuristics'
+import {
+  buildDocumentWidgetGuidanceSnippet,
+  inferDocumentWidgetProfile,
+  type DocumentWidgetProfile,
+} from './widget-guidance'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
 import { getLogPath, getWhichCommand } from '../../utils/platform'
@@ -120,6 +125,7 @@ interface ToolPolicy {
   preferSectionRewrite: boolean
   preferFormatOnly: boolean
   documentWidgetTaskKind?: DocumentWidgetTaskKind
+  documentWidgetProfile?: DocumentWidgetProfile | null
   allowBrowserTools: boolean
   preferredSkillToolNames?: string[] | null
 }
@@ -1489,6 +1495,11 @@ export class DirectChatEngine extends EventEmitter {
 - "你是谁" → 直接回答，不使用工具
 - "这篇文章怎么样" → 直接回答，不使用工具
 `)
+
+      const widgetGuidance = buildDocumentWidgetGuidanceSnippet(policy.documentWidgetProfile || null)
+      if (widgetGuidance) {
+        guidance.push(widgetGuidance)
+      }
     }
 
     return guidance.join('\n\n')
@@ -2682,6 +2693,7 @@ export class DirectChatEngine extends EventEmitter {
       const pureUserInput = this.extractPureUserInput(userText)
       const userInstructionText = this.extractPrimaryUserInstruction(pureUserInput)
       const documentWidgetTaskKind = this.inferDocumentWidgetTaskKind(pureUserInput)
+      const documentWidgetProfile = inferDocumentWidgetProfile(pureUserInput)
       const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
       const keepToolsWithVideo = this.shouldKeepToolsWithVideo(pureUserInput, sessionId)
       // Avoid tools when video exists, so simple media tasks don't get routed into skill/tool loops.
@@ -2724,6 +2736,7 @@ export class DirectChatEngine extends EventEmitter {
         preferSectionRewrite: hasTools && this.shouldPreferSectionRewrite(userInstructionText),
         preferFormatOnly: hasTools && this.shouldPreferFormatOnly(userInstructionText),
         documentWidgetTaskKind,
+        documentWidgetProfile,
         allowBrowserTools: hasTools && (
           browserDecision.mode === 'browser_workflow' ||
           browserDecision.mode === 'browser_upload_workflow'
