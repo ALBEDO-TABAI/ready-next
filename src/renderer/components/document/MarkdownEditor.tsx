@@ -3,6 +3,8 @@ import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import TiptapEditor, { type TiptapEditorRef } from './TiptapEditor'
 import EditorFloatingToolbar from './EditorFloatingToolbar'
 import EditorContextMenu from './EditorContextMenu'
+import NotePreview from './NotePreview'
+import { addDocumentQuoteReference, appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -12,37 +14,6 @@ import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-
-/** Lightweight Markdown to HTML renderer (no external deps) */
-function renderMarkdown(md: string): string {
-  let html = md
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, lang, code) => {
-    return `<pre class="md-code-block"><code class="lang-${lang}">${code.trim()}</code></pre>`
-  })
-  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-  html = html.replace(/^#### (.+)$/gm, '<h4 class="md-h4">$1</h4>')
-  html = html.replace(/^### (.+)$/gm, '<h3 class="md-h3">$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2 class="md-h2">$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1 class="md-h1">$1</h1>')
-  html = html.replace(/^---$/gm, '<hr class="md-hr" />')
-  html = html.replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  html = html.replace(/~~(.+?)~~/g, '<del>$1</del>')
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-img" />')
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link" target="_blank" rel="noopener">$1</a>')
-  html = html.replace(/^- (.+)$/gm, '<li class="md-ul-item">$1</li>')
-  html = html.replace(/(<li class="md-ul-item">.*<\/li>\n?)+/g, '<ul class="md-ul">$&</ul>')
-  html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-ol-item">$1</li>')
-  html = html.replace(/(<li class="md-ol-item">.*<\/li>\n?)+/g, '<ol class="md-ol">$&</ol>')
-  html = html.replace(/^(?!<[a-zA-Z])((?!\s*$).+)$/gm, '<p class="md-p">$1</p>')
-  html = html.replace(/<\/blockquote>\s*<blockquote class="md-quote">/g, '<br/>')
-  return html
-}
 
 const DEFAULT_CONTENT = `# 欢迎使用 Ready 文档编辑器
 
@@ -99,6 +70,8 @@ const getFileExt = (path: string | null): string => {
 interface MarkdownEditorProps {
   tab: DocTab
   viewMode?: 'edit' | 'preview'
+  onRequestPreview?: (title: string) => void
+  previewFocusWidgetTitle?: string | null
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -114,6 +87,45 @@ function escapeHtmlText(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function normalizeDocText(value: string): string {
+  return value.replace(/\r\n?/g, '\n')
+}
+
+function findDocumentSelectionLocation(
+  content: string,
+  selection: string,
+): { lineStart: number | null; lineEnd: number | null; sectionTitle: string | null } {
+  const normalizedContent = normalizeDocText(content)
+  const normalizedSelection = normalizeDocText(selection).trim()
+  if (!normalizedSelection) {
+    return { lineStart: null, lineEnd: null, sectionTitle: null }
+  }
+
+  const index = normalizedContent.indexOf(normalizedSelection)
+  if (index < 0) {
+    return { lineStart: null, lineEnd: null, sectionTitle: null }
+  }
+
+  const before = normalizedContent.slice(0, index)
+  const selected = normalizedContent.slice(index, index + normalizedSelection.length)
+  const lineStart = before.split('\n').length
+  const lineEnd = lineStart + selected.split('\n').length - 1
+
+  const lines = normalizedContent.split('\n')
+  let sectionTitle: string | null = null
+  for (let currentLine = Math.min(lineStart - 1, lines.length - 1); currentLine >= 0; currentLine -= 1) {
+    const trimmed = lines[currentLine].trim()
+    if (!trimmed) continue
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
+    if (headingMatch) {
+      sectionTitle = headingMatch[2].trim()
+      break
+    }
+  }
+
+  return { lineStart, lineEnd, sectionTitle }
 }
 
 function getMarkdownForDroppedFiles(
@@ -160,8 +172,13 @@ function getMarkdownForDroppedFiles(
   return lines.join('\n')
 }
 
-export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEditorProps) {
-  const { updateTabContent, markTabSaved } = useDocTabs()
+export default function MarkdownEditor({
+  tab,
+  viewMode = 'edit',
+  onRequestPreview,
+  previewFocusWidgetTitle,
+}: MarkdownEditorProps) {
+  const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
@@ -182,10 +199,14 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
     x: number
     y: number
   }>({ visible: false, x: 0, y: 0 })
+  const [contextSelection, setContextSelection] = useState<string>('')
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
   const canSave = !!tab.path
-  const renderedHtml = useMemo(() => renderMarkdown(tab.content), [tab.content])
+  const activeRevealTarget = useMemo(() => {
+    if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
+    return pendingReveal
+  }, [pendingReveal, tab.path])
 
   const showFloatingToolbar =
     hasSelection && viewMode === 'edit'
@@ -317,6 +338,8 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
   // ─── Context menu handler ──────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    const selectedText = window.getSelection?.()?.toString() || ''
+    setContextSelection(selectedText)
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY })
   }, [])
 
@@ -352,6 +375,42 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
     setContextMenu((prev) => ({ ...prev, visible: false }))
   }, [])
 
+  const quoteSelectionToAgent = useCallback(() => {
+    const selection = contextSelection.trim()
+    if (!selection) return
+
+    const location = findDocumentSelectionLocation(tab.content, selection)
+    addDocumentQuoteReference({
+      title: tab.title,
+      path: tab.path,
+      selection,
+      sectionTitle: location.sectionTitle,
+      lineStart: location.lineStart,
+      lineEnd: location.lineEnd,
+    })
+  }, [contextSelection, tab.content, tab.path, tab.title])
+
+  const requestAgentUpdateWidget = useCallback((widgetTitle: string, widgetCode: string) => {
+    const snippet = [
+      `请直接更新当前文档中的 widget，不要新增第二个。`,
+      `目标 widget: ${widgetTitle}`,
+      `文档: ${tab.title}`,
+      `路径: ${tab.path || '(未保存草稿)'}`,
+      '',
+      '当前 widget 源码如下：',
+      '```show-widget',
+      JSON.stringify({
+        title: widgetTitle,
+        widget_code: widgetCode,
+      }),
+      '```',
+      '',
+      '请优先使用 document_update_widget 完成更新，并在修改后保存文档。',
+    ].join('\n')
+
+    appendToAgentInput(snippet)
+  }, [tab.path, tab.title])
+
   // ─── View mode buttons ─────────────────────────────────────
   // (Moved to DocumentMode header — no longer rendered here)
 
@@ -361,7 +420,7 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
   return (
     <div className="flex flex-col h-full">
       {/* ── Content area ──────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--bg-primary)' }}>
+      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--bg-content)' }}>
         <>
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
@@ -373,14 +432,22 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
               onDragOver={handleEditorDragOver}
               onDrop={handleEditorDrop}
             >
-              <div style={{ padding: '24px 40px', maxWidth: 800, margin: '0 auto' }}>
+              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {contentReady ? (
                   <TiptapEditor
                     ref={tiptapRef}
                     content={tab.content}
                     onChange={handleEditorChange}
                     onSelectionChange={handleSelectionChange}
+                    onRequestPreview={onRequestPreview}
+                    onRequestAgentUpdate={requestAgentUpdateWidget}
                     editable={!isLoading}
+                    revealTarget={activeRevealTarget}
+                    onRevealHandled={() => {
+                      if (activeRevealTarget) {
+                        setPendingReveal(null)
+                      }
+                    }}
                   />
                 ) : (
                   <div className="flex items-center justify-center py-10">
@@ -403,12 +470,10 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
             <div
               className="flex-1 overflow-auto"
               style={{ background: 'var(--bg-content)' }}
+              onContextMenu={handleContextMenu}
             >
-              <div style={{ padding: '24px 40px', maxWidth: 800, margin: '0 auto' }}>
-                <div
-                  className="md-preview text-[var(--text-body)]"
-                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                />
+              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
+                <NotePreview content={tab.content} notePath={tab.path} focusWidgetTitle={previewFocusWidgetTitle} />
               </div>
             </div>
           )}
@@ -421,6 +486,8 @@ export default function MarkdownEditor({ tab, viewMode = 'edit' }: MarkdownEdito
         visible={contextMenu.visible}
         position={{ x: contextMenu.x, y: contextMenu.y }}
         onClose={closeContextMenu}
+        canQuote={contextSelection.trim().length > 0}
+        onQuoteToAgent={quoteSelectionToAgent}
       />
     </div>
   )
