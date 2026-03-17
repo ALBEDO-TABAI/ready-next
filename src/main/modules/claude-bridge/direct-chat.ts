@@ -56,6 +56,7 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
+import { DEFAULT_API_REQUEST_TIMEOUT_MS, resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
 import { getLogPath, getWhichCommand } from '../../utils/platform'
@@ -63,7 +64,6 @@ import { getLogPath, getWhichCommand } from '../../utils/platform'
 const LOG = getLogPath('ready-directchat.log')
 const execFileAsync = promisify(execFile)
 const DEFAULT_KIMI_CODING_USER_AGENT = 'KimiCLI/1.14.0'
-const API_REQUEST_TIMEOUT_MS = 45_000
 const settingsRepository = new AppSettingsRepository()
 const chatRepository = new ChatRepository()
 
@@ -958,7 +958,7 @@ export class DirectChatEngine extends EventEmitter {
     init: RequestInit,
     signal: AbortSignal,
     label: string,
-    timeoutMs = API_REQUEST_TIMEOUT_MS,
+    timeoutMs = DEFAULT_API_REQUEST_TIMEOUT_MS,
   ): Promise<Response> {
     const timeoutController = new AbortController()
     const relayAbort = () => timeoutController.abort(signal.reason)
@@ -3802,9 +3802,10 @@ export class DirectChatEngine extends EventEmitter {
   ): Promise<APIResponse> {
     const headers = this.buildAnthropicLikeHeaders(config, baseUrl)
     const model = this.resolveAnthropicLikeModel(config, baseUrl)
+    const timeoutMs = resolveApiRequestTimeoutMs(policy)
 
     const url = `${baseUrl}/v1/messages`
-    log(`POST ${url}, model=${model}, with tools`)
+    log(`POST ${url}, model=${model}, with tools, timeout=${timeoutMs}`)
 
     const tools = this.getPolicyAnthropicTools(policy)
     if (policy?.forceDocumentTool) {
@@ -3830,7 +3831,7 @@ export class DirectChatEngine extends EventEmitter {
       headers,
       body: JSON.stringify(reqBody),
       signal,
-    }, signal, 'anthropic tools')
+    }, signal, 'anthropic tools', timeoutMs)
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')
@@ -5089,6 +5090,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     const openAIBase = isKimiCodingBase ? this.resolveKimiCodingV1Base(baseUrl) : baseUrl
     const wireApi = this.resolveOpenAIWireApi(config, provider, openAIBase)
     const reasoningEffort = this.resolveReasoningEffort(config, provider)
+    const timeoutMs = resolveApiRequestTimeoutMs(policy)
     const tools = this.getPolicyOpenAITools(policy)
     const repairedMessages = this.repairOpenAIToolMessageHistory(session.messages) as unknown as ChatMessage[]
     if (policy?.forceDocumentTool) {
@@ -5107,7 +5109,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     if (wireApi === 'responses') {
       const continuation = this.getResponsesContinuationState(session)
       const url = `${openAIBase}/responses`
-      log(`POST ${url}, model=${model}, with tools, wireApi=responses${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}`)
+      log(`POST ${url}, model=${model}, with tools, wireApi=responses${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}, timeout=${timeoutMs}`)
       const reqBody: Record<string, unknown> = {
         model,
         tools: this.convertOpenAIToolsToResponses(tools),
@@ -5129,7 +5131,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
         headers,
         body: JSON.stringify(reqBody),
         signal,
-      }, signal, 'openai responses tools')
+      }, signal, 'openai responses tools', timeoutMs)
 
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => '')
@@ -5159,7 +5161,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
     ]
 
     const url = `${openAIBase}/chat/completions`
-    log(`POST ${url}, model=${model}, with tools${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}`)
+    log(`POST ${url}, model=${model}, with tools${policy?.forceDocumentTool ? ' (force document)' : policy?.forceDesignTool ? ' (force design)' : ''}, timeout=${timeoutMs}`)
 
     const reqBody: Record<string, unknown> = {
       model,
@@ -5176,7 +5178,7 @@ ${this.buildTextToolBridgeSystemPrompt(policy)}`
       headers,
       body: JSON.stringify(reqBody),
       signal,
-    }, signal, 'openai tools')
+    }, signal, 'openai tools', timeoutMs)
 
     // 移除了 tool_choice 相关的错误处理，因为我们不再强制工具调用
 
