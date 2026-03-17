@@ -26,6 +26,10 @@ export interface DocumentWidgetProfile {
   guidanceBullets: string[]
 }
 
+function looksLikeGenericWidgetAsk(userText: string): boolean {
+  return /(图表|可视化|widget|show-widget|生成式\s*ui|数据图|趋势图|卡片组件)/i.test(userText)
+}
+
 function inferWidgetFamily(userText: string): DocumentWidgetFamily {
   if (/(本周|下周|周报|周计划|weekly|week)/i.test(userText)) return 'weekly_focus_chart'
   if (/(评分|打分|计算器|预算|估算|score|calculator|estimate|budget)/i.test(userText)) return 'mini_calculator'
@@ -172,6 +176,20 @@ export function inferDocumentWidgetProfile(userText: string): DocumentWidgetProf
       ...buildStyleGuidance(style),
     ],
   }
+}
+
+export function buildDocumentWidgetClarificationSnippet(userText: string): string {
+  if (!looksLikeGenericWidgetAsk(userText)) return ''
+  const profile = inferDocumentWidgetProfile(userText)
+  if (profile) return ''
+
+  return [
+    '## Widget 澄清建议',
+    '- 如果用户还没说明清楚，优先追问 1 个最关键问题，不要一次追问太多。',
+    '- 推荐优先澄清：这是要看趋势、做对比、做流程说明，还是做计算器？',
+    '- 如果图表类型还不清楚，可给出 3 个简短选项：折线趋势 / 柱状对比 / 流程图。',
+    '- 如果风格不清楚，可追问：更像周报数据板、研究图、还是笔记卡片？',
+  ].join('\n')
 }
 
 export function buildDocumentWidgetGuidanceSnippet(profile: DocumentWidgetProfile | null): string {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
+  buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
   inferDocumentWidgetProfile,
 } from '../main/modules/claude-bridge/widget-guidance'
@@ -42,6 +43,14 @@ describe('document widget guidance', () => {
     assert.match(snippet, /weekly_focus_chart/)
     assert.match(snippet, /本周 \/ 下周/)
     assert.match(snippet, /implementation/)
+  })
+
+  it('suggests a minimal clarification path for ambiguous chart requests', () => {
+    const snippet = buildDocumentWidgetClarificationSnippet('帮我做个数据图表，先看看动态')
+    assert.match(snippet, /澄清建议/)
+    assert.match(snippet, /折线趋势/)
+    assert.match(snippet, /柱状对比/)
+    assert.match(snippet, /流程图/)
   })
 
   it('documents weekly focus chart and style vocabulary in widget baselines', () => {

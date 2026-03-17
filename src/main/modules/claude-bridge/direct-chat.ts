@@ -51,6 +51,7 @@ import {
   type DocumentWidgetTaskKind,
 } from './tool-policy-heuristics'
 import {
+  buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
@@ -126,6 +127,7 @@ interface ToolPolicy {
   preferFormatOnly: boolean
   documentWidgetTaskKind?: DocumentWidgetTaskKind
   documentWidgetProfile?: DocumentWidgetProfile | null
+  documentWidgetSourceText?: string | null
   allowBrowserTools: boolean
   preferredSkillToolNames?: string[] | null
 }
@@ -1499,6 +1501,11 @@ export class DirectChatEngine extends EventEmitter {
       const widgetGuidance = buildDocumentWidgetGuidanceSnippet(policy.documentWidgetProfile || null)
       if (widgetGuidance) {
         guidance.push(widgetGuidance)
+      } else {
+        const widgetClarifier = buildDocumentWidgetClarificationSnippet(policy.documentWidgetSourceText || '')
+        if (widgetClarifier) {
+          guidance.push(widgetClarifier)
+        }
       }
     }
 
@@ -2737,6 +2744,7 @@ export class DirectChatEngine extends EventEmitter {
         preferFormatOnly: hasTools && this.shouldPreferFormatOnly(userInstructionText),
         documentWidgetTaskKind,
         documentWidgetProfile,
+        documentWidgetSourceText: pureUserInput,
         allowBrowserTools: hasTools && (
           browserDecision.mode === 'browser_workflow' ||
           browserDecision.mode === 'browser_upload_workflow'
