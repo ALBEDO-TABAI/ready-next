@@ -1,10 +1,11 @@
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, BrowserWindow, type WebContents } from 'electron'
 import {
   readFileSync, writeFileSync, readdirSync, statSync, existsSync,
-  mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync
+  mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, type FSWatcher
 } from 'fs'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
+import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
@@ -279,12 +280,14 @@ async function writeDocxFromContent(path: string, content: string): Promise<{ su
 
 /** Convert an absolute file path to a local-file:// URL with proper encoding */
 function toLocalFileUrl(filePath: string): string {
+  // Normalize Windows backslashes to forward slashes
+  const normalized = filePath.replace(/\\/g, '/')
   // Encode each path component separately to handle Chinese chars, spaces, etc.
-  const encoded = filePath
+  const encoded = normalized
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/')
-  return `local-file://${encoded}`
+  return `local-file:///${encoded}` // Three slashes for absolute paths
 }
 
 /** Detect content type category from extension */
@@ -358,7 +361,162 @@ export async function writeDocumentEditableText(
   }
 }
 
+async function saveDocumentWithDialog(payload: {
+  content: string
+  suggestedName?: string
+  defaultPath?: string | null
+}): Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }> {
+  try {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return { success: false, error: 'No window' }
+
+    const suggestedName = (payload.suggestedName || '新文档.md').trim() || '新文档.md'
+    const safeSuggestedName = extname(suggestedName) ? suggestedName : `${suggestedName}.md`
+    const defaultDir = payload.defaultPath ? dirname(payload.defaultPath) : homedir()
+    const saveResult = await dialog.showSaveDialog(win, {
+      title: '保存文档',
+      defaultPath: join(defaultDir, safeSuggestedName),
+      filters: [
+        { name: 'Markdown 文档', extensions: ['md'] },
+        { name: '文本文件', extensions: ['txt'] },
+        { name: 'HTML 快照', extensions: ['html'] },
+        { name: 'Word 文档', extensions: ['docx'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { success: false, canceled: true, error: 'cancelled' }
+    }
+
+    if (extname(saveResult.filePath).toLowerCase() === '.html') {
+      const title = basename(saveResult.filePath, '.html') || 'Document Snapshot'
+      const html = buildDocumentHtmlSnapshotExport(payload.content, title)
+      writeFileSync(saveResult.filePath, html, 'utf-8')
+      return { success: true, path: saveResult.filePath }
+    }
+
+    const writeResult = await writeDocumentEditableText(saveResult.filePath, payload.content)
+    if (!writeResult.success) {
+      return { success: false, error: writeResult.error || '文档写入失败' }
+    }
+
+    return { success: true, path: saveResult.filePath }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export function setupDocumentIPC(useMock = false): void {
+  type DirectoryWatchSession = {
+    sender: WebContents
+    watchers: Map<string, FSWatcher>
+    debounceTimer: NodeJS.Timeout | null
+    pendingPaths: Set<string>
+  }
+
+  const directoryWatchSessions = new Map<number, DirectoryWatchSession>()
+
+  const closeDirectoryWatchSession = (senderId: number) => {
+    const session = directoryWatchSessions.get(senderId)
+    if (!session) return
+    if (session.debounceTimer) {
+      clearTimeout(session.debounceTimer)
+    }
+    session.watchers.forEach((watcher) => watcher.close())
+    directoryWatchSessions.delete(senderId)
+  }
+
+  const ensureDirectoryWatchSession = (sender: WebContents): DirectoryWatchSession => {
+    const existing = directoryWatchSessions.get(sender.id)
+    if (existing) return existing
+
+    const session: DirectoryWatchSession = {
+      sender,
+      watchers: new Map<string, FSWatcher>(),
+      debounceTimer: null,
+      pendingPaths: new Set<string>(),
+    }
+
+    sender.once('destroyed', () => {
+      closeDirectoryWatchSession(sender.id)
+    })
+
+    directoryWatchSessions.set(sender.id, session)
+    return session
+  }
+
+  const queueDirectoryWatchEvent = (session: DirectoryWatchSession, watchedPath: string) => {
+    session.pendingPaths.add(watchedPath)
+    if (session.debounceTimer) return
+
+    session.debounceTimer = setTimeout(() => {
+      session.debounceTimer = null
+      if (session.sender.isDestroyed()) return
+      const paths = Array.from(session.pendingPaths)
+      session.pendingPaths.clear()
+      session.sender.send('document:directoryChanged', {
+        paths,
+        timestamp: Date.now(),
+      })
+    }, 140)
+  }
+
+  const syncWatchedDirectories = (sender: WebContents, rawPaths: string[]): string[] => {
+    const session = ensureDirectoryWatchSession(sender)
+    const normalizedPaths = Array.from(
+      new Set(
+        rawPaths
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+          .filter((value) => {
+            if (!existsSync(value)) return false
+            try {
+              return statSync(value).isDirectory()
+            } catch {
+              return false
+            }
+          }),
+      ),
+    )
+
+    session.watchers.forEach((watcher, watchedPath) => {
+      if (normalizedPaths.includes(watchedPath)) return
+      watcher.close()
+      session.watchers.delete(watchedPath)
+    })
+
+    normalizedPaths.forEach((dirPath) => {
+      if (session.watchers.has(dirPath)) return
+      try {
+        const watcher = watch(dirPath, { persistent: false }, () => {
+          queueDirectoryWatchEvent(session, dirPath)
+        })
+        watcher.on('error', () => {
+          watcher.close()
+          session.watchers.delete(dirPath)
+        })
+        session.watchers.set(dirPath, watcher)
+      } catch {
+        // Ignore unwatchable paths; other directories should continue to work.
+      }
+    })
+
+    return Array.from(session.watchers.keys())
+  }
+
+  ipcMain.handle('document:watchDirectories', async (event, payload: { paths?: string[] }) => {
+    try {
+      if (useMock) {
+        return { success: true, data: { watchedPaths: [] }, mock: true }
+      }
+      const watchedPaths = syncWatchedDirectories(event.sender, Array.isArray(payload?.paths) ? payload.paths : [])
+      return { success: true, data: { watchedPaths } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Read file — enhanced with binary file handling via local-file:// URLs
   ipcMain.handle('document:read', async (_, path: string) => {
     try {
@@ -377,14 +535,28 @@ export function setupDocumentIPC(useMock = false): void {
       // For binary files, return a local-file:// URL instead of content
       if (isBinaryFile(path)) {
         const category = getFileCategory(path)
+        const extension = extname(path).toLowerCase()
+        const data: {
+          type: 'binary'
+          category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
+          localUrl: string
+          extension: string
+          bytes?: Uint8Array
+        } = {
+          type: 'binary',
+          category,
+          localUrl: toLocalFileUrl(path),
+          extension,
+        }
+
+        // react-pdf reads raw bytes more reliably than fetching a custom protocol URL.
+        if (category === 'pdf') {
+          data.bytes = new Uint8Array(readFileSync(path))
+        }
+
         return {
           success: true,
-          data: {
-            type: 'binary' as const,
-            category,
-            localUrl: toLocalFileUrl(path),
-            extension: extname(path).toLowerCase()
-          }
+          data,
         }
       }
 
@@ -422,6 +594,17 @@ export function setupDocumentIPC(useMock = false): void {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage }
     }
+  })
+
+  ipcMain.handle('document:saveAs', async (_, payload: { content: string; suggestedName?: string; defaultPath?: string | null }) => {
+    if (useMock) {
+      return {
+        success: true,
+        path: payload.defaultPath || payload.suggestedName || '新文档.md',
+        mock: true,
+      }
+    }
+    return saveDocumentWithDialog(payload)
   })
 
   // List directory
