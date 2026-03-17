@@ -18,4 +18,10 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
     assert.equal(shouldForceDocumentToolCall(prompt), true)
   })
+
+  it('treats style-only chart follow-up requests as widget updates', () => {
+    const prompt = '把收益计算的部分的设计风格和上面股价收益图的设计风格统一一下'
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
 })

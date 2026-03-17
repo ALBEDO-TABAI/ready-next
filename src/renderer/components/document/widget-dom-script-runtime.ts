@@ -28,3 +28,21 @@ export function buildScopedWidgetInlineScript(scriptContent: string, exportedHan
     '})();',
   ].join('\n')
 }
+
+export function invokeInlineHandlerExpression(
+  expression: string | null | undefined,
+  widgetWindow: Record<string, unknown>,
+  event?: Event,
+): boolean {
+  const normalized = String(expression || '').trim()
+  if (!normalized) return false
+
+  const match = normalized.match(/^([A-Za-z_$][\w$]*)\((?:\s*event\s*)?\)$/)
+  if (!match?.[1]) return false
+
+  const candidate = widgetWindow[match[1]]
+  if (typeof candidate !== 'function') return false
+
+  candidate.call(widgetWindow, event)
+  return true
+}

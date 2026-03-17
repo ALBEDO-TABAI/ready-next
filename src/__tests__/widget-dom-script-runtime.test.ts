@@ -2,7 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
 
-import { buildScopedWidgetInlineScript } from '../renderer/components/document/widget-dom-script-runtime'
+import {
+  buildScopedWidgetInlineScript,
+  invokeInlineHandlerExpression,
+} from '../renderer/components/document/widget-dom-script-runtime'
 
 describe('widget dom runtime script scoping', () => {
   it('allows repeated execution of widget scripts with top-level const declarations', () => {
@@ -26,5 +29,19 @@ window.__last = calculateReturn()
 
     assert.equal(typeof context.window.calculateReturn, 'function')
     assert.equal(context.window.__last, 3)
+  })
+
+  it('invokes simple inline handler expressions against the widget window scope', () => {
+    let called = 0
+    const widgetWindow = {
+      calculateReturn: () => {
+        called += 1
+      },
+    }
+
+    const handled = invokeInlineHandlerExpression('calculateReturn()', widgetWindow, { type: 'input' })
+
+    assert.equal(handled, true)
+    assert.equal(called, 1)
   })
 })

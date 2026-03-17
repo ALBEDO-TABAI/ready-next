@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
-import { buildScopedWidgetInlineScript, collectInlineHandlerNames } from './widget-dom-script-runtime'
+import {
+  buildScopedWidgetInlineScript,
+  collectInlineHandlerNames,
+  invokeInlineHandlerExpression,
+} from './widget-dom-script-runtime'
 import { clampNumericInputValue } from './widget-runtime-helpers'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 
@@ -95,6 +99,11 @@ export default function WidgetDomRuntime({
       onOpenHref(link.href)
     }
 
+    const invokeInlineHandler = (target: EventTarget | null, attr: string, event: Event) => {
+      if (!(target instanceof HTMLElement)) return
+      invokeInlineHandlerExpression(target.getAttribute(attr), widgetWindow as unknown as Record<string, unknown>, event)
+    }
+
     const handleNumericBounds = (event: Event) => {
       const target = event.target
       if (!(target instanceof HTMLInputElement)) return
@@ -109,6 +118,16 @@ export default function WidgetDomRuntime({
       }
     }
 
+    const handleInput = (event: Event) => {
+      handleNumericBounds(event)
+      invokeInlineHandler(event.target, 'oninput', event)
+    }
+
+    const handleChange = (event: Event) => {
+      handleNumericBounds(event)
+      invokeInlineHandler(event.target, 'onchange', event)
+    }
+
     const previousBridge = widgetWindow.__readyWidgetSendMessage
     const nextBridge = (text: string) => {
       appendWidgetMessageToAgentInput(text, title)
@@ -117,8 +136,8 @@ export default function WidgetDomRuntime({
 
     renderRuntime()
     host.addEventListener('click', handleClick)
-    host.addEventListener('input', handleNumericBounds, true)
-    host.addEventListener('change', handleNumericBounds, true)
+    host.addEventListener('input', handleInput, true)
+    host.addEventListener('change', handleChange, true)
 
     const observer = new MutationObserver(() => {
       renderRuntime()
@@ -131,8 +150,8 @@ export default function WidgetDomRuntime({
     return () => {
       observer.disconnect()
       host.removeEventListener('click', handleClick)
-      host.removeEventListener('input', handleNumericBounds, true)
-      host.removeEventListener('change', handleNumericBounds, true)
+      host.removeEventListener('input', handleInput, true)
+      host.removeEventListener('change', handleChange, true)
       if (widgetWindow.__readyWidgetSendMessage === nextBridge) {
         widgetWindow.__readyWidgetSendMessage = previousBridge
       }

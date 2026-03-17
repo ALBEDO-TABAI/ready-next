@@ -85,6 +85,17 @@ try {
 var widgetToken='${safeToken}';
 var root=document.getElementById('__widget-root');
 var resizeTimer=null;
+function invokeInlineHandler(target, attrName, event){
+  if(!target || typeof target.getAttribute !== 'function') return false;
+  var expr=String(target.getAttribute(attrName) || '').trim();
+  if(!expr) return false;
+  var match=expr.match(/^([A-Za-z_$][\\w$]*)\\((?:\\s*event\\s*)?\\)$/);
+  if(!match || !match[1]) return false;
+  var fn=window[match[1]];
+  if(typeof fn !== 'function') return false;
+  fn.call(window, event);
+  return true;
+}
 function notifyResize(){
   if(resizeTimer) clearTimeout(resizeTimer);
   resizeTimer=setTimeout(function(){
@@ -136,6 +147,7 @@ document.addEventListener('click',function(event){
   if(!href || /^\\s*javascript\\s*:/i.test(href)) return;
   event.preventDefault();
   parent.postMessage({type:'widget:link',href:href,token:widgetToken},'*');
+  return;
 });
 window.__readyWidgetSendMessage=function(text){
   if(typeof text !== 'string') return;
@@ -145,9 +157,11 @@ window.__readyWidgetSendMessage=function(text){
 };
 document.addEventListener('input',function(event){
   clampNumericInput(event.target);
+  invokeInlineHandler(event.target, 'oninput', event);
 }, true);
 document.addEventListener('change',function(event){
   clampNumericInput(event.target);
+  invokeInlineHandler(event.target, 'onchange', event);
 }, true);
 
 window.addEventListener('message',function(event){

@@ -152,7 +152,8 @@ describe('document widget renderer contract', () => {
     assert.match(source, /buildScopedWidgetInlineScript/)
     assert.match(source, /setAttribute\('nonce', 'cmVhZHktd2lkZ2V0'\)/)
     assert.match(source, /clampNumericInputValue/)
-    assert.match(source, /addEventListener\('input', handleNumericBounds, true\)/)
+    assert.match(source, /addEventListener\('input', handleInput, true\)/)
+    assert.match(source, /invokeInlineHandlerExpression/)
   })
 
   it('does not describe non-script widgets as static html only', () => {

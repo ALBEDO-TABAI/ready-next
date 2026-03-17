@@ -145,7 +145,7 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   if (hasDocContext && editIntent.test(primaryInstruction)) return true
 
   const hasDocKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
-  const existingWidgetReference = /(这个|当前|现有|已有|上面这个|图里|卡片里|widget里|趋势图里|波动图里)/i
+  const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
   const strongDirectness = /(直接|立刻|马上|立即|在原文中|就地)/i
   if (widgetTaskKind && (hasDocContext || hasDocKeyword.test(primaryInstruction) || existingWidgetReference.test(primaryInstruction))) {
     return true
@@ -163,10 +163,10 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
   if (!primaryInstruction) return null
 
   const widgetKeyword =
-    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|对比图|小工具|卡片组件)/i
+    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件)/i
   if (!widgetKeyword.test(primaryInstruction)) return null
 
-  const existingWidgetReference = /(这个|当前|现有|已有|上面这个|图里|卡片里|widget里|趋势图里|波动图里)/i
+  const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
 
   if (/(列出|查看|看看|有哪些|当前.*widget|list)/i.test(primaryInstruction)) {
     return 'inspect'
@@ -177,6 +177,10 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
   }
 
   if (existingWidgetReference.test(primaryInstruction) && /(增加|添加|加入|补充|扩展|加一个|加上|append|extend|enhance)/i.test(primaryInstruction)) {
+    return 'update'
+  }
+
+  if (existingWidgetReference.test(primaryInstruction) && /(风格|样式|配色|视觉|主题|统一|一致|协调|美化|润色|改一下风格|统一一下)/i.test(primaryInstruction)) {
     return 'update'
   }
 
