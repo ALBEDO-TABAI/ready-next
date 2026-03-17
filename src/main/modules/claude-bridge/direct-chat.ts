@@ -2710,7 +2710,7 @@ export class DirectChatEngine extends EventEmitter {
       const pureUserInput = this.extractPureUserInput(userText)
       const contextualUserInput = resolveToolPolicyInput(
         pureUserInput,
-        this.collectRecentPureUserInputs(session.messages.slice(0, -1)),
+        this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
       )
       if (contextualUserInput !== pureUserInput) {
         log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)

@@ -1,7 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isRetryOnlyPrompt, resolveToolPolicyInput } from '../main/modules/claude-bridge/tool-policy-context'
+import {
+  isHostInjectedUserPrompt,
+  isRetryOnlyPrompt,
+  resolveToolPolicyInput,
+} from '../main/modules/claude-bridge/tool-policy-context'
 
 describe('tool policy context', () => {
   it('keeps concrete prompts unchanged', () => {
@@ -22,5 +26,16 @@ describe('tool policy context', () => {
     assert.equal(isRetryOnlyPrompt('再试一次'), true)
     assert.equal(isRetryOnlyPrompt('continue'), true)
     assert.equal(isRetryOnlyPrompt('在图里增加输入栏'), false)
+  })
+
+  it('skips host-injected follow-up prompts when resolving retry context', () => {
+    const retry = resolveToolPolicyInput('继续', [
+      '系统检查：你还没有执行真实文档修改。',
+      '[tool_result]\ncall_id: abc\ntool: document_list_widgets\nresult:\n当前文档共有 1 个 widget',
+      '在这个股票价格趋势图里增加一个计算输入栏，可以输入买入时间 买入价格 计算收益',
+    ])
+
+    assert.match(retry, /股票价格趋势图/)
+    assert.equal(isHostInjectedUserPrompt('系统检查：你还没有执行真实文档修改。'), true)
   })
 })
