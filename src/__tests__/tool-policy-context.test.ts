@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  compactToolPolicyHistory,
   isHostInjectedUserPrompt,
   isRetryOnlyPrompt,
   resolveToolPolicyInput,
@@ -37,5 +38,18 @@ describe('tool policy context', () => {
 
     assert.match(retry, /股票价格趋势图/)
     assert.equal(isHostInjectedUserPrompt('系统检查：你还没有执行真实文档修改。'), true)
+  })
+
+  it('filters host-injected history before trimming the retry window', () => {
+    const noisyInputs = [
+      '在这个股票价格趋势图里增加一个计算输入栏，可以输入买入时间 买入价格 计算收益',
+      ...Array.from({ length: 60 }, (_, index) => `系统检查：第 ${index + 1} 次提示`),
+    ]
+
+    const history = compactToolPolicyHistory(noisyInputs, 40)
+    assert.equal(history[history.length - 1], '在这个股票价格趋势图里增加一个计算输入栏，可以输入买入时间 买入价格 计算收益')
+
+    const retry = resolveToolPolicyInput('继续', noisyInputs)
+    assert.match(retry, /股票价格趋势图/)
   })
 })

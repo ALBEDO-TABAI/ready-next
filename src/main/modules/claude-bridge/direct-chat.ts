@@ -56,7 +56,7 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
-import { resolveToolPolicyInput } from './tool-policy-context'
+import { compactToolPolicyHistory, resolveToolPolicyInput } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS, resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
@@ -1352,12 +1352,12 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private collectRecentPureUserInputs(messages: ChatMessage[], limit = 6): string[] {
-    return messages
+    const extractedInputs = messages
       .filter((message) => message.role === 'user')
-      .slice(-limit)
-      .reverse()
       .map((message) => this.extractPureUserInput(this.extractIncomingText(message.content)))
       .filter((input) => input.trim().length > 0)
+
+    return compactToolPolicyHistory(extractedInputs, limit)
   }
 
   /**

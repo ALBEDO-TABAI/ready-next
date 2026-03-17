@@ -13,12 +13,21 @@ export function isHostInjectedUserPrompt(input: string): boolean {
   return HOST_INJECTED_USER_PATTERN.test(input.trim())
 }
 
+export function compactToolPolicyHistory(inputs: string[], limit: number): string[] {
+  return inputs
+    .map((input) => input.trim())
+    .filter((input) => input.length > 0)
+    .filter((input) => !isHostInjectedUserPrompt(input))
+    .slice(-limit)
+    .reverse()
+}
+
 export function resolveToolPolicyInput(currentInput: string, previousInputs: string[]): string {
   const normalizedCurrent = currentInput.trim()
   if (!normalizedCurrent) return currentInput
   if (!isRetryOnlyPrompt(normalizedCurrent)) return currentInput
 
-  for (const previousInput of previousInputs) {
+  for (const previousInput of compactToolPolicyHistory(previousInputs, previousInputs.length || 1)) {
     const candidate = previousInput.trim()
     if (!candidate || isRetryOnlyPrompt(candidate) || isHostInjectedUserPrompt(candidate)) continue
     if (inferDocumentWidgetTaskKind(candidate) || shouldForceDocumentToolCall(candidate)) {
