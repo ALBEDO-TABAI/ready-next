@@ -7,6 +7,8 @@ const CONTEXT_MARKERS = [
   '--- 附件:',
 ]
 
+export type DocumentWidgetTaskKind = 'create' | 'inspect' | 'update' | 'remove' | null
+
 const BOOTSTRAP_HEADER_PATTERN =
   /^##\s+(L1 会话上下文|L2 按需规则|当前 Scope|最近会话摘要|\d{4}-\d{2}-\d{2}\.md)\b/i
 
@@ -133,6 +135,7 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   if (shouldForceDesignToolCall(userText)) return false
   const primaryInstruction = extractPrimaryUserInstruction(userText)
   if (!primaryInstruction) return false
+  const widgetTaskKind = inferDocumentWidgetTaskKind(primaryInstruction)
   const normalized = userText.toLowerCase()
   const hasDocContext =
     userText.includes('### 当前文档上下文') ||
@@ -142,12 +145,50 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   if (hasDocContext && editIntent.test(primaryInstruction)) return true
 
   const hasDocKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
+  const existingWidgetReference = /(这个|当前|现有|已有|上面这个|图里|卡片里|widget里|趋势图里|波动图里)/i
   const strongDirectness = /(直接|立刻|马上|立即|在原文中|就地)/i
+  if (widgetTaskKind && (hasDocContext || hasDocKeyword.test(primaryInstruction) || existingWidgetReference.test(primaryInstruction))) {
+    return true
+  }
   return (
     hasDocKeyword.test(primaryInstruction) &&
     strongDirectness.test(primaryInstruction) &&
     editIntent.test(primaryInstruction)
   )
+}
+
+export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTaskKind {
+  if (!userText) return null
+  const primaryInstruction = extractPrimaryUserInstruction(userText)
+  if (!primaryInstruction) return null
+
+  const widgetKeyword =
+    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|对比图|小工具|卡片组件)/i
+  if (!widgetKeyword.test(primaryInstruction)) return null
+
+  const existingWidgetReference = /(这个|当前|现有|已有|上面这个|图里|卡片里|widget里|趋势图里|波动图里)/i
+
+  if (/(列出|查看|看看|有哪些|当前.*widget|list)/i.test(primaryInstruction)) {
+    return 'inspect'
+  }
+
+  if (/(删除|删掉|移除|remove)/i.test(primaryInstruction)) {
+    return 'remove'
+  }
+
+  if (existingWidgetReference.test(primaryInstruction) && /(增加|添加|加入|补充|扩展|加一个|加上|append|extend|enhance)/i.test(primaryInstruction)) {
+    return 'update'
+  }
+
+  if (/(更新|修改|改成|改为|替换|rewrite|update)/i.test(primaryInstruction)) {
+    return 'update'
+  }
+
+  if (/(插入|新建|创建|生成|做一个|加一个|append|insert|create)/i.test(primaryInstruction)) {
+    return 'create'
+  }
+
+  return null
 }
 
 export function shouldPreferFormatOnly(userText: string): boolean {
