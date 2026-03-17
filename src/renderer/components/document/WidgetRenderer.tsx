@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
@@ -68,7 +68,7 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
     )
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     function handleMessage(event: MessageEvent) {
       if (!event.data || typeof event.data.type !== 'string') return
       if (event.data.token !== widgetTokenRef.current) return

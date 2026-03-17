@@ -131,6 +131,7 @@ describe('document widget renderer contract', () => {
       'utf8',
     )
 
+    assert.match(source, /useLayoutEffect/)
     assert.match(source, /sandbox="allow-scripts"/)
     assert.doesNotMatch(source, /if\s*\(\s*!needsSandbox\s*\)/)
     assert.match(source, /srcDoc=\{srcDoc\}/)
@@ -148,6 +149,7 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(source, /attachShadow/)
     assert.doesNotMatch(source, /shadowRoot/)
     assert.match(source, /host\.innerHTML = ''/)
+    assert.match(source, /buildScopedWidgetInlineScript/)
     assert.match(source, /setAttribute\('nonce', 'cmVhZHktd2lkZ2V0'\)/)
     assert.match(source, /clampNumericInputValue/)
     assert.match(source, /addEventListener\('input', handleNumericBounds, true\)/)

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
+import { buildScopedWidgetInlineScript, collectInlineHandlerNames } from './widget-dom-script-runtime'
 import { clampNumericInputValue } from './widget-runtime-helpers'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 
@@ -14,6 +15,7 @@ const WIDGET_RUNTIME_NONCE = 'cmVhZHktd2lkZ2V0'
 
 function executeScripts(container: HTMLElement): Promise<void> {
   const scripts = Array.from(container.querySelectorAll('script'))
+  const exportedHandlerNames = collectInlineHandlerNames(container)
   let chain = Promise.resolve()
 
   scripts.forEach((oldScript) => {
@@ -27,7 +29,7 @@ function executeScripts(container: HTMLElement): Promise<void> {
         next.onload = () => resolve()
         next.onerror = () => resolve()
       } else {
-        next.textContent = oldScript.textContent
+        next.textContent = buildScopedWidgetInlineScript(oldScript.textContent || '', exportedHandlerNames)
       }
       oldScript.replaceWith(next)
       if (!oldScript.src) {
