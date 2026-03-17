@@ -56,6 +56,7 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
+import { buildDocumentToolCompletionText } from './document-tool-flow'
 import { compactToolPolicyHistory, resolveToolPolicyInput } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS, resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
@@ -3227,6 +3228,7 @@ export class DirectChatEngine extends EventEmitter {
           let executedPrimaryDesignToolThisIteration = false
           let lastPrimaryDesignToolPayload: Record<string, unknown> | null = null
           let lastPrimaryDesignToolRawResult: string | null = null
+          const documentToolResultsThisIteration: string[] = []
           if (useAnthropicProtocol) {
             // For Anthropic: assistant message contains both text + tool_use blocks
             const assistantContent: Array<Record<string, unknown>> = []
@@ -3248,6 +3250,7 @@ export class DirectChatEngine extends EventEmitter {
               ensureNotAborted()
               log(`tool execute: ${tc.name}, result=${result.slice(0, 140)}`)
               if (tc.name.startsWith('document_')) {
+                documentToolResultsThisIteration.push(result)
                 executedDocActionCount += 1
                 if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                   executedMutatingDocActionCount += 1
@@ -3297,6 +3300,7 @@ export class DirectChatEngine extends EventEmitter {
                 ensureNotAborted()
                 log(`tool execute: ${tc.name}, result=${result.slice(0, 140)}`)
                 if (tc.name.startsWith('document_')) {
+                  documentToolResultsThisIteration.push(result)
                   executedDocActionCount += 1
                   if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                     executedMutatingDocActionCount += 1
@@ -3359,6 +3363,7 @@ export class DirectChatEngine extends EventEmitter {
                 ensureNotAborted()
                 log(`tool execute: ${tc.name}, result=${result.slice(0, 140)}`)
                 if (tc.name.startsWith('document_')) {
+                  documentToolResultsThisIteration.push(result)
                   executedDocActionCount += 1
                   if (CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(tc.name)) {
                     executedMutatingDocActionCount += 1
@@ -3483,6 +3488,21 @@ export class DirectChatEngine extends EventEmitter {
 
           if (toolPolicy.forceDocumentTool && (executedMutatingDocActionCount > 0 || executedInspectionDocActionCount > 0)) {
             documentToolTaskCompleted = true
+          }
+
+          const documentToolCompletionText = buildDocumentToolCompletionText({
+            forceDocumentTool: toolPolicy.forceDocumentTool,
+            executedMutatingDocActionCount,
+            executedSaveDocActionCount,
+            lastWidgetValidationError,
+            toolResults: documentToolResultsThisIteration,
+          })
+          if (documentToolCompletionText) {
+            emitOutput(documentToolCompletionText, 'text')
+            session.messages.push({ role: 'assistant', content: documentToolCompletionText })
+            finishedBeforeLimit = true
+            log('Completed forceDocumentTool loop from host-side save+mutation result')
+            break
           }
 
           if (
