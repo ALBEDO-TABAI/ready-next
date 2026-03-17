@@ -201,6 +201,8 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(srcdoc, /data-widget-script-nonce=/)
     assert.match(srcdoc, /<script>\(function\(\)/)
     assert.match(srcdoc, /data-widget-token="tok"/)
+    assert.match(srcdoc, /<div id="__widget-root"><div class="widget-root"><div>demo<\/div><\/div><\/div>/)
+    assert.doesNotMatch(srcdoc, /__widget-template/)
   })
 
   it('does not keep a persistent compatibility-mode notice in WidgetRenderer', () => {

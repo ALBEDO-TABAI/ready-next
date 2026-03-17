@@ -84,7 +84,6 @@ export function buildWidgetReceiverSrcdoc(
 try {
 var widgetToken='${safeToken}';
 var root=document.getElementById('__widget-root');
-var template=document.getElementById('__widget-template');
 var resizeTimer=null;
 function notifyResize(){
   if(resizeTimer) clearTimeout(resizeTimer);
@@ -121,43 +120,6 @@ if (typeof ResizeObserver === 'function') {
   document.addEventListener('DOMContentLoaded', notifyResize);
 }
 
-function executeScripts(container){
-  var scripts=container.querySelectorAll('script');
-  var chain = Promise.resolve();
-  scripts.forEach(function(oldScript){
-    chain = chain.then(function(){
-      return new Promise(function(resolve){
-        var next=document.createElement('script');
-        Array.from(oldScript.attributes).forEach(function(attr){
-          next.setAttribute(attr.name, attr.value);
-        });
-        if (oldScript.src) {
-          next.onload = function(){ resolve(undefined); };
-          next.onerror = function(){ resolve(undefined); };
-        }
-        if(!oldScript.src){
-          next.textContent=oldScript.textContent;
-        }
-        oldScript.replaceWith(next);
-        if (!oldScript.src) {
-          resolve(undefined);
-        }
-      });
-    });
-  });
-  return chain;
-}
-
-function renderHtml(html){
-  root.innerHTML='<div class="widget-root">'+html+'</div>';
-  executeScripts(root)
-    .then(function(){ notifyResize(); })
-    .catch(function(error){
-      parent.postMessage({type:'widget:error',message:String(error && error.message ? error.message : error),token:widgetToken},'*');
-      notifyResize();
-    });
-}
-
 document.addEventListener('click',function(event){
   var link=event.target && event.target.closest ? event.target.closest('a[href]') : null;
   if(!link) return;
@@ -185,7 +147,6 @@ window.addEventListener('message',function(event){
   }
 });
 
-renderHtml(template ? template.innerHTML : '');
 setTimeout(function(){
   parent.postMessage({type:'widget:ready',token:widgetToken},'*');
   notifyResize();
@@ -203,8 +164,7 @@ setTimeout(function(){
   <style>${styleBlock}</style>
 </head>
 <body style="margin:0;padding:0;background:transparent;" data-widget-token="${safeToken}">
-  <template id="__widget-template">${safeInitialHtml}</template>
-  <div id="__widget-root"></div>
+  <div id="__widget-root"><div class="widget-root">${safeInitialHtml}</div></div>
   <script>${receiverScript}</script>
 </body>
 </html>`
