@@ -1335,6 +1335,7 @@ export class DirectChatEngine extends EventEmitter {
     // Remove environment information blocks
     const envMarkers = [
       '## 环境信息',
+      '### Widget 更新上下文',
       '### 当前设计画布上下文',
       '### 设计项目引用',
       '### 当前文档上下文',
@@ -2710,6 +2711,7 @@ export class DirectChatEngine extends EventEmitter {
       const isKimi = isKimiCoding || (!useAnthropicProtocol && (baseUrl.includes('kimi') || baseUrl.includes('moonshot')))
       const sessionId = this.extractSessionIdFromInternalName(name)
       const userText = this.extractIncomingText(content)
+      const hasWidgetTargetContext = userText.includes('### Widget 更新上下文')
       const pureUserInput = this.extractPureUserInput(userText)
       const contextualUserInput = resolveToolPolicyInput(
         pureUserInput,
@@ -2719,7 +2721,7 @@ export class DirectChatEngine extends EventEmitter {
         log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
       }
       const userInstructionText = this.extractPrimaryUserInstruction(contextualUserInput)
-      const documentWidgetTaskKind = this.inferDocumentWidgetTaskKind(contextualUserInput)
+      const documentWidgetTaskKind = hasWidgetTargetContext ? 'update' : this.inferDocumentWidgetTaskKind(contextualUserInput)
       const documentWidgetProfile = inferDocumentWidgetProfile(contextualUserInput)
       const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
       const keepToolsWithVideo = this.shouldKeepToolsWithVideo(contextualUserInput, sessionId)
@@ -2755,7 +2757,7 @@ export class DirectChatEngine extends EventEmitter {
         ? this.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null
       const toolPolicy: ToolPolicy = {
-        forceDocumentTool: hasTools && this.shouldForceDocumentToolCall(contextualUserInput),
+        forceDocumentTool: hasTools && (hasWidgetTargetContext || this.shouldForceDocumentToolCall(contextualUserInput)),
         forceDesignTool: false,
         preferredDesignTool: null,
         primaryDesignInstruction: null,

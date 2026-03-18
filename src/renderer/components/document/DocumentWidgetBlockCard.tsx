@@ -10,7 +10,7 @@ interface DocumentWidgetBlockCardProps {
   onToggleSource: () => void
   onCopySource: () => void
   onDelete: () => void
-  onRequestAgentUpdate?: (title: string) => void
+  onRequestAgentUpdate?: (title: string, widgetCode: string) => void
   onRequestPreview?: (title: string) => void
 }
 
@@ -61,7 +61,7 @@ export default function DocumentWidgetBlockCard({
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                onRequestAgentUpdate(title)
+                onRequestAgentUpdate(title, widgetCode)
               }}
             >
               <MessageSquareQuote size={13} strokeWidth={2} />

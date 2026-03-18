@@ -1,5 +1,10 @@
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
+import {
+  buildWidgetTargetUpdatePrompt,
+  createDocumentWidgetTargetAttachment,
+  type DocumentWidgetTargetContext,
+} from './widget-target-attachment'
 
 export const READY_FOCUS_CHAT_INPUT_EVENT = 'ready:focus-chat-input'
 export const READY_WIDGET_MESSAGE_EVENT = 'ready:widget-message'
@@ -62,6 +67,23 @@ export function appendWidgetMessageToAgentInput(text: string, title?: string): v
   window.dispatchEvent(new CustomEvent(READY_WIDGET_MESSAGE_EVENT, {
     detail: { title: title || null, text: trimmed },
   }))
+}
+
+export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetContext): void {
+  const prompt = buildWidgetTargetUpdatePrompt(context.widgetTitle)
+  const attachment = createDocumentWidgetTargetAttachment(context)
+
+  useWorkspace.setState({ chatPanelVisible: true })
+
+  useAgent.setState((state) => ({
+    attachments: [
+      ...state.attachments.filter((item) => item.source !== 'document-widget-target'),
+      attachment,
+    ],
+    inputValue: prompt,
+  }))
+
+  window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))
 }
 
 export function addDocumentQuoteReference(context: DocumentQuoteContext): void {

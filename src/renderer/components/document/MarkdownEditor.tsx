@@ -4,7 +4,7 @@ import TiptapEditor, { type TiptapEditorRef } from './TiptapEditor'
 import EditorFloatingToolbar from './EditorFloatingToolbar'
 import EditorContextMenu from './EditorContextMenu'
 import NotePreview from './NotePreview'
-import { addDocumentQuoteReference, appendToAgentInput } from '../../modules/agent/chat-input-bridge'
+import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -391,24 +391,17 @@ export default function MarkdownEditor({
   }, [contextSelection, tab.content, tab.path, tab.title])
 
   const requestAgentUpdateWidget = useCallback((widgetTitle: string, widgetCode: string) => {
-    const snippet = [
-      `请直接更新当前文档中的 widget，不要新增第二个。`,
-      `目标 widget: ${widgetTitle}`,
-      `文档: ${tab.title}`,
-      `路径: ${tab.path || '(未保存草稿)'}`,
-      '',
-      '当前 widget 源码如下：',
-      '```show-widget',
-      JSON.stringify({
-        title: widgetTitle,
-        widget_code: widgetCode,
-      }),
-      '```',
-      '',
-      '请优先使用 document_update_widget 完成更新，并在修改后保存文档。',
-    ].join('\n')
-
-    appendToAgentInput(snippet)
+    addDocumentWidgetTargetReference({
+      documentTitle: tab.title,
+      documentPath: tab.path,
+      widgetTitle,
+      widgetCode,
+      widgetMode: /<script\b/i.test(widgetCode)
+        ? 'scripted'
+        : /<svg\b/i.test(widgetCode)
+          ? 'static-svg'
+          : 'static-html',
+    })
   }, [tab.path, tab.title])
 
   // ─── View mode buttons ─────────────────────────────────────

@@ -1,10 +1,9 @@
-import type {
-  DesignControllerPhase,
-  DesignLayoutBounds,
-  DesignLayoutDigest,
-  DesignRepairScope,
-  DesignStyleSystem,
-} from '../../../shared/design-agent'
+// Legacy design types (design mode removed)
+type DesignLayoutBounds = { x: number; y: number; w: number; h: number }
+type DesignLayoutDigest = Record<string, unknown>
+type DesignRepairScope = 'run-owned' | 'selected'
+type DesignControllerPhase = string
+type DesignStyleSystem = Record<string, unknown>
 
 export interface AgentMessage {
   id: string
@@ -29,14 +28,22 @@ export interface ChatAttachment {
   name: string
   path: string
   type: 'image' | 'video' | 'text' | 'spreadsheet' | 'other'
+  isDirectory?: boolean
   size: number
   ext: string
-  source?: 'file' | 'browser-tab' | 'skill-folder' | 'design-project' | 'channel'
+  source?: 'file' | 'browser-tab' | 'skill-folder' | 'design-project' | 'document-quote' | 'document-widget-target' | 'channel'
   browserTabId?: string
   url?: string
   title?: string
+  documentTitle?: string
+  widgetTitle?: string
+  widgetCode?: string
+  widgetMode?: string
   heading?: string
   selection?: string
+  lineStart?: number
+  lineEnd?: number
+  sectionTitle?: string
   excerpt?: string
   capturedAt?: number
   skillId?: string

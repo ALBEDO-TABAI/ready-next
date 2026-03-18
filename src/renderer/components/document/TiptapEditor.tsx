@@ -119,7 +119,7 @@ function createWidgetBlockExtension(
                     widgetCode={widget.widgetCode}
                     sourceVisible={sourceVisible}
                     onRequestPreview={onRequestPreview}
-                    onRequestAgentUpdate={onRequestAgentUpdate ? () => onRequestAgentUpdate(title, widget.widgetCode) : undefined}
+                    onRequestAgentUpdate={onRequestAgentUpdate ? (nextTitle, nextCode) => onRequestAgentUpdate(nextTitle, nextCode) : undefined}
                     onToggleSource={() => {
                       const currentEditor = getEditor()
                       if (!currentEditor) return
