@@ -24,4 +24,10 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
     assert.equal(shouldForceDocumentToolCall(prompt), true)
   })
+
+  it('treats widget preview surface fixes as document widget updates', () => {
+    const prompt = '现在预览还有灰色的底，而且计算器的部分输入的数值需要有输入框'
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
 })
