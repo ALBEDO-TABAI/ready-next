@@ -6,6 +6,7 @@ import type {
   HistoryItem,
   PanelType,
 } from '../../modules/browser/types'
+import { WORKBENCH_SUPPORT_PANEL_WIDTH } from '../../modules/workbench/chrome'
 
 interface BrowserSidePanelProps {
   activePanel: PanelType
@@ -42,19 +43,22 @@ export default function BrowserSidePanel({
 
   return (
     <aside
-      className="content-surface-panel flex h-full w-[320px] flex-shrink-0 flex-col overflow-hidden border-l"
+      className="content-surface-panel flex h-full flex-shrink-0 flex-col overflow-hidden"
       style={{
-        borderColor: 'var(--border-default)',
-        background: 'var(--surface-panel-bg)',
-        boxShadow: 'var(--shadow-sm)',
+        width: WORKBENCH_SUPPORT_PANEL_WIDTH,
+        minWidth: WORKBENCH_SUPPORT_PANEL_WIDTH,
+        borderColor: 'transparent',
+        background: 'color-mix(in srgb, var(--surface-panel-bg) 8%, transparent)',
+        backdropFilter: 'blur(18px) saturate(138%)',
+        WebkitBackdropFilter: 'blur(18px) saturate(138%)',
       }}
     >
       <div
-        className="glass-surface-panel flex items-center justify-between"
+        className="flex items-center justify-between"
         style={{
           padding: '10px 14px',
-          background: 'var(--surface-toolbar-bg)',
-          borderBottom: '1px solid var(--border-default)',
+          background: 'transparent',
+          borderBottom: '1px solid transparent',
         }}
       >
         <div>
@@ -119,8 +123,8 @@ export default function BrowserSidePanel({
       <div
         className="flex items-center justify-between border-b px-3 py-2"
         style={{
-          borderColor: 'var(--border-default)',
-          background: 'var(--surface-card-bg)',
+          borderColor: 'transparent',
+          background: 'transparent',
         }}
       >
         <div>
@@ -140,7 +144,7 @@ export default function BrowserSidePanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="panel-hover-scrollbar flex-1 overflow-auto">
         {activePanel === 'bookmarks' && (
           bookmarks.length === 0 ? (
             <div className="flex items-center justify-center py-8" style={{ color: 'var(--text-light)' }}>

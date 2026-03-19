@@ -12,8 +12,9 @@ export default function StatusBar() {
 
     return (
         <div
-            className="glass-surface-panel h-[24px] flex items-center justify-between px-3 border-t border-[var(--border-default)] text-[11px] text-[var(--text-light)] select-none"
-            style={{ background: 'var(--surface-toolbar-bg)' }}
+            data-liquid-shell="statusbar"
+            className="h-[24px] flex items-center justify-between px-3 text-[11px] text-[var(--text-light)] select-none"
+            style={{ background: 'transparent', borderTop: '1px solid transparent', boxShadow: 'none' }}
         >
             {/* Left */}
             <div className="flex items-center gap-3">

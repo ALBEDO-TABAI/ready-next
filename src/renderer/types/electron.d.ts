@@ -443,6 +443,7 @@ interface ElectronBrowserAPI {
   reload: (tabId: string) => Promise<{ success: boolean; error?: string }>
   updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }>
   hideAll: () => Promise<{ success: boolean }>
+  hideActiveHost: () => Promise<{ success: boolean }>
   showActive: () => Promise<{ success: boolean }>
   getTabs: () => Promise<BrowserTabInfo[]>
   getAdblockState: () => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
@@ -527,6 +528,8 @@ interface DocumentReadBinaryData {
   category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
   localUrl: string
   extension: string
+  /** Raw bytes are currently attached for PDF previews to avoid custom-protocol fetch issues. */
+  bytes?: Uint8Array | ArrayBuffer | number[]
 }
 
 /** Read file response */
@@ -543,6 +546,14 @@ interface DocumentReadResponse {
 /** Write file response */
 interface DocumentWriteResponse {
   success: boolean
+  error?: string
+  mock?: boolean
+}
+
+interface DocumentSaveAsResponse {
+  success: boolean
+  path?: string
+  canceled?: boolean
   error?: string
   mock?: boolean
 }
@@ -647,9 +658,19 @@ interface DocumentHomeResponse {
   path: string
 }
 
+interface DocumentWatchDirectoriesResponse {
+  success: boolean
+  data?: {
+    watchedPaths: string[]
+  }
+  error?: string
+  mock?: boolean
+}
+
 interface ElectronDocumentAPI {
   readFile: (path: string) => Promise<DocumentReadResponse>
   writeFile: (path: string, content: string) => Promise<DocumentWriteResponse>
+  saveFileAs: (payload: { content: string; suggestedName?: string; defaultPath?: string | null }) => Promise<DocumentSaveAsResponse>
   listFiles: (dir: string) => Promise<DocumentListResponse>
   parseDocx: (path: string) => Promise<DocumentDocxResponse>
   parseXlsx: (path: string) => Promise<DocumentXlsxResponse>
@@ -665,6 +686,8 @@ interface ElectronDocumentAPI {
   showInFolder: (path: string) => Promise<DocumentOperationResponse>
   openPath: (path: string) => Promise<DocumentOperationResponse>
   createFile: (path: string) => Promise<DocumentOperationResponse>
+  watchDirectories: (paths: string[]) => Promise<DocumentWatchDirectoriesResponse>
+  onDirectoryChange: (callback: (data: { paths: string[]; timestamp: number }) => void) => () => void
 }
 
 // =============================================================================
@@ -882,59 +905,6 @@ interface ElectronVideoInfo {
   size: number
 }
 
-interface ElectronVideoAPI {
-  getInfo: (path: string) => Promise<{ success: boolean; data?: ElectronVideoInfo; error?: string; errorCode?: string }>
-  extractFrame: (options: { input: string; timestamp: number; output?: string }) =>
-    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
-  trim: (options: { input: string; start: number; end: number; output: string }) =>
-    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
-  transcode: (options: {
-    input: string; output: string; codec?: string;
-    resolution?: string; bitrate?: string; audioCodec?: string; audioBitrate?: string
-  }) => Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
-  extractAudio: (options: { input: string; output?: string; format?: string }) =>
-    Promise<{ success: boolean; path?: string; error?: string; errorCode?: string }>
-  /**
-   * Timeline renderer endpoint (implemented in main process and extensible for future engines).
-   */
-  renderTimeline: (options: {
-    output: string
-    width: number
-    height: number
-    fps: number
-    duration: number
-    tracks: {
-      video: unknown[]
-      subtitle: unknown[]
-      audio: unknown[]
-    }
-  }) => Promise<{ success: boolean; path?: string; warning?: string; error?: string; errorCode?: string }>
-}
-
-// =============================================================================
-// Design API Types
-// =============================================================================
-
-interface DesignReadResponse {
-  success: boolean
-  data?: unknown
-  error?: string
-  errorCode?: string
-}
-
-interface DesignWriteResponse {
-  success: boolean
-  path?: string
-  error?: string
-  errorCode?: string
-}
-
-interface ElectronDesignAPI {
-  read: (path: string) => Promise<DesignReadResponse>
-  write: (path: string, data: unknown) => Promise<DesignWriteResponse>
-  saveAs: (payload?: { defaultPath?: string; data?: unknown }) => Promise<DesignWriteResponse>
-  export: (payload: { path?: string; format: 'png' | 'svg'; data: string; defaultName?: string }) => Promise<DesignWriteResponse>
-}
 
 // =============================================================================
 // Skills Runtime API Types
@@ -942,6 +912,7 @@ interface ElectronDesignAPI {
 
 type SkillSource = 'embedded' | 'custom'
 type SkillRuntimeKind = 'python' | 'node' | 'shell' | 'reference'
+type SkillExecutionMode = 'advisory' | 'workflow' | 'direct'
 
 interface SkillParamDefinition {
   name: string
@@ -960,6 +931,7 @@ interface SkillActionDefinition {
   params: SkillParamDefinition[]
   baseArgs?: string[]
   inputMode?: 'flags' | 'json'
+  visibility?: 'public' | 'internal'
 }
 
 interface SkillState {
@@ -973,8 +945,59 @@ interface SkillState {
   manifestValid: boolean
   defaultAction?: string
   actions: SkillActionDefinition[]
+  executionMode: SkillExecutionMode
   managedPath?: string
   sourcePath?: string
+}
+
+interface SkillExecutionBlocker {
+  type: 'need_input' | 'need_confirmation' | 'need_agent_result' | 'completed' | 'failed'
+  executionId: string
+  skillId: string
+  stepId?: string
+  message: string
+  agentTask?: {
+    prompt: string
+  }
+}
+
+interface SkillExecutionStepRecord {
+  id: string
+  executionId: string
+  stepId: string
+  attempt: number
+  status: 'running' | 'success' | 'failed' | 'blocked' | 'cancelled'
+  startedAt: string
+  finishedAt?: string | null
+  message?: string | null
+}
+
+interface SkillArtifactRecord {
+  id: string
+  label?: string
+  kind?: string
+  path?: string
+  mimeType?: string
+  metadata?: Record<string, unknown>
+}
+
+interface SkillExecutionDetail {
+  id: string
+  skillId: string
+  entryAction: string
+  sessionId?: string | null
+  source: SkillSource
+  status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string | null
+  currentStepId?: string | null
+  blocker?: SkillExecutionBlocker | null
+  stepOutputs: Record<string, Record<string, unknown>>
+  confirmations: Record<string, boolean>
+  inputs: Record<string, unknown>
+  steps: SkillExecutionStepRecord[]
+  artifacts: SkillArtifactRecord[]
 }
 
 interface SkillInstallResult {
@@ -994,6 +1017,9 @@ interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
+  mode?: 'direct' | 'workflow'
+  execution?: SkillExecutionDetail | null
+  blocker?: SkillExecutionBlocker | null
 }
 
 interface SkillJobRecord {
@@ -1047,8 +1073,22 @@ interface ElectronSkillsAPI {
     action: string
     params?: Record<string, unknown>
     timeoutMs?: number
+    sessionId?: string
+    executionMode?: 'auto' | 'workflow' | 'direct'
   }) => Promise<IPCResponse<SkillRunResult>>
   listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
+  listExecutions: (payload?: { limit?: number; sessionId?: string; activeOnly?: boolean }) => Promise<IPCResponse<SkillExecutionDetail[]>>
+  getExecution: (payload: { id: string }) => Promise<IPCResponse<SkillExecutionDetail>>
+  submitInput: (payload: { executionId: string; inputs: Record<string, unknown> }) => Promise<IPCResponse<SkillExecutionDetail>>
+  submitConfirmation: (payload: { executionId: string; stepId: string; confirmed: boolean }) => Promise<IPCResponse<SkillExecutionDetail>>
+  submitAgentResult: (payload: {
+    executionId: string
+    stepId: string
+    textContent?: string
+    outputs?: Record<string, unknown>
+  }) => Promise<IPCResponse<SkillExecutionDetail>>
+  restartFromStep: (payload: { executionId: string; stepId: string; inputs?: Record<string, unknown> }) => Promise<IPCResponse<SkillExecutionDetail>>
+  cancelExecution: (payload: { executionId: string }) => Promise<IPCResponse<SkillExecutionDetail>>
   listSchedules: () => Promise<IPCResponse<SkillScheduleRecord[]>>
   createSchedule: (payload: {
     skillId: string
@@ -1189,23 +1229,203 @@ interface ElectronChatAPI {
 }
 
 // =============================================================================
+// User Profile API Types
+// =============================================================================
+
+interface UserProfileData {
+  id: string
+  name?: string
+  avatarUrl?: string
+  preferredLanguage: string
+  communicationStyle?: string
+  preferencesJson?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+interface ElectronUserProfileAPI {
+  get: (userId: string) => Promise<{ success: boolean; data?: UserProfileData; error?: string }>
+  list: () => Promise<{ success: boolean; data?: UserProfileData[]; error?: string }>
+  create: (profile: {
+    id?: string
+    name?: string
+    avatarUrl?: string
+    preferredLanguage?: string
+    communicationStyle?: string
+  }) => Promise<{ success: boolean; data?: UserProfileData; error?: string }>
+  update: (userId: string, updates: {
+    name?: string
+    avatarUrl?: string
+    preferredLanguage?: string
+    communicationStyle?: string
+  }) => Promise<{ success: boolean; error?: string }>
+  delete: (userId: string) => Promise<{ success: boolean; error?: string }>
+}
+
+// =============================================================================
+// Agent Personality API Types
+// =============================================================================
+
+interface AgentPersonalityData {
+  id: string
+  agentName: string
+  displayName?: string
+  personalityText: string
+  tone?: string
+  metaJson?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+interface ElectronAgentPersonalityAPI {
+  get: (agentName: string) => Promise<{ success: boolean; data?: AgentPersonalityData; error?: string }>
+  list: () => Promise<{ success: boolean; data?: AgentPersonalityData[]; error?: string }>
+  create: (personality: {
+    agentName: string
+    displayName?: string
+    personalityText: string
+    tone?: string
+  }) => Promise<{ success: boolean; data?: AgentPersonalityData; error?: string }>
+  update: (agentName: string, updates: {
+    displayName?: string
+    personalityText?: string
+    tone?: string
+  }) => Promise<{ success: boolean; error?: string }>
+  delete: (agentName: string) => Promise<{ success: boolean; error?: string }>
+}
+
+// =============================================================================
+// Memory API Types
+// =============================================================================
+
+type MemoryLayer = 'l0' | 'l1' | 'l2'
+type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule'
+
+interface MemoryEntry {
+  id: string
+  layer: MemoryLayer
+  scopeId: string | null
+  category: MemoryCategory
+  title: string
+  summary: string | null
+  contentKey: string
+  priority: number
+  accessCount: number
+  lastAccessedAt: number | null
+  createdAt: number
+  updatedAt: number
+  expiresAt: number | null
+  archivedAt: number | null
+  tags: string[] | null
+  meta: Record<string, unknown>
+}
+
+interface TriggerDefinition {
+  id: string
+  label: string
+  module: string | null
+  pattern: string
+  patternFlags: string
+  blocking: boolean
+  priority: number
+  enabled: boolean
+  hitCount: number
+  lastHitAt: number | null
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
+}
+
+interface MemoryQueryFilters {
+  layer?: MemoryLayer
+  scopeId?: string | null
+  category?: MemoryCategory
+  includeArchived?: boolean
+  limit?: number
+  offset?: number
+}
+
+interface TriggerFilters {
+  enabled?: boolean
+  module?: string
+  limit?: number
+}
+
+interface MemoryStats {
+  totalMemories: number
+  byLayer: Record<MemoryLayer, number>
+  byCategory: Record<MemoryCategory, number>
+  archivedCount: number
+  avgAccessCount: number
+}
+
+interface MemoryLifecycleStatus {
+  running: boolean
+  lastMaintenanceAt: string | null
+}
+
+interface MemoryMaintenanceResult {
+  archivedCount: number
+  prunedCount: number
+}
+
+interface ElectronMemoryAPI {
+  query: (filters: MemoryQueryFilters) => Promise<IPCResponse<MemoryEntry[]>>
+  create: (entry: Partial<MemoryEntry>) => Promise<IPCResponse<MemoryEntry>>
+  update: (id: string, updates: Partial<MemoryEntry>) => Promise<IPCResponse<void>>
+  delete: (id: string) => Promise<IPCResponse<void>>
+  stats: () => Promise<IPCResponse<MemoryStats>>
+  createFromConversation: (payload: {
+    scopeId: string
+    category: 'summary' | 'learning'
+    title: string
+    content: string
+    tags?: string[]
+    priority?: number
+  }) => Promise<IPCResponse<{ memoryId: string }>>
+}
+
+interface ElectronTriggerAPI {
+  list: (filters?: TriggerFilters) => Promise<IPCResponse<TriggerDefinition[]>>
+  create: (trigger: Partial<TriggerDefinition>) => Promise<IPCResponse<TriggerDefinition>>
+  update: (id: string, updates: Partial<TriggerDefinition>) => Promise<IPCResponse<void>>
+  createWithMemories: (payload: {
+    label: string
+    pattern: string
+    patternFlags?: string
+    memoryIds: string[]
+    module?: string
+    blocking?: boolean
+    priority?: number
+  }) => Promise<IPCResponse<{ triggerId: string }>>
+}
+
+interface ElectronMemoryLifecycleAPI {
+  status: () => Promise<IPCResponse<MemoryLifecycleStatus>>
+  runMaintenance: () => Promise<IPCResponse<MemoryMaintenanceResult>>
+}
+
+// =============================================================================
 // Top-level API
 // =============================================================================
 
 interface ElectronAPI {
   agent: ElectronAgentAPI
+  memory: ElectronMemoryAPI
+  trigger: ElectronTriggerAPI
+  memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
   document: ElectronDocumentAPI
   rss: ElectronRSSAPI
   calendar: ElectronCalendarAPI
-  video: ElectronVideoAPI
-  design: ElectronDesignAPI
   skills: ElectronSkillsAPI
   app: ElectronAppAPI
   window: ElectronWindowAPI
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   chat: ElectronChatAPI
+  userProfile: ElectronUserProfileAPI
+  agentPersonality: ElectronAgentPersonalityAPI
   platform: string
   getFilePathFromDrop: (file: File) => string
 }
@@ -1216,4 +1436,14 @@ declare global {
   }
 }
 
-export { }
+export type {
+  MemoryLayer,
+  MemoryCategory,
+  MemoryEntry,
+  TriggerDefinition,
+  MemoryQueryFilters,
+  TriggerFilters,
+  MemoryStats,
+  MemoryLifecycleStatus,
+  MemoryMaintenanceResult,
+}

@@ -7,6 +7,7 @@ import { PANEL_TOKENS, SKILLS_PANEL_DIMENSIONS } from './panelTokens'
 interface SkillActionDefinition {
   name: string
   description: string
+  visibility?: 'public' | 'internal'
 }
 
 interface SkillState {
@@ -20,6 +21,7 @@ interface SkillState {
   manifestValid: boolean
   defaultAction?: string
   actions: SkillActionDefinition[]
+  executionMode: 'advisory' | 'workflow' | 'direct'
   managedPath?: string
   sourcePath?: string
 }
@@ -428,15 +430,15 @@ export default function SkillsCenterPanel() {
   }, [contextMenu, handleOpenPath, handleRemoveCustomSkill])
 
   return (
-    <div className="content-surface-panel relative flex h-full min-h-0 flex-col" style={{ background: 'var(--surface-panel-bg)' }}>
+    <div className="relative flex h-full min-h-0 flex-col">
       <div
-        className="glass-surface-panel shrink-0 border-b flex items-center"
+        className="shrink-0 border-b flex items-center"
         style={{
-          borderColor: PANEL_COLORS.border,
+          borderColor: 'transparent',
           height: SKILLS_PANEL_DIMENSIONS.headerHeight,
           padding: `0 ${SKILLS_PANEL_DIMENSIONS.sectionPaddingX}px`,
           boxSizing: 'border-box',
-          background: 'var(--surface-toolbar-bg)',
+          background: 'transparent',
         }}
       >
         <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
@@ -448,13 +450,13 @@ export default function SkillsCenterPanel() {
         <section
           className="shrink-0 border-b"
           style={{
-            borderColor: PANEL_COLORS.border,
-            background: PANEL_COLORS.panelBg,
+            borderColor: 'transparent',
+            background: 'transparent',
             height: topHeight,
             minHeight: 156,
           }}
         >
-          <div className="h-full min-h-0 overflow-auto">
+          <div className="panel-hover-scrollbar h-full min-h-0 overflow-auto">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 14px' }}>
               <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle }}>
                 系统级 Skill
@@ -473,12 +475,12 @@ export default function SkillsCenterPanel() {
                     return (
                       <div
                         key={skill.id}
-                        className="content-surface-card cursor-pointer transition-colors duration-150"
+                        className="cursor-pointer rounded-[10px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
                         style={{
                           borderRadius: 8,
-                          border: `1px solid ${selected ? PANEL_COLORS.blue : PANEL_COLORS.border}`,
+                          border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
+                          background: selected ? 'var(--bg-hover)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}
@@ -528,24 +530,24 @@ export default function SkillsCenterPanel() {
 
         <div
           className="shrink-0 cursor-row-resize hover:bg-[var(--bg-hover)]"
-          style={{ background: PANEL_COLORS.panelBg, height: 4 }}
+          style={{ background: 'transparent', height: 4 }}
           onMouseDown={handleSplitterMouseDown}
           title="拖拽调整上下分区高度"
         />
 
-        <section className="min-h-0" style={{ height: bottomHeight, minHeight: 156, background: PANEL_COLORS.panelBg }}>
-          <div className="h-full min-h-0 overflow-auto">
+        <section className="min-h-0" style={{ height: bottomHeight, minHeight: 156, background: 'transparent' }}>
+          <div className="panel-hover-scrollbar h-full min-h-0 overflow-auto">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 14px' }}>
               <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle }}>
                 用户导入 Skill
               </p>
 
               <div
-                className="content-surface-card shrink-0 flex flex-col items-center justify-center transition-colors cursor-pointer"
+                className="shrink-0 flex cursor-pointer flex-col items-center justify-center rounded-[10px] border transition-colors hover:bg-[var(--bg-hover)]"
                 style={{
                   borderRadius: 8,
-                  border: `1px solid ${importDropActive ? PANEL_COLORS.blue : PANEL_COLORS.dropBorder}`,
-                  background: importDropActive ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
+                  border: importDropActive ? `1px solid ${PANEL_COLORS.blue}` : '1px solid transparent',
+                  background: importDropActive ? PANEL_COLORS.blueLight : 'transparent',
                   height: SKILLS_PANEL_DIMENSIONS.dropZoneHeight,
                   gap: 4,
                 }}
@@ -573,12 +575,12 @@ export default function SkillsCenterPanel() {
                     return (
                       <div
                         key={skill.id}
-                        className="content-surface-card cursor-pointer transition-colors duration-150"
+                        className="cursor-pointer rounded-[10px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
                         style={{
                           borderRadius: 8,
-                          border: `1px solid ${selected ? PANEL_COLORS.blue : PANEL_COLORS.border}`,
+                          border: '1px solid transparent',
                           padding: '10px 12px',
-                          background: selected ? PANEL_COLORS.blueLight : 'var(--surface-card-bg)',
+                          background: selected ? 'var(--bg-hover)' : 'transparent',
                         }}
                         onClick={() => setSelectedCardId(cardId)}
                         onDoubleClick={() => void handleOpenPath(skillPath)}

@@ -8,6 +8,7 @@ import SidePanel, { type SidePanelVariant } from '../components/layout/SidePanel
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
+import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 
 // --- Resize Handle ---
 function ResizeHandle({
@@ -71,6 +72,7 @@ export default function WorkbenchMode() {
   } = useWorkspace()
   const { workbenchMode, splitMode, splitRatio, setSplitRatio } = useMode()
   const navigate = useNavigate()
+  const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
 
   const handleSplitResize = useCallback((delta: number) => {
@@ -99,7 +101,7 @@ export default function WorkbenchMode() {
         } else {
           await refreshFiles()
         }
-      } catch (error) {
+      } catch {
         console.warn('Workspace init failed, fallback to mock files')
         await refreshFiles()
       }
@@ -153,51 +155,67 @@ export default function WorkbenchMode() {
     return 'folder'
   }, [sidePanelVariant])
 
+  useEffect(() => {
+    const visibleModes = [workbenchMode, splitMode].filter(Boolean)
+    if (!visibleModes.includes('browser')) {
+      void window.electronAPI?.browser.hideActiveHost()
+    }
+  }, [splitMode, workbenchMode])
+
   return (
-    <div className="workbench-mode-root flex flex-col h-full">
-      {/* TopBar: right button toggles ChatPanel */}
-      <TopBar onToggleChatPanel={toggleChatPanel} />
+    <LiquidSceneProvider mouseContainer={sceneRef}>
+      <div ref={sceneRef} className="workbench-mode-root relative flex h-full flex-col overflow-hidden">
+        <div className="relative z-10 flex h-full flex-col">
+          {/* TopBar: right button toggles ChatPanel */}
+          <TopBar onToggleChatPanel={toggleChatPanel} />
 
-      <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
-        <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} />
-        <SidePanel variant={sidePanelVariant} />
+          <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
+            <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} />
+            <SidePanel variant={sidePanelVariant} />
 
-        {/* Sidebar resize handle */}
-        {sidebarVisible && (
-          <ResizeHandle onResize={handleSidebarResize} direction="right" />
-        )}
+            {/* Sidebar resize handle */}
+            {sidebarVisible && (
+              <ResizeHandle onResize={handleSidebarResize} direction="right" />
+            )}
 
-        {/* Main Content Area */}
-        {splitMode ? (
-          /* Split view: primary left, secondary right, draggable divider */
-          <div className="flex-1 flex min-w-0" ref={splitContainerRef}>
-            <div
-              className="flex flex-col min-w-0 bg-[var(--bg-content)]"
-              style={{ flexBasis: `${splitRatio}%`, flexShrink: 0, flexGrow: 0 }}
-            >
-              <WorkbenchModeOutlet mode={workbenchMode} />
-            </div>
-            <ResizeHandle onResize={handleSplitResize} direction="right" />
-            <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-              <WorkbenchModeOutlet mode={splitMode} />
-            </div>
+            {/* Main Content Area */}
+            {splitMode ? (
+              /* Split view: primary left, secondary right, draggable divider */
+              <div className="flex-1 flex min-w-0" ref={splitContainerRef}>
+                <div
+                  className="flex flex-col min-w-0"
+                  style={{
+                    flexBasis: `${splitRatio}%`,
+                    flexShrink: 0,
+                    flexGrow: 0,
+                    background: 'transparent',
+                  }}
+                >
+                  <WorkbenchModeOutlet mode={workbenchMode} />
+                </div>
+                <ResizeHandle onResize={handleSplitResize} direction="right" />
+                <div className="flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
+                  <WorkbenchModeOutlet mode={splitMode} />
+                </div>
+              </div>
+            ) : (
+              /* Single mode */
+              <div className="flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
+                <WorkbenchModeOutlet mode={workbenchMode} />
+              </div>
+            )}
+
+            {/* Chat panel resize handle */}
+            {chatPanelVisible && (
+              <ResizeHandle onResize={handleChatResize} direction="left" />
+            )}
+
+            <ChatPanel />
           </div>
-        ) : (
-          /* Single mode */
-          <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-content)]">
-            <WorkbenchModeOutlet mode={workbenchMode} />
-          </div>
-        )}
 
-        {/* Chat panel resize handle */}
-        {chatPanelVisible && (
-          <ResizeHandle onResize={handleChatResize} direction="left" />
-        )}
-
-        <ChatPanel />
+          <StatusBar />
+        </div>
       </div>
-
-      <StatusBar />
-    </div>
+    </LiquidSceneProvider>
   )
 }

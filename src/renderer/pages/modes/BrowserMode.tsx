@@ -4,7 +4,7 @@ import BrowserTabBar from '../../components/browser/BrowserTabBar'
 import BrowserAddressBar from '../../components/browser/BrowserAddressBar'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
-import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import type {
   AdblockState,
   BrowserDiagnosticsData,
@@ -14,7 +14,6 @@ import type {
   PanelType,
   TabUpdateEvent,
 } from '../../modules/browser/types'
-import { useMode } from '../../stores/useMode'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
@@ -50,7 +49,7 @@ function isLikelyAbsolutePath(value: string): boolean {
   return false
 }
 
-export default function BrowserMode() {
+export default function BrowserMode({ isActive = true }: { isActive?: boolean }) {
   // Persistent browser tab state — survives mode switches
   const {
     tabs, activeTabId, urlInput,
@@ -80,7 +79,6 @@ export default function BrowserMode() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevLoadingRef = useRef<Record<string, boolean>>({})
 
-  const workbenchMode = useMode(s => s.workbenchMode)
   const sidebarVisible = useWorkspace(s => s.sidebarVisible)
   const sidePanelVariant = useWorkspace(s => s.sidePanelVariant)
   const sidePanelWidths = useWorkspace(s => s.sidePanelWidths)
@@ -95,10 +93,11 @@ export default function BrowserMode() {
     return adblockState.whitelistDomains.some((domain) => currentDomain === domain || currentDomain.endsWith(`.${domain}`))
   }, [adblockState.whitelistDomains, currentDomain])
   const hasError = !!activeTab?.error
-  const { sendBounds, sendBoundsImmediate } = useBrowserViewBounds({
+  const { sendBoundsImmediate } = useBrowserViewBounds({
     isElectron,
     contentRef,
-    workbenchMode,
+    isActive,
+    topInset: WORKBENCH_TOOLBAR_ROW_HEIGHT,
     sidebarVisible,
     sidePanelVariant,
     effectiveSidePanelWidth,
@@ -242,6 +241,8 @@ export default function BrowserMode() {
 
   const handleNewTab = useCallback(async () => {
     if (!isElectron) return
+    sendBoundsImmediate({ forceExact: true })
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
     const result = await window.electronAPI?.browser?.createTab(DEFAULT_URL) as { success: boolean; tabId?: string } | undefined
     if (result?.success && result.tabId) {
       const newTab: BrowserTab = {
@@ -259,10 +260,9 @@ export default function BrowserMode() {
       addTab(newTab)
       setActiveTabId(result.tabId)
       setUrlInput('')
-      // Update bounds after rendering
-      requestAnimationFrame(() => sendBounds())
+      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
     }
-  }, [isElectron, addTab, setActiveTabId, setUrlInput]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isElectron, addTab, sendBoundsImmediate, setActiveTabId, setUrlInput])
 
   const handleCloseTab = useCallback(async (id: string) => {
     if (!isElectron) return
@@ -452,6 +452,8 @@ export default function BrowserMode() {
   useEffect(() => {
     if (!isElectron) return
     const cleanup = window.electronAPI?.browser?.onNewTabRequest(async (url: string) => {
+      sendBoundsImmediate({ forceExact: true })
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
       const result = await window.electronAPI?.browser?.createTab(url) as { success: boolean; tabId?: string } | undefined
       if (result?.success && result.tabId) {
         const newTab: BrowserTab = {
@@ -544,23 +546,31 @@ export default function BrowserMode() {
   // so we just need to re-show the active BrowserView and re-sync the URL input.
   useEffect(() => {
     if (!isElectron) return
+    if (!isActive) {
+      window.electronAPI?.browser?.hideActiveHost()
+      return
+    }
     const { tabs: currentTabs, activeTabId: currentActive } = useBrowserTabs.getState()
     if (currentTabs.length === 0) {
-      handleNewTab()
+      void handleNewTab()
     } else {
-      if (currentActive) {
-        window.electronAPI?.browser?.switchTab(currentActive)
-      } else {
-        window.electronAPI?.browser?.showActive()
-      }
-      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+      requestAnimationFrame(() => {
+        sendBoundsImmediate({ forceExact: true })
+        if (currentActive) {
+          window.electronAPI?.browser?.switchTab(currentActive)
+        } else {
+          window.electronAPI?.browser?.showActive()
+        }
+      })
     }
+  }, [handleNewTab, isActive, isElectron, sendBoundsImmediate])
+
+  useEffect(() => {
     return () => {
-      // Only hide BrowserView on unmount — tab state persists in store
-      window.electronAPI?.browser?.hideAll()
+      window.electronAPI?.browser?.hideActiveHost()
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
@@ -572,7 +582,7 @@ export default function BrowserMode() {
           style={{
             height: WORKBENCH_TAB_ROW_HEIGHT,
             padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-            background: 'var(--surface-toolbar-bg)',
+            background: 'var(--bg-content)',
             borderBottom: '1px solid var(--border-default)',
           }}
         >
@@ -614,72 +624,76 @@ export default function BrowserMode() {
 
   return (
     <div className="workbench-mode-root">
-      {/* Task 1: UnifiedTabBar — 34px height, favicon+title+star+close, active blue indicator, + new tab */}
-      <BrowserTabBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onTabClick={handleTabClick}
-        onTabClose={handleCloseTab}
-        onNewTab={handleNewTab}
-        onReorder={handleReorder}
-      />
+      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+        <div className="workbench-canvas-shell flex h-full min-h-0 flex-col">
+          {/* Task 1: UnifiedTabBar — 34px height, favicon+title+star+close, active blue indicator, + new tab */}
+          <BrowserTabBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onTabClick={handleTabClick}
+            onTabClose={handleCloseTab}
+            onNewTab={handleNewTab}
+            onReorder={handleReorder}
+          />
 
-      {/* Address bar with all toolbar buttons */}
-      <BrowserAddressBar
-        url={activeTab?.url || ''}
-        urlInput={urlInput}
-        loading={activeTab?.loading || false}
-        canGoBack={activeTab?.canGoBack || false}
-        canGoForward={activeTab?.canGoForward || false}
-        isBookmarked={isBookmarked}
-        adblockEnabled={adblockState.enabled}
-        adblockDomainWhitelisted={currentDomainAdblockWhitelisted}
-        currentDomain={currentDomain}
-        activePanel={activePanel}
-        onUrlChange={setUrlInput}
-        onNavigate={handleNavigate}
-        onGoBack={handleGoBack}
-        onGoForward={handleGoForward}
-        onRefresh={handleRefresh}
-        onFocus={handleUrlFocus}
-        onBlur={handleUrlBlur}
-        onEditStart={() => setIsAddressEditing(true)}
-        onEditEnd={() => setIsAddressEditing(false)}
-        onOpenExternal={handleOpenExternal}
-        onToggleBookmark={handleToggleBookmark}
-        onToggleAdblock={handleToggleAdblock}
-        onToggleCurrentSiteAdblock={handleToggleCurrentSiteAdblock}
-        onTogglePanel={handleTogglePanel}
-        onPrint={handlePrint}
-      />
+          {/* Address bar with all toolbar buttons */}
+          <BrowserAddressBar
+            url={activeTab?.url || ''}
+            urlInput={urlInput}
+            loading={activeTab?.loading || false}
+            canGoBack={activeTab?.canGoBack || false}
+            canGoForward={activeTab?.canGoForward || false}
+            isBookmarked={isBookmarked}
+            adblockEnabled={adblockState.enabled}
+            adblockDomainWhitelisted={currentDomainAdblockWhitelisted}
+            currentDomain={currentDomain}
+            activePanel={activePanel}
+            onUrlChange={setUrlInput}
+            onNavigate={handleNavigate}
+            onGoBack={handleGoBack}
+            onGoForward={handleGoForward}
+            onRefresh={handleRefresh}
+            onFocus={handleUrlFocus}
+            onBlur={handleUrlBlur}
+            onEditStart={() => setIsAddressEditing(true)}
+            onEditEnd={() => setIsAddressEditing(false)}
+            onOpenExternal={handleOpenExternal}
+            onToggleBookmark={handleToggleBookmark}
+            onToggleAdblock={handleToggleAdblock}
+            onToggleCurrentSiteAdblock={handleToggleCurrentSiteAdblock}
+            onTogglePanel={handleTogglePanel}
+            onPrint={handlePrint}
+          />
 
-      <BrowserShellLayout
-        isElectron={isElectron}
-        contentRef={contentRef}
-        activeTab={activeTab}
-        activePanel={activePanel}
-        bookmarks={bookmarks}
-        selectedBookmarkUrl={selectedBookmarkUrl}
-        historyItems={historyItems}
-        downloads={downloads}
-        adblockState={adblockState}
-        browserDiagnostics={browserDiagnostics}
-        toastVisible={toastVisible}
-        currentDomain={currentDomain}
-        currentDomainAdblockWhitelisted={currentDomainAdblockWhitelisted}
-        onDragOver={handleContentDragOver}
-        onDrop={handleContentDrop}
-        onRetry={() => void handleRetry()}
-        onClosePanel={() => setActivePanel(null)}
-        onNavigateFromPanel={(url) => void handleNavigateFromPanel(url)}
-        onRemoveBookmark={(url) => void handleRemoveBookmark(url)}
-        onClearHistory={() => void handleClearHistory()}
-        onClearDownloads={() => void handleClearDownloads()}
-        onSelectBookmark={setSelectedBookmarkUrl}
-        onToggleAdblock={() => void handleToggleAdblock()}
-        onRefreshAdblock={() => void refreshAdblockState()}
-        onSyncBounds={() => sendBoundsImmediate({ forceExact: true })}
-      />
+          <BrowserShellLayout
+            isElectron={isElectron}
+            contentRef={contentRef}
+            activeTab={activeTab}
+            activePanel={activePanel}
+            bookmarks={bookmarks}
+            selectedBookmarkUrl={selectedBookmarkUrl}
+            historyItems={historyItems}
+            downloads={downloads}
+            adblockState={adblockState}
+            browserDiagnostics={browserDiagnostics}
+            toastVisible={toastVisible}
+            currentDomain={currentDomain}
+            currentDomainAdblockWhitelisted={currentDomainAdblockWhitelisted}
+            onDragOver={handleContentDragOver}
+            onDrop={handleContentDrop}
+            onRetry={() => void handleRetry()}
+            onClosePanel={() => setActivePanel(null)}
+            onNavigateFromPanel={(url) => void handleNavigateFromPanel(url)}
+            onRemoveBookmark={(url) => void handleRemoveBookmark(url)}
+            onClearHistory={() => void handleClearHistory()}
+            onClearDownloads={() => void handleClearDownloads()}
+            onSelectBookmark={setSelectedBookmarkUrl}
+            onToggleAdblock={() => void handleToggleAdblock()}
+            onRefreshAdblock={() => void refreshAdblockState()}
+            onSyncBounds={() => sendBoundsImmediate({ forceExact: true })}
+          />
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { History, Minus, AtSign, Plus, Send, ChevronDown, Maximize2, RotateCcw, Square, Undo2, X, FileText, Image, Film, Table, Globe, Puzzle, Pen, ChevronRight, Wrench, CheckCircle2, CircleDashed, Copy, Check } from 'lucide-react'
-import { useAgent, initAgentListeners, ChatAttachment, AgentMessage, ConversationScope, ToolTraceEvent } from '../../stores/useAgent'
+import { History, AtSign, Plus, Send, ChevronDown, Square, Undo2, X, FileText, Image, Film, Table, Globe, Puzzle, Pen, ChevronRight, Wrench, CheckCircle2, CircleDashed, Copy, Check, MessageSquareQuote, Folder, PanelRightClose } from 'lucide-react'
+import { useAgent, initAgentListeners, ChatAttachment, ConversationScope, ToolTraceEvent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings } from '../../stores/useSettings'
+import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
+import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import { toLocalFileUrl } from '../../utils/dragDrop'
-import { coerceDesignLayoutDigest, formatDesignLayoutDigest } from '../../../shared/design-agent'
+import { IconButton } from '../ui/IconButton'
+import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
@@ -210,14 +213,20 @@ function ModelSelector() {
   }, [open])
 
   const hasKey = !!config.apiKey
-  const label = getShortProviderLabel()
+  const label = config.displayName || getShortProviderLabel()
 
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
-        style={{ padding: '3px 8px', borderRadius: 8, border: '1px solid var(--border-input)', gap: 4 }}
+        style={{
+          padding: '3px 8px',
+          borderRadius: 8,
+          border: '1px solid transparent',
+          background: 'transparent',
+          gap: 4,
+        }}
       >
         <span
           className="w-1.5 h-1.5 rounded-full"
@@ -285,8 +294,14 @@ function ModelSelector() {
 function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
   const style = { width: size, height: size }
   const cls = "text-[var(--text-gray)]"
+  if (attachment.isDirectory) {
+    return <Folder style={style} className={cls} strokeWidth={2} />
+  }
   if (attachment.source === 'browser-tab') {
     return <Globe style={style} className={cls} strokeWidth={2} />
+  }
+  if (attachment.source === 'document-quote') {
+    return <MessageSquareQuote style={style} className={cls} strokeWidth={2} />
   }
   if (attachment.source === 'design-project') {
     return <Pen style={style} className={cls} strokeWidth={2} />
@@ -317,8 +332,90 @@ function formatDesignAttachmentSummary(attachment: ChatAttachment): string {
     attachment.selectionSummary ? `- 选择状态: ${attachment.selectionSummary}` : null,
     attachment.currentToolContext ? `- 当前工具: ${attachment.currentToolContext}` : null,
     attachment.snapshotHash ? `- 快照哈希: ${attachment.snapshotHash}` : null,
-    ...formatDesignLayoutDigest(attachment.layoutDigest),
   ].filter(Boolean).join('\n')
+}
+
+function formatDocumentQuoteAttachmentSummary(attachment: ChatAttachment): string {
+  const lineLabel = attachment.lineStart && attachment.lineEnd
+    ? attachment.lineStart === attachment.lineEnd
+      ? `第 ${attachment.lineStart} 行`
+      : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
+    : null
+
+  return [
+    '### 文档引用',
+    `- 文档: ${attachment.title || attachment.name}`,
+    `- 路径: ${attachment.path}`,
+    attachment.sectionTitle ? `- 章节: ${attachment.sectionTitle}` : null,
+    lineLabel ? `- 位置: ${lineLabel}` : null,
+    attachment.selection ? '' : null,
+    attachment.selection ? '```quote' : null,
+    attachment.selection || null,
+    attachment.selection ? '```' : null,
+  ].filter(Boolean).join('\n')
+}
+
+function formatDocumentWidgetTargetSummary(attachment: ChatAttachment): string {
+  return [
+    '### Widget 更新目标',
+    `- 文档: ${attachment.documentTitle || '(未保存草稿)'}`,
+    `- 目标 widget: ${attachment.widgetTitle || attachment.title || attachment.name}`,
+    `- 路径: ${attachment.path}`,
+    attachment.widgetMode ? `- 当前模式: ${attachment.widgetMode}` : null,
+    '',
+    '```show-widget',
+    JSON.stringify({
+      title: attachment.widgetTitle || attachment.title || attachment.name,
+      widget_code: attachment.widgetCode || '',
+    }),
+    '```',
+  ].filter(Boolean).join('\n')
+}
+
+function getDocumentQuoteTooltip(attachment: ChatAttachment): string {
+  return [
+    attachment.title || attachment.name,
+    attachment.sectionTitle ? `章节: ${attachment.sectionTitle}` : null,
+    attachment.lineStart && attachment.lineEnd
+      ? attachment.lineStart === attachment.lineEnd
+        ? `第 ${attachment.lineStart} 行`
+        : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
+      : null,
+    attachment.selection ? attachment.selection.slice(0, 200) : null,
+  ].filter(Boolean).join('\n')
+}
+
+function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
+  if (attachment.isDirectory) {
+    return '文件夹'
+  }
+
+  if (attachment.source === 'document-quote') {
+    const lineLabel = attachment.lineStart && attachment.lineEnd
+      ? attachment.lineStart === attachment.lineEnd
+        ? `L${attachment.lineStart}`
+        : `L${attachment.lineStart}-${attachment.lineEnd}`
+      : null
+    return [attachment.sectionTitle, lineLabel].filter(Boolean).join(' · ') || '文档引用'
+  }
+
+  if (attachment.source === 'skill-folder') {
+    return attachment.skillId ? `skill · ${attachment.skillId}` : 'skill'
+  }
+
+  if (attachment.source === 'browser-tab') {
+    return '网页引用'
+  }
+
+  if (attachment.source === 'document-widget-target') {
+    return [
+      attachment.widgetTitle || attachment.title || attachment.name,
+      attachment.documentTitle ? `文档: ${attachment.documentTitle}` : null,
+      attachment.widgetMode || 'widget 更新',
+    ].filter(Boolean).join('\n')
+  }
+
+  return null
 }
 
 interface ConversationChannelOption {
@@ -327,6 +424,60 @@ interface ConversationChannelOption {
   sourceId: string
   label: string
   caption: string
+}
+
+const IMAGE_ATTACHMENT_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'tiff'])
+const VIDEO_ATTACHMENT_EXTS = new Set(['mp4', 'mov', 'mkv', 'webm', 'avi'])
+const TEXT_ATTACHMENT_EXTS = new Set(['txt', 'md', 'csv', 'pdf', 'json', 'html', 'docx', 'doc', 'rtf', 'odt'])
+const SPREADSHEET_ATTACHMENT_EXTS = new Set(['xlsx', 'xls', 'tsv'])
+
+function getAttachmentTypeFromExt(ext?: string, isDirectory = false): ChatAttachment['type'] {
+  if (isDirectory) return 'other'
+  const normalizedExt = String(ext || '').toLowerCase().replace(/^\./, '')
+  if (IMAGE_ATTACHMENT_EXTS.has(normalizedExt)) return 'image'
+  if (VIDEO_ATTACHMENT_EXTS.has(normalizedExt)) return 'video'
+  if (TEXT_ATTACHMENT_EXTS.has(normalizedExt)) return 'text'
+  if (SPREADSHEET_ATTACHMENT_EXTS.has(normalizedExt)) return 'spreadsheet'
+  return 'other'
+}
+
+function getPathBasename(path: string): string {
+  return path.split(/[/\\]/).pop() || path
+}
+
+function createLocalPathAttachment(params: {
+  name?: string
+  path: string
+  ext?: string
+  size?: number
+  isDirectory?: boolean
+}): ChatAttachment {
+  const isDirectory = Boolean(params.isDirectory)
+  const normalizedExt = isDirectory
+    ? ''
+    : String(params.ext || getPathBasename(params.path).split('.').pop() || '')
+      .toLowerCase()
+      .replace(/^\./, '')
+
+  return {
+    id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: params.name || getPathBasename(params.path),
+    path: params.path,
+    type: getAttachmentTypeFromExt(normalizedExt, isDirectory),
+    isDirectory,
+    size: params.size || 0,
+    ext: normalizedExt ? `.${normalizedExt}` : '',
+    source: 'file',
+  }
+}
+
+function formatFolderAttachmentSummary(attachment: ChatAttachment): string {
+  return [
+    '### 文件夹引用',
+    `- 名称: ${attachment.name}`,
+    `- 路径: ${attachment.path}`,
+    '- 用途: 可让 agent 直接基于这个目录继续定位文件、生成结果或说明目标落点。',
+  ].join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +519,7 @@ export default function ChatPanel() {
     loadSendPreferences,
   } = useAgent()
 
-  const { chatPanelVisible, chatPanelWidth } = useWorkspace()
+  const { chatPanelVisible, chatPanelWidth, toggleChatPanel } = useWorkspace()
 
   const [showAgentSelect, setShowAgentSelect] = useState(false)
   const [showScopeSelect, setShowScopeSelect] = useState(false)
@@ -387,6 +538,16 @@ export default function ChatPanel() {
   const historyRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const showScopeSelectRef = useRef(false)
+  const showHistoryRef = useRef(false)
+
+  useEffect(() => {
+    showScopeSelectRef.current = showScopeSelect
+  }, [showScopeSelect])
+
+  useEffect(() => {
+    showHistoryRef.current = showHistory
+  }, [showHistory])
 
   const currentAgentData = agents.find(a => a.name === currentAgent)
   const getScopeChannelKey = useCallback((scope: ConversationScope) => {
@@ -502,11 +663,35 @@ export default function ChatPanel() {
 
   const handleAttachmentPreview = useCallback(async (attachment: ChatAttachment) => {
     if (!attachment.path) return
+    if (attachment.source === 'document-quote') {
+      setActiveAttachmentPreview({
+        attachment,
+        mode: 'text',
+        content: formatDocumentQuoteAttachmentSummary(attachment),
+      })
+      return
+    }
+    if (attachment.source === 'document-widget-target') {
+      setActiveAttachmentPreview({
+        attachment,
+        mode: 'text',
+        content: formatDocumentWidgetTargetSummary(attachment),
+      })
+      return
+    }
     if (attachment.source === 'design-project') {
       setActiveAttachmentPreview({
         attachment,
         mode: 'text',
         content: formatDesignAttachmentSummary(attachment),
+      })
+      return
+    }
+    if (attachment.isDirectory) {
+      setActiveAttachmentPreview({
+        attachment,
+        mode: 'text',
+        content: formatFolderAttachmentSummary(attachment),
       })
       return
     }
@@ -544,6 +729,10 @@ export default function ChatPanel() {
   }, [setActiveAttachmentPreview])
 
   const handleOpenAttachment = useCallback(async (attachment: ChatAttachment) => {
+    if (attachment.source === 'document-quote') {
+      revealDocumentQuoteAttachment(attachment)
+      return
+    }
     if (!attachment.path || !attachment.path.startsWith('/')) return
     await window.electronAPI.document.openPath(attachment.path).catch(() => undefined)
   }, [])
@@ -670,13 +859,21 @@ export default function ChatPanel() {
     newSession()
   }, [newSession])
 
+  const handleScopeToggle = useCallback(() => {
+    const nextOpen = !showScopeSelectRef.current
+    setShowHistory(false)
+    setShowScopeSelect(nextOpen)
+  }, [])
+
   // W2: History button
   const handleHistoryToggle = useCallback(() => {
-    if (!showHistory) {
-      loadScopes()
+    const nextOpen = !showHistoryRef.current
+    setShowScopeSelect(false)
+    if (nextOpen) {
+      void loadScopes()
     }
-    setShowHistory(!showHistory)
-  }, [showHistory, loadScopes])
+    setShowHistory(nextOpen)
+  }, [loadScopes])
 
   const handleLoadConversation = useCallback((convId: string) => {
     loadConversation(convId)
@@ -723,7 +920,15 @@ export default function ChatPanel() {
     }, 0)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  useEffect(() => {
+    const handler = () => {
+      focusInputWithResize()
+    }
+    window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, handler as EventListener)
+    return () => window.removeEventListener(READY_FOCUS_CHAT_INPUT_EVENT, handler as EventListener)
+  }, [focusInputWithResize])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
@@ -872,7 +1077,6 @@ export default function ChatPanel() {
               ? designData.selectionBounds as { x: number; y: number; w: number; h: number }
               : undefined,
             currentToolContext: typeof data.currentToolContext === 'string' ? data.currentToolContext : undefined,
-            layoutDigest: coerceDesignLayoutDigest(data.layoutDigest) || undefined,
             latestReviewSummary: typeof designData.latestReviewSummary === 'string' ? designData.latestReviewSummary : undefined,
             repairScope: designData.repairScope === 'run-owned' || designData.repairScope === 'selected'
               ? designData.repairScope
@@ -914,30 +1118,15 @@ export default function ChatPanel() {
           const snippet = lines.join('\n')
           setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
           focusInputWithResize()
-        } else if ((data.type === 'file' || data.type === 'doc-tab') && data.path) {
-          // Add as chat attachment
-          const normalizedExt = (data.ext || data.name.split('.').pop() || '')
-            .toLowerCase()
-            .replace(/^\./, '')
-          const ext = normalizedExt ? `.${normalizedExt}` : ''
-          const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'tiff']
-          const videoExts = ['mp4', 'mov', 'mkv', 'webm', 'avi']
-          const textExts = ['txt', 'md', 'csv', 'pdf', 'json', 'html', 'docx', 'doc', 'rtf', 'odt']
-          const spreadExts = ['xlsx', 'xls', 'tsv']
-          let type: ChatAttachment['type'] = 'other'
-          if (imageExts.includes(normalizedExt)) type = 'image'
-          else if (videoExts.includes(normalizedExt)) type = 'video'
-          else if (textExts.includes(normalizedExt)) type = 'text'
-          else if (spreadExts.includes(normalizedExt)) type = 'spreadsheet'
-
-          addAttachments([{
-            id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        } else if ((data.type === 'file' || data.type === 'doc-tab' || data.type === 'folder') && data.path) {
+          addAttachments([createLocalPathAttachment({
             name: data.name,
             path: data.path,
-            type,
-            size: data.size || 0,
-            ext,
-          }])
+            ext: data.ext,
+            size: data.size,
+            isDirectory: data.type === 'folder',
+          })])
+          focusInputWithResize()
         }
       } catch { /* ignore malformed data */ }
       return
@@ -947,32 +1136,28 @@ export default function ChatPanel() {
     const files = Array.from(e.dataTransfer.files)
     if (files.length === 0) return
 
-    const newAttachments: ChatAttachment[] = files.map(file => {
+    const newAttachments = await Promise.all(files.map(async (file) => {
       const path = (typeof window !== 'undefined' && window.electronAPI)
         ? window.electronAPI.getFilePathFromDrop(file)
         : file.name
-      const normalizedExt = (file.name.split('.').pop() || '').toLowerCase()
-      const ext = normalizedExt ? `.${normalizedExt}` : ''
-      const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'tiff']
-      const videoExts = ['mp4', 'mov', 'mkv', 'webm', 'avi']
-      const textExts = ['txt', 'md', 'csv', 'pdf', 'json', 'html', 'docx', 'doc', 'rtf', 'odt']
-      const spreadExts = ['xlsx', 'xls', 'tsv']
-      let type: ChatAttachment['type'] = 'other'
-      if (imageExts.includes(normalizedExt)) type = 'image'
-      else if (videoExts.includes(normalizedExt)) type = 'video'
-      else if (textExts.includes(normalizedExt)) type = 'text'
-      else if (spreadExts.includes(normalizedExt)) type = 'spreadsheet'
+      if (!path) return null
 
-      return {
-        id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name,
-        path,
-        type,
-        size: file.size,
-        ext
+      let isDirectory = false
+      if (window.electronAPI?.document?.stat) {
+        const statResult = await window.electronAPI.document.stat(path).catch(() => null)
+        isDirectory = statResult?.data?.isDirectory ?? statResult?.stat?.isDirectory ?? false
       }
-    })
-    addAttachments(newAttachments)
+
+      return createLocalPathAttachment({
+        name: file.name || getPathBasename(path),
+        path,
+        ext: file.name.split('.').pop(),
+        size: file.size,
+        isDirectory,
+      })
+    }))
+    addAttachments(newAttachments.filter(Boolean) as ChatAttachment[])
+    focusInputWithResize()
   }, [addAttachments, focusInputWithResize, setInputValue])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1049,8 +1234,21 @@ export default function ChatPanel() {
   // Filtered file pool for @ menu
   const filteredFilePool = useMemo(() => {
     if (!atFilter) return filePool
-    return filePool.filter(f => f.name.toLowerCase().includes(atFilter.toLowerCase()))
+    const loweredFilter = atFilter.toLowerCase()
+    return filePool.filter((file) =>
+      file.name.toLowerCase().includes(loweredFilter) ||
+      file.path.toLowerCase().includes(loweredFilter),
+    )
   }, [filePool, atFilter])
+  const composerShellStyle = {
+    ...LIQUID_INACTIVE_CHROME_STYLE,
+    borderRadius: 10,
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 100%)',
+    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid transparent',
+    boxShadow: isDragOver
+      ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent), inset 0 1px 0 rgba(255,255,255,0.06)'
+      : 'inset 0 0 0 1px color-mix(in srgb, var(--border-input) 72%, transparent), inset 0 1px 0 rgba(255,255,255,0.24), inset 0 -10px 18px rgba(91, 141, 239, 0.12)',
+  } as const
 
   // Format time for history panel
   const formatTime = (dateStr: string) => {
@@ -1070,12 +1268,13 @@ export default function ChatPanel() {
   return (
     <div
       data-chat-panel-root="true"
-      className="content-surface-panel flex-shrink-0 flex flex-col overflow-hidden"
+      data-liquid-shell="chat-panel"
+      className="workbench-panel-frame flex-shrink-0 flex flex-col overflow-hidden"
       style={{
         width: chatPanelVisible ? chatPanelWidth : 0,
         minWidth: chatPanelVisible ? chatPanelWidth : 0,
-        background: 'var(--surface-panel-bg)',
-        borderLeft: chatPanelVisible ? '1px solid var(--border-default)' : 'none',
+        background: 'transparent',
+        boxShadow: 'none',
         transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out',
       }}
       onDrop={handleDrop}
@@ -1084,14 +1283,32 @@ export default function ChatPanel() {
     >
       {/* Header -- chatHead: 38px height, 13px/600 title */}
       <div
-        className="glass-surface-panel flex items-center justify-between"
-        style={{ height: 38, padding: '0 14px', borderBottom: '1px solid var(--border-default)', background: 'var(--surface-toolbar-bg)' }}
+        className="flex items-center justify-between"
+        style={{
+          height: 38,
+          padding: '0 14px',
+          borderBottom: '1px solid transparent',
+          background: 'transparent',
+          position: 'relative',
+          overflow: 'visible',
+          zIndex: 20,
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          boxShadow: 'none',
+        }}
       >
         <div className="relative" ref={scopeRef}>
           <button
-            onClick={() => setShowScopeSelect(!showScopeSelect)}
+            onClick={handleScopeToggle}
             className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
-            style={{ gap: 6, padding: '6px 10px', borderRadius: 10, border: '1px solid var(--border-input)', maxWidth: 200 }}
+            style={{
+              gap: 6,
+              padding: '6px 10px',
+              borderRadius: 10,
+              border: '1px solid transparent',
+              background: 'transparent',
+              maxWidth: 200,
+            }}
           >
             <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-title)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {currentChannel.label}
@@ -1119,12 +1336,13 @@ export default function ChatPanel() {
                 width: 300,
                 maxHeight: 340,
                 overflowY: 'auto',
-                background: 'var(--surface-floating-bg)',
+                background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
                 border: '1px solid var(--border-default)',
                 borderRadius: 10,
                 boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
                 padding: 6,
-                zIndex: 220,
+                zIndex: 240,
+                pointerEvents: 'auto',
               }}
             >
               {channelOptions.length === 0 ? (
@@ -1162,44 +1380,40 @@ export default function ChatPanel() {
             </div>
           )}
         </div>
-        <div className="flex items-center" style={{ gap: 6 }}>
-          <button
-            onClick={handleNewSession}
-            title="新建对话"
-            className="p-1 rounded hover:bg-black/5 active:scale-[0.98] transition-all duration-200 ease-out"
-            style={{ color: 'var(--text-light)' }}
-          >
-            <RotateCcw style={{ width: 14, height: 14 }} strokeWidth={2} />
-          </button>
+        <div className="flex items-center" style={{ gap: 4 }}>
+          <IconButton
+            icon={<PanelRightClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            onClick={toggleChatPanel}
+            title="折叠聊天面板"
+          />
 
-          {/* W2: History Button with Dropdown */}
           <div className="relative" ref={historyRef}>
-            <button
+            {/* 历史记录按钮 */}
+            <IconButton
+              icon={<History style={{ width: 14, height: 14 }} strokeWidth={2} />}
               onClick={handleHistoryToggle}
               title="历史对话"
-              className="p-1 rounded hover:bg-black/5 active:scale-[0.98] transition-all duration-200 ease-out"
-              style={{ color: showHistory ? 'var(--color-blue)' : 'var(--text-light)' }}
-            >
-              <History style={{ width: 14, height: 14 }} strokeWidth={2} />
-            </button>
+              active={showHistory}
+            />
 
+            {/* 历史记录下拉面板 */}
             {showHistory && (
               <div
                 className="glass-surface-floating"
                 style={{
                   position: 'absolute',
-                  top: '100%',
+                  top: 'calc(100% + 6px)',
                   right: 0,
-                  marginTop: 4,
                   width: 260,
                   maxHeight: 320,
                   overflowY: 'auto',
-                  background: 'var(--surface-floating-bg)',
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
                   border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
                   padding: 4,
-                  zIndex: 200
+                  zIndex: 240,
+                  pointerEvents: 'auto',
                 }}
               >
                 <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '4px 8px', marginBottom: 2 }}>
@@ -1250,15 +1464,18 @@ export default function ChatPanel() {
             )}
           </div>
 
-          <button className="p-1 rounded active:scale-[0.98] transition-all duration-200 ease-out" style={{ color: 'var(--text-light)' }}>
-            <Minus style={{ width: 14, height: 14 }} strokeWidth={2} />
-          </button>
+          {/* 新建会话按钮 */}
+          <IconButton
+            icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
+            onClick={handleNewSession}
+            title="新建对话"
+          />
         </div>
       </div>
 
       {/* ChatMessages */}
       <div
-        className="flex-1 overflow-auto"
+        className="panel-hover-scrollbar flex-1 overflow-auto"
         style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}
       >
         {/* Welcome Card */}
@@ -1278,7 +1495,7 @@ export default function ChatPanel() {
             <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
           </div>
 
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-body)' }}>Ready AI Assistant</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)' }}>Ready AI Assistant</span>
 
           <span
             style={{
@@ -1300,7 +1517,7 @@ export default function ChatPanel() {
                 display: 'flex', flexDirection: 'column', gap: 4
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>内容优化</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>内容优化</span>
               <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>分析热门数据...</span>
             </button>
             <button
@@ -1312,7 +1529,7 @@ export default function ChatPanel() {
                 display: 'flex', flexDirection: 'column', gap: 4
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>写作文案</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>写作文案</span>
               <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>创作优质内容...</span>
             </button>
           </div>
@@ -1325,8 +1542,10 @@ export default function ChatPanel() {
               style={{
                 borderRadius: 12,
                 border: '1px solid var(--border-default)',
-                background: 'var(--surface-card-bg)',
+                background: 'color-mix(in srgb, var(--surface-card-bg) 24%, transparent)',
                 overflow: 'hidden',
+                backdropFilter: 'blur(16px) saturate(132%)',
+                WebkitBackdropFilter: 'blur(16px) saturate(132%)',
               }}
             >
               <button
@@ -1450,34 +1669,44 @@ export default function ChatPanel() {
               className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}
             >
               {msg.type === 'user' ? (
-                /* User message: right-aligned, subtle tinted background */
+                /* User message: right-aligned plain text */
                 <div
                   className="max-w-[85%] text-[13px] leading-relaxed"
                   style={{
-                    padding: '8px 12px',
-                    borderRadius: '14px 14px 4px 14px',
-                    background: 'var(--bg-user-msg, color-mix(in srgb, var(--color-blue) 8%, transparent))',
                     color: 'var(--text-body)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end',
+                    gap: 6,
                   }}
                 >
                   {/* Attachments strip */}
                   {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5" style={{ marginBottom: msg.content ? 6 : 0 }}>
+                    <div className="flex flex-wrap justify-end gap-1.5">
                       {msg.attachments.map(att => (
                         <button
                           key={att.id}
                           type="button"
-                          onClick={() => { void handleAttachmentPreview(att) }}
+                          onClick={() => {
+                            if (att.source === 'document-quote') {
+                              revealDocumentQuoteAttachment(att)
+                              return
+                            }
+                            void handleAttachmentPreview(att)
+                          }}
                           className="flex items-center gap-1.5 rounded-md text-left transition-all duration-150 hover:border-[var(--color-blue)]"
                           style={{
-                            padding: '4px 8px',
-                            background: 'var(--bg-code)',
+                            padding: '5px 8px',
+                            background: att.source === 'document-quote'
+                              ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
+                              : 'var(--surface-card-bg)',
                             border: '1px solid var(--border-default)',
                             fontSize: 11,
-                            color: 'var(--text-gray)',
-                            maxWidth: 180,
+                            color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-gray)',
+                            maxWidth: att.source === 'document-quote' ? 220 : 180,
                             cursor: 'pointer',
                           }}
+                          title={att.source === 'document-quote' ? getDocumentQuoteTooltip(att) : att.name}
                         >
                           {getAttachmentPreviewSrc(att) ? (
                             <img
@@ -1495,12 +1724,43 @@ export default function ChatPanel() {
                           ) : (
                             <AttachmentIcon attachment={att} size={12} />
                           )}
-                          <span className="truncate">{att.name}</span>
+                          <span
+                            style={{
+                              minWidth: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: 2,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <span className="truncate" style={{ maxWidth: '100%' }}>{att.name}</span>
+                            {getAttachmentMetaSummary(att) ? (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  lineHeight: 1.1,
+                                  padding: '2px 6px',
+                                  borderRadius: 999,
+                                  background: att.source === 'document-quote'
+                                    ? 'rgba(255,255,255,0.68)'
+                                    : 'rgba(0,0,0,0.04)',
+                                  color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
+                                  maxWidth: '100%',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {getAttachmentMetaSummary(att)}
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
-                  {msg.content && <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>}
+                  {msg.content && <div style={{ whiteSpace: 'pre-wrap', textAlign: 'right' }}>{msg.content}</div>}
                 </div>
               ) : msg.type === 'system' ? (
                 /* System / error message */
@@ -1565,15 +1825,46 @@ export default function ChatPanel() {
           const streamMsg = messages.find(m => m.id === (useAgent.getState().streamingMessageId))
           if (!streamMsg || streamMsg.content.length === 0) {
             return (
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--bg-avatar)' }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
                 </div>
-                <div className="px-3 py-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-default)]">
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 rounded-full bg-[var(--color-blue)] animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-[var(--color-blue)] animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-[var(--color-blue)] animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="flex items-center gap-2.5" style={{ color: 'var(--text-gray)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>思考中</span>
+                  <div className="flex items-center gap-1.5" aria-label="agent-thinking">
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '0ms',
+                      }}
+                    />
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '180ms',
+                      }}
+                    />
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '360ms',
+                      }}
+                    />
                   </div>
                 </div>
               </div>
@@ -1587,12 +1878,15 @@ export default function ChatPanel() {
 
       {/* ChatInputArea */}
       <div
-        className="glass-surface-panel"
+        className=""
         style={{
           padding: '10px 14px',
-          borderTop: '1px solid var(--border-default)',
+          borderTop: '1px solid transparent',
           display: 'flex', flexDirection: 'column', gap: 8,
-          background: 'var(--surface-toolbar-bg)',
+          background: 'transparent',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          boxShadow: 'none',
         }}
       >
         {/* W3: Attachment thumbnails bar */}
@@ -1605,19 +1899,26 @@ export default function ChatPanel() {
               <div
                 key={att.id}
                 className="relative flex-shrink-0 flex items-center gap-1.5"
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  background: 'var(--bg-hover)',
-                  border: '1px solid var(--border-default)',
-                  maxWidth: 140
-                }}
-              >
+                  style={{
+                    padding: '5px 8px',
+                    borderRadius: 6,
+                    background: att.source === 'document-quote' ? 'var(--color-blue-light)' : 'var(--bg-hover)',
+                    border: '1px solid var(--border-default)',
+                    maxWidth: att.source === 'document-quote' ? 240 : 168
+                  }}
+                >
                 <button
                   type="button"
-                  onClick={() => { void handleAttachmentPreview(att) }}
+                  onClick={() => {
+                    if (att.source === 'document-quote') {
+                      revealDocumentQuoteAttachment(att)
+                      return
+                    }
+                    void handleAttachmentPreview(att)
+                  }}
                   className="flex items-center gap-1.5 text-left"
                   style={{ minWidth: 0, flex: 1, paddingRight: 8 }}
+                  title={att.source === 'document-quote' ? getDocumentQuoteTooltip(att) : att.name}
                 >
                   {att.type === 'image' ? (
                     <img
@@ -1629,17 +1930,52 @@ export default function ChatPanel() {
                   ) : (
                     <AttachmentIcon attachment={att} />
                   )}
-                  <span style={{
-                    fontSize: 10, color: 'var(--text-body)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  }}>
-                    {att.name}
+                  <span
+                    style={{
+                      minWidth: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 2,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-body)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '100%',
+                      }}
+                    >
+                      {att.name}
+                    </span>
+                    {getAttachmentMetaSummary(att) ? (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          lineHeight: 1.1,
+                          padding: '2px 6px',
+                          borderRadius: 999,
+                          background: att.source === 'document-quote' ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.05)',
+                          color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: '100%',
+                        }}
+                      >
+                        {getAttachmentMetaSummary(att)}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
                 <button
                   onClick={() => removeAttachment(att.id)}
                   className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center hover:bg-black/10"
-                  style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-default)' }}
+                  style={{ background: 'color-mix(in srgb, var(--bg-panel) 24%, transparent)', border: '1px solid var(--border-default)' }}
                 >
                   <X style={{ width: 8, height: 8 }} className="text-[var(--text-gray)]" strokeWidth={3} />
                 </button>
@@ -1650,12 +1986,12 @@ export default function ChatPanel() {
 
         {pendingSendCount > 0 && !isStreaming && (
           <div
-            className="glass-surface-card flex items-center justify-between"
+            className="flex items-center justify-between"
             style={{
               padding: '7px 10px',
               borderRadius: 8,
-              border: '1px solid var(--border-input)',
-              background: 'var(--surface-card-bg)',
+              border: '1px solid transparent',
+              background: 'transparent',
               fontSize: 11,
               color: 'var(--text-gray)',
             }}
@@ -1671,88 +2007,110 @@ export default function ChatPanel() {
 
         {/* Input Box -- upgraded to textarea for multiline + @ detection */}
         <div
-          className="glass-surface-card flex items-end"
-          style={{
-            borderRadius: 10,
-            background: 'var(--surface-card-bg)',
-            border: isDragOver ? '2px solid var(--color-blue)' : '1px solid var(--border-input)',
-            padding: isDragOver ? '9px 13px' : '10px 14px',
-            position: 'relative',
-            transition: 'border 150ms ease',
-          }}
+          data-chat-composer-shell="true"
+          className="block w-full"
+          style={composerShellStyle}
         >
-          <textarea
-            ref={textareaRef}
-            value={inputValue}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            disabled={isStreaming}
-            placeholder="Hi～今天有什么可以帮到你"
-            className="flex-1 bg-transparent border-none outline-none resize-none"
+          <div
+            className="flex items-end"
             style={{
-              fontSize: 13, fontWeight: 500, color: 'var(--text-body)',
-              lineHeight: '1.5', minHeight: 20, maxHeight: 120,
-              opacity: isStreaming ? 0.7 : 1,
+              borderRadius: 10,
+              background: 'transparent',
+              padding: isDragOver ? '9px 13px' : '10px 14px',
+              position: 'relative',
+              transition: 'padding 150ms ease',
             }}
-            rows={1}
-          />
-
-          {/* W4: @ mention dropdown */}
-          {showAtMenu && filteredFilePool.length > 0 && (
-            <div
-              ref={atMenuRef}
-              className="glass-surface-floating"
+          >
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              disabled={isStreaming}
+              placeholder="Hi～今天有什么可以帮到你"
+              className="flex-1 bg-transparent border-none outline-none resize-none"
               style={{
-                position: 'absolute',
-                bottom: '100%',
-                left: 0,
-                marginBottom: 4,
-                width: '100%',
-                maxHeight: 200,
-                overflowY: 'auto',
-                background: 'var(--surface-floating-bg)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 8,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                padding: 4,
-                zIndex: 200
+                fontSize: 13, fontWeight: 500, color: 'var(--text-body)',
+                lineHeight: '1.5', minHeight: 20, maxHeight: 120,
+                opacity: isStreaming ? 0.7 : 1,
               }}
-            >
-              <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
-                引用文件
+              rows={1}
+            />
+
+            {/* W4: @ mention dropdown */}
+            {showAtMenu && filteredFilePool.length > 0 && (
+              <div
+                ref={atMenuRef}
+                className="glass-surface-floating"
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  marginBottom: 4,
+                  width: '100%',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                  padding: 4,
+                  zIndex: 200
+                }}
+              >
+                <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+                  引用文件 / 文件夹
+                </div>
+                {filteredFilePool.map(file => (
+                  <button
+                    key={file.id}
+                    onClick={() => handleAtSelect(file)}
+                    className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-all duration-150"
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <AttachmentIcon attachment={file} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      }}>
+                        {file.name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--text-light)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          marginTop: 2,
+                        }}
+                        title={file.path}
+                      >
+                        {file.path}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+                      {file.isDirectory
+                        ? '文件夹'
+                        : file.source === 'browser-tab'
+                          ? '网页'
+                          : file.source === 'skill-folder'
+                            ? '技能'
+                            : `${Math.max(1, Math.round(file.size / 1024))} KB`}
+                    </span>
+                  </button>
+                ))}
               </div>
-              {filteredFilePool.map(file => (
-                <button
-                  key={file.id}
-                  onClick={() => handleAtSelect(file)}
-                  className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-all duration-150"
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                  }}
-                >
-                  <AttachmentIcon attachment={file} />
-                  <span style={{
-                    fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  }}>
-                    {file.name}
-                  </span>
-                  <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto' }}>
-                    {file.source === 'browser-tab'
-                      ? '网页'
-                      : file.source === 'skill-folder'
-                        ? '技能'
-                        : `${(file.size / 1024).toFixed(0)} KB`}
-                  </span>
-                </button>
-              ))}
+              )}
             </div>
-          )}
         </div>
 
         {/* Bottom Bar */}
@@ -1764,7 +2122,7 @@ export default function ChatPanel() {
               onClick={pickFiles}
               title="添加文件"
               className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-all duration-200 ease-out"
-              style={{ width: 24, height: 24, borderRadius: 8, border: '1px solid var(--border-input)' }}
+              style={{ width: 24, height: 24, borderRadius: 8, border: '1px solid transparent', background: 'transparent' }}
             >
               <Plus style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
             </button>
@@ -1777,7 +2135,8 @@ export default function ChatPanel() {
                 style={{
                   padding: '3px 8px',
                   borderRadius: 8,
-                  border: '1px solid var(--border-input)',
+                  border: '1px solid transparent',
+                  background: 'transparent',
                   gap: 4,
                   opacity: currentScope?.sourceKind === 'channel' ? 0.7 : 1,
                   cursor: currentScope?.sourceKind === 'channel' ? 'default' : 'pointer',
@@ -1804,7 +2163,7 @@ export default function ChatPanel() {
                     left: 0,
                     marginBottom: 4,
                     minWidth: 160,
-                    background: 'var(--bg-panel)',
+                    background: 'color-mix(in srgb, var(--bg-panel) 24%, transparent)',
                     border: '1px solid var(--border-default)',
                     borderRadius: 8,
                     boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
@@ -1844,30 +2203,23 @@ export default function ChatPanel() {
             <ModelSelector />
           </div>
 
-          {/* Right: undo + @ + expand + stop/send */}
+          {/* Right: undo + @ + stop/send */}
           <div className="flex items-center" style={{ gap: 6 }}>
             {/* Undo last message */}
             {!isStreaming && messages.filter(m => m.type === 'user').length > 0 && (
-              <button
+              <IconButton
+                icon={<Undo2 style={{ width: 15, height: 15 }} strokeWidth={2} />}
                 onClick={undoLastMessage}
                 title="撤回上一条消息"
-                className="p-1 rounded hover:bg-black/5 active:scale-[0.98] transition-all duration-200 ease-out"
-              >
-                <Undo2 style={{ width: 15, height: 15 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-              </button>
+              />
             )}
             {/* W4: @ button */}
-            <button
+            <IconButton
+              icon={<AtSign style={{ width: 15, height: 15 }} strokeWidth={2} />}
               onClick={handleAtButtonClick}
-              title={filePool.length > 0 ? '引用文件' : '先用 + 添加文件'}
-              className="p-1 rounded active:scale-[0.98] transition-all duration-200 ease-out"
-              style={{ opacity: filePool.length > 0 ? 1 : 0.4 }}
-            >
-              <AtSign style={{ width: 15, height: 15 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-            </button>
-            <button className="p-1 rounded active:scale-[0.98] transition-all duration-200 ease-out">
-              <Maximize2 style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-            </button>
+              title={filePool.length > 0 ? '引用文件或文件夹' : '先用 + 添加文件'}
+              disabled={filePool.length === 0}
+            />
             {isStreaming ? (
               <button
                 onClick={stopStreaming}
@@ -1887,9 +2239,12 @@ export default function ChatPanel() {
                 disabled={!inputValue.trim() && attachments.length === 0}
                 className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out"
                 style={{
-                  width: 26, height: 26,
+                  width: 26,
+                  height: 26,
                   borderRadius: 13,
-                  background: 'var(--color-blue)'
+                  border: '1px solid transparent',
+                  background: 'var(--color-blue)',
+                  boxShadow: 'none',
                 }}
               >
                 <Send style={{ width: 13, height: 13 }} strokeWidth={2} />
@@ -1921,7 +2276,7 @@ export default function ChatPanel() {
               overflow: 'hidden',
               borderRadius: 16,
               border: '1px solid var(--border-default)',
-              background: 'var(--surface-floating-bg)',
+              background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
               display: 'flex',
               flexDirection: 'column',
             }}

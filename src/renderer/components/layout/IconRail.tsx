@@ -1,7 +1,6 @@
 import { Folder, Search, Puzzle, Settings } from 'lucide-react'
 import { motion } from 'framer-motion'
 import MorphIconRailGroup from '../motion/MorphIconRailGroup'
-import { useTheme } from '../../stores/useTheme'
 
 interface IconRailProps {
   activeIcon?: string
@@ -17,21 +16,20 @@ const topIcons = [
 
 export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false }: IconRailProps) {
   const handleClick = (id: string) => onIconClick?.(id)
-  const skin = useTheme((state) => state.skin)
-  const isLiquid = skin === 'liquid-glass'
 
   // Task 4: Conditionally hidden for image/video modes
   if (hidden) return null
 
   return (
     <div
-      className="glass-surface-panel flex flex-col justify-between py-[10px] border-r border-[var(--border-default)]"
+      data-liquid-shell="icon-rail"
+      className="flex flex-col justify-between py-[10px]"
       role="toolbar"
       aria-label="工具栏"
       style={{
         width: 44,
         minWidth: 44,
-        background: 'var(--surface-panel-bg)',
+        background: 'transparent',
       }}
     >
       {/* Top Icons */}
@@ -51,9 +49,10 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
           onClick={() => onIconClick?.('settings')}
           title="设置"
           aria-label="设置"
-          whileHover={isLiquid ? { y: -1 } : undefined}
-          whileTap={isLiquid ? { scale: 0.97, y: 0 } : undefined}
-          className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[var(--text-gray)] hover:text-[var(--text-body)] active:scale-[0.98] transition-all duration-200 ease-out"
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.97, y: 0 }}
+          className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[var(--text-gray)] hover:text-[var(--text-body)] hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-all duration-200 ease-out"
+          style={{ background: 'transparent', border: 'none', boxShadow: 'none' }}
         >
           <Settings className="w-[15px] h-[15px]" strokeWidth={2} />
         </motion.button>

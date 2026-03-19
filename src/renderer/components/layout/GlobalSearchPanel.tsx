@@ -56,11 +56,16 @@ function isTextFile(path: string): boolean {
   return ext.length > 0 && SEARCHABLE_EXTENSIONS.has(ext)
 }
 
-function readTextPayload(result: any): string | null {
-  if (!result || !result.success) return null
-  if (typeof result.content === 'string') return result.content
-  if (result.data?.type === 'text' && typeof result.data.content === 'string') {
-    return result.data.content
+function readTextPayload(result: unknown): string | null {
+  const payload = result as {
+    success?: boolean
+    content?: unknown
+    data?: { type?: unknown; content?: unknown }
+  } | null
+  if (!payload || !payload.success) return null
+  if (typeof payload.content === 'string') return payload.content
+  if (payload.data?.type === 'text' && typeof payload.data.content === 'string') {
+    return payload.data.content
   }
   return null
 }
@@ -87,9 +92,8 @@ function snippetFrom(content: string, query: string): string | undefined {
 }
 
 function modeForPath(path: string): WorkbenchMode {
-  const ext = getExt(path)
-  if (ext === 'tldr') return 'document'
-  if (['mp4', 'mov', 'mkv', 'avi', 'webm', 'mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg'].includes(ext)) return 'video'
+  void path
+  // All files open in document mode now
   return 'document'
 }
 
@@ -288,13 +292,13 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
   )
 
   return (
-    <div className="content-surface-panel flex h-full min-h-0 flex-col" style={{ background: 'var(--surface-panel-bg)' }}>
+    <div className="flex h-full min-h-0 flex-col">
       <div
-        className="glass-surface-panel flex items-center justify-between border-b"
+        className="flex items-center justify-between border-b"
         style={{
           height: GLOBAL_SEARCH_DIMENSIONS.headerHeight,
-          borderColor: PANEL_COLORS.cardBorder,
-          background: 'var(--surface-toolbar-bg)',
+          borderColor: 'transparent',
+          background: 'transparent',
           padding: `0 ${GLOBAL_SEARCH_DIMENSIONS.bodyPaddingX}px`,
           boxSizing: 'border-box',
         }}
@@ -333,7 +337,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
           className="content-surface-card w-full border px-[10px] flex items-center"
           style={{
             borderColor: PANEL_COLORS.inputBorder,
-            background: 'var(--surface-card-bg)',
+            background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
             height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
             borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
           }}
@@ -353,7 +357,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
             className="content-surface-card flex-1 border px-[10px] flex items-center"
             style={{
               borderColor: PANEL_COLORS.inputBorder,
-              background: 'var(--surface-card-bg)',
+              background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
               height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
               borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
             }}
@@ -375,7 +379,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
             style={{
               borderColor: PANEL_COLORS.inputBorder,
               color: PANEL_COLORS.muted,
-              background: 'var(--surface-card-bg)',
+              background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
               height: GLOBAL_SEARCH_DIMENSIONS.controlHeight,
               borderRadius: GLOBAL_SEARCH_DIMENSIONS.controlRadius,
             }}
@@ -390,7 +394,7 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
           </p>
         )}
 
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div className="panel-hover-scrollbar flex-1 min-h-0 overflow-auto">
           {query.trim().length > 0 && (
             <>
               {showEmptyState && (
@@ -405,8 +409,8 @@ export default function GlobalSearchPanel({ resetSignal = 0 }: GlobalSearchPanel
                     <button
                       key={`${item.path}-${item.snippet || ''}`}
                       onClick={() => openResult(item)}
-                      className="content-surface-card w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--bg-hover)]"
-                      style={{ borderColor: PANEL_COLORS.cardBorder, background: 'var(--surface-card-bg)' }}
+                      className="w-full rounded-[8px] border px-[8px] py-[6px] text-left transition-colors hover:bg-[var(--bg-hover)]"
+                      style={{ borderColor: PANEL_COLORS.cardBorder, background: 'transparent' }}
                     >
                       <div className="flex items-center gap-[6px] min-w-0">
                         <FileText className="h-[13px] w-[13px] shrink-0" style={{ color: PANEL_COLORS.mutedStrong }} />

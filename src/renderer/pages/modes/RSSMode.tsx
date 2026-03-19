@@ -1,18 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
-import RSSRuntimeDiagnostics from '../../components/rss/RSSRuntimeDiagnostics'
-import RSSSessionDiagnostics from '../../components/rss/RSSSessionDiagnostics'
-import RSSSourceCapabilityMatrix from '../../components/rss/RSSSourceCapabilityMatrix'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
-import { useRSSRuntimeDiagnostics } from '../../modules/rss/useRSSRuntimeDiagnostics'
+import { WORKBENCH_SUPPORT_PANEL_WIDTH } from '../../modules/workbench/chrome'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
-const BROWSER_BACKED_PLATFORMS = new Set(['weibo', 'xiaohongshu', 'douyin'])
 
 type RSSAnalysisStatus =
   | 'queued'
@@ -50,14 +46,8 @@ interface RSSAnalysisJobState {
   updatedAt: string
 }
 
-export default function RSSMode() {
+export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
   const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
-  const selectedItemId = useRSSSession((state) => state.selectedItemId)
-  const selectedItemTitle = useRSSSession((state) => state.selectedItemTitle)
-  const totalItemsSnapshot = useRSSSession((state) => state.totalItems)
-  const unreadItemsSnapshot = useRSSSession((state) => state.unreadItems)
-  const lastFetchAt = useRSSSession((state) => state.lastFetchAt)
-  const lastAnalysisSnapshot = useRSSSession((state) => state.lastAnalysis)
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
   const setSelection = useRSSSession((state) => state.setSelection)
   const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
@@ -77,19 +67,7 @@ export default function RSSMode() {
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
   const previousItemIdsRef = useRef<Set<string>>(new Set())
   const sourcesRef = useRef<RSSSource[]>([])
-  const {
-    runtimeStatus,
-    runtimeDiagnostics,
-    runtimeLoading,
-    runtimeRepairing,
-    benchmarkResult,
-    benchmarking,
-    loadRuntimeDiagnostics,
-    runBenchmark,
-    repairRuntime,
-  } = useRSSRuntimeDiagnostics({
-    onStatusMessage: setStatusMessage,
-  })
+  const shouldPoll = isActive
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -225,7 +203,7 @@ export default function RSSMode() {
     }
   }, [computeUnreadCounts])
 
-  useEffect(() => { loadRSSData() }, [loadRSSData])
+  useEffect(() => { void loadRSSData() }, [loadRSSData])
 
   const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
     if (!window.electronAPI?.rss?.getItemAnalysisProgress) return false
@@ -271,6 +249,7 @@ export default function RSSMode() {
   }, [])
 
   useEffect(() => {
+    if (!shouldPoll) return
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -286,10 +265,11 @@ export default function RSSMode() {
       disposed = true
       if (timer) clearTimeout(timer)
     }
-  }, [fetchAnalysisJobs, fetchAnalysisProgress, visibleItemIds])
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, shouldPoll, visibleItemIds])
 
   // Task 6: Auto-refresh every 15 minutes
   useEffect(() => {
+    if (!shouldPoll) return
     const interval = setInterval(async () => {
       try {
         await window.electronAPI?.rss?.fetchAll()
@@ -299,7 +279,13 @@ export default function RSSMode() {
       }
     }, AUTO_REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [loadRSSData])
+  }, [loadRSSData, shouldPoll])
+
+  useEffect(() => {
+    if (!shouldPoll) return
+    void fetchAnalysisJobs()
+    void fetchAnalysisProgress(visibleItemIds)
+  }, [fetchAnalysisJobs, fetchAnalysisProgress, shouldPoll, visibleItemIds])
 
   useEffect(() => {
     if (!statusMessage) return
@@ -400,13 +386,12 @@ export default function RSSMode() {
         }
       }
       await loadRSSData()
-      await loadRuntimeDiagnostics()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : '刷新失败')
     } finally {
       setRefreshing(false)
     }
-  }, [loadRSSData, loadRuntimeDiagnostics, refreshing])
+  }, [loadRSSData, refreshing])
 
   useRSSAgentAdapter({
     items,
@@ -592,86 +577,74 @@ export default function RSSMode() {
   }
 
   return (
-    <div className="workbench-mode-root">
-      <div className="flex-1 flex overflow-hidden">
-        {/* Feed list (shrinks when preview is open) */}
-        <div className={`content-surface-panel flex-shrink-0 overflow-hidden flex flex-col border-r border-[var(--border-default)] transition-all duration-300 relative ${
-          selectedItem ? 'w-[300px]' : 'flex-1'
-        }`}>
-          <RSSRuntimeDiagnostics
-            status={runtimeStatus}
-            diagnostics={runtimeDiagnostics}
-            loading={runtimeLoading}
-            onRefresh={loadRuntimeDiagnostics}
-            onRepair={repairRuntime}
-            repairing={runtimeRepairing}
-          />
-          <RSSSessionDiagnostics
-            selectedSourceId={selectedSourceId}
-            selectedItemId={selectedItemId}
-            selectedItemTitle={selectedItemTitle}
-            totalItems={totalItemsSnapshot}
-            unreadItems={unreadItemsSnapshot}
-            visibleItems={visibleItemIds.length}
-            lastFetchAt={lastFetchAt}
-            lastAnalysis={lastAnalysisSnapshot}
-          />
-          <RSSSourceCapabilityMatrix
-            diagnostics={runtimeDiagnostics}
-            benchmark={benchmarkResult}
-            benchmarking={benchmarking}
-            onBenchmark={runBenchmark}
-          />
-          <RSSFeed
-            items={items}
-            sources={sources}
-            filter={filter}
-            selectedSource={selectedSource}
-            selectedItemId={selectedItem?.id ?? null}
-            loading={loading}
-            refreshing={refreshing}
-            isMock={isMock}
-            hasPreview={!!selectedItem}
-            newItemIds={newItemIds}
-            analysisProgressMap={analysisProgressMap}
-            analysisJobs={analysisJobs}
-            onFilterChange={setFilter}
-            onSourceChange={handleSourceChange}
-            onItemClick={handleItemClick}
-            onMarkItemRead={handleMarkItemRead}
-            onToggleStar={handleToggleStar}
-            onDeleteItem={handleDeleteItem}
-            onDownloadItem={handleDownloadItem}
-            onOpenAnalysisOutput={handleOpenAnalysisOutput}
-            onRefresh={handleRefresh}
-            onAddSource={() => setShowAddModal(true)}
-            onClearRead={handleClearRead}
-            onPauseAnalysisJob={handlePauseAnalysisJob}
-            onResumeAnalysisJob={handleResumeAnalysisJob}
-            onDeleteAnalysisJob={handleDeleteAnalysisJob}
-          />
-          {statusMessage && (
-            <div
-              className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
-              style={{
-                background: 'var(--surface-floating-bg)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-secondary)',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
-              {statusMessage}
-            </div>
+    <div className="workbench-mode-root rss-mode-shell" style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}>
+      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+        <div
+          className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
+          style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}
+        >
+          {/* Feed list (shrinks when preview is open) */}
+          <div
+            className={`rss-feed-sheet content-surface-panel flex-shrink-0 overflow-hidden flex flex-col transition-all duration-300 relative ${
+              selectedItem ? 'border-r border-[var(--border-default)]' : 'flex-1'
+            }`}
+            style={{
+              width: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
+              minWidth: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
+              background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)',
+            }}
+          >
+            <RSSFeed
+              items={items}
+              sources={sources}
+              filter={filter}
+              selectedSource={selectedSource}
+              selectedItemId={selectedItem?.id ?? null}
+              loading={loading}
+              refreshing={refreshing}
+              isMock={isMock}
+              hasPreview={!!selectedItem}
+              newItemIds={newItemIds}
+              analysisProgressMap={analysisProgressMap}
+              analysisJobs={analysisJobs}
+              onFilterChange={setFilter}
+              onSourceChange={handleSourceChange}
+              onItemClick={handleItemClick}
+              onMarkItemRead={handleMarkItemRead}
+              onToggleStar={handleToggleStar}
+              onDeleteItem={handleDeleteItem}
+              onDownloadItem={handleDownloadItem}
+              onOpenAnalysisOutput={handleOpenAnalysisOutput}
+              onRefresh={handleRefresh}
+              onAddSource={() => setShowAddModal(true)}
+              onClearRead={handleClearRead}
+              onPauseAnalysisJob={handlePauseAnalysisJob}
+              onResumeAnalysisJob={handleResumeAnalysisJob}
+              onDeleteAnalysisJob={handleDeleteAnalysisJob}
+            />
+            {statusMessage && (
+              <div
+                className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
+                style={{
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                {statusMessage}
+              </div>
+            )}
+          </div>
+
+          {/* Preview Browser */}
+          {selectedItem && (
+            <PreviewBrowser
+              item={selectedItem}
+              onClose={handleClosePreview}
+            />
           )}
         </div>
-
-        {/* Preview Browser */}
-        {selectedItem && (
-          <PreviewBrowser
-            item={selectedItem}
-            onClose={handleClosePreview}
-          />
-        )}
       </div>
 
       {/* Add Source Modal */}

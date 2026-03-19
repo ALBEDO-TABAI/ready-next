@@ -200,7 +200,7 @@ export default function RSSFeed({
   loading,
   refreshing,
   isMock,
-  hasPreview,
+  hasPreview: _hasPreview,
   newItemIds,
   analysisProgressMap,
   analysisJobs,
@@ -219,7 +219,7 @@ export default function RSSFeed({
   onResumeAnalysisJob,
   onDeleteAnalysisJob,
 }: RSSFeedProps) {
-  const [downloadedItemIds, setDownloadedItemIds] = useState<Set<string>>(new Set())
+  const [, setDownloadedItemIds] = useState<Set<string>>(new Set())
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
 
   // Apply filters
@@ -236,11 +236,7 @@ export default function RSSFeed({
     () => sources.find((source) => source.id === selectedSource) ?? null,
     [selectedSource, sources],
   )
-  const refreshLabel = isRefreshing
-    ? '刷新中'
-    : selectedSourceEntry
-      ? `刷新 ${selectedSourceEntry.name}`
-      : '刷新全部'
+  const refreshLabel = isRefreshing ? '刷新中' : '刷新'
   const activeJobsCount = useMemo(
     () =>
       analysisJobs.filter(
@@ -248,11 +244,47 @@ export default function RSSFeed({
       ).length,
     [analysisJobs],
   )
+  const sourceSelectWidth = 92
+  const filterSelectWidth = 76
+  const taskButtonWidth = 58
+  const refreshButtonWidth = 68
+  const clearButtonWidth = 56
+  const calendarPrimaryButtonStyle = {
+    height: 28,
+    borderRadius: 8,
+    border: '1px solid var(--border-default)',
+    background: 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)',
+    color: 'var(--text-title)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    padding: '0 10px',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 500,
+    flexShrink: 0,
+  } as const
+  const calendarPillButtonStyle = {
+    padding: '4px 10px',
+    borderRadius: 10,
+    border: '1px solid var(--border-input)',
+    background: 'transparent',
+    fontSize: 11,
+    fontWeight: 500,
+    color: 'var(--text-body)',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  } as const
+  const taskCountLabel = activeJobsCount > 99 ? '99+' : String(activeJobsCount)
 
   return (
     <div
-      className="content-surface-panel flex flex-col h-full"
-      style={{ padding: '20px 24px 0', background: 'var(--surface-panel-bg)' }}
+      className="rss-feed-surface content-surface-panel flex flex-col h-full"
+      style={{ padding: '20px 24px 0', background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
     >
       {/* Header Bar */}
       <div
@@ -266,7 +298,7 @@ export default function RSSFeed({
       >
         {/* Left: Title & Badge */}
         <div className="flex items-center" style={{ gap: 12 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-title)', lineHeight: 1 }}>RSS 订阅源</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1 }}>RSS 订阅源</h2>
           {unreadCount > 0 && (
             <span
               className="rounded-full text-white"
@@ -295,18 +327,11 @@ export default function RSSFeed({
             onClick={onAddSource}
             className="flex items-center transition-colors duration-150"
             style={{
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 500,
-              color: '#FFFFFF',
-              background: 'var(--color-blue)',
+              ...calendarPrimaryButtonStyle,
             }}
             title="添加 RSS 源"
           >
-            <Plus style={{ width: 14, height: 14 }} strokeWidth={2} />
+            <Plus style={{ width: 13, height: 13, color: 'var(--color-red)' }} strokeWidth={2} />
             <span>添加源</span>
           </button>
 
@@ -317,18 +342,14 @@ export default function RSSFeed({
               onChange={(e) => onSourceChange(e.target.value || null)}
               className="appearance-none cursor-pointer transition-colors duration-150"
               style={{
-                padding: '6px 28px 6px 12px',
-                borderRadius: 6,
-                border: 'none',
-                fontSize: 13,
-                width: 92,
-                minWidth: 92,
-                maxWidth: 92,
+                ...calendarPillButtonStyle,
+                padding: '4px 28px 4px 12px',
+                width: sourceSelectWidth,
+                minWidth: sourceSelectWidth,
+                maxWidth: sourceSelectWidth,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                background: 'var(--bg-canvas)',
-                color: 'var(--text-secondary)',
               }}
             >
               <option value="">全部源</option>
@@ -353,12 +374,10 @@ export default function RSSFeed({
               onChange={(e) => onFilterChange(e.target.value as 'all' | 'unread' | 'starred')}
               className="appearance-none cursor-pointer transition-colors duration-150"
               style={{
-                padding: '6px 28px 6px 12px',
-                borderRadius: 6,
-                border: 'none',
-                fontSize: 13,
-                background: 'var(--bg-canvas)',
-                color: 'var(--text-secondary)',
+                ...calendarPillButtonStyle,
+                padding: '4px 28px 4px 12px',
+                width: filterSelectWidth,
+                minWidth: filterSelectWidth,
               }}
             >
               <option value="all">全部</option>
@@ -382,32 +401,29 @@ export default function RSSFeed({
               onClick={() => setTaskMenuOpen((prev) => !prev)}
               className="flex items-center transition-colors duration-150"
               style={{
-                gap: 6,
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: 'none',
-                fontSize: 13,
-                background: 'var(--bg-canvas)',
-                color: 'var(--text-secondary)',
+                width: taskButtonWidth,
+                ...calendarPillButtonStyle,
+                position: 'relative',
               }}
               title="查看分析任务"
             >
               <span>任务</span>
-              {activeJobsCount > 0 && (
-                <span
-                  className="rounded-full text-white"
-                  style={{
-                    minWidth: 16,
-                    padding: '0 5px',
-                    lineHeight: '16px',
-                    fontSize: 10,
-                    background: 'var(--color-blue)',
-                  }}
-                >
-                  {activeJobsCount}
-                </span>
-              )}
-              <ChevronDown style={{ width: 14, height: 14, color: 'var(--text-muted)' }} strokeWidth={2} />
+              <span
+                className="rounded-full text-white"
+                style={{
+                  minWidth: 14,
+                  padding: '0 4px',
+                  lineHeight: '14px',
+                  fontSize: 9,
+                  background: 'var(--color-blue)',
+                  opacity: activeJobsCount > 0 ? 1 : 0,
+                  position: 'absolute',
+                  top: 3,
+                  right: 3,
+                }}
+              >
+                {taskCountLabel}
+              </span>
             </button>
 
             {taskMenuOpen && (
@@ -416,7 +432,7 @@ export default function RSSFeed({
                 style={{
                   width: 460,
                   maxHeight: 420,
-                  background: 'var(--surface-floating-bg)',
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 28%, transparent)',
                   borderColor: 'var(--border-default)',
                   boxShadow: 'var(--shadow-sm)',
                 }}
@@ -424,11 +440,11 @@ export default function RSSFeed({
                 <div
                   className="sticky top-0 flex items-center justify-between border-b px-4 py-3"
                   style={{
-                    background: 'var(--surface-floating-bg)',
+                    background: 'color-mix(in srgb, var(--surface-floating-bg) 28%, transparent)',
                     borderColor: 'var(--border-default)',
                   }}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>分析任务</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>分析任务</span>
                   <button
                     type="button"
                     onClick={() => setTaskMenuOpen(false)}
@@ -456,7 +472,7 @@ export default function RSSFeed({
                           className="rounded-md border transition-colors"
                           style={{
                             borderColor: 'var(--border-default)',
-                            background: 'var(--surface-card-bg)',
+                            background: 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)',
                             borderRadius: 10,
                           }}
                         >
@@ -465,7 +481,7 @@ export default function RSSFeed({
                               <div
                                 className="text-[13px] font-medium"
                                 style={{
-                                  color: 'var(--text-title)',
+                                  color: 'var(--text-secondary)',
                                   display: '-webkit-box',
                                   overflow: 'hidden',
                                   WebkitBoxOrient: 'vertical',
@@ -534,34 +550,24 @@ export default function RSSFeed({
             onClick={onRefresh}
             disabled={refreshing}
             className="flex items-center transition-colors duration-150 disabled:opacity-50"
-            style={{
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              fontSize: 13,
-              background: 'var(--bg-canvas)',
-              color: 'var(--text-secondary)',
-            }}
-            title={selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'}
-          >
-            <span>{refreshLabel}</span>
+              style={{
+                width: refreshButtonWidth,
+                ...calendarPillButtonStyle,
+              }}
+              title={selectedSourceEntry ? `刷新当前源：${selectedSourceEntry.name}` : '刷新全部订阅源'}
+            >
+            <span className="truncate">{refreshLabel}</span>
           </button>
 
           <button
             onClick={onClearRead}
             className="flex items-center transition-colors duration-150"
-            style={{
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              fontSize: 13,
-              background: 'var(--bg-canvas)',
-              color: 'var(--text-secondary)',
-            }}
-            title="清空当前筛选范围中的全部内容"
-          >
+              style={{
+                width: clearButtonWidth,
+                ...calendarPillButtonStyle,
+              }}
+              title="清空当前筛选范围中的全部内容"
+            >
             <span>清空</span>
           </button>
         </div>
@@ -570,7 +576,7 @@ export default function RSSFeed({
       {/* Item List */}
       <div
         className="rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
-        style={{ background: 'var(--surface-card-bg)' }}
+        style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}
       >
         <div className="divide-y divide-[var(--border-default)]">
           {filteredItems.length === 0 ? (
@@ -581,16 +587,19 @@ export default function RSSFeed({
           ) : (
             filteredItems.map((item) => {
               const isNew = newItemIds.has(item.id)
+              const isSelected = selectedItemId === item.id
               return (
                 <button
                   key={item.id}
                   onClick={() => onItemClick(item)}
-                  className={`w-full text-left transition-colors relative ${
-                    selectedItemId === item.id
-                      ? 'bg-[var(--color-blue-light)] border-l-2 border-[var(--color-blue)]'
-                      : ''
-                  } ${!item.read ? 'bg-[var(--bg-primary)]' : ''}`}
-                  style={{ padding: '12px 0' }}
+                  className="w-full text-left transition-colors relative"
+                  style={{
+                    padding: '12px 0',
+                    background: isSelected
+                      ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
+                      : 'transparent',
+                    boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
+                  }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-2 min-w-0 basis-[82%] max-w-[82%]">
@@ -625,15 +634,15 @@ export default function RSSFeed({
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3
-                            className={`text-[13px] truncate ${
-                              !item.read
-                                ? 'font-semibold text-[var(--text-title)]'
-                                : 'text-[var(--text-body)]'
-                            }`}
-                          >
-                            {item.title}
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3
+                        className={`text-[13px] truncate ${
+                          !item.read
+                                ? 'font-semibold text-[var(--text-secondary)]'
+                                : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        {item.title}
                           </h3>
                           {isNew && (
                             <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-white text-[9px] flex-shrink-0" style={{ background: 'var(--color-red)' }}>

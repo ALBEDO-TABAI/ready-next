@@ -131,17 +131,17 @@ export default function BrowserTabBar({
 
   return (
     <div
-      className="glass-surface-panel flex items-center no-drag"
+      className="flex items-center no-drag"
       style={{
         height: WORKBENCH_TAB_ROW_HEIGHT,
-        background: 'var(--surface-toolbar-bg)',
-        borderBottom: '1px solid var(--border-default)',
+        background: 'transparent',
+        borderBottom: '1px solid transparent',
         gap: 0,
       }}
     >
       <div
         className="flex items-center flex-1 min-w-0"
-        style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X, paddingRight: WORKBENCH_HEADER_EDGE_X, gap: 0 }}
+        style={{ paddingLeft: 0, paddingRight: WORKBENCH_HEADER_EDGE_X, gap: 0 }}
       >
       {/* Scroll left arrow */}
       {showLeftArrow && (
@@ -189,7 +189,7 @@ export default function BrowserTabBar({
                   width: WORKBENCH_TAB_MAX_WIDTH,
                   minWidth: 120,
                   maxWidth: WORKBENCH_TAB_MAX_WIDTH,
-                  background: isActive ? 'var(--surface-card-bg)' : 'transparent',
+                  background: isActive ? 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)' : 'transparent',
                   color: isActive ? 'var(--text-title)' : 'var(--text-gray)',
                   borderLeft: isDragOver ? '2px solid var(--color-blue)' : '2px solid transparent',
                   alignSelf: 'flex-end',

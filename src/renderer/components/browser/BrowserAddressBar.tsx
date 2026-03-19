@@ -82,13 +82,13 @@ export default function BrowserAddressBar({
 
   return (
     <div
-      className="glass-surface-panel flex items-center no-drag"
+      className="flex items-center no-drag"
       style={{
         height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
         padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
         gap: 6,
-        background: 'var(--surface-toolbar-bg)',
-        borderBottom: '1px solid var(--border-default)',
+        background: 'transparent',
+        borderBottom: '1px solid transparent',
       }}
     >
       {/* Navigation buttons */}
@@ -125,10 +125,11 @@ export default function BrowserAddressBar({
 
       {/* URL input with lock/globe prefix and 10px corner radius */}
       <div
-        className="browser-address-shell glass-surface-card flex-1 flex items-center text-[12px] border border-[var(--border-input)] relative overflow-hidden"
+        className="browser-address-shell flex-1 flex items-center text-[12px] relative overflow-hidden"
         style={{
-          background: 'var(--surface-card-bg)',
+          background: 'color-mix(in srgb, var(--surface-card-bg) 10%, transparent)',
           borderRadius: 10,
+          border: '1px solid transparent',
           height: 28,
           paddingLeft: 10,
           paddingRight: 4,
@@ -186,7 +187,7 @@ export default function BrowserAddressBar({
         className={toolbarBtn(!adblockEnabled)}
         style={{
           width: 28, height: 28,
-          background: adblockEnabled ? undefined : 'var(--color-orange-light)',
+          background: 'transparent',
         }}
         title={adblockEnabled ? '关闭广告拦截' : '开启广告拦截'}
       >
@@ -203,7 +204,7 @@ export default function BrowserAddressBar({
         className={toolbarBtn(adblockDomainWhitelisted)}
         style={{
           width: 28, height: 28,
-          background: adblockDomainWhitelisted ? 'var(--color-blue-light)' : undefined,
+          background: 'transparent',
         }}
         title={
           currentDomain
@@ -225,7 +226,7 @@ export default function BrowserAddressBar({
         className={toolbarBtn(activePanel === 'bookmarks')}
         style={{
           width: 28, height: 28,
-          background: activePanel === 'bookmarks' ? 'var(--color-blue-light)' : undefined,
+          background: 'transparent',
         }}
         title="收藏夹"
       >
@@ -240,7 +241,7 @@ export default function BrowserAddressBar({
         className={toolbarBtn(activePanel === 'downloads')}
         style={{
           width: 28, height: 28,
-          background: activePanel === 'downloads' ? 'var(--color-blue-light)' : undefined,
+          background: 'transparent',
         }}
         title="下载"
       >
@@ -255,7 +256,7 @@ export default function BrowserAddressBar({
         className={toolbarBtn(activePanel === 'history')}
         style={{
           width: 28, height: 28,
-          background: activePanel === 'history' ? 'var(--color-blue-light)' : undefined,
+          background: 'transparent',
         }}
         title="历史记录"
       >

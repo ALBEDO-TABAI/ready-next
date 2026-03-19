@@ -14,7 +14,7 @@ import { AuthPopupManager } from './auth-popup-manager'
 import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
 import { BrowserContextMenuService } from './context-menu-service'
 import { isReusableCaptureTabUrl } from './capture-url-utils'
-import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
+import { BrowserDataService, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService } from './download-service'
 import { BROWSER_DIAGNOSTICS_LOG_PATH, BrowserDiagnosticsService } from './diagnostics-service'
 import { BrowserHostLayoutService } from './host-layout-service'
@@ -71,6 +71,7 @@ export class BrowserController {
   tabCounter = 0
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
+  private browserHostsPresented = true
   private readonly browserHostKind: BrowserHostKind
   private mainWindow: BrowserWindow
   private useMock: boolean
@@ -169,6 +170,7 @@ export class BrowserController {
       },
       getNextTabId: () => `tab-${++this.tabCounter}`,
       getViewBounds: () => this.viewBounds,
+      shouldPresentHosts: () => this.browserHostsPresented,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
@@ -197,6 +199,7 @@ export class BrowserController {
       setViewBounds: (bounds) => {
         this.viewBounds = bounds
       },
+      shouldPresentHosts: () => this.browserHostsPresented,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url) => this.createTab(url),
       detachHost: (view) => this.detachHost(view),
@@ -955,10 +958,17 @@ export class BrowserController {
   }
 
   hideAllHosts(): { success: boolean } {
+    this.browserHostsPresented = false
     return this.tabShellService.hideAllHosts()
   }
 
+  hideActiveHost(): { success: boolean } {
+    this.browserHostsPresented = false
+    return this.tabShellService.hideActiveHostOnly()
+  }
+
   showActiveHost(): { success: boolean } {
+    this.browserHostsPresented = true
     return this.tabShellService.showActiveHost()
   }
 }

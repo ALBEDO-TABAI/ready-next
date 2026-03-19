@@ -53,6 +53,7 @@ interface BrowserShellIPCController {
   reload(tabId: string | null): { success: boolean; error?: string }
   updateViewBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean }
   hideAllHosts(): { success: boolean }
+  hideActiveHost(): { success: boolean }
   showActiveHost(): { success: boolean }
   getTabList(): unknown
   getTabContext(tabId?: string | null): Promise<unknown>
@@ -131,6 +132,7 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   })
 
   ipcMain.handle('browser:hideAll', () => controller.hideAllHosts())
+  ipcMain.handle('browser:hideActiveHost', () => controller.hideActiveHost())
 
   ipcMain.handle('browser:showActive', () => controller.showActiveHost())
 

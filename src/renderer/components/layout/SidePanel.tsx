@@ -29,6 +29,9 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   const [thumbnailSize, setThumbnailSize] = useState(132)
   const filterMenuRef = useRef<HTMLDivElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refreshRunStateRef = useRef({ running: false, pending: false })
+  const wasAutoRefreshActiveRef = useRef(false)
 
   const {
     sidebarVisible,
@@ -90,7 +93,12 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   const savedWorkspaces = useMemo(() => getSavedWorkspaces(), [getSavedWorkspaces])
 
   const handleConnectedRefresh = useCallback(async () => {
-    if (!isConnected || isRefreshing) return
+    if (!isConnected) return
+    if (refreshRunStateRef.current.running) {
+      refreshRunStateRef.current.pending = true
+      return
+    }
+    refreshRunStateRef.current.running = true
     setIsRefreshing(true)
     try {
       await refreshFiles()
@@ -100,21 +108,82 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
       }
       await Promise.all(Array.from(dirs).map((dir) => loadDirChildren(dir)))
     } finally {
+      refreshRunStateRef.current.running = false
       setIsRefreshing(false)
+      if (refreshRunStateRef.current.pending) {
+        refreshRunStateRef.current.pending = false
+        void handleConnectedRefresh()
+      }
     }
-  }, [currentPath, expandedDirs, isConnected, isRefreshing, loadDirChildren, refreshFiles])
+  }, [currentPath, expandedDirs, isConnected, loadDirChildren, refreshFiles])
+
+  const watchedDirectories = useMemo(() => {
+    if (variant !== 'files' || !isVisible || !isConnected) return []
+    const dirs = new Set<string>()
+    pinnedFolders.forEach((dir) => {
+      if (dir) dirs.add(dir)
+    })
+    expandedDirs.forEach((dir) => {
+      if (dir) dirs.add(dir)
+    })
+    if (currentPath && currentPath !== '/') {
+      dirs.add(currentPath)
+    }
+    return Array.from(dirs)
+  }, [currentPath, expandedDirs, isConnected, isVisible, pinnedFolders, variant])
+
+  useEffect(() => {
+    if (!window.electronAPI?.document?.watchDirectories) return
+    if (variant !== 'files' || !isVisible || !isConnected) {
+      void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
+      return
+    }
+    void window.electronAPI.document.watchDirectories(watchedDirectories).catch(() => undefined)
+    return () => {
+      void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
+    }
+  }, [isConnected, isVisible, variant, watchedDirectories])
+
+  useEffect(() => {
+    if (variant !== 'files' || !isVisible || !isConnected) return
+    if (!window.electronAPI?.document?.onDirectoryChange) return
+
+    const unsubscribe = window.electronAPI.document.onDirectoryChange(() => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null
+        void handleConnectedRefresh()
+      }, 180)
+    })
+
+    return () => {
+      unsubscribe()
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+        refreshTimerRef.current = null
+      }
+    }
+  }, [handleConnectedRefresh, isConnected, isVisible, variant])
+
+  useEffect(() => {
+    const isAutoRefreshActive = variant === 'files' && isVisible && isConnected
+    if (isAutoRefreshActive && !wasAutoRefreshActiveRef.current) {
+      void handleConnectedRefresh()
+    }
+    wasAutoRefreshActiveRef.current = isAutoRefreshActive
+  }, [handleConnectedRefresh, isConnected, isVisible, variant])
 
   return (
     <div
-      className="content-surface-panel flex-shrink-0 border-r flex flex-col select-none overflow-hidden"
+      data-liquid-shell="side-panel"
+      className="workbench-panel-frame flex-shrink-0 flex flex-col select-none overflow-hidden"
       style={{
         width: isVisible ? panelWidth : 0,
         minWidth: isVisible ? panelWidth : 0,
-        background: PANEL_TOKENS.panelBg,
+        background: 'transparent',
+        boxShadow: 'none',
         fontFamily: 'Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
         transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out',
-        borderColor: PANEL_TOKENS.border,
-        borderRightWidth: isVisible ? 1 : 0,
       }}
     >
       {variant === 'calendar' ? (
@@ -129,12 +198,13 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
         <>
           {/* Header row */}
           <div
-            className="shrink-0 border-b flex items-center justify-between"
+            className="shrink-0 flex items-center justify-between"
             style={{
               height: FILES_PANEL_DIMENSIONS.headerHeight,
-              borderColor: PANEL_TOKENS.border,
+              borderColor: 'transparent',
               padding: `0 ${FILES_PANEL_DIMENSIONS.headerPaddingX}px`,
               boxSizing: 'border-box',
+              background: 'transparent',
             }}
           >
             <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
@@ -165,12 +235,13 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
 
           {/* Toolbar row */}
           <div
-            className="shrink-0 border-b flex items-center justify-between"
+            className="shrink-0 flex items-center justify-between"
             style={{
               height: FILES_PANEL_DIMENSIONS.toolbarHeight,
-              borderColor: PANEL_TOKENS.border,
+              borderColor: 'transparent',
               padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
               boxSizing: 'border-box',
+              background: 'transparent',
             }}
           >
             {/* Left: view mode + filter */}
@@ -344,13 +415,15 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
             }}
           >
             <label
-              className="flex items-center gap-[6px] border"
+              className="content-surface-card flex items-center gap-[6px] border"
               style={{
                 height: FILES_PANEL_DIMENSIONS.searchHeight,
                 borderRadius: FILES_PANEL_DIMENSIONS.searchRadius,
-                borderColor: PANEL_TOKENS.inputBorder,
                 padding: '6px 10px',
-                background: PANEL_TOKENS.cardBg,
+                borderColor: PANEL_TOKENS.inputBorder,
+                background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+                backdropFilter: 'blur(14px) saturate(132%)',
+                WebkitBackdropFilter: 'blur(14px) saturate(132%)',
               }}
             >
               <Search className="h-[13px] w-[13px]" style={{ color: PANEL_TOKENS.sectionTitle }} />

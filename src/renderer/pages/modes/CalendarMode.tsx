@@ -9,7 +9,6 @@ import { createCalendarControlsPlugin } from '@schedule-x/calendar-controls'
 import { Temporal } from '@js-temporal/polyfill'
 
 import MiniCalendar from '../../components/calendar/MiniCalendar'
-import CalendarDiagnosticsPanel from '../../components/calendar/CalendarDiagnosticsPanel'
 import CalendarSources from '../../components/calendar/CalendarSources'
 import EventModal from '../../components/calendar/EventModal'
 import { NewEventMenu, NewEventCard } from '../../components/calendar/NewEventMenu'
@@ -28,7 +27,11 @@ import {
 } from '../../components/calendar/schedule-x-utils'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
 import { useCalendarAgentAdapter } from '../../modules/calendar/useCalendarAgentAdapter'
-import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
+import {
+  WORKBENCH_HEADER_EDGE_X,
+  WORKBENCH_SUPPORT_PANEL_WIDTH,
+  WORKBENCH_TOOLBAR_ROW_HEIGHT,
+} from '../../modules/workbench/chrome'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
 import { useCalendarSession } from '../../stores/useCalendarSession'
 
@@ -290,6 +293,7 @@ export default function CalendarMode() {
         events: [],
         calendars: sourcesToCalendars(cachedState?.sources?.length ? cachedState.sources : DEFAULT_SOURCES),
         locale: 'zh-CN',
+        isResponsive: false,
         selectedDate: toPlainDateLike(cachedState?.currentDate ?? new Date()),
         dayBoundaries: { start: '06:00', end: '21:00' },
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -809,69 +813,76 @@ export default function CalendarMode() {
           </div>
         )}
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Calendar Sidebar */}
-          <div
-            className="content-surface-panel flex-shrink-0 overflow-auto flex flex-col"
-            style={{
-              width: 220,
-              background: 'var(--surface-panel-bg)',
-              padding: '12px 14px',
-              borderRight: '1px solid var(--border-default)',
-            }}
-          >
-            <MiniCalendar
-              currentDate={currentDate}
-              selectedDate={selectedDate}
-              events={eventsForMiniCalendar}
-              onDateChange={setCurrentDate}
-              onSelectDate={handleSelectDate}
-            />
+        <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+          <div className="flex h-full min-h-0 overflow-hidden" style={{ gap: 0 }}>
+            {/* Calendar Sidebar */}
+            <div
+              className="panel-hover-scrollbar content-surface-panel flex-shrink-0 overflow-auto flex flex-col"
+              style={{
+                width: WORKBENCH_SUPPORT_PANEL_WIDTH,
+                minWidth: WORKBENCH_SUPPORT_PANEL_WIDTH,
+                background: 'color-mix(in srgb, var(--surface-panel-bg) 34%, transparent)',
+                padding: '0 14px 12px',
+                borderRight: '1px solid transparent',
+                backdropFilter: 'blur(18px) saturate(135%)',
+                WebkitBackdropFilter: 'blur(18px) saturate(135%)',
+              }}
+            >
+              <MiniCalendar
+                currentDate={currentDate}
+                selectedDate={selectedDate}
+                events={eventsForMiniCalendar}
+                onDateChange={setCurrentDate}
+                onSelectDate={handleSelectDate}
+              />
 
-            {/* Divider */}
-            <div style={{ height: 0, borderTop: '1px solid var(--border-default)', margin: '8px 0 4px' }} />
+              {/* Divider */}
+              <div style={{ height: 8 }} />
 
-            <CalendarSources
-              sources={sources}
-              onToggleSource={toggleSource}
-              onAddSource={addSource}
-              onUpdateSource={updateSource}
-              onDeleteSource={deleteSource}
-            />
+              <CalendarSources
+                sources={sources}
+                onToggleSource={toggleSource}
+                onAddSource={addSource}
+                onUpdateSource={updateSource}
+                onDeleteSource={deleteSource}
+              />
+            </div>
 
-            <CalendarDiagnosticsPanel
-              isMock={isMock}
-              dataLoaded={dataLoaded}
-              viewType={viewType}
-              currentDate={currentDate}
-              totalSources={sources.length}
-              enabledSources={sources.filter((source) => source.enabled).length}
-              totalEvents={events.length}
-              visibleRangeStart={visibleRangeStart}
-              visibleRangeEnd={visibleRangeEnd}
-              selectedEventId={selectedEventId}
-              selectedEventTitle={selectedEventTitle}
-              lastMutationAt={lastMutationAt}
-              conflictState={conflictSnapshot}
-              onRefresh={() => loadCalendarData(true)}
-            />
-          </div>
-
-          {/* Main View */}
-          <div
-            ref={mainViewRef}
-            className="content-surface-panel flex-1 flex flex-col"
-            style={{ background: 'var(--surface-card-bg)', position: 'relative' }}
-          >
+            {/* Main View */}
+            <div
+              className="workbench-canvas-shell flex flex-1 min-h-0 min-w-0 overflow-hidden"
+              style={{
+                background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
+                borderRadius: 0,
+                borderTopRightRadius: 'var(--workbench-canvas-radius)',
+                borderBottomRightRadius: 'var(--workbench-canvas-radius)',
+                borderLeft: 'none',
+                boxShadow: 'none',
+                backdropFilter: 'blur(20px) saturate(138%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(138%)',
+              }}
+            >
+              <div
+                ref={mainViewRef}
+                className="content-surface-panel flex-1 flex flex-col"
+                style={{
+                  background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
+                  position: 'relative',
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                }}
+              >
             {/* CalNavBar - our own nav bar above SX calendar */}
             <div
-              className="glass-surface-panel flex items-center justify-between flex-shrink-0"
+              className="flex items-center justify-between flex-shrink-0"
               style={{
                 height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                 padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-                borderBottom: '1px solid var(--border-default)',
-                background: 'var(--surface-toolbar-bg)',
+                borderBottom: '1px solid transparent',
+                background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
                 boxSizing: 'border-box',
+                backdropFilter: 'blur(18px) saturate(136%)',
+                WebkitBackdropFilter: 'blur(18px) saturate(136%)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -883,7 +894,7 @@ export default function CalendarMode() {
                     height: 28,
                     borderRadius: 8,
                     border: '1px solid var(--border-default)',
-                    background: 'var(--surface-card-bg)',
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)',
                     color: 'var(--text-title)',
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -962,7 +973,7 @@ export default function CalendarMode() {
                           padding: '8px 14px',
                           borderRadius: 12,
                           border: '1px dashed var(--color-blue)',
-                          background: 'var(--surface-floating-bg)',
+                          background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
                           color: 'var(--color-blue)',
                           fontSize: 12,
                           fontWeight: 600,
@@ -996,6 +1007,8 @@ export default function CalendarMode() {
                 onClose={() => setNewEventCardPos(null)}
               />
             )}
+              </div>
+            </div>
           </div>
         </div>
 

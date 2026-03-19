@@ -55,6 +55,7 @@ interface BrowserTabShellHost {
   setActiveTabId(tabId: string | null): void
   getViewBounds(): BrowserRect
   setViewBounds(bounds: BrowserRect): void
+  shouldPresentHosts(): boolean
   isAllowedUrl(url: string): boolean
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
   detachHost(view: BrowserShellView): void
@@ -147,9 +148,11 @@ export class BrowserTabShellService {
       if (activeTab?.view) this.host.detachHost(activeTab.view)
     }
 
-    this.host.showHost(nextTab.view, this.host.getViewBounds())
-    this.host.applyBounds(nextTab.view)
     this.host.setActiveTabId(tabId)
+    if (this.host.shouldPresentHosts()) {
+      this.host.showHost(nextTab.view, this.host.getViewBounds())
+      this.host.applyBounds(nextTab.view)
+    }
 
     return {
       success: true,
@@ -187,6 +190,17 @@ export class BrowserTabShellService {
       }
     }
     this.host.detachPreviewView()
+    return { success: true }
+  }
+
+  hideActiveHostOnly(): { success: boolean } {
+    const activeTabId = this.host.getActiveTabId()
+    if (activeTabId) {
+      const activeTab = this.host.tabs.get(activeTabId)
+      if (activeTab?.view) {
+        this.host.hideHost(activeTab.view)
+      }
+    }
     return { success: true }
   }
 

@@ -5,7 +5,8 @@ const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
 interface UseBrowserViewBoundsParams {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
-  workbenchMode: string
+  isActive: boolean
+  topInset: number
   sidebarVisible: boolean
   sidePanelVariant: string
   effectiveSidePanelWidth: number
@@ -19,7 +20,8 @@ interface UseBrowserViewBoundsParams {
 export function useBrowserViewBounds({
   isElectron,
   contentRef,
-  workbenchMode,
+  isActive,
+  topInset,
   sidebarVisible,
   sidePanelVariant,
   effectiveSidePanelWidth,
@@ -54,16 +56,14 @@ export function useBrowserViewBounds({
       ? Math.min(shellRight, safeRightFromDom)
       : Math.min(shellRight, safeRightFromState)
     const x = Math.round(rect.left)
-    const y = Math.round(rect.top)
+    const y = Math.round(rect.top - topInset)
     const exactWidth = Math.round(Math.max(0, safeRight - rect.left))
-    const height = Math.round(rect.height)
+    const height = Math.round(rect.height + topInset)
 
     if (exactWidth <= 0 || height <= 0) return
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const isManualResizing = document.body.classList.contains('resizing')
-    const isLayoutTransitionActive = now < layoutTransitionUntilRef.current
-
     // 拖拽时使用精确宽度，避免露底
     const width = exactWidth
 
@@ -87,7 +87,7 @@ export function useBrowserViewBounds({
     lastSentBoundsRef.current = { x, y, width, height }
     lastBoundsSentAtRef.current = now
     window.electronAPI?.browser?.updateBounds({ x, y, width, height })
-  }, [chatPanelVisible, chatPanelWidth, contentRef, isElectron])
+  }, [chatPanelVisible, chatPanelWidth, contentRef, isElectron, topInset])
 
   const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
     if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
@@ -101,7 +101,7 @@ export function useBrowserViewBounds({
     if (!isElectron) return
 
     const shouldShowBrowserView =
-      workbenchMode === 'browser' && !hasError && overlayLockCountRef.current === 0
+      isActive && !hasError && overlayLockCountRef.current === 0
 
     if (!shouldShowBrowserView) {
       window.electronAPI?.browser?.hideAll()
@@ -110,7 +110,7 @@ export function useBrowserViewBounds({
 
     window.electronAPI?.browser?.showActive()
     requestAnimationFrame(() => sendBoundsImmediate({ forceExact: options?.forceExact ?? true }))
-  }, [hasError, isElectron, sendBoundsImmediate, workbenchMode])
+  }, [hasError, isActive, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     const element = contentRef.current
@@ -132,7 +132,7 @@ export function useBrowserViewBounds({
   }, [contentRef, sendBounds])
 
   useEffect(() => {
-    if (workbenchMode !== 'browser') return
+    if (!isActive) return
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
     layoutTransitionUntilRef.current = now + 380
 
@@ -160,7 +160,7 @@ export function useBrowserViewBounds({
     sidebarVisible,
     sidePanelVariant,
     skillsSplitRatio,
-    workbenchMode,
+    isActive,
   ])
 
   useEffect(() => {

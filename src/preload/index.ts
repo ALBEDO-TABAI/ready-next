@@ -109,6 +109,30 @@ const agentAPI = {
   }
 }
 
+// Memory API
+const memoryAPI = {
+  query: (filters: unknown) => ipcRenderer.invoke('agent:memory:query', filters),
+  create: (entry: unknown) => ipcRenderer.invoke('agent:memory:create', entry),
+  update: (id: string, updates: unknown) => ipcRenderer.invoke('agent:memory:update', { id, updates }),
+  delete: (id: string) => ipcRenderer.invoke('agent:memory:delete', id),
+  stats: () => ipcRenderer.invoke('agent:memory:stats'),
+  createFromConversation: (payload: unknown) => ipcRenderer.invoke('agent:memory:createFromConversation', payload),
+}
+
+// Trigger API
+const triggerAPI = {
+  list: (filters?: unknown) => ipcRenderer.invoke('agent:trigger:list', filters),
+  create: (trigger: unknown) => ipcRenderer.invoke('agent:trigger:create', trigger),
+  update: (id: string, updates: unknown) => ipcRenderer.invoke('agent:trigger:update', { id, updates }),
+  createWithMemories: (payload: unknown) => ipcRenderer.invoke('agent:trigger:createWithMemories', payload),
+}
+
+// Memory Lifecycle API
+const memoryLifecycleAPI = {
+  status: () => ipcRenderer.invoke('agent:memory:lifecycle:status'),
+  runMaintenance: () => ipcRenderer.invoke('agent:memory:lifecycle:runMaintenance'),
+}
+
 // Browser API
 const browserAPI = {
   createTab: (url: string) => ipcRenderer.invoke('browser:createTab', url),
@@ -121,6 +145,7 @@ const browserAPI = {
   updateBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:updateBounds', bounds),
   hideAll: () => ipcRenderer.invoke('browser:hideAll'),
+  hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost'),
   showActive: () => ipcRenderer.invoke('browser:showActive'),
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
@@ -195,6 +220,8 @@ const browserAPI = {
 const documentAPI = {
   readFile: (path: string) => ipcRenderer.invoke('document:read', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('document:write', { path, content }),
+  saveFileAs: (payload: { content: string; suggestedName?: string; defaultPath?: string | null }) =>
+    ipcRenderer.invoke('document:saveAs', payload),
   listFiles: (dir: string) => ipcRenderer.invoke('document:list', dir),
   parseDocx: (path: string) => ipcRenderer.invoke('document:parseDocx', path),
   parseXlsx: (path: string) => ipcRenderer.invoke('document:parseXlsx', path),
@@ -209,7 +236,13 @@ const documentAPI = {
   getHome: () => ipcRenderer.invoke('document:getHome'),
   showInFolder: (path: string) => ipcRenderer.invoke('document:showInFolder', path),
   openPath: (path: string) => ipcRenderer.invoke('document:openPath', path),
-  createFile: (path: string) => ipcRenderer.invoke('document:createFile', path)
+  createFile: (path: string) => ipcRenderer.invoke('document:createFile', path),
+  watchDirectories: (paths: string[]) => ipcRenderer.invoke('document:watchDirectories', { paths }),
+  onDirectoryChange: (callback: (data: { paths: string[]; timestamp: number }) => void) => {
+    const handler = (_: unknown, data: { paths: string[]; timestamp: number }) => callback(data)
+    ipcRenderer.on('document:directoryChanged', handler)
+    return () => { ipcRenderer.removeListener('document:directoryChanged', handler) }
+  }
 }
 
 // RSS API
@@ -263,48 +296,6 @@ const calendarAPI = {
   deleteEvent: (id: string) => ipcRenderer.invoke('calendar:deleteEvent', id)
 }
 
-// Video API
-const videoAPI = {
-  getInfo: (path: string) => ipcRenderer.invoke('video:get-info', path),
-  extractFrame: (options: { input: string; timestamp: number; output?: string }) =>
-    ipcRenderer.invoke('video:extract-frame', options),
-  trim: (options: { input: string; start: number; end: number; output: string }) =>
-    ipcRenderer.invoke('video:trim', options),
-  transcode: (options: {
-    input: string; output: string; codec?: string;
-    resolution?: string; bitrate?: string; audioCodec?: string; audioBitrate?: string
-  }) => ipcRenderer.invoke('video:transcode', options),
-  extractAudio: (options: { input: string; output?: string; format?: string }) =>
-    ipcRenderer.invoke('video:extract-audio', options),
-  renderTimeline: (options: {
-    output: string
-    width: number
-    height: number
-    fps: number
-    duration: number
-    tracks: {
-      video: unknown[]
-      subtitle: unknown[]
-      audio: unknown[]
-    }
-  }) => ipcRenderer.invoke('video:render-timeline', options) as Promise<{
-    success: boolean
-    path?: string
-    warning?: string
-    error?: string
-    errorCode?: string
-  }>,
-}
-
-// Design API
-const designAPI = {
-  read: (path: string) => ipcRenderer.invoke('design:read', path),
-  write: (path: string, data: unknown) => ipcRenderer.invoke('design:write', { path, data }),
-  saveAs: (payload?: { defaultPath?: string; data?: unknown }) => ipcRenderer.invoke('design:saveAs', payload),
-  export: (payload: { path?: string; format: 'png' | 'svg'; data: string; defaultName?: string }) =>
-    ipcRenderer.invoke('design:export', payload),
-}
-
 // Skills Runtime API
 const skillsAPI = {
   list: () => ipcRenderer.invoke('skills:list'),
@@ -319,8 +310,26 @@ const skillsAPI = {
     action: string
     params?: Record<string, unknown>
     timeoutMs?: number
+    sessionId?: string
+    executionMode?: 'auto' | 'workflow' | 'direct'
   }) => ipcRenderer.invoke('skills:run', payload),
   listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
+  listExecutions: (payload?: { limit?: number; sessionId?: string; activeOnly?: boolean }) =>
+    ipcRenderer.invoke('skills:executions:list', payload || {}),
+  getExecution: (payload: { id: string }) => ipcRenderer.invoke('skills:executions:get', payload),
+  submitInput: (payload: { executionId: string; inputs: Record<string, unknown> }) =>
+    ipcRenderer.invoke('skills:executions:submitInput', payload),
+  submitConfirmation: (payload: { executionId: string; stepId: string; confirmed: boolean }) =>
+    ipcRenderer.invoke('skills:executions:submitConfirmation', payload),
+  submitAgentResult: (payload: {
+    executionId: string
+    stepId: string
+    textContent?: string
+    outputs?: Record<string, unknown>
+  }) => ipcRenderer.invoke('skills:executions:submitAgentResult', payload),
+  restartFromStep: (payload: { executionId: string; stepId: string; inputs?: Record<string, unknown> }) =>
+    ipcRenderer.invoke('skills:executions:restartFromStep', payload),
+  cancelExecution: (payload: { executionId: string }) => ipcRenderer.invoke('skills:executions:cancel', payload),
   listSchedules: () => ipcRenderer.invoke('skills:schedules:list'),
   createSchedule: (payload: {
     skillId: string
@@ -407,21 +416,62 @@ const chatAPI = {
   readFileForAI: (filePath: string) => ipcRenderer.invoke('chat:readFileForAI', filePath),
 }
 
+// User Profile API
+const userProfileAPI = {
+  get: (userId: string) => ipcRenderer.invoke('userProfile:get', userId),
+  list: () => ipcRenderer.invoke('userProfile:list'),
+  create: (profile: {
+    id?: string
+    name?: string
+    avatarUrl?: string
+    preferredLanguage?: string
+    communicationStyle?: string
+  }) => ipcRenderer.invoke('userProfile:create', profile),
+  update: (userId: string, updates: {
+    name?: string
+    avatarUrl?: string
+    preferredLanguage?: string
+    communicationStyle?: string
+  }) => ipcRenderer.invoke('userProfile:update', userId, updates),
+  delete: (userId: string) => ipcRenderer.invoke('userProfile:delete', userId),
+}
+
+// Agent Personality API
+const agentPersonalityAPI = {
+  get: (agentName: string) => ipcRenderer.invoke('agentPersonality:get', agentName),
+  list: () => ipcRenderer.invoke('agentPersonality:list'),
+  create: (personality: {
+    agentName: string
+    displayName?: string
+    personalityText: string
+    tone?: string
+  }) => ipcRenderer.invoke('agentPersonality:create', personality),
+  update: (agentName: string, updates: {
+    displayName?: string
+    personalityText?: string
+    tone?: string
+  }) => ipcRenderer.invoke('agentPersonality:update', agentName, updates),
+  delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
+}
+
 // Expose APIs to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
+  memory: memoryAPI,
+  trigger: triggerAPI,
+  memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,
   document: documentAPI,
   rss: rssAPI,
   calendar: calendarAPI,
-  video: videoAPI,
-  design: designAPI,
   skills: skillsAPI,
   app: appAPI,
   window: windowAPI,
   theme: themeAPI,
   settings: settingsAPI,
   chat: chatAPI,
+  userProfile: userProfileAPI,
+  agentPersonality: agentPersonalityAPI,
   platform: process.platform,
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
@@ -432,18 +482,21 @@ declare global {
   interface Window {
     electronAPI: {
       agent: typeof agentAPI
+      memory: typeof memoryAPI
+      trigger: typeof triggerAPI
+      memoryLifecycle: typeof memoryLifecycleAPI
       browser: typeof browserAPI
       document: typeof documentAPI
       rss: typeof rssAPI
       calendar: typeof calendarAPI
-      video: typeof videoAPI
-      design: typeof designAPI
       skills: typeof skillsAPI
       app: typeof appAPI
       window: typeof windowAPI
       theme: typeof themeAPI
       settings: typeof settingsAPI
       chat: typeof chatAPI
+      userProfile: typeof userProfileAPI
+      agentPersonality: typeof agentPersonalityAPI
       platform: string
       getFilePathFromDrop: (file: File) => string
     }

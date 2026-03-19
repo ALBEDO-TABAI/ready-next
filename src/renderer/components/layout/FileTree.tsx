@@ -114,6 +114,7 @@ interface WorkspaceDragPayload {
   ext?: string
   size?: number
   isDirectory: boolean
+  movable: boolean
 }
 
 interface RSSDragPayload {
@@ -127,7 +128,7 @@ interface RSSDragPayload {
   publishedAt?: string
 }
 
-function putDragData(e: React.DragEvent, item: FileItem) {
+function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
   const ext = getFileExt(item)
   const payload: WorkspaceDragPayload = {
     type: item.isDirectory ? 'folder' : 'file',
@@ -136,6 +137,7 @@ function putDragData(e: React.DragEvent, item: FileItem) {
     ext,
     size: item.size,
     isDirectory: item.isDirectory,
+    movable,
   }
   const serialized = JSON.stringify(payload)
   e.dataTransfer.setData('application/x-ready-drag', serialized)
@@ -179,6 +181,7 @@ function joinPath(dir: string, name: string): string {
 
 function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): boolean {
   if (!targetDir || !source.path) return false
+  if (source.movable === false) return false
   if (source.path === targetDir) return false
   const currentParent = source.path.replace(/[\\/][^\\/]+$/, '') || '/'
   if (currentParent === targetDir) return false
@@ -254,6 +257,7 @@ function FileTreeItem({
   isRenaming,
   isDropTarget,
   draggableEnabled,
+  dragMovable,
   depth,
   onToggleDir,
   onOpenFile,
@@ -271,6 +275,7 @@ function FileTreeItem({
   isRenaming: boolean
   isDropTarget: boolean
   draggableEnabled?: boolean
+  dragMovable?: boolean
   depth: number
   onToggleDir: () => void
   onOpenFile: () => void
@@ -286,18 +291,13 @@ function FileTreeItem({
     <div
       draggable={draggableEnabled ?? true}
       onDragStart={(e) => {
-        putDragData(e, item)
+        putDragData(e, item, dragMovable ?? true)
         onDragStart?.(e)
       }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onClick={() => onOpenFile()}
-      onDoubleClick={() => {
-        if (item.isDirectory) {
-          void onToggleDir()
-        }
-      }}
       onContextMenu={onContextMenu}
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
@@ -395,6 +395,7 @@ function GridItemCard({
   isActive,
   isDropTarget,
   thumbnailSize,
+  dragMovable,
   onOpen,
   onDoubleClick,
   onContextMenu,
@@ -406,6 +407,7 @@ function GridItemCard({
   isActive: boolean
   isDropTarget: boolean
   thumbnailSize: number
+  dragMovable?: boolean
   onOpen: () => void
   onDoubleClick?: () => void
   onContextMenu: (e: React.MouseEvent) => void
@@ -421,7 +423,7 @@ function GridItemCard({
     <button
       draggable
       onDragStart={(e) => {
-        putDragData(e, item)
+        putDragData(e, item, dragMovable ?? true)
       }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -594,7 +596,6 @@ export default function FileTree({
     currentPath,
     toggleDir,
     selectFile,
-    setCurrentPath,
     renameItem,
     cancelRenaming,
     createFile,
@@ -634,7 +635,9 @@ export default function FileTree({
   const handleOpenFile = useCallback((item: FileItem) => {
     if (item.isDirectory) {
       selectFile(item.path)
-      setCurrentPath(item.path)
+      if (viewMode === 'tree') {
+        void toggleDir(item.path)
+      }
       return
     }
 
@@ -645,15 +648,13 @@ export default function FileTree({
       js: 'document', css: 'document', html: 'document', docx: 'document', xlsx: 'document',
       png: 'document', jpg: 'document', jpeg: 'document', webp: 'document', svg: 'document', gif: 'document',
       bmp: 'document', ico: 'document',
-      mp4: 'video', mov: 'video', mkv: 'video', avi: 'video', webm: 'video', ogg: 'video', m4v: 'video',
-      mp3: 'video', wav: 'video', aac: 'video', flac: 'video', m4a: 'video', wma: 'video', opus: 'video',
       pdf: 'document',
       tldr: 'document'
     }
     if (modeMap[ext]) {
       setWorkbenchMode(modeMap[ext])
     }
-  }, [selectFile, setCurrentPath, setWorkbenchMode])
+  }, [selectFile, setWorkbenchMode, toggleDir, viewMode])
 
   const moveWorkspaceItem = useCallback(async (payload: WorkspaceDragPayload, targetDir: string) => {
     if (!canMoveToDirectory(payload, targetDir)) return
@@ -849,7 +850,7 @@ export default function FileTree({
               isExpanded={isExpanded}
               isRenaming={renamingPath === folderPath}
               isDropTarget={moveDropTargetDir === folderPath}
-              draggableEnabled={false}
+              dragMovable={false}
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
               onOpenFile={() => handleOpenFile(pinnedItem)}
@@ -1165,6 +1166,7 @@ export default function FileTree({
               isActive={selectedFile === item.path}
               isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
               thumbnailSize={thumbnailSize}
+              dragMovable={!pinnedFolders.includes(item.path)}
               onOpen={() => {
                 if (item.isDirectory) {
                   handleOpenFile(item)
@@ -1190,7 +1192,7 @@ export default function FileTree({
 
   return (
     <div
-      className="flex-1 overflow-auto relative"
+      className="panel-hover-scrollbar flex-1 overflow-auto relative"
       style={{ padding: '6px 8px' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

@@ -1,6 +1,10 @@
 import type { Session, WebContents } from 'electron'
 import type { BrowserHostView, BrowserRect } from './host-types'
 
+function applyRoundedViewport(_view: BrowserHostView): void {
+  // Rounded clipping is handled at the native host view layer.
+}
+
 export type BrowserLifecycleTabOwner = 'manual' | 'agent'
 export type BrowserLifecycleTabActivity = 'idle' | 'running' | 'attention'
 
@@ -36,6 +40,7 @@ interface BrowserTabLifecycleHost {
   setActiveTabId(tabId: string | null): void
   getNextTabId(): string
   getViewBounds(): BrowserRect
+  shouldPresentHosts(): boolean
   isAllowedUrl(url: string): boolean
   extractDomain(url: string): string
   createHost(partition: string): BrowserHostView
@@ -116,15 +121,33 @@ export class BrowserTabLifecycleService {
     this.host.installContextMenu(view.webContents)
     this.host.ensureDownloadSession(view.webContents.session)
 
-    const activeTabId = this.host.getActiveTabId()
-    if (activeTabId) {
-      const previousTab = this.host.tabs.get(activeTabId)
-      if (previousTab?.view) {
-        this.host.detachHost(previousTab.view)
+    const previousTab = this.host.getActiveTabId()
+      ? this.host.tabs.get(this.host.getActiveTabId() as string) || null
+      : null
+    const previousView = previousTab?.view || null
+    let resolvedSwap = false
+    const finalizeSwap = (shouldShow: boolean) => {
+      if (resolvedSwap) return
+      resolvedSwap = true
+      if (this.host.getActiveTabId() !== tabId) return
+      if (previousView) {
+        this.host.detachHost(previousView)
+      }
+      if (shouldShow && this.host.shouldPresentHosts()) {
+        this.host.showHost(view, this.host.getViewBounds())
       }
     }
 
-    this.host.showHost(view, this.host.getViewBounds())
+    view.webContents.once('did-stop-loading', () => {
+      finalizeSwap(true)
+    })
+    view.webContents.once('did-fail-load', () => {
+      // Even when a page reports a load failure, we still need to swap the
+      // new host into view so the renderer can show the page's own error state
+      // instead of leaving a blank container.
+      finalizeSwap(true)
+    })
+
     this.host.setActiveTabId(tabId)
     view.webContents.loadURL(url).catch(() => {
       // handled by did-fail-load
@@ -133,6 +156,10 @@ export class BrowserTabLifecycleService {
   }
 
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {
+    view.webContents.on('dom-ready', () => {
+      applyRoundedViewport(view)
+    })
+
     view.webContents.on('page-title-updated', (_event, title) => {
       tab.title = title
       this.host.sendToRenderer('browser:tabUpdate', { type: 'title', tabId, title })
@@ -170,6 +197,7 @@ export class BrowserTabLifecycleService {
     })
 
     view.webContents.on('did-stop-loading', () => {
+      applyRoundedViewport(view)
       this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: false })
     })
 
