@@ -99,6 +99,11 @@ html[data-skin='liquid-glass'] .sx__calendar-wrapper {
   height: 100% !important;
 }
 
+html[data-skin='liquid-glass'] .sx__calendar,
+html[data-skin='liquid-glass'] .sx-react-calendar-wrapper {
+  background: transparent !important;
+}
+
 /* ========== Week/Day view ========== */
 .sx__week-wrapper,
 .sx__day-wrapper,
@@ -153,6 +158,18 @@ html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
 /* Week header */
 .sx__week-header {
   border-bottom: 1px solid var(--border-default) !important;
+}
+
+html[data-skin='liquid-glass'] .sx__week-header {
+  border-bottom: none !important;
+}
+
+html[data-skin='liquid-glass'] .sx__week-header-border {
+  display: none !important;
+}
+
+html[data-skin='liquid-glass'] .sx__week-grid .sx__time-grid-day:first-child {
+  border-left: none !important;
 }
 
 .sx__week-grid__date,

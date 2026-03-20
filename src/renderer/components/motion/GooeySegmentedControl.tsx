@@ -87,11 +87,7 @@ export default function GooeySegmentedControl({
         </svg>
 
         <motion.div
-          animate={
-            hoveredId
-              ? { scaleX: 1.018, scaleY: 0.986, y: -0.5 }
-              : { scaleX: 1, scaleY: 1, y: 0 }
-          }
+          animate={{ scaleX: 1, scaleY: 1 }}
           transition={reduceMotion ? REDUCED_SPRING : TRACK_SPRING}
           style={{
             position: 'relative',
@@ -164,13 +160,7 @@ export default function GooeySegmentedControl({
                   onTapStart={() => setPressedId(item.id)}
                   onTapCancel={() => setPressedId((current) => (current === item.id ? null : current))}
                   onTap={() => setPressedId(null)}
-                  animate={
-                    isPressed
-                      ? { y: 0.2, scale: 0.98 }
-                      : isHovered
-                        ? { y: -0.8, scale: 1.012 }
-                        : { y: 0, scale: 1 }
-                  }
+                  animate={{ scale: 1 }}
                   transition={reduceMotion ? REDUCED_SPRING : ITEM_SPRING}
                   className={itemClassName ? `relative ${itemClassName}` : 'relative'}
                   style={{
@@ -193,8 +183,8 @@ export default function GooeySegmentedControl({
                       layout
                       transition={reduceMotion ? REDUCED_SPRING : BLOB_SPRING}
                       animate={{
-                        scaleX: isPressed ? 1.2 : isHovered && !isActive ? 1.12 : isHovered ? 1.08 : 1,
-                        scaleY: isPressed ? 0.86 : isHovered ? 0.92 : 1,
+                        scaleX: 1,
+                        scaleY: 1,
                         opacity: isActive ? 0.98 : 0.82,
                       }}
                       style={{
@@ -214,8 +204,8 @@ export default function GooeySegmentedControl({
                   <motion.span
                     transition={reduceMotion ? REDUCED_SPRING : PRESS_SPRING}
                     animate={{
-                      x: isPressed ? 0.4 : 0,
-                      scale: isPressed ? 0.96 : 1,
+                      x: 0,
+                      scale: 1,
                       color: isActive || isHovered ? 'var(--text-title)' : 'var(--text-gray)',
                     }}
                     className={contentClassName}

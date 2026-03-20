@@ -15,6 +15,7 @@ import {
   Pause,
   Trash2,
 } from 'lucide-react'
+import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
 
 export interface RSSItem {
   id: string
@@ -284,14 +285,14 @@ export default function RSSFeed({
   return (
     <div
       className="rss-feed-surface content-surface-panel flex flex-col h-full"
-      style={{ padding: '20px 24px 0', background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
+      style={{ padding: '0', background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
     >
       {/* Header Bar */}
       <div
         className="flex items-center justify-between flex-shrink-0"
         style={{
           minHeight: 56,
-          padding: '0 0 16px',
+          padding: `0 ${WORKBENCH_HEADER_EDGE_X}px 16px`,
           background: 'transparent',
           borderBottom: '1px solid var(--border-default)',
         }}
@@ -594,7 +595,7 @@ export default function RSSFeed({
                   onClick={() => onItemClick(item)}
                   className="w-full text-left transition-colors relative"
                   style={{
-                    padding: '12px 0',
+                    padding: `12px ${WORKBENCH_HEADER_EDGE_X}px`,
                     background: isSelected
                       ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
                       : 'transparent',

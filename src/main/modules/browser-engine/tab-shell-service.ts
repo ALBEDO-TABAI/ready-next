@@ -171,6 +171,9 @@ export class BrowserTabShellService {
 
   updateViewBounds(bounds: BrowserRect): { success: boolean } {
     this.host.setViewBounds(bounds)
+    if (!this.host.shouldPresentHosts()) {
+      return { success: true }
+    }
     const activeTabId = this.host.getActiveTabId()
     if (activeTabId) {
       const activeTab = this.host.tabs.get(activeTabId)

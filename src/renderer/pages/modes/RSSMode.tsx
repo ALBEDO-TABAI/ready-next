@@ -65,9 +65,11 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
+  const [hasHydrated, setHasHydrated] = useState(false)
   const previousItemIdsRef = useRef<Set<string>>(new Set())
   const sourcesRef = useRef<RSSSource[]>([])
-  const shouldPoll = isActive
+  const becameVisibleRef = useRef(false)
+  const shouldPoll = isActive && hasHydrated
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -203,7 +205,28 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
     }
   }, [computeUnreadCounts])
 
-  useEffect(() => { void loadRSSData() }, [loadRSSData])
+  useEffect(() => {
+    if (!isActive) {
+      becameVisibleRef.current = false
+      return
+    }
+
+    if (becameVisibleRef.current) return
+    becameVisibleRef.current = true
+    let cancelled = false
+
+    const syncVisibleData = async () => {
+      await loadRSSData()
+      if (!cancelled && !hasHydrated) {
+        setHasHydrated(true)
+      }
+    }
+
+    void syncVisibleData()
+    return () => {
+      cancelled = true
+    }
+  }, [hasHydrated, isActive, loadRSSData])
 
   const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
     if (!window.electronAPI?.rss?.getItemAnalysisProgress) return false
@@ -642,6 +665,7 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
             <PreviewBrowser
               item={selectedItem}
               onClose={handleClosePreview}
+              isActive={isActive}
             />
           )}
         </div>

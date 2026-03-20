@@ -6,6 +6,7 @@ import { registerModuleAgentHandler } from '../../utils/moduleAgentBridge'
 import { createCalendarAgentHandler } from './calendar-agent-handler'
 
 interface UseCalendarAgentAdapterParams {
+  enabled?: boolean
   currentDate: Date
   viewType: ViewType
   editingEvent: CalendarEvent | null
@@ -21,6 +22,7 @@ interface UseCalendarAgentAdapterParams {
 
 export function useCalendarAgentAdapter(params: UseCalendarAgentAdapterParams): void {
   const {
+    enabled = true,
     currentDate,
     viewType,
     editingEvent,
@@ -35,18 +37,21 @@ export function useCalendarAgentAdapter(params: UseCalendarAgentAdapterParams): 
   } = params
 
   useEffect(() => {
+    if (!enabled) return
     const { start, end } = getDateRange(currentDate, viewType)
     setVisibleRange(start.toISOString(), end.toISOString())
-  }, [currentDate, getDateRange, setVisibleRange, viewType])
+  }, [currentDate, enabled, getDateRange, setVisibleRange, viewType])
 
   useEffect(() => {
+    if (!enabled) return
     setSelectedSessionEvent({
       id: editingEvent?.id ?? null,
       title: editingEvent?.title ?? null,
     })
-  }, [editingEvent, setSelectedSessionEvent])
+  }, [editingEvent, enabled, setSelectedSessionEvent])
 
   useEffect(() => {
+    if (!enabled) return
     return registerModuleAgentHandler(
       'calendar',
       createCalendarAgentHandler({
@@ -64,6 +69,7 @@ export function useCalendarAgentAdapter(params: UseCalendarAgentAdapterParams): 
     )
   }, [
     currentDate,
+    enabled,
     editingEvent,
     eventsRef,
     getDateRange,

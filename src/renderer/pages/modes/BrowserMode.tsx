@@ -78,6 +78,7 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   const shownDomainsRef = useRef<Set<string>>(new Set())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevLoadingRef = useRef<Record<string, boolean>>({})
+  const activationFrameRef = useRef<number | null>(null)
 
   const sidebarVisible = useWorkspace(s => s.sidebarVisible)
   const sidePanelVariant = useWorkspace(s => s.sidePanelVariant)
@@ -546,28 +547,39 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   // so we just need to re-show the active BrowserView and re-sync the URL input.
   useEffect(() => {
     if (!isElectron) return
+    if (activationFrameRef.current) {
+      cancelAnimationFrame(activationFrameRef.current)
+      activationFrameRef.current = null
+    }
     if (!isActive) {
-      window.electronAPI?.browser?.hideActiveHost()
+      window.electronAPI?.browser?.hideAll()
       return
     }
-    const { tabs: currentTabs, activeTabId: currentActive } = useBrowserTabs.getState()
+    const { tabs: currentTabs } = useBrowserTabs.getState()
     if (currentTabs.length === 0) {
       void handleNewTab()
     } else {
-      requestAnimationFrame(() => {
+      activationFrameRef.current = requestAnimationFrame(() => {
+        activationFrameRef.current = null
         sendBoundsImmediate({ forceExact: true })
-        if (currentActive) {
-          window.electronAPI?.browser?.switchTab(currentActive)
-        } else {
-          window.electronAPI?.browser?.showActive()
-        }
+        window.electronAPI?.browser?.showActive()
       })
+    }
+    return () => {
+      if (activationFrameRef.current) {
+        cancelAnimationFrame(activationFrameRef.current)
+        activationFrameRef.current = null
+      }
     }
   }, [handleNewTab, isActive, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     return () => {
-      window.electronAPI?.browser?.hideActiveHost()
+      if (activationFrameRef.current) {
+        cancelAnimationFrame(activationFrameRef.current)
+        activationFrameRef.current = null
+      }
+      window.electronAPI?.browser?.hideAll()
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     }
   }, [])

@@ -8,6 +8,7 @@ import type { RSSItem } from './RSSFeed'
 interface PreviewBrowserProps {
   item: RSSItem
   onClose: () => void
+  isActive?: boolean
 }
 
 interface PreviewState {
@@ -27,7 +28,7 @@ const defaultPreviewState: PreviewState = {
   canGoForward: false,
 }
 
-export default function PreviewBrowser({ item, onClose }: PreviewBrowserProps) {
+export default function PreviewBrowser({ item, onClose, isActive = true }: PreviewBrowserProps) {
   const [previewState, setPreviewState] = useState<PreviewState>(defaultPreviewState)
   const contentRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number | null>(null)
@@ -90,10 +91,14 @@ export default function PreviewBrowser({ item, onClose }: PreviewBrowserProps) {
   }, [])
 
   useEffect(() => {
+    if (!isActive) {
+      void window.electronAPI?.browser?.previewClose()
+      return
+    }
     setPreviewState((prev) => ({ ...prev, loading: true, error: undefined }))
     void window.electronAPI?.browser?.previewOpen({ url: item.link })
     requestAnimationFrame(() => sendBoundsImmediate())
-  }, [item.id, item.link, sendBoundsImmediate])
+  }, [isActive, item.id, item.link, sendBoundsImmediate])
 
   useEffect(() => {
     const el = contentRef.current
@@ -113,6 +118,17 @@ export default function PreviewBrowser({ item, onClose }: PreviewBrowserProps) {
   }, [sendBoundsImmediate])
 
   useEffect(() => {
+    if (!isActive) {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      return
+    }
     startBoundsTracking()
   }, [
     sidebarVisible,
@@ -121,6 +137,7 @@ export default function PreviewBrowser({ item, onClose }: PreviewBrowserProps) {
     skillsSplitRatio,
     chatPanelVisible,
     chatPanelWidth,
+    isActive,
     startBoundsTracking,
   ])
 

@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-03-07
+> 更新时间: 2026-03-20
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -40,6 +40,15 @@ Ready 采用 Electron 三层架构：
 - 前端：`src/renderer/pages/modes/DesignMode.tsx`
 - 后端：`src/main/modules/design-engine/*`
 - 说明：TLDraw 画布、设计会话、Inspector 与导出链路
+- 关键组件：
+  - `ComponentPanel.tsx`：属性面板，控制选中元素的样式
+  - `shapes/`：自定义形状（TextBlockShape、ButtonShape、CardShape 等）
+  - `design-agent-handler.ts`：设计工具的 Agent 处理逻辑
+- 样式系统：
+  - tldraw 原生 text 使用 `DefaultSizeStyle` (s/m/l/xl)
+  - 实际字号映射：`{ s: 18px, m: 32px, l: 48px, xl: 64px }`
+  - 显示模式和编辑模式通过 CSS 强制统一字号（`src/renderer/styles/index.css`）
+  - 编辑模式使用 `tiptap ProseMirror` (contenteditable) 而非 textarea
 
 ### 3.4 Video
 - 前端：`src/renderer/pages/modes/VideoMode.tsx`
@@ -155,6 +164,9 @@ Ready 采用 Electron 三层架构：
 - 导入/移除 custom skill
 - 调度 Python / Node / Shell skill action
 - 记录 jobs / schedules / stats
+- 编译 `ready-skill.json + skill.workflow.json + SKILL.md`
+- 持久化 workflow execution / step history / artifacts
+- 对 workflow skill 提供 blocker-based resume / restart-from-step
 
 ### 8.3 UI
 技能中心当前支持：
@@ -162,6 +174,19 @@ Ready 采用 Electron 三层架构：
 - 拖拽导入技能目录
 - 默认命令生成
 - 技能说明更新与删除/移除操作
+- Recent Executions 区域，展示 status / current step / blocker / recent artifacts
+- 在 blocker 为 `need_input / need_confirmation / need_agent_result` 时直接继续提交 execution
+
+### 8.4 Workflow Skill 协议
+- `ready-skill.json` 负责 skill 元信息、actions、visibility、execution mode
+- `skill.workflow.json` 负责 step、inputs、transitions、agent_task / confirmation / user_input
+- `SKILL.md` 只做人类说明，不再承担机器协议职责
+- 公开 action 才会暴露为模型工具；`visibility: "internal"` 仅供 workflow step 调用
+
+### 8.5 Claude / OpenAI 兼容修复
+- `direct-chat` 现在会在视频输入场景下，为显式 `/skill`、手动阶段控制、embedded python 请求、活跃 execution 保留 tools
+- OpenAI `chat/completions` / `responses` 发请求前都会修复缺失的 tool response history，避免 `tool_call_id` 400
+- `need_agent_result` blocker 会自动注入文本类 source materials 正文，而不是只告诉模型文件路径
 
 ## 9. 开发约定
 ### 9.1 新增跨进程功能的最小闭环
@@ -176,12 +201,27 @@ Ready 采用 Electron 三层架构：
 - BrowserView 是原生层覆盖，不受 DOM `z-index` 控制
 - 需要展示纯 DOM 覆盖层时，先 `hideAll()`
 - 恢复浏览内容时，再 `showActive()` 并更新 bounds
+- 工作台切到非 browser 可见态时，优先由壳层统一调用 `browser.hideAll()`，不要只隐藏 active tab host；否则 RSS preview / popup 这类原生子视图可能残留在前台
 
-### 9.3 日志约定
-当前关键日志：
-- `/tmp/ready-directchat.log`
-- `/tmp/ready-tools.log`
-- `/tmp/ready-browser.log`
+### 9.3 Workbench Keep-Alive 约定
+- `src/renderer/components/layout/WorkbenchModeOutlet.tsx` 负责 browser / document / rss / calendar 四个主模式的常驻挂载
+- 模式切换只改 CSS 显隐（`hidden` / `display: none`），不再通过访问后首次挂载或切场动画来切整个重量级子树
+- 页面级副作用必须感知 `isActive`
+- RSS：隐藏时暂停 analysis polling / auto refresh，可见时再做一次数据同步
+- Calendar：重量级 Schedule-X 初始化延后到首次激活，隐藏时不继续做 UI 同步
+- RSS preview：模式隐藏时必须关闭 preview host，重新显示时再按当前 item 恢复
+- 顶栏四模块切换器使用稳定最小宽度，避免 active/hover 状态引发布局抖动
+- browser/rss/calendar 的内部 header rail 需要和 document 模式共享左边界；`workbench-canvas-shell` 负责统一圆角矩形轮廓，子模块不要再各自切半圆角壳
+- BrowserMode 若通过 `requestAnimationFrame` 延后恢复原生 host，必须可取消；切出 browser 时统一走 `hideAll()`，避免旧 RAF 把 BrowserView 再次抬回前台
+- 主进程在 `browserHostsPresented = false` 时不应继续把 renderer bounds 应用到 active host；隐藏态只记录最新 bounds，不重新摆回可视区
+- liquid-glass 皮肤下若某模块没有额外顶部 shell 参与勾边，需要为该模块补回最小可见 outline；当前 RSS 使用这一例外规则
+- 顶栏四模块切换器当前使用普通稳定按钮组；如果未来重新引入高动态 segmented control，必须先验证 hover/active 不会造成几何偏移
+
+### 9.4 日志约定
+当前关键日志位于系统临时目录（macOS: `/tmp/`, Windows: `%TEMP%`）：
+- `ready-directchat.log`
+- `ready-tools.log`
+- `ready-browser.log`
 
 ## 10. 常用命令
 ```bash
@@ -199,9 +239,12 @@ npm run verify
 - `ai-provider-capabilities.test.ts`
 - `browser-popup-policy.test.ts`
 - `browser-tools.test.ts`
+- `browser-host-visibility-contract.test.ts`
 - `database.test.ts`
 - `ipc-handlers.test.ts`
 - `responses-parser.test.ts`
 - `rss-analysis-manager.test.ts`
 - `stores.test.ts`
 - `tool-bridge.test.ts`
+- `workbench-keep-alive-contract.test.ts`
+- `workbench-shell-alignment-contract.test.ts`

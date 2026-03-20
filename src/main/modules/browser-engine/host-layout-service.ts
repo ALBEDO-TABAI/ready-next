@@ -2,6 +2,9 @@ import { BrowserView, BrowserWindow, WebContentsView } from 'electron'
 
 import { type BrowserHostKind, type BrowserHostView, type BrowserRect } from './host-types'
 
+const HOST_BORDER_RADIUS = 18
+const HOST_TRANSPARENT_BG = '#00000000'
+
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
   private pendingBoundsByView = new WeakMap<BrowserHostView, BrowserRect>()
@@ -29,6 +32,18 @@ export class BrowserHostLayoutService {
     const view = this.browserHostKind === 'webContentsView'
       ? new WebContentsView(options)
       : new BrowserView(options)
+    try {
+      view.setBackgroundColor(HOST_TRANSPARENT_BG)
+    } catch {
+      // ignore background color failures
+    }
+    if ('setBorderRadius' in view && typeof view.setBorderRadius === 'function') {
+      try {
+        view.setBorderRadius(HOST_BORDER_RADIUS)
+      } catch {
+        // ignore border radius failures on unsupported hosts
+      }
+    }
     this.hostKindByView.set(view, this.browserHostKind)
     return view
   }
@@ -63,6 +78,11 @@ export class BrowserHostLayoutService {
 
   hideHost(view: BrowserHostView): void {
     this.attachHost(view)
+    const timer = this.boundsFlushTimers.get(view)
+    if (timer) {
+      clearTimeout(timer)
+      this.boundsFlushTimers.delete(view)
+    }
     this.hiddenHosts.add(view)
     this.pendingBoundsByView.set(view, this.offscreenBounds)
     this.setHostBoundsNow(view, this.offscreenBounds)

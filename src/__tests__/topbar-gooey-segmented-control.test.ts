@@ -9,19 +9,12 @@ function readWorkspaceFile(path: string): string {
 
 test('topbar module switcher uses a dedicated gooey segmented control with svg goo filter and spring physics', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
-  const gooeyControl = readWorkspaceFile('src/renderer/components/motion/GooeySegmentedControl.tsx')
+  const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
 
-  assert.match(topBar, /import GooeySegmentedControl/)
-  assert.doesNotMatch(topBar, /import MorphSegmentedControl/)
-  assert.match(topBar, /<GooeySegmentedControl/)
-
-  assert.match(gooeyControl, /<svg[^>]*width="0"[^>]*height="0"/)
-  assert.match(gooeyControl, /<feGaussianBlur/)
-  assert.match(gooeyControl, /<feColorMatrix/)
-  assert.match(gooeyControl, /values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 [0-9.]+ -[0-9.]+"/)
-  assert.match(gooeyControl, /type:\s*'spring'/)
-  assert.match(gooeyControl, /mass:\s*[0-9.]+/)
-  assert.match(gooeyControl, /stiffness:\s*[0-9.]+/)
-  assert.match(gooeyControl, /damping:\s*[0-9.]+/)
-  assert.match(gooeyControl, /data-gooey-segmented-control=/)
+  assert.doesNotMatch(topBar, /import GooeySegmentedControl/)
+  assert.match(topBar, /className="mode-tab-button relative flex h-\[24px\] w-\[34px\]/)
+  assert.match(topBar, /role="tablist"/)
+  assert.match(topBar, /aria-label="工作台模式"/)
+  assert.match(topBar, /color-mix\(in srgb, var\(--color-green-light\) 58%, transparent\)/)
+  assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
 })

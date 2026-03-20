@@ -6,7 +6,6 @@ import ModeSlider from './ModeSlider'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import { IconButton } from '../ui/IconButton'
-import GooeySegmentedControl, { type GooeySegmentedItem } from '../motion/GooeySegmentedControl'
 import {
   WORKBENCH_MODE_TRACK_MAX_WIDTH,
   WORKBENCH_TOPBAR_HEIGHT,
@@ -66,24 +65,6 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
     }
   }, [])
 
-  const modeItems: GooeySegmentedItem[] = modes.map((mode, index) => {
-    const isPrimary = workbenchMode === mode.id
-    const isSplitOnly = splitMode === mode.id && splitMode !== workbenchMode
-    const isActive = isPrimary || isSplitOnly
-    return {
-      id: mode.id,
-      label: mode.label,
-      icon: mode.icon,
-      active: isPrimary,
-      secondaryActive: isSplitOnly,
-      role: 'tab',
-      tabIndex: isActive ? 0 : -1,
-      title: `${mode.label}${isSplitOnly ? ' (分屏)' : ''}${!isActive ? '\n按住 Shift 点击可分屏' : ''}`,
-      onClick: (e) => handleModeClick(mode.id, e),
-      onKeyDown: (e) => handleTabKeyDown(e, index),
-    }
-  })
-
   return (
     <div
       data-liquid-shell="topbar"
@@ -104,18 +85,44 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
           <div
             role="tablist"
             aria-label="工作台模式"
+            className="flex items-center gap-[4px]"
             style={{
               maxWidth: WORKBENCH_MODE_TRACK_MAX_WIDTH,
               overflowX: 'auto',
             }}
           >
-            <GooeySegmentedControl
-              items={modeItems}
-              className="flex items-center gap-[2px]"
-              itemClassName="relative flex h-[24px] items-center justify-center rounded-[10px] px-[8px]"
-              itemStyle={{ flexShrink: 0, minWidth: 28 }}
-              contentClassName="relative z-[1] flex h-full items-center justify-center text-[12px] leading-none"
-            />
+            {modes.map((mode, index) => {
+              const Icon = mode.icon
+              const isPrimary = workbenchMode === mode.id
+              const isSplitOnly = splitMode === mode.id && splitMode !== workbenchMode
+              const isActive = isPrimary || isSplitOnly
+
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
+                  title={`${mode.label}${isSplitOnly ? ' (分屏)' : ''}${!isActive ? '\n按住 Shift 点击可分屏' : ''}`}
+                  onClick={(event) => handleModeClick(mode.id, event)}
+                  onKeyDown={(event) => handleTabKeyDown(event, index)}
+                  className="mode-tab-button relative flex h-[24px] w-[34px] items-center justify-center rounded-[10px] transition-colors duration-150"
+                  style={{
+                    flexShrink: 0,
+                    border: '1px solid transparent',
+                    background: isPrimary
+                      ? 'color-mix(in srgb, var(--color-green-light) 58%, transparent)'
+                      : isSplitOnly
+                        ? 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)'
+                        : 'transparent',
+                    color: isActive ? 'var(--text-body)' : 'var(--text-gray)',
+                  }}
+                >
+                  <Icon style={{ width: 13, height: 13 }} strokeWidth={2} />
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

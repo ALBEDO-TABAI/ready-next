@@ -158,7 +158,7 @@ export default function WorkbenchMode() {
   useEffect(() => {
     const visibleModes = [workbenchMode, splitMode].filter(Boolean)
     if (!visibleModes.includes('browser')) {
-      void window.electronAPI?.browser.hideActiveHost()
+      void window.electronAPI?.browser.hideAll()
     }
   }, [splitMode, workbenchMode])
 

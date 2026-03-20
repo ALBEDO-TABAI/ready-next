@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-10
+> 更新时间: 2026-03-20
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
@@ -26,12 +26,29 @@
 - browser/RSS/calendar/design/video 都有基础 diagnostics panel。
 - browser/document/design/video 的 tabs/chrome 已进入共享路径。
 - document 与 design 已从”tab 行里塞操作”改成”tabs + toolbar”结构。
+- browser / document / rss / calendar 的工作台切换已补上 keep-alive 壳层：四个主模式会在 outlet 内常驻挂载，切换只改 CSS 显隐，不再依赖访问后首次挂载 + motion 动画切场。
+- 非活跃模式已开始进入“前台激活、后台挂起”节奏：RSS 轮询/自动刷新只在可见时运行，Calendar 的 Schedule-X 初始化延后到首次激活，RSS 预览在模式隐藏时会主动关闭原生 preview host。
+- 当当前可见模式集合不含 browser 时，Workbench 壳层会统一走 `browser.hideAll()`，避免只隐藏 active host 却遗漏 preview/native overlay。
+- 顶栏四模块切换器已收敛为稳定宽度，去掉了会造成视觉抖动的纵向位移；browser/rss/calendar 的工作区外轮廓和左边界也已向 document 模式对齐。
+- BrowserMode 重新显示原生 host 的逻辑已加上 RAF 取消与 `hideAll()` 收口，避免切离 browser 后被延迟回调重新抬回前台；RSS 在 liquid-glass 下恢复了可见的圆角 outline。
+- 顶栏四模块切换器已进一步退回普通按钮组，不再依赖 gooey segmented control；主进程隐藏态下也会跳过 BrowserView bounds 回写，进一步降低原生视图抢前台风险。
 
 6. RSS 已经具备独立维护条件。
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
 - route diagnostics 和 benchmark 结果会持久化。
 - browser-backed acquisition 已切到优先复用应用内浏览器路线。
 - 单源刷新语义、`lastFetchInvocation` 诊断、preview 关闭覆盖 RSS 面板 bug 都已收口。
+
+7. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
+- 新增 `skill-execution-types.ts`、compiler / loader、execution state store、execution coordinator、prompt builder。
+- embedded skills 已拆分为 `workflow / advisory / direct` 兼容模式：
+  - `video-copy-analyzer`：workflow
+  - `video-expert-analyzer`：workflow
+  - `lets-go-rss`：advisory + direct runtime utility
+- 新增 `skill_get_state / skill_submit_input / skill_submit_confirmation / skill_submit_agent_result / skill_restart_from_step / skill_cancel_execution`
+- 新增 `system_run_embedded_python`
+- skills center 已新增 Recent Executions 和 blocker 继续入口
+- direct-chat 已加入视频输入下的 skill/python tools 保留策略，以及 OpenAI tool history repair
 
 7. **设计模块已完成核心改进（2026-03-10）**。
 - **”假成功”问题已修复**：所有设计工具调用都返回真实结果或明确错误，AI 能基于真实执行结果做决策。
@@ -67,6 +84,7 @@
 - ~~Design inspector 仍缺高频属性控制~~（已完成）。
 - Browser diagnostics 仍是 panel，不是完整 lab。
 - Browser orchestration 仍有最后一层收口空间。
+- skill workflow 仍缺少更细的 execution UX 打磨与更多样例 skill 迁移。
 - **`PromptAssemblyService + L0/L1/L2 memory` 还未启动**（下一阶段主线）。
 - **Feishu capability replacement 还未启动**（下一阶段主线）。
 
@@ -83,6 +101,10 @@
 ## 最近一次有效校验
 - `npm run typecheck:node` 通过
 - `npm run typecheck:web` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/skill-compiler-smoke.test.ts src/__tests__/skill-resolver-smoke.test.ts` 通过
+- `python3 -m py_compile` 已校验新 wrapper 脚本语法
 - `npm test` 通过，最近一次全量通过为 `173` 个测试
 - `npm run build` 通过
 

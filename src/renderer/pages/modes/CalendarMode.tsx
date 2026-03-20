@@ -192,7 +192,7 @@ function ViewSelector({ viewType, onViewTypeChange }: { viewType: ViewType; onVi
 
 // --- Component ---
 
-export default function CalendarMode() {
+export default function CalendarMode({ isActive = true }: { isActive?: boolean }) {
   const visibleRangeStart = useCalendarSession((state) => state.visibleRangeStart)
   const visibleRangeEnd = useCalendarSession((state) => state.visibleRangeEnd)
   const selectedEventId = useCalendarSession((state) => state.selectedEventId)
@@ -210,6 +210,7 @@ export default function CalendarMode() {
   const [isMock, setIsMock] = useState(cachedState?.isMock ?? false)
   const [viewType, setViewType] = useState<ViewType>(cachedState?.viewType ?? 'week')
   const [dataLoaded, setDataLoaded] = useState(cachedState?.dataLoaded ?? false)
+  const [hasActivated, setHasActivated] = useState(isActive || Boolean(cachedState?.dataLoaded))
 
   // EventModal state
   const [modalOpen, setModalOpen] = useState(false)
@@ -226,6 +227,7 @@ export default function CalendarMode() {
   const [newEventCardDesc, setNewEventCardDesc] = useState<string | undefined>(undefined)
   const mainViewRef = useRef<HTMLDivElement>(null)
   const createButtonRef = useRef<HTMLButtonElement>(null)
+  const becameVisibleRef = useRef(false)
 
   // --- Schedule-X: direct DOM management (StrictMode-safe) ---
   // We bypass ScheduleXCalendar because its cleanup calls calendarApp.destroy(),
@@ -253,6 +255,12 @@ export default function CalendarMode() {
       cachedState = stateRef.current
     }
   }, [])
+
+  useEffect(() => {
+    if (isActive) {
+      setHasActivated(true)
+    }
+  }, [isActive])
 
   // --- Event modal handlers (defined before SX effect so they can be referenced) ---
 
@@ -282,6 +290,7 @@ export default function CalendarMode() {
 
   // --- Single SX lifecycle effect: create → render → (cleanup: destroy) ---
   useEffect(() => {
+    if (!hasActivated) return
     const container = sxContainerRef.current
     if (!container) return
 
@@ -407,10 +416,11 @@ export default function CalendarMode() {
       return undefined
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [hasActivated])
 
   // --- Load data only once ---
   const loadCalendarData = useCallback(async (force = false) => {
+    if (!hasActivated) return
     if (dataLoaded && !force) return
 
     try {
@@ -453,11 +463,21 @@ export default function CalendarMode() {
     }
 
     setDataLoaded(true)
-  }, [dataLoaded])
+  }, [dataLoaded, hasActivated])
 
-  useEffect(() => { loadCalendarData() }, [loadCalendarData])
+  useEffect(() => {
+    if (!isActive) {
+      becameVisibleRef.current = false
+      return
+    }
+
+    if (!hasActivated || becameVisibleRef.current) return
+    becameVisibleRef.current = true
+    void loadCalendarData(dataLoaded)
+  }, [dataLoaded, hasActivated, isActive, loadCalendarData])
 
   useCalendarAgentAdapter({
+    enabled: hasActivated,
     currentDate,
     viewType,
     editingEvent,
@@ -479,7 +499,7 @@ export default function CalendarMode() {
 
   useEffect(() => {
     const app = calendarAppRef.current
-    if (!app) return
+    if (!app || !isActive) return
     const filteredEvents = events.filter(e => enabledSourceIds.has(e.calendarId))
     const sxEvents = filteredEvents.map(eventToSX)
     try {
@@ -487,12 +507,12 @@ export default function CalendarMode() {
     } catch (err) {
       console.warn('SX events.set error:', err)
     }
-  }, [sxReady, events, enabledSourceIds])
+  }, [sxReady, events, enabledSourceIds, isActive])
 
   // --- Sync calendars (sources) to Schedule-X ---
   useEffect(() => {
     const app = calendarAppRef.current
-    if (!app) return
+    if (!app || !isActive) return
     const cals = sourcesToCalendars(sources)
     try {
       const a = app as any
@@ -502,36 +522,36 @@ export default function CalendarMode() {
     } catch (err) {
       console.warn('SX calendars sync error:', err)
     }
-  }, [sxReady, sources])
+  }, [sxReady, sources, isActive])
 
   // --- Sync view type to Schedule-X ---
   useEffect(() => {
     const plugin = controlsPluginRef.current
-    if (!plugin) return
+    if (!plugin || !isActive) return
     const sxViewName = SX_VIEW_NAMES[viewType]
     try {
       plugin.setView(sxViewName)
     } catch (err) {
       console.warn('SX setView error:', err)
     }
-  }, [sxReady, viewType])
+  }, [sxReady, viewType, isActive])
 
   // --- Sync date navigation to Schedule-X ---
   useEffect(() => {
     const plugin = controlsPluginRef.current
-    if (!plugin) return
+    if (!plugin || !isActive) return
     try {
       // calendar-controls expects Temporal.PlainDate (not a YYYY-MM-DD string).
       plugin.setDate(toPlainDateLike(currentDate) as any)
     } catch (err) {
       console.warn('SX setDate error:', err)
     }
-  }, [sxReady, currentDate])
+  }, [sxReady, currentDate, isActive])
 
   // --- Watch for theme changes via MutationObserver ---
   useEffect(() => {
     const app = calendarAppRef.current
-    if (!app) return
+    if (!app || !isActive) return
     const observer = new MutationObserver(() => {
       const theme = document.documentElement.getAttribute('data-theme')
       try {
@@ -542,7 +562,7 @@ export default function CalendarMode() {
     })
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => observer.disconnect()
-  }, [sxReady])
+  }, [sxReady, isActive])
 
   // --- Source management ---
 
@@ -802,7 +822,7 @@ export default function CalendarMode() {
 
   return (
     <CalendarProvider value={calendarContextValue}>
-      <div className="workbench-mode-root">
+      <div className="workbench-mode-root calendar-mode-shell">
         {/* Mock Mode Badge */}
         {isMock && (
           <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-orange-light)] border-b border-[var(--color-orange)] flex-shrink-0">
@@ -814,18 +834,23 @@ export default function CalendarMode() {
         )}
 
         <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
-          <div className="flex h-full min-h-0 overflow-hidden" style={{ gap: 0 }}>
+          <div
+            className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
+            style={{
+              gap: 0,
+              background: 'rgba(241, 244, 249, 0.94)',
+              backdropFilter: 'blur(20px) saturate(138%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(138%)',
+            }}
+          >
             {/* Calendar Sidebar */}
             <div
-              className="panel-hover-scrollbar content-surface-panel flex-shrink-0 overflow-auto flex flex-col"
+              className="panel-hover-scrollbar flex-shrink-0 overflow-auto flex flex-col"
               style={{
                 width: WORKBENCH_SUPPORT_PANEL_WIDTH,
                 minWidth: WORKBENCH_SUPPORT_PANEL_WIDTH,
-                background: 'color-mix(in srgb, var(--surface-panel-bg) 34%, transparent)',
+                background: 'transparent',
                 padding: '0 14px 12px',
-                borderRight: '1px solid transparent',
-                backdropFilter: 'blur(18px) saturate(135%)',
-                WebkitBackdropFilter: 'blur(18px) saturate(135%)',
               }}
             >
               <MiniCalendar
@@ -850,26 +875,18 @@ export default function CalendarMode() {
 
             {/* Main View */}
             <div
-              className="workbench-canvas-shell flex flex-1 min-h-0 min-w-0 overflow-hidden"
+              className="flex flex-1 min-h-0 min-w-0 overflow-hidden"
               style={{
-                background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
-                borderRadius: 0,
-                borderTopRightRadius: 'var(--workbench-canvas-radius)',
-                borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-                borderLeft: 'none',
+                background: 'transparent',
                 boxShadow: 'none',
-                backdropFilter: 'blur(20px) saturate(138%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(138%)',
               }}
             >
               <div
                 ref={mainViewRef}
-                className="content-surface-panel flex-1 flex flex-col"
+                className="flex-1 flex flex-col"
                 style={{
-                  background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
+                  background: 'transparent',
                   position: 'relative',
-                  borderTopLeftRadius: 0,
-                  borderBottomLeftRadius: 0,
                 }}
               >
             {/* CalNavBar - our own nav bar above SX calendar */}
@@ -878,11 +895,8 @@ export default function CalendarMode() {
               style={{
                 height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                 padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-                borderBottom: '1px solid transparent',
-                background: 'color-mix(in srgb, var(--bg-content) 24%, transparent)',
+                background: 'transparent',
                 boxSizing: 'border-box',
-                backdropFilter: 'blur(18px) saturate(136%)',
-                WebkitBackdropFilter: 'blur(18px) saturate(136%)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -943,7 +957,9 @@ export default function CalendarMode() {
               onDragLeave={handleCalendarDragLeave}
               onDrop={handleCalendarDrop}
               style={{
-                background: calendarDropActive ? 'var(--color-blue-light)' : undefined,
+                background: calendarDropActive
+                  ? 'var(--color-blue-light)'
+                  : 'transparent',
                 transition: 'background 0.15s ease',
               }}
             >
