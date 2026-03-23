@@ -89,10 +89,14 @@ html[data-theme='dark'] {
   -webkit-backdrop-filter: none;
 }
 
+:root {
+  --sx-ready-liquid-neutral-bg: rgba(247, 248, 251, 0.96);
+}
+
 html[data-skin='liquid-glass'] .sx__calendar-wrapper {
-  background: transparent !important;
-  backdrop-filter: blur(18px) saturate(138%);
-  -webkit-backdrop-filter: blur(18px) saturate(138%);
+  background: var(--sx-ready-liquid-neutral-bg) !important;
+  backdrop-filter: blur(18px) saturate(0%);
+  -webkit-backdrop-filter: blur(18px) saturate(0%);
 }
 
 .sx__calendar {
@@ -102,6 +106,7 @@ html[data-skin='liquid-glass'] .sx__calendar-wrapper {
 html[data-skin='liquid-glass'] .sx__calendar,
 html[data-skin='liquid-glass'] .sx-react-calendar-wrapper {
   background: transparent !important;
+  border-radius: 0 !important;
 }
 
 /* ========== Week/Day view ========== */
@@ -131,7 +136,7 @@ html[data-skin='liquid-glass'] .sx__time-grid-day,
 html[data-skin='liquid-glass'] .sx__time-axis,
 html[data-skin='liquid-glass'] .sx__week-grid__date,
 html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
-  background: transparent !important;
+  background: var(--sx-ready-liquid-neutral-bg) !important;
 }
 
 .sx__time-axis {
