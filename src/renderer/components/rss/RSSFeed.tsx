@@ -284,12 +284,12 @@ export default function RSSFeed({
 
   return (
     <div
-      className="rss-feed-surface content-surface-panel flex flex-col h-full"
-      style={{ padding: '0', background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
+      className="rss-feed-surface rss-workbench-surface content-surface-panel flex flex-col h-full"
+      style={{ padding: '0', background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
     >
       {/* Header Bar */}
       <div
-        className="flex items-center justify-between flex-shrink-0"
+        className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"
         style={{
           minHeight: 56,
           padding: `0 ${WORKBENCH_HEADER_EDGE_X}px 16px`,
@@ -576,8 +576,8 @@ export default function RSSFeed({
 
       {/* Item List */}
       <div
-        className="rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
-        style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}
+        className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
+        style={{ background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))' }}
       >
         <div className="divide-y divide-[var(--border-default)]">
           {filteredItems.length === 0 ? (

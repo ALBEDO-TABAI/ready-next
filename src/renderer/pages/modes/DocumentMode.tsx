@@ -276,12 +276,12 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
           />
 
           <div
-            className="flex items-center min-w-0"
+            className="document-path-bar flex items-center min-w-0"
             style={{
               height: 30,
               paddingLeft: 18,
               paddingRight: 18,
-              background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)',
+              background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))',
             }}
           >
             <div

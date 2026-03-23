@@ -19,16 +19,26 @@ test('topbar module switcher uses stable widths and avoids vertical position jit
 
 test('browser rss and calendar shells align their left edge with the shared workbench canvas contract', () => {
   const browserHeader = readWorkspaceFile('src/renderer/components/browser/BrowserHeader.tsx')
+  const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
   const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
   const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
+  const workbenchTabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(browserHeader, /className="glass-surface-panel flex-shrink-0"/)
+  assert.match(browserHeader, /className="browser-header-surface glass-surface-panel flex-shrink-0"/)
   assert.match(browserHeader, /paddingLeft: WORKBENCH_HEADER_EDGE_X/)
+  assert.match(workbenchTabs, /className="workbench-tabs-surface glass-surface-panel flex-shrink-0"/)
+  assert.match(documentMode, /className="document-path-bar flex items-center min-w-0"/)
+  assert.match(markdownEditor, /className="document-editor-surface flex-1 overflow-auto"/)
+  assert.match(markdownEditor, /className="document-preview-surface flex-1 overflow-auto"/)
 
   assert.match(rssFeed, /WORKBENCH_HEADER_EDGE_X/)
+  assert.match(rssFeed, /className="rss-feed-surface rss-workbench-surface content-surface-panel flex flex-col h-full"/)
+  assert.match(rssFeed, /className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"/)
+  assert.match(rssFeed, /className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"/)
   assert.match(rssFeed, /padding:\s*`0 \$\{WORKBENCH_HEADER_EDGE_X\}px 16px`/)
   assert.match(rssFeed, /padding:\s*`12px \$\{WORKBENCH_HEADER_EDGE_X\}px`/)
 
@@ -53,6 +63,11 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{/)
   assert.match(styles, /background: rgba\(241, 244, 249, 0\.94\) !important;/)
   assert.match(styles, /border: 1px solid rgba\(224, 230, 240, 0\.96\) !important;/)
+  assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(241,\s*244,\s*249,\s*0\.94\);/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.document-editor-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-workbench-surface \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(20px\) saturate\(0%\) !important;/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-feed-toolbar,[\s\S]*\.rss-feed-list \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-feed-toolbar,[\s\S]*backdrop-filter:\s*blur\(20px\) saturate\(0%\) !important;/)
 })
 
 test('browser visibility handoff cancels stale re-show work and rss shell keeps a rounded outline in liquid glass', () => {

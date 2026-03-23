@@ -182,6 +182,7 @@ export default function MarkdownEditor({
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // TiptapEditor ref
   const tiptapRef = useRef<TiptapEditorRef>(null)
@@ -219,19 +220,29 @@ export default function MarkdownEditor({
         if (!tab.content && !tab.isDirty) {
           updateTabContent(tab.id, DEFAULT_CONTENT)
         }
+        setLoadError(null)
+        setContentReady(true)
+        setIsLoading(false)
         return
       }
 
       // Avoid clobbering content that has already been loaded by tool actions.
       if (tab.content.length > 0 && !tab.isDirty) {
+        setLoadError(null)
         setIsLoading(false)
         setContentReady(true)
         return
       }
 
-      if (typeof window === 'undefined' || !window.electronAPI) return
+      if (typeof window === 'undefined' || !window.electronAPI) {
+        setLoadError('文档加载失败：当前环境未提供 Electron 文件系统能力。')
+        setIsLoading(false)
+        setContentReady(true)
+        return
+      }
 
       setIsLoading(true)
+      setLoadError(null)
       try {
         const ext = getFileExt(tab.path)
         if (['md', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'].includes(ext)) {
@@ -260,14 +271,12 @@ export default function MarkdownEditor({
           }
         } else {
           if (!cancelled) {
-            updateTabContent(tab.id, `# 暂不支持该格式\n\n文件: ${tab.path}`)
-            markTabSaved(tab.id)
+            setLoadError(`文件暂不支持直接编辑：${tab.path}`)
           }
         }
       } catch (error) {
         if (!cancelled) {
-          updateTabContent(tab.id, `# 文件读取失败\n\n${error instanceof Error ? error.message : String(error)}`)
-          markTabSaved(tab.id)
+          setLoadError(`文档加载失败：${error instanceof Error ? error.message : String(error)}`)
         }
       } finally {
         if (!cancelled) {
@@ -410,16 +419,34 @@ export default function MarkdownEditor({
   // Resolve TiptapEditor editor instance for context menu / toolbar
   const editorInstance = tiptapRef.current?.editor ?? null
 
+  const renderLoadState = () => {
+    if (loadError) {
+      return (
+        <div className="flex items-center justify-center py-10">
+          <div className="max-w-[520px] rounded-[12px] border border-[var(--color-orange)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
+            {loadError}
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex items-center justify-center py-10">
+        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载中...</span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* ── Content area ──────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--bg-content)' }}>
+      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}>
         <>
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
             <div
               ref={editorContainerRef}
-              className="flex-1 overflow-auto"
+              className="document-editor-surface flex-1 overflow-auto"
               style={{ position: 'relative' }}
               onContextMenu={handleContextMenu}
               onDragOver={handleEditorDragOver}
@@ -427,25 +454,27 @@ export default function MarkdownEditor({
             >
               <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {contentReady ? (
-                  <TiptapEditor
-                    ref={tiptapRef}
-                    content={tab.content}
-                    onChange={handleEditorChange}
-                    onSelectionChange={handleSelectionChange}
-                    onRequestPreview={onRequestPreview}
-                    onRequestAgentUpdate={requestAgentUpdateWidget}
-                    editable={!isLoading}
-                    revealTarget={activeRevealTarget}
-                    onRevealHandled={() => {
-                      if (activeRevealTarget) {
-                        setPendingReveal(null)
-                      }
-                    }}
-                  />
+                  loadError ? (
+                    renderLoadState()
+                  ) : (
+                    <TiptapEditor
+                      ref={tiptapRef}
+                      content={tab.content}
+                      onChange={handleEditorChange}
+                      onSelectionChange={handleSelectionChange}
+                      onRequestPreview={onRequestPreview}
+                      onRequestAgentUpdate={requestAgentUpdateWidget}
+                      editable={!isLoading}
+                      revealTarget={activeRevealTarget}
+                      onRevealHandled={() => {
+                        if (activeRevealTarget) {
+                          setPendingReveal(null)
+                        }
+                      }}
+                    />
+                  )
                 ) : (
-                  <div className="flex items-center justify-center py-10">
-                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载中...</span>
-                  </div>
+                  renderLoadState()
                 )}
               </div>
 
@@ -461,12 +490,16 @@ export default function MarkdownEditor({
           {/* ── Preview pane ──────────── */}
           {viewMode === 'preview' && (
             <div
-              className="flex-1 overflow-auto"
-              style={{ background: 'var(--bg-content)' }}
+              className="document-preview-surface flex-1 overflow-auto"
+              style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
               onContextMenu={handleContextMenu}
             >
               <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
-                <NotePreview content={tab.content} notePath={tab.path} focusWidgetTitle={previewFocusWidgetTitle} />
+                {loadError ? (
+                  renderLoadState()
+                ) : (
+                  <NotePreview content={tab.content} notePath={tab.path} focusWidgetTitle={previewFocusWidgetTitle} />
+                )}
               </div>
             </div>
           )}

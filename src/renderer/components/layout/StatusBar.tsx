@@ -1,5 +1,6 @@
 import { Wifi, WifiOff, Clock, GitBranch } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { WORKBENCH_EDGE_ICON_INSET, WORKBENCH_STATUSBAR_HEIGHT } from '../../modules/workbench/chrome'
 
 export default function StatusBar() {
     const [time, setTime] = useState(new Date())
@@ -13,8 +14,8 @@ export default function StatusBar() {
     return (
         <div
             data-liquid-shell="statusbar"
-            className="h-[24px] flex items-center justify-between px-3 text-[11px] text-[var(--text-light)] select-none"
-            style={{ background: 'transparent', borderTop: '1px solid transparent', boxShadow: 'none' }}
+            className="flex items-center justify-between text-[11px] text-[var(--text-light)] select-none"
+            style={{ height: WORKBENCH_STATUSBAR_HEIGHT, paddingLeft: WORKBENCH_EDGE_ICON_INSET, paddingRight: WORKBENCH_EDGE_ICON_INSET, background: 'transparent', borderTop: '1px solid transparent', boxShadow: 'none' }}
         >
             {/* Left */}
             <div className="flex items-center gap-3">

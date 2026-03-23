@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import './tiptap.css';
 
+/* Visual token source of truth for renderer UI.
+   Keep shared colors, surfaces, shadows, and shell classes here; component files should only override when behavior requires it. */
 /* Custom CSS Variables */
 :root {
   /* Colors from UI-SPEC-V5.md — Light Mode (default) */
@@ -256,6 +258,7 @@ html[data-skin='liquid-glass'] {
   --surface-shadow: var(--lg-content-shadow);
   --surface-blur: 18px;
   --surface-saturate: 155%;
+  --workbench-liquid-chrome-bg: rgba(241, 244, 249, 0.94);
   --glass-highlight: rgba(255, 255, 255, 0.74);
   --app-bg-overlay-opacity: 1;
 }
@@ -302,6 +305,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --surface-shadow: var(--lg-content-shadow);
   --surface-blur: 14px;
   --surface-saturate: 132%;
+  --workbench-liquid-chrome-bg: rgba(31, 38, 52, 0.94);
   --glass-highlight: rgba(226, 237, 255, 0.2);
   --app-bg-overlay-opacity: 1;
 }
@@ -1132,6 +1136,24 @@ html[data-skin='liquid-glass'] .glass-surface-floating::after {
 html[data-skin='liquid-glass'] .glass-surface-panel,
 html[data-skin='liquid-glass'] .glass-surface-card {
   box-shadow: none !important;
+}
+
+html[data-skin='liquid-glass'] .browser-header-surface,
+html[data-skin='liquid-glass'] .workbench-tabs-surface,
+html[data-skin='liquid-glass'] .document-path-bar,
+html[data-skin='liquid-glass'] .document-editor-surface,
+html[data-skin='liquid-glass'] .document-preview-surface,
+html[data-skin='liquid-glass'] .rss-workbench-surface {
+  background: var(--workbench-liquid-chrome-bg) !important;
+  backdrop-filter: blur(20px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(0%) !important;
+}
+
+html[data-skin='liquid-glass'] .rss-feed-toolbar,
+html[data-skin='liquid-glass'] .rss-feed-list {
+  background: var(--workbench-liquid-chrome-bg) !important;
+  backdrop-filter: blur(20px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(0%) !important;
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-panel {

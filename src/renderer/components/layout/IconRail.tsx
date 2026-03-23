@@ -1,6 +1,7 @@
 import { Folder, Search, Puzzle, Settings } from 'lucide-react'
 import { motion } from 'framer-motion'
 import MorphIconRailGroup from '../motion/MorphIconRailGroup'
+import { WORKBENCH_EDGE_RAIL_SIZE } from '../../modules/workbench/chrome'
 
 interface IconRailProps {
   activeIcon?: string
@@ -27,8 +28,8 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
       role="toolbar"
       aria-label="工具栏"
       style={{
-        width: 44,
-        minWidth: 44,
+        width: WORKBENCH_EDGE_RAIL_SIZE,
+        minWidth: WORKBENCH_EDGE_RAIL_SIZE,
         background: 'transparent',
       }}
     >

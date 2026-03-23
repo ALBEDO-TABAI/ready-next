@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { PanelLeftClose, Globe, FileText, Rss, Calendar, Moon, Sun } from 'lucide-react'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { useTheme } from '../../stores/useTheme'
+import { useWorkspace } from '../../stores/useWorkspace'
 import ModeSlider from './ModeSlider'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
@@ -28,6 +29,7 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
   const { appMode, workbenchMode, splitMode, setWorkbenchMode, setSplitMode } = useMode()
   const { modalProps, showAlert } = useModal()
   const { resolvedTheme, toggleTheme } = useTheme()
+  const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
 
   const handleModeClick = (mode: WorkbenchMode, e: React.MouseEvent) => {
     if (e.shiftKey) {
@@ -68,7 +70,7 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
   return (
     <div
       data-liquid-shell="topbar"
-      className="h-[38px] flex items-center justify-between drag-region"
+      className="flex items-center justify-between drag-region"
       style={{
         background: 'transparent',
         height: WORKBENCH_TOPBAR_HEIGHT,
@@ -152,12 +154,14 @@ export default function TopBar({ onToggleChatPanel }: TopBarProps) {
           style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
         />
 
-        <IconButton
-          icon={<PanelLeftClose style={{ width: 15, height: 15 }} strokeWidth={2} />}
-          onClick={onToggleChatPanel}
-          title="收起/展开聊天面板"
-          style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
-        />
+        {chatPanelVisible && (
+          <IconButton
+            icon={<PanelLeftClose style={{ width: 15, height: 15 }} strokeWidth={2} />}
+            onClick={onToggleChatPanel}
+            title="收起/展开聊天面板"
+            style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
+          />
+        )}
       </div>
 
       {/* Modal dialog for coming-soon alerts */}

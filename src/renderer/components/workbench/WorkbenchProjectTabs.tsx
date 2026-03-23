@@ -57,61 +57,71 @@ export default function WorkbenchProjectTabs({
     </button>
   ) : null
 
-  return (
+  const tabsRail = (
     <div
-      className="glass-surface-panel flex items-center justify-between flex-shrink-0"
+      className="flex min-w-0 overflow-hidden"
       style={{
-        height: WORKBENCH_TAB_ROW_HEIGHT,
-        borderBottom: '1px solid var(--border-default)',
-        background: 'var(--surface-toolbar-bg)',
+        paddingLeft: WORKBENCH_HEADER_EDGE_X,
+        minHeight: WORKBENCH_TAB_ROW_HEIGHT,
+        alignItems: 'flex-end',
       }}
     >
-      <div
-        className="flex items-end h-full min-w-0 overflow-hidden"
-        style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X }}
+      <MorphTabStrip
+        layoutId={layoutId}
+        className="flex min-w-0 flex-1 items-end h-full overflow-hidden gap-[1px]"
       >
-        <MorphTabStrip
-          layoutId={layoutId}
-          className="flex min-w-0 items-end h-full overflow-hidden gap-[1px]"
-        >
-          {tabs.map((tab, index) => {
-            const isActive = Boolean(tab.active)
-            const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
-            return (
-              <div key={tab.id} className="relative flex min-w-0 items-end" style={{ width: WORKBENCH_TAB_MAX_WIDTH, minWidth: 120, maxWidth: WORKBENCH_TAB_MAX_WIDTH }}>
-                <MorphTabButton
-                  layoutId={layoutId}
-                  active={isActive}
-                  secondaryActive={isSecondaryActive}
-                  draggable={Boolean(onTabDragStart)}
-                  onDragStart={onTabDragStart ? (event) => onTabDragStart(event, tab.id) : undefined}
-                  onDragOver={onTabDragOver ? (event) => onTabDragOver(event, index) : undefined}
-                  onDrop={onTabDrop ? (event) => onTabDrop(event, index) : undefined}
-                  onDragEnd={onTabDragEnd}
-                  onClick={(event) => onTabClick(tab.id, event)}
-                  className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
-                  style={{
-                    gap: 6,
-                    height: isActive ? activeTabHeight : inactiveTabHeight,
-                    background: isActive || isSecondaryActive ? 'var(--surface-card-bg)' : 'transparent',
-                    color: isActive || isSecondaryActive ? 'var(--text-title)' : 'var(--text-gray)',
-                    borderBottom: isActive
-                      ? '1px solid var(--surface-card-bg)'
-                      : isSecondaryActive
-                        ? '2px solid var(--color-blue)'
-                        : '1px solid transparent',
-                    alignSelf: 'flex-end',
-                  }}
-                  contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
-                  title={tab.title}
-                >
+        {tabs.map((tab, index) => {
+          const isActive = Boolean(tab.active)
+          const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
+          return (
+            <div
+              key={tab.id}
+              className="relative flex min-w-0 flex-1 items-end"
+              style={{
+                minWidth: 0,
+                maxWidth: WORKBENCH_TAB_MAX_WIDTH,
+              }}
+            >
+              <MorphTabButton
+                layoutId={layoutId}
+                active={isActive}
+                secondaryActive={isSecondaryActive}
+                draggable={Boolean(onTabDragStart)}
+                onDragStart={onTabDragStart ? (event) => onTabDragStart(event, tab.id) : undefined}
+                onDragOver={onTabDragOver ? (event) => onTabDragOver(event, index) : undefined}
+                onDrop={onTabDrop ? (event) => onTabDrop(event, index) : undefined}
+                onDragEnd={onTabDragEnd}
+                onClick={(event) => onTabClick(tab.id, event)}
+                suppressLiquidPill={isActive}
+                className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
+                style={{
+                  gap: 6,
+                  height: isActive ? activeTabHeight : inactiveTabHeight,
+                  background: isActive
+                    ? 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)'
+                    : isSecondaryActive
+                      ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
+                      : 'transparent',
+                  color: isActive || isSecondaryActive ? 'var(--text-secondary)' : 'var(--text-gray)',
+                  borderBottom: isActive
+                    ? '1px solid transparent'
+                    : isSecondaryActive
+                      ? '2px solid var(--color-blue)'
+                      : '1px solid transparent',
+                  borderTop: isActive ? '1px solid rgba(255,255,255,0.08)' : '1px solid transparent',
+                  alignSelf: 'flex-end',
+                }}
+                contentClassName="relative z-[1] flex min-w-0 flex-1 items-center gap-[6px]"
+                title={tab.title}
+              >
+                <>
                   {tab.dotColor ? (
                     <span
                       className="flex-shrink-0 rounded-full"
                       style={{ width: 8, height: 8, background: tab.dotColor }}
                     />
                   ) : null}
-                  <span className="truncate flex-1 min-w-0" style={{ lineHeight: '28px' }}>
+                  <span className="truncate flex-1 min-w-0" style={{ lineHeight: '28px', color: isActive ? 'var(--text-secondary)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}>
                     {tab.label}
                     {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span> : null}
                   </span>
@@ -122,31 +132,44 @@ export default function WorkbenchProjectTabs({
                         event.stopPropagation()
                         onTabClose(tab.id, event)
                       }}
-                      className="rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0 flex items-center justify-center"
+                      className="rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0 flex items-center justify-center"
                       style={{ width: 18, height: 18 }}
                       title="Close"
                     >
                       <X style={{ width: 10, height: 10 }} strokeWidth={2} />
                     </span>
                   ) : null}
-                </MorphTabButton>
-              </div>
-            )
-          })}
-        </MorphTabStrip>
+                </>
+              </MorphTabButton>
+            </div>
+          )
+        })}
+      </MorphTabStrip>
 
-        {inlineNewTabButton}
-        {renderAfterTabs}
-      </div>
+      {inlineNewTabButton}
+      {renderAfterTabs}
+    </div>
+  )
 
-      {rightActions ? (
-        <div
-          className="flex items-center flex-shrink-0"
-          style={{ gap: 8, paddingLeft: 8, paddingRight: WORKBENCH_HEADER_EDGE_X }}
-        >
-          {rightActions}
+  return (
+    <div
+      data-liquid-shell="workbench-tabs"
+      className="workbench-tabs-surface glass-surface-panel flex-shrink-0"
+    >
+      <div className="flex items-center justify-between min-w-0" style={{ minHeight: WORKBENCH_TAB_ROW_HEIGHT }}>
+        <div className="min-w-0 flex-1">
+          {tabsRail}
         </div>
-      ) : null}
+
+        {rightActions ? (
+          <div
+            className="flex items-center justify-end flex-shrink-0 h-full"
+            style={{ gap: 8, paddingLeft: 8, paddingRight: WORKBENCH_HEADER_EDGE_X }}
+          >
+            {rightActions}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

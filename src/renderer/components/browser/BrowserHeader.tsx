@@ -100,7 +100,7 @@ export default function BrowserHeader({
   return (
     <div
       ref={headerRootRef}
-      className="glass-surface-panel flex-shrink-0"
+      className="browser-header-surface glass-surface-panel flex-shrink-0"
     >
       <div
         className="flex items-center no-drag"
@@ -109,7 +109,7 @@ export default function BrowserHeader({
           paddingLeft: WORKBENCH_HEADER_EDGE_X,
           paddingRight: WORKBENCH_HEADER_EDGE_X,
           gap: 8,
-          background: 'color-mix(in srgb, var(--surface-toolbar-bg) 14%, transparent)',
+          background: 'transparent',
           borderBottom: '1px solid transparent',
         }}
       >
