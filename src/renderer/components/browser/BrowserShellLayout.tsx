@@ -82,6 +82,35 @@ export default function BrowserShellLayout({
             onDrop={onDrop}
             style={{ borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)' }}
           >
+            <div
+              className="browser-shell-corner-fill-left"
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: 'var(--workbench-canvas-radius)',
+                height: 'var(--workbench-canvas-radius)',
+                borderBottomRightRadius: 'var(--workbench-canvas-radius)',
+                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            />
+            <div
+              className="browser-shell-corner-fill-right"
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 0,
+                width: 'var(--workbench-canvas-radius)',
+                height: 'var(--workbench-canvas-radius)',
+                borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
+                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            />
+
             {!isElectron && (
               <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
                 <div className="text-center">

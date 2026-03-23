@@ -85,3 +85,10 @@ test('tab rail can toggle bookmarks from explicit tab affordances, not only from
   assert.match(tabRail, /onToggleBookmarkForTab/)
   assert.match(tabRail, /onToggleBookmarkForTab\(tab\)/)
 })
+
+test('browser shell layout adds corner fillers so the header chrome visually meets the page surface', () => {
+  const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
+
+  assert.match(browserShellLayout, /browser-shell-corner-fill-left/)
+  assert.match(browserShellLayout, /browser-shell-corner-fill-right/)
+})
