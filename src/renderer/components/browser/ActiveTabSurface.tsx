@@ -1,0 +1,161 @@
+import { useEffect, useRef, useState, type RefObject } from 'react'
+import { Globe, Loader2, Lock, Star, X } from 'lucide-react'
+import type { ActiveTabMode } from '../../modules/browser/useBrowserHeaderInteraction'
+import type { BrowserTab } from '../../stores/useBrowserTabs'
+
+interface ActiveTabSurfaceProps {
+  tab: BrowserTab
+  mode: ActiveTabMode
+  urlInput: string
+  isBookmarked: boolean
+  surfaceRef: RefObject<HTMLDivElement | null>
+  onUrlChange: (value: string) => void
+  onExpandRequest: () => void
+  onHotspotEnter: () => void
+  onHotspotLeave: () => void
+  onInputFocus: () => void
+  onInputBlur: () => void
+  onCommitNavigation: () => void
+  onToggleBookmark: () => void
+  onClose: () => void
+}
+
+export default function ActiveTabSurface({
+  tab,
+  mode,
+  urlInput,
+  isBookmarked,
+  surfaceRef,
+  onUrlChange,
+  onExpandRequest,
+  onHotspotEnter,
+  onHotspotLeave,
+  onInputFocus,
+  onInputBlur,
+  onCommitNavigation,
+  onToggleBookmark,
+  onClose,
+}: ActiveTabSurfaceProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [isComposing, setIsComposing] = useState(false)
+  const isExpanded = mode === 'expanded' || mode === 'editing'
+  const isHttps = tab.url.startsWith('https://')
+
+  useEffect(() => {
+    if (!isExpanded) return
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isExpanded])
+
+  return (
+    <div
+      ref={surfaceRef}
+      className="group relative flex min-w-0 items-center rounded-[14px] border transition-all duration-200"
+      style={{
+        height: 34,
+        width: isExpanded ? 420 : 220,
+        minWidth: isExpanded ? 320 : 168,
+        maxWidth: isExpanded ? 420 : 220,
+        paddingLeft: 12,
+        paddingRight: 10,
+        gap: 8,
+        background: mode === 'primed'
+          ? 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)'
+          : 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)',
+        borderColor: mode === 'primed'
+          ? 'color-mix(in srgb, var(--color-blue) 32%, transparent)'
+          : 'transparent',
+        boxShadow: mode === 'primed'
+          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 24%, transparent), 0 10px 20px rgba(8, 16, 32, 0.12)'
+          : 'none',
+      }}
+    >
+      {tab.loading ? (
+        <Loader2
+          style={{ width: 14, height: 14 }}
+          className="animate-spin flex-shrink-0 text-[var(--color-blue)]"
+          strokeWidth={2}
+        />
+      ) : tab.favicon ? (
+        <img
+          src={tab.favicon}
+          alt=""
+          className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
+        />
+      ) : (
+        <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--text-body)]" strokeWidth={2} />
+      )}
+
+      {isExpanded ? (
+        <div
+          data-browser-active-hotspot
+          className="flex min-w-0 flex-1 items-center gap-2"
+          onMouseEnter={onHotspotEnter}
+          onMouseLeave={onHotspotLeave}
+        >
+          {isHttps ? (
+            <Lock style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--color-green)]" strokeWidth={2} />
+          ) : (
+            <Globe style={{ width: 12, height: 12 }} className="flex-shrink-0 text-[var(--text-gray)]" strokeWidth={2} />
+          )}
+          <input
+            ref={inputRef}
+            type="text"
+            value={urlInput}
+            onChange={(event) => onUrlChange(event.target.value)}
+            onFocus={onInputFocus}
+            onBlur={onInputBlur}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !isComposing && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                onCommitNavigation()
+              }
+            }}
+            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-browser-active-hotspot
+          onClick={onExpandRequest}
+          onMouseEnter={onHotspotEnter}
+          onMouseLeave={onHotspotLeave}
+          className="flex min-w-0 flex-1 items-center bg-transparent text-left"
+        >
+          <span className="truncate text-[12px] font-medium text-[var(--text-title)]">
+            {tab.title || 'New Tab'}
+          </span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onToggleBookmark}
+        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+        title={isBookmarked ? '取消收藏' : '收藏此页面'}
+      >
+        <Star
+          style={{ width: 12, height: 12 }}
+          className={isBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-gray)]'}
+          strokeWidth={2}
+          fill={isBookmarked ? 'var(--color-orange)' : 'none'}
+        />
+      </button>
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+        title="关闭标签"
+      >
+        <X style={{ width: 12, height: 12 }} strokeWidth={2} className="text-[var(--text-gray)]" />
+      </button>
+    </div>
+  )
+}

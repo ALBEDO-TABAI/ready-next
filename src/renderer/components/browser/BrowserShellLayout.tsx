@@ -1,6 +1,5 @@
 import type { DragEvent, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
-import BrowserDiagnosticsEntry from './BrowserDiagnosticsEntry'
 import BrowserSidePanel from './BrowserSidePanel'
 import type { AdblockState, BookmarkItem, BrowserDiagnosticsData, DownloadItem, HistoryItem, PanelType } from '../../modules/browser/types'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
@@ -61,130 +60,121 @@ export default function BrowserShellLayout({
   onSyncBounds,
 }: BrowserShellLayoutProps) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {activeTab?.loading && (
-        <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--border-default)' }}>
-          <div
-            className="absolute left-0 top-0 h-full rounded-r"
-            style={{
-              background: 'var(--color-blue)',
-              animation: 'browserContentProgress 1.5s ease-in-out infinite',
-            }}
-          />
-        </div>
-      )}
-
-      <div className="flex min-h-0 flex-1">
-        <div
-          ref={contentRef}
-          className="relative min-w-0 flex-1"
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-        >
-          {!isElectron && (
-            <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
-              <div className="text-center">
-                <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
-                <p className="text-[13px]">Browser requires Electron environment</p>
-              </div>
-            </div>
-          )}
-
-          {activeTab?.error && (
+    <div className="flex min-h-0 h-full flex-1">
+      <div className="relative min-w-0 flex flex-1 flex-col">
+        {activeTab?.loading && (
+          <div className="relative h-0.5 flex-shrink-0 overflow-hidden" style={{ background: 'var(--border-default)' }}>
             <div
-              className="absolute inset-0 flex items-center justify-center"
-              style={{ background: 'var(--bg-content)' }}
-            >
-              <div className="text-center" style={{ maxWidth: 360 }}>
-                <AlertTriangle
-                  className="mx-auto mb-4"
-                  style={{ width: 48, height: 48, color: 'var(--color-orange)' }}
-                  strokeWidth={1.5}
-                />
-                <p className="mb-2 text-[15px] font-medium" style={{ color: 'var(--text-title)' }}>
-                  Page failed to load
-                </p>
-                <p className="mb-4 text-[12px]" style={{ color: 'var(--text-gray)', lineHeight: 1.6 }}>
-                  {activeTab.error}
-                </p>
-                <button
-                  onClick={() => void onRetry()}
-                  className="inline-flex items-center gap-2 rounded-lg px-4 py-2 transition-colors hover:bg-[var(--color-blue-light)]"
-                  style={{
-                    color: 'var(--color-blue)',
-                    fontSize: 13,
-                    border: '1px solid var(--color-blue)',
-                    background: 'transparent',
-                  }}
-                >
-                  <RefreshCw style={{ width: 14, height: 14 }} strokeWidth={2} />
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!activeTab?.error && (
-            <BrowserDiagnosticsEntry
-              activeTab={activeTab}
-              adblockState={adblockState}
-              diagnostics={browserDiagnostics}
-              currentDomain={currentDomain}
-              currentDomainAdblockWhitelisted={currentDomainAdblockWhitelisted}
-              onRefreshAdblock={onRefreshAdblock}
-              onSyncBounds={onSyncBounds}
-            />
-          )}
-
-          {toastVisible && (
-            <div
+              className="absolute left-0 top-0 h-full rounded-r"
               style={{
-                position: 'absolute',
-                bottom: 16,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'var(--surface-floating-bg)',
-                color: 'var(--text-body)',
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                zIndex: 30,
-                animation: 'cookieToastFade 3s ease-in-out forwards',
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-                border: '1px solid var(--surface-border)',
-                backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-                WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                background: 'var(--color-blue)',
+                animation: 'browserContentProgress 1.5s ease-in-out infinite',
               }}
-            >
-              <CheckCircle
-                style={{ width: 16, height: 16, color: 'var(--color-green)', flexShrink: 0 }}
-                strokeWidth={2}
-              />
-              已保存登录状态
-            </div>
-          )}
-        </div>
+            />
+          </div>
+        )}
 
-        <BrowserSidePanel
-          activePanel={activePanel}
-          bookmarks={bookmarks}
-          selectedBookmarkUrl={selectedBookmarkUrl}
-          historyItems={historyItems}
-          downloads={downloads}
-          adblockState={adblockState}
-          onClose={onClosePanel}
-          onNavigateFromPanel={onNavigateFromPanel}
-          onRemoveBookmark={onRemoveBookmark}
-          onClearHistory={onClearHistory}
-          onClearDownloads={onClearDownloads}
-          onSelectBookmark={onSelectBookmark}
-          onToggleAdblock={onToggleAdblock}
-        />
+        <div className="flex min-h-0 min-w-0 flex-1 bg-transparent">
+          <div
+            ref={contentRef}
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            style={{ borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)' }}
+          >
+            {!isElectron && (
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
+                <div className="text-center">
+                  <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
+                  <p className="text-[13px]">Browser requires Electron environment</p>
+                </div>
+              </div>
+            )}
+
+            {activeTab?.error && (
+              <div
+                className="absolute inset-0 flex items-center justify-center"
+                style={{ background: 'color-mix(in srgb, var(--bg-content) 22%, transparent)', backdropFilter: 'blur(18px) saturate(136%)', WebkitBackdropFilter: 'blur(18px) saturate(136%)' }}
+              >
+                <div className="text-center" style={{ maxWidth: 360 }}>
+                  <AlertTriangle
+                    className="mx-auto mb-4"
+                    style={{ width: 48, height: 48, color: 'var(--color-orange)' }}
+                    strokeWidth={1.5}
+                  />
+                  <p className="mb-2 text-[15px] font-medium" style={{ color: 'var(--text-title)' }}>
+                    Page failed to load
+                  </p>
+                  <p className="mb-4 text-[12px]" style={{ color: 'var(--text-gray)', lineHeight: 1.6 }}>
+                    {activeTab.error}
+                  </p>
+                  <button
+                    onClick={() => void onRetry()}
+                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 transition-colors hover:bg-[var(--color-blue-light)]"
+                    style={{
+                      color: 'var(--color-blue)',
+                      fontSize: 13,
+                      border: '1px solid var(--color-blue)',
+                      background: 'transparent',
+                    }}
+                  >
+                    <RefreshCw style={{ width: 14, height: 14 }} strokeWidth={2} />
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {toastVisible && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 16,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'var(--surface-floating-bg)',
+                  color: 'var(--text-body)',
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  zIndex: 30,
+                  animation: 'cookieToastFade 3s ease-in-out forwards',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid var(--surface-border)',
+                  backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                  WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                }}
+              >
+                <CheckCircle
+                  style={{ width: 16, height: 16, color: 'var(--color-green)', flexShrink: 0 }}
+                  strokeWidth={2}
+                />
+                已保存登录状态
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      <BrowserSidePanel
+        activePanel={activePanel}
+        bookmarks={bookmarks}
+        selectedBookmarkUrl={selectedBookmarkUrl}
+        historyItems={historyItems}
+        downloads={downloads}
+        adblockState={adblockState}
+        onClose={onClosePanel}
+        onNavigateFromPanel={onNavigateFromPanel}
+        onRemoveBookmark={onRemoveBookmark}
+        onClearHistory={onClearHistory}
+        onClearDownloads={onClearDownloads}
+        onSelectBookmark={onSelectBookmark}
+        onToggleAdblock={onToggleAdblock}
+      />
 
       <style>{`
         @keyframes browserContentProgress {

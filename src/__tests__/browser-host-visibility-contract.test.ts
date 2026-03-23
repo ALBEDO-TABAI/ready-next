@@ -7,7 +7,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser host visibility is explicitly gated and browser bounds support top inset while side/chat panels get rounded outer frames', () => {
+test('browser host visibility is explicitly gated and browser bounds keep BrowserView below the DOM-only browser header while side/chat panels get rounded outer frames', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
@@ -34,8 +34,8 @@ test('browser host visibility is explicitly gated and browser bounds support top
   assert.match(boundsHook, /topInset:\s*number/)
   assert.match(boundsHook, /const y = Math\.round\(rect\.top - topInset\)/)
   assert.match(boundsHook, /const height = Math\.round\(rect\.height \+ topInset\)/)
-  assert.match(browserMode, /WORKBENCH_TOOLBAR_ROW_HEIGHT/)
-  assert.match(browserMode, /topInset:\s*WORKBENCH_TOOLBAR_ROW_HEIGHT/)
+  assert.match(browserMode, /topInset:\s*0/)
+  assert.doesNotMatch(browserMode, /topInset:\s*WORKBENCH_TOOLBAR_ROW_HEIGHT/)
   assert.match(workbenchMode, /browser\.hideAll\(\)/)
   assert.doesNotMatch(workbenchMode, /browser\.hideActiveHost\(\)/)
 
