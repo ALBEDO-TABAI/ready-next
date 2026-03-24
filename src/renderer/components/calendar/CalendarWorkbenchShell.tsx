@@ -218,7 +218,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     <Plus style={{ width: 13, height: 13, color: 'var(--color-red)' }} />
                     新建
                   </button>
-                  <span style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-title)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>
                     {headerTitle}
                   </span>
                 </div>
@@ -229,7 +229,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     style={{
                       padding: '4px 12px', borderRadius: 10,
                       border: '1px solid var(--border-input)', background: 'transparent',
-                      fontSize: 11, fontWeight: 500, color: 'var(--text-body)',
+                      fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
                       cursor: 'pointer',
                     }}
                   >

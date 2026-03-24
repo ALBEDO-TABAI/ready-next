@@ -36,7 +36,7 @@ export default function CalendarViewSelector({
           display: 'flex', alignItems: 'center', gap: 4,
           padding: '4px 10px', borderRadius: 10,
           border: '1px solid var(--border-input)', background: 'transparent',
-          fontSize: 11, fontWeight: 500, color: 'var(--text-body)',
+          fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
           cursor: 'pointer',
         }}
       >
@@ -64,7 +64,7 @@ export default function CalendarViewSelector({
                 display: 'block', width: '100%',
                 padding: '4px 10px', borderRadius: 6,
                 border: 'none', cursor: 'pointer', textAlign: 'left',
-                fontSize: 11, fontWeight: viewType === value ? 600 : 400,
+                fontSize: 12, fontWeight: viewType === value ? 600 : 400,
                 color: viewType === value ? 'var(--color-blue)' : 'var(--text-body)',
                 background: viewType === value ? 'var(--color-blue-light)' : 'transparent',
               }}

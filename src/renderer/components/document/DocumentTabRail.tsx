@@ -163,7 +163,7 @@ export default function DocumentTabRail({
                       onClick={(event) => onTabClick(tab.id, event)}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[11px] transition-all duration-150"
+                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-all duration-150"
                       style={{
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
@@ -204,7 +204,7 @@ export default function DocumentTabRail({
 
                           <span
                             className="truncate flex-1 min-w-0"
-                            style={{ lineHeight: '26px', color: isActive ? 'var(--text-title)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}
+                            style={{ lineHeight: '28px', color: isActive ? 'var(--text-title)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}
                           >
                             {tab.label}
                             {tab.dirty ? <span className="ml-0.5" style={{ color: 'var(--text-light)' }}>●</span> : null}

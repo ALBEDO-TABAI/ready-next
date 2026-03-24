@@ -271,7 +271,7 @@ export default function RSSFeed({
     borderRadius: 10,
     border: '1px solid var(--border-input)',
     background: 'transparent',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 500,
     color: 'var(--text-body)',
     cursor: 'pointer',
@@ -299,7 +299,7 @@ export default function RSSFeed({
       >
         {/* Left: Title & Badge */}
         <div className="flex items-center" style={{ gap: 12 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1 }}>RSS 订阅源</h2>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1 }}>RSS 订阅源</h2>
           {unreadCount > 0 && (
             <span
               className="rounded-full text-white"
@@ -315,7 +315,7 @@ export default function RSSFeed({
             </span>
           )}
           {isMock && (
-            <span className="px-2 py-0.5 rounded-full bg-[var(--color-orange-light)] text-[var(--color-orange)] text-[10px]">
+            <span className="px-2 py-0.5 rounded-full bg-[var(--color-orange-light)] text-[var(--color-orange)] text-[12px]">
               Mock 模式
             </span>
           )}

@@ -21,7 +21,7 @@ test('document mode uses a browser-style document tab rail with hover hints and 
   assert.match(documentTabRail, /const \[showRightArrow, setShowRightArrow\] = useState\(false\)/)
   assert.match(documentTabRail, /overflow-x-auto/)
   assert.match(documentTabRail, /scrollTo\(\{\s*left:\s*targetLeft/)
-  assert.match(documentTabRail, /text-\[11px\]/)
+  assert.match(documentTabRail, /text-\[12px\]/)
   assert.match(documentTabRail, /onMouseEnter=\{\(\) => setHoveredTabId\(tab\.id\)\}/)
   assert.match(documentTabRail, /onMouseLeave=\{\(\) => setHoveredTabId\(\(current\) => current === tab\.id \? null : current\)\}/)
   assert.match(documentTabRail, /borderColor: isDragOver/)
