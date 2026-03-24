@@ -97,9 +97,10 @@ export function useBrowserViewBounds({
 
   const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean }) => {
     if (!isElectron) return
+    if (!isActive) return
 
     const shouldShowBrowserView =
-      isActive && !hasError && overlayLockCountRef.current === 0
+      !hasError && overlayLockCountRef.current === 0
 
     if (!shouldShowBrowserView) {
       window.electronAPI?.browser?.hideAll()

@@ -40,6 +40,7 @@ test('browser mode delegates panel data and diagnostics synchronization to focus
   assert.match(runtimeHook, /handleNewTab\(\)/)
   assert.match(runtimeHook, /await sendBoundsImmediate\(\{ forceExact: true \}\)/)
   assert.match(runtimeHook, /onNewTabRequest\(async \(url: string\) => \{[\s\S]*await sendBoundsImmediate\(\{ forceExact: true \}\)/)
-  assert.match(runtimeHook, /window\.electronAPI\?\.browser\?\.showActive\(\)/)
+  assert.doesNotMatch(runtimeHook, /window\.electronAPI\?\.browser\?\.showActive\(\)/)
+  assert.doesNotMatch(runtimeHook, /window\.electronAPI\?\.browser\?\.hideAll\(\)/)
   assert.match(tabActionsHook, /await sendBoundsImmediate\(\{ forceExact: true \}\)/)
 })

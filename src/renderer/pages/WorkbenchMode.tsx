@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useMode } from '../stores/useMode'
@@ -60,7 +60,6 @@ function ResizeHandle({
 
 export default function WorkbenchMode() {
   const {
-    refreshFiles,
     toggleSidebar,
     toggleChatPanel,
     setSidePanelWidth,
@@ -74,6 +73,7 @@ export default function WorkbenchMode() {
   const navigate = useNavigate()
   const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
+  const [workspaceInitError, setWorkspaceInitError] = useState<string | null>(null)
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -83,32 +83,40 @@ export default function WorkbenchMode() {
     setSplitRatio(splitRatio + deltaPercent)
   }, [splitRatio, setSplitRatio])
 
+  const initializeWorkspace = useCallback(async () => {
+    try {
+      const savedRoot = localStorage.getItem('ready-workspace-root')
+
+      if (typeof window === 'undefined' || !window.electronAPI) {
+        setWorkspaceInitError('工作台初始化失败：当前环境未提供 Electron 文件系统能力。')
+        return
+      }
+
+      if (savedRoot) {
+        useWorkspace.getState().setWorkspaceRoot(savedRoot)
+        setWorkspaceInitError(null)
+        return
+      }
+
+      const homeResult = await window.electronAPI.document.getHome()
+      if (homeResult.success && homeResult.path) {
+        useWorkspace.getState().setWorkspaceRoot(homeResult.path)
+        setWorkspaceInitError(null)
+        return
+      }
+
+      setWorkspaceInitError('工作台初始化失败：未能获取默认工作目录。')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn('Workspace init failed:', message)
+      setWorkspaceInitError(`工作台初始化失败：${message}`)
+    }
+  }, [])
+
   // Initialize workspace on mount
   useEffect(() => {
-    const initWorkspace = async () => {
-      try {
-        const savedRoot = localStorage.getItem('ready-workspace-root')
-
-        if (typeof window !== 'undefined' && window.electronAPI) {
-          if (savedRoot) {
-            useWorkspace.getState().setWorkspaceRoot(savedRoot)
-          } else {
-            const homeResult = await window.electronAPI.document.getHome()
-            if (homeResult.success && homeResult.path) {
-              useWorkspace.getState().setWorkspaceRoot(homeResult.path)
-            }
-          }
-        } else {
-          await refreshFiles()
-        }
-      } catch {
-        console.warn('Workspace init failed, fallback to mock files')
-        await refreshFiles()
-      }
-    }
-    initWorkspace()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    void initializeWorkspace()
+  }, [initializeWorkspace])
 
   const handleIconClick = (icon: string) => {
     if (icon === 'settings') {
@@ -162,10 +170,40 @@ export default function WorkbenchMode() {
     }
   }, [splitMode, workbenchMode])
 
+  useEffect(() => {
+    return () => {
+      void window.electronAPI?.browser.hideAll()
+    }
+  }, [])
+
   return (
     <LiquidSceneProvider mouseContainer={sceneRef}>
       <div ref={sceneRef} className="workbench-mode-root relative flex h-full flex-col overflow-hidden">
         <div className="relative z-10 flex h-full flex-col">
+          {workspaceInitError && (
+            <div
+              className="glass-surface-floating mx-3 mt-2 flex items-center justify-between rounded-[12px] px-3 py-2 text-[12px]"
+              style={{
+                border: '1px solid var(--color-orange)',
+                color: 'var(--text-secondary)',
+                background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
+              }}
+            >
+              <span>{workspaceInitError}</span>
+              <button
+                type="button"
+                onClick={() => void initializeWorkspace()}
+                className="rounded-[8px] px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
+                style={{
+                  border: '1px solid transparent',
+                  color: 'var(--text-body)',
+                }}
+              >
+                重试
+              </button>
+            </div>
+          )}
+
           {/* TopBar: right button toggles ChatPanel */}
           <TopBar onToggleChatPanel={toggleChatPanel} />
 

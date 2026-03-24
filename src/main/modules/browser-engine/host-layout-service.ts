@@ -72,8 +72,13 @@ export class BrowserHostLayoutService {
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
     this.attachHost(view)
     this.hiddenHosts.delete(view)
+    const timer = this.boundsFlushTimers.get(view)
+    if (timer) {
+      clearTimeout(timer)
+      this.boundsFlushTimers.delete(view)
+    }
     this.pendingBoundsByView.set(view, bounds)
-    this.scheduleHostBounds(view, bounds)
+    this.setHostBoundsNow(view, bounds)
   }
 
   hideHost(view: BrowserHostView): void {

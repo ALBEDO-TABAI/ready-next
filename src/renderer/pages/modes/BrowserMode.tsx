@@ -138,7 +138,9 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     reorderTabs,
   })
 
-  useBrowserRuntimeEffects({
+  const {
+    browserRuntimeReady,
+  } = useBrowserRuntimeEffects({
     isElectron,
     isActive,
     isAddressEditing,
@@ -147,8 +149,8 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   })
 
   // Task 4: Empty state — no tabs
-  if (tabs.length === 0) {
-    return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} />
+  if (!browserRuntimeReady || tabs.length === 0) {
+    return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} loading={!browserRuntimeReady} />
   }
 
   return (

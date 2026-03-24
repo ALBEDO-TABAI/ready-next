@@ -6,9 +6,11 @@ import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules
 export default function BrowserModeEmptyState({
   onNewTab,
   contentRef,
+  loading = false,
 }: {
   onNewTab: () => void | Promise<void>
   contentRef: RefObject<HTMLDivElement | null>
+  loading?: boolean
 }) {
   return (
     <div className="workbench-mode-root">
@@ -42,21 +44,23 @@ export default function BrowserModeEmptyState({
               <div className="text-center">
                 <Globe className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1.5} />
                 <p className="text-[14px] font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
-                  当前没有打开的标签页
+                  {loading ? '浏览器启动中…' : '当前没有打开的标签页'}
                 </p>
-                <button
-                  onClick={() => void onNewTab()}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--color-blue-light)]"
-                  style={{
-                    color: 'var(--color-blue)',
-                    fontSize: 13,
-                    border: '1px solid var(--color-blue)',
-                    background: 'transparent',
-                  }}
-                >
-                  <Plus style={{ width: 14, height: 14 }} strokeWidth={2} />
-                  点击 + 新建标签页
-                </button>
+                {!loading && (
+                  <button
+                    onClick={() => void onNewTab()}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--color-blue-light)]"
+                    style={{
+                      color: 'var(--color-blue)',
+                      fontSize: 13,
+                      border: '1px solid var(--color-blue)',
+                      background: 'transparent',
+                    }}
+                  >
+                    <Plus style={{ width: 14, height: 14 }} strokeWidth={2} />
+                    点击 + 新建标签页
+                  </button>
+                )}
               </div>
             </div>
           </div>

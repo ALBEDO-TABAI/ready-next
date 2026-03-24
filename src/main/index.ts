@@ -17,11 +17,10 @@ import { setupBrowserIPC, type BrowserController } from './modules/browser-engin
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
-import { setupVideoIPC } from './modules/video-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
-import { setupDesignIPC } from './modules/design-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
+import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { getDatabase } from './modules/database'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
@@ -30,17 +29,13 @@ const { autoUpdater } = pkg
 
 // Environment configuration
 // Document operations (local fs) are always real — no external dependencies.
-// External services (RSS, Calendar, Agent) default to mock in production
-// since their backends are not fully ready yet.
-const ENABLE_MOCK_SERVICES = is.dev
-  ? process.env.ENABLE_MOCK_SERVICES === 'true'
-  : process.env.ENABLE_MOCK_SERVICES !== 'false' // default true in production
+// All environments: opt-in only via ENABLE_MOCK_SERVICES=true
+const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
 
 // Document engine always uses real fs, regardless of mock setting
 const DOCUMENT_USE_MOCK = false
-// RSS uses the embedded/local pipeline by default even in packaged builds.
-// Keep mock opt-in only so packaged apps don't silently report a fake runtime.
-const RSS_USE_MOCK = process.env.ENABLE_MOCK_RSS === 'true'
+// RSS and Calendar use the same mock flag
+const RSS_USE_MOCK = ENABLE_MOCK_SERVICES
 const CALENDAR_USE_MOCK = ENABLE_MOCK_SERVICES
 
 // Initialize agent manager
@@ -51,6 +46,33 @@ let mainWindow: BrowserWindow | null = null
 let browserController: BrowserController | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
+const THEME_SETTING_KEY = 'ui_theme_option'
+
+function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
+  try {
+    const raw = String(getDatabase().getSetting(THEME_SETTING_KEY) || '').trim().toLowerCase()
+    if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
+  } catch {
+    // ignore persisted theme read failures
+  }
+  return 'light'
+}
+
+function applyNativeWindowMaterial(window: BrowserWindow): void {
+  if (process.platform === 'darwin') {
+    window.setVibrancy('under-window')
+    window.setWindowButtonPosition({ x: 14, y: 14 })
+    return
+  }
+
+  if (process.platform === 'win32' && 'setBackgroundMaterial' in window) {
+    try {
+      window.setBackgroundMaterial('mica')
+    } catch {
+      /* ignore unsupported Windows builds */
+    }
+  }
+}
 
 async function runBookmarkMenuAction(action: 'import' | 'export'): Promise<void> {
   if (!browserController) return
@@ -118,6 +140,7 @@ function setupApplicationMenu(): void {
 }
 
 function createWindow(): void {
+  nativeTheme.themeSource = resolveStoredThemeSource()
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -125,6 +148,8 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : undefined,
+    visualEffectState: process.platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
@@ -132,6 +157,8 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+
+  applyNativeWindowMaterial(mainWindow)
 
   // Keep renderer UI at 100% scale so panel sizing remains pixel-consistent with design specs.
   mainWindow.webContents.setZoomFactor(1)
@@ -190,10 +217,9 @@ function setupGlobalIPC(): void {
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupRSSIPC(RSS_USE_MOCK)
   setupCalendarIPC(CALENDAR_USE_MOCK)
-  setupVideoIPC()
   setupSettingsIPC()
-  setupDesignIPC()
   setupSkillsIPC()
+  setupMemoryManagementIPC()
 
   // Window state IPC — uses the module-level mainWindow variable
   ipcMain.handle('window:minimize', () => {
@@ -212,7 +238,13 @@ function setupGlobalIPC(): void {
 
   // Theme sync — sets Electron's nativeTheme so BrowserView respects prefers-color-scheme
   ipcMain.handle('theme:set', (_event, theme: string) => {
-    nativeTheme.themeSource = theme as 'light' | 'dark' | 'system'
+    const nextTheme = theme === 'dark' || theme === 'light' || theme === 'system' ? theme : 'light'
+    nativeTheme.themeSource = nextTheme
+    try {
+      getDatabase().setSetting(THEME_SETTING_KEY, nextTheme)
+    } catch {
+      // ignore persistence failures
+    }
   })
 }
 
@@ -312,37 +344,33 @@ function isPathAllowed(filePath: string): boolean {
   const resolved = resolve(filePath)
   const normalized = normalize(resolved)
 
-  // Must be within user's home directory
-  // macOS/Windows filesystems are case-insensitive, so compare accordingly.
-  // (Chromium lowercases the host component of standard scheme URLs,
-  //  e.g. local-file:///Users/... → host="users", breaking case-sensitive checks)
-  const home = homedir()
-  const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32'
-  const normalizedCmp = caseInsensitive ? normalized.toLowerCase() : normalized
-  const homeCmp = caseInsensitive ? home.toLowerCase() : home
-
-  if (!normalizedCmp.startsWith(homeCmp)) {
-    return false
-  }
-
   // Block path traversal
-  const relativePart = normalized.slice(home.length)
-  if (relativePart.includes('..')) {
+  if (normalized.includes('..')) {
     return false
   }
 
-  // Block sensitive directories
-  const pathSegments = relativePart.split('/').filter(Boolean)
-  for (const segment of pathSegments) {
-    if (SENSITIVE_DIRS.includes(segment.toLowerCase())) {
+  // Blacklist: sensitive patterns (case-insensitive on macOS/Windows)
+  const sensitivePatterns = [
+    /[/\\]\.ssh[/\\]/,
+    /[/\\]\.aws[/\\]/,
+    /[/\\]\.gnupg[/\\]/,
+    /[/\\]\.env$/,
+    /[/\\]credentials$/,
+    /[/\\]credentials\.json$/,
+    /[/\\]\.npmrc$/,
+    /[/\\]\.pypirc$/,
+    /[/\\]\.gitconfig$/,
+    /[/\\]id_rsa/,
+    /[/\\]id_ed25519/,
+  ]
+
+  const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32'
+  const pathToCheck = caseInsensitive ? normalized.toLowerCase() : normalized
+
+  for (const pattern of sensitivePatterns) {
+    if (pattern.test(pathToCheck)) {
       return false
     }
-  }
-
-  // Block sensitive files (check the basename)
-  const fileName = pathSegments[pathSegments.length - 1]
-  if (fileName && SENSITIVE_FILES.includes(fileName.toLowerCase())) {
-    return false
   }
 
   return true
@@ -355,9 +383,16 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.ready.app')
   setupApplicationMenu()
 
+  console.log('[Main] App ready, registering protocol handler...')
+
   // Register local-file:// protocol handler for serving local files to the renderer
   // Uses fs directly to properly support Range requests for video seeking.
   protocol.handle('local-file', (request) => {
+    console.log('[Protocol] ===== Handling request =====')
+    console.log('[Protocol] URL:', request.url)
+    console.log('[Protocol] Method:', request.method)
+    console.log('[Protocol] Headers:', request.headers)
+
     // Because local-file is registered as a "standard" scheme, Chromium parses
     // local-file:///Users/user/file.png as:
     //   host = "users" (lowercased!), pathname = "/user/file.png"
@@ -368,19 +403,31 @@ app.whenReady().then(() => {
       ? `/${parsed.host}${decodedPathname}`
       : decodedPathname
 
-    // On Windows, remove leading slash from /C:/path
+    console.log('[Protocol] Parsed path:', { host: parsed.host, pathname: parsed.pathname, filePath })
+
+    // Windows: remove leading slash and fix drive letter case
     if (process.platform === 'win32' && filePath.startsWith('/')) {
       filePath = filePath.slice(1)
+      // Fix lowercase drive letter: c:/path -> C:/path
+      if (filePath.length >= 2 && filePath[1] === ':') {
+        filePath = filePath[0].toUpperCase() + filePath.slice(1)
+      }
     }
+
+    console.log('[Protocol] Final path:', filePath)
 
     // Security: validate the path before serving
     if (!isPathAllowed(filePath)) {
+      console.log('[Protocol] Path not allowed:', filePath)
       return new Response('Forbidden', { status: 403 })
     }
 
     if (!existsSync(filePath)) {
+      console.log('[Protocol] File not found:', filePath)
       return new Response('Not Found', { status: 404 })
     }
+
+    console.log('[Protocol] File exists, serving:', filePath)
 
     // MIME type map
     const mimeMap: Record<string, string> = {
@@ -426,6 +473,9 @@ app.whenReady().then(() => {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Content-Length': String(chunkSize),
             'Accept-Ranges': 'bytes',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': 'Range',
           },
         })
       }
@@ -448,6 +498,9 @@ app.whenReady().then(() => {
         'Content-Type': contentType,
         'Content-Length': String(fileSize),
         'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': 'Range',
       },
     })
   })

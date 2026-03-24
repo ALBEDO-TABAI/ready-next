@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { TabUpdateEvent } from './types'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
@@ -20,6 +20,7 @@ export function useBrowserRuntimeEffects({
   handleNewTab,
 }: UseBrowserRuntimeEffectsParams) {
   const activationFrameRef = useRef<number | null>(null)
+  const [browserRuntimeReady, setBrowserRuntimeReady] = useState(!isElectron)
 
   const restoreExistingTabs = useCallback(async () => {
     if (!isElectron) return false
@@ -130,28 +131,27 @@ export function useBrowserRuntimeEffects({
       activationFrameRef.current = null
     }
     if (!isActive) {
-      window.electronAPI?.browser?.hideAll()
+      setBrowserRuntimeReady(false)
       return
     }
+    setBrowserRuntimeReady(false)
     let cancelled = false
-    const activate = async () => {
+    activationFrameRef.current = requestAnimationFrame(async () => {
+      activationFrameRef.current = null
       const { tabs: currentTabs } = useBrowserTabs.getState()
       const hasTabs = currentTabs.length > 0 || await restoreExistingTabs()
       if (cancelled) return
 
       if (!hasTabs) {
         await handleNewTab()
-        return
       }
 
-      activationFrameRef.current = requestAnimationFrame(async () => {
-        activationFrameRef.current = null
-        await sendBoundsImmediate({ forceExact: true })
-        window.electronAPI?.browser?.showActive()
-      })
-    }
-
-    void activate()
+      await sendBoundsImmediate({ forceExact: true })
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      if (!cancelled) {
+        setBrowserRuntimeReady(true)
+      }
+    })
     return () => {
       cancelled = true
       if (activationFrameRef.current) {
@@ -167,7 +167,10 @@ export function useBrowserRuntimeEffects({
         cancelAnimationFrame(activationFrameRef.current)
         activationFrameRef.current = null
       }
-      window.electronAPI?.browser?.hideAll()
     }
   }, [])
+
+  return {
+    browserRuntimeReady,
+  }
 }
