@@ -9,6 +9,9 @@ interface ActiveTabSurfaceProps {
   urlInput: string
   isBookmarked: boolean
   surfaceRef: RefObject<HTMLDivElement | null>
+  draggable?: boolean
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
+  onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
   onUrlChange: (value: string) => void
   onExpandRequest: () => void
   onHotspotEnter: () => void
@@ -26,6 +29,9 @@ export default function ActiveTabSurface({
   urlInput,
   isBookmarked,
   surfaceRef,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
   onUrlChange,
   onExpandRequest,
   onHotspotEnter,
@@ -53,6 +59,9 @@ export default function ActiveTabSurface({
   return (
     <div
       ref={surfaceRef}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className="group relative flex min-w-0 items-center rounded-[14px] border transition-all duration-200"
       style={{
         height: 34,

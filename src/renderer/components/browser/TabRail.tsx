@@ -80,6 +80,19 @@ export default function TabRail({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const dragIndexRef = useRef<number | null>(null)
 
+  const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
+    const data = JSON.stringify({
+      type: 'browser-tab' as const,
+      name: tab.title || 'New Tab',
+      title: tab.title || 'New Tab',
+      url: tab.url,
+      ext: '.url',
+      tabId: tab.id,
+      draggedAt: Date.now(),
+    })
+    event.dataTransfer.setData('application/x-ready-drag', data)
+  }, [])
+
   const checkOverflow = useCallback(() => {
     const element = scrollRef.current
     if (!element) return
@@ -102,8 +115,12 @@ export default function TabRail({
 
   const handleDragStart = (event: React.DragEvent, index: number) => {
     dragIndexRef.current = index
-    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData('text/plain', String(index))
+    const tab = tabs[index]
+    if (tab) {
+      setBrowserTabDragPayload(event, tab)
+    }
     const target = event.currentTarget as HTMLElement
     target.style.opacity = '0.5'
   }
@@ -180,6 +197,9 @@ export default function TabRail({
                     urlInput={urlInput}
                     isBookmarked={isBookmarked}
                     surfaceRef={activeTabSurfaceRef}
+                    draggable={activeTabMode !== 'expanded' && activeTabMode !== 'editing'}
+                    onDragStart={(event) => handleDragStart(event, index)}
+                    onDragEnd={handleDragEnd}
                     onUrlChange={onUrlChange}
                     onExpandRequest={onExpandRequest}
                     onHotspotEnter={onHotspotEnter}
