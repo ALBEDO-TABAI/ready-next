@@ -3,8 +3,8 @@ import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
+import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
-import WorkbenchProjectTabs from '../../components/workbench/WorkbenchProjectTabs'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import { getFileExtension } from '../../utils/path'
 
@@ -208,7 +208,7 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
     <div className="workbench-mode-root">
       <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
-          <WorkbenchProjectTabs
+          <DocumentTabRail
             layoutId="document-tabs"
             tabs={tabs.map((tab) => {
               const isPrimary = tab.id === activeTabId
