@@ -259,6 +259,11 @@ html[data-skin='liquid-glass'] {
   --surface-blur: 18px;
   --surface-saturate: 155%;
   --workbench-liquid-chrome-bg: rgba(241, 244, 249, 0.94);
+  --chat-menu-frost-bg: rgba(236, 239, 243, 0.84);
+  --chat-menu-frost-border: rgba(255, 255, 255, 0.3);
+  --chat-menu-hover-bg: rgba(246, 248, 251, 0.56);
+  --chat-menu-selected-bg: rgba(239, 242, 246, 0.5);
+  --chat-menu-selected-border: rgba(222, 228, 236, 0.34);
   --glass-highlight: rgba(255, 255, 255, 0.74);
   --app-bg-overlay-opacity: 1;
 }
@@ -306,6 +311,11 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --surface-blur: 14px;
   --surface-saturate: 132%;
   --workbench-liquid-chrome-bg: rgba(31, 38, 52, 0.94);
+  --chat-menu-frost-bg: rgba(34, 37, 43, 0.84);
+  --chat-menu-frost-border: rgba(214, 224, 243, 0.14);
+  --chat-menu-hover-bg: rgba(255, 255, 255, 0.08);
+  --chat-menu-selected-bg: rgba(239, 242, 246, 0.1);
+  --chat-menu-selected-border: rgba(214, 224, 243, 0.16);
   --glass-highlight: rgba(226, 237, 255, 0.2);
   --app-bg-overlay-opacity: 1;
 }
@@ -1238,6 +1248,58 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-app-bg {
   box-shadow: var(--lg-shadow-ambient);
   backdrop-filter: blur(var(--lg-blur-strong)) saturate(var(--surface-saturate));
   -webkit-backdrop-filter: blur(var(--lg-blur-strong)) saturate(var(--surface-saturate));
+}
+
+.chat-header-floating-menu {
+  box-shadow:
+    0 10px 22px rgba(24, 39, 77, 0.08),
+    0 3px 8px rgba(24, 39, 77, 0.03) !important;
+}
+
+.chat-header-floating-menu-item {
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 150ms ease;
+}
+
+.chat-header-floating-menu-item:hover {
+  background: color-mix(in srgb, rgba(255,255,255,0.14) 60%, rgba(0,0,0,0.02)) !important;
+}
+
+.chat-header-menu-delete-button:hover {
+  background: color-mix(in srgb, rgba(255,255,255,0.12) 56%, rgba(0,0,0,0.03)) !important;
+}
+
+html[data-skin='liquid-glass'] .chat-header-floating-menu {
+  background: var(--chat-menu-frost-bg, rgba(236, 239, 243, 0.84)) !important;
+  border-color: var(--chat-menu-frost-border, rgba(255, 255, 255, 0.3)) !important;
+  box-shadow:
+    0 16px 34px rgba(30, 46, 82, 0.1),
+    0 6px 12px rgba(30, 46, 82, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16) !important;
+  backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.24)) saturate(calc(var(--surface-saturate) - 6%)) contrast(1.01) !important;
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.24)) saturate(calc(var(--surface-saturate) - 6%)) contrast(1.01) !important;
+}
+
+html[data-skin='liquid-glass'] .chat-header-floating-menu-item:hover {
+  background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.56)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+html[data-skin='liquid-glass'] .chat-header-floating-menu-item.is-selected {
+  background: var(--chat-menu-selected-bg, rgba(239, 242, 246, 0.5)) !important;
+  border-color: var(--chat-menu-selected-border, rgba(222, 228, 236, 0.34)) !important;
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.54) !important;
+}
+
+html[data-skin='liquid-glass'] .chat-header-menu-delete-button:hover {
+  background: var(--chat-menu-hover-bg, rgba(246, 248, 251, 0.56)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .morph-segmented-track {
