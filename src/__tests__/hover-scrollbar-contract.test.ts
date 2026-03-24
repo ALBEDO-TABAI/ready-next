@@ -16,6 +16,9 @@ test('workbench panel scroll areas hide scrollbar thumbs until the user hovers t
   const skillsPanel = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const browserSidePanel = readWorkspaceFile('src/renderer/components/browser/BrowserSidePanel.tsx')
   const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+  const pdfViewer = readWorkspaceFile('src/renderer/components/document/PdfViewer.tsx')
+  const imageGallery = readWorkspaceFile('src/renderer/components/document/ImageGallery.tsx')
 
   assert.match(styles, /\.panel-hover-scrollbar\s*\{/)
   assert.match(styles, /\.panel-hover-scrollbar::-webkit-scrollbar-thumb\s*\{/)
@@ -29,6 +32,10 @@ test('workbench panel scroll areas hide scrollbar thumbs until the user hovers t
   assert.match(skillsPanel, /panel-hover-scrollbar/)
   assert.match(browserSidePanel, /panel-hover-scrollbar/)
   assert.match(calendarMode, /panel-hover-scrollbar/)
+  assert.match(markdownEditor, /panel-hover-scrollbar document-editor-surface flex-1 overflow-auto/)
+  assert.match(markdownEditor, /panel-hover-scrollbar document-preview-surface flex-1 overflow-auto/)
+  assert.match(pdfViewer, /panel-hover-scrollbar flex-1 overflow-auto/)
+  assert.match(imageGallery, /panel-hover-scrollbar flex-1 flex items-center justify-center overflow-auto/)
 
   assert.match(scheduleStyles, /\.sx__calendar-wrapper ::-webkit-scrollbar-thumb\s*\{/)
   assert.match(scheduleStyles, /\.sx__calendar-wrapper:hover ::-webkit-scrollbar-thumb\s*\{/)

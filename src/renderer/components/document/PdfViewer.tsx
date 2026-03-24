@@ -25,18 +25,135 @@ interface PdfViewerProps {
   fileUrl: string
 }
 
+function decodeBase64ToBytes(base64: string): Uint8Array {
+  const binaryString = atob(base64)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i += 1) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+  return bytes
+}
+
+function normalizePdfBytes(value: unknown): Uint8Array | null {
+  if (!value) return null
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  }
+  if (Array.isArray(value)) return new Uint8Array(value)
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    'data' in value &&
+    value.type === 'Buffer' &&
+    Array.isArray(value.data)
+  ) {
+    return new Uint8Array(value.data)
+  }
+  return null
+}
+
 export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0)
   const [zoom, setZoom] = useState(100)
   const [currentPage, setCurrentPage] = useState(1)
   const [error, setError] = useState<string | null>(null)
+  const [pdfData, setPdfData] = useState<Uint8Array | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const observerRef = useRef<IntersectionObserver | null>(null)
 
+  // Load PDF data via IPC
+  useEffect(() => {
+    if (!tab.path) {
+      setPdfData(null)
+      setPdfUrl(null)
+      setError('No file path provided')
+      return
+    }
+
+    let cancelled = false
+    setNumPages(0)
+    setCurrentPage(1)
+    setPdfData(null)
+    setPdfUrl(null)
+    setError(null)
+    pageRefs.current.clear()
+
+    const loadPdf = async () => {
+      try {
+        const filePath = tab.path
+        if (!filePath) {
+          setError('No file path provided')
+          return
+        }
+
+        console.log('[PdfViewer] Loading PDF from path:', filePath)
+
+        // Read via IPC so renderer does not depend on custom-scheme fetch behavior.
+        const result = await window.electronAPI.document.readFile(filePath)
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to read file')
+        }
+
+        const binaryData = result.data?.type === 'binary' ? result.data : null
+        const ipcBytes = normalizePdfBytes(binaryData?.bytes)
+
+        if (!cancelled && binaryData?.category === 'pdf' && ipcBytes && ipcBytes.length > 0) {
+          console.log('[PdfViewer] Loaded PDF bytes from IPC:', ipcBytes.length)
+          setPdfData(ipcBytes)
+          setError(null)
+          return
+        }
+
+        if (!cancelled && binaryData?.category === 'pdf' && binaryData.localUrl) {
+          console.log('[PdfViewer] Falling back to local-file URL:', binaryData.localUrl)
+          setPdfUrl(binaryData.localUrl)
+          setError(null)
+          return
+        }
+
+        if (!cancelled && result.content) {
+          const bytes = decodeBase64ToBytes(result.content)
+          console.log('[PdfViewer] Loaded legacy base64 PDF bytes:', bytes.length)
+          setPdfData(bytes)
+          setError(null)
+          return
+        }
+
+        if (!cancelled && fileUrl) {
+          console.log('[PdfViewer] Falling back to provided file URL:', fileUrl)
+          setPdfUrl(fileUrl)
+          setError(null)
+          return
+        }
+
+        throw new Error('No PDF data returned')
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[PdfViewer] PDF load error:', err)
+          setError(err instanceof Error ? err.message : 'PDF 加载失败')
+        }
+      }
+    }
+
+    loadPdf()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tab.path, fileUrl])
+
   // Stable file prop to avoid Document re-renders
-  const fileOption = useMemo(() => ({ url: fileUrl }), [fileUrl])
+  const fileOption = useMemo(() => {
+    if (pdfData) return { data: pdfData }
+    return pdfUrl
+  }, [pdfData, pdfUrl])
 
   const onLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n)
@@ -44,6 +161,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   }, [])
 
   const onLoadError = useCallback((err: Error) => {
+    console.error('[PdfViewer] PDF.js load error:', err)
     setError(err.message || 'PDF 加载失败')
   }, [])
 
@@ -132,8 +250,18 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
   if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-        <p className="text-[13px]">PDF 加载失败: {error}</p>
+      <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)] gap-2">
+        <p className="text-[13px]">PDF 加载失败</p>
+        <p className="text-[11px] text-[var(--text-light)]">{error}</p>
+        <p className="text-[10px] text-[var(--text-light)] mt-2">文件: {tab.path}</p>
+      </div>
+    )
+  }
+
+  if (!fileOption) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--text-muted)' }} />
       </div>
     )
   }
@@ -234,7 +362,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
       {/* PDF content - continuous scroll */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto"
+        className="panel-hover-scrollbar flex-1 overflow-auto"
         style={{ background: '#525659' }}
         onWheel={handleWheel}
       >

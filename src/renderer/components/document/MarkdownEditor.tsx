@@ -446,7 +446,7 @@ export default function MarkdownEditor({
           {viewMode === 'edit' && (
             <div
               ref={editorContainerRef}
-              className="document-editor-surface flex-1 overflow-auto"
+              className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"
               style={{ position: 'relative' }}
               onContextMenu={handleContextMenu}
               onDragOver={handleEditorDragOver}
@@ -490,7 +490,7 @@ export default function MarkdownEditor({
           {/* ── Preview pane ──────────── */}
           {viewMode === 'preview' && (
             <div
-              className="document-preview-surface flex-1 overflow-auto"
+              className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
               style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
               onContextMenu={handleContextMenu}
             >

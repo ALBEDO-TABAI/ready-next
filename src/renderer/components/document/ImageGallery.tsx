@@ -12,6 +12,7 @@ import {
   Images,
 } from 'lucide-react'
 import { type DocTab } from '../../stores/useDocTabs'
+import { toLocalFileUrl } from '../../utils/dragDrop'
 
 const TRANSPARENT_EXTS = ['png', 'webp', 'svg', 'gif']
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']
@@ -67,7 +68,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
       const imageFiles = result.items
         .filter((f) => !f.isDirectory && IMAGE_EXTS.includes(f.name.split('.').pop()?.toLowerCase() || ''))
         .map((f) => ({
-          src: `local-file://${encodeURI(f.path).replace(/#/g, '%23')}`,
+          src: toLocalFileUrl(f.path),
           width: 1920, // PhotoSwipe needs dimensions; will be updated on load
           height: 1080,
           alt: f.name,
@@ -302,7 +303,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
         {/* Image container */}
         <div
           ref={containerRef}
-          className="flex-1 flex items-center justify-center overflow-auto"
+          className="panel-hover-scrollbar flex-1 flex items-center justify-center overflow-auto"
           style={{
             padding: 24,
             cursor: needsPan ? (isDragging ? 'grabbing' : 'grab') : 'default',

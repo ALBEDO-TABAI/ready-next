@@ -32,8 +32,8 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(browserHeader, /paddingLeft: WORKBENCH_HEADER_EDGE_X/)
   assert.match(workbenchTabs, /className="workbench-tabs-surface glass-surface-panel flex-shrink-0"/)
   assert.match(documentMode, /className="document-path-bar flex items-center min-w-0"/)
-  assert.match(markdownEditor, /className="document-editor-surface flex-1 overflow-auto"/)
-  assert.match(markdownEditor, /className="document-preview-surface flex-1 overflow-auto"/)
+  assert.match(markdownEditor, /className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"/)
+  assert.match(markdownEditor, /className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"/)
 
   assert.match(rssFeed, /WORKBENCH_HEADER_EDGE_X/)
   assert.match(rssFeed, /className="rss-feed-surface rss-workbench-surface content-surface-panel flex flex-col h-full"/)
