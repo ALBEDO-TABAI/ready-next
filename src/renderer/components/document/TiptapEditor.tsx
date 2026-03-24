@@ -22,7 +22,6 @@ export interface TiptapEditorProps {
   content: string
   onChange?: (markdown: string) => void
   onSelectionChange?: (hasSelection: boolean) => void
-  onRequestPreview?: (title: string) => void
   onRequestAgentUpdate?: (title: string, widgetCode: string) => void
   editable?: boolean
   className?: string
@@ -66,7 +65,6 @@ function getWidgetMemoryKey(title: string, widgetCode: string): string {
 
 function createWidgetBlockExtension(
   getEditor: () => Editor | null,
-  onRequestPreview?: (title: string) => void,
   onRequestAgentUpdate?: (title: string, widgetCode: string) => void,
 ): Extension {
   return Extension.create({
@@ -118,7 +116,6 @@ function createWidgetBlockExtension(
                     modeLabel={getWidgetModeLabel(widget.widgetCode)}
                     widgetCode={widget.widgetCode}
                     sourceVisible={sourceVisible}
-                    onRequestPreview={onRequestPreview}
                     onRequestAgentUpdate={onRequestAgentUpdate ? (nextTitle, nextCode) => onRequestAgentUpdate(nextTitle, nextCode) : undefined}
                     onToggleSource={() => {
                       const currentEditor = getEditor()
@@ -225,7 +222,6 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     content,
     onChange,
     onSelectionChange,
-    onRequestPreview,
     onRequestAgentUpdate,
     editable = true,
     className,
@@ -237,8 +233,8 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     const revealClearTimerRef = useRef<number | null>(null)
     const editorRef = useRef<Editor | null>(null)
     const widgetBlockExtension = useMemo(
-      () => createWidgetBlockExtension(() => editorRef.current, onRequestPreview, onRequestAgentUpdate),
-      [onRequestAgentUpdate, onRequestPreview],
+      () => createWidgetBlockExtension(() => editorRef.current, onRequestAgentUpdate),
+      [onRequestAgentUpdate],
     )
 
     const editor = useEditor({

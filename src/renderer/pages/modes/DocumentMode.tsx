@@ -3,16 +3,15 @@ import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
-import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
-import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
+import WorkbenchProjectTabs from '../../components/workbench/WorkbenchProjectTabs'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
-import {
-  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
-  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
-  WORKBENCH_CANVAS_OUTER_PADDING_X,
-} from '../../modules/workbench/chrome'
 import { getFileExtension } from '../../utils/path'
+import {
+  getDocumentViewModeOptions,
+  normalizeDocumentViewMode,
+  type DocumentViewMode,
+} from '../../components/document/document-view-modes'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -29,6 +28,13 @@ const getFileTypeColor = (path: string | null): string => {
   if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return '#EB5757' // red - video
   if (ext === 'pdf') return '#EB5757' // red - pdf
   return '#5B8DEF' // blue - default
+}
+
+function formatDocumentOpenError(message: string): string {
+  const normalized = message.trim()
+  if (!normalized) return '无法打开文档：未知错误。'
+  if (normalized.startsWith('无法打开文档')) return normalized
+  return `无法打开文档：${normalized}`
 }
 
 // --- SplitResizeHandle ---
@@ -64,14 +70,11 @@ function SplitResizeHandle({ onResize }: { onResize: (delta: number) => void }) 
 function DocumentEditor({
   tab,
   viewMode,
-  onRequestPreview,
-  previewFocusWidgetTitle,
 }: {
   tab: DocTab
-  viewMode: 'edit' | 'preview'
-  onRequestPreview?: (title: string) => void
-  previewFocusWidgetTitle?: string | null
+  viewMode: DocumentViewMode
 }) {
+  const normalizedViewMode = useMemo(() => normalizeDocumentViewMode(tab.path, viewMode), [tab.path, viewMode])
   const ext = useMemo(() => getFileExt(tab.path), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(ext)
@@ -94,24 +97,19 @@ function DocumentEditor({
   return (
     <MarkdownEditor
       tab={tab}
-      viewMode={viewMode}
-      onRequestPreview={onRequestPreview}
-      previewFocusWidgetTitle={previewFocusWidgetTitle}
+      viewMode={normalizedViewMode}
     />
   )
 }
 
 // --- DocumentMode main component ---
-interface DocumentModeProps {
-  isActive?: boolean
-  isMotionSettled?: boolean
-}
-
-export default function DocumentMode({
-  isActive = true,
-  isMotionSettled = true,
-}: DocumentModeProps) {
-  const { selectedFile } = useWorkspace()
+export default function DocumentMode() {
+  const {
+    selectedFile,
+    documentOpenError,
+    setDocumentOpenError,
+    clearDocumentOpenError,
+  } = useWorkspace()
   const {
     tabs, activeTabId, splitTabId, splitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setSplitRatio,
@@ -119,41 +117,54 @@ export default function DocumentMode({
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
-  const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
-  const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
-  const [hasActivated, setHasActivated] = useState(isActive)
-
-  useEffect(() => {
-    if (isActive) {
-      setHasActivated(true)
-    }
-  }, [isActive])
+  const [editorMode, setEditorMode] = useState<DocumentViewMode>('rich')
 
   // Open the file selected in SidePanel
   useEffect(() => {
-    if (!hasActivated || !selectedFile) return undefined
+    if (!selectedFile) {
+      clearDocumentOpenError()
+      return undefined
+    }
 
     let disposed = false
     void (async () => {
       if (!window.electronAPI?.document?.stat) {
-        openTab(selectedFile)
+        if (!disposed) {
+          setDocumentOpenError(selectedFile, formatDocumentOpenError('当前环境不支持文档状态检查。'))
+        }
         return
       }
-      const result = await window.electronAPI.document.stat(selectedFile).catch(() => null)
-      const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
-      if (!disposed && result?.success && !isDirectory) {
-        openTab(selectedFile)
+      const result: {
+        success: boolean
+        error?: string
+        data?: { isDirectory?: boolean }
+        stat?: { isDirectory?: boolean }
+      } = await window.electronAPI.document.stat(selectedFile).catch((error) => ({
+        success: false,
+        error: error instanceof Error ? error.message : '读取文档状态失败',
+      }))
+      const isDirectory = result.data?.isDirectory ?? result.stat?.isDirectory ?? false
+      if (disposed) return
+      if (!result.success) {
+        setDocumentOpenError(selectedFile, formatDocumentOpenError(result.error || '读取文档状态失败'))
+        return
       }
+      if (isDirectory) {
+        setDocumentOpenError(selectedFile, formatDocumentOpenError('该路径是目录，无法作为文档打开。'))
+        return
+      }
+      clearDocumentOpenError()
+      openTab(selectedFile)
     })()
 
     return () => {
       disposed = true
     }
-  }, [hasActivated, selectedFile, openTab])
+  }, [selectedFile, openTab, setDocumentOpenError, clearDocumentOpenError])
 
   useEffect(() => {
     const handler = () => {
-      setEditorMode('edit')
+      setEditorMode('source')
     }
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
     return () => window.removeEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
@@ -162,6 +173,14 @@ export default function DocumentMode({
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
+  const availableViewModes = useMemo(
+    () => getDocumentViewModeOptions(activeTab?.path ?? null),
+    [activeTab?.path],
+  )
+  const resolvedEditorMode = useMemo(
+    () => normalizeDocumentViewMode(activeTab?.path ?? null, editorMode),
+    [activeTab?.path, editorMode],
+  )
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
@@ -220,14 +239,9 @@ export default function DocumentMode({
 
   return (
     <div className="workbench-mode-root">
-      <div
-        className="flex-1 min-h-0"
-        style={{
-          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
-        }}
-      >
+      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
-          <DocumentTabRail
+          <WorkbenchProjectTabs
             layoutId="document-tabs"
             tabs={tabs.map((tab) => {
               const isPrimary = tab.id === activeTabId
@@ -253,21 +267,68 @@ export default function DocumentMode({
             onTabDragOver={handleDragOver}
             onTabDrop={handleDrop}
             onTabDragEnd={handleDragEnd}
-            rightActions={
-              <DraggableModeSwitch
-                mode={editorMode}
-                onChange={setEditorMode}
-              />
-            }
+            rightActions={availableViewModes.length > 1 ? (
+              <div
+                className="glass-surface-card flex items-center"
+                style={{
+                  background: 'var(--bg-content)',
+                  borderRadius: 8,
+                  padding: 2,
+                  border: '1px solid transparent',
+                  height: 30,
+                }}
+              >
+                {availableViewModes.map((mode) => (
+                  <button
+                    key={mode.mode}
+                    onClick={() => setEditorMode(mode.mode)}
+                    className="transition-all duration-150 ease-out"
+                    title={mode.description}
+                    style={{
+                      padding: '0 12px',
+                      height: 26,
+                      fontSize: 12,
+                      borderRadius: 6,
+                      fontWeight: 500,
+                      ...(resolvedEditorMode === mode.mode ? {
+                        background: 'var(--color-blue-light)',
+                        color: 'var(--color-blue)',
+                        boxShadow: 'none',
+                        border: '1px solid transparent',
+                      } : {
+                        background: 'transparent',
+                        color: 'var(--text-muted)',
+                        border: '1px solid transparent',
+                      }),
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            ) : undefined}
           />
 
+          {documentOpenError && (
+            <div
+              className="mx-3 mt-2 rounded-[8px] px-3 py-2 text-[12px]"
+              style={{
+                background: 'var(--color-orange-light)',
+                color: 'var(--color-orange)',
+              }}
+              title={documentOpenError.path}
+            >
+              {documentOpenError.message}
+            </div>
+          )}
+
           <div
-            className="document-path-bar flex items-center min-w-0"
+            className="flex items-center min-w-0"
             style={{
               height: 30,
               paddingLeft: 18,
               paddingRight: 18,
-              background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))',
+              background: 'var(--bg-content)',
             }}
           >
             <div
@@ -297,12 +358,7 @@ export default function DocumentMode({
                 <DocumentEditor
                   key={activeTab.id}
                   tab={activeTab}
-                  viewMode={editorMode}
-                  previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onRequestPreview={(title) => {
-                    setPreviewFocusWidgetTitle(title)
-                    setEditorMode('preview')
-                  }}
+                  viewMode={resolvedEditorMode}
                 />
               </div>
               <SplitResizeHandle onResize={handleSplitResize} />
@@ -310,12 +366,7 @@ export default function DocumentMode({
                 <DocumentEditor
                   key={splitTab.id}
                   tab={splitTab}
-                  viewMode={editorMode}
-                  previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onRequestPreview={(title) => {
-                    setPreviewFocusWidgetTitle(title)
-                    setEditorMode('preview')
-                  }}
+                  viewMode={resolvedEditorMode}
                 />
               </div>
             </div>
@@ -324,12 +375,7 @@ export default function DocumentMode({
               <DocumentEditor
                 key={activeTab.id}
                 tab={activeTab}
-                viewMode={editorMode}
-                previewFocusWidgetTitle={previewFocusWidgetTitle}
-                onRequestPreview={(title) => {
-                  setPreviewFocusWidgetTitle(title)
-                  setEditorMode('preview')
-                }}
+                viewMode={resolvedEditorMode}
               />
             </div>
           ) : (

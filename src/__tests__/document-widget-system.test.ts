@@ -190,6 +190,20 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(source, /isScriptWidget/)
   })
 
+  it('keeps widget management actions in source mode without a preview button', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetBlockCard.tsx'),
+      'utf8',
+    )
+
+    assert.match(source, /让 agent 更新/)
+    assert.match(source, /查看源码/)
+    assert.match(source, /复制源码/)
+    assert.match(source, /删除/)
+    assert.doesNotMatch(source, /<span>预览<\/span>/)
+    assert.doesNotMatch(source, /onRequestPreview/)
+  })
+
   it('uses the external widget receiver bootstrap script so renderer CSP does not block widget startup', () => {
     const srcdoc = buildWidgetReceiverSrcdoc(':root{}', false, '<div>demo</div>', 'tok')
     const rendererHtml = readFileSync(

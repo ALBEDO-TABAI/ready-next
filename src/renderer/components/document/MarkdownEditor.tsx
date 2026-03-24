@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
-import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
-import TiptapEditor, { type TiptapEditorRef } from './TiptapEditor'
-import EditorFloatingToolbar from './EditorFloatingToolbar'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDocTabs, type DocTab, type PendingDocReveal } from '../../stores/useDocTabs'
 import EditorContextMenu from './EditorContextMenu'
-import NotePreview from './NotePreview'
+import DocumentWidgetBlockCard from './DocumentWidgetBlockCard'
+import RichDocumentView from './RichDocumentView'
 import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
 import {
   getDroppedFileKind,
@@ -11,20 +10,18 @@ import {
   toFileUrl,
 } from '../../utils/dragDrop'
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
+import { type DocumentViewMode } from './document-view-modes'
+import { tryParseWidgetPayload } from './widget-fence-parser'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 const DEFAULT_CONTENT = `# 欢迎使用 Ready 文档编辑器
 
-这是一个支持 Markdown 的文档编辑器，支持**实时预览**。
+现在文档模式分成两层：
 
-## 功能特点
-
-- **编辑模式**：直接编写 Markdown 原文
-- **预览模式**：实时渲染 Markdown 为富文本
-- **分栏模式**：左侧编辑，右侧预览
-- 支持文件读取和保存（Electron 环境）
+- **排版**：查看最终成品效果
+- **源码**：直接编辑 Markdown 原文和生成式内容
 
 ## Markdown 语法示例
 
@@ -47,12 +44,10 @@ function hello() {
 
 ### 引用
 > 这是一段引用文字。
-> Ready 让自媒体创作更高效。
-
----
-
-*按 Cmd+S 保存文档*
+> Ready 让创作更高效。
 `
+
+const SOURCE_WIDGET_FENCE_REGEX = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
 
 interface ReadResult {
   success?: boolean
@@ -62,6 +57,16 @@ interface ReadResult {
   error?: string
 }
 
+interface SourceWidgetCard {
+  key: string
+  title: string
+  widgetCode: string
+  rawFence: string
+  start: number
+  end: number
+  modeLabel: string
+}
+
 const getFileExt = (path: string | null): string => {
   if (!path) return ''
   return (path.split('/').pop() || '').split('.').pop()?.toLowerCase() || ''
@@ -69,9 +74,7 @@ const getFileExt = (path: string | null): string => {
 
 interface MarkdownEditorProps {
   tab: DocTab
-  viewMode?: 'edit' | 'preview'
-  onRequestPreview?: (title: string) => void
-  previewFocusWidgetTitle?: string | null
+  viewMode?: DocumentViewMode
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -91,6 +94,44 @@ function escapeHtmlText(value: string): string {
 
 function normalizeDocText(value: string): string {
   return value.replace(/\r\n?/g, '\n')
+}
+
+function getWidgetModeLabel(widgetCode: string): string {
+  if (/<script\b/i.test(widgetCode)) return '脚本交互'
+  if (/<svg\b/i.test(widgetCode)) return 'SVG widget'
+  return 'HTML widget'
+}
+
+function collectSourceWidgets(content: string): SourceWidgetCard[] {
+  const widgets: SourceWidgetCard[] = []
+
+  for (const match of content.matchAll(SOURCE_WIDGET_FENCE_REGEX)) {
+    const rawFence = match[0]
+    const rawBody = match[1] || ''
+    const start = match.index ?? 0
+    const widget = tryParseWidgetPayload(rawBody, rawFence)
+    if (!widget) continue
+
+    const title = widget.title || `widget_${widgets.length + 1}`
+    widgets.push({
+      key: `${title}-${start}`,
+      title,
+      widgetCode: widget.widgetCode,
+      rawFence,
+      start,
+      end: start + rawFence.length,
+      modeLabel: getWidgetModeLabel(widget.widgetCode),
+    })
+  }
+
+  return widgets
+}
+
+function removeWidgetFromSourceContent(content: string, widget: SourceWidgetCard): string {
+  const before = content.slice(0, widget.start).replace(/[ \t]*\n?$/, '')
+  const after = content.slice(widget.end).replace(/^\n+/, '')
+  const merged = [before, after].filter(Boolean).join('\n\n')
+  return merged.replace(/\n{3,}/g, '\n\n')
 }
 
 function findDocumentSelectionLocation(
@@ -130,7 +171,7 @@ function findDocumentSelectionLocation(
 
 function getMarkdownForDroppedFiles(
   files: ReturnType<typeof getDroppedFilesFromDataTransfer>,
-  targetExt: string
+  targetExt: string,
 ): string {
   const isDocx = targetExt === 'docx'
   const lines: string[] = []
@@ -172,47 +213,96 @@ function getMarkdownForDroppedFiles(
   return lines.join('\n')
 }
 
+function findSourceRevealRange(
+  content: string,
+  revealTarget: PendingDocReveal | null,
+): { start: number; end: number } | null {
+  if (!revealTarget) return null
+
+  const normalizedContent = normalizeDocText(content)
+  const selection = normalizeDocText(revealTarget.selection || '').trim()
+
+  if (selection) {
+    const index = normalizedContent.indexOf(selection)
+    if (index >= 0) {
+      return {
+        start: index,
+        end: index + selection.length,
+      }
+    }
+  }
+
+  if (revealTarget.lineStart && revealTarget.lineStart > 0) {
+    const lines = normalizedContent.split('\n')
+    if (lines.length === 0) return null
+
+    const startLine = Math.min(revealTarget.lineStart - 1, lines.length - 1)
+    const endLine = Math.min(
+      Math.max(startLine, (revealTarget.lineEnd || revealTarget.lineStart) - 1),
+      lines.length - 1,
+    )
+    const start = lines.slice(0, startLine).reduce((sum, line) => sum + line.length + 1, 0)
+    const selectedBlock = lines.slice(startLine, endLine + 1).join('\n')
+
+    return {
+      start,
+      end: start + selectedBlock.length,
+    }
+  }
+
+  return null
+}
+
+function buildSourceModeMeta(currentExt: string): { badge: string; hint: string } {
+  if (currentExt === 'docx') {
+    return {
+      badge: 'DOCX 文本',
+      hint: '这里编辑正文原文，生成式内容的更新、查看源码和删除也都在这里完成。',
+    }
+  }
+
+  if (currentExt && !['md', 'markdown', 'txt'].includes(currentExt)) {
+    return {
+      badge: `${currentExt.toUpperCase()} 原文`,
+      hint: '这里直接显示文件原文，不做提前渲染。',
+    }
+  }
+
+  return {
+    badge: 'Markdown 原文',
+    hint: '这里直接编辑原始 Markdown；生成式内容的管理动作也只放在这里。',
+  }
+}
+
 export default function MarkdownEditor({
   tab,
-  viewMode = 'edit',
-  onRequestPreview,
-  previewFocusWidgetTitle,
+  viewMode = 'rich',
 }: MarkdownEditorProps) {
   const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  // TiptapEditor ref
-  const tiptapRef = useRef<TiptapEditorRef>(null)
-
-  // Editor container ref for positioning floating toolbar
-  const editorContainerRef = useRef<HTMLDivElement>(null)
-
-  // Floating toolbar state
-  const [hasSelection, setHasSelection] = useState(false)
-  const [floatingToolbarPos, setFloatingToolbarPos] = useState({ x: 0, y: 0 })
-
-  // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean
     x: number
     y: number
   }>({ visible: false, x: 0, y: 0 })
   const [contextSelection, setContextSelection] = useState<string>('')
+  const [focusedWidgetKey, setFocusedWidgetKey] = useState<string | null>(null)
+
+  const sourceEditorRef = useRef<HTMLTextAreaElement>(null)
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
   const canSave = !!tab.path
+  const sourceModeMeta = useMemo(() => buildSourceModeMeta(currentExt), [currentExt])
+  const sourceWidgets = useMemo(() => collectSourceWidgets(tab.content), [tab.content])
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
     return pendingReveal
   }, [pendingReveal, tab.path])
 
-  const showFloatingToolbar =
-    hasSelection && viewMode === 'edit'
+  const isSourceMode = viewMode === 'source'
 
-  // ─── File loading ───────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -220,29 +310,18 @@ export default function MarkdownEditor({
         if (!tab.content && !tab.isDirty) {
           updateTabContent(tab.id, DEFAULT_CONTENT)
         }
-        setLoadError(null)
-        setContentReady(true)
-        setIsLoading(false)
         return
       }
 
-      // Avoid clobbering content that has already been loaded by tool actions.
       if (tab.content.length > 0 && !tab.isDirty) {
-        setLoadError(null)
         setIsLoading(false)
         setContentReady(true)
         return
       }
 
-      if (typeof window === 'undefined' || !window.electronAPI) {
-        setLoadError('文档加载失败：当前环境未提供 Electron 文件系统能力。')
-        setIsLoading(false)
-        setContentReady(true)
-        return
-      }
+      if (typeof window === 'undefined' || !window.electronAPI) return
 
       setIsLoading(true)
-      setLoadError(null)
       try {
         const ext = getFileExt(tab.path)
         if (['md', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'].includes(ext)) {
@@ -271,12 +350,14 @@ export default function MarkdownEditor({
           }
         } else {
           if (!cancelled) {
-            setLoadError(`文件暂不支持直接编辑：${tab.path}`)
+            updateTabContent(tab.id, `# 暂不支持该格式\n\n文件: ${tab.path}`)
+            markTabSaved(tab.id)
           }
         }
       } catch (error) {
         if (!cancelled) {
-          setLoadError(`文档加载失败：${error instanceof Error ? error.message : String(error)}`)
+          updateTabContent(tab.id, `# 文件读取失败\n\n${error instanceof Error ? error.message : String(error)}`)
+          markTabSaved(tab.id)
         }
       } finally {
         if (!cancelled) {
@@ -289,7 +370,6 @@ export default function MarkdownEditor({
     return () => { cancelled = true }
   }, [tab.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Save logic ─────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!tab.path || !canSave || !tab.isDirty) return
     if (typeof window === 'undefined' || !window.electronAPI) return
@@ -304,7 +384,6 @@ export default function MarkdownEditor({
     }
   }, [tab.path, tab.content, canSave, tab.id, markTabSaved])
 
-  // Cmd+S keyboard shortcut
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -316,41 +395,30 @@ export default function MarkdownEditor({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleSave])
 
-  // ─── TiptapEditor callbacks ─────────────────────────────────
-  const handleEditorChange = useCallback(
-    (markdown: string) => {
-      updateTabContent(tab.id, markdown)
-      setSaveState('idle')
-    },
-    [tab.id, updateTabContent]
-  )
+  const handleSourceChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updateTabContent(tab.id, e.target.value)
+    setSaveState('idle')
+  }, [tab.id, updateTabContent])
 
-  const handleSelectionChange = useCallback(
-    (selected: boolean) => {
-      setHasSelection(selected)
-      if (selected && tiptapRef.current?.editor && editorContainerRef.current) {
-        const editor = tiptapRef.current.editor
-        const { from, to } = editor.state.selection
-        const startCoords = editor.view.coordsAtPos(from)
-        const endCoords = editor.view.coordsAtPos(to)
-        const containerRect = editorContainerRef.current.getBoundingClientRect()
+  const handleSourceSelection = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget
+    setContextSelection(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd))
+  }, [])
 
-        setFloatingToolbarPos({
-          x: (startCoords.left + endCoords.right) / 2 - containerRect.left,
-          y: startCoords.top - containerRect.top - 50,
-        })
-      }
-    },
-    []
-  )
+  const getCurrentSelectionText = useCallback(() => {
+    if (isSourceMode && sourceEditorRef.current) {
+      const textarea = sourceEditorRef.current
+      return textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
+    }
 
-  // ─── Context menu handler ──────────────────────────────────
+    return window.getSelection?.()?.toString() || ''
+  }, [isSourceMode])
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    const selectedText = window.getSelection?.()?.toString() || ''
-    setContextSelection(selectedText)
+    setContextSelection(getCurrentSelectionText())
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY })
-  }, [])
+  }, [getCurrentSelectionText])
 
   const handleEditorDragOver = useCallback((e: React.DragEvent) => {
     const types = new Set(Array.from(e.dataTransfer.types || []))
@@ -364,21 +432,38 @@ export default function MarkdownEditor({
     e.dataTransfer.dropEffect = 'copy'
   }, [])
 
+  const insertSnippetAtSourceSelection = useCallback((snippet: string) => {
+    const textarea = sourceEditorRef.current
+    if (!textarea) {
+      updateTabContent(tab.id, `${tab.content}${snippet}`)
+      setSaveState('idle')
+      return
+    }
+
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const nextContent = `${tab.content.slice(0, start)}${snippet}${tab.content.slice(end)}`
+    updateTabContent(tab.id, nextContent)
+    setSaveState('idle')
+
+    requestAnimationFrame(() => {
+      const nextTextarea = sourceEditorRef.current
+      if (!nextTextarea) return
+      const cursor = start + snippet.length
+      nextTextarea.focus()
+      nextTextarea.setSelectionRange(cursor, cursor)
+    })
+  }, [tab.content, tab.id, updateTabContent])
+
   const handleEditorDrop = useCallback((e: React.DragEvent) => {
     const droppedFiles = getDroppedFilesFromDataTransfer(e.dataTransfer)
     if (droppedFiles.length === 0) return
 
     e.preventDefault()
-
     const snippet = getMarkdownForDroppedFiles(droppedFiles, currentExt)
     if (!snippet) return
-
-    const prefix = tab.content.trim().length === 0
-      ? ''
-      : tab.content.endsWith('\n') ? '\n' : '\n\n'
-    updateTabContent(tab.id, `${tab.content}${prefix}${snippet}\n`)
-    setSaveState('idle')
-  }, [currentExt, tab.content, tab.id, updateTabContent])
+    insertSnippetAtSourceSelection(snippet)
+  }, [currentExt, insertSnippetAtSourceSelection])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }))
@@ -413,102 +498,138 @@ export default function MarkdownEditor({
     })
   }, [tab.path, tab.title])
 
-  // ─── View mode buttons ─────────────────────────────────────
-  // (Moved to DocumentMode header — no longer rendered here)
+  const focusSourceRange = useCallback((start: number, end: number, widgetKey?: string | null) => {
+    const textarea = sourceEditorRef.current
+    if (!textarea) return
 
-  // Resolve TiptapEditor editor instance for context menu / toolbar
-  const editorInstance = tiptapRef.current?.editor ?? null
+    requestAnimationFrame(() => {
+      const nextTextarea = sourceEditorRef.current
+      if (!nextTextarea) return
+      nextTextarea.focus()
+      nextTextarea.setSelectionRange(start, end)
+      const lineHeight = Number.parseFloat(window.getComputedStyle(nextTextarea).lineHeight || '22') || 22
+      const before = tab.content.slice(0, start)
+      const lineIndex = Math.max(0, before.split('\n').length - 1)
+      nextTextarea.scrollTop = Math.max(0, lineIndex * lineHeight - nextTextarea.clientHeight / 3)
+      setContextSelection(nextTextarea.value.slice(start, end))
+      setFocusedWidgetKey(widgetKey || null)
+    })
+  }, [tab.content])
 
-  const renderLoadState = () => {
-    if (loadError) {
-      return (
-        <div className="flex items-center justify-center py-10">
-          <div className="max-w-[520px] rounded-[12px] border border-[var(--color-orange)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
-            {loadError}
-          </div>
-        </div>
-      )
+  const handleToggleWidgetSource = useCallback((widget: SourceWidgetCard) => {
+    const textarea = sourceEditorRef.current
+    if (!textarea) return
+
+    if (focusedWidgetKey === widget.key) {
+      textarea.focus()
+      textarea.setSelectionRange(widget.end, widget.end)
+      setFocusedWidgetKey(null)
+      setContextSelection('')
+      return
     }
 
-    return (
-      <div className="flex items-center justify-center py-10">
-        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载中...</span>
-      </div>
-    )
-  }
+    focusSourceRange(widget.start, widget.end, widget.key)
+  }, [focusSourceRange, focusedWidgetKey])
+
+  const handleDeleteWidget = useCallback((widget: SourceWidgetCard) => {
+    const nextContent = removeWidgetFromSourceContent(tab.content, widget)
+    updateTabContent(tab.id, nextContent)
+    setSaveState('idle')
+    if (focusedWidgetKey === widget.key) {
+      setFocusedWidgetKey(null)
+      setContextSelection('')
+    }
+  }, [focusedWidgetKey, tab.content, tab.id, updateTabContent])
+
+  useEffect(() => {
+    if (!isSourceMode || !activeRevealTarget) return
+
+    const range = findSourceRevealRange(tab.content, activeRevealTarget)
+    if (!range) {
+      setPendingReveal(null)
+      return
+    }
+
+    focusSourceRange(range.start, range.end)
+    setPendingReveal(null)
+  }, [activeRevealTarget, focusSourceRange, isSourceMode, setPendingReveal, tab.content])
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Content area ──────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}>
-        <>
-          {/* ── Edit pane: TiptapEditor ── */}
-          {viewMode === 'edit' && (
-            <div
-              ref={editorContainerRef}
-              className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"
-              style={{ position: 'relative' }}
-              onContextMenu={handleContextMenu}
-              onDragOver={handleEditorDragOver}
-              onDrop={handleEditorDrop}
-            >
-              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
-                {contentReady ? (
-                  loadError ? (
-                    renderLoadState()
-                  ) : (
-                    <TiptapEditor
-                      ref={tiptapRef}
-                      content={tab.content}
-                      onChange={handleEditorChange}
-                      onSelectionChange={handleSelectionChange}
-                      onRequestPreview={onRequestPreview}
-                      onRequestAgentUpdate={requestAgentUpdateWidget}
-                      editable={!isLoading}
-                      revealTarget={activeRevealTarget}
-                      onRevealHandled={() => {
-                        if (activeRevealTarget) {
-                          setPendingReveal(null)
-                        }
-                      }}
-                    />
-                  )
-                ) : (
-                  renderLoadState()
-                )}
+      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--bg-content)' }}>
+        {isSourceMode ? (
+          <div
+            className="flex-1 overflow-auto"
+            style={{ position: 'relative' }}
+            onContextMenu={handleContextMenu}
+            onDragOver={handleEditorDragOver}
+            onDrop={handleEditorDrop}
+          >
+            <div className="document-source-shell">
+              <div className="document-source-header">
+                <div className="document-source-badge">{sourceModeMeta.badge}</div>
+                <div className="document-source-hint">{sourceModeMeta.hint}</div>
               </div>
 
-              {/* ── Floating Toolbar (above selection) ── */}
-              <EditorFloatingToolbar
-                editor={editorInstance}
-                visible={showFloatingToolbar}
-                position={floatingToolbarPos}
-              />
-            </div>
-          )}
+              {contentReady ? (
+                <textarea
+                  ref={sourceEditorRef}
+                  className="document-source-textarea"
+                  value={tab.content}
+                  onChange={handleSourceChange}
+                  onSelect={handleSourceSelection}
+                  readOnly={isLoading}
+                  spellCheck={false}
+                  placeholder="开始输入 Markdown 原文..."
+                />
+              ) : (
+                <div className="flex items-center justify-center py-10">
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>加载中...</span>
+                </div>
+              )}
 
-          {/* ── Preview pane ──────────── */}
-          {viewMode === 'preview' && (
-            <div
-              className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
-              style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
-              onContextMenu={handleContextMenu}
-            >
-              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
-                {loadError ? (
-                  renderLoadState()
-                ) : (
-                  <NotePreview content={tab.content} notePath={tab.path} focusWidgetTitle={previewFocusWidgetTitle} />
-                )}
-              </div>
+              {sourceWidgets.length > 0 ? (
+                <div className="document-source-widgets">
+                  <div className="document-source-widgets-header">
+                    <div className="document-source-widgets-title">生成式内容</div>
+                    <div className="document-source-widgets-hint">这里保留更新、查看源码、复制源码和删除等管理动作。</div>
+                  </div>
+                  <div className="document-source-widgets-list">
+                    {sourceWidgets.map((widget) => (
+                      <DocumentWidgetBlockCard
+                        key={widget.key}
+                        title={widget.title}
+                        modeLabel={widget.modeLabel}
+                        widgetCode={widget.widgetCode}
+                        sourceVisible={focusedWidgetKey === widget.key}
+                        onRequestAgentUpdate={(title, widgetCode) => requestAgentUpdateWidget(title, widgetCode)}
+                        onToggleSource={() => handleToggleWidgetSource(widget)}
+                        onCopySource={() => {
+                          void navigator.clipboard?.writeText(widget.rawFence)
+                        }}
+                        onDelete={() => handleDeleteWidget(widget)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          )}
-        </>
+          </div>
+        ) : (
+          <div
+            className="flex-1 overflow-auto"
+            style={{ background: 'var(--bg-content)' }}
+            onContextMenu={handleContextMenu}
+          >
+            <div style={{ padding: '16px 40px 28px', maxWidth: 860, margin: '0 auto' }}>
+              <RichDocumentView content={tab.content} notePath={tab.path} />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Editor Context Menu (fixed position, portal-like) ── */}
       <EditorContextMenu
-        editor={editorInstance}
+        editor={null}
         visible={contextMenu.visible}
         position={{ x: contextMenu.x, y: contextMenu.y }}
         onClose={closeContextMenu}
