@@ -10,18 +10,18 @@ interface WindowOpenDetails {
 
 export class BrowserWindowOpenService {
   private readonly popupManager: AuthPopupManager
-  private readonly createTab: (url: string) => Promise<{ success: boolean; tabId?: string; error?: string }>
+  private readonly requestNewTab: (url: string) => void
   private readonly logBrowserDiag: (message: string) => void
   private readonly openExternal: (url: string) => void
 
   constructor(deps: {
     popupManager: AuthPopupManager
-    createTab: (url: string) => Promise<{ success: boolean; tabId?: string; error?: string }>
+    requestNewTab: (url: string) => void
     logBrowserDiag: (message: string) => void
     openExternal: (url: string) => void
   }) {
     this.popupManager = deps.popupManager
-    this.createTab = deps.createTab
+    this.requestNewTab = deps.requestNewTab
     this.logBrowserDiag = deps.logBrowserDiag
     this.openExternal = deps.openExternal
   }
@@ -59,10 +59,7 @@ export class BrowserWindowOpenService {
     }
 
     if (resolved.mode === 'open-tab') {
-      void this.createTab(details.url).catch((error) => {
-        this.logBrowserDiag(`[browser-v3][popup] failed to open in tab: ${String(error)}`)
-        this.openExternal(details.url)
-      })
+      this.requestNewTab(details.url)
       return { action: 'deny' }
     }
 

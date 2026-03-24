@@ -258,7 +258,9 @@ export class BrowserController {
     this.sessionPolicyService.setupBrowserSessionPolicies()
     this.windowOpenService = new BrowserWindowOpenService({
       popupManager: this.popupManager,
-      createTab: (url) => this.createTab(url),
+      requestNewTab: (url) => {
+        this.sendToRenderer('browser:newTabRequest', url)
+      },
       logBrowserDiag: (message) => this.logBrowserDiag(message),
       openExternal: (url) => {
         shell.openExternal(url)
