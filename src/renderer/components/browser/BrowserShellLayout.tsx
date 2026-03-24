@@ -1,53 +1,25 @@
 import type { DragEvent, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
-import BrowserSidePanel from './BrowserSidePanel'
-import type { AdblockState, BookmarkItem, DownloadItem, HistoryItem, PanelType } from '../../modules/browser/types'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 
 interface BrowserShellLayoutProps {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
   activeTab: BrowserTab | null
-  activePanel: PanelType
-  bookmarks: BookmarkItem[]
-  selectedBookmarkUrl: string
-  historyItems: HistoryItem[]
-  downloads: DownloadItem[]
-  adblockState: AdblockState
   toastVisible: boolean
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: (event: DragEvent<HTMLDivElement>) => void
   onRetry: () => void | Promise<void>
-  onClosePanel: () => void
-  onNavigateFromPanel: (url: string) => void | Promise<void>
-  onRemoveBookmark: (url: string) => void | Promise<void>
-  onClearHistory: () => void | Promise<void>
-  onClearDownloads: () => void | Promise<void>
-  onSelectBookmark: (url: string) => void
-  onToggleAdblock: () => void | Promise<void>
 }
 
 export default function BrowserShellLayout({
   isElectron,
   contentRef,
   activeTab,
-  activePanel,
-  bookmarks,
-  selectedBookmarkUrl,
-  historyItems,
-  downloads,
-  adblockState,
   toastVisible,
   onDragOver,
   onDrop,
   onRetry,
-  onClosePanel,
-  onNavigateFromPanel,
-  onRemoveBookmark,
-  onClearHistory,
-  onClearDownloads,
-  onSelectBookmark,
-  onToggleAdblock,
 }: BrowserShellLayoutProps) {
   return (
     <div className="flex min-h-0 h-full flex-1">
@@ -178,22 +150,6 @@ export default function BrowserShellLayout({
           </div>
         </div>
       </div>
-
-      <BrowserSidePanel
-        activePanel={activePanel}
-        bookmarks={bookmarks}
-        selectedBookmarkUrl={selectedBookmarkUrl}
-        historyItems={historyItems}
-        downloads={downloads}
-        adblockState={adblockState}
-        onClose={onClosePanel}
-        onNavigateFromPanel={onNavigateFromPanel}
-        onRemoveBookmark={onRemoveBookmark}
-        onClearHistory={onClearHistory}
-        onClearDownloads={onClearDownloads}
-        onSelectBookmark={onSelectBookmark}
-        onToggleAdblock={onToggleAdblock}
-      />
 
       <style>{`
         @keyframes browserContentProgress {

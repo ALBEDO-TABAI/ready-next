@@ -9,6 +9,8 @@ interface ActiveTabSurfaceProps {
   urlInput: string
   isBookmarked: boolean
   surfaceRef: RefObject<HTMLDivElement | null>
+  compactWidth: number
+  compactMinWidth: number
   draggable?: boolean
   onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
   onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
@@ -29,6 +31,8 @@ export default function ActiveTabSurface({
   urlInput,
   isBookmarked,
   surfaceRef,
+  compactWidth,
+  compactMinWidth,
   draggable = false,
   onDragStart,
   onDragEnd,
@@ -65,9 +69,9 @@ export default function ActiveTabSurface({
       className="group relative flex min-w-0 items-center rounded-[14px] border transition-all duration-200"
       style={{
         height: 34,
-        width: isExpanded ? 420 : 220,
-        minWidth: isExpanded ? 320 : 168,
-        maxWidth: isExpanded ? 420 : 220,
+        width: isExpanded ? 420 : compactWidth,
+        minWidth: isExpanded ? 320 : compactMinWidth,
+        maxWidth: isExpanded ? 420 : compactWidth,
         paddingLeft: 12,
         paddingRight: 10,
         gap: 8,

@@ -13,7 +13,6 @@ interface UseBrowserViewBoundsParams {
   skillsSplitRatio: number
   chatPanelVisible: boolean
   chatPanelWidth: number
-  activePanel: string | null
   hasError: boolean
 }
 
@@ -28,7 +27,6 @@ export function useBrowserViewBounds({
   skillsSplitRatio,
   chatPanelVisible,
   chatPanelWidth,
-  activePanel,
   hasError,
 }: UseBrowserViewBoundsParams) {
   const boundsRafRef = useRef<number | null>(null)
@@ -38,7 +36,7 @@ export function useBrowserViewBounds({
   const layoutTransitionUntilRef = useRef(0)
   const overlayLockCountRef = useRef(0)
 
-  const sendBoundsImmediate = useCallback((options?: { forceExact?: boolean }) => {
+  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean }) => {
     if (!isElectron || !contentRef.current) return
     const chatPanelResizeHandleWidth = 4
     const rect = contentRef.current.getBoundingClientRect()
@@ -86,7 +84,7 @@ export function useBrowserViewBounds({
     lastBoundsKeyRef.current = boundsKey
     lastSentBoundsRef.current = { x, y, width, height }
     lastBoundsSentAtRef.current = now
-    window.electronAPI?.browser?.updateBounds({ x, y, width, height })
+    await window.electronAPI?.browser?.updateBounds({ x, y, width, height })
   }, [chatPanelVisible, chatPanelWidth, contentRef, isElectron, topInset])
 
   const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
@@ -97,7 +95,7 @@ export function useBrowserViewBounds({
     })
   }, [sendBoundsImmediate])
 
-  const syncBrowserVisibility = useCallback((options?: { forceExact?: boolean }) => {
+  const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean }) => {
     if (!isElectron) return
 
     const shouldShowBrowserView =
@@ -108,8 +106,8 @@ export function useBrowserViewBounds({
       return
     }
 
+    await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
     window.electronAPI?.browser?.showActive()
-    requestAnimationFrame(() => sendBoundsImmediate({ forceExact: options?.forceExact ?? true }))
   }, [hasError, isActive, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
@@ -152,7 +150,6 @@ export function useBrowserViewBounds({
       timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [
-    activePanel,
     chatPanelVisible,
     chatPanelWidth,
     effectiveSidePanelWidth,
@@ -164,7 +161,7 @@ export function useBrowserViewBounds({
   ])
 
   useEffect(() => {
-    syncBrowserVisibility({ forceExact: true })
+    void syncBrowserVisibility({ forceExact: true })
   }, [syncBrowserVisibility])
 
   useEffect(() => {
@@ -178,7 +175,7 @@ export function useBrowserViewBounds({
         overlayLockCountRef.current = Math.max(0, overlayLockCountRef.current - 1)
       }
 
-      syncBrowserVisibility({ forceExact: true })
+      void syncBrowserVisibility({ forceExact: true })
     }
 
     window.addEventListener(BROWSER_OVERLAY_LOCK_EVENT, handleOverlayLock as EventListener)

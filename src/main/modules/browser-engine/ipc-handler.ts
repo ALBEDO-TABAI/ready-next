@@ -26,11 +26,13 @@ import { BrowserSessionPolicyService } from './session-policy-service'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
 import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
 import { BrowserTabShellService } from './tab-shell-service'
+import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
 import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
+import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -90,6 +92,7 @@ export class BrowserController {
   private readonly tabShellService: BrowserTabShellService
   private readonly sessionPolicyService: BrowserSessionPolicyService
   private readonly appShortcutBridgeService: BrowserAppShortcutBridgeService
+  private readonly utilityMenuService: BrowserUtilityMenuService
   private readonly windowOpenService: BrowserWindowOpenService
 
   constructor(mainWindow: BrowserWindow, useMock = false) {
@@ -214,6 +217,43 @@ export class BrowserController {
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
       isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
+    })
+    this.utilityMenuService = new BrowserUtilityMenuService({
+      mainWindow,
+      getBookmarks: () => this.dataService.getBookmarks(),
+      getDownloads: () => this.dataService.getDownloads(),
+      getHistory: (limit) => this.dataService.getHistory(limit),
+      getAdblockState: () => this.sessionPolicyService.getAdblockState(),
+      isBookmarked: (url) => this.dataService.isBookmarked(url),
+      addBookmark: (url, title) => {
+        this.dataService.addBookmark(url, title)
+      },
+      removeBookmarkByUrl: (url) => this.dataService.removeBookmarkByUrl(url),
+      importBookmarksFromDialog: () => this.importBookmarksFromDialog(),
+      exportBookmarksToDialog: () => this.exportBookmarksToDialog(),
+      clearHistory: () => this.dataService.clearHistory(),
+      clearDownloads: () => this.dataService.clearDownloads(),
+      navigateToUrl: async (url) => {
+        if (this.activeTabId) {
+          await this.navigate(this.activeTabId, url)
+          return
+        }
+        await this.createTab(url)
+      },
+      setAdblockEnabled: (enabled) => {
+        this.sessionPolicyService.setAdblockEnabled(enabled, 'all')
+      },
+      toggleAdblockDomain: (domain) => {
+        this.sessionPolicyService.toggleAdblockDomain(domain)
+      },
+      printCurrentTab: () => {
+        const activeTab = this.getActiveTab()
+        activeTab?.view?.webContents.print()
+      },
+      openExternal: (url) => {
+        shell.openExternal(url)
+      },
+      sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
     })
     this.sessionPolicyService.setupBrowserSessionPolicies()
     this.windowOpenService = new BrowserWindowOpenService({
@@ -504,6 +544,10 @@ export class BrowserController {
     filePath?: string
   }> {
     return this.bookmarkTransferService.exportBookmarksToDialog()
+  }
+
+  showUtilityMenu(payload: unknown): { success: boolean } {
+    return this.utilityMenuService.showMenu(payload as BrowserUtilityMenuRequest)
   }
 
   async previewOpen(url: string): Promise<{ success: boolean; error?: string }> {

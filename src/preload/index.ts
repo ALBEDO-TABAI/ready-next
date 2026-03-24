@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 
 // Agent API
 const agentAPI = {
@@ -211,6 +212,8 @@ const browserAPI = {
     ipcRenderer.on('browser:downloadUpdate', handler)
     return () => ipcRenderer.removeListener('browser:downloadUpdate', handler)
   },
+
+  showUtilityMenu: (payload: BrowserUtilityMenuRequest) => ipcRenderer.invoke('browser:showUtilityMenu', payload),
 
   // Print
   print: (tabId: string) => ipcRenderer.invoke('browser:print', tabId)

@@ -54,6 +54,10 @@
 - 这类问题单看 UI 很容易误判成 DOM 布局、圆角 filler 或网页自身不自适应。
 - 更稳的排法是直接对照 `ready-browser.log` 里的 `createTab / updateBounds / showActive` 时序，看看到底是谁先发生，以及发生时有没有拿到正确 bounds。
 
+### 2.7 浏览器头部的瞬时菜单不要复用会改布局的 side panel
+- 收藏、下载、更多这类”点一下就收起“的工具菜单，如果直接借用 renderer 里的侧栏或内联下拉，就会同时改动 flex 布局和 BrowserView bounds，表现成网页区域被横向挤压、头部高度被拉高，肉眼上像界面位移或闪动。
+- 更稳的做法是把这类入口接到主进程 native menu，或者至少保证菜单不参与布局流；不要把瞬时菜单状态继续塞进 `activePanel` 这类会驱动整块工作区尺寸变化的状态里。
+
 ## 3. Browser Agent 经验
 ### 3.1 链接不是动作，只是资源
 - 用户消息里出现 URL，不代表可以立刻导航。

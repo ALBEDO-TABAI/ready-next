@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
@@ -11,10 +11,10 @@ import {
   extractBrowserDomain,
   normalizeBrowserUrlInput,
 } from '../../modules/browser/url-utils'
-import type { PanelType } from '../../modules/browser/types'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
+import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { toFileUrl } from '../../utils/dragDrop'
+import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 
 export default function BrowserMode({ isActive = true }: { isActive?: boolean }) {
   // Persistent browser tab state — survives mode switches
@@ -23,7 +23,6 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     setTabs, setActiveTabId, setUrlInput,
     addTab, updateTab, reorderTabs,
   } = useBrowserTabs()
-  const [activePanel, setActivePanel] = useState<PanelType>(null)
   const [isAddressEditing, setIsAddressEditing] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI
@@ -49,7 +48,6 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     skillsSplitRatio,
     chatPanelVisible,
     chatPanelWidth,
-    activePanel,
     hasError,
   })
 
@@ -61,32 +59,16 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   const {
     isBookmarked,
     bookmarks,
-    selectedBookmarkUrl,
-    historyItems,
-    downloads,
-    setSelectedBookmarkUrl,
     handleToggleBookmark,
     handleToggleBookmarkForTab,
-    handleTogglePanel,
-    handleNavigateFromPanel,
-    handleRemoveBookmark,
-    handleClearHistory,
-    handleClearDownloads,
   } = useBrowserPanelData({
     isElectron,
-    activePanel,
-    setActivePanel,
     activeTab,
-    activeTabId,
-    updateTab,
-    setUrlInput,
   })
 
   const {
     toastVisible,
     adblockState,
-    handleToggleAdblock,
-    handleToggleCurrentSiteAdblock,
   } = useBrowserDiagnosticsState({
     isElectron,
     tabs,
@@ -98,6 +80,35 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     if (!currentDomain) return false
     return adblockState.whitelistDomains.some((domain) => currentDomain === domain || currentDomain.endsWith(`.${domain}`))
   }, [adblockState.whitelistDomains, currentDomain])
+
+  const handleShowUtilityMenu = useCallback((kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => {
+    if (!isElectron) return
+
+    const currentTabPayload = activeTab
+      ? {
+          id: activeTab.id,
+          url: activeTab.url,
+          title: activeTab.title || activeTab.url,
+          domain: activeTab.domain || currentDomain,
+        }
+      : null
+
+    void window.electronAPI?.browser?.showUtilityMenu({
+      kind,
+      anchorRect: {
+        left: anchorRect.left,
+        top: anchorRect.top,
+        right: anchorRect.right,
+        bottom: anchorRect.bottom,
+        width: anchorRect.width,
+        height: anchorRect.height,
+      },
+      currentTab: currentTabPayload,
+      currentDomain,
+      adblockEnabled: adblockState.enabled,
+      adblockDomainWhitelisted: currentDomainAdblockWhitelisted,
+    })
+  }, [activeTab, adblockState.enabled, currentDomain, currentDomainAdblockWhitelisted, isElectron])
 
   const {
     handleNewTab,
@@ -112,9 +123,7 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     handleRetry,
     handleUrlFocus,
     handleUrlBlur,
-    handleOpenExternal,
     handleReorder,
-    handlePrint,
   } = useBrowserTabActions({
     isElectron,
     activeTab,
@@ -149,16 +158,11 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
           <BrowserHeader
             tabs={tabs}
             activeTabId={activeTabId}
-            url={activeTab?.url || ''}
             urlInput={urlInput}
             loading={activeTab?.loading || false}
             canGoBack={activeTab?.canGoBack || false}
             canGoForward={activeTab?.canGoForward || false}
             isBookmarked={isBookmarked}
-            adblockEnabled={adblockState.enabled}
-            adblockDomainWhitelisted={currentDomainAdblockWhitelisted}
-            currentDomain={currentDomain}
-            activePanel={activePanel}
             bookmarkedUrls={bookmarks.map((item) => item.url)}
             onTabClick={handleTabClick}
             onTabClose={handleCloseTab}
@@ -173,36 +177,19 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
             onBlur={handleUrlBlur}
             onEditStart={() => setIsAddressEditing(true)}
             onEditEnd={() => setIsAddressEditing(false)}
-            onOpenExternal={handleOpenExternal}
             onToggleBookmark={handleToggleBookmark}
             onToggleBookmarkForTab={handleToggleBookmarkForTab}
-            onToggleAdblock={handleToggleAdblock}
-            onToggleCurrentSiteAdblock={handleToggleCurrentSiteAdblock}
-            onTogglePanel={handleTogglePanel}
-            onPrint={handlePrint}
+            onShowUtilityMenu={handleShowUtilityMenu}
           />
 
           <BrowserShellLayout
             isElectron={isElectron}
             contentRef={contentRef}
             activeTab={activeTab}
-            activePanel={activePanel}
-            bookmarks={bookmarks}
-            selectedBookmarkUrl={selectedBookmarkUrl}
-            historyItems={historyItems}
-            downloads={downloads}
-            adblockState={adblockState}
             toastVisible={toastVisible}
             onDragOver={handleContentDragOver}
             onDrop={handleContentDrop}
             onRetry={() => void handleRetry()}
-            onClosePanel={() => setActivePanel(null)}
-            onNavigateFromPanel={(url) => void handleNavigateFromPanel(url)}
-            onRemoveBookmark={(url) => void handleRemoveBookmark(url)}
-            onClearHistory={() => void handleClearHistory()}
-            onClearDownloads={() => void handleClearDownloads()}
-            onSelectBookmark={setSelectedBookmarkUrl}
-            onToggleAdblock={() => void handleToggleAdblock()}
           />
         </div>
       </div>

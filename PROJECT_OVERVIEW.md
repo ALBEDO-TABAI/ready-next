@@ -13,7 +13,7 @@ Ready 是一个桌面创作工作台，目标是把以下工作流统一到一�
 - AI Agent、技能与远程协作（Agent / Skills / Remote IM）
 
 ## 2. 当前模块状态
-- 浏览器：多标签 BrowserView、书签/历史/下载/打印、右键菜单、Browser Agent V7 任务图执行框架；Renderer 头部已收口为单层 `BrowserHeader`，激活标签可展开为地址输入面，刷新区 hover 可揭示前进/后退；冷启动与 renderer 重载时会先恢复主进程 tabs，再等待正确 bounds 后显示/创建 host
+- 浏览器：多标签 BrowserView、书签/历史/下载/打印、右键菜单、Browser Agent V7 任务图执行框架；Renderer 头部已收口为单层 `BrowserHeader`，激活标签可展开为地址输入面，刷新区 hover 可揭示前进/后退；右上收藏/下载/更多已改走主进程 native utility menu，不再复用会挤压布局的 renderer 侧栏；冷启动与 renderer 重载时会先恢复主进程 tabs，再等待正确 bounds 后显示/创建 host
 - 文稿：多标签、多格式读写，支持 `document_*` 工具链做真实编辑
 - 设计：`DesignMode` 已替代旧 `ImageMode`，TLDraw 画布与设计侧组件链路已接入
 - 剪辑：Remotion 预览、时间轴与 Inspector 结构已形成

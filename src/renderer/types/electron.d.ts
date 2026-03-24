@@ -1,4 +1,5 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
+import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type {
   RSSBenchmarkResultData,
   RSSDiagnosticsData,
@@ -498,6 +499,7 @@ interface ElectronBrowserAPI {
   getDownloads: () => Promise<{ success: boolean; data?: BrowserDownloadData[]; error?: string }>
   clearDownloads: () => Promise<{ success: boolean; error?: string }>
   onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
+  showUtilityMenu: (payload: BrowserUtilityMenuRequest) => Promise<{ success: boolean; error?: string }>
 
   // Print
   print: (tabId: string) => Promise<{ success: boolean; error?: string }>

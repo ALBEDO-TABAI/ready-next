@@ -1,24 +1,19 @@
 import HeaderUtilityActions from './HeaderUtilityActions'
 import TabRail from './TabRail'
-import type { PanelType } from '../../modules/browser/types'
 import { useBrowserHeaderInteraction } from '../../modules/browser/useBrowserHeaderInteraction'
 import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
+import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 
 interface BrowserHeaderProps {
   tabs: BrowserTab[]
   activeTabId: string | null
-  url: string
   urlInput: string
   bookmarkedUrls: string[]
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
   isBookmarked: boolean
-  adblockEnabled: boolean
-  adblockDomainWhitelisted: boolean
-  currentDomain?: string
-  activePanel: PanelType
   onTabClick: (id: string) => void
   onTabClose: (id: string) => void
   onNewTab: () => void
@@ -32,29 +27,20 @@ interface BrowserHeaderProps {
   onBlur: () => void
   onEditStart: () => void
   onEditEnd: () => void
-  onOpenExternal: () => void
   onToggleBookmark: () => void
   onToggleBookmarkForTab: (tab: BrowserTab) => void
-  onToggleAdblock: () => void
-  onToggleCurrentSiteAdblock: () => void
-  onTogglePanel: (panel: 'bookmarks' | 'downloads' | 'history') => void
-  onPrint: () => void
+  onShowUtilityMenu: (kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => void
 }
 
 export default function BrowserHeader({
   tabs,
   activeTabId,
-  url,
   urlInput,
   bookmarkedUrls,
   loading,
   canGoBack,
   canGoForward,
   isBookmarked,
-  adblockEnabled,
-  adblockDomainWhitelisted,
-  currentDomain,
-  activePanel,
   onTabClick,
   onTabClose,
   onNewTab,
@@ -68,13 +54,9 @@ export default function BrowserHeader({
   onBlur,
   onEditStart,
   onEditEnd,
-  onOpenExternal,
   onToggleBookmark,
   onToggleBookmarkForTab,
-  onToggleAdblock,
-  onToggleCurrentSiteAdblock,
-  onTogglePanel,
-  onPrint,
+  onShowUtilityMenu,
 }: BrowserHeaderProps) {
   const {
     headerRootRef,
@@ -101,6 +83,7 @@ export default function BrowserHeader({
     <div
       ref={headerRootRef}
       className="browser-header-surface glass-surface-panel flex-shrink-0"
+      style={{ overflow: 'visible', zIndex: 8 }}
     >
       <div
         className="flex items-center no-drag"
@@ -111,6 +94,9 @@ export default function BrowserHeader({
           gap: 8,
           background: 'transparent',
           borderBottom: '1px solid transparent',
+          alignItems: 'center',
+          position: 'relative',
+          zIndex: 2,
         }}
       >
         <TabRail
@@ -172,29 +158,9 @@ export default function BrowserHeader({
         />
 
         <HeaderUtilityActions
-          adblockEnabled={adblockEnabled}
-          adblockDomainWhitelisted={adblockDomainWhitelisted}
-          currentDomain={currentDomain}
-          activePanel={activePanel}
-          onToggleAdblock={() => {
+          onShowUtilityMenu={(kind, anchorRect) => {
             collapseAndReset()
-            onToggleAdblock()
-          }}
-          onToggleCurrentSiteAdblock={() => {
-            collapseAndReset()
-            onToggleCurrentSiteAdblock()
-          }}
-          onTogglePanel={(panel) => {
-            collapseAndReset()
-            onTogglePanel(panel)
-          }}
-          onPrint={() => {
-            collapseAndReset()
-            onPrint()
-          }}
-          onOpenExternal={() => {
-            collapseAndReset()
-            onOpenExternal()
+            onShowUtilityMenu(kind, anchorRect)
           }}
         />
       </div>

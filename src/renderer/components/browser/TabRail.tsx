@@ -8,6 +8,7 @@ import {
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 import type { ActiveTabMode, RefreshDockMode } from '../../modules/browser/useBrowserHeaderInteraction'
+import { getTabRailLayoutMetrics } from '../../modules/browser/tab-rail-layout'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
 
@@ -75,10 +76,13 @@ export default function TabRail({
   onToggleBookmarkForTab,
 }: TabRailProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const previousTabCountRef = useRef(tabs.length)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
   const [showRightArrow, setShowRightArrow] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [hoveredTabId, setHoveredTabId] = useState<string | null>(null)
   const dragIndexRef = useRef<number | null>(null)
+  const layoutMetrics = getTabRailLayoutMetrics(tabs.length)
 
   const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
     const data = JSON.stringify({
@@ -112,6 +116,27 @@ export default function TabRail({
       observer.disconnect()
     }
   }, [checkOverflow, tabs.length])
+
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const lastTab = tabs[tabs.length - 1]
+    if (!lastTab) return
+
+    const tabCountChanged = previousTabCountRef.current !== tabs.length
+    previousTabCountRef.current = tabs.length
+    const shouldBiasToEnd = tabCountChanged || activeTabId === lastTab.id
+    if (!shouldBiasToEnd) return
+
+    const frame = requestAnimationFrame(() => {
+      const targetLeft = Math.max(0, element.scrollWidth - element.clientWidth)
+      element.scrollTo({ left: targetLeft, behavior: 'smooth' })
+      checkOverflow()
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [activeTabId, checkOverflow, tabs])
 
   const handleDragStart = (event: React.DragEvent, index: number) => {
     dragIndexRef.current = index
@@ -176,10 +201,11 @@ export default function TabRail({
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
+            const isHovered = hoveredTabId === tab.id
 
             if (isActive) {
               return (
-                <div key={tab.id} className="relative z-[2] flex flex-shrink-0 items-center gap-[6px]">
+                <div key={tab.id} className="relative z-[2] flex min-w-0 items-center gap-[6px]">
                   <RefreshDock
                     loading={loading}
                     canGoBack={canGoBack}
@@ -197,6 +223,8 @@ export default function TabRail({
                     urlInput={urlInput}
                     isBookmarked={isBookmarked}
                     surfaceRef={activeTabSurfaceRef}
+                    compactWidth={layoutMetrics.activeCompactWidth}
+                    compactMinWidth={layoutMetrics.activeCompactMinWidth}
                     draggable={activeTabMode !== 'expanded' && activeTabMode !== 'editing'}
                     onDragStart={(event) => handleDragStart(event, index)}
                     onDragEnd={handleDragEnd}
@@ -233,18 +261,29 @@ export default function TabRail({
                 onDragEnd={handleDragEnd}
                 onDragOver={(event) => handleDragOver(event, index)}
                 onDrop={(event) => handleDrop(event, index)}
+                onMouseEnter={() => setHoveredTabId(tab.id)}
+                onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
                 onClick={() => void onTabClick(tab.id)}
                 onAuxClick={(event) => handleAuxClick(event, tab.id)}
                 className="group relative flex min-w-0 cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-all duration-150"
                 style={{
                   gap: 6,
                   height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
-                  width: WORKBENCH_TAB_MAX_WIDTH,
-                  minWidth: 140,
+                  width: layoutMetrics.inactiveWidth,
+                  minWidth: layoutMetrics.inactiveMinWidth,
                   maxWidth: WORKBENCH_TAB_MAX_WIDTH,
-                  background: 'transparent',
-                  color: 'var(--text-gray)',
-                  borderColor: isDragOver ? 'var(--color-blue)' : 'transparent',
+                  background: isHovered
+                    ? 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)'
+                    : 'transparent',
+                  color: isHovered ? 'var(--text-title)' : 'var(--text-gray)',
+                  borderColor: isDragOver
+                    ? 'var(--color-blue)'
+                    : isHovered
+                      ? 'color-mix(in srgb, var(--color-blue) 28%, transparent)'
+                      : 'transparent',
+                  boxShadow: isHovered
+                    ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent)'
+                    : 'none',
                 }}
                 contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
               >

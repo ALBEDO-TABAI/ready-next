@@ -8,6 +8,7 @@ interface BrowserDataIPCController {
   toggleAdblockDomain: (domain: string) => unknown
   importBookmarksFromDialog: () => Promise<unknown>
   exportBookmarksToDialog: () => Promise<unknown>
+  showUtilityMenu: (payload: unknown) => { success: boolean }
   tabs: Map<string, { view?: { webContents: { print: () => void } } }>
 }
 
@@ -124,6 +125,14 @@ export function setupBrowserDataIPC(
       if (!tab?.view) return { success: false, error: 'Tab not found' }
       tab.view.webContents.print()
       return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:showUtilityMenu', (_, payload: unknown) => {
+    try {
+      return controller.showUtilityMenu(payload)
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
