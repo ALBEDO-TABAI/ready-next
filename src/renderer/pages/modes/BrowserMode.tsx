@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect, useState, useMemo } from 'react'
+import { useCallback, useRef, useState, useMemo } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
@@ -85,8 +85,6 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   const {
     toastVisible,
     adblockState,
-    browserDiagnostics,
-    refreshAdblockState,
     handleToggleAdblock,
     handleToggleCurrentSiteAdblock,
   } = useBrowserDiagnosticsState({
@@ -141,7 +139,7 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
-    return <BrowserModeEmptyState onNewTab={handleNewTab} />
+    return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} />
   }
 
   return (
@@ -194,10 +192,7 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
             historyItems={historyItems}
             downloads={downloads}
             adblockState={adblockState}
-            browserDiagnostics={browserDiagnostics}
             toastVisible={toastVisible}
-            currentDomain={currentDomain}
-            currentDomainAdblockWhitelisted={currentDomainAdblockWhitelisted}
             onDragOver={handleContentDragOver}
             onDrop={handleContentDrop}
             onRetry={() => void handleRetry()}
@@ -208,8 +203,6 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
             onClearDownloads={() => void handleClearDownloads()}
             onSelectBookmark={setSelectedBookmarkUrl}
             onToggleAdblock={() => void handleToggleAdblock()}
-            onRefreshAdblock={() => void refreshAdblockState()}
-            onSyncBounds={() => sendBoundsImmediate({ forceExact: true })}
           />
         </div>
       </div>

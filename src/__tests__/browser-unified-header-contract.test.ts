@@ -9,6 +9,7 @@ function readWorkspaceFile(path: string): string {
 
 test('browser mode delegates top-level browser chrome to BrowserHeader', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
+  const emptyState = readWorkspaceFile('src/renderer/components/browser/BrowserModeEmptyState.tsx')
 
   assert.match(browserMode, /import BrowserHeader from ['"]\.\.\/\.\.\/components\/browser\/BrowserHeader['"]/)
   assert.match(browserMode, /<BrowserHeader/)
@@ -16,6 +17,9 @@ test('browser mode delegates top-level browser chrome to BrowserHeader', () => {
   assert.doesNotMatch(browserMode, /import BrowserAddressBar from/)
   assert.doesNotMatch(browserMode, /<BrowserTabBar/)
   assert.doesNotMatch(browserMode, /<BrowserAddressBar/)
+  assert.match(browserMode, /<BrowserModeEmptyState onNewTab=\{handleNewTab\} contentRef=\{contentRef\}/)
+  assert.match(emptyState, /contentRef: RefObject<HTMLDivElement \| null>/)
+  assert.match(emptyState, /ref=\{contentRef\}/)
 })
 
 test('browser header owns a dedicated interaction state hook for active-tab and refresh-dock modes', () => {
@@ -91,4 +95,5 @@ test('browser shell layout adds corner fillers so the header chrome visually mee
 
   assert.match(browserShellLayout, /browser-shell-corner-fill-left/)
   assert.match(browserShellLayout, /browser-shell-corner-fill-right/)
+  assert.doesNotMatch(browserShellLayout, /marginRight:\s*WORKBENCH_HEADER_EDGE_X/)
 })

@@ -1,7 +1,7 @@
 import type { DragEvent, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
 import BrowserSidePanel from './BrowserSidePanel'
-import type { AdblockState, BookmarkItem, BrowserDiagnosticsData, DownloadItem, HistoryItem, PanelType } from '../../modules/browser/types'
+import type { AdblockState, BookmarkItem, DownloadItem, HistoryItem, PanelType } from '../../modules/browser/types'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 
 interface BrowserShellLayoutProps {
@@ -14,10 +14,7 @@ interface BrowserShellLayoutProps {
   historyItems: HistoryItem[]
   downloads: DownloadItem[]
   adblockState: AdblockState
-  browserDiagnostics: BrowserDiagnosticsData | null
   toastVisible: boolean
-  currentDomain: string
-  currentDomainAdblockWhitelisted: boolean
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: (event: DragEvent<HTMLDivElement>) => void
   onRetry: () => void | Promise<void>
@@ -28,8 +25,6 @@ interface BrowserShellLayoutProps {
   onClearDownloads: () => void | Promise<void>
   onSelectBookmark: (url: string) => void
   onToggleAdblock: () => void | Promise<void>
-  onRefreshAdblock: () => void | Promise<void>
-  onSyncBounds: () => void
 }
 
 export default function BrowserShellLayout({
@@ -42,10 +37,7 @@ export default function BrowserShellLayout({
   historyItems,
   downloads,
   adblockState,
-  browserDiagnostics,
   toastVisible,
-  currentDomain,
-  currentDomainAdblockWhitelisted,
   onDragOver,
   onDrop,
   onRetry,
@@ -56,8 +48,6 @@ export default function BrowserShellLayout({
   onClearDownloads,
   onSelectBookmark,
   onToggleAdblock,
-  onRefreshAdblock,
-  onSyncBounds,
 }: BrowserShellLayoutProps) {
   return (
     <div className="flex min-h-0 h-full flex-1">

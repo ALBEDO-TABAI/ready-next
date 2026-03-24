@@ -134,6 +134,7 @@ describe('BrowserTabShellService', () => {
       },
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
       isAllowedUrl: () => true,
       createTab: async () => ({ success: true, tabId: 'tab-3' }),
       detachHost: () => {
@@ -159,6 +160,51 @@ describe('BrowserTabShellService', () => {
     assert.strictEqual(result.required, true)
     assert.strictEqual(result.canGoBack, true)
     assert.strictEqual(result.canGoForward, true)
+  })
+
+  it('detaches every non-target host before showing the next tab', () => {
+    const first = createMockView()
+    const second = createMockView()
+    const third = createMockView()
+    const tabs = new Map([
+      ['tab-1', { id: 'tab-1', url: 'https://a.com', title: 'A', domain: 'a.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: first.view }],
+      ['tab-2', { id: 'tab-2', url: 'https://b.com', title: 'B', domain: 'b.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: second.view }],
+      ['tab-3', { id: 'tab-3', url: 'https://c.com', title: 'C', domain: 'c.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: third.view }],
+    ])
+    let activeTabId = 'tab-1'
+    const detached: string[] = []
+    const shown: string[] = []
+    const service = new BrowserTabShellService({
+      tabs: tabs as any,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => {
+        activeTabId = tabId
+      },
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      createTab: async () => ({ success: true, tabId: 'tab-4' }),
+      detachHost: (view) => {
+        if (view === first.view) detached.push('tab-1')
+        if (view === second.view) detached.push('tab-2')
+        if (view === third.view) detached.push('tab-3')
+      },
+      showHost: (view) => {
+        if (view === second.view) shown.push('tab-2')
+      },
+      applyBounds: () => undefined,
+      hideHost: () => undefined,
+      detachPreviewView: () => undefined,
+      restoreActiveTabHost: () => undefined,
+    })
+
+    const result = service.switchTab('tab-2')
+
+    assert.strictEqual(result.success, true)
+    assert.strictEqual(activeTabId, 'tab-2')
+    assert.deepStrictEqual(detached, ['tab-1', 'tab-3'])
+    assert.deepStrictEqual(shown, ['tab-2'])
   })
 })
 

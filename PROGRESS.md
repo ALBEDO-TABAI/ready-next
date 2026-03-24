@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-20
+> 更新时间: 2026-03-24
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
@@ -32,6 +32,8 @@
 - 顶栏四模块切换器已收敛为稳定宽度，去掉了会造成视觉抖动的纵向位移；browser/rss/calendar 的工作区外轮廓和左边界也已向 document 模式对齐。
 - BrowserMode 重新显示原生 host 的逻辑已加上 RAF 取消与 `hideAll()` 收口，避免切离 browser 后被延迟回调重新抬回前台；RSS 在 liquid-glass 下恢复了可见的圆角 outline。
 - 顶栏四模块切换器已进一步退回普通按钮组，不再依赖 gooey segmented control；主进程隐藏态下也会跳过 BrowserView bounds 回写，进一步降低原生视图抢前台风险。
+- BrowserMode 顶部浏览器 chrome 已从 “`BrowserTabBar + BrowserAddressBar` 两层结构” 收口为单层 `BrowserHeader`：左侧 refresh dock 支持 hover reveal，激活标签改为可展开地址面，右侧工具按钮独立收口。
+- Browser cold start / renderer reload 的 host 恢复链路已补齐：空态也提供可测量 `contentRef`，renderer 会先 `browser.getTabs()` 恢复主进程 tabs，再 `await sendBoundsImmediate()` 后才 `showActive()` / `createTab()`，避免默认 `800x600` host 抢跑导致的边界不自适应。
 
 6. RSS 已经具备独立维护条件。
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
@@ -84,6 +86,7 @@
 - ~~Design inspector 仍缺高频属性控制~~（已完成）。
 - Browser diagnostics 仍是 panel，不是完整 lab。
 - Browser orchestration 仍有最后一层收口空间。
+- Browser unified header 还需要一轮实机动效与窄宽度体验微调，但结构性切换已完成。
 - skill workflow 仍缺少更细的 execution UX 打磨与更多样例 skill 迁移。
 - **`PromptAssemblyService + L0/L1/L2 memory` 还未启动**（下一阶段主线）。
 - **Feishu capability replacement 还未启动**（下一阶段主线）。
@@ -101,6 +104,8 @@
 ## 最近一次有效校验
 - `npm run typecheck:node` 通过
 - `npm run typecheck:web` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/ui-browser-hook-split-contract.test.ts src/__tests__/browser-engine-services.test.ts src/__tests__/browser-unified-header-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-unified-header-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/ui-browser-hook-split-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/skill-compiler-smoke.test.ts src/__tests__/skill-resolver-smoke.test.ts` 通过

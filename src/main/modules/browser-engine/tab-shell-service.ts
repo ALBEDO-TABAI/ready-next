@@ -69,6 +69,15 @@ interface BrowserTabShellHost {
 export class BrowserTabShellService {
   constructor(private readonly host: BrowserTabShellHost) {}
 
+  private detachNonTargetHosts(targetTabId: string | null): void {
+    for (const [tabId, tab] of this.host.tabs.entries()) {
+      if (tabId === targetTabId) continue
+      if (tab.view) {
+        this.host.detachHost(tab.view)
+      }
+    }
+  }
+
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http: and https: are allowed.' }
@@ -141,12 +150,7 @@ export class BrowserTabShellService {
   switchTab(tabId: string): BrowserTabSwitchResult {
     const nextTab = this.host.tabs.get(tabId)
     if (!nextTab?.view) return { success: false, error: 'Tab not found' }
-
-    const activeTabId = this.host.getActiveTabId()
-    if (activeTabId) {
-      const activeTab = this.host.tabs.get(activeTabId)
-      if (activeTab?.view) this.host.detachHost(activeTab.view)
-    }
+    this.detachNonTargetHosts(tabId)
 
     this.host.setActiveTabId(tabId)
     if (this.host.shouldPresentHosts()) {
@@ -209,6 +213,7 @@ export class BrowserTabShellService {
 
   showActiveHost(): { success: boolean } {
     this.host.detachPreviewView()
+    this.detachNonTargetHosts(this.host.getActiveTabId())
     this.host.restoreActiveTabHost()
     return { success: true }
   }
