@@ -35,13 +35,14 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
     >
       {/* Top Icons */}
       <div className="flex flex-col items-center gap-[6px]">
-        <MorphIconRailGroup
-          items={topIcons}
-          activeId={activeIcon}
-          onSelect={handleClick}
-          layoutId="icon-rail-main"
-          className="flex flex-col items-center gap-[6px]"
-        />
+        <div className="icon-rail-slider-shell">
+          <MorphIconRailGroup
+            items={topIcons}
+            activeId={activeIcon}
+            onSelect={handleClick}
+            layoutId="icon-rail-main"
+          />
+        </div>
       </div>
 
       {/* Bottom Icons */}
