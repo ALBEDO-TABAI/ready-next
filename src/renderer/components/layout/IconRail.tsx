@@ -7,6 +7,7 @@ interface IconRailProps {
   activeIcon?: string
   onIconClick?: (icon: string) => void
   hidden?: boolean
+  expanded?: boolean
 }
 
 const topIcons = [
@@ -15,7 +16,7 @@ const topIcons = [
   { id: 'skills', icon: Puzzle, label: '技能中心' },
 ]
 
-export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false }: IconRailProps) {
+export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false, expanded = true }: IconRailProps) {
   const handleClick = (id: string) => onIconClick?.(id)
 
   // Task 4: Conditionally hidden for image/video modes
@@ -39,6 +40,7 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
           <MorphIconRailGroup
             items={topIcons}
             activeId={activeIcon}
+            expanded={expanded}
             onSelect={handleClick}
             layoutId="icon-rail-main"
           />

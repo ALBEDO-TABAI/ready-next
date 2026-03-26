@@ -36,9 +36,10 @@ function AnimatedPanelLayer({
   body,
   header,
   panelKey,
+  panelWidth,
   direction,
   reduceMotion,
-}: AnimatedPanelSlots & { panelKey: string; direction: PanelDirection; reduceMotion: boolean }) {
+}: AnimatedPanelSlots & { panelKey: string; panelWidth: number; direction: PanelDirection; reduceMotion: boolean }) {
   const isPresent = useIsPresent()
   const presenceDirection = usePresenceData() as PanelDirection | undefined
   const resolvedDirection = ((presenceDirection ?? direction) as PanelDirection) || 1
@@ -47,7 +48,12 @@ function AnimatedPanelLayer({
   return (
     <div
       className="absolute inset-0 overflow-hidden"
-      style={{ zIndex: layerZIndex, pointerEvents: isPresent ? 'auto' : 'none' }}
+      style={{
+        zIndex: layerZIndex,
+        pointerEvents: isPresent ? 'auto' : 'none',
+        width: panelWidth,
+        minWidth: panelWidth,
+      }}
     >
       <div
         className="grid h-full min-h-0"
@@ -147,6 +153,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
           {(slots) => (
             <AnimatedPanelLayer
               panelKey={panelKey}
+              panelWidth={panelWidth}
               direction={transitionDirection}
               reduceMotion={!!reduceMotion}
               header={slots.header}
@@ -163,6 +170,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
           {(slots) => (
             <AnimatedPanelLayer
               panelKey={panelKey}
+              panelWidth={panelWidth}
               direction={transitionDirection}
               reduceMotion={!!reduceMotion}
               header={slots.header}
@@ -178,6 +186,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
         {(slots) => (
           <AnimatedPanelLayer
             panelKey={panelKey}
+            panelWidth={panelWidth}
             direction={transitionDirection}
             reduceMotion={!!reduceMotion}
             header={slots.header}
@@ -202,7 +211,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
       }}
     >
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-        <AnimatePresence initial={false} mode="sync" custom={transitionDirection}>
+        <AnimatePresence initial={false} mode="sync" custom={sidebarVisible ? transitionDirection : 1}>
           {isVisible ? renderAnimatedPanel(variant as RenderableSidePanelVariant) : null}
         </AnimatePresence>
       </div>

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把左侧三个面板从硬切换改成固定视窗里的上卷切换，并让标题行和内容层按同一条节奏、同一方向规则交接。
+**Goal:** 把左侧三个面板从硬切换改成固定视窗里的上卷切换，同时给左边轨道滑块增加下陷记忆态与先浮起再滑动的行为。
 
-**Architecture:** 在共享的 `SidePanel` 壳层里保留固定外框，把标题行和内容层都放进裁剪视窗。切换方向由左侧按钮的上下顺序决定，标题和内容使用同一条滚动进度，避免上一版那种各跑各的节奏导致的抖动。三个具体面板仅保留各自业务内容，把标题和主体拆成可组合片段供壳层调用。
+**Architecture:** 在共享的 `SidePanel` 壳层里保留固定外框，把标题行和内容层都放进裁剪视窗。切换方向由左侧按钮的上下顺序决定，标题和内容分开跑但始终同向。左边轨道滑块则额外维护“浮起 / 下陷”的深度状态，并在从收起态切换按钮时先浮起再滑动。
 
 **Tech Stack:** React 19、TypeScript、Framer Motion、node:test
 
@@ -100,6 +100,8 @@ Expected:
 - 标题和内容都像在固定窗口里上卷
 - 连续快速点不会错位
 - 文件管理切回时内部状态仍在
+- 面板收起后，左边滑块会在原位下陷
+- 从收起态点别的按钮时，滑块先浮起再滑动
 
 - [ ] **Step 4: Update any user-facing note if needed**
 
