@@ -31,13 +31,10 @@
   - 所有工具栏和侧边栏
 
 ### 2. 文档更新 ✅
-- `DESIGN_MODULE_STAGE_3D_IMPLEMENTATION.md` - Stage 3D 实现报告
-- `DESIGN_MODULE_COMPLETION_SUMMARY.md` - 完整计划总结（100% 完成）
-- `DESIGN_UPDATE_SELECTED_IMPLEMENTATION.md` - design_update_selected 工具报告
-- `DESIGN_UI_ENHANCEMENTS.md` - UI 增强报告
 - `UI_VISUAL_OPTIMIZATION.md` - UI 视觉优化报告
 - `PROGRESS.md` - 更新当前进展
 - `CURRENT_STATUS_20260310.md` - 本文档
+- 注：当时配套的 design 细分实现报告后续已从仓库清理，不再单独保留
 
 ### 3. 验证状态 ✅
 - **类型检查**: ✅ 通过（无错误）
@@ -158,11 +155,8 @@
 ## 关键文档索引
 
 ### 设计模块
-- `DESIGN_MODULE_IMPROVEMENTS_SUMMARY.md` - 完整改进总结
-- `DESIGN_MODULE_STAGE_3D_IMPLEMENTATION.md` - Stage 3D 实现
-- `DESIGN_UPDATE_SELECTED_IMPLEMENTATION.md` - 便捷工具实现
-- `DESIGN_UI_ENHANCEMENTS.md` - UI 增强
 - `UI_VISUAL_OPTIMIZATION.md` - 视觉优化
+- 注：早期 design 阶段性实现报告已在后续仓库清理中移除
 
 ### 项目管理
 - `PROGRESS.md` - 开发进展
