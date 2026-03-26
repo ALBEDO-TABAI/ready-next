@@ -2,6 +2,10 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { Globe, FileText, Rss, Calendar } from 'lucide-react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import '../../styles/workbench-sliders.css'
+import {
+  WORKBENCH_SLIDER_FRAME_STEP,
+  WORKBENCH_SLIDER_SPRING,
+} from '../../modules/workbench/slider-motion'
 
 const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
   { id: 'browser', icon: Globe },
@@ -9,11 +13,6 @@ const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
   { id: 'rss', icon: Rss },
   { id: 'calendar', icon: Calendar },
 ]
-
-// Spring physics - softer, slower, less bounce
-const SPRING_STIFFNESS = 120
-const SPRING_DAMPING = 40
-const SPRING_MASS = 1.8
 
 interface DraggableModeTabsProps {
   activeMode: WorkbenchMode
@@ -51,12 +50,12 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     const animate = () => {
       const target = targetRef.current
       const displacement = target - currentRef.current
-      const springForce = displacement * SPRING_STIFFNESS
-      const dampingForce = velocityRef.current * SPRING_DAMPING
-      const acceleration = (springForce - dampingForce) / SPRING_MASS
+      const springForce = displacement * WORKBENCH_SLIDER_SPRING.stiffness
+      const dampingForce = velocityRef.current * WORKBENCH_SLIDER_SPRING.damping
+      const acceleration = (springForce - dampingForce) / WORKBENCH_SLIDER_SPRING.mass
 
-      velocityRef.current += acceleration * 0.016
-      currentRef.current += velocityRef.current * 0.016
+      velocityRef.current += acceleration * WORKBENCH_SLIDER_FRAME_STEP
+      currentRef.current += velocityRef.current * WORKBENCH_SLIDER_FRAME_STEP
 
       if (Math.abs(target - currentRef.current) < 0.002 && Math.abs(velocityRef.current) < 0.02) {
         currentRef.current = target

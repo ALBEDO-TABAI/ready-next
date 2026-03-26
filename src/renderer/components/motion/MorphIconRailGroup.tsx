@@ -1,6 +1,10 @@
 import { type CSSProperties, type ElementType } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import '../../styles/workbench-sliders.css'
+import {
+  REDUCED_MOTION_TRANSITION,
+  WORKBENCH_SLIDER_MOTION_TRANSITION,
+} from '../../modules/workbench/slider-motion'
 
 interface RailItem {
   id: string
@@ -17,8 +21,6 @@ interface MorphIconRailGroupProps {
   style?: CSSProperties
 }
 
-const SPRING_TRANSITION = { type: 'spring', stiffness: 460, damping: 22, mass: 0.6 } as const
-const REDUCED_TRANSITION = { duration: 0.01 } as const
 export default function MorphIconRailGroup({
   items,
   activeId,
@@ -28,7 +30,7 @@ export default function MorphIconRailGroup({
   style,
 }: MorphIconRailGroupProps) {
   const reduceMotion = useReducedMotion()
-  const transition = reduceMotion ? REDUCED_TRANSITION : SPRING_TRANSITION
+  const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_MOTION_TRANSITION
 
   return (
     <MotionConfig transition={transition}>
