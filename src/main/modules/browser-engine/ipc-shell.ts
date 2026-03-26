@@ -55,6 +55,8 @@ interface BrowserShellIPCController {
   hideAllHosts(): { success: boolean }
   hideActiveHost(): { success: boolean }
   showActiveHost(): { success: boolean }
+  captureWindowSnapshot(bounds: { x: number; y: number; width: number; height: number }): Promise<{ success: boolean; data?: string; error?: string }>
+  captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }>
   getTabList(): unknown
   getTabContext(tabId?: string | null): Promise<unknown>
   previewOpen(url: string): Promise<{ success: boolean; error?: string }>
@@ -130,11 +132,30 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:updateBounds', (_, bounds: { x: number; y: number; width: number; height: number }) => {
     return controller.updateViewBounds(bounds)
   })
+  ipcMain.on('browser:updateBounds', (_, bounds: { x: number; y: number; width: number; height: number }) => {
+    controller.updateViewBounds(bounds)
+  })
 
   ipcMain.handle('browser:hideAll', () => controller.hideAllHosts())
   ipcMain.handle('browser:hideActiveHost', () => controller.hideActiveHost())
 
   ipcMain.handle('browser:showActive', () => controller.showActiveHost())
+
+  ipcMain.handle('browser:captureWindowSnapshot', async (_, bounds: { x: number; y: number; width: number; height: number }) => {
+    try {
+      return await controller.captureWindowSnapshot(bounds)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:captureViewportSnapshot', async (_, tabId?: string | null) => {
+    try {
+      return await controller.captureViewportSnapshot(tabId)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
 
   ipcMain.handle('browser:getTabs', () => controller.getTabList())
 
@@ -169,6 +190,12 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle(
     'browser:previewUpdateBounds',
     (_, bounds: { x: number; y: number; width: number; height: number }) => controller.previewUpdateBounds(bounds),
+  )
+  ipcMain.on(
+    'browser:previewUpdateBounds',
+    (_, bounds: { x: number; y: number; width: number; height: number }) => {
+      controller.previewUpdateBounds(bounds)
+    },
   )
   ipcMain.handle('browser:previewClose', () => controller.previewClose())
   ipcMain.handle('browser:previewGetState', () => controller.previewGetState())

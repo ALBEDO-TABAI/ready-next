@@ -7,8 +7,6 @@ const HOST_TRANSPARENT_BG = '#00000000'
 
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
-  private pendingBoundsByView = new WeakMap<BrowserHostView, BrowserRect>()
-  private boundsFlushTimers = new WeakMap<BrowserHostView, ReturnType<typeof setTimeout>>()
   private hostKindByView = new WeakMap<BrowserHostView, BrowserHostKind>()
   private attachedHosts = new WeakSet<BrowserHostView>()
   private hiddenHosts = new WeakSet<BrowserHostView>()
@@ -50,11 +48,6 @@ export class BrowserHostLayoutService {
 
   detachHost(view: BrowserHostView): void {
     if (!this.attachedHosts.has(view)) return
-    const timer = this.boundsFlushTimers.get(view)
-    if (timer) {
-      clearTimeout(timer)
-      this.boundsFlushTimers.delete(view)
-    }
     const kind = this.hostKindByView.get(view) || 'browserView'
     try {
       if (kind === 'webContentsView') {
@@ -72,31 +65,18 @@ export class BrowserHostLayoutService {
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
     this.attachHost(view)
     this.hiddenHosts.delete(view)
-    const timer = this.boundsFlushTimers.get(view)
-    if (timer) {
-      clearTimeout(timer)
-      this.boundsFlushTimers.delete(view)
-    }
-    this.pendingBoundsByView.set(view, bounds)
     this.setHostBoundsNow(view, bounds)
   }
 
   hideHost(view: BrowserHostView): void {
     this.attachHost(view)
-    const timer = this.boundsFlushTimers.get(view)
-    if (timer) {
-      clearTimeout(timer)
-      this.boundsFlushTimers.delete(view)
-    }
     this.hiddenHosts.add(view)
-    this.pendingBoundsByView.set(view, this.offscreenBounds)
     this.setHostBoundsNow(view, this.offscreenBounds)
   }
 
   applyBounds(view: BrowserHostView, bounds: BrowserRect): void {
-    this.pendingBoundsByView.set(view, bounds)
     if (this.hiddenHosts.has(view)) return
-    this.scheduleHostBounds(view, bounds)
+    this.setHostBoundsNow(view, bounds)
   }
 
   isHostAttached(view: BrowserHostView): boolean {
@@ -127,18 +107,5 @@ export class BrowserHostLayoutService {
     if (this.appliedBoundsByView.get(view) === key) return
     view.setBounds(bounds)
     this.appliedBoundsByView.set(view, key)
-  }
-
-  private scheduleHostBounds(view: BrowserHostView, bounds: BrowserRect): void {
-    this.pendingBoundsByView.set(view, bounds)
-    const existing = this.boundsFlushTimers.get(view)
-    if (existing) return
-    const timer = setTimeout(() => {
-      this.boundsFlushTimers.delete(view)
-      const pending = this.pendingBoundsByView.get(view)
-      if (!pending) return
-      this.setHostBoundsNow(view, pending)
-    }, 24)
-    this.boundsFlushTimers.set(view, timer)
   }
 }

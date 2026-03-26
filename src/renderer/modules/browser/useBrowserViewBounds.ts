@@ -6,6 +6,7 @@ interface UseBrowserViewBoundsParams {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
   isActive: boolean
+  hostVisibleRef: RefObject<boolean>
   topInset: number
   sidebarVisible: boolean
   sidePanelVariant: string
@@ -20,6 +21,7 @@ export function useBrowserViewBounds({
   isElectron,
   contentRef,
   isActive,
+  hostVisibleRef,
   topInset,
   sidebarVisible,
   sidePanelVariant,
@@ -30,68 +32,75 @@ export function useBrowserViewBounds({
   hasError,
 }: UseBrowserViewBoundsParams) {
   const boundsRafRef = useRef<number | null>(null)
+  const boundsTrackingRafRef = useRef<number | null>(null)
+  const boundsTrackingTimeoutRef = useRef<number | null>(null)
   const lastBoundsKeyRef = useRef('')
-  const lastSentBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const lastBoundsSentAtRef = useRef(0)
-  const layoutTransitionUntilRef = useRef(0)
   const overlayLockCountRef = useRef(0)
 
-  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean }) => {
+  const sendBoundsImmediate = useCallback(async (_options?: { forceExact?: boolean }) => {
     if (!isElectron || !contentRef.current) return
-    const chatPanelResizeHandleWidth = 4
     const rect = contentRef.current.getBoundingClientRect()
-    const shellRect = contentRef.current.closest('[data-workbench-shell="true"]')?.getBoundingClientRect()
-    const shellRight = shellRect?.right ?? window.innerWidth
-    const chatPanelRect = document.querySelector<HTMLElement>('[data-chat-panel-root="true"]')?.getBoundingClientRect()
-    const chatPanelOccupiesSpace = Boolean(chatPanelRect && chatPanelRect.width > chatPanelResizeHandleWidth + 1)
-    const safeRightFromDom = chatPanelOccupiesSpace && chatPanelRect
-      ? chatPanelRect.left - chatPanelResizeHandleWidth
-      : Number.POSITIVE_INFINITY
-    const safeRightFromState = chatPanelVisible
-      ? shellRight - chatPanelWidth - chatPanelResizeHandleWidth
-      : shellRight
-    const safeRight = chatPanelOccupiesSpace
-      ? Math.min(shellRight, safeRightFromDom)
-      : Math.min(shellRight, safeRightFromState)
     const x = Math.round(rect.left)
     const y = Math.round(rect.top - topInset)
-    const exactWidth = Math.round(Math.max(0, safeRight - rect.left))
+    const exactWidth = Math.round(rect.width)
     const height = Math.round(rect.height + topInset)
 
     if (exactWidth <= 0 || height <= 0) return
 
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    const isManualResizing = document.body.classList.contains('resizing')
-    // 拖拽时使用精确宽度，避免露底
     const width = exactWidth
-
-    // 拖拽时限制更新频率，避免过于频繁
-    const minSendInterval = isManualResizing ? 16 : 42
-    const last = lastSentBoundsRef.current
-    if (isManualResizing && last && !options?.forceExact) {
-      const widthDelta = Math.abs(width - last.width)
-      const xDelta = Math.abs(x - last.x)
-      const elapsed = now - lastBoundsSentAtRef.current
-      // 只在变化足够大或时间足够长时才更新
-      if (elapsed < minSendInterval && widthDelta < 4 && xDelta < 4) {
-        return
-      }
-    }
-
     const boundsKey = `${x}:${y}:${width}:${height}`
     if (lastBoundsKeyRef.current === boundsKey) return
 
     lastBoundsKeyRef.current = boundsKey
-    lastSentBoundsRef.current = { x, y, width, height }
-    lastBoundsSentAtRef.current = now
     await window.electronAPI?.browser?.updateBounds({ x, y, width, height })
-  }, [chatPanelVisible, chatPanelWidth, contentRef, isElectron, topInset])
+  }, [contentRef, isElectron, topInset])
+
+  const stopBoundsTracking = useCallback(() => {
+    if (boundsTrackingRafRef.current) {
+      cancelAnimationFrame(boundsTrackingRafRef.current)
+      boundsTrackingRafRef.current = null
+    }
+    if (boundsTrackingTimeoutRef.current) {
+      window.clearTimeout(boundsTrackingTimeoutRef.current)
+      boundsTrackingTimeoutRef.current = null
+    }
+  }, [])
+
+  const startBoundsTracking = useCallback((durationMs = 420) => {
+    if (!isElectron || !isActive) return
+
+    stopBoundsTracking()
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+
+    const tick = () => {
+      void sendBoundsImmediate({ forceExact: true })
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const isManualResizing = document.body.classList.contains('resizing')
+      if (isManualResizing || now - startedAt < durationMs) {
+        boundsTrackingRafRef.current = requestAnimationFrame(tick)
+        return
+      }
+
+      boundsTrackingRafRef.current = null
+      boundsTrackingTimeoutRef.current = window.setTimeout(() => {
+        void sendBoundsImmediate({ forceExact: true })
+        boundsTrackingTimeoutRef.current = null
+      }, 48)
+    }
+
+    boundsTrackingRafRef.current = requestAnimationFrame(tick)
+  }, [isActive, isElectron, sendBoundsImmediate, stopBoundsTracking])
 
   const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
+    if (document.body.classList.contains('resizing')) {
+      void sendBoundsImmediate({ forceExact: true })
+      return
+    }
     if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
     boundsRafRef.current = requestAnimationFrame(() => {
       boundsRafRef.current = null
-      sendBoundsImmediate(options)
+      void sendBoundsImmediate(options)
     })
   }, [sendBoundsImmediate])
 
@@ -102,63 +111,57 @@ export function useBrowserViewBounds({
     const shouldShowBrowserView =
       !hasError && overlayLockCountRef.current === 0
 
-    if (!shouldShowBrowserView) {
+    if (!hostVisibleRef.current || !shouldShowBrowserView) {
       window.electronAPI?.browser?.hideAll()
       return
     }
 
     await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
     window.electronAPI?.browser?.showActive()
-  }, [hasError, isActive, isElectron, sendBoundsImmediate])
+  }, [hasError, hostVisibleRef, isActive, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     const element = contentRef.current
     if (!element) return
 
-    const observer = new ResizeObserver(() => {
+    const handleBoundsShift = () => {
+      if (document.body.classList.contains('resizing') && boundsTrackingRafRef.current === null) {
+        startBoundsTracking(160)
+      }
       sendBounds()
-    })
+    }
+
+    const observer = new ResizeObserver(handleBoundsShift)
     observer.observe(element)
 
-    const handleResize = () => sendBounds()
+    const handleResize = () => handleBoundsShift()
     window.addEventListener('resize', handleResize)
 
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', handleResize)
       if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
+      stopBoundsTracking()
     }
-  }, [contentRef, sendBounds])
+  }, [contentRef, sendBounds, startBoundsTracking, stopBoundsTracking])
 
   useEffect(() => {
     if (!isActive) return
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    layoutTransitionUntilRef.current = now + 380
-
-    if (document.body.classList.contains('resizing')) {
-      sendBounds()
-      return
-    }
-
-    const timers = [
-      window.setTimeout(() => sendBounds(), 0),
-      window.setTimeout(() => sendBounds(), 120),
-      window.setTimeout(() => sendBounds(), 240),
-      window.setTimeout(() => sendBounds({ forceExact: true }), 380),
-    ]
+    startBoundsTracking()
 
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
+      stopBoundsTracking()
     }
   }, [
     chatPanelVisible,
     chatPanelWidth,
     effectiveSidePanelWidth,
-    sendBounds,
     sidebarVisible,
     sidePanelVariant,
     skillsSplitRatio,
     isActive,
+    startBoundsTracking,
+    stopBoundsTracking,
   ])
 
   useEffect(() => {

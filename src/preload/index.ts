@@ -143,11 +143,16 @@ const browserAPI = {
   goBack: (tabId: string) => ipcRenderer.invoke('browser:goBack', tabId),
   goForward: (tabId: string) => ipcRenderer.invoke('browser:goForward', tabId),
   reload: (tabId: string) => ipcRenderer.invoke('browser:reload', tabId),
-  updateBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
-    ipcRenderer.invoke('browser:updateBounds', bounds),
+  updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => {
+    ipcRenderer.send('browser:updateBounds', bounds)
+    return Promise.resolve({ success: true })
+  },
   hideAll: () => ipcRenderer.invoke('browser:hideAll'),
   hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost'),
   showActive: () => ipcRenderer.invoke('browser:showActive'),
+  captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),
+  captureViewportSnapshot: (tabId?: string | null) => ipcRenderer.invoke('browser:captureViewportSnapshot', tabId),
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
   getDiagnostics: () => ipcRenderer.invoke('browser:getDiagnostics'),
@@ -160,8 +165,10 @@ const browserAPI = {
   previewGoBack: () => ipcRenderer.invoke('browser:previewGoBack'),
   previewGoForward: () => ipcRenderer.invoke('browser:previewGoForward'),
   previewReload: () => ipcRenderer.invoke('browser:previewReload'),
-  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
-    ipcRenderer.invoke('browser:previewUpdateBounds', bounds),
+  previewUpdateBounds: (bounds: { x: number; y: number; width: number; height: number }) => {
+    ipcRenderer.send('browser:previewUpdateBounds', bounds)
+    return Promise.resolve({ success: true })
+  },
   previewClose: () => ipcRenderer.invoke('browser:previewClose'),
   previewGetState: () => ipcRenderer.invoke('browser:previewGetState'),
   onPreviewUpdate: (callback: (data: unknown) => void) => {
@@ -386,12 +393,13 @@ const appAPI = {
 const windowAPI = {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
-  close: () => ipcRenderer.invoke('window:close')
+  close: () => ipcRenderer.invoke('window:close'),
 }
 
 // Theme API
 const themeAPI = {
   set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
+  get: () => ipcRenderer.invoke('theme:get'),
 }
 
 // Settings API

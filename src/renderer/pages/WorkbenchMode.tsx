@@ -9,6 +9,7 @@ import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
+import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
 
 // --- Resize Handle ---
 function ResizeHandle({
@@ -41,6 +42,11 @@ function ResizeHandle({
       document.body.classList.remove('resizing')
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      window.dispatchEvent(
+        new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
+          detail: { resizing: false },
+        }),
+      )
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -48,6 +54,11 @@ function ResizeHandle({
     document.body.classList.add('resizing')
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    window.dispatchEvent(
+      new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
+        detail: { resizing: true },
+      }),
+    )
   }, [direction])
 
   return (
@@ -208,7 +219,7 @@ export default function WorkbenchMode() {
           <TopBar onToggleChatPanel={toggleChatPanel} />
 
           <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
-            <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} />
+            <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} expanded={sidebarVisible} />
             <SidePanel variant={sidePanelVariant} />
 
             {/* Sidebar resize handle */}

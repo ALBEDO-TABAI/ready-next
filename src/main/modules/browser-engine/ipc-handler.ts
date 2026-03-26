@@ -1017,6 +1017,27 @@ export class BrowserController {
     this.browserHostsPresented = true
     return this.tabShellService.showActiveHost()
   }
+
+  async captureWindowSnapshot(bounds: BrowserRect): Promise<{ success: boolean; data?: string; error?: string }> {
+    try {
+      if (bounds.width <= 0 || bounds.height <= 0) {
+        return { success: false, error: 'Invalid snapshot bounds' }
+      }
+      const image = await this.mainWindow.capturePage(bounds)
+      return { success: true, data: image.toPNG().toString('base64') }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  async captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }> {
+    try {
+      const data = await this.screenshot(tabId || null)
+      return { success: true, data }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
 }
 
 export function setupBrowserIPC(mainWindow: BrowserWindow, useMock = false): BrowserController {
