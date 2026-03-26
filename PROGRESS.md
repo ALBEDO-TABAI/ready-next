@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-24
+> 更新时间: 2026-03-26
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
@@ -39,6 +39,7 @@
 - renderer 侧 browser bounds hook 也已去掉对细小拖拽位移的跳步忽略，并在拖拽及宽度切换后的短窗口内持续做逐帧跟随，进一步压低边界错位和尾部抖动。
 - preload/main 之间的高频 browser bounds 更新现已改成 fire-and-forget 单向同步，拖拽面板时不再为每一帧等待 IPC invoke 往返，浏览器内容区的跟随路径更短。
 - BrowserMode 的拖拽冻结方案已从“冻结内部网页视口”切到“冻结整块浏览器区域可见画面”：拖拽时直接覆盖当前浏览器区域截图，顶部、圆角和内容来自同一张画面，避免继续在边角上出现白块、缺角或反向咬口。
+- 文件管理顶部“筛选 / 更多”菜单已从左侧栏内部节点改为顶层弹层渲染：菜单仍贴着左栏按钮展开，但不再被 `SidePanel` 的 `overflow-hidden` 裁掉，也不再靠隐藏浏览器内容来制造层级。
 
 6. RSS 已经具备独立维护条件。
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
@@ -115,6 +116,8 @@
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-resize-stability-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts` 通过
+- `npx tsx --test src/__tests__/floating-submenu-style-contract.test.ts src/__tests__/chat-header-menu-style-contract.test.ts` 通过
+- `npm run typecheck:web` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/skill-compiler-smoke.test.ts src/__tests__/skill-resolver-smoke.test.ts` 通过
 - `python3 -m py_compile` 已校验新 wrapper 脚本语法
 - `npm test` 通过，最近一次全量通过为 `173` 个测试

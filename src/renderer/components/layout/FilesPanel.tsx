@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search,
   FilePlus,
@@ -17,6 +18,12 @@ import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode }
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
+import {
+  buildFloatingMenuCheckStyle,
+  buildFloatingMenuItemStyle,
+  buildFloatingMenuSurfaceStyle,
+} from '../ui/floatingMenuStyles'
+import './filesPanelFloatingMenu.css'
 
 interface FilesPanelProps {
   isVisible: boolean
@@ -28,6 +35,11 @@ export interface SidePanelSlots {
   body: ReactNode
 }
 
+interface FloatingMenuPosition {
+  left: number
+  top: number
+}
+
 const ICON_BTN =
   'flex items-center justify-center rounded transition-colors duration-100 hover:bg-[var(--bg-hover)]'
 
@@ -37,6 +49,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const [filters, setFilters] = useState<FileFilterMap>({ ...DEFAULT_FILE_FILTERS })
   const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [filterMenuPosition, setFilterMenuPosition] = useState<FloatingMenuPosition | null>(null)
+  const [moreMenuPosition, setMoreMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [thumbnailSize, setThumbnailSize] = useState(132)
   const [gridNavigation, setGridNavigation] = useState<{
     path: GridNavigationEntry
@@ -47,6 +61,9 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     history: [null],
     index: 0,
   })
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const filterTriggerRef = useRef<HTMLButtonElement>(null)
+  const moreTriggerRef = useRef<HTMLButtonElement>(null)
   const filterMenuRef = useRef<HTMLDivElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -77,12 +94,18 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   useEffect(() => {
     if (!showFilterMenu && !showMoreMenu) return
     const handler = (e: MouseEvent) => {
-      if (showFilterMenu && filterMenuRef.current && !filterMenuRef.current.contains(e.target as Node)) {
-        setShowFilterMenu(false)
-      }
-      if (showMoreMenu && moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setShowMoreMenu(false)
-      }
+      const target = e.target as Node
+      const clickedFilterMenu = !!(
+        filterMenuRef.current?.contains(target) ||
+        filterTriggerRef.current?.contains(target)
+      )
+      const clickedMoreMenu = !!(
+        moreMenuRef.current?.contains(target) ||
+        moreTriggerRef.current?.contains(target)
+      )
+
+      if (showFilterMenu && !clickedFilterMenu) setShowFilterMenu(false)
+      if (showMoreMenu && !clickedMoreMenu) setShowMoreMenu(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -105,6 +128,72 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   ]
 
   const savedWorkspaces = useMemo(() => getSavedWorkspaces(), [getSavedWorkspaces])
+  const filterMenuStyle = buildFloatingMenuSurfaceStyle(168, {
+    maxHeight: 360,
+    padding: 6,
+    zIndex: 250,
+  })
+  const moreMenuStyle = buildFloatingMenuSurfaceStyle(188, {
+    maxHeight: 320,
+    padding: 6,
+    zIndex: 250,
+  })
+  const portalRoot = typeof document !== 'undefined' ? document.body : null
+
+  const computeMenuPosition = useCallback((trigger: HTMLButtonElement | null, menuWidth: number): FloatingMenuPosition | null => {
+    if (!trigger || !toolbarRef.current) return null
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const panelRect = toolbarRef.current.getBoundingClientRect()
+    const padding = 8
+    const left = Math.max(
+      panelRect.left + padding,
+      Math.min(triggerRect.right - menuWidth, panelRect.right - menuWidth - padding),
+    )
+
+    return {
+      left: Math.round(left),
+      top: Math.round(triggerRect.bottom + 6),
+    }
+  }, [])
+
+  const toggleFilterMenu = useCallback(() => {
+    setShowMoreMenu(false)
+    setShowFilterMenu((prev) => {
+      const next = !prev
+      setFilterMenuPosition(next ? computeMenuPosition(filterTriggerRef.current, 168) : null)
+      return next
+    })
+  }, [computeMenuPosition])
+
+  const toggleMoreMenu = useCallback(() => {
+    setShowFilterMenu(false)
+    setShowMoreMenu((prev) => {
+      const next = !prev
+      setMoreMenuPosition(next ? computeMenuPosition(moreTriggerRef.current, 188) : null)
+      return next
+    })
+  }, [computeMenuPosition])
+
+  useEffect(() => {
+    if (!showFilterMenu && !showMoreMenu) return
+
+    const syncMenuPositions = () => {
+      if (showFilterMenu) {
+        setFilterMenuPosition(computeMenuPosition(filterTriggerRef.current, 168))
+      }
+      if (showMoreMenu) {
+        setMoreMenuPosition(computeMenuPosition(moreTriggerRef.current, 188))
+      }
+    }
+
+    window.addEventListener('resize', syncMenuPositions)
+    window.addEventListener('scroll', syncMenuPositions, true)
+    return () => {
+      window.removeEventListener('resize', syncMenuPositions)
+      window.removeEventListener('scroll', syncMenuPositions, true)
+    }
+  }, [computeMenuPosition, showFilterMenu, showMoreMenu])
 
   const handleConnectedRefresh = useCallback(async () => {
     if (!isConnected) return
@@ -274,6 +363,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const body = (
     <>
       <div
+        ref={toolbarRef}
         className="shrink-0 flex items-center justify-between"
         style={{
           height: FILES_PANEL_DIMENSIONS.toolbarHeight,
@@ -311,53 +401,16 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
             <LayoutGrid style={{ width: 14, height: 14 }} />
           </button>
 
-          <div className="relative" ref={filterMenuRef}>
+          <div className="relative">
             <button
+              ref={filterTriggerRef}
               className={ICON_BTN}
               style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
-              onClick={() => setShowFilterMenu((v) => !v)}
+              onClick={toggleFilterMenu}
               title="筛选"
             >
               <SlidersHorizontal style={{ width: 14, height: 14 }} />
             </button>
-            {showFilterMenu && (
-              <div
-                className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1"
-                style={{
-                  minWidth: 140,
-                  background: PANEL_TOKENS.cardBg,
-                  borderColor: PANEL_TOKENS.border,
-                }}
-              >
-                {filterLabels.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => toggleFilter(key)}
-                    className="w-full text-left flex items-center gap-2 hover:bg-[var(--bg-hover)]"
-                    style={{ padding: '5px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
-                  >
-                    <span
-                      style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: 3,
-                        border: `1px solid ${filters[key] ? PANEL_TOKENS.blue : PANEL_TOKENS.border}`,
-                        background: filters[key] ? PANEL_TOKENS.blue : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff',
-                        fontSize: 10,
-                        lineHeight: 1,
-                      }}
-                    >
-                      {filters[key] ? '✓' : ''}
-                    </span>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
@@ -379,73 +432,16 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
             <FolderPlus style={{ width: 14, height: 14 }} />
           </button>
 
-          <div className="relative" ref={moreMenuRef}>
+          <div className="relative">
             <button
+              ref={moreTriggerRef}
               className={ICON_BTN}
               style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
-              onClick={() => setShowMoreMenu((v) => !v)}
+              onClick={toggleMoreMenu}
               title="更多"
             >
               <MoreVertical style={{ width: 14, height: 14 }} />
             </button>
-            {showMoreMenu && (
-              <div
-                className="absolute right-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1"
-                style={{
-                  minWidth: 180,
-                  background: PANEL_TOKENS.cardBg,
-                  borderColor: PANEL_TOKENS.border,
-                }}
-                onClick={() => setShowMoreMenu(false)}
-              >
-                <button
-                  onClick={() => {
-                    if (pinnedFolders.length === 0) return
-                    const defaultName =
-                      pinnedFolders.map((p) => p.split('/').pop()).join(' + ') || '我的工作区'
-                    const name = prompt('工作区名称：', defaultName)
-                    if (name) saveWorkspace(name)
-                  }}
-                  className="w-full text-left flex items-center gap-2 hover:bg-[var(--bg-hover)]"
-                  style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
-                >
-                  <Folder style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-                  保存当前工作区
-                </button>
-                <button
-                  onClick={() => {
-                    if (!workspaceRoot || confirm('确定新建工作区？当前文件列表将被清空。')) {
-                      clearWorkspace()
-                    }
-                  }}
-                  className="w-full text-left flex items-center gap-2 hover:bg-[var(--bg-hover)]"
-                  style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
-                >
-                  <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
-                  新建工作区
-                </button>
-
-                {savedWorkspaces.length > 0 && (
-                  <>
-                    <div style={{ borderTop: `1px solid ${PANEL_TOKENS.border}`, margin: '4px 0' }} />
-                    <div style={{ padding: '4px 12px', fontSize: 10, color: PANEL_TOKENS.mutedStrong, fontWeight: 500 }}>
-                      已保存的工作区
-                    </div>
-                    {savedWorkspaces.map((w) => (
-                      <button
-                        key={w.name}
-                        onClick={() => loadSavedWorkspace(w.folders)}
-                        className="w-full text-left flex items-center gap-2 hover:bg-[var(--bg-hover)]"
-                        style={{ padding: '6px 12px', fontSize: 12, color: PANEL_TOKENS.text }}
-                      >
-                        <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.blue }} />
-                        <span className="truncate">{w.name}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -531,6 +527,129 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         onGridPathChange={handleGridPathChange}
         onThumbnailSizeChange={setThumbnailSize}
       />
+      {portalRoot && showFilterMenu && filterMenuPosition && createPortal(
+        <div
+          ref={filterMenuRef}
+          className="glass-surface-floating ready-floating-menu"
+          style={{
+            ...filterMenuStyle,
+            position: 'fixed',
+            left: filterMenuPosition.left,
+            top: filterMenuPosition.top,
+            minWidth: 168,
+          }}
+        >
+          {filterLabels.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => toggleFilter(key)}
+              className="ready-floating-menu-item w-full text-left flex items-center gap-2"
+              style={{
+                ...buildFloatingMenuItemStyle({ compact: true }),
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12,
+                color: PANEL_TOKENS.text,
+              }}
+            >
+              <span style={buildFloatingMenuCheckStyle(filters[key])}>
+                {filters[key] ? '✓' : ''}
+              </span>
+              {label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+      {portalRoot && showMoreMenu && moreMenuPosition && createPortal(
+        <div
+          ref={moreMenuRef}
+          className="glass-surface-floating ready-floating-menu"
+          style={{
+            ...moreMenuStyle,
+            position: 'fixed',
+            left: moreMenuPosition.left,
+            top: moreMenuPosition.top,
+            minWidth: 188,
+          }}
+          onClick={() => setShowMoreMenu(false)}
+        >
+          <button
+            onClick={() => {
+              if (pinnedFolders.length === 0) return
+              const defaultName =
+                pinnedFolders.map((p) => p.split('/').pop()).join(' + ') || '我的工作区'
+              const name = prompt('工作区名称：', defaultName)
+              if (name) saveWorkspace(name)
+            }}
+            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
+            style={{
+              ...buildFloatingMenuItemStyle({ compact: true }),
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 12,
+              color: PANEL_TOKENS.text,
+            }}
+          >
+            <Folder style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+            保存当前工作区
+          </button>
+          <button
+            onClick={() => {
+              if (!workspaceRoot || confirm('确定新建工作区？当前文件列表将被清空。')) {
+                clearWorkspace()
+              }
+            }}
+            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
+            style={{
+              ...buildFloatingMenuItemStyle({ compact: true }),
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 12,
+              color: PANEL_TOKENS.text,
+            }}
+          >
+            <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+            新建工作区
+          </button>
+
+          {savedWorkspaces.length > 0 && (
+            <>
+              <div
+                style={{
+                  borderTop: '1px solid color-mix(in srgb, var(--border-default) 76%, rgba(255,255,255,0.28))',
+                  margin: '6px 0',
+                }}
+              />
+              <div style={{ padding: '4px 12px 6px', fontSize: 10, color: PANEL_TOKENS.mutedStrong, fontWeight: 600, letterSpacing: '0.04em' }}>
+                已保存的工作区
+              </div>
+              {savedWorkspaces.map((w) => (
+                <button
+                  key={w.name}
+                  onClick={() => loadSavedWorkspace(w.folders)}
+                  className="ready-floating-menu-item w-full text-left flex items-center gap-2"
+                  style={{
+                    ...buildFloatingMenuItemStyle({ compact: true }),
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    fontSize: 12,
+                    color: PANEL_TOKENS.text,
+                  }}
+                >
+                  <FolderOpen style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+                  <span className="truncate">{w.name}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   )
 
