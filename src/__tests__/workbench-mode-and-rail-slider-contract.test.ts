@@ -34,4 +34,6 @@ test('workbench mode switch and icon rail share the blue slider treatment', () =
   assert.match(styles, /\.draggable-mode-tabs\s*\{[\s\S]*?height:\s*38px/)
   assert.match(styles, /\.draggable-mode-tabs\s*\{[\s\S]*?border-radius:\s*18px/)
   assert.match(styles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*?border-radius:\s*16px/)
+  assert.match(modeTabs, /data-mode=\{mode\.id\}/)
+  assert.match(styles, /\.draggable-mode-tabs__icon\[data-mode='calendar'\]\s+svg\s*\{[\s\S]*?transform:\s*translateX\(-0\.5px\);/)
 })

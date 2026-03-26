@@ -215,6 +215,10 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   outline: none;
 }
 
+.draggable-mode-tabs__icon[data-mode='calendar'] svg {
+  transform: translateX(-0.5px);
+}
+
 html[data-skin='liquid-glass'] .draggable-mode-tabs {
   border-color: color-mix(in srgb, var(--lg-border-soft) 55%, rgba(0, 0, 0, 0.03));
   background: color-mix(in srgb, var(--lg-surface-elevated) 85%, rgba(150, 160, 180, 0.18));

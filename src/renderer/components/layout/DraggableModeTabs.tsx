@@ -189,6 +189,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
             key={mode.id}
             type="button"
             className={`draggable-mode-tabs__icon ${Math.round(position) === index ? 'is-active' : ''}`}
+            data-mode={mode.id}
             style={getIconStyle(index)}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => handleIconClick(index, e)}
