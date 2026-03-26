@@ -194,7 +194,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
             onClick={(e) => handleIconClick(index, e)}
             title={mode.id}
           >
-            <Icon style={{ width: 13, height: 13 }} strokeWidth={2} />
+            <Icon style={{ width: 15, height: 15 }} strokeWidth={2} />
           </button>
         )
       })}

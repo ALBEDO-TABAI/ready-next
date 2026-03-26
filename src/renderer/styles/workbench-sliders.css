@@ -108,10 +108,10 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   position: relative;
   display: flex;
   align-items: center;
-  width: 136px;
-  height: 28px;
+  width: 140px;
+  height: 38px;
   padding: 2px;
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
   isolation: isolate;
   border: 1px solid color-mix(in srgb, var(--border-default) 45%, rgba(0, 0, 0, 0.06));
@@ -139,7 +139,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   left: 2px;
   width: calc((100% - 4px) / 4);
   height: calc(100% - 4px);
-  border-radius: 12px;
+  border-radius: 16px;
   z-index: 2;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.5) 5%, transparent 10%),
@@ -175,7 +175,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   left: 0;
   right: 0;
   height: 40%;
-  border-radius: 12px 12px 50% 50%;
+  border-radius: 16px 16px 50% 50%;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 100%);
   opacity: 0.5;
   pointer-events: none;
@@ -198,6 +198,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   position: relative;
   z-index: 3;
   flex: 1;
+  min-width: 34px;
   height: 100%;
   padding: 0;
   border: none;
