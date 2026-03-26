@@ -9,7 +9,7 @@ export interface FileItem {
 }
 
 export type SidePanelWidthKey = 'files' | 'search' | 'skills'
-export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'calendar' | 'hidden'
+export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'hidden'
 
 interface SidePanelWidths {
   // 三个面板共享一个宽度，避免切换时跳跃
@@ -75,10 +75,43 @@ interface WorkspaceState {
   cancelCreating: () => void
 }
 
+const getPathSeparator = (path: string): '/' | '\\' => {
+  return path.includes('\\') && !path.includes('/') ? '\\' : '/'
+}
+
+const isWindowsDriveRoot = (path: string): boolean => /^[A-Za-z]:\\?$/.test(path)
+
+const normalizeDirectoryPath = (path: string): string => {
+  if (!path) return path
+  const separator = getPathSeparator(path)
+  if (separator === '\\') {
+    if (isWindowsDriveRoot(path)) {
+      return path.endsWith('\\') ? path : `${path}\\`
+    }
+    return path.replace(/\\+$/, '')
+  }
+  if (path === '/') return '/'
+  return path.replace(/\/+$/, '')
+}
+
 // Helper to get dirname
 const getDirName = (path: string): string => {
-  const idx = path.lastIndexOf('/')
-  return idx <= 0 ? '/' : path.slice(0, idx)
+  const separator = getPathSeparator(path)
+  const normalized = normalizeDirectoryPath(path)
+  if (!normalized) return separator
+
+  if (separator === '\\') {
+    if (isWindowsDriveRoot(normalized)) return normalized
+    const idx = normalized.lastIndexOf('\\')
+    if (idx < 0) return normalized
+    if (idx <= 2 && /^[A-Za-z]:/.test(normalized)) {
+      return `${normalized.slice(0, 2)}\\`
+    }
+    return normalized.slice(0, idx)
+  }
+
+  const idx = normalized.lastIndexOf('/')
+  return idx <= 0 ? '/' : normalized.slice(0, idx)
 }
 
 const joinChildPath = (dir: string, name: string): string => {
@@ -86,6 +119,46 @@ const joinChildPath = (dir: string, name: string): string => {
   const normalized = dir.replace(/[\\/]+$/, '')
   if (!normalized) return `${separator}${name}`
   return `${normalized}${separator}${name}`
+}
+
+const isSameOrDescendantPath = (path: string, ancestor: string): boolean => {
+  const normalizedPath = normalizeDirectoryPath(path)
+  const normalizedAncestor = normalizeDirectoryPath(ancestor)
+  if (!normalizedPath || !normalizedAncestor) return false
+  if (normalizedPath === normalizedAncestor) return true
+  const separator = getPathSeparator(normalizedPath)
+  return normalizedPath.startsWith(`${normalizedAncestor}${separator}`)
+}
+
+const expandDirsForTarget = (
+  targetDir: string,
+  expandedDirs: Set<string>,
+  pinnedFolders: string[],
+): Set<string> => {
+  const next = new Set(expandedDirs)
+  const normalizedTarget = normalizeDirectoryPath(targetDir)
+  if (!normalizedTarget || normalizedTarget === '/') return next
+
+  const pinnedAncestor = pinnedFolders.find((folder) => isSameOrDescendantPath(normalizedTarget, folder))
+  let cursor = normalizedTarget
+
+  while (cursor) {
+    next.add(cursor)
+
+    if (pinnedAncestor && normalizeDirectoryPath(cursor) === normalizeDirectoryPath(pinnedAncestor)) {
+      break
+    }
+
+    const parent = getDirName(cursor)
+    if (!parent || parent === cursor) break
+    if (parent === '/' || isWindowsDriveRoot(parent)) {
+      if (!pinnedAncestor) next.add(parent)
+      break
+    }
+    cursor = parent
+  }
+
+  return next
 }
 
 const isKnownDirectoryPath = (
@@ -107,12 +180,16 @@ const resolveCreationBaseDir = (state: Pick<
   WorkspaceState,
   'currentPath' | 'workspaceRoot' | 'pinnedFolders' | 'selectedFile' | 'files' | 'dirChildren'
 >): string => {
-  if (state.currentPath && state.currentPath !== '/') {
-    return state.currentPath
-  }
-
   if (isKnownDirectoryPath(state.selectedFile, state.files, state.dirChildren, state.pinnedFolders)) {
     return state.selectedFile as string
+  }
+
+  if (state.selectedFile) {
+    return getDirName(state.selectedFile)
+  }
+
+  if (state.currentPath && state.currentPath !== '/') {
+    return state.currentPath
   }
 
   if (state.workspaceRoot) {
@@ -191,7 +268,7 @@ const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
     if (!raw) return 'files'
     const parsed = raw as WorkspaceSidePanelVariant
     // Validate the variant
-    if (['files', 'search', 'skills', 'calendar', 'hidden'].includes(parsed)) {
+    if (['files', 'search', 'skills', 'hidden'].includes(parsed)) {
       console.log('[SidePanelVariant] Valid variant loaded:', parsed)
       return parsed
     }
@@ -662,12 +739,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   startCreating: (type) => {
     const state = get()
     const targetDir = resolveCreationBaseDir(state)
+    const expandedDirs = expandDirsForTarget(targetDir, state.expandedDirs, state.pinnedFolders)
     if (targetDir !== state.currentPath) {
-      set({ creatingType: type, creatingPath: targetDir, currentPath: targetDir, selectedFile: targetDir })
+      set({
+        creatingType: type,
+        creatingPath: targetDir,
+        currentPath: targetDir,
+        selectedFile: targetDir,
+        expandedDirs,
+      })
       void get().refreshFiles()
+      void get().loadDirChildren(targetDir)
       return
     }
-    set({ creatingType: type, creatingPath: targetDir })
+    set({ creatingType: type, creatingPath: targetDir, expandedDirs })
+    if (!state.dirChildren.has(targetDir)) {
+      void get().loadDirChildren(targetDir)
+    }
   },
   cancelCreating: () => set({ creatingType: null, creatingPath: null })
 }})

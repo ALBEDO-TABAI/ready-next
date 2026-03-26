@@ -30,11 +30,11 @@ test('grid navigation history does not duplicate the current directory', () => {
 })
 
 test('side panel search slot reserves its left edge for grid history buttons and keeps the search icon on the right', () => {
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const filesPanel = readWorkspaceFile('src/renderer/components/layout/FilesPanel.tsx')
 
-  assert.match(sidePanel, /title="后退"/)
-  assert.match(sidePanel, /title="前进"/)
-  assert.match(sidePanel, /viewMode === 'grid'/)
-  assert.match(sidePanel, /Search className="h-\[13px\] w-\[13px\][^"]*"/)
-  assert.match(sidePanel, /<input[\s\S]*?\/>\s*<Search/)
+  assert.match(filesPanel, /title="后退"/)
+  assert.match(filesPanel, /title="前进"/)
+  assert.match(filesPanel, /viewMode === 'grid'/)
+  assert.match(filesPanel, /Search className="h-\[13px\] w-\[13px\][^"]*"/)
+  assert.match(filesPanel, /<input[\s\S]*?\/>\s*<Search/)
 })
