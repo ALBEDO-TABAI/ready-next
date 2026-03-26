@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
+import {
+  SETTINGS_CARD_STYLE,
+  SETTINGS_INPUT_STYLE,
+  SETTINGS_PRIMARY_BUTTON_STYLE,
+  SETTINGS_SECONDARY_BUTTON_STYLE,
+} from './settings-theme'
 
 type IMTab = 'imessage' | 'telegram' | 'feishu'
 
@@ -56,26 +62,20 @@ function maskSecret(value: string): string {
 }
 
 const panelCardStyle = {
-  borderColor: 'var(--border-default)',
-  background: 'var(--surface-card-bg, var(--bg-primary))',
+  ...SETTINGS_CARD_STYLE,
 }
 
 const fieldStyle = {
-  borderColor: 'var(--border-input)',
-  background: 'var(--bg-content)',
-  color: 'var(--text-body)',
+  ...SETTINGS_INPUT_STYLE,
   padding: '15px 18px',
 }
 
 const secondaryButtonStyle = {
-  borderColor: 'var(--border-input)',
-  color: 'var(--text-body)',
-  background: 'var(--bg-content)',
+  ...SETTINGS_SECONDARY_BUTTON_STYLE,
 }
 
 const primaryButtonStyle = {
-  background: 'var(--color-blue)',
-  color: '#fff',
+  ...SETTINGS_PRIMARY_BUTTON_STYLE,
 }
 
 export default function RemoteIMSettingsPanel() {
@@ -271,7 +271,7 @@ export default function RemoteIMSettingsPanel() {
   return (
     <div className="flex flex-col" style={{ gap: 28 }}>
       <div
-        className="border flex w-fit"
+        className="glass-surface-card border flex w-fit"
         style={{
           ...panelCardStyle,
           borderRadius: 28,
@@ -305,12 +305,10 @@ export default function RemoteIMSettingsPanel() {
 
       {tab === 'imessage' && (
         <div
-          className="border text-[13px]"
+          className="text-[13px]"
           style={{
-            ...panelCardStyle,
             color: 'var(--text-muted)',
-            borderRadius: 28,
-            padding: '28px 32px',
+            padding: '4px 0 10px',
             lineHeight: 1.7,
           }}
         >
@@ -319,7 +317,7 @@ export default function RemoteIMSettingsPanel() {
       )}
 
       {tab === 'telegram' && (
-        <div className="border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '28px 32px', gap: 20 }}>
+        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 20 }}>
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>Telegram 连接</div>
             <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
@@ -387,7 +385,7 @@ export default function RemoteIMSettingsPanel() {
       )}
 
       {tab === 'feishu' && (
-        <div className="border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '28px 32px', gap: 24 }}>
+        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 24 }}>
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>飞书连接</div>
             <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
@@ -494,7 +492,7 @@ export default function RemoteIMSettingsPanel() {
               </>
             )}
           </div>
-          <div className="border text-[12px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)', background: 'var(--bg-content)', borderRadius: 24, padding: '22px 24px', lineHeight: 1.8 }}>
+          <div className="text-[12px]" style={{ color: 'var(--text-muted)', padding: '4px 0 0', lineHeight: 1.8 }}>
             <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)', marginBottom: 10 }}>配置指引</div>
             <div>1. 在飞书开放平台创建自建应用并启用机器人能力。</div>
             <div>2. 建议选择事件订阅的“长连接”模式；如果使用回调 URL 模式，需要额外暴露可公网访问的 callback 地址。</div>
@@ -504,7 +502,7 @@ export default function RemoteIMSettingsPanel() {
         </div>
       )}
 
-      <div className="border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '30px 32px', gap: 20 }}>
+      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '30px 32px', gap: 20 }}>
         <div className="flex items-center justify-between" style={{ paddingTop: 4 }}>
           <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>运行状态</div>
           <button
@@ -530,8 +528,8 @@ export default function RemoteIMSettingsPanel() {
             return (
               <div
                 key={channel.id}
-                className="border flex items-start justify-between"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-content)', borderRadius: 24, padding: '20px 24px', gap: 20 }}
+                className="glass-surface-card border flex items-start justify-between"
+                style={{ ...panelCardStyle, borderRadius: 24, padding: '20px 24px', gap: 20 }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium flex items-center gap-3" style={{ color: 'var(--text-title)' }}>
@@ -591,7 +589,7 @@ export default function RemoteIMSettingsPanel() {
         </div>
       </div>
 
-      <div className="border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '28px 32px', gap: 18 }}>
+      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '28px 32px', gap: 18 }}>
         <div className="flex items-center justify-between">
           <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>附件缓存</div>
           <button
@@ -628,8 +626,8 @@ export default function RemoteIMSettingsPanel() {
             {cacheStats.channels.map((item) => (
               <div
                 key={item.channelId}
-                className="border flex items-center justify-between"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-content)', borderRadius: 20, padding: '16px 18px', gap: 16 }}
+                className="glass-surface-card border flex items-center justify-between"
+                style={{ ...panelCardStyle, borderRadius: 20, padding: '16px 18px', gap: 16 }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{item.channelId}</div>

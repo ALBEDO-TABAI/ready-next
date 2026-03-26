@@ -98,6 +98,23 @@
 - 日程整体壳层：`src/renderer/components/calendar/CalendarWorkbenchShell.tsx`
 - 左侧小日历与来源列表也都从这里往下找
 
+### 设置
+
+- 页面入口：`src/renderer/pages/Settings.tsx`
+  设置页的整体结构、左侧导航、各分区标题、通用设置项布局都从这里开始改。
+- 设置页共用外观 token：`src/renderer/components/settings/settings-theme.ts`
+  输入槽、按钮、只读短槽、轻量信息块、左侧导航选中态都统一走这里，不要在设置页里再各写一套。
+- 远程 IM 分区：`src/renderer/components/settings/RemoteIMSettingsPanel.tsx`
+- 记忆系统分区：`src/renderer/components/memory/MemoryStatsCard.tsx`、`src/renderer/components/memory/MemoryCreator.tsx`、`src/renderer/components/memory/MemoryListPanel.tsx`、`src/renderer/components/memory/TriggerManager.tsx`
+- Agent 人格分区：`src/renderer/components/personality/PersonalityEditor.tsx`
+- 用户档案分区：`src/renderer/components/profile/UserProfileEditor.tsx`
+- 设置页浏览器预览假数据：`src/renderer/preview/installSettingsPreviewMocks.ts`
+  如果设置页预览打不开，先看这里是不是缺了 Electron API mock。
+
+### 和设置页改动最相关的检查
+
+- 设置页玻璃壳层与短槽约定：`src/__tests__/settings-liquid-glass-contract.test.ts`
+
 ## 5. 共用样式去哪里找
 
 - 全局 UI 变量和共用壳层：`src/renderer/styles/index.css`
@@ -135,6 +152,14 @@
   先看 `index.css`
 - 改日程左栏：
   先看 `CalendarWorkbenchShell.tsx`
+- 改设置页整体布局、左侧导航、各分区排版：
+  先看 `Settings.tsx`
+- 改设置页输入槽、按钮、只读槽、轻量信息块：
+  先看 `settings-theme.ts`
+- 改设置页某个业务分区的内容：
+  先看对应分区组件，不要回到 `Settings.tsx` 里硬塞业务细节
+- 改设置页预览：
+  先看 `installSettingsPreviewMocks.ts`
 
 ## 7. 当前约定
 
@@ -150,3 +175,7 @@
 - 左栏滑块是否处于展开态，由 `WorkbenchMode.tsx -> IconRail.tsx -> MorphIconRailGroup.tsx` 这条链路传递；不要在别的地方各自猜测。
 - 如果要继续调左栏滑块速度，优先改 `MorphIconRailGroup.tsx` 里的时间常量和派生 transition，不要直接改顶部四模块那套基线。
 - 如果改了滑块却表现不对，再检查 `src/renderer/styles/index.css` 里有没有旧的同名样式残留。
+- 设置页左侧导航不要再加整块底板或卡片底色；选中态优先靠文字颜色、轻量高亮和图标状态表达。
+- 设置页右侧内容区尽量保持干净，除了输入槽、按钮、真正承载状态的信息块外，不要额外堆大面积色块或装饰性卡片。
+- 快捷键、存储、关于这类右侧展示值较短的分区，优先用短槽承载，不要让右侧控件默认拉很宽把文本挤坏。
+- 设置页如果要继续补新分区，优先沿用 `settings-theme.ts` 的共用 token；不要在新分区里重新发明一套输入框、按钮和只读槽样式。

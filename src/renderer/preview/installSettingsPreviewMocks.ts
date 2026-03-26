@@ -1,0 +1,433 @@
+import type { ThemeOption, ThemeSkin } from '../stores/useTheme'
+import type { AIModelConfig } from '../../shared/ai-providers'
+
+type Success<T> = Promise<{ success: true; data: T }>
+type SuccessNoData = Promise<{ success: true }>
+
+interface MockPersonality {
+  id: string
+  agentName: string
+  displayName?: string
+  personalityText: string
+  tone?: string
+  createdAt: number
+  updatedAt: number
+}
+
+interface MockUserProfile {
+  id: string
+  name?: string
+  avatarUrl?: string
+  preferredLanguage: string
+  communicationStyle?: string
+  preferencesJson?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+const now = Date.now()
+
+const mockAIConfig: AIModelConfig = {
+  provider: 'moonshot',
+  baseUrl: 'https://api.moonshot.cn/v1',
+  apiKey: 'sk-kimi-preview-1234567890',
+  model: 'kimi-k2-0905-preview',
+  displayName: 'Kimi 代码主力',
+  agentProtocol: 'openai',
+  wireApi: 'responses',
+  reasoningEffort: 'high',
+  toolUseMode: 'on',
+  visionMode: 'on',
+  nativeVideoMode: 'auto',
+}
+
+const settingsStore = new Map<string, string>([
+  ['ai_saved_configs', JSON.stringify({
+    moonshot: mockAIConfig,
+    openai: {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-preview',
+      model: 'gpt-5',
+      displayName: 'GPT-5',
+      agentProtocol: 'openai',
+      wireApi: 'responses',
+      reasoningEffort: 'high',
+      toolUseMode: 'on',
+      visionMode: 'on',
+      nativeVideoMode: 'auto',
+    },
+    anthropic: {
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com/v1',
+      apiKey: 'sk-ant-preview',
+      model: 'claude-sonnet-4-5',
+      displayName: 'Claude Sonnet',
+      agentProtocol: 'anthropic',
+      reasoningEffort: 'medium',
+      toolUseMode: 'on',
+      visionMode: 'on',
+      nativeVideoMode: 'auto',
+    },
+  })],
+  ['remote_channels_enabled', 'true'],
+  ['sidecar_autostart', 'true'],
+  ['sidecar_bind_host', '127.0.0.1'],
+  ['sidecar_bind_port', '8765'],
+  ['agent_message_coalesce_enabled', 'true'],
+  ['agent_message_coalesce_window_ms', '1200'],
+])
+
+let channelData = [
+  {
+    id: 'channel-feishu-default',
+    type: 'feishu-app',
+    name: '飞书主通道',
+    enabled: true,
+    config: {
+      appId: 'cli_preview_123',
+      appSecret: 'secret_preview_feishu',
+      verificationToken: 'verify_preview',
+      encryptKey: '',
+    },
+    lastSeenAt: new Date(now - 1000 * 60 * 5).toISOString(),
+  },
+  {
+    id: 'channel-telegram-default',
+    type: 'telegram-bot',
+    name: 'Telegram Bot',
+    enabled: true,
+    config: {
+      token: '123456:preview_telegram_token',
+    },
+    lastSeenAt: new Date(now - 1000 * 60 * 12).toISOString(),
+  },
+]
+
+let memoryEntries = Array.from({ length: 7 }).map((_, index) => ({
+  id: `memory-${index + 1}`,
+  scopeId: index % 2 === 0 ? 'conversation:kimi:thread-112' : 'global',
+  contentKey: `note-${index + 1}`,
+  layer: index % 3 === 0 ? 'l2' : index % 2 === 0 ? 'l1' : 'l0',
+  category: index % 3 === 0 ? 'trigger' : index % 2 === 0 ? 'learning' : 'summary',
+  title: [
+    '用户偏好偏简洁回复，但关键结论必须先给',
+    '浏览器任务提交前必须确认页面进入运行态',
+    '创作型文案更喜欢高信息密度的段首',
+    '视频分析默认走字幕抽取再二次总结',
+    '用户对设置页视觉一致性特别敏感',
+    '飞书附件只进资源层，不直接触发 agent',
+    '日历任务更偏向时间轴视图而不是列表视图',
+  ][index],
+  summary: '这是一条用于预览设置页视觉密度的示例记忆，重点观察标签、行高、信息层级与卡片间距。',
+  priority: (index % 5) + 1,
+  accessCount: 5 + index * 3,
+  archivedAt: index === 5 ? now / 1000 - 86400 * 7 : null,
+  lastAccessedAt: now / 1000 - index * 3600 * 6,
+  createdAt: now / 1000 - 86400 * (index + 3),
+  updatedAt: now / 1000 - 3600 * (index + 1),
+  expiresAt: index === 6 ? now / 1000 + 86400 * 45 : null,
+  tags: ['ui', 'settings', index % 2 === 0 ? 'design' : 'workflow'],
+}))
+
+const triggerDefinitions = [
+  {
+    id: 'trigger-1',
+    label: '设置页设计审查',
+    pattern: '设置|视觉|排版|字号',
+    patternFlags: 'i',
+    priority: 90,
+    hitCount: 14,
+    lastHitAt: now / 1000 - 3600 * 8,
+    enabled: true,
+    blocking: true,
+    module: 'design-review',
+  },
+  {
+    id: 'trigger-2',
+    label: '浏览器上传型任务',
+    pattern: '上传|附件|提交',
+    patternFlags: 'i',
+    priority: 78,
+    hitCount: 31,
+    lastHitAt: now / 1000 - 3600 * 24,
+    enabled: true,
+    blocking: false,
+    module: 'browser-agent',
+  },
+  {
+    id: 'trigger-3',
+    label: '远程 IM 运维',
+    pattern: '飞书|Telegram|Channel',
+    patternFlags: 'i',
+    priority: 54,
+    hitCount: 8,
+    lastHitAt: now / 1000 - 3600 * 36,
+    enabled: false,
+    blocking: false,
+    module: 'remote-im',
+  },
+]
+
+let personalities: MockPersonality[] = [
+  {
+    id: 'personality-browser',
+    agentName: 'browser',
+    displayName: 'Browser Planner',
+    personalityText: '先理解任务，再给出计划，执行时只按计划推进，不在中途随意换方向。',
+    tone: 'professional',
+    createdAt: now / 1000 - 86400 * 30,
+    updatedAt: now / 1000 - 3600 * 12,
+  },
+  {
+    id: 'personality-designer',
+    agentName: 'designer',
+    displayName: 'Design Critic',
+    personalityText: '对留白、比例、字重和层级非常敏感，强调系统性和克制，不接受临时拼贴感。',
+    tone: 'technical',
+    createdAt: now / 1000 - 86400 * 12,
+    updatedAt: now / 1000 - 3600 * 4,
+  },
+]
+
+let userProfiles: MockUserProfile[] = [
+  {
+    id: 'default-user',
+    name: 'Maijiahui',
+    avatarUrl: '',
+    preferredLanguage: 'zh',
+    communicationStyle: 'detailed',
+    createdAt: now / 1000 - 86400 * 120,
+    updatedAt: now / 1000 - 3600 * 8,
+  },
+  {
+    id: 'creator-mode',
+    name: '内容创作模式',
+    avatarUrl: '',
+    preferredLanguage: 'zh',
+    communicationStyle: 'friendly',
+    createdAt: now / 1000 - 86400 * 30,
+    updatedAt: now / 1000 - 3600 * 3,
+  },
+]
+
+function success<T>(data: T): Success<T> {
+  return Promise.resolve({ success: true, data })
+}
+
+function successNoData(): SuccessNoData {
+  return Promise.resolve({ success: true })
+}
+
+function applyPreviewTheme(previewUrl: URL): void {
+  const theme = (previewUrl.searchParams.get('theme') || 'light') as ThemeOption
+  const skin = (previewUrl.searchParams.get('skin') || 'liquid-glass') as ThemeSkin
+  localStorage.setItem('ready-theme', theme)
+  localStorage.setItem('ready-theme-skin', skin)
+}
+
+export function installSettingsPreviewMocks(): void {
+  const previewUrl = new URL(window.location.href)
+  applyPreviewTheme(previewUrl)
+  const option = (localStorage.getItem('ready-theme') || 'light') as ThemeOption
+  const resolved = option === 'system' ? 'light' : option
+
+  const api = {
+    theme: {
+      get: async () => ({
+        success: true,
+        data: {
+          option,
+          resolved,
+        },
+      }),
+      set: async () => undefined,
+    },
+    app: {
+      onShortcut: () => () => undefined,
+    },
+    settings: {
+      get: async (key: string) => ({ success: true, data: settingsStore.get(key) ?? null }),
+      set: async (key: string, value: string) => {
+        settingsStore.set(key, value)
+        return { success: true }
+      },
+      getAll: async () => ({ success: true, data: Object.fromEntries(settingsStore.entries()) }),
+      getAIConfig: async () => ({ success: true, data: mockAIConfig }),
+      setAIConfig: async (config: AIModelConfig) => {
+        settingsStore.set('ai_model_config', JSON.stringify(config))
+        return { success: true }
+      },
+      testAIConnection: async () => ({
+        success: true,
+        data: {
+          latencyMs: 142,
+          modelList: ['kimi-k2-0905-preview', 'kimi-thinking-preview'],
+        },
+      }),
+    },
+    agent: {
+      onStream: () => () => undefined,
+      onStatusChange: () => () => undefined,
+      onError: () => () => undefined,
+      onToolAction: () => () => undefined,
+      onToolActionRequest: () => () => undefined,
+      onScopeRunEvent: () => () => undefined,
+      onConversationEvent: () => () => undefined,
+      completeToolActionRequest: async () => undefined,
+      listChannels: async () => ({ success: true, data: channelData }),
+      getRuntimeStatus: async () => ({
+        success: true,
+        data: {
+          sidecar: {
+            status: 'running',
+            port: 8765,
+          },
+          channels: {
+            total: channelData.length,
+          },
+          schedules: {
+            total: 6,
+          },
+          heartbeat: {
+            orchestrator: {
+              activeTasks: 2,
+            },
+            adapters: channelData.map((channel, index) => ({
+              id: channel.id,
+              type: channel.type,
+              status: channel.enabled ? 'running' : 'stopped',
+              healthy: channel.enabled,
+              lastBeatAt: new Date(now - index * 1000 * 60 * 8).toISOString(),
+            })),
+          },
+        },
+      }),
+      getRemoteAttachmentCacheStats: async () => ({
+        success: true,
+        data: {
+          totalFiles: 27,
+          totalBytes: 1024 * 1024 * 184,
+          targetPath: '/tmp/ready-remote-cache',
+          channels: [
+            { channelId: 'channel-feishu-default', files: 16, bytes: 1024 * 1024 * 124 },
+            { channelId: 'channel-telegram-default', files: 11, bytes: 1024 * 1024 * 60 },
+          ],
+        },
+      }),
+      testChannel: async () => ({ success: true, data: { ok: true } }),
+      upsertChannel: async (payload: typeof channelData[number]) => {
+        const existing = channelData.findIndex((item) => item.id === payload.id)
+        if (existing >= 0) {
+          channelData[existing] = payload
+        } else {
+          channelData = [...channelData, payload]
+        }
+        return { success: true }
+      },
+      setChannelEnabled: async (id: string, enabled: boolean) => {
+        channelData = channelData.map((channel) => channel.id === id ? { ...channel, enabled } : channel)
+        return { success: true }
+      },
+      deleteChannel: async (id: string) => {
+        channelData = channelData.filter((channel) => channel.id !== id)
+        return { success: true }
+      },
+      sendChannelProbe: async () => ({ success: true }),
+      clearRemoteAttachmentCache: async () => ({ success: true }),
+    },
+    memory: {
+      query: async () => ({ success: true, data: memoryEntries }),
+      create: async (entry: Record<string, unknown>) => {
+        const next = { ...entry, id: `memory-${memoryEntries.length + 1}` }
+        memoryEntries = [next as typeof memoryEntries[number], ...memoryEntries]
+        return { success: true, data: next }
+      },
+      update: async (id: string, updates: Record<string, unknown>) => {
+        memoryEntries = memoryEntries.map((item) => item.id === id ? { ...item, ...updates } : item)
+        return { success: true }
+      },
+      delete: async (id: string) => {
+        memoryEntries = memoryEntries.filter((item) => item.id !== id)
+        return { success: true }
+      },
+      stats: async () => ({
+        success: true,
+        data: {
+          totalMemories: 182,
+          byLayer: { l0: 56, l1: 84, l2: 42 },
+          byCategory: { summary: 67, learning: 51, trigger: 39, rule: 25 },
+          archivedCount: 18,
+          avgAccessCount: 7.6,
+        },
+      }),
+      createFromConversation: async () => ({
+        success: true,
+        data: { memoryId: `memory-${memoryEntries.length + 1}` },
+      }),
+    },
+    trigger: {
+      list: async () => ({ success: true, data: triggerDefinitions }),
+      create: async (trigger: Record<string, unknown>) => success(trigger),
+      update: async (id: string, updates: Record<string, unknown>) => {
+        const index = triggerDefinitions.findIndex((trigger) => trigger.id === id)
+        if (index >= 0) {
+          triggerDefinitions[index] = { ...triggerDefinitions[index], ...updates }
+        }
+        return { success: true }
+      },
+    },
+    memoryLifecycle: {
+      status: async () => ({
+        success: true,
+        data: {
+          running: true,
+          lastMaintenanceAt: new Date(now - 1000 * 60 * 38).toISOString(),
+        },
+      }),
+      runMaintenance: async () => ({
+        success: true,
+        data: {
+          archivedCount: 4,
+          prunedCount: 2,
+        },
+      }),
+    },
+    agentPersonality: {
+      list: async () => ({ success: true, data: personalities }),
+      get: async (agentName: string) => ({ success: true, data: personalities.find((item) => item.agentName === agentName) || null }),
+      create: async (payload: Omit<MockPersonality, 'id' | 'createdAt' | 'updatedAt'>) => {
+        personalities = [
+          ...personalities,
+          { ...payload, id: `personality-${payload.agentName}`, createdAt: now / 1000, updatedAt: now / 1000 },
+        ]
+        return { success: true }
+      },
+      update: async (agentName: string, payload: Partial<MockPersonality>) => {
+        personalities = personalities.map((item) => item.agentName === agentName ? { ...item, ...payload, updatedAt: now / 1000 } : item)
+        return { success: true }
+      },
+      delete: async (agentName: string) => {
+        personalities = personalities.filter((item) => item.agentName !== agentName)
+        return { success: true }
+      },
+    },
+    userProfile: {
+      list: async () => ({ success: true, data: userProfiles }),
+      get: async (id: string) => ({ success: true, data: userProfiles.find((item) => item.id === id) || null }),
+      update: async (id: string, payload: Partial<MockUserProfile>) => {
+        userProfiles = userProfiles.map((item) => item.id === id ? { ...item, ...payload, updatedAt: now / 1000 } : item)
+        return { success: true }
+      },
+      delete: async (id: string) => {
+        userProfiles = userProfiles.filter((item) => item.id !== id)
+        return { success: true }
+      },
+    },
+  }
+
+  window.alert = () => undefined
+  window.confirm = () => true
+  window.prompt = (_message?: string, defaultValue = '') => defaultValue || 'preview-item'
+  Object.assign(window, { electronAPI: api })
+}
