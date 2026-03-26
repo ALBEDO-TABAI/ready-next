@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import {
-  ChevronRight, ChevronDown, ArrowLeft, Minus, Plus,
+  ChevronRight, ChevronDown, Minus, Plus,
   FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2,
   FilePlus2, FolderPlus, Copy, RefreshCw, Trash2,
 } from 'lucide-react'
@@ -52,6 +52,8 @@ interface FileTreeProps {
   filters?: FileFilterMap
   viewMode?: FileViewMode
   thumbnailSize?: number
+  gridPath?: string | null
+  onGridPathChange?: (path: string | null) => void
   onThumbnailSizeChange?: (size: number) => void
   onResultCountChange?: (count: number) => void
 }
@@ -581,6 +583,8 @@ export default function FileTree({
   filters = DEFAULT_FILE_FILTERS,
   viewMode = 'tree',
   thumbnailSize = 132,
+  gridPath,
+  onGridPathChange,
   onThumbnailSizeChange,
   onResultCountChange,
 }: FileTreeProps) {
@@ -618,8 +622,10 @@ export default function FileTree({
   } | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
-  const [gridPath, setGridPath] = useState<string | null>(null)
+  const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
   const queryLower = query.trim().toLowerCase()
+  const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
+  const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
 
   const filteredCurrentItems = useMemo(() => {
     return files
@@ -959,8 +965,8 @@ export default function FileTree({
   // Collect items for grid view based on gridPath navigation
   const gridItems = useMemo(() => {
     // If user has navigated into a subdirectory via grid
-    if (gridPath) {
-      const children = dirChildren.get(gridPath) || []
+    if (effectiveGridPath) {
+      const children = dirChildren.get(effectiveGridPath) || []
       return children
         .filter(isFileAllowed)
         .filter((item) => passesFilter(item, filters))
@@ -978,39 +984,21 @@ export default function FileTree({
       return result.length > 0 ? result : filteredCurrentItems
     }
     return filteredCurrentItems
-  }, [gridPath, pinnedFolders, filteredCurrentItems, filters, queryLower, dirChildren])
-
-  // Compute grid back path
-  const gridParentPath = useMemo(() => {
-    if (!gridPath) return null
-    // Check if gridPath is a pinned root
-    if (pinnedFolders.includes(gridPath)) return '' // back to root
-    const idx = gridPath.lastIndexOf('/')
-    if (idx <= 0) return ''
-    return gridPath.slice(0, idx)
-  }, [gridPath, pinnedFolders])
+  }, [effectiveGridPath, pinnedFolders, filteredCurrentItems, filters, queryLower, dirChildren])
 
   const gridNavigateInto = useCallback(async (dirPath: string) => {
     // Ensure children are loaded
     if (!dirChildren.has(dirPath)) {
       await loadDirChildren(dirPath)
     }
-    setGridPath(dirPath)
-  }, [dirChildren, loadDirChildren])
-
-  const gridNavigateBack = useCallback(() => {
-    if (gridParentPath === '') {
-      setGridPath(null) // back to root
-    } else if (gridParentPath) {
-      setGridPath(gridParentPath)
-    }
-  }, [gridParentPath])
+    setEffectiveGridPath(dirPath)
+  }, [dirChildren, loadDirChildren, setEffectiveGridPath])
 
   const gridDisplayPath = useMemo(() => {
-    if (!gridPath) return null
-    return gridPath.split('/').pop() || gridPath
-  }, [gridPath])
-  const gridContainerPath = gridPath ?? currentPath
+    if (!effectiveGridPath) return null
+    return effectiveGridPath.split('/').pop() || effectiveGridPath
+  }, [effectiveGridPath])
+  const gridContainerPath = effectiveGridPath ?? currentPath
 
   const renderGridContent = () => {
     if (gridItems.length === 0 && !creatingType) {
@@ -1026,25 +1014,8 @@ export default function FileTree({
       <>
         {/* Grid navigation bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, minHeight: 24 }}>
-          {gridPath !== null && (
-            <button
-              onClick={gridNavigateBack}
-              title="返回上一级"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 22, height: 22, borderRadius: 6,
-                border: '1px solid var(--border-default)',
-                background: 'var(--bg-primary)',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-            >
-              <ArrowLeft style={{ width: 13, height: 13 }} />
-            </button>
-          )}
           {gridDisplayPath && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={gridPath || ''}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={effectiveGridPath || ''}>
               {gridDisplayPath}
             </span>
           )}

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
+import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import GlobalSearchPanel from './GlobalSearchPanel'
 import SkillsCenterPanel from './SkillsCenterPanel'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
@@ -27,6 +28,15 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [thumbnailSize, setThumbnailSize] = useState(132)
+  const [gridNavigation, setGridNavigation] = useState<{
+    path: GridNavigationEntry
+    history: GridNavigationEntry[]
+    index: number
+  }>({
+    path: null,
+    history: [null],
+    index: 0,
+  })
   const filterMenuRef = useRef<HTMLDivElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -172,6 +182,52 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
     }
     wasAutoRefreshActiveRef.current = isAutoRefreshActive
   }, [handleConnectedRefresh, isConnected, isVisible, variant])
+
+  useEffect(() => {
+    setGridNavigation({
+      path: null,
+      history: [null],
+      index: 0,
+    })
+  }, [workspaceRoot])
+
+  const handleGridPathChange = useCallback((nextPath: GridNavigationEntry) => {
+    setGridNavigation((prev) => {
+      const nextHistory = computeNextGridHistory(prev.history, prev.index, nextPath)
+      return {
+        path: nextHistory.entries[nextHistory.index] ?? null,
+        history: nextHistory.entries,
+        index: nextHistory.index,
+      }
+    })
+  }, [])
+
+  const handleGridNavigateBack = useCallback(() => {
+    setGridNavigation((prev) => {
+      if (prev.index <= 0) return prev
+      const nextIndex = prev.index - 1
+      return {
+        ...prev,
+        index: nextIndex,
+        path: prev.history[nextIndex] ?? null,
+      }
+    })
+  }, [])
+
+  const handleGridNavigateForward = useCallback(() => {
+    setGridNavigation((prev) => {
+      if (prev.index >= prev.history.length - 1) return prev
+      const nextIndex = prev.index + 1
+      return {
+        ...prev,
+        index: nextIndex,
+        path: prev.history[nextIndex] ?? null,
+      }
+    })
+  }, [])
+
+  const canGridNavigateBack = viewMode === 'grid' && gridNavigation.index > 0
+  const canGridNavigateForward = viewMode === 'grid' && gridNavigation.index < gridNavigation.history.length - 1
 
   return (
     <div
@@ -414,28 +470,70 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
               padding: `${FILES_PANEL_DIMENSIONS.searchPaddingY}px ${FILES_PANEL_DIMENSIONS.searchPaddingX}px`,
             }}
           >
-            <label
-              className="content-surface-card flex items-center gap-[6px] border"
-              style={{
-                height: FILES_PANEL_DIMENSIONS.searchHeight,
-                borderRadius: FILES_PANEL_DIMENSIONS.searchRadius,
-                padding: '6px 10px',
-                borderColor: PANEL_TOKENS.inputBorder,
-                background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
-                backdropFilter: 'blur(14px) saturate(132%)',
-                WebkitBackdropFilter: 'blur(14px) saturate(132%)',
-              }}
-            >
-              <Search className="h-[13px] w-[13px]" style={{ color: PANEL_TOKENS.sectionTitle }} />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索文件..."
-                className="h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-placeholder)]"
-                style={{ color: PANEL_TOKENS.text }}
-              />
-            </label>
+            <div className="flex items-center gap-[6px]">
+              {viewMode === 'grid' && (
+                <div className="flex items-center gap-[4px] shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleGridNavigateBack}
+                    disabled={!canGridNavigateBack}
+                    title="后退"
+                    aria-label="后退"
+                    className="flex items-center justify-center rounded-[8px] border text-[12px] font-semibold transition-colors duration-100"
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderColor: 'var(--input-slot-border)',
+                      background: canGridNavigateBack ? 'var(--input-slot-bg)' : 'var(--bg-hover)',
+                      color: canGridNavigateBack ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
+                      opacity: canGridNavigateBack ? 1 : 0.45,
+                      cursor: canGridNavigateBack ? 'pointer' : 'default',
+                    }}
+                  >
+                    {'<'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGridNavigateForward}
+                    disabled={!canGridNavigateForward}
+                    title="前进"
+                    aria-label="前进"
+                    className="flex items-center justify-center rounded-[8px] border text-[12px] font-semibold transition-colors duration-100"
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderColor: 'var(--input-slot-border)',
+                      background: canGridNavigateForward ? 'var(--input-slot-bg)' : 'var(--bg-hover)',
+                      color: canGridNavigateForward ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
+                      opacity: canGridNavigateForward ? 1 : 0.45,
+                      cursor: canGridNavigateForward ? 'pointer' : 'default',
+                    }}
+                  >
+                    {'>'}
+                  </button>
+                </div>
+              )}
+              <label
+                className="ready-input-shell flex items-center gap-[6px] border min-w-0 flex-1"
+                style={{
+                  height: FILES_PANEL_DIMENSIONS.searchHeight,
+                  borderRadius: FILES_PANEL_DIMENSIONS.searchRadius,
+                  padding: '6px 10px',
+                  background: 'var(--input-slot-bg)',
+                  borderColor: 'var(--input-slot-border)',
+                }}
+              >
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="搜索文件..."
+                  className="ready-input-slot-inner h-full w-full bg-transparent border-none outline-none text-[13px] font-medium placeholder:text-[var(--text-placeholder)]"
+                  style={{ color: PANEL_TOKENS.text }}
+                />
+                <Search className="h-[13px] w-[13px] shrink-0" style={{ color: PANEL_TOKENS.sectionTitle }} />
+              </label>
+            </div>
           </div>
 
           {/* File tree / grid */}
@@ -444,6 +542,8 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
             filters={filters}
             viewMode={viewMode}
             thumbnailSize={thumbnailSize}
+            gridPath={gridNavigation.path}
+            onGridPathChange={handleGridPathChange}
             onThumbnailSizeChange={setThumbnailSize}
           />
         </>
