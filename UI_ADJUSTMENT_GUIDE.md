@@ -72,6 +72,19 @@
 
 ## 4. 四个主模式分别去哪改
 
+### Agent 聊天
+
+- 聊天面板总入口：`src/renderer/components/agent/ChatPanel.tsx`
+  这里负责会话来源筛选、历史会话加载、输入区、附件区、消息区的整体拼装。
+- 聊天头部：`src/renderer/components/agent/ChatHeader.tsx`
+  左侧现在是紧凑的会话窗口切换按钮；右侧的历史会话按钮保持独立，不要再把两者合并成一个入口。
+- 聊天头部下拉卡片外观：`src/renderer/components/agent/chatHeaderMenuStyles.ts`
+  这里继续复用聊天头部 / 文件面板同一套磨砂浮层参数。
+- 浮层通用玻璃质感：`src/renderer/components/ui/floatingMenuStyles.ts`
+  如果要改聊天头部下拉卡片的毛玻璃、圆角、阴影和层级，先看这里。
+- 聊天消息列表：`src/renderer/components/agent/ChatMessages.tsx`
+  用户消息仍在右侧，但正文现在固定左对齐；用户与 agent 消息之间的细淡白色分隔线也在这里。
+
 ### 浏览器
 
 - 页面入口：`src/renderer/pages/modes/BrowserMode.tsx`
@@ -115,6 +128,12 @@
 
 - 设置页玻璃壳层与短槽约定：`src/__tests__/settings-liquid-glass-contract.test.ts`
 
+### 和聊天头部 / 消息区改动最相关的检查
+
+- 聊天头部“窗口切换按钮”和“历史按钮”分工约定：`src/__tests__/chat-session-switcher-contract.test.ts`
+- 聊天头部浮层磨砂样式约定：`src/__tests__/chat-header-menu-style-contract.test.ts`
+- 用户消息左对齐与消息分隔线约定：`src/__tests__/chat-user-message-alignment-contract.test.ts`
+
 ## 5. 共用样式去哪里找
 
 - 全局 UI 变量和共用壳层：`src/renderer/styles/index.css`
@@ -135,6 +154,16 @@
   先看 `FilesPanel.tsx`
 - 改文件面板顶部下拉菜单位置、显隐、完整显示问题：
   先看 `FilesPanel.tsx`，再看 `floatingMenuStyles.ts` 和 `filesPanelFloatingMenu.css`
+- 改聊天头部左侧会话窗口切换按钮：
+  先看 `ChatHeader.tsx`
+- 改聊天头部右侧历史会话菜单：
+  先看 `ChatHeader.tsx`
+- 改聊天头部下拉卡片的玻璃感、边框、阴影、层级：
+  先看 `chatHeaderMenuStyles.ts`，再看 `floatingMenuStyles.ts`
+- 改用户消息在右侧区域里的文字对齐方式：
+  先看 `ChatMessages.tsx`
+- 改消息之间那条很淡的分隔线：
+  先看 `ChatMessages.tsx`
 - 改文件树、缩略图网格、拖拽、右键菜单：
   先看 `FileTree.tsx`
 - 改文件夹卡片里那块小缩略图区域：
@@ -167,6 +196,10 @@
 - 文件面板的真实入口固定在 `FilesPanel.tsx`。
 - `FilesPanel.tsx`、`GlobalSearchPanel.tsx`、`SkillsCenterPanel.tsx` 现在都要继续保持“标题槽 / 主体槽”输出能力，别再改回每个面板自己整块硬切。
 - 文件面板顶部的瞬时菜单不要再直接留在左侧栏布局层里；左侧栏壳层带 `overflow-hidden`，菜单一旦超出边界就会被裁掉。现在这类菜单应继续保持为顶层弹层，由 `FilesPanel.tsx` 负责位置计算。
+- 聊天头部左侧小按钮只负责“当前会话窗口 / 来源”的切换；右侧 `历史对话` 按钮继续单独负责历史会话浏览与切换，不要再合并成一个入口。
+- 聊天头部这两个弹层都应继续复用 `ready-floating-menu / chat-header-floating-menu` 这套磨砂浮层样式和较高层级，避免被聊天区正文盖住。
+- 用户消息虽然仍然待在右侧，但正文文本固定左对齐，不要再改回右对齐。
+- 用户与 agent 的普通消息之间现在用很淡的白色细线拉开层次；如果继续调整间距，优先在 `ChatMessages.tsx` 里微调，不要把分隔感重新塞回消息气泡内边距。
 - 文件夹缩略图的画法固定拆在 `FolderPreview.tsx`，不要再把这块样式塞回 `FileTree.tsx`。
 - 文件夹缩略图“看什么内容、怎么退化”的规则固定拆在 `folderPreviewModel.ts`。
 - 日程左栏的真实入口固定在 `CalendarWorkbenchShell.tsx`。

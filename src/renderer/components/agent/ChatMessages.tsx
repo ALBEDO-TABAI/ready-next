@@ -260,160 +260,177 @@ export default function ChatMessages({
       )}
 
       {/* Messages */}
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}
-        >
-          {msg.type === 'user' ? (
-            <div
-              className="max-w-[85%] text-[13px] leading-relaxed"
-              style={{
-                color: 'var(--text-body)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                gap: 6,
-              }}
-            >
-              {msg.attachments && msg.attachments.length > 0 && (
-                <div className="flex flex-wrap justify-end gap-1.5">
-                  {msg.attachments.map((att) => (
-                    <button
-                      key={att.id}
-                      type="button"
-                      onClick={() => {
-                        if (att.source === 'document-quote') {
-                          onRevealDocumentQuote(att)
-                          return
-                        }
-                        void onAttachmentPreview(att)
-                      }}
-                      className="flex items-center gap-1.5 rounded-md text-left transition-all duration-150 hover:border-[var(--color-blue)]"
-                      style={{
-                        padding: '5px 8px',
-                        background: att.source === 'document-quote'
-                          ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
-                          : 'var(--surface-card-bg)',
-                        border: '1px solid var(--border-default)',
-                        fontSize: 11,
-                        color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-gray)',
-                        maxWidth: att.source === 'document-quote' ? 220 : 180,
-                        cursor: 'pointer',
-                      }}
-                      title={att.source === 'document-quote' ? getDocumentQuoteTooltip(att) : att.name}
-                    >
-                      {getAttachmentPreviewSrc(att) ? (
-                        <img
-                          src={getAttachmentPreviewSrc(att)!}
-                          alt={att.name}
-                          style={{
-                            width: 24,
-                            height: 24,
-                            objectFit: 'cover',
-                            borderRadius: 6,
-                            border: '1px solid var(--border-default)',
-                            flexShrink: 0,
+      {messages.map((msg, index) => {
+        const showMessageDivider = index < messages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
+
+        return (
+          <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
+            <div className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
+              {msg.type === 'user' ? (
+                <div
+                  className="max-w-[85%] text-[13px] leading-relaxed"
+                  style={{
+                    color: 'var(--text-body)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end',
+                    gap: 6,
+                  }}
+                >
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      {msg.attachments.map((att) => (
+                        <button
+                          key={att.id}
+                          type="button"
+                          onClick={() => {
+                            if (att.source === 'document-quote') {
+                              onRevealDocumentQuote(att)
+                              return
+                            }
+                            void onAttachmentPreview(att)
                           }}
-                        />
-                      ) : (
-                        renderAttachmentIcon(att, 12)
-                      )}
-                      <span
-                        style={{
-                          minWidth: 0,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          gap: 2,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <span className="truncate" style={{ maxWidth: '100%' }}>{att.name}</span>
-                        {getAttachmentMetaSummary(att) ? (
+                          className="flex items-center gap-1.5 rounded-md text-left transition-all duration-150 hover:border-[var(--color-blue)]"
+                          style={{
+                            padding: '5px 8px',
+                            background: att.source === 'document-quote'
+                              ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
+                              : 'var(--surface-card-bg)',
+                            border: '1px solid var(--border-default)',
+                            fontSize: 11,
+                            color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-gray)',
+                            maxWidth: att.source === 'document-quote' ? 220 : 180,
+                            cursor: 'pointer',
+                          }}
+                          title={att.source === 'document-quote' ? getDocumentQuoteTooltip(att) : att.name}
+                        >
+                          {getAttachmentPreviewSrc(att) ? (
+                            <img
+                              src={getAttachmentPreviewSrc(att)!}
+                              alt={att.name}
+                              style={{
+                                width: 24,
+                                height: 24,
+                                objectFit: 'cover',
+                                borderRadius: 6,
+                                border: '1px solid var(--border-default)',
+                                flexShrink: 0,
+                              }}
+                            />
+                          ) : (
+                            renderAttachmentIcon(att, 12)
+                          )}
                           <span
                             style={{
-                              fontSize: 10,
-                              lineHeight: 1.1,
-                              padding: '2px 6px',
-                              borderRadius: 999,
-                              background: att.source === 'document-quote'
-                                ? 'rgba(255,255,255,0.68)'
-                                : 'rgba(0,0,0,0.04)',
-                              color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
-                              maxWidth: '100%',
+                              minWidth: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: 2,
                               overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
                             }}
                           >
-                            {getAttachmentMetaSummary(att)}
+                            <span className="truncate" style={{ maxWidth: '100%' }}>{att.name}</span>
+                            {getAttachmentMetaSummary(att) ? (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  lineHeight: 1.1,
+                                  padding: '2px 6px',
+                                  borderRadius: 999,
+                                  background: att.source === 'document-quote'
+                                    ? 'rgba(255,255,255,0.68)'
+                                    : 'rgba(0,0,0,0.04)',
+                                  color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
+                                  maxWidth: '100%',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {getAttachmentMetaSummary(att)}
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {msg.content && <div style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}>{msg.content}</div>}
+                </div>
+              ) : msg.type === 'system' ? (
+                <div
+                  className="text-[12px] leading-relaxed"
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: 'color-mix(in srgb, var(--color-red) 10%, transparent)',
+                    color: 'var(--color-red)',
+                  }}
+                >
+                  {msg.content}
+                </div>
+              ) : (
+                <div
+                  className="group/agentmsg relative max-w-[90%] text-[13px] leading-relaxed"
+                  style={{ color: 'var(--text-body)', paddingRight: 18 }}
+                >
+                  <div style={{ fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+                    {renderMarkdown(msg.content)}
+                  </div>
+                  {!!msg.content?.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => { void onCopyMessage(msg.id, msg.content) }}
+                      className={`absolute transition-all duration-160 ease-out ${
+                        copiedMessageId === msg.id
+                          ? 'opacity-100 pointer-events-auto'
+                          : 'opacity-0 pointer-events-none group-hover/agentmsg:opacity-100 group-hover/agentmsg:pointer-events-auto'
+                      }`}
+                      style={{
+                        right: 0,
+                        bottom: -2,
+                        width: 18,
+                        height: 18,
+                        borderRadius: 9,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid var(--border-default)',
+                        color: copiedMessageId === msg.id ? 'var(--color-green)' : 'var(--text-light)',
+                        background: copiedMessageId === msg.id
+                          ? 'color-mix(in srgb, var(--color-green) 10%, transparent)'
+                          : 'var(--surface-card-bg)',
+                      }}
+                      title={copiedMessageId === msg.id ? '已复制' : '复制回复'}
+                    >
+                      {copiedMessageId === msg.id ? (
+                        <Check style={{ width: 12, height: 12 }} strokeWidth={2} />
+                      ) : (
+                        <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
+                      )}
                     </button>
-                  ))}
+                  )}
                 </div>
               )}
-              {msg.content && <div style={{ whiteSpace: 'pre-wrap', textAlign: 'right' }}>{msg.content}</div>}
             </div>
-          ) : msg.type === 'system' ? (
-            <div
-              className="text-[12px] leading-relaxed"
-              style={{
-                padding: '6px 10px',
-                borderRadius: 8,
-                background: 'color-mix(in srgb, var(--color-red) 10%, transparent)',
-                color: 'var(--color-red)',
-              }}
-            >
-              {msg.content}
-            </div>
-          ) : (
-            <div
-              className="group/agentmsg relative max-w-[90%] text-[13px] leading-relaxed"
-              style={{ color: 'var(--text-body)', paddingRight: 18 }}
-            >
-              <div style={{ fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                {renderMarkdown(msg.content)}
-              </div>
-              {!!msg.content?.trim() && (
-                <button
-                  type="button"
-                  onClick={() => { void onCopyMessage(msg.id, msg.content) }}
-                  className={`absolute transition-all duration-160 ease-out ${
-                    copiedMessageId === msg.id
-                      ? 'opacity-100 pointer-events-auto'
-                      : 'opacity-0 pointer-events-none group-hover/agentmsg:opacity-100 group-hover/agentmsg:pointer-events-auto'
-                  }`}
-                  style={{
-                    right: 0,
-                    bottom: -2,
-                    width: 18,
-                    height: 18,
-                    borderRadius: 9,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px solid var(--border-default)',
-                    color: copiedMessageId === msg.id ? 'var(--color-green)' : 'var(--text-light)',
-                    background: copiedMessageId === msg.id
-                      ? 'color-mix(in srgb, var(--color-green) 10%, transparent)'
-                      : 'var(--surface-card-bg)',
-                  }}
-                  title={copiedMessageId === msg.id ? '已复制' : '复制回复'}
-                >
-                  {copiedMessageId === msg.id ? (
-                    <Check style={{ width: 12, height: 12 }} strokeWidth={2} />
-                  ) : (
-                    <Copy style={{ width: 12, height: 12 }} strokeWidth={2} />
-                  )}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
+
+            {showMessageDivider ? (
+              <div
+                data-chat-message-divider="true"
+                aria-hidden="true"
+                style={{
+                  height: 1,
+                  margin: '0 12px',
+                  borderRadius: 999,
+                  background: 'color-mix(in srgb, rgba(255,255,255,0.46) 42%, transparent)',
+                  opacity: 0.72,
+                }}
+              />
+            ) : null}
+          </div>
+        )
+      })}
 
       {isStreaming && (() => {
         const streamMsg = messages.find((m) => m.id === streamingMessageId)

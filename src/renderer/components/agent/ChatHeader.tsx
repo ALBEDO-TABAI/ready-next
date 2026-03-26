@@ -48,7 +48,6 @@ export default function ChatHeader({
   const scopeRef = useRef<HTMLDivElement>(null)
   const historyRef = useRef<HTMLDivElement>(null)
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (scopeRef.current && !scopeRef.current.contains(e.target as Node)) {
@@ -63,7 +62,7 @@ export default function ChatHeader({
   }, [])
 
   const handleHistoryToggle = useCallback(() => {
-    setShowHistory(prev => !prev)
+    setShowHistory((prev) => !prev)
   }, [])
 
   const channelMenuStyle = {
@@ -97,17 +96,32 @@ export default function ChatHeader({
         boxShadow: 'none',
       }}
     >
-      {/* Left: Channel Selector */}
-      <div className="relative" ref={scopeRef}>
+      <div className="relative" ref={scopeRef} data-chat-session-switcher="true">
         <button
           onClick={() => {
             setShowScopeSelect((value) => !value)
             setShowHistory(false)
           }}
           className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
-          style={{ gap: 6, padding: '6px 10px 6px 2px', borderRadius: 10, border: '1px solid transparent', background: 'transparent', maxWidth: 200 }}
+          style={{
+            gap: 6,
+            padding: '6px 10px 6px 2px',
+            borderRadius: 10,
+            border: '1px solid transparent',
+            background: 'transparent',
+            maxWidth: 200,
+          }}
         >
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-title)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: 'var(--text-title)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {currentChannel.label}
           </span>
           <ChevronDown
@@ -124,7 +138,7 @@ export default function ChatHeader({
 
         {showScopeSelect && (
           <div
-            className="glass-surface-floating chat-header-floating-menu"
+            className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
             style={channelMenuStyle}
           >
             <div style={CHAT_HEADER_MENU_SECTION_LABEL_STYLE}>会话来源</div>
@@ -139,16 +153,23 @@ export default function ChatHeader({
                       onChannelSelect(channel)
                       setShowScopeSelect(false)
                     }}
-                    className={`chat-header-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 ${currentChannel.key === channel.key ? 'is-selected' : ''}`}
+                    className={`chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 ${currentChannel.key === channel.key ? 'is-selected' : ''}`}
                     style={buildChatHeaderMenuItemStyle({ selected: currentChannel.key === channel.key })}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: 'var(--text-body)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {channel.label}
                       </div>
-                      <div style={CHAT_HEADER_MENU_META_STYLE}>
-                        {channel.caption}
-                      </div>
+                      <div style={CHAT_HEADER_MENU_META_STYLE}>{channel.caption}</div>
                     </div>
                     {currentChannel.key === channel.key && (
                       <span
@@ -169,8 +190,7 @@ export default function ChatHeader({
         )}
       </div>
 
-      {/* Right: History + New Session */}
-      <div className="flex items-center" style={{ gap: 4 }}>
+      <div className="flex items-center" style={{ gap: 4 }} data-chat-session-menu="true">
         <IconButton
           icon={<PanelRightClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
           onClick={onTogglePanel}
@@ -189,11 +209,10 @@ export default function ChatHeader({
           active={showHistory}
         />
 
-        {/* History Dropdown */}
         {showHistory && (
           <div
             ref={historyRef}
-            className="glass-surface-floating chat-header-floating-menu"
+            className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
             style={historyMenuStyle}
           >
             <div style={CHAT_HEADER_MENU_SECTION_LABEL_STYLE}>{currentChannel.label}历史</div>
@@ -203,10 +222,10 @@ export default function ChatHeader({
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: 4 }}>
-                {filteredScopes.map(conv => (
+                {filteredScopes.map((conv) => (
                   <div
                     key={conv.id}
-                    className="chat-header-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 group"
+                    className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 group"
                     style={{ ...buildChatHeaderMenuItemStyle(), display: 'flex', alignItems: 'center', gap: 12 }}
                   >
                     <button
@@ -225,10 +244,16 @@ export default function ChatHeader({
                         textAlign: 'left',
                       }}
                     >
-                      <div style={{
-                        fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                      }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: 'var(--text-body)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {conv.title || '新对话'}
                       </div>
                       <div style={{ ...CHAT_HEADER_MENU_META_STYLE, display: 'flex', gap: 6 }}>
