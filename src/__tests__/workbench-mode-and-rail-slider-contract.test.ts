@@ -24,6 +24,8 @@ test('workbench mode switch and icon rail share the blue slider treatment', () =
 
   assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?flex-direction:\s*column/)
   assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?border-radius:\s*18px/)
+  assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?width:\s*100%/)
+  assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?justify-content:\s*flex-end/)
   assert.match(styles, /\.icon-rail-slider__thumb\s*\{[\s\S]*?height:\s*34px/)
   assert.match(styles, /\.icon-rail-slider__button\s*\{[\s\S]*?z-index:\s*3/)
 })
