@@ -8,6 +8,8 @@ import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
+import { FolderPreview } from './FolderPreview'
+import { describeFolderPreview } from './folderPreviewModel'
 
 const ALLOWED_EXTENSIONS = new Set([
   'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt',
@@ -397,6 +399,8 @@ function GridItemCard({
   isActive,
   isDropTarget,
   thumbnailSize,
+  folderChildren,
+  folderChildrenLoaded,
   dragMovable,
   onOpen,
   onDoubleClick,
@@ -409,6 +413,8 @@ function GridItemCard({
   isActive: boolean
   isDropTarget: boolean
   thumbnailSize: number
+  folderChildren?: FileItem[]
+  folderChildrenLoaded?: boolean
   dragMovable?: boolean
   onOpen: () => void
   onDoubleClick?: () => void
@@ -420,6 +426,7 @@ function GridItemCard({
   const kind = getFileKind(item)
   const canPreviewImage = kind === 'image' && !item.isDirectory
   const previewHeight = Math.max(52, Math.round(thumbnailSize * 0.62))
+  const folderPreviewLoaded = item.isDirectory ? (folderChildrenLoaded ?? false) : true
 
   return (
     <button
@@ -444,14 +451,24 @@ function GridItemCard({
         className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-content)] flex items-center justify-center overflow-hidden"
         style={{ height: previewHeight }}
       >
-        {canPreviewImage ? (
+        {item.isDirectory ? (
+          <FolderPreview
+            childrenItems={folderChildren ?? []}
+            previewHeight={previewHeight}
+            isLoaded={folderPreviewLoaded}
+          />
+        ) : canPreviewImage ? (
           <img src={toLocalFileUrl(item.path)} alt={item.name} className="max-h-full max-w-full object-cover" />
         ) : (
           fileIcon(item, false)
         )}
       </div>
       <p className="mt-2 text-[11px] text-[var(--text-title)] truncate px-1" title={item.name}>{item.name}</p>
-      <p className="text-[10px] text-[var(--text-light)] px-1">{item.isDirectory ? '文件夹' : formatSize(item.size) || '-'}</p>
+      <p className="text-[10px] text-[var(--text-light)] px-1">
+        {item.isDirectory
+          ? describeFolderPreview(folderChildren ?? [], { isLoaded: folderPreviewLoaded })
+          : formatSize(item.size) || '-'}
+      </p>
     </button>
   )
 }
@@ -623,6 +640,7 @@ export default function FileTree({
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
   const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
+  const gridPreviewLoadingRef = useRef(new Set<string>())
   const queryLower = query.trim().toLowerCase()
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
@@ -999,6 +1017,41 @@ export default function FileTree({
     return effectiveGridPath.split('/').pop() || effectiveGridPath
   }, [effectiveGridPath])
   const gridContainerPath = effectiveGridPath ?? currentPath
+  const gridFolderPreviewKey = useMemo(
+    () => gridItems.filter((item) => item.isDirectory).map((item) => item.path).join('\u0000'),
+    [gridItems],
+  )
+
+  useEffect(() => {
+    if (viewMode !== 'grid') return
+
+    const previewPaths = gridFolderPreviewKey ? gridFolderPreviewKey.split('\u0000') : []
+    const missingPaths = previewPaths
+      .filter((dirPath) => dirPath && !dirChildren.has(dirPath) && !gridPreviewLoadingRef.current.has(dirPath))
+      .slice(0, 18)
+
+    if (missingPaths.length === 0) return
+
+    let cancelled = false
+
+    const hydrateFolderPreviews = async () => {
+      for (const dirPath of missingPaths) {
+        if (cancelled) break
+        gridPreviewLoadingRef.current.add(dirPath)
+        try {
+          await loadDirChildren(dirPath)
+        } finally {
+          gridPreviewLoadingRef.current.delete(dirPath)
+        }
+      }
+    }
+
+    void hydrateFolderPreviews()
+
+    return () => {
+      cancelled = true
+    }
+  }, [dirChildren, gridFolderPreviewKey, loadDirChildren, viewMode])
 
   const renderGridContent = () => {
     if (gridItems.length === 0 && !creatingType) {
@@ -1137,6 +1190,8 @@ export default function FileTree({
               isActive={selectedFile === item.path}
               isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
               thumbnailSize={thumbnailSize}
+              folderChildren={item.isDirectory ? dirChildren.get(item.path) : undefined}
+              folderChildrenLoaded={item.isDirectory ? dirChildren.has(item.path) : true}
               dragMovable={!pinnedFolders.includes(item.path)}
               onOpen={() => {
                 if (item.isDirectory) {
