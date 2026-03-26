@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Folder, FolderInput, FolderOpen, Pen, Trash2 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -38,9 +38,23 @@ interface LegacyImportedSkillFolder {
   addedAt?: number
 }
 
+interface LegacyImportedFolderParseResult {
+  folders: LegacyImportedSkillFolder[]
+  error: string | null
+}
+
 type SkillCardContextTarget = {
   skill: SkillState
   path: string
+}
+
+interface SkillsCenterPanelProps {
+  children?: (slots: SidePanelSlots) => ReactNode
+}
+
+export interface SidePanelSlots {
+  header: ReactNode
+  body: ReactNode
 }
 
 const IMPORTED_SKILL_KEY = 'ready-imported-skill-folders'
@@ -71,16 +85,21 @@ function basename(input: string): string {
   return chunks[chunks.length - 1] || input
 }
 
-function parseLegacyImportedFolders(): LegacyImportedSkillFolder[] {
-  if (typeof window === 'undefined') return []
+function parseLegacyImportedFolders(): LegacyImportedFolderParseResult {
+  if (typeof window === 'undefined') return { folders: [], error: null }
   try {
     const raw = localStorage.getItem(IMPORTED_SKILL_KEY)
-    if (!raw) return []
+    if (!raw) return { folders: [], error: null }
     const parsed = JSON.parse(raw) as LegacyImportedSkillFolder[]
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item) => typeof item?.path === 'string' && item.path.trim().length > 0)
+    if (!Array.isArray(parsed)) {
+      return { folders: [], error: '旧版技能目录数据损坏，已跳过无效记录。' }
+    }
+    return {
+      folders: parsed.filter((item) => typeof item?.path === 'string' && item.path.trim().length > 0),
+      error: null,
+    }
   } catch {
-    return []
+    return { folders: [], error: '旧版技能目录数据损坏，已跳过无效记录。' }
   }
 }
 
@@ -118,7 +137,7 @@ function putSkillDragData(
   e.dataTransfer.effectAllowed = 'copy'
 }
 
-export default function SkillsCenterPanel() {
+export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) {
   const [skills, setSkills] = useState<SkillState[]>([])
   const [runtimeInfo, setRuntimeInfo] = useState<SkillsRuntimeInfo | null>(null)
   const [loading, setLoading] = useState(false)
@@ -196,13 +215,16 @@ export default function SkillsCenterPanel() {
     if (migratedLegacyRef.current || typeof window === 'undefined' || !window.electronAPI?.skills?.importCustomSkill) return
     migratedLegacyRef.current = true
     const legacyFolders = parseLegacyImportedFolders()
-    if (legacyFolders.length === 0) {
+    if (legacyFolders.error) {
+      pushMessage(legacyFolders.error)
+    }
+    if (legacyFolders.folders.length === 0) {
       localStorage.removeItem(IMPORTED_SKILL_KEY)
       return
     }
 
     void (async () => {
-      const { imported, failed } = await importFolders(legacyFolders.map((item) => item.path))
+      const { imported, failed } = await importFolders(legacyFolders.folders.map((item) => item.path))
       if (failed.length > 0) {
         localStorage.setItem(
           IMPORTED_SKILL_KEY,
@@ -235,9 +257,14 @@ export default function SkillsCenterPanel() {
     await window.electronAPI.document.showInFolder(path)
   }, [])
 
-  const resolveDroppedPaths = useCallback(async (e: DragEvent): Promise<string[]> => {
+  const resolveDroppedPaths = useCallback(async (e: DragEvent): Promise<{
+    paths: string[]
+    malformedPayloadCount: number
+    unreadablePaths: string[]
+  }> => {
     const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
     const result = new Set<string>()
+    let malformedPayloadCount = 0
 
     if (readyRaw) {
       try {
@@ -246,7 +273,7 @@ export default function SkillsCenterPanel() {
           result.add(parsed.path)
         }
       } catch {
-        // ignore malformed payload
+        malformedPayloadCount += 1
       }
     }
 
@@ -256,21 +283,26 @@ export default function SkillsCenterPanel() {
       if (filePath) result.add(filePath)
     }
 
-    if (!window.electronAPI?.document?.stat) return Array.from(result)
+    if (!window.electronAPI?.document?.stat) {
+      return { paths: Array.from(result), malformedPayloadCount, unreadablePaths: [] }
+    }
 
     const verified: string[] = []
+    const unreadablePaths: string[] = []
     for (const path of result) {
       try {
         const statRes = await window.electronAPI.document.stat(path)
         if (statRes.success) {
           const isDirectory = statRes.data?.isDirectory ?? statRes.stat?.isDirectory ?? false
           if (isDirectory) verified.push(path)
+        } else {
+          unreadablePaths.push(path)
         }
       } catch {
-        // ignore unreadable path
+        unreadablePaths.push(path)
       }
     }
-    return verified
+    return { paths: verified, malformedPayloadCount, unreadablePaths }
   }, [])
 
   const handleImportDragOver = useCallback((e: DragEvent) => {
@@ -290,14 +322,27 @@ export default function SkillsCenterPanel() {
     e.stopPropagation()
     setImportDropActive(false)
     void (async () => {
-      const paths = await resolveDroppedPaths(e)
+      const { paths, malformedPayloadCount, unreadablePaths } = await resolveDroppedPaths(e)
       if (paths.length === 0) {
+        if (malformedPayloadCount > 0) {
+          pushMessage('拖拽数据损坏，无法识别可导入的 skill 文件夹。')
+          return
+        }
+        if (unreadablePaths.length > 0) {
+          pushMessage(`拖入内容无法读取：${unreadablePaths.length} 个路径检查失败。`)
+          return
+        }
         pushMessage('仅支持导入 skill 文件夹')
         return
       }
       const result = await importFolders(paths)
       if (result.imported > 0) {
-        pushMessage(`已导入 ${result.imported} 个 skill`)
+        const warningSuffix = malformedPayloadCount > 0
+          ? '，但有拖拽数据损坏已被忽略'
+          : unreadablePaths.length > 0
+            ? `，但有 ${unreadablePaths.length} 个路径无法读取`
+            : ''
+        pushMessage(`已导入 ${result.imported} 个 skill${warningSuffix}`)
       } else {
         pushMessage('没有成功导入任何 skill，请检查目录内容')
       }
@@ -429,24 +474,25 @@ export default function SkillsCenterPanel() {
     return items
   }, [contextMenu, handleOpenPath, handleRemoveCustomSkill])
 
-  return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div
-        className="shrink-0 border-b flex items-center"
-        style={{
-          borderColor: 'transparent',
-          height: SKILLS_PANEL_DIMENSIONS.headerHeight,
-          padding: `0 ${SKILLS_PANEL_DIMENSIONS.sectionPaddingX}px`,
-          boxSizing: 'border-box',
-          background: 'transparent',
-        }}
-      >
-        <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
-          技能中心
-        </span>
-      </div>
+  const header = (
+    <div
+      className="shrink-0 border-b flex items-center"
+      style={{
+        borderColor: 'transparent',
+        height: SKILLS_PANEL_DIMENSIONS.headerHeight,
+        padding: `0 ${SKILLS_PANEL_DIMENSIONS.sectionPaddingX}px`,
+        boxSizing: 'border-box',
+        background: 'transparent',
+      }}
+    >
+      <span className="text-[13px] font-semibold" style={{ color: PANEL_COLORS.title }}>
+        技能中心
+      </span>
+    </div>
+  )
 
-      <div ref={bodyRef} className="flex-1 min-h-0 flex flex-col">
+  const body = (
+    <div ref={bodyRef} className="flex-1 min-h-0 flex flex-col">
         <section
           className="shrink-0 border-b"
           style={{
@@ -642,8 +688,13 @@ export default function SkillsCenterPanel() {
             </div>
           </div>
         </section>
-      </div>
+    </div>
+  )
 
+  const shell = (
+    <div className="relative flex h-full min-h-0 flex-col">
+      {header}
+      {body}
       {message && (
         <div className="pointer-events-none absolute left-[8px] right-[8px] bottom-[8px]">
           <div
@@ -679,6 +730,12 @@ export default function SkillsCenterPanel() {
       />
     </div>
   )
+
+  if (children) {
+    return <>{children({ header, body })}</>
+  }
+
+  return shell
 }
 
 function DescriptionEditorDialog({

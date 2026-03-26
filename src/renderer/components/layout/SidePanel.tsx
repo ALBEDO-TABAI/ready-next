@@ -1,4 +1,4 @@
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useIsPresent, usePresenceData, useReducedMotion } from 'framer-motion'
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -28,7 +28,8 @@ const PANEL_STACK_ORDER: Record<RenderableSidePanelVariant, number> = {
   search: 1,
   skills: 2,
 }
-const PANEL_STREAM_DURATION = 0.42
+const HEADER_STREAM_DURATION = 0.32
+const CONTENT_STREAM_DURATION = 0.4
 const REDUCED_STREAM_DURATION = 0.12
 
 function AnimatedPanelLayer({
@@ -38,37 +39,82 @@ function AnimatedPanelLayer({
   direction,
   reduceMotion,
 }: AnimatedPanelSlots & { panelKey: string; direction: PanelDirection; reduceMotion: boolean }) {
+  const isPresent = useIsPresent()
+  const presenceDirection = usePresenceData() as PanelDirection | undefined
+  const resolvedDirection = ((presenceDirection ?? direction) as PanelDirection) || 1
+  const layerZIndex = isPresent ? 1 : 2
+
   return (
-    <div className="absolute inset-0 overflow-hidden">
-      <motion.div
-        key={panelKey}
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={{ zIndex: layerZIndex, pointerEvents: isPresent ? 'auto' : 'none' }}
+    >
+      <div
         className="grid h-full min-h-0"
         style={{
           gridTemplateRows: `${FILES_PANEL_DIMENSIONS.headerHeight}px minmax(0, 1fr)`,
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-          transform: 'translateZ(0)',
         }}
-        initial={reduceMotion ? false : { y: direction > 0 ? '100%' : '-100%' }}
-        animate={{
-          y: 0,
-          transition: reduceMotion
-            ? { duration: REDUCED_STREAM_DURATION }
-            : { duration: PANEL_STREAM_DURATION, ease: STREAM_EASE },
-        }}
-        exit={
-          reduceMotion
-            ? undefined
-            : { y: direction > 0 ? '-100%' : '100%', transition: { duration: PANEL_STREAM_DURATION, ease: STREAM_EASE } }
-        }
       >
-        <div className="min-h-0 overflow-hidden">
-          {header}
+        <div className="relative overflow-hidden">
+          <motion.div
+            key={`${panelKey}-header`}
+            custom={resolvedDirection}
+            className="absolute inset-0"
+            style={{
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              transform: 'translateZ(0)',
+            }}
+            initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '72%' : '-72%' }}
+            animate={{
+              y: 0,
+              transition: reduceMotion
+                ? { duration: REDUCED_STREAM_DURATION }
+                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+            }}
+            exit={
+              reduceMotion
+                ? undefined
+                : {
+                    y: resolvedDirection > 0 ? '-72%' : '72%',
+                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+                  }
+            }
+          >
+            {header}
+          </motion.div>
         </div>
-        <div className="min-h-0 overflow-hidden">
-          {body}
+
+        <div className="relative min-h-0 overflow-hidden">
+          <motion.div
+            key={`${panelKey}-body`}
+            custom={resolvedDirection}
+            className="absolute inset-0 flex min-h-0 flex-col"
+            style={{
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              transform: 'translateZ(0)',
+            }}
+            initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '100%' : '-100%' }}
+            animate={{
+              y: 0,
+              transition: reduceMotion
+                ? { duration: REDUCED_STREAM_DURATION }
+                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+            }}
+            exit={
+              reduceMotion
+                ? undefined
+                : {
+                    y: resolvedDirection > 0 ? '-100%' : '100%',
+                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+                  }
+            }
+          >
+            {body}
+          </motion.div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }
@@ -156,7 +202,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
       }}
     >
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-        <AnimatePresence initial={false} mode="sync">
+        <AnimatePresence initial={false} mode="sync" custom={transitionDirection}>
           {isVisible ? renderAnimatedPanel(variant as RenderableSidePanelVariant) : null}
         </AnimatePresence>
       </div>
