@@ -299,6 +299,18 @@ export default function BrowserMode({
     return () => window.clearTimeout(timer)
   }, [activeTab?.loading, activeTabId, browserRuntimeReady, captureStableFrame, shouldRevealBrowserHost])
 
+  // 预截图机制：页面稳定后定期更新缓存，确保切换时画面不过旧
+  useEffect(() => {
+    if (!isElectron || !isActive || !browserRuntimeReady || !activeTabId || activeTab?.loading) return
+
+    // 页面稳定后每 30 秒更新一次缓存
+    const interval = window.setInterval(() => {
+      void captureStableFrame()
+    }, 30000)
+
+    return () => window.clearInterval(interval)
+  }, [isActive, activeTab?.loading, activeTabId, browserRuntimeReady, captureStableFrame, isElectron])
+
   useEffect(() => {
     return () => {
       clearSurfaceReadyTimer()
@@ -309,6 +321,27 @@ export default function BrowserMode({
   if (tabs.length === 0) {
     return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} loading={!browserRuntimeReady} />
   }
+
+  // 冻结帧淡出动画状态
+  const [freezeFrameOpacity, setFreezeFrameOpacity] = useState(1)
+  const prevShouldShowRef = useRef(shouldShowFreezeFrame)
+
+  useEffect(() => {
+    if (prevShouldShowRef.current && !shouldShowFreezeFrame) {
+      // 开始淡出
+      setFreezeFrameOpacity(0)
+      const timer = window.setTimeout(() => {
+        prevShouldShowRef.current = shouldShowFreezeFrame
+      }, 120)
+      return () => window.clearTimeout(timer)
+    }
+    setFreezeFrameOpacity(1)
+    prevShouldShowRef.current = shouldShowFreezeFrame
+    return undefined
+  }, [shouldShowFreezeFrame])
+
+  // 只要有冻结帧数据就渲染，通过 opacity 控制显隐
+  const shouldRenderFreezeFrame = Boolean(visibleFreezeFrame?.src) && (shouldShowFreezeFrame || freezeFrameOpacity > 0)
 
   return (
       <div ref={modeRootRef} className="workbench-mode-root relative">
@@ -351,7 +384,7 @@ export default function BrowserMode({
             contentRef={contentRef}
             activeTab={activeTab}
             toastVisible={toastVisible}
-            freezeOverlay={shouldShowFreezeFrame && visibleFreezeFrame?.src ? (
+            freezeOverlay={shouldRenderFreezeFrame && visibleFreezeFrame ? (
               <div
                 className="browser-resize-shell-freeze"
                 style={{
@@ -361,6 +394,9 @@ export default function BrowserMode({
                   pointerEvents: 'none',
                   overflow: 'hidden',
                   borderRadius: 'inherit',
+                  opacity: freezeFrameOpacity,
+                  transition: 'opacity 120ms ease-out',
+                  willChange: freezeFrameOpacity < 1 ? 'opacity' : 'auto',
                 }}
               >
                 <img

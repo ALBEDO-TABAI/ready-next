@@ -31,7 +31,15 @@
 - BrowserView 不受 DOM `z-index` 控制。
 - 任何侧栏、抽屉、悬浮层、动画布局只要与 BrowserView 共存，都必须把 bounds、显隐、动画节奏一起设计。
 
-### 2.2 面板动画与 BrowserView bounds 需要解耦
+### 2.2 模式切换的丝滑体验：冻结帧是关键
+- BrowserView 是原生层，无法参与 CSS 动画。水平滚动切换模式时，如果 BrowserView 还在显示，会出现"从侧边栏滑入"的穿帮感。
+- **D方案核心**：所有模式常驻 DOM + 水平滚动容器，`isMotionSettled` 控制 BrowserView 显示时机。
+- **冻结帧捕获**：必须在 `hideAll()` **之前**捕获当前画面，使用 `captureViewportSnapshot`（调用 `webContents.capturePage()`），而非 `captureWindowSnapshot`（只捕获主窗口）。
+- **为什么 `captureWindowSnapshot` 不行**：`mainWindow.capturePage()` 只捕获主窗口渲染内容，BrowserView 是独立的 `webContents`，必须用 `view.webContents.capturePage()`。
+- **缓存策略**：`cachedFreezeFramesByTabId` 按标签页缓存，切换回来时显示上次画面而非空白骨架屏。
+- **显示优先级**：过渡期间 `freezeFrame ?? cachedFreezeFrame` → 动画结束 → 真实 BrowserView。
+
+### 2.3 面板动画与 BrowserView bounds 需要解耦
 - 面板收放、拖拽边界、浏览器区域缩放如果直接跟 BrowserView 高频同步，容易出现闪动、跳帧或遮挡。
 - 更稳的做法是把”布局动画”与”原生视图刷新”分层处理，必要时在拖拽/收放期间降频或走更稳定的更新节奏。
 

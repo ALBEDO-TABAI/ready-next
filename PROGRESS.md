@@ -1,11 +1,18 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-27
+> 更新时间: 2026-03-28
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
-- 本地相对 `origin/main` 为 `ahead 29`。
+- 本地相对 `origin/main` 为 `ahead 100`。
 - 这条基线已经吸收了 agent/runtime 拆分、browser service 化、repository 基线拆分、module handler 独立化、RSS runtime 与 browser-backed acquisition 的主要改动。
+
+2. **Browser 模式切换体验已进一步打磨（冻结帧机制）**
+- 修复了切换时"标签栏先出、内容后加载"的分段闪现问题。
+- 关键修复：`captureSnapshot` 改用 `captureViewportSnapshot`（调用 BrowserView 的 `webContents.capturePage()`），而非 `captureWindowSnapshot`（只捕获主窗口，不含 BrowserView）。
+- 切换前（`!isMotionSettled`）先执行 `captureStableFrame()` 保存当前画面，再 `hideAll()` 隐藏 BrowserView。
+- 过渡期间显示冻结帧（`freezeFrame ?? cachedFreezeFrame`），动画结束后 BrowserView 真正就位再淡出。
+- 每个标签页独立缓存冻结帧（`cachedFreezeFramesByTabId`），切回时显示上次画面而非骨架屏。
 
 2. Agent/runtime 底座已经落地到可继续迭代的状态。
 - `useAgent` 不再独自承担整条执行链。
