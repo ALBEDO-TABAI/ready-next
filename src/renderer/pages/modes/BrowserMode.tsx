@@ -219,6 +219,16 @@ export default function BrowserMode({
   }, [captureStableFrame, shouldPrepareBrowserHost])
 
   useEffect(() => {
+    if (!isElectron) return
+
+    // D方案关键修复：水平滚动动画期间强制隐藏 BrowserView
+    // 防止 BrowserView 看起来"从文件管理面板上方飘进来"
+    if (!isMotionSettled) {
+      void window.electronAPI?.browser?.hideAll?.()
+    }
+  }, [isElectron, isMotionSettled])
+
+  useEffect(() => {
     if (!shouldRevealBrowserHost || !browserRuntimeReady) {
       clearSurfaceReadyTimer()
       setIsBrowserSurfaceReady(false)
