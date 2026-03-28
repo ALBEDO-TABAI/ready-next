@@ -39,6 +39,24 @@
 - **缓存策略**：`cachedFreezeFramesByTabId` 按标签页缓存，切换回来时显示上次画面而非空白骨架屏。
 - **显示优先级**：过渡期间 `freezeFrame ?? cachedFreezeFrame` → 动画结束 → 真实 BrowserView。
 
+### 2.2b "无法挑剔的丝滑"级优化
+在基础冻结帧之上，要达到极致丝滑还需：
+
+**复合淡出动画（Opacity + Blur + Scale）**
+- 仅用透明度淡出不够细腻，叠加轻微模糊（0→2px）和轻微缩小（1→0.998）能增强"沉入背景"的深度感
+- 使用 JS 驱动的 `requestAnimationFrame` 动画配合 `ease-out-quart` 缓动，比 CSS transition 更可控
+- 三属性同步动画：`opacity`（1→0）、`filter: blur()`（0→2px）、`transform: scale()`（1→0.998）
+
+**预测性预捕获（Predictive Pre-capture）**
+- 用户鼠标悬停在浏览器模式图标上时，立即触发 `browser.captureViewportSnapshot()`
+- 这样点击发生时冻结帧已经准备好，消除"点击→截图→切换"的延迟
+- 事件流：`mouseenter` → `BROWSER_PRE_CAPTURE_EVENT` → 后台 BrowserMode 执行 `captureStableFrame()`
+
+**更激进的延迟优化**
+- `BROWSER_SURFACE_READY_DELAY_MS` 从 24ms 降至 16ms（一帧@60fps）
+- 预截图间隔保持 30s，但页面加载完成后立即补一次捕获
+- 冻结帧淡出持续时间从 120ms 延长至 180ms，配合模糊效果更柔和
+
 ### 2.3 面板动画与 BrowserView bounds 需要解耦
 - 面板收放、拖拽边界、浏览器区域缩放如果直接跟 BrowserView 高频同步，容易出现闪动、跳帧或遮挡。
 - 更稳的做法是把”布局动画”与”原生视图刷新”分层处理，必要时在拖拽/收放期间降频或走更稳定的更新节奏。

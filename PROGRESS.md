@@ -13,6 +13,8 @@
 - 切换前（`!isMotionSettled`）先执行 `captureStableFrame()` 保存当前画面，再 `hideAll()` 隐藏 BrowserView。
 - 过渡期间显示冻结帧（`freezeFrame ?? cachedFreezeFrame`），动画结束后 BrowserView 真正就位再淡出。
 - 每个标签页独立缓存冻结帧（`cachedFreezeFramesByTabId`），切回时显示上次画面而非骨架屏。
+- 最新一轮继续收紧了回场体感：冻结帧淡出已从单纯透明度升级为 `opacity + blur + scale` 复合动画，Browser surface ready 延迟也从 24ms 再压到 16ms。
+- 顶栏模块切换器现已补上 hover 级预截图：鼠标悬停到 browser 图标时，会提前触发后台 `captureStableFrame()`，把"点击后才开始准备冻结帧"的迟滞再往前消掉半拍。
 
 2. Agent/runtime 底座已经落地到可继续迭代的状态。
 - `useAgent` 不再独自承担整条执行链。

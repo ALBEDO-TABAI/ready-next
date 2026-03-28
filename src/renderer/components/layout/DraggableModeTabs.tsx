@@ -16,6 +16,8 @@ const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
   { id: 'calendar', icon: Calendar },
 ]
 
+const BROWSER_CAPTURE_FREEZE_EVENT = 'ready:browser-capture-freeze'
+
 interface DraggableModeTabsProps {
   activeMode: WorkbenchMode
   onChange: (mode: WorkbenchMode) => void
@@ -193,6 +195,15 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     onChange(modes[index].id)
   }, [onChange])
 
+  // 鼠标悬停预捕获：当悬停在非当前激活的模式上时，触发预捕获
+  const handleIconHover = useCallback((index: number) => {
+    const mode = modes[index].id
+    // 如果悬停的是浏览器模式，且当前不是浏览器模式，触发预捕获
+    if (mode === 'browser' && activeMode !== 'browser') {
+      window.dispatchEvent(new CustomEvent(BROWSER_CAPTURE_FREEZE_EVENT))
+    }
+  }, [activeMode])
+
   // Calculate icon styles based on proximity to thumb center
   const getIconStyle = useCallback((index: number) => {
     const distance = Math.abs(position - index)
@@ -240,6 +251,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
             style={getIconStyle(index)}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => handleIconClick(index, e)}
+            onMouseEnter={() => handleIconHover(index)}
             title={mode.id}
           >
             <Icon style={{ width: 15, height: 15 }} strokeWidth={2} />

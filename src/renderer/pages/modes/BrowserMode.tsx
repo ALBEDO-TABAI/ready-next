@@ -22,7 +22,17 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_X,
 } from '../../modules/workbench/chrome'
 
-const BROWSER_SURFACE_READY_DELAY_MS = 24
+const BROWSER_SURFACE_READY_DELAY_MS = 16
+const BROWSER_CAPTURE_FREEZE_EVENT = 'ready:browser-capture-freeze'
+
+// 冻结帧过渡动画配置
+const FREEZE_FRAME_CONFIG = {
+  fadeDurationMs: 180,        // 淡出持续时间
+  blurStartPx: 0,            // 起始模糊度
+  blurEndPx: 2,              // 结束模糊度（轻微模糊增强丝滑感）
+  scaleStart: 1,             // 起始缩放
+  scaleEnd: 0.998,           // 结束缩放（轻微缩小增强深度感）
+}
 
 // 新增：切换动画相关 props
 interface BrowserModeProps {
@@ -207,9 +217,9 @@ export default function BrowserMode({
       void captureStableFrame()
     }
 
-    window.addEventListener('ready:browser-capture-freeze', handleCaptureFreeze)
+    window.addEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
     return () => {
-      window.removeEventListener('ready:browser-capture-freeze', handleCaptureFreeze)
+      window.removeEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
     }
   }, [isElectron, captureStableFrame])
 
@@ -317,31 +327,83 @@ export default function BrowserMode({
     }
   }, [clearSurfaceReadyTimer])
 
+  // 冻结帧高级淡出动画状态（模糊 + 缩放 + 透明度）
+  const [freezeFrameStyle, setFreezeFrameStyle] = useState({
+    opacity: 1,
+    filter: 'blur(0px)',
+    transform: 'scale(1)',
+  })
+  const prevShouldShowRef = useRef(shouldShowFreezeFrame)
+  const freezeFrameAnimRef = useRef<number | null>(null)
+
+  const clearFreezeFrameAnim = useCallback(() => {
+    if (freezeFrameAnimRef.current !== null) {
+      cancelAnimationFrame(freezeFrameAnimRef.current)
+      freezeFrameAnimRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    clearFreezeFrameAnim()
+
+    if (prevShouldShowRef.current && !shouldShowFreezeFrame) {
+      // 开始高级淡出：透明度 + 轻微模糊 + 轻微缩放
+      const startTime = performance.now()
+      const duration = FREEZE_FRAME_CONFIG.fadeDurationMs
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime
+        const progress = Math.min(elapsed / duration, 1)
+        // 使用 ease-out-quart 缓动
+        const easeOut = 1 - Math.pow(1 - progress, 4)
+
+        const opacity = 1 - easeOut
+        const blur = FREEZE_FRAME_CONFIG.blurStartPx + (FREEZE_FRAME_CONFIG.blurEndPx - FREEZE_FRAME_CONFIG.blurStartPx) * easeOut
+        const scale = FREEZE_FRAME_CONFIG.scaleStart + (FREEZE_FRAME_CONFIG.scaleEnd - FREEZE_FRAME_CONFIG.scaleStart) * easeOut
+
+        setFreezeFrameStyle({
+          opacity,
+          filter: `blur(${blur}px)`,
+          transform: `scale(${scale})`,
+        })
+
+        if (progress < 1) {
+          freezeFrameAnimRef.current = requestAnimationFrame(animate)
+          return
+        }
+
+        freezeFrameAnimRef.current = null
+        prevShouldShowRef.current = shouldShowFreezeFrame
+      }
+
+      freezeFrameAnimRef.current = requestAnimationFrame(animate)
+      return () => {
+        clearFreezeFrameAnim()
+      }
+    }
+
+    setFreezeFrameStyle({
+      opacity: 1,
+      filter: 'blur(0px)',
+      transform: 'scale(1)',
+    })
+    prevShouldShowRef.current = shouldShowFreezeFrame
+    return undefined
+  }, [clearFreezeFrameAnim, shouldShowFreezeFrame])
+
+  useEffect(() => {
+    return () => {
+      clearFreezeFrameAnim()
+    }
+  }, [clearFreezeFrameAnim])
+
+  // 只要有冻结帧数据就渲染，通过 style 控制显隐
+  const shouldRenderFreezeFrame = Boolean(visibleFreezeFrame?.src) && (shouldShowFreezeFrame || freezeFrameStyle.opacity > 0)
+
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
     return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} loading={!browserRuntimeReady} />
   }
-
-  // 冻结帧淡出动画状态
-  const [freezeFrameOpacity, setFreezeFrameOpacity] = useState(1)
-  const prevShouldShowRef = useRef(shouldShowFreezeFrame)
-
-  useEffect(() => {
-    if (prevShouldShowRef.current && !shouldShowFreezeFrame) {
-      // 开始淡出
-      setFreezeFrameOpacity(0)
-      const timer = window.setTimeout(() => {
-        prevShouldShowRef.current = shouldShowFreezeFrame
-      }, 120)
-      return () => window.clearTimeout(timer)
-    }
-    setFreezeFrameOpacity(1)
-    prevShouldShowRef.current = shouldShowFreezeFrame
-    return undefined
-  }, [shouldShowFreezeFrame])
-
-  // 只要有冻结帧数据就渲染，通过 opacity 控制显隐
-  const shouldRenderFreezeFrame = Boolean(visibleFreezeFrame?.src) && (shouldShowFreezeFrame || freezeFrameOpacity > 0)
 
   return (
       <div ref={modeRootRef} className="workbench-mode-root relative">
@@ -394,9 +456,11 @@ export default function BrowserMode({
                   pointerEvents: 'none',
                   overflow: 'hidden',
                   borderRadius: 'inherit',
-                  opacity: freezeFrameOpacity,
-                  transition: 'opacity 120ms ease-out',
-                  willChange: freezeFrameOpacity < 1 ? 'opacity' : 'auto',
+                  opacity: freezeFrameStyle.opacity,
+                  filter: freezeFrameStyle.filter,
+                  transform: freezeFrameStyle.transform,
+                  willChange: freezeFrameStyle.opacity < 1 ? 'opacity, filter, transform' : 'auto',
+                  transition: 'none', // 使用 JS 动画，不用 CSS transition
                 }}
               >
                 <img
