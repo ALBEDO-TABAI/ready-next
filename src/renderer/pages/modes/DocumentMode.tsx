@@ -5,7 +5,14 @@ import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
+import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
+import DocumentEnterOverlay from '../../components/document/DocumentEnterOverlay'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
+import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
+} from '../../modules/workbench/chrome'
 import { getFileExtension } from '../../utils/path'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
@@ -96,7 +103,19 @@ function DocumentEditor({
 }
 
 // --- DocumentMode main component ---
-export default function DocumentMode({ isActive = true }: { isActive?: boolean }) {
+interface DocumentModeProps {
+  isActive?: boolean
+  isMotionSettled?: boolean
+  isTransitioning?: boolean
+  transitionDirection?: -1 | 1
+}
+
+export default function DocumentMode({
+  isActive = true,
+  isMotionSettled = true,
+  isTransitioning = false,
+  transitionDirection = 1,
+}: DocumentModeProps) {
   const { selectedFile } = useWorkspace()
   const {
     tabs, activeTabId, splitTabId, splitRatio,
@@ -148,6 +167,9 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
+
+  // 是否正在切入文档模式（用于显示骨架遮罩）
+  const isEnteringDocument = isActive && isTransitioning && !isMotionSettled
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
@@ -206,7 +228,12 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
 
   return (
     <div className="workbench-mode-root">
-      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+        }}
+      >
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
           <DocumentTabRail
             layoutId="document-tabs"
@@ -235,43 +262,10 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
             onTabDrop={handleDrop}
             onTabDragEnd={handleDragEnd}
             rightActions={
-              <div
-                className="glass-surface-card flex items-center"
-                style={{
-                  background: 'color-mix(in srgb, var(--surface-card-bg) 24%, transparent)',
-                  borderRadius: 8,
-                  padding: 2,
-                  border: '1px solid transparent',
-                  height: 30,
-                }}
-              >
-                {(['edit', 'preview'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setEditorMode(mode)}
-                    className="transition-all duration-150 ease-out"
-                    style={{
-                      padding: '0 12px',
-                      height: 26,
-                      fontSize: 12,
-                      borderRadius: 6,
-                      fontWeight: 500,
-                      ...(editorMode === mode ? {
-                        background: 'var(--color-blue-light)',
-                        color: 'var(--color-blue)',
-                        boxShadow: 'none',
-                        border: '1px solid transparent',
-                      } : {
-                        background: 'transparent',
-                        color: 'var(--text-muted)',
-                        border: '1px solid transparent',
-                      }),
-                    }}
-                  >
-                    {mode === 'edit' ? '编辑' : '预览'}
-                  </button>
-                ))}
-              </div>
+              <DraggableModeSwitch
+                mode={editorMode}
+                onChange={setEditorMode}
+              />
             }
           />
 
@@ -354,6 +348,12 @@ export default function DocumentMode({ isActive = true }: { isActive?: boolean }
               </div>
             </div>
           )}
+
+          {/* 文档进入骨架遮罩 */}
+          <DocumentEnterOverlay
+            visible={isEnteringDocument}
+            direction={transitionDirection}
+          />
         </div>
       </div>
     </div>

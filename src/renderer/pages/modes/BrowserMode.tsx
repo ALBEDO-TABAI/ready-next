@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import BrowserEnterOverlay from '../../components/browser/BrowserEnterOverlay'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
@@ -16,8 +17,28 @@ import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { toFileUrl } from '../../utils/dragDrop'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
+import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
+} from '../../modules/workbench/chrome'
 
-export default function BrowserMode({ isActive = true }: { isActive?: boolean }) {
+const BROWSER_SURFACE_READY_DELAY_MS = 24
+
+// 新增：切换动画相关 props
+interface BrowserModeProps {
+  isActive?: boolean
+  isMotionSettled?: boolean
+  isTransitioning?: boolean
+  transitionDirection?: -1 | 1
+}
+
+export default function BrowserMode({
+  isActive = true,
+  isMotionSettled = true,
+  isTransitioning = false,
+  transitionDirection = 1,
+}: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
   const {
     tabs, activeTabId, urlInput,
@@ -25,7 +46,10 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
     addTab, updateTab, reorderTabs,
   } = useBrowserTabs()
   const [isAddressEditing, setIsAddressEditing] = useState(false)
+  const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
   const hostVisibleRef = useRef(false)
+  const surfaceReadyTimerRef = useRef<number | null>(null)
+  const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI
@@ -40,10 +64,22 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
+
+  // === 分级显示策略 ===
+  // Level 1: 准备层 - 只要当前模式是浏览器，就准备浏览器 Host（更新 bounds）
+  const shouldPrepareBrowserHost = isActive
+  // Level 2: 显示层 - 动画结束后才真正显示浏览器内容
+  const shouldRevealBrowserHost = isActive && isMotionSettled
+  // 是否正在切入浏览器（用于显示遮罩）
+  const isEnteringBrowser = isActive && isTransitioning && !isMotionSettled
+  // Level 3: 就绪层 - 浏览器 surface 已准备好
+  const isBrowserHostFullyVisible = shouldRevealBrowserHost && isBrowserSurfaceReady
+
+  const previousShouldPrepareBrowserHostRef = useRef(shouldPrepareBrowserHost)
   const { sendBoundsImmediate } = useBrowserViewBounds({
     isElectron,
     contentRef,
-    isActive,
+    isActive: shouldPrepareBrowserHost,
     hostVisibleRef,
     topInset: 0,
     sidebarVisible,
@@ -153,16 +189,53 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
   })
   hostVisibleRef.current = browserRuntimeReady && tabs.length > 0
 
-  const { freezeFrame } = useBrowserResizeFreeze({
+  const {
+    cachedFreezeFrame,
+    captureStableFrame,
+    freezeFrame,
+  } = useBrowserResizeFreeze({
     isElectron,
     isActive,
     browserRuntimeReady,
-    surfaceRef: shellRef,
+    activeTabId,
+    surfaceRef: contentRef,
     sendBoundsImmediate,
   })
+  const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
+  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (!isBrowserSurfaceReady || Boolean(freezeFrame))
+
+  // Startup placeholder: show a neutral loading surface when browser runtime is hydrating
+  // and no freeze-frame is available yet. This prevents the "tag bar first, page later" perception.
+  const shouldShowStartupPlaceholder =
+    !activeTab?.error &&
+    !shouldShowFreezeFrame &&
+    (!browserRuntimeReady || !isBrowserSurfaceReady)
+
+  const clearSurfaceReadyTimer = useCallback(() => {
+    if (surfaceReadyTimerRef.current) {
+      window.clearTimeout(surfaceReadyTimerRef.current)
+      surfaceReadyTimerRef.current = null
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    if (previousShouldPrepareBrowserHostRef.current && !shouldPrepareBrowserHost) {
+      void captureStableFrame()
+    }
+    previousShouldPrepareBrowserHostRef.current = shouldPrepareBrowserHost
+  }, [captureStableFrame, shouldPrepareBrowserHost])
 
   useEffect(() => {
-    if (!isElectron || !isActive) return
+    if (!shouldRevealBrowserHost || !browserRuntimeReady) {
+      clearSurfaceReadyTimer()
+      setIsBrowserSurfaceReady(false)
+    }
+  }, [browserRuntimeReady, clearSurfaceReadyTimer, shouldRevealBrowserHost])
+
+  useEffect(() => {
+    if (!isElectron || !shouldRevealBrowserHost) return
+
+    let cancelled = false
 
     const syncVisibleHost = async () => {
       if (!browserRuntimeReady || tabs.length === 0) {
@@ -171,19 +244,53 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
       }
       await sendBoundsImmediate({ forceExact: true })
       await window.electronAPI?.browser?.showActive?.()
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
+      if (cancelled) return
+      clearSurfaceReadyTimer()
+      surfaceReadyTimerRef.current = window.setTimeout(() => {
+        if (cancelled) return
+        surfaceReadyTimerRef.current = null
+        setIsBrowserSurfaceReady(true)
+      }, BROWSER_SURFACE_READY_DELAY_MS)
     }
 
     void syncVisibleHost().catch(() => undefined)
-  }, [browserRuntimeReady, isActive, isElectron, sendBoundsImmediate, tabs.length])
+
+    return () => {
+      cancelled = true
+      clearSurfaceReadyTimer()
+    }
+  }, [browserRuntimeReady, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, shouldRevealBrowserHost, tabs.length])
+
+  useEffect(() => {
+    if (!shouldRevealBrowserHost || !browserRuntimeReady || !activeTabId || activeTab?.loading) return
+
+    const timer = window.setTimeout(() => {
+      void captureStableFrame()
+    }, 180)
+
+    return () => window.clearTimeout(timer)
+  }, [activeTab?.loading, activeTabId, browserRuntimeReady, captureStableFrame, shouldRevealBrowserHost])
+
+  useEffect(() => {
+    return () => {
+      clearSurfaceReadyTimer()
+    }
+  }, [clearSurfaceReadyTimer])
 
   // Task 4: Empty state — no tabs
-  if (!browserRuntimeReady || tabs.length === 0) {
+  if (tabs.length === 0) {
     return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} loading={!browserRuntimeReady} />
   }
 
   return (
-      <div className="workbench-mode-root">
-      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+      <div ref={modeRootRef} className="workbench-mode-root relative">
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+        }}
+      >
         <div ref={shellRef} className="workbench-canvas-shell relative flex h-full min-h-0 flex-col">
           <BrowserHeader
             tabs={tabs}
@@ -217,32 +324,68 @@ export default function BrowserMode({ isActive = true }: { isActive?: boolean })
             contentRef={contentRef}
             activeTab={activeTab}
             toastVisible={toastVisible}
+            freezeOverlay={shouldShowFreezeFrame && visibleFreezeFrame?.src ? (
+              <div
+                className="browser-resize-shell-freeze"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 40,
+                  pointerEvents: 'none',
+                  overflow: 'hidden',
+                  borderRadius: 'inherit',
+                }}
+              >
+                <img
+                  src={visibleFreezeFrame.src}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'block',
+                    objectFit: 'fill',
+                    userSelect: 'none',
+                  }}
+                />
+              </div>
+            ) : null}
             onDragOver={handleContentDragOver}
             onDrop={handleContentDrop}
             onRetry={() => void handleRetry()}
           />
-          {freezeFrame?.src && (
+
+          {/* 浏览器进入遮罩 - 切换动画期间显示骨架屏 */}
+          <BrowserEnterOverlay
+            visible={isEnteringBrowser}
+            direction={transitionDirection}
+          />
+
+          {shouldShowStartupPlaceholder && (
             <div
-              className="browser-resize-shell-freeze"
+              className="browser-surface-startup-mask"
               style={{
                 position: 'absolute',
                 inset: 0,
-                zIndex: 40,
-                pointerEvents: 'none',
-                overflow: 'hidden',
-                borderRadius: 'inherit',
+                zIndex: 50,
+                pointerEvents: 'auto',
+                borderRadius: 'var(--workbench-canvas-radius)',
+                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <img
-                src={freezeFrame.src}
-                alt=""
-                draggable={false}
+              <div
                 style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'block',
-                  objectFit: 'fill',
-                  userSelect: 'none',
+                  width: 24,
+                  height: 24,
+                  borderRadius: '50%',
+                  border: '2px solid var(--border-default)',
+                  borderTopColor: 'var(--color-blue)',
+                  animation: 'browserStartupSpinner 0.8s linear infinite',
                 }}
               />
             </div>

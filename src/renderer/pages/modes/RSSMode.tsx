@@ -3,8 +3,14 @@ import { RefreshCw, AlertCircle } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
+import RSSEnterOverlay from '../../components/rss/RSSEnterOverlay'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
-import { WORKBENCH_SUPPORT_PANEL_WIDTH } from '../../modules/workbench/chrome'
+import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
+  WORKBENCH_SUPPORT_PANEL_WIDTH,
+} from '../../modules/workbench/chrome'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 
@@ -46,7 +52,19 @@ interface RSSAnalysisJobState {
   updatedAt: string
 }
 
-export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
+interface RSSModeProps {
+  isActive?: boolean
+  isMotionSettled?: boolean
+  isTransitioning?: boolean
+  transitionDirection?: -1 | 1
+}
+
+export default function RSSMode({
+  isActive = true,
+  isMotionSettled = true,
+  isTransitioning = false,
+  transitionDirection = 1,
+}: RSSModeProps) {
   const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
   const setSelection = useRSSSession((state) => state.setSelection)
@@ -63,6 +81,7 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [backgroundWarning, setBackgroundWarning] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
   const [hasHydrated, setHasHydrated] = useState(false)
@@ -229,10 +248,10 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
   }, [hasHydrated, isActive, loadRSSData])
 
   const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
-    if (!window.electronAPI?.rss?.getItemAnalysisProgress) return false
+    if (!window.electronAPI?.rss?.getItemAnalysisProgress) return true
     if (itemIds.length === 0) {
       setAnalysisProgressMap({})
-      return false
+      return true
     }
 
     try {
@@ -247,11 +266,11 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
     }
   }, [])
 
-  const fetchAnalysisJobs = useCallback(async () => {
-    if (!window.electronAPI?.rss?.listItemAnalysisJobs) return
+  const fetchAnalysisJobs = useCallback(async (): Promise<boolean> => {
+    if (!window.electronAPI?.rss?.listItemAnalysisJobs) return true
     try {
       const result = await window.electronAPI.rss.listItemAnalysisJobs({ limit: 120 })
-      if (!result.success || !result.data) return
+      if (!result.success || !result.data) return false
       const jobs = result.data.map((job) => ({
         id: job.id,
         itemId: job.itemId,
@@ -266,8 +285,9 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
         updatedAt: job.updatedAt,
       }))
       setAnalysisJobs(jobs)
+      return true
     } catch {
-      // silent
+      return false
     }
   }, [])
 
@@ -278,7 +298,12 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
 
     const tick = async () => {
       const running = await fetchAnalysisProgress(visibleItemIds)
-      await fetchAnalysisJobs()
+      const jobsOk = await fetchAnalysisJobs()
+      if (!running || !jobsOk) {
+        setBackgroundWarning('RSS 后台同步失败，部分状态可能过期。')
+      } else {
+        setBackgroundWarning(null)
+      }
       if (disposed) return
       timer = setTimeout(tick, running ? 1400 : 9000)
     }
@@ -297,8 +322,9 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
       try {
         await window.electronAPI?.rss?.fetchAll()
         await loadRSSData()
+        setBackgroundWarning(null)
       } catch {
-        // silent fail on auto-refresh
+        setBackgroundWarning('RSS 自动刷新失败，稍后会再次尝试。')
       }
     }, AUTO_REFRESH_INTERVAL)
     return () => clearInterval(interval)
@@ -601,7 +627,12 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <div className="workbench-mode-root rss-mode-shell" style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}>
-      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+        }}
+      >
         <div
           className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
           style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}
@@ -645,7 +676,7 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
               onResumeAnalysisJob={handleResumeAnalysisJob}
               onDeleteAnalysisJob={handleDeleteAnalysisJob}
             />
-            {statusMessage && (
+            {(statusMessage || backgroundWarning) && (
               <div
                 className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
                 style={{
@@ -655,7 +686,7 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
                   boxShadow: 'var(--shadow-sm)',
                 }}
               >
-                {statusMessage}
+                {statusMessage || backgroundWarning}
               </div>
             )}
           </div>
@@ -668,6 +699,12 @@ export default function RSSMode({ isActive = true }: { isActive?: boolean }) {
               isActive={isActive}
             />
           )}
+
+          {/* RSS 进入骨架遮罩 */}
+          <RSSEnterOverlay
+            visible={isActive && isTransitioning && !isMotionSettled}
+            direction={transitionDirection}
+          />
         </div>
       </div>
 
