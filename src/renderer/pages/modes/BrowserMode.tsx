@@ -348,6 +348,41 @@ export default function BrowserMode({
             onRetry={() => void handleRetry()}
           />
 
+          {/* 浏览器过渡遮罩 - 动画期间或浏览器未准备好时显示 */}
+          {(!isMotionSettled || !isBrowserHostFullyVisible) && !shouldShowFreezeFrame && (
+            <div
+              className="browser-transition-mask"
+              style={{
+                position: 'absolute',
+                inset: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+                zIndex: 45,
+                pointerEvents: 'none',
+                borderRadius: 'var(--workbench-canvas-radius)',
+                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                overflow: 'hidden',
+              }}
+            >
+              {/* 骨架结构：与浏览器界面结构一致 */}
+              <div className="flex h-full flex-col">
+                {/* 进度条占位（如果加载中） */}
+                {activeTab?.loading && (
+                  <div className="h-0.5 w-full" style={{ background: 'var(--border-default)' }}>
+                    <div
+                      className="h-full rounded-r"
+                      style={{
+                        background: 'var(--color-blue)',
+                        width: '60%',
+                        animation: 'browserSkeletonProgress 1.5s ease-in-out infinite',
+                      }}
+                    />
+                  </div>
+                )}
+                {/* 内容区域占位 */}
+                <div className="flex-1" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }} />
+              </div>
+            </div>
+          )}
+
           {shouldShowStartupPlaceholder && (
             <div
               className="browser-surface-startup-mask"
