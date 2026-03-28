@@ -73,6 +73,7 @@ export default function BrowserMode({
     isElectron,
     contentRef,
     isActive: shouldPrepareBrowserHost,
+    isVisibleAllowed: isMotionSettled, // D方案：水平滚动动画期间禁止 BrowserView 显示
     hostVisibleRef,
     topInset: 0,
     sidebarVisible,

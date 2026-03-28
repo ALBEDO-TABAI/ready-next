@@ -6,6 +6,7 @@ interface UseBrowserViewBoundsParams {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
   isActive: boolean
+  isVisibleAllowed?: boolean // D方案：水平滚动动画期间设为 false
   hostVisibleRef: RefObject<boolean>
   topInset: number
   sidebarVisible: boolean
@@ -21,6 +22,7 @@ export function useBrowserViewBounds({
   isElectron,
   contentRef,
   isActive,
+  isVisibleAllowed = true, // 默认为 true，保持向后兼容
   hostVisibleRef,
   topInset,
   sidebarVisible,
@@ -69,6 +71,13 @@ export function useBrowserViewBounds({
   const startBoundsTracking = useCallback((durationMs = 420) => {
     if (!isElectron || !isActive) return
 
+    // D方案：水平滚动动画期间不进行 bounds tracking
+    // 防止 BrowserView 在滚动过程中更新位置造成"滑入"观感
+    if (!isVisibleAllowed) {
+      stopBoundsTracking()
+      return
+    }
+
     stopBoundsTracking()
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
 
@@ -90,7 +99,7 @@ export function useBrowserViewBounds({
     }
 
     boundsTrackingRafRef.current = requestAnimationFrame(tick)
-  }, [isActive, isElectron, sendBoundsImmediate, stopBoundsTracking])
+  }, [isActive, isElectron, isVisibleAllowed, sendBoundsImmediate, stopBoundsTracking])
 
   const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
     if (document.body.classList.contains('resizing')) {
@@ -108,6 +117,12 @@ export function useBrowserViewBounds({
     if (!isElectron) return
     if (!isActive) return
 
+    // D方案关键：水平滚动动画期间不允许显示 BrowserView
+    if (!isVisibleAllowed) {
+      window.electronAPI?.browser?.hideAll()
+      return
+    }
+
     const shouldShowBrowserView =
       !hasError && overlayLockCountRef.current === 0
 
@@ -118,7 +133,7 @@ export function useBrowserViewBounds({
 
     await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
     window.electronAPI?.browser?.showActive()
-  }, [hasError, hostVisibleRef, isActive, isElectron, sendBoundsImmediate])
+  }, [hasError, hostVisibleRef, isActive, isElectron, isVisibleAllowed, sendBoundsImmediate])
 
   useEffect(() => {
     const element = contentRef.current
