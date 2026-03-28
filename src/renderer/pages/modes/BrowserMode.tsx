@@ -196,10 +196,37 @@ export default function BrowserMode({
     sendBoundsImmediate,
   })
   const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
-  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (!isBrowserSurfaceReady || Boolean(freezeFrame))
+  // 关键修复：在切换动画期间（!isMotionSettled）或浏览器未准备好时，显示冻结帧
+  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (!isMotionSettled || !isBrowserSurfaceReady || Boolean(freezeFrame))
 
-  // Startup placeholder: show a neutral loading surface when browser runtime is hydrating
-  // and no freeze-frame is available yet. This prevents the "tag bar first, page later" perception.
+  // 监听离开浏览器模式前的截图请求
+  useEffect(() => {
+    if (!isElectron) return
+
+    const handleCaptureFreeze = () => {
+      void captureStableFrame()
+    }
+
+    window.addEventListener('ready:browser-capture-freeze', handleCaptureFreeze)
+    return () => {
+      window.removeEventListener('ready:browser-capture-freeze', handleCaptureFreeze)
+    }
+  }, [isElectron, captureStableFrame])
+
+  // 关键修复：在 isActive 变为 false 前（离开浏览器模式前）捕获截图
+  // 使用 useLayoutEffect 确保在 DOM 变化前执行
+  useLayoutEffect(() => {
+    if (!isElectron) return
+
+    // 只有当从 active 变为 inactive 时才捕获
+    if (previousShouldPrepareBrowserHostRef.current && !shouldPrepareBrowserHost) {
+      // 立即捕获截图，此时 BrowserView 还在显示
+      void captureStableFrame()
+    }
+    previousShouldPrepareBrowserHostRef.current = shouldPrepareBrowserHost
+  }, [captureStableFrame, isElectron, shouldPrepareBrowserHost])
+
+  // Startup placeholder: 有过冻结帧时显示冻结帧，而不是 loading
   const shouldShowStartupPlaceholder =
     !activeTab?.error &&
     !shouldShowFreezeFrame &&
@@ -212,22 +239,18 @@ export default function BrowserMode({
     }
   }, [])
 
-  useLayoutEffect(() => {
-    if (previousShouldPrepareBrowserHostRef.current && !shouldPrepareBrowserHost) {
-      void captureStableFrame()
-    }
-    previousShouldPrepareBrowserHostRef.current = shouldPrepareBrowserHost
-  }, [captureStableFrame, shouldPrepareBrowserHost])
-
   useEffect(() => {
     if (!isElectron) return
 
     // D方案关键修复：水平滚动动画期间强制隐藏 BrowserView
     // 防止 BrowserView 看起来"从文件管理面板上方飘进来"
     if (!isMotionSettled) {
-      void window.electronAPI?.browser?.hideAll?.()
+      // 关键：先截图保存当前画面，等待截图完成后再隐藏 BrowserView
+      void captureStableFrame().then(() => {
+        void window.electronAPI?.browser?.hideAll?.()
+      })
     }
-  }, [isElectron, isMotionSettled])
+  }, [isElectron, isMotionSettled, captureStableFrame])
 
   useEffect(() => {
     if (!shouldRevealBrowserHost || !browserRuntimeReady) {
@@ -359,8 +382,8 @@ export default function BrowserMode({
             onRetry={() => void handleRetry()}
           />
 
-          {/* 浏览器过渡遮罩 - 动画期间或浏览器未准备好时显示 */}
-          {(!isMotionSettled || !isBrowserHostFullyVisible) && !shouldShowFreezeFrame && (
+          {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示（有过冻结帧时不显示，避免遮挡） */}
+          {!shouldShowFreezeFrame && !isBrowserHostFullyVisible && (
             <div
               className="browser-transition-mask"
               style={{
@@ -373,7 +396,7 @@ export default function BrowserMode({
                 overflow: 'hidden',
               }}
             >
-              {/* 骨架结构：与浏览器界面结构一致 */}
+              {/* 骨架结构 */}
               <div className="flex h-full flex-col">
                 {/* 进度条占位（如果加载中） */}
                 {activeTab?.loading && (

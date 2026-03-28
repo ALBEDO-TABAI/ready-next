@@ -85,22 +85,12 @@ export function useBrowserResizeFreeze({
   const captureSnapshot = useCallback(async () => {
     if (!isElectron || !surfaceRef.current) return null
 
-    await sendBoundsImmediate({ forceExact: true })
-    const rect = surfaceRef.current.getBoundingClientRect()
-    const width = Math.round(rect.width)
-    const height = Math.round(rect.height)
-    if (width <= 0 || height <= 0) return null
-
-    const result = await window.electronAPI?.browser?.captureWindowSnapshot({
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
-      width,
-      height,
-    })
+    // 使用 captureViewportSnapshot 捕获 BrowserView，而不是主窗口
+    const result = await window.electronAPI?.browser?.captureViewportSnapshot?.()
     if (!result?.success || !result.data) return null
 
     return { src: `data:image/png;base64,${result.data}` }
-  }, [isElectron, sendBoundsImmediate, surfaceRef])
+  }, [isElectron, surfaceRef])
 
   const recaptureFreezeFrame = useCallback(async (sessionId: number) => {
     if (!isElectron || !isActive || !browserRuntimeReady || !surfaceRef.current) return
@@ -114,13 +104,13 @@ export function useBrowserResizeFreeze({
   }, [browserRuntimeReady, captureSnapshot, isActive, isElectron, setCachedFreezeFrameForTab, setFreezeFrame, surfaceRef])
 
   const captureStableFrame = useCallback(async () => {
-    if (!isElectron || !browserRuntimeReady || !surfaceRef.current) return
+    if (!isElectron || !surfaceRef.current) return
 
     const nextFrame = await captureSnapshot()
     if (!nextFrame) return
 
     setCachedFreezeFrameForTab(activeTabIdRef.current, nextFrame)
-  }, [browserRuntimeReady, captureSnapshot, isElectron, setCachedFreezeFrameForTab, surfaceRef])
+  }, [captureSnapshot, isElectron, setCachedFreezeFrameForTab, surfaceRef])
 
   const handleResizeStart = useCallback(() => {
     resizingRef.current = true
@@ -195,8 +185,10 @@ export function useBrowserResizeFreeze({
 
   useEffect(() => {
     if (isElectron && isActive && browserRuntimeReady) return
-    resetFreeze()
-  }, [browserRuntimeReady, isActive, isElectron, resetFreeze])
+    // 只清空临时 freezeFrame，不清空 cachedFreezeFrame
+    // cachedFreezeFrame 用于模式切换时的冻结帧显示
+    setFreezeFrame(null)
+  }, [browserRuntimeReady, isActive, isElectron, setFreezeFrame])
 
   useEffect(() => {
     if (activeTabId) return
