@@ -15,6 +15,11 @@ test('icon rail slider reuses the same motion profile as the workbench mode slid
   assert.match(modeTabs, /from '\.\.\/\.\.\/modules\/workbench\/slider-motion'/)
   assert.match(modeTabs, /WORKBENCH_SLIDER_SPRING/)
   assert.match(modeTabs, /WORKBENCH_SLIDER_FRAME_STEP/)
+  assert.match(modeTabs, /WORKBENCH_SLIDER_CLICK_DURATION_MS/)
+  assert.match(modeTabs, /easeWorkbenchSliderClick/)
+  assert.match(modeTabs, /const startClickAnimation = useCallback\(\(\) => \{/)
+  assert.match(modeTabs, /useEffect\(\(\) => \{[\s\S]*startClickAnimation\(\)/)
+  assert.match(modeTabs, /handleMouseUp[\s\S]*startSpringAnimation\(\)/)
 
   assert.match(iconRailGroup, /from '\.\.\/\.\.\/modules\/workbench\/slider-motion'/)
   assert.match(iconRailGroup, /WORKBENCH_SLIDER_MOTION_TRANSITION/)
@@ -24,4 +29,6 @@ test('icon rail slider reuses the same motion profile as the workbench mode slid
   assert.match(motionProfile, /damping:\s*40/)
   assert.match(motionProfile, /mass:\s*1\.8/)
   assert.match(motionProfile, /WORKBENCH_SLIDER_FRAME_STEP = 0\.016/)
+  assert.match(motionProfile, /WORKBENCH_SLIDER_CLICK_DURATION_MS = 200/)
+  assert.match(motionProfile, /export function easeWorkbenchSliderClick\(progress: number\)/)
 })

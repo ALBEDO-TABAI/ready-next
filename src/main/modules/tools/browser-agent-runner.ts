@@ -2,6 +2,7 @@ import { appendFileSync } from 'fs'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { rememberBrowserWorkflowState } from '../agent-control/session-continuity'
 import { executeBrowserTool } from './browser-tools'
+import { getLogPath } from '../../utils/platform'
 
 type BrowserAgentSessionState =
   | 'queued'
@@ -219,7 +220,7 @@ interface BrowserAgentRunnerOptions {
   emitToolEvent?: (type: 'tool_use' | 'tool_result', text: string) => void
 }
 
-const LOG = '/tmp/ready-tools.log'
+const LOG = getLogPath('ready-tools.log')
 const STAGE_ATTEMPTS: Record<'ensure_upload' | 'ensure_prompt' | 'submit' | 'final_reconcile' | 'recover', number> = {
   ensure_upload: 2,
   ensure_prompt: 2,

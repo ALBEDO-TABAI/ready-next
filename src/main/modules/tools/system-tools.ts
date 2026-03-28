@@ -1,9 +1,11 @@
 import { appendFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { getLogPath } from '../../utils/platform'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 
 const execFileAsync = promisify(execFile)
-const LOG = '/tmp/ready-system-tools.log'
+const LOG = getLogPath('ready-system-tools.log')
 
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
@@ -25,6 +27,17 @@ interface SystemToolDef {
 
 const SYSTEM_TOOLS: SystemToolDef[] = [
   {
+    name: 'system_run_embedded_python',
+    description: '使用 Ready 内置的 skills runtime Python 执行代码或脚本。优先用于手动控制 skill 阶段、检查文件或运行辅助 Python 逻辑。',
+    params: [
+      { name: 'code', type: 'string', description: '可选，直接执行的 Python 代码', required: false },
+      { name: 'scriptPath', type: 'string', description: '可选，要执行的 Python 脚本绝对路径', required: false },
+      { name: 'args', type: 'array', description: '可选，脚本参数数组', required: false },
+      { name: 'cwd', type: 'string', description: '可选，执行目录', required: false },
+      { name: 'timeoutMs', type: 'number', description: '可选，超时时间毫秒', required: false },
+    ],
+  },
+  {
     name: 'system_run_openclaw',
     description: '执行本地 openclaw 配对/插件命令。当前仅允许 openclaw pairing 子命令，用于批准飞书等插件配对请求。',
     params: [
@@ -37,6 +50,12 @@ function toSchemaParam(param: ToolParam): Record<string, unknown> {
   const schema: Record<string, unknown> = {
     type: param.type,
     description: param.description,
+  }
+  if (param.type === 'array') {
+    schema.items = { type: 'string' }
+  }
+  if (param.type === 'object') {
+    schema.additionalProperties = true
   }
   if (param.enum) schema.enum = param.enum
   return schema
@@ -112,6 +131,25 @@ function validateOpenclawArgs(args: string[]): void {
 }
 
 export async function executeSystemTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+  if (toolName === 'system_run_embedded_python') {
+    const manager = getSkillsRuntimeManager()
+    const result = await manager.runEmbeddedPython({
+      code: typeof args.code === 'string' ? args.code : undefined,
+      scriptPath: typeof args.scriptPath === 'string' ? args.scriptPath : undefined,
+      args: Array.isArray(args.args) ? args.args.map((item) => String(item)) : undefined,
+      cwd: typeof args.cwd === 'string' ? args.cwd : undefined,
+      timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+    })
+    if (!result.success) {
+      return `Embedded Python failed.\n${[result.error, result.stderr, result.stdout].filter(Boolean).join('\n')}`.trim()
+    }
+    return [
+      result.command.length > 0 ? `Command: ${result.command.join(' ')}` : '',
+      result.stdout ? `STDOUT:\n${result.stdout}` : '',
+      result.stderr ? `STDERR:\n${result.stderr}` : '',
+    ].filter(Boolean).join('\n\n') || 'Embedded Python completed.'
+  }
+
   if (toolName !== 'system_run_openclaw') {
     return `Unknown system tool: ${toolName}`
   }

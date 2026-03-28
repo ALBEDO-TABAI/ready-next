@@ -117,7 +117,9 @@ export function getDroppedFileKind(file: Pick<DroppedFile, 'ext'>): DroppedFileK
 }
 
 export function toLocalFileUrl(filePath: string): string {
-  return `local-file://${encodeURI(filePath).replace(/#/g, '%23')}`
+  // Normalize Windows backslashes to forward slashes
+  const normalized = filePath.replace(/\\/g, '/')
+  return `local-file:///${encodeURI(normalized).replace(/#/g, '%23')}`
 }
 
 export function toFileUrl(filePath: string): string {

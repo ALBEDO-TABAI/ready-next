@@ -416,12 +416,10 @@ export default function TaskPanel() {
 
         <div className="flex items-center" style={{ gap: 6 }}>
           <div
-            className="flex-1 flex items-center"
+            className="ready-input-shell flex-1 flex items-center"
             style={{
               borderRadius: 10,
-              border: '1px solid var(--border-input)',
               padding: '6px 10px',
-              background: 'var(--bg-primary)',
             }}
           >
             <input
@@ -430,7 +428,7 @@ export default function TaskPanel() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="给 Agent 发指令..."
-              className="flex-1 bg-transparent border-none outline-none"
+              className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
               style={{ fontSize: 11, color: 'var(--text-body)' }}
             />
           </div>

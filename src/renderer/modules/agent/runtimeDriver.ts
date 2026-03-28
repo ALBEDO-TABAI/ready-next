@@ -3,6 +3,7 @@ import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageCo
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
+import { extractSkillCommandFromText, runSkillCommand } from './commandHandlers'
 
 interface AgentStoreLike {
   getState: () => any
@@ -64,7 +65,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     return null
   }
 
-  function activateWorkbenchMode(mode: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar'): void {
+  function activateWorkbenchMode(mode: 'browser' | 'document' | 'rss' | 'calendar'): void {
     const modeStore = useMode.getState()
     modeStore.setWorkbenchMode(mode)
     modeStore.setReadySubMode(mode)
@@ -77,6 +78,44 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
     const content = currentMessage?.content || runState.responseBuffer || ''
     await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope)
+  }
+
+  async function maybeAutoExecuteAssistantSkillCommand(scopeId: string, runState: ScopeRunState | null): Promise<void> {
+    if (!runState?.responseMessageId) return
+    const state = store.getState()
+    if (state.currentScopeId !== scopeId) return
+    const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
+    const content = String(currentMessage?.content || runState.responseBuffer || '')
+    const command = extractSkillCommandFromText(content)
+    if (!command) return
+
+    const responseIndex = state.messages.findIndex((item: AgentMessage) => item.id === runState.responseMessageId)
+    const sourceMessages = responseIndex >= 0 ? state.messages.slice(0, responseIndex) : state.messages
+    const latestUserWithAttachments = [...sourceMessages]
+      .reverse()
+      .find((item: AgentMessage) => item.type === 'user' && Array.isArray(item.attachments) && item.attachments.length > 0)
+    const attachments = latestUserWithAttachments?.attachments || []
+
+    const result = await runSkillCommand(command, attachments)
+    if (!result.handled) return
+
+    const appended = `\n\n[系统已自动执行技能命令]\n${result.text}`
+    store.setState((current: any) => ({
+      messages: current.messages.map((item: AgentMessage) =>
+        item.id === runState.responseMessageId ? { ...item, content: `${item.content}${appended}` } : item,
+      ),
+      scopeRunStates: {
+        ...current.scopeRunStates,
+        [scopeId]: current.scopeRunStates[scopeId]
+          ? {
+            ...current.scopeRunStates[scopeId],
+            responseBuffer: `${current.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
+            latestText: result.text.slice(-500),
+            updatedAt: new Date().toISOString(),
+          }
+          : current.scopeRunStates[scopeId],
+      },
+    }))
   }
 
   function initAgentListeners(): () => void {
@@ -92,17 +131,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
       if (data.type === 'done') {
         const runState = store.getState().scopeRunStates[scopeId] || null
-        void persistAssistantMessageForRun(scopeId, runState)
-        if (store.getState().currentScopeId === scopeId) {
-          store.setState({
-            streamingMessageId: null,
-            streamingRequestId: null,
-            ...syncActiveScopeRunAliases({
-              currentScopeId: scopeId,
-              scopeRunStates: store.getState().scopeRunStates,
-            }),
-          })
-        }
+        void (async () => {
+          await maybeAutoExecuteAssistantSkillCommand(scopeId, runState)
+          await persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+          if (store.getState().currentScopeId === scopeId) {
+            store.setState({
+              streamingMessageId: null,
+              streamingRequestId: null,
+              ...syncActiveScopeRunAliases({
+                currentScopeId: scopeId,
+                scopeRunStates: store.getState().scopeRunStates,
+              }),
+            })
+          }
+        })()
         return
       }
 

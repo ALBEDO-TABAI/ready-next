@@ -2,22 +2,36 @@ import { app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { join, delimiter } from 'path'
 import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs'
 import { getDatabase } from '../database'
+import { getWhichCommand } from '../../utils/platform'
 import { EMBEDDED_SKILLS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
+import type {
+  ExecutionBlocker,
+  SkillActionDefinition,
+  SkillActionResult,
+  SkillDefinition,
+  SkillExecutionDetail,
+  SkillExecutionMode,
+  SkillExecutionState,
+  SkillInputValue,
+  SkillParamDefinition,
+  SkillRuntimeKind,
+  SkillSource,
+} from '../../../shared/skill-execution-types'
 import {
   type RegisteredCustomSkill,
-  type SkillActionDefinition,
-  type SkillParamDefinition,
-  type SkillRuntimeKind,
-  type SkillSource,
   getManagedCustomSkill,
   importCustomSkillFolder,
   listManagedCustomSkills,
   removeManagedCustomSkill,
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
+import { SkillLoader } from './skill-loader'
+import { ExecutionStateStore } from './execution-state-store'
+import { ExecutionCoordinator } from './execution-coordinator'
+import { isWorkflowStarterAction } from './guardrails'
 
 const execFileAsync = promisify(execFile)
 
@@ -86,6 +100,7 @@ export interface SkillState {
   manifestValid: boolean
   defaultAction?: string
   actions: SkillActionDefinition[]
+  executionMode: SkillExecutionMode
   managedPath?: string
   sourcePath?: string
 }
@@ -121,6 +136,9 @@ export interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
+  mode?: 'direct' | 'workflow'
+  execution?: SkillExecutionDetail | null
+  blocker?: ExecutionBlocker | null
 }
 
 export interface SkillRunRequest {
@@ -131,6 +149,8 @@ export interface SkillRunRequest {
   triggerType?: SkillTriggerType
   scheduleId?: string
   env?: Record<string, string>
+  sessionId?: string
+  executionMode?: 'auto' | 'workflow' | 'direct'
 }
 
 interface SkillJobRow {
@@ -167,6 +187,7 @@ interface SkillScheduleRow {
 
 interface DatabaseStatement {
   run(...params: unknown[]): unknown
+  get<T = unknown>(...params: unknown[]): T | undefined
   all<T = unknown>(...params: unknown[]): T[]
 }
 
@@ -269,6 +290,9 @@ export class SkillsRuntimeManager {
   private readonly modelscopeCache: string
   private readonly pipCache: string
   private readonly outputsRoot: string
+  private loader: SkillLoader | null = null
+  private executionStore: ExecutionStateStore | null = null
+  private executionCoordinator: ExecutionCoordinator | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
@@ -286,160 +310,41 @@ export class SkillsRuntimeManager {
     this.startScheduler()
   }
 
-  private getEmbeddedDefaultAction(skillId: EmbeddedSkillId): string {
-    switch (skillId) {
-      case 'video-expert-analyzer':
-        return 'video_expert_pipeline'
-      case 'video-copy-analyzer':
-        return 'video_copy_analyze'
-      case 'lets-go-rss':
-        return 'rss_update'
-      default:
-        return ''
+  private getSkillLoader(): SkillLoader {
+    if (!this.loader) {
+      this.loader = new SkillLoader(this.resolveEmbeddedSkillsRoot(), this.customSkillsRoot)
     }
+    return this.loader
   }
 
-  private getEmbeddedActions(skillId: EmbeddedSkillId): SkillActionDefinition[] {
-    switch (skillId) {
-      case 'video-expert-analyzer':
-        return [
-          {
-            name: 'video_expert_pipeline',
-            description: '运行 Video Expert Analyzer 主流程：下载视频、分镜、提取字幕并生成分析模板。',
-            runtime: 'python',
-            entry: 'scripts/pipeline_enhanced.py',
-            timeoutMs: 60 * 60 * 1000,
-            params: [
-              { name: 'url', type: 'string', description: '视频 URL（B站/YouTube/抖音等）', required: true },
-              { name: 'outputDir', type: 'string', description: '可选输出目录', required: false },
-              { name: 'sceneThreshold', type: 'number', description: '可选分镜阈值', required: false },
-              { name: 'bestThreshold', type: 'number', description: '可选精选片段阈值', required: false },
-            ],
-          },
-          {
-            name: 'video_expert_ai_analyze',
-            description: '对 scene_scores.json 执行 AI 评分（agent/api）。',
-            runtime: 'python',
-            entry: 'scripts/ai_analyzer.py',
-            timeoutMs: 30 * 60 * 1000,
-            params: [
-              { name: 'sceneScoresPath', type: 'string', description: 'scene_scores.json 绝对路径', required: true },
-              { name: 'mode', type: 'string', description: '评分模式', required: false, enum: ['agent', 'api'] },
-            ],
-          },
-        ]
-      case 'video-copy-analyzer':
-        return [
-          {
-            name: 'video_copy_analyze',
-            description: '运行 Video Copy Analyzer，生成字幕与文字稿。',
-            runtime: 'python',
-            entry: 'main.py',
-            timeoutMs: 60 * 60 * 1000,
-            params: [
-              { name: 'input', type: 'string', description: '视频 URL 或本地文件路径', required: true },
-              { name: 'outputDir', type: 'string', description: '可选输出目录', required: false },
-              { name: 'model', type: 'string', description: 'whisper 模型 tiny/base/small/medium/large', required: false },
-              { name: 'language', type: 'string', description: '语言 zh/en/auto', required: false },
-            ],
-          },
-        ]
-      case 'lets-go-rss':
-        return [
-          {
-            name: 'rss_add',
-            description: '向 Lets Go RSS 添加一个订阅源 URL。',
-            runtime: 'python',
-            entry: 'scripts/lets_go_rss.py',
-            timeoutMs: 5 * 60 * 1000,
-            params: [{ name: 'url', type: 'string', description: '订阅源或平台账号 URL', required: true }],
-          },
-          {
-            name: 'rss_update',
-            description: '执行 Lets Go RSS 更新任务（支持 digest/no_llm）。',
-            runtime: 'python',
-            entry: 'scripts/lets_go_rss.py',
-            timeoutMs: 15 * 60 * 1000,
-            params: [
-              { name: 'digest', type: 'boolean', description: '摘要模式（每账号 1 条）', required: false },
-              { name: 'noLlm', type: 'boolean', description: '禁用 LLM 分类', required: false },
-            ],
-          },
-          {
-            name: 'rss_status',
-            description: '读取 Lets Go RSS 最近一次缓存报告。',
-            runtime: 'python',
-            entry: 'scripts/lets_go_rss.py',
-            timeoutMs: 60_000,
-            params: [],
-          },
-          {
-            name: 'rss_list',
-            description: '列出 Lets Go RSS 当前订阅列表。',
-            runtime: 'python',
-            entry: 'scripts/lets_go_rss.py',
-            timeoutMs: 60_000,
-            params: [],
-          },
-          {
-            name: 'rss_stats',
-            description: '查看 Lets Go RSS 订阅统计。',
-            runtime: 'python',
-            entry: 'scripts/lets_go_rss.py',
-            timeoutMs: 60_000,
-            params: [],
-          },
-        ]
-      default:
-        return []
-    }
-  }
-
-  private toEmbeddedSkillState(skill: EmbeddedSkillManifest): SkillState {
-    const skillPath = this.getSkillRuntimePath(skill.id)
+  private toSkillState(definition: SkillDefinition): SkillState {
+    const skillPath = definition.source === 'embedded'
+      ? this.getSkillRuntimePath(definition.id)
+      : (definition.managedPath || definition.sourcePath)
     const statePath = getInstallStatePath(skillPath)
     return {
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-      version: skill.version,
+      id: definition.id,
+      name: definition.name,
+      description: definition.description,
+      version: definition.version,
       installed: existsSync(statePath),
       installStatePath: statePath,
-      source: 'embedded',
-      manifestValid: true,
-      defaultAction: this.getEmbeddedDefaultAction(skill.id),
-      actions: this.getEmbeddedActions(skill.id),
-      managedPath: skillPath,
+      source: definition.source,
+      manifestValid: definition.manifestValid,
+      defaultAction: definition.defaultAction,
+      actions: definition.actions,
+      executionMode: definition.executionMode,
+      managedPath: definition.source === 'embedded' ? skillPath : definition.managedPath,
+      sourcePath: definition.sourcePath,
     }
-  }
-
-  private toCustomSkillState(skill: RegisteredCustomSkill): SkillState {
-    return {
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-      version: skill.version,
-      installed: true,
-      installStatePath: getInstallStatePath(skill.managedPath),
-      source: 'custom',
-      manifestValid: true,
-      defaultAction: skill.defaultAction,
-      actions: skill.actions,
-      managedPath: skill.managedPath,
-      sourcePath: skill.sourcePath,
-    }
-  }
-
-  private listCustomSkillStates(): SkillState[] {
-    this.ensureRuntimeDirs()
-    return listManagedCustomSkills(this.customSkillsRoot).map((skill) => this.toCustomSkillState(skill))
   }
 
   listSkills(): SkillState[] {
     this.ensureRuntimeDirs()
+    const loader = this.getSkillLoader()
     return [
-      ...EMBEDDED_SKILLS.map((skill) => this.toEmbeddedSkillState(skill)),
-      ...this.listCustomSkillStates(),
+      ...loader.listEmbeddedSkills().map((definition) => this.toSkillState(definition)),
+      ...loader.listCustomSkills().map((definition) => this.toSkillState(definition)),
     ]
   }
 
@@ -454,10 +359,150 @@ export class SkillsRuntimeManager {
     }
   }
 
+  private getExecutionStore(): ExecutionStateStore {
+    if (!this.executionStore) {
+      const db = this.getRawDatabase()
+      if (!db) {
+        throw new Error('Database not available')
+      }
+      this.executionStore = new ExecutionStateStore(db)
+    }
+    return this.executionStore
+  }
+
+  private getExecutionCoordinator(): ExecutionCoordinator {
+    if (!this.executionCoordinator) {
+      this.executionCoordinator = new ExecutionCoordinator(
+        this.getExecutionStore(),
+        {
+          executeRuntimeAction: ({ definition, actionName, step, args, sessionId }) =>
+            this.executeWorkflowRuntimeAction({
+              definition,
+              actionName,
+              stepId: step.id,
+              params: args,
+              sessionId,
+            }),
+        },
+        this.outputsRoot,
+      )
+    }
+    return this.executionCoordinator
+  }
+
+  listExecutions(limit = 30, sessionId?: string, activeOnly = false): SkillExecutionDetail[] {
+    this.ensureRuntimeDirs()
+    return this.getExecutionStore()
+      .listExecutions(limit, sessionId, activeOnly)
+      .map((item) => this.getExecutionStore().getExecution(item.id))
+      .filter((item): item is SkillExecutionDetail => Boolean(item))
+  }
+
+  getExecution(executionId: string): SkillExecutionDetail | null {
+    this.ensureRuntimeDirs()
+    return this.getExecutionStore().getExecution(executionId)
+  }
+
+  async submitExecutionInput(executionId: string, inputs: Record<string, SkillInputValue>): Promise<SkillExecutionDetail> {
+    this.ensureRuntimeDirs()
+    return this.getExecutionCoordinator().submitInput(executionId, inputs)
+  }
+
+  async submitExecutionConfirmation(executionId: string, stepId: string, confirmed: boolean): Promise<SkillExecutionDetail> {
+    this.ensureRuntimeDirs()
+    return this.getExecutionCoordinator().submitConfirmation(executionId, stepId, confirmed)
+  }
+
+  async submitExecutionAgentResult(params: {
+    executionId: string
+    stepId: string
+    textContent?: string
+    outputs?: Record<string, SkillInputValue>
+  }): Promise<SkillExecutionDetail> {
+    this.ensureRuntimeDirs()
+    return this.getExecutionCoordinator().submitAgentResult(params)
+  }
+
+  async restartExecutionFromStep(
+    executionId: string,
+    stepId: string,
+    inputs?: Record<string, SkillInputValue>,
+  ): Promise<SkillExecutionDetail> {
+    this.ensureRuntimeDirs()
+    return this.getExecutionCoordinator().restartFromStep(executionId, stepId, inputs)
+  }
+
+  cancelExecution(executionId: string): SkillExecutionDetail | null {
+    this.ensureRuntimeDirs()
+    return this.getExecutionCoordinator().cancelExecution(executionId)
+  }
+
+  async runEmbeddedPython(params: {
+    code?: string
+    scriptPath?: string
+    args?: string[]
+    cwd?: string
+    timeoutMs?: number
+  }): Promise<{ success: boolean; stdout: string; stderr: string; command: string[]; error?: string }> {
+    this.ensureRuntimeDirs()
+    const venvPython = await this.ensurePythonVenv()
+    let scriptPath = params.scriptPath || ''
+    if (!scriptPath) {
+      const code = String(params.code || '').trim()
+      if (!code) {
+        return { success: false, stdout: '', stderr: '', command: [], error: 'Missing code or scriptPath' }
+      }
+      const scriptDir = join(this.runtimeRoot, 'tmp-python')
+      mkdirSync(scriptDir, { recursive: true })
+      scriptPath = join(scriptDir, `ready-embedded-${randomUUID()}.py`)
+      writeFileSync(scriptPath, `${code}\n`, 'utf-8')
+    }
+    const command = [venvPython, scriptPath, ...((params.args || []).map((item) => String(item)))]
+    try {
+      const { stdout, stderr } = await execFileAsync(venvPython, [scriptPath, ...((params.args || []).map((item) => String(item)))], {
+        cwd: params.cwd || this.runtimeRoot,
+        timeout: Math.max(1_000, params.timeoutMs || DEFAULT_TIMEOUT_MS),
+        maxBuffer: MAX_COMMAND_BUFFER,
+        env: this.getBaseEnv(),
+      })
+      return {
+        success: true,
+        stdout: truncateOutput(stdout || ''),
+        stderr: truncateOutput(stderr || ''),
+        command,
+      }
+    } catch (error) {
+      const err = error as Error & { stdout?: string; stderr?: string }
+      return {
+        success: false,
+        stdout: truncateOutput(err.stdout || ''),
+        stderr: truncateOutput(err.stderr || ''),
+        command,
+        error: err.message,
+      }
+    }
+  }
+
   importCustomSkill(sourcePath: string): SkillState {
     this.ensureRuntimeDirs()
     const record = importCustomSkillFolder(sourcePath, this.customSkillsRoot)
-    return this.toCustomSkillState(record)
+    const definition = this.getSkillLoader().loadSkill(record.id, record.managedPath)
+    return this.toSkillState(definition || {
+      id: record.id,
+      name: record.name,
+      description: record.description,
+      version: record.version,
+      source: 'custom',
+      sourcePath: record.sourcePath,
+      managedPath: record.managedPath,
+      manifestPath: record.manifestPath,
+      requirementsFile: record.requirementsFile,
+      defaultAction: record.defaultAction,
+      actions: record.actions,
+      executionMode: record.execution?.mode || 'direct',
+      workflow: undefined,
+      manifestValid: true,
+    })
   }
 
   removeCustomSkill(skillId: string): { removed: boolean } {
@@ -468,7 +513,23 @@ export class SkillsRuntimeManager {
   updateCustomSkillDescription(skillId: string, description: string): SkillState {
     this.ensureRuntimeDirs()
     const record = updateManagedCustomSkillDescription(this.customSkillsRoot, skillId, description)
-    return this.toCustomSkillState(record)
+    const definition = this.getSkillLoader().loadSkill(record.id, record.managedPath)
+    return this.toSkillState(definition || {
+      id: record.id,
+      name: record.name,
+      description: record.description,
+      version: record.version,
+      source: 'custom',
+      sourcePath: record.sourcePath,
+      managedPath: record.managedPath,
+      manifestPath: record.manifestPath,
+      requirementsFile: record.requirementsFile,
+      defaultAction: record.defaultAction,
+      actions: record.actions,
+      executionMode: record.execution?.mode || 'direct',
+      workflow: undefined,
+      manifestValid: true,
+    })
   }
 
   async ensureSkillInstalled(skillId: SkillId, force = false): Promise<SkillInstallResult> {
@@ -499,202 +560,47 @@ export class SkillsRuntimeManager {
       return result
     }
 
-    const manifest = getEmbeddedSkillManifest(request.skillId)
-    if (!manifest) {
-      const customSkill = getManagedCustomSkill(this.customSkillsRoot, request.skillId)
-      if (!customSkill) {
-        return finish({
-          success: false,
-          skillId: request.skillId,
-          action: request.action,
-          stdout: '',
-          stderr: '',
-          command: [],
-          error: `Unknown skill: ${request.skillId}`,
-        })
+    try {
+      const resolved = await this.resolveSkillForExecution(request.skillId)
+      if (!resolved) {
+        return finish(this.invalidParams(request.skillId, request.action, `Unknown skill: ${request.skillId}`))
       }
 
-      const action = customSkill.actions.find((item) => item.name === request.action)
+      const action = resolved.definition.actions.find((item) => item.name === request.action)
       if (!action) {
-        return finish(this.invalidParams(customSkill.id, request.action, `Unknown action: ${request.action}`))
+        return finish(this.invalidParams(resolved.definition.id, request.action, `Unknown action: ${request.action}`))
       }
 
-      const installResult = await this.ensureSkillInstalled(customSkill.id)
-      if (!installResult.success || !installResult.skillPath) {
-        return finish({
-          success: false,
-          skillId: customSkill.id,
-          action: request.action,
-          stdout: '',
-          stderr: '',
-          command: [],
-          error: installResult.error || 'Skill installation failed',
+      const shouldStartWorkflow =
+        resolved.definition.executionMode === 'workflow' &&
+        isWorkflowStarterAction(resolved.definition, request.action) &&
+        request.executionMode !== 'direct' &&
+        (request.executionMode === 'workflow' || request.executionMode === 'auto' || request.executionMode === undefined)
+
+      if (shouldStartWorkflow) {
+        const execution = await this.getExecutionCoordinator().startExecution({
+          definition: resolved.definition,
+          entryAction: request.action,
+          inputs: (request.params || {}) as Record<string, SkillInputValue>,
+          sessionId: request.sessionId || null,
         })
+        return finish(this.toWorkflowRunResult(resolved.definition.id, request.action, execution))
       }
 
-      return finish(await this.runCustomSkillAction(
-        customSkill,
+      return finish(await this.runDefinitionActionDirect(
+        resolved.definition,
         action,
         request.params || {},
         Math.max(3_000, request.timeoutMs || action.timeoutMs || DEFAULT_TIMEOUT_MS),
         request.env,
-        installResult.venvPython,
+        resolved.installResult.venvPython,
       ))
-    }
-
-    const installResult = await this.ensureSkillInstalled(manifest.id)
-    if (!installResult.success || !installResult.skillPath || !installResult.venvPython) {
-      return finish({
-        success: false,
-        skillId: manifest.id,
-        action: request.action,
-        stdout: '',
-        stderr: '',
-        command: [],
-        error: installResult.error || 'Skill installation failed',
-      })
-    }
-    this.ensureSkillCompatibilityFiles(manifest.id, installResult.skillPath)
-
-    const params = request.params || {}
-    const envOverrides = request.env
-    const timeoutMs = Math.max(3_000, request.timeoutMs || DEFAULT_TIMEOUT_MS)
-
-    switch (request.action) {
-      case 'video_expert_pipeline': {
-        const url = asString(params.url)
-        if (!url) return finish(this.invalidParams(manifest.id, request.action, 'params.url is required'))
-        const outputDir = this.resolveOutputDir(asString(params.outputDir), manifest.id)
-        const args = [url, '-o', outputDir]
-        const sceneThreshold = asNumber(params.sceneThreshold)
-        const bestThreshold = asNumber(params.bestThreshold)
-        if (sceneThreshold !== null) args.push('--scene-threshold', String(sceneThreshold))
-        if (bestThreshold !== null) args.push('--best-threshold', String(bestThreshold))
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/pipeline_enhanced.py',
-            args,
-            timeoutMs,
-            outputDir,
-            envOverrides,
-          )
-        )
-      }
-
-      case 'video_expert_ai_analyze': {
-        const sceneScoresPath = asString(params.sceneScoresPath)
-        if (!sceneScoresPath) return finish(this.invalidParams(manifest.id, request.action, 'params.sceneScoresPath is required'))
-        const mode = asString(params.mode) || 'agent'
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/ai_analyzer.py',
-            [sceneScoresPath, '--mode', mode],
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-      }
-
-      case 'video_copy_analyze': {
-        const input = asString(params.input)
-        if (!input) return finish(this.invalidParams(manifest.id, request.action, 'params.input is required'))
-        const outputDir = this.resolveOutputDir(asString(params.outputDir), manifest.id)
-        const model = asString(params.model) || 'medium'
-        const language = asString(params.language) || 'auto'
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'main.py',
-            [input, outputDir, model, language],
-            timeoutMs,
-            outputDir,
-            envOverrides,
-          )
-        )
-      }
-
-      case 'rss_add': {
-        const url = asString(params.url)
-        if (!url) return finish(this.invalidParams(manifest.id, request.action, 'params.url is required'))
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/lets_go_rss.py',
-            ['--add', url, '--skip-setup'],
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-      }
-
-      case 'rss_update': {
-        const digest = asBoolean(params.digest) ?? true
-        const noLlm = asBoolean(params.noLlm) ?? true
-        const args = ['--update', '--skip-setup']
-        if (digest) args.push('--digest')
-        if (noLlm) args.push('--no-llm')
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/lets_go_rss.py',
-            args,
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-      }
-
-      case 'rss_status':
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/lets_go_rss.py',
-            ['--status'],
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-
-      case 'rss_list':
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/lets_go_rss.py',
-            ['--list', '--skip-setup'],
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-
-      case 'rss_stats':
-        return finish(
-          await this.runPythonScript(
-            manifest,
-            installResult.venvPython,
-            'scripts/lets_go_rss.py',
-            ['--stats', '--skip-setup'],
-            timeoutMs,
-            undefined,
-            envOverrides,
-          )
-        )
-
-      default:
-        return finish(this.invalidParams(manifest.id, request.action, `Unknown action: ${request.action}`))
+    } catch (error) {
+      return finish(this.invalidParams(
+        request.skillId,
+        request.action,
+        error instanceof Error ? error.message : String(error),
+      ))
     }
   }
 
@@ -740,15 +646,34 @@ export class SkillsRuntimeManager {
     return args
   }
 
-  private async runCustomSkillAction(
-    skill: RegisteredCustomSkill,
+  private async resolveSkillForExecution(skillId: SkillId): Promise<{ definition: SkillDefinition; installResult: SkillInstallResult } | null> {
+    this.ensureRuntimeDirs()
+    const installResult = await this.ensureSkillInstalled(skillId)
+    if (!installResult.success || !installResult.skillPath) {
+      return null
+    }
+    const manifest = getEmbeddedSkillManifest(skillId)
+    if (manifest) {
+      this.ensureSkillCompatibilityFiles(manifest.id, installResult.skillPath)
+    }
+    const definition = this.getSkillLoader().loadSkill(skillId, installResult.skillPath)
+    if (!definition) {
+      return null
+    }
+    return { definition, installResult }
+  }
+
+  private async runDefinitionActionDirect(
+    definition: SkillDefinition,
     action: SkillActionDefinition,
     params: Record<string, unknown>,
     timeoutMs: number,
     envOverrides?: Record<string, string>,
     venvPython?: string,
   ): Promise<SkillRunResult> {
-    const skillPath = skill.managedPath
+    const skillPath = definition.source === 'embedded'
+      ? this.getSkillRuntimePath(definition.id)
+      : (definition.managedPath || definition.sourcePath)
     const entryPath = join(skillPath, action.entry)
 
     if (action.runtime === 'reference') {
@@ -756,21 +681,23 @@ export class SkillsRuntimeManager {
         const stdout = readFileSync(entryPath, 'utf-8')
         return {
           success: true,
-          skillId: skill.id,
+          skillId: definition.id,
           action: action.name,
           stdout: truncateOutput(stdout),
           stderr: '',
           command: ['read', entryPath],
+          mode: 'direct',
         }
       } catch (error) {
         return {
           success: false,
-          skillId: skill.id,
+          skillId: definition.id,
           action: action.name,
           stdout: '',
           stderr: '',
           command: ['read', entryPath],
           error: error instanceof Error ? error.message : String(error),
+          mode: 'direct',
         }
       }
     }
@@ -778,60 +705,266 @@ export class SkillsRuntimeManager {
     const args = this.buildActionArgs(params, action)
     if (action.runtime === 'python') {
       if (!venvPython) {
-        return this.invalidParams(skill.id, action.name, 'Python skill runtime is unavailable')
+        return this.invalidParams(definition.id, action.name, 'Python skill runtime is unavailable')
       }
-      return this.runCustomScript(skill.id, skillPath, action.name, action.runtime, venvPython, [entryPath, ...args], timeoutMs, envOverrides)
+      return this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides)
     }
 
     if (action.runtime === 'node') {
-      return this.runCustomScript(skill.id, skillPath, action.name, action.runtime, 'node', [entryPath, ...args], timeoutMs, envOverrides)
+      return this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides)
     }
 
-    return this.runCustomScript(skill.id, skillPath, action.name, action.runtime, entryPath, args, timeoutMs, envOverrides)
+    return this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides)
   }
 
-  private async runCustomScript(
+  private async runDirectScript(
     skillId: SkillId,
     cwd: string,
-    actionName: string,
-    runtime: SkillRuntimeKind,
+    action: SkillActionDefinition,
     commandBin: string,
     commandArgs: string[],
     timeoutMs: number,
     envOverrides?: Record<string, string>,
   ): Promise<SkillRunResult> {
-    const command = [commandBin, ...commandArgs]
-    try {
-      const { stdout, stderr } = await execFileAsync(commandBin, commandArgs, {
-        cwd,
-        timeout: timeoutMs,
-        maxBuffer: MAX_COMMAND_BUFFER,
-        env: {
-          ...this.getBaseEnv(),
-          ...(envOverrides || {}),
+    const executed = await this.executeProcessWithStructuredResult({
+      skillId,
+      actionName: action.name,
+      runtime: action.runtime,
+      cwd,
+      commandBin,
+      commandArgs,
+      timeoutMs,
+      envOverrides,
+      preferStructuredResult: true,
+    })
+    return this.toDirectRunResult(skillId, action.name, executed)
+  }
+
+  async executeWorkflowRuntimeAction(params: {
+    definition: SkillDefinition
+    actionName: string
+    stepId: string
+    params: Record<string, SkillInputValue>
+    sessionId?: string | null
+  }): Promise<SkillActionResult> {
+    const resolved = await this.resolveSkillForExecution(params.definition.id)
+    if (!resolved) {
+      return {
+        ok: false,
+        status: 'failed',
+        outputs: {},
+        artifacts: [],
+        logs: { stdout: '', stderr: '' },
+        error: { message: `Unknown skill: ${params.definition.id}` },
+      }
+    }
+    const action = resolved.definition.actions.find((entry) => entry.name === params.actionName)
+    if (!action) {
+      return {
+        ok: false,
+        status: 'failed',
+        outputs: {},
+        artifacts: [],
+        logs: { stdout: '', stderr: '' },
+        error: { message: `Unknown action: ${params.actionName}` },
+      }
+    }
+    if (action.runtime === 'reference') {
+      const stdout = readFileSync(join(
+        resolved.definition.source === 'embedded'
+          ? this.getSkillRuntimePath(resolved.definition.id)
+          : (resolved.definition.managedPath || resolved.definition.sourcePath),
+        action.entry,
+      ), 'utf-8')
+      return {
+        ok: true,
+        status: 'success',
+        outputs: {
+          textContent: stdout,
         },
+        artifacts: [],
+        logs: { stdout: truncateOutput(stdout), stderr: '' },
+      }
+    }
+
+    const skillPath = resolved.definition.source === 'embedded'
+      ? this.getSkillRuntimePath(resolved.definition.id)
+      : (resolved.definition.managedPath || resolved.definition.sourcePath)
+    const entryPath = join(skillPath, action.entry)
+    const args = this.buildActionArgs(params.params as Record<string, unknown>, action)
+    if (action.runtime === 'python' && !resolved.installResult.venvPython) {
+      return {
+        ok: false,
+        status: 'failed',
+        outputs: {},
+        artifacts: [],
+        logs: { stdout: '', stderr: '' },
+        error: { message: 'Python skill runtime is unavailable' },
+      }
+    }
+    const executed = await this.executeProcessWithStructuredResult({
+      skillId: resolved.definition.id,
+      actionName: action.name,
+      runtime: action.runtime,
+      cwd: skillPath,
+      commandBin: action.runtime === 'python'
+        ? (resolved.installResult.venvPython || '')
+        : action.runtime === 'node'
+          ? 'node'
+          : entryPath,
+      commandArgs: action.runtime === 'python' || action.runtime === 'node'
+        ? [entryPath, ...args]
+        : args,
+      timeoutMs: Math.max(3_000, action.timeoutMs || DEFAULT_TIMEOUT_MS),
+      preferStructuredResult: true,
+      envOverrides: {
+        ...(params.sessionId ? { READY_SKILL_SESSION_ID: params.sessionId } : {}),
+      },
+    })
+    if (executed.structuredResult) {
+      return executed.structuredResult
+    }
+    return {
+      ok: executed.success,
+      status: executed.success ? 'success' : 'failed',
+      outputs: executed.outputDir ? { outputDir: executed.outputDir } : {},
+      artifacts: [],
+      logs: {
+        stdout: executed.stdout,
+        stderr: executed.stderr,
+      },
+      error: executed.success ? undefined : { message: executed.error || `Step ${params.stepId} failed` },
+    }
+  }
+
+  private createStructuredResultPath(skillId: string, actionName: string): string {
+    const dir = join(this.runtimeRoot, 'results')
+    mkdirSync(dir, { recursive: true })
+    return join(dir, `${skillId}-${actionName}-${randomUUID()}.json`)
+  }
+
+  private async executeProcessWithStructuredResult(params: {
+    skillId: string
+    actionName: string
+    runtime: SkillRuntimeKind
+    cwd: string
+    commandBin: string
+    commandArgs: string[]
+    timeoutMs: number
+    envOverrides?: Record<string, string>
+    preferStructuredResult: boolean
+  }): Promise<{
+    success: boolean
+    stdout: string
+    stderr: string
+    command: string[]
+    error?: string
+    outputDir?: string
+    structuredResult?: SkillActionResult
+  }> {
+    const command = [params.commandBin, ...params.commandArgs]
+    const resultPath = params.preferStructuredResult ? this.createStructuredResultPath(params.skillId, params.actionName) : null
+    const env = {
+      ...this.getBaseEnv(),
+      ...(params.envOverrides || {}),
+      ...(resultPath ? { READY_SKILL_RESULT_PATH: resultPath } : {}),
+    }
+
+    try {
+      const { stdout, stderr } = await execFileAsync(params.commandBin, params.commandArgs, {
+        cwd: params.cwd,
+        timeout: params.timeoutMs,
+        maxBuffer: MAX_COMMAND_BUFFER,
+        env,
       })
+      const structuredResult = resultPath && existsSync(resultPath)
+        ? this.parseJson<SkillActionResult>(readFileSync(resultPath, 'utf-8'), undefined as never)
+        : undefined
+      const outputDir = structuredResult?.outputs && typeof structuredResult.outputs.outputDir === 'string'
+        ? structuredResult.outputs.outputDir
+        : undefined
       return {
         success: true,
-        skillId,
-        action: actionName,
-        stdout: truncateOutput(stdout || ''),
-        stderr: truncateOutput(stderr || ''),
+        stdout: truncateOutput(stdout || structuredResult?.logs.stdout || ''),
+        stderr: truncateOutput(stderr || structuredResult?.logs.stderr || ''),
         command,
+        outputDir,
+        structuredResult,
       }
     } catch (error) {
       const err = error as Error & { stdout?: string; stderr?: string }
+      const structuredResult = resultPath && existsSync(resultPath)
+        ? this.parseJson<SkillActionResult>(readFileSync(resultPath, 'utf-8'), undefined as never)
+        : undefined
+      const outputDir = structuredResult?.outputs && typeof structuredResult.outputs.outputDir === 'string'
+        ? structuredResult.outputs.outputDir
+        : undefined
       return {
-        success: false,
-        skillId,
-        action: actionName,
-        stdout: truncateOutput(err.stdout || ''),
-        stderr: truncateOutput(err.stderr || ''),
+        success: structuredResult?.ok || false,
+        stdout: truncateOutput(err.stdout || structuredResult?.logs.stdout || ''),
+        stderr: truncateOutput(err.stderr || structuredResult?.logs.stderr || ''),
         command,
-        error: runtime === 'node' && err.message.includes('ENOENT')
+        outputDir,
+        structuredResult,
+        error: params.runtime === 'node' && err.message.includes('ENOENT')
           ? 'Node.js runtime not found. Please install Node.js or use python/shell based custom skills.'
-          : err.message,
+          : (structuredResult?.error?.message || err.message),
       }
+    }
+  }
+
+  private toDirectRunResult(
+    skillId: string,
+    actionName: string,
+    executed: {
+      success: boolean
+      stdout: string
+      stderr: string
+      command: string[]
+      error?: string
+      outputDir?: string
+      structuredResult?: SkillActionResult
+    },
+  ): SkillRunResult {
+    const structured = executed.structuredResult
+    const outputs = structured?.outputs || {}
+    const extraStdout = [
+      typeof outputs.outputDir === 'string' ? `Output directory: ${outputs.outputDir}` : '',
+      ...Object.entries(outputs)
+        .filter(([key, value]) => key !== 'outputDir' && typeof value === 'string' && value.length > 0)
+        .map(([key, value]) => `${key}: ${value}`),
+    ].filter(Boolean).join('\n')
+
+    return {
+      success: structured ? structured.ok : executed.success,
+      skillId,
+      action: actionName,
+      stdout: [executed.stdout, extraStdout].filter(Boolean).join('\n').trim(),
+      stderr: executed.stderr,
+      outputDir: executed.outputDir,
+      command: executed.command,
+      error: structured?.ok ? undefined : (structured?.error?.message || executed.error),
+      mode: 'direct',
+    }
+  }
+
+  private toWorkflowRunResult(skillId: string, actionName: string, execution: SkillExecutionDetail): SkillRunResult {
+    const summary = [
+      `Execution ID: ${execution.id}`,
+      `Status: ${execution.status}`,
+      execution.currentStepId ? `Current step: ${execution.currentStepId}` : '',
+      execution.blocker ? `Blocker: ${execution.blocker.type} - ${execution.blocker.message}` : '',
+    ].filter(Boolean).join('\n')
+    return {
+      success: execution.status !== 'failed' && execution.status !== 'cancelled',
+      skillId,
+      action: actionName,
+      stdout: summary,
+      stderr: '',
+      command: [],
+      mode: 'workflow',
+      execution,
+      blocker: execution.blocker || null,
     }
   }
 
@@ -1268,8 +1401,9 @@ export class SkillsRuntimeManager {
     if (existsSync(destination)) return
 
     try {
-      const { stdout } = await execFileAsync('which', [binaryName], { timeout: 10_000 })
-      const source = stdout.trim()
+      const { stdout } = await execFileAsync(getWhichCommand(), [binaryName], { timeout: 10_000 })
+      // Windows 'where' may return multiple lines, take the first one
+      const source = stdout.trim().split('\n')[0]
       if (!source) return
       symlinkSync(source, destination)
     } catch {
@@ -1283,7 +1417,7 @@ export class SkillsRuntimeManager {
       : join(this.venvRoot, 'bin')
     return {
       ...process.env,
-      PATH: `${this.runtimeBin}:${venvBinDir}:${process.env.PATH || ''}`,
+      PATH: [this.runtimeBin, venvBinDir, process.env.PATH || ''].join(delimiter),
       PIP_CACHE_DIR: this.pipCache,
       XDG_CACHE_HOME: this.cacheRoot,
       MODELSCOPE_CACHE: this.modelscopeCache,

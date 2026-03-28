@@ -1,0 +1,415 @@
+<style>
+  .intro {
+    max-width: 960px;
+  }
+  .section-grid {
+    display: grid;
+    gap: 22px;
+  }
+  .hero {
+    border-radius: 22px;
+    padding: 18px;
+    background:
+      radial-gradient(circle at top left, rgba(120, 190, 255, 0.15), transparent 32%),
+      linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .hero-shell {
+    background: rgba(10,10,12,0.56);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 16px;
+    overflow: hidden;
+  }
+  .anim-strip {
+    display: grid;
+    gap: 16px;
+  }
+  .anim-track {
+    position: relative;
+    height: 82px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+  .timeline {
+    position: absolute;
+    inset: 0;
+  }
+  .dock {
+    position: absolute;
+    left: 14px;
+    top: 20px;
+    height: 42px;
+    width: 52px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    animation: dockReveal 7s ease-in-out infinite;
+    overflow: hidden;
+  }
+  .dock .icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.88);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .dock .icon.fade {
+    opacity: 0;
+    animation: navFade 7s ease-in-out infinite;
+  }
+  .anim-tab {
+    position: absolute;
+    top: 20px;
+    left: 78px;
+    height: 42px;
+    width: 240px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.09);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    color: rgba(255,255,255,0.9);
+    animation: tabMorph 7s ease-in-out infinite;
+    transform-origin: left center;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .favicon {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: conic-gradient(from 210deg, #34a853, #4285f4, #ea4335, #fbbc05, #34a853);
+    flex-shrink: 0;
+  }
+  .text-title,
+  .text-url {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .text-url {
+    position: absolute;
+    left: 40px;
+    right: 54px;
+    opacity: 0;
+    font-weight: 500;
+    color: rgba(255,255,255,0.84);
+    animation: urlSwap 7s ease-in-out infinite;
+  }
+  .text-title {
+    animation: titleSwap 7s ease-in-out infinite;
+  }
+  .tab-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255,255,255,0.62);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .ghost {
+    position: absolute;
+    top: 24px;
+    height: 34px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.04);
+  }
+  .ghost.one {
+    left: 332px;
+    width: 90px;
+    animation: ghostOne 7s ease-in-out infinite;
+  }
+  .ghost.two {
+    left: 430px;
+    width: 76px;
+    animation: ghostTwo 7s ease-in-out infinite;
+  }
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .step {
+    border-radius: 18px;
+    padding: 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .step .label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.9);
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .mock {
+    height: 74px;
+    border-radius: 14px;
+    background: rgba(12,12,14,0.54);
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 10px;
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+  .mock-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill {
+    height: 26px;
+    min-width: 26px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .tab {
+    height: 30px;
+    min-width: 116px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    color: rgba(255,255,255,0.88);
+    font-size: 11px;
+    min-width: 0;
+  }
+  .tab.active {
+    background: rgba(255,255,255,0.13);
+  }
+  .tab.grow {
+    flex: 1;
+  }
+  .line {
+    width: 1px;
+    height: 14px;
+    background: rgba(255,255,255,0.1);
+  }
+  .caption {
+    color: rgba(255,255,255,0.78);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .hint-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .hint {
+    border-radius: 16px;
+    padding: 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .hint h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
+  .hint p {
+    margin: 0;
+    color: rgba(255,255,255,0.76);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  @keyframes dockReveal {
+    0%, 18% { width: 52px; }
+    30%, 54% { width: 118px; }
+    66%, 100% { width: 52px; }
+  }
+  @keyframes navFade {
+    0%, 18% { opacity: 0; transform: translateX(-6px); }
+    30%, 54% { opacity: 1; transform: translateX(0); }
+    66%, 100% { opacity: 0; transform: translateX(-6px); }
+  }
+  @keyframes tabMorph {
+    0%, 18% { left: 78px; width: 240px; }
+    30%, 54% { left: 150px; width: 420px; }
+    66%, 100% { left: 78px; width: 240px; }
+  }
+  @keyframes titleSwap {
+    0%, 18% { opacity: 1; }
+    30%, 54% { opacity: 0; }
+    66%, 100% { opacity: 1; }
+  }
+  @keyframes urlSwap {
+    0%, 18% { opacity: 0; }
+    30%, 54% { opacity: 1; }
+    66%, 100% { opacity: 0; }
+  }
+  @keyframes ghostOne {
+    0%, 18% { left: 332px; width: 90px; opacity: 1; }
+    30%, 54% { left: 582px; width: 72px; opacity: 0.72; }
+    66%, 100% { left: 332px; width: 90px; opacity: 1; }
+  }
+  @keyframes ghostTwo {
+    0%, 18% { left: 430px; width: 76px; opacity: 1; }
+    30%, 54% { left: 660px; width: 64px; opacity: 0.56; }
+    66%, 100% { left: 430px; width: 76px; opacity: 1; }
+  }
+</style>
+
+<div class="intro section">
+  <h2>第三种方案的动效拆解</h2>
+  <p class="subtitle">这页不是让你选布局，而是解释我说的“液态头部”到底怎么动。你可以把它理解成：在第二种单层方案上，再多借一点连续形变和预热反馈。</p>
+</div>
+
+<div class="section-grid">
+  <div class="hero">
+    <div class="mockup">
+      <div class="mockup-header">自动播放示意</div>
+      <div class="mockup-body">
+        <div class="hero-shell">
+          <div class="anim-strip">
+            <div class="anim-track">
+              <div class="timeline">
+                <div class="dock">
+                  <div class="icon">⟲</div>
+                  <div class="icon fade">‹</div>
+                  <div class="icon fade">›</div>
+                </div>
+                <div class="anim-tab">
+                  <div class="favicon"></div>
+                  <div class="text-title">Google</div>
+                  <div class="text-url">https://www.google.com</div>
+                  <div class="tab-actions">
+                    <div>☆</div>
+                    <div>×</div>
+                  </div>
+                </div>
+                <div class="ghost one"></div>
+                <div class="ghost two"></div>
+              </div>
+            </div>
+            <div class="caption">
+              循环展示两个动作叠加后的效果：左侧刷新按钮像一个小 dock 一样展开，激活标签同时从“标题标签”过渡成“地址输入体”，旁边的标签被轻轻挤开而不是硬切换。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">步骤分解</div>
+    <div class="mockup-body">
+      <div class="steps">
+        <div class="step">
+          <div class="label">1</div>
+          <div class="mock">
+            <div class="mock-row">
+              <div class="pill">⟲</div>
+              <div class="tab active">
+                <div class="favicon"></div>
+                Google
+                <div style="margin-left:auto">☆ ×</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            默认紧凑态。用户看到的是普通标签，只是功能更完整。
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="label">2</div>
+          <div class="mock">
+            <div class="mock-row">
+              <div class="pill" style="box-shadow:0 0 0 6px rgba(120,190,255,0.08)">⟲</div>
+              <div class="tab active">
+                <div class="favicon"></div>
+                Google
+                <div style="margin-left:auto">☆ ×</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            鼠标接近可交互热点时，先给“预热反馈”。不是直接跳，而是轻微发光或鼓起，告诉用户这里还能继续展开。
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="label">3</div>
+          <div class="mock">
+            <div class="mock-row">
+              <div class="pill">⟲</div>
+              <div class="tab active grow">
+                <div class="favicon"></div>
+                https://www.google.com
+                <div class="line"></div>
+                <div>☆ ×</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            单击标签中部后，标签沿横向拉伸，标题淡出，URL 淡入。它不是切到另一行，而是在原位置完成角色切换。
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="label">4</div>
+          <div class="mock">
+            <div class="mock-row">
+              <div class="pill" style="width:66px; gap:6px;">⟲ ‹ ›</div>
+              <div class="tab active grow">
+                <div class="favicon"></div>
+                Google
+                <div style="margin-left:auto">☆ ×</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">
+            鼠标移到刷新按钮上方时，左侧小 dock 拉开，前进 / 后退露出来。激活标签略向右让位，形成连续流动感。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint-grid">
+    <div class="hint">
+      <h4>第三点和第二点的区别</h4>
+      <p>第二点关注“结构重组”，让地址栏并入激活标签。第三点是在这个结构上再加“连续变形”，让状态切换不那么像硬切。</p>
+    </div>
+    <div class="hint">
+      <h4>我建议保留的动效</h4>
+      <p>如果最后选第二点，我会优先借用两件事：中部点击展开时的标题/URL 淡换，以及刷新按钮 hover 时的左侧 reveal。</p>
+    </div>
+    <div class="hint">
+      <h4>我建议克制的动效</h4>
+      <p>不建议把所有按钮都做成长距离位移，也不建议让标签频繁弹跳。视觉语义要集中在“可展开区域”和“激活标签”上。</p>
+    </div>
+  </div>
+</div>

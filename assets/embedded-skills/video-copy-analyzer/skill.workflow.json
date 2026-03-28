@@ -1,0 +1,114 @@
+{
+  "version": "1",
+  "autoAdvance": true,
+  "initialStep": "prepare_input",
+  "finalStep": "write_structured_transcript",
+  "inputs": [
+    { "key": "input", "description": "视频 URL 或本地文件路径", "type": "string", "required": true },
+    { "key": "outputDir", "description": "输出目录", "type": "string", "required": false },
+    { "key": "model", "description": "whisper 模型", "type": "string", "required": false, "defaultValue": "medium" },
+    { "key": "language", "description": "语言", "type": "string", "required": false, "defaultValue": "auto" },
+    { "key": "forceSubtitleMode", "description": "强制字幕提取模式", "type": "string", "required": false, "defaultValue": "auto", "enum": ["auto", "funasr"] }
+  ],
+  "steps": [
+    {
+      "id": "prepare_input",
+      "name": "Prepare Input",
+      "description": "规范化输入与输出目录。",
+      "requiredInputs": ["input"],
+      "action": {
+        "type": "runtime_call",
+        "actionName": "video_copy_prepare_input",
+        "args": {
+          "input": { "source": "input", "key": "input" },
+          "outputDir": { "source": "input", "key": "outputDir" },
+          "model": { "source": "input", "key": "model" },
+          "language": { "source": "input", "key": "language" },
+          "forceSubtitleMode": { "source": "input", "key": "forceSubtitleMode" }
+        }
+      },
+      "successCriteria": [
+        { "type": "output_present", "outputKey": "sourceInput" },
+        { "type": "output_present", "outputKey": "outputDir" }
+      ],
+      "nextSteps": [{ "condition": "success", "targetStepId": "extract_subtitle" }]
+    },
+    {
+      "id": "extract_subtitle",
+      "name": "Extract Subtitle",
+      "description": "执行字幕提取并写出原始 transcript。",
+      "action": {
+        "type": "runtime_call",
+        "actionName": "video_copy_extract_subtitle",
+        "args": {
+          "sourceInput": { "source": "output", "stepId": "prepare_input", "key": "sourceInput" },
+          "outputDir": { "source": "output", "stepId": "prepare_input", "key": "outputDir" },
+          "model": { "source": "output", "stepId": "prepare_input", "key": "model" },
+          "language": { "source": "output", "stepId": "prepare_input", "key": "language" },
+          "forceSubtitleMode": { "source": "output", "stepId": "prepare_input", "key": "forceSubtitleMode" }
+        }
+      },
+      "successCriteria": [
+        { "type": "output_present", "outputKey": "srtPath" },
+        { "type": "output_present", "outputKey": "transcriptPath" }
+      ],
+      "nextSteps": [{ "condition": "success", "targetStepId": "correct_transcript" }]
+    },
+    {
+      "id": "correct_transcript",
+      "name": "Correct Transcript",
+      "description": "让 Claude 基于原始字幕修订出干净的 transcript。",
+      "action": {
+        "type": "agent_task",
+        "prompt": "请基于已有的 SRT 与原始 transcript，输出一份更干净、按自然段整理的中文 transcript。不要解释过程，直接给最终正文。",
+        "outputKey": "correctedTranscriptText",
+        "generatedFiles": [
+          {
+            "outputKey": "correctedTranscriptPath",
+            "pathTemplate": "{{executionOutputDir}}/corrected_transcript.md",
+            "description": "修订后的文字稿",
+            "mimeType": "text/markdown"
+          }
+        ]
+      },
+      "nextSteps": [{ "condition": "success", "targetStepId": "write_analysis_report" }]
+    },
+    {
+      "id": "write_analysis_report",
+      "name": "Write Analysis Report",
+      "description": "生成文案分析报告。",
+      "action": {
+        "type": "agent_task",
+        "prompt": "请基于已修订的 transcript 和原始字幕，撰写一份简洁但可执行的文案分析报告，至少包括主题、受众、情绪节奏、关键信息点和可复用表达方式。",
+        "outputKey": "analysisReportText",
+        "generatedFiles": [
+          {
+            "outputKey": "analysisReportPath",
+            "pathTemplate": "{{executionOutputDir}}/copy_analysis_report.md",
+            "description": "文案分析报告",
+            "mimeType": "text/markdown"
+          }
+        ]
+      },
+      "nextSteps": [{ "condition": "success", "targetStepId": "write_structured_transcript" }]
+    },
+    {
+      "id": "write_structured_transcript",
+      "name": "Write Structured Transcript",
+      "description": "输出结构化 transcript 交付物。",
+      "action": {
+        "type": "agent_task",
+        "prompt": "请把修订后的 transcript 重写为结构化交付：包含标题、摘要、时间线要点和正文。不要输出解释。",
+        "outputKey": "structuredTranscriptText",
+        "generatedFiles": [
+          {
+            "outputKey": "structuredTranscriptPath",
+            "pathTemplate": "{{executionOutputDir}}/structured_transcript.md",
+            "description": "结构化 transcript",
+            "mimeType": "text/markdown"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -134,6 +134,34 @@ function clearPendingSendBufferState() {
   }
 }
 
+function isSameAttachmentPoolEntry(a: ChatAttachment, b: ChatAttachment): boolean {
+  if (a.source === 'document-quote' || b.source === 'document-quote' || a.source === 'document-widget-target' || b.source === 'document-widget-target') {
+    return (
+      a.source === b.source &&
+      a.path === b.path &&
+      a.widgetTitle === b.widgetTitle &&
+      a.lineStart === b.lineStart &&
+      a.lineEnd === b.lineEnd &&
+      (a.selection || '') === (b.selection || '')
+    )
+  }
+  return a.path === b.path
+}
+
+function shouldKeepInFilePool(attachment: ChatAttachment): boolean {
+  return attachment.source !== 'document-quote' && attachment.source !== 'document-widget-target'
+}
+
+function removeFromFilePool(
+  filePool: ChatAttachment[],
+  removedAttachment: ChatAttachment,
+  remainingAttachments: ChatAttachment[],
+): ChatAttachment[] {
+  const stillReferenced = remainingAttachments.some((attachment) => isSameAttachmentPoolEntry(attachment, removedAttachment))
+  if (stillReferenced) return filePool
+  return filePool.filter((attachment) => !isSameAttachmentPoolEntry(attachment, removedAttachment))
+}
+
 async function flushPendingSendBuffer() {
   const buffered = pendingSendBuffer
   clearPendingSendBufferState()
@@ -535,12 +563,25 @@ export const useAgent = create<AgentState>((set, get) => ({
   // W3: Add attachments
   addAttachments: (files: ChatAttachment[]) => set((state) => ({
     attachments: [...state.attachments, ...files],
-    filePool: [...state.filePool, ...files.filter(f => !state.filePool.some(p => p.path === f.path))]
+    filePool: [
+      ...state.filePool,
+      ...files.filter((file) =>
+        shouldKeepInFilePool(file) &&
+        !state.filePool.some((poolItem) => isSameAttachmentPoolEntry(poolItem, file)),
+      ),
+    ],
   })),
 
-  removeAttachment: (id: string) => set((state) => ({
-    attachments: state.attachments.filter(a => a.id !== id)
-  })),
+  removeAttachment: (id: string) => set((state) => {
+    const removedAttachment = state.attachments.find((attachment) => attachment.id === id)
+    const nextAttachments = state.attachments.filter((attachment) => attachment.id !== id)
+    return {
+      attachments: nextAttachments,
+      filePool: removedAttachment
+        ? removeFromFilePool(state.filePool, removedAttachment, nextAttachments)
+        : state.filePool,
+    }
+  }),
 
   clearAttachments: () => set({ attachments: [] }),
 
@@ -556,7 +597,8 @@ export const useAgent = create<AgentState>((set, get) => ({
           path: f.path,
           type: f.type as ChatAttachment['type'],
           size: f.size,
-          ext: f.ext
+          ext: f.ext,
+          source: 'file',
         }))
         get().addAttachments(attachments)
       }
@@ -565,13 +607,15 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   sendMessage: async (content: string) => {
     const normalizedContent = content.trim()
-    if (!normalizedContent) return
+    const { attachments: pendingAttachments } = get()
+    if (!normalizedContent && pendingAttachments.length === 0) return
 
     const stateBeforeSend = get()
     const shouldCoalesce =
       !bypassCoalescingOnce &&
       !stateBeforeSend.isStreaming &&
       stateBeforeSend.sendCoalescingEnabled &&
+      normalizedContent.length > 0 &&
       !normalizedContent.startsWith('/') &&
       stateBeforeSend.sendCoalescingWindowMs > 0
 
@@ -685,7 +729,10 @@ export const useAgent = create<AgentState>((set, get) => ({
 
     // Capture attachments before clearing
     const currentAttachments = [...attachments]
-    set({ attachments: [] })
+    set((state) => ({
+      attachments: [],
+      filePool: state.filePool.filter((attachment) => attachment.source !== 'document-quote'),
+    }))
 
     // Build display content (include @[filename] references)
     const userMsgId = generateId('msg')

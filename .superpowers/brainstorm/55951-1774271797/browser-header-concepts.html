@@ -1,0 +1,354 @@
+<style>
+  .intro {
+    max-width: 980px;
+  }
+  .cards.browser-header-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+  .browser-card {
+    overflow: hidden;
+  }
+  .browser-mock {
+    background:
+      radial-gradient(circle at top left, rgba(255,255,255,0.06), transparent 34%),
+      linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 14px;
+    min-height: 270px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .rail {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-cluster {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .nav-pill {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.9);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .tab-track {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+  .mini-tab {
+    height: 34px;
+    min-width: 92px;
+    padding: 0 12px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255,255,255,0.88);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .mini-tab.active {
+    background: rgba(255,255,255,0.13);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .mini-tab.stretch {
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+  .favicon {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: conic-gradient(from 210deg, #34a853, #4285f4, #ea4335, #fbbc05, #34a853);
+    flex-shrink: 0;
+  }
+  .title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .url {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.82);
+    font-size: 12px;
+  }
+  .ghost-tab {
+    height: 30px;
+    min-width: 74px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.035);
+    flex: 0 0 88px;
+  }
+  .star,
+  .close {
+    width: 16px;
+    text-align: center;
+    color: rgba(255,255,255,0.64);
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255,255,255,0.08);
+    flex-shrink: 0;
+  }
+  .state-stack {
+    display: grid;
+    gap: 8px;
+  }
+  .state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    padding: 4px 8px;
+    color: rgba(255,255,255,0.7);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .caption-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+    color: rgba(255,255,255,0.8);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .caption-list span {
+    color: rgba(255,255,255,0.56);
+    margin-right: 6px;
+  }
+  .recommended {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 5px 10px;
+    background: rgba(87, 184, 255, 0.18);
+    border: 1px solid rgba(87, 184, 255, 0.24);
+    color: #8fd3ff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+</style>
+
+<div class="intro section">
+  <h2>浏览器头部改造方向</h2>
+  <p class="subtitle">我先把你描述的交互拆成 3 个方向。每张卡里都画了标签、地址栏和左侧导航如何合并。点一个最接近你预期的方向，或在终端直接说想混搭哪几个点。</p>
+</div>
+
+<div class="cards browser-header-cards">
+  <div class="card browser-card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <div class="label">A · 保守演进</div>
+      <h3>双层结构保留，标签更完整</h3>
+      <p>保留现有标签栏 + 地址栏两层，只补显式收藏 / 关闭按钮，并把左侧导航做成 hover 展开。</p>
+      <div class="browser-mock">
+        <div class="rail">
+          <div class="header-row">
+            <div class="tab-track">
+              <div class="mini-tab active">
+                <div class="favicon"></div>
+                <div class="title">Google</div>
+                <div class="star">☆</div>
+                <div class="close">×</div>
+              </div>
+              <div class="ghost-tab"></div>
+              <div class="ghost-tab" style="flex-basis:72px"></div>
+            </div>
+          </div>
+        </div>
+        <div class="rail">
+          <div class="header-row">
+            <div class="nav-cluster">
+              <div class="nav-pill">⟲</div>
+              <div class="nav-pill" style="opacity:0.35">‹</div>
+              <div class="nav-pill" style="opacity:0.35">›</div>
+            </div>
+            <div class="mini-tab stretch" style="height:30px; border-radius:12px;">
+              <div class="favicon"></div>
+              <div class="url">https://www.google.com</div>
+              <div class="star">★</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption-list">
+        <div><span>优点</span>改动小，兼容现有代码。</div>
+        <div><span>风险</span>“少一行功能栏”的问题本质上没被重构掉。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card browser-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <div class="header-row" style="justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div class="label">B · 单层融合</div>
+          <h3>激活标签变形为地址栏</h3>
+        </div>
+        <div class="recommended">推荐</div>
+      </div>
+      <p>默认是紧凑标签；激活后再次点击中部，标签横向拉伸并切换成地址输入态。刷新按钮独立在左侧，hover 时向两边揭示前进 / 后退。</p>
+      <div class="browser-mock">
+        <div class="state-stack">
+          <div class="state-chip">默认标签态</div>
+          <div class="rail">
+            <div class="header-row">
+              <div class="nav-pill">⟲</div>
+              <div class="tab-track">
+                <div class="mini-tab active">
+                  <div class="favicon"></div>
+                  <div class="title">Google</div>
+                  <div class="star">☆</div>
+                  <div class="close">×</div>
+                </div>
+                <div class="ghost-tab"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="state-chip">中部再点一下后</div>
+          <div class="rail">
+            <div class="header-row">
+              <div class="nav-cluster">
+                <div class="nav-pill">⟲</div>
+              </div>
+              <div class="tab-track">
+                <div class="mini-tab active stretch">
+                  <div class="favicon"></div>
+                  <div class="url">https://www.google.com</div>
+                  <div class="divider"></div>
+                  <div class="star">☆</div>
+                  <div class="close">×</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="state-chip">hover 刷新按钮</div>
+          <div class="rail">
+            <div class="header-row">
+              <div class="nav-cluster">
+                <div class="nav-pill">⟲</div>
+                <div class="nav-pill">‹</div>
+                <div class="nav-pill">›</div>
+              </div>
+              <div class="tab-track">
+                <div class="mini-tab active stretch">
+                  <div class="favicon"></div>
+                  <div class="title">Google</div>
+                  <div class="star">☆</div>
+                  <div class="close">×</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption-list">
+        <div><span>优点</span>最贴近你给的三张参考图，也能把“缺的一行”收回到同一层里。</div>
+        <div><span>风险</span>需要补一个轻量状态机，处理点击 / hover / 编辑态切换。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card browser-card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <div class="label">C · 高动效版</div>
+      <h3>整个头部围绕激活标签流动</h3>
+      <p>左侧导航、激活标签、右侧工具都围绕中心标签连续变形，强调“液态工作台”的感觉。</p>
+      <div class="browser-mock">
+        <div class="rail">
+          <div class="header-row">
+            <div class="nav-pill" style="width:34px;height:34px;background:rgba(255,255,255,0.18);">●</div>
+            <div class="nav-cluster">
+              <div class="nav-pill">⟲</div>
+              <div class="nav-pill">‹</div>
+              <div class="nav-pill">›</div>
+            </div>
+            <div class="tab-track">
+              <div class="mini-tab active stretch" style="height:36px;">
+                <div class="favicon"></div>
+                <div class="url">https://www.google.com</div>
+                <div class="divider"></div>
+                <div class="star">★</div>
+                <div class="close">×</div>
+              </div>
+            </div>
+            <div class="nav-cluster">
+              <div class="nav-pill">⤴</div>
+              <div class="nav-pill">☰</div>
+            </div>
+          </div>
+        </div>
+        <div class="rail" style="opacity:0.76">
+          <div class="header-row">
+            <div class="tab-track">
+              <div class="ghost-tab" style="flex-basis:84px"></div>
+              <div class="ghost-tab" style="flex-basis:126px"></div>
+              <div class="ghost-tab" style="flex:1 1 auto"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption-list">
+        <div><span>优点</span>视觉最强，也最像一个独立产品语言。</div>
+        <div><span>风险</span>实现成本高，容易和现有 BrowserView 边界同步产生耦合。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <div class="mockup">
+    <div class="mockup-header">我最想确认的一件事</div>
+    <div class="mockup-body">
+      你更想要的是哪种“核心感受”？
+      <br><br>
+      1. 先把少掉的功能栏补回来，但整体别大改
+      <br>
+      2. 让激活标签本身承担地址栏，头部收成一层
+      <br>
+      3. 做得更大胆，让头部像液态控件一样变化
+    </div>
+  </div>
+</div>

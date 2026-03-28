@@ -28,15 +28,14 @@ test('rss feed mirrors calendar header button styling while article rows stay on
 
 test('chat composer keeps a visible shell and a primary send button after liquid glass restyle', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
 
   assert.match(chatPanel, /const composerShellStyle = \{/)
-  assert.match(chatPanel, /data-chat-composer-shell="true"/)
-  assert.match(chatPanel, /background:\s*'linear-gradient\(180deg, rgba\(255,255,255,0\.16\) 0%, rgba\(255,255,255,0\.05\) 100%\)'/)
-  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
-  assert.match(chatPanel, /inset 0 0 0 1px color-mix\(in srgb, var\(--border-input\) 72%, transparent\)/)
-  assert.match(chatPanel, /inset 0 1px 0 rgba\(255,255,255,0\.24\)/)
-  assert.match(chatPanel, /inset 0 -10px 18px rgba\(91, 141, 239, 0\.12\)/)
-  assert.match(chatPanel, /background: 'var\(--color-blue\)'/)
+  assert.match(chatInput, /data-chat-composer-shell="true"/)
+  assert.match(chatPanel, /background:\s*'var\(--input-slot-bg\)'/)
+  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanel, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
+  assert.match(chatInput, /background: 'var\(--color-blue\)'/)
   assert.doesNotMatch(chatPanel, /id="chat-input-shell"/)
 })
 

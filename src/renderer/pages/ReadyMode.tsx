@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import {
-  Users, Settings, Globe, FileText, Pen,
-  Scissors, Rss, Calendar
+  Users, Settings, Globe, FileText,
+  Rss, Calendar
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
@@ -17,8 +17,6 @@ import FilePanel from '../components/ready/FilePanel'
 const subModes: { id: WorkbenchMode; label: string; icon: React.ElementType }[] = [
   { id: 'browser',  label: '浏览器', icon: Globe },
   { id: 'document', label: '文档',   icon: FileText },
-  { id: 'design',   label: '设计',   icon: Pen },
-  { id: 'video',    label: '剪辑',   icon: Scissors },
   { id: 'rss',      label: 'RSS',    icon: Rss },
   { id: 'calendar', label: '日程',   icon: Calendar }
 ]
@@ -62,18 +60,8 @@ export default function ReadyMode() {
 
   /** Handle file click in FilePanel — open in LiveFollowPanel document mode */
   const handleFileOpen = useCallback((filePath: string) => {
-    // Switch LiveFollowPanel to document mode when a file is clicked
-    const ext = filePath.split('.').pop()?.toLowerCase() || ''
-    const designExts = ['tldr']
-    const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm']
-
-    if (designExts.includes(ext)) {
-      setReadySubMode('design')
-    } else if (videoExts.includes(ext)) {
-      setReadySubMode('video')
-    } else {
-      setReadySubMode('document')
-    }
+    // All files open in document mode now
+    setReadySubMode('document')
     setIsFollowMode(false)
   }, [setReadySubMode])
 

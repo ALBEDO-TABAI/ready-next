@@ -108,6 +108,7 @@ export interface AgentRuntimeStatus {
 export interface ConversationScope {
   id: string
   agent: string
+  userId?: string
   title: string
   sourceKind: ConversationSourceKind
   sourceId: string

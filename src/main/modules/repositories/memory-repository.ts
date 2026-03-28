@@ -1,12 +1,13 @@
 import { randomUUID } from 'crypto'
 
 export type MemoryLayer = 'l0' | 'l1' | 'l2'
-export type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule'
+export type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule' | 'user_preference' | 'global_fact' | 'personality_trait'
 
 export interface MemoryEntry {
   id: string
   layer: MemoryLayer
   scopeId: string | null
+  userId?: string | null
   category: MemoryCategory
   title: string
   summary: string | null
@@ -41,6 +42,7 @@ export interface TriggerDefinition {
 export interface MemoryQueryFilters {
   layer?: MemoryLayer
   scopeId?: string | null
+  userId?: string
   category?: MemoryCategory
   includeArchived?: boolean
   limit?: number
@@ -89,14 +91,15 @@ export class MemoryRepository {
 
     db.prepare(`
       INSERT INTO agent_memory_metadata (
-        id, layer, scope_id, category, title, summary, content_key,
+        id, layer, scope_id, user_id, category, title, summary, content_key,
         priority, access_count, last_accessed_at, created_at, updated_at,
         expires_at, archived_at, tags, meta_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       entry.layer || 'l1',
       entry.scopeId ?? null,
+      entry.userId ?? null,
       entry.category || 'summary',
       entry.title || 'Untitled',
       entry.summary ?? null,
@@ -225,6 +228,11 @@ export class MemoryRepository {
         conditions.push('scope_id = ?')
         values.push(filters.scopeId)
       }
+    }
+
+    if (filters.userId) {
+      conditions.push('user_id = ?')
+      values.push(filters.userId)
     }
 
     if (filters.category) {
@@ -668,6 +676,9 @@ export class MemoryRepository {
         learning: byCategory.find((r) => r.category === 'learning')?.count || 0,
         trigger: byCategory.find((r) => r.category === 'trigger')?.count || 0,
         rule: byCategory.find((r) => r.category === 'rule')?.count || 0,
+        user_preference: byCategory.find((r) => r.category === 'user_preference')?.count || 0,
+        global_fact: byCategory.find((r) => r.category === 'global_fact')?.count || 0,
+        personality_trait: byCategory.find((r) => r.category === 'personality_trait')?.count || 0,
       },
       archivedCount: archived?.count || 0,
       avgAccessCount: avgAccess?.avg || 0,

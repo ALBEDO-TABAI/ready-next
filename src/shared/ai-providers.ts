@@ -61,6 +61,8 @@ export interface AIModelConfig {
   nativeVideoMode?: AICapabilityMode
   /** Volcano Engine specific: endpoint ID */
   endpointId?: string
+  /** 配置命名槽 - 在前台显示的名称 */
+  displayName?: string
 }
 
 // ---------------------------------------------------------------------------

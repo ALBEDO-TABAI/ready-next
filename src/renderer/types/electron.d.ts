@@ -8,6 +8,7 @@ import type {
   RSSStatusData,
   RSSUpdateTaskStatusData,
 } from '../modules/rss/types'
+import type { ThemeOption, ResolvedTheme } from '../stores/useTheme'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -446,6 +447,9 @@ interface ElectronBrowserAPI {
   hideAll: () => Promise<{ success: boolean }>
   hideActiveHost: () => Promise<{ success: boolean }>
   showActive: () => Promise<{ success: boolean }>
+  fitActiveTabToBounds: (tabId?: string | null) => Promise<{ success: boolean; zoomFactor?: number; error?: string }>
+  captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean; data?: string; error?: string }>
+  captureViewportSnapshot: (tabId?: string | null) => Promise<{ success: boolean; data?: string; error?: string }>
   getTabs: () => Promise<BrowserTabInfo[]>
   getAdblockState: () => Promise<{ success: boolean; data?: BrowserAdblockStateData; error?: string }>
   getDiagnostics: () => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
@@ -1119,6 +1123,7 @@ interface ElectronWindowAPI {
 
 interface ElectronThemeAPI {
   set: (theme: string) => Promise<void>
+  get: () => Promise<{ success: boolean; data?: { option: ThemeOption; resolved: ResolvedTheme }; error?: string }>
 }
 
 // =============================================================================

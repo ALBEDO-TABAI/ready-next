@@ -13,8 +13,9 @@ import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
 import { domainsLikelyMatch, findRecentBrowserAction, rememberBrowserAction } from '../agent-control/session-continuity'
 import { AgentRepository } from '../repositories/agent-repository'
+import { getLogPath } from '../../utils/platform'
 
-const LOG = '/tmp/ready-tools.log'
+const LOG = getLogPath('ready-tools.log')
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }

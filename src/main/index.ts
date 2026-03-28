@@ -139,7 +139,7 @@ function setupApplicationMenu(): void {
   Menu.setApplicationMenu(menu)
 }
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
   // Create the browser window.
   mainWindow = new BrowserWindow({
@@ -187,14 +187,6 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
-
   // Setup window-dependent IPC only once (agent/browser handlers register ipcMain.handle
   // which cannot be registered twice without error)
   if (!windowIPCRegistered) {
@@ -202,6 +194,13 @@ function createWindow(): void {
     setRSSBrowserController(browserController)
     setupAgentIPC(agentManager, mainWindow, browserController)
     windowIPCRegistered = true
+  }
+  // HMR for renderer base on electron-vite cli.
+  // Load the remote URL for development or the local html file for production.
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
   // Auto-updater — only in production builds
@@ -244,6 +243,23 @@ function setupGlobalIPC(): void {
       getDatabase().setSetting(THEME_SETTING_KEY, nextTheme)
     } catch {
       // ignore persistence failures
+    }
+  })
+  ipcMain.handle('theme:get', () => {
+    try {
+      const option = resolveStoredThemeSource()
+      return {
+        success: true,
+        data: {
+          option,
+          resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+        },
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }
     }
   })
 }
@@ -522,12 +538,12 @@ app.whenReady().then(() => {
   setupGlobalIPC()
   applyBundledAISettingsSeed()
 
-  createWindow()
+  void createWindow()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
 })
 

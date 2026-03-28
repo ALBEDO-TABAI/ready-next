@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import BrowserEnterOverlay from '../../components/browser/BrowserEnterOverlay'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
@@ -29,15 +28,11 @@ const BROWSER_SURFACE_READY_DELAY_MS = 24
 interface BrowserModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
-  isTransitioning?: boolean
-  transitionDirection?: -1 | 1
 }
 
 export default function BrowserMode({
   isActive = true,
   isMotionSettled = true,
-  isTransitioning = false,
-  transitionDirection = 1,
 }: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
   const {
@@ -70,8 +65,6 @@ export default function BrowserMode({
   const shouldPrepareBrowserHost = isActive
   // Level 2: 显示层 - 动画结束后才真正显示浏览器内容
   const shouldRevealBrowserHost = isActive && isMotionSettled
-  // 是否正在切入浏览器（用于显示遮罩）
-  const isEnteringBrowser = isActive && isTransitioning && !isMotionSettled
   // Level 3: 就绪层 - 浏览器 surface 已准备好
   const isBrowserHostFullyVisible = shouldRevealBrowserHost && isBrowserSurfaceReady
 
@@ -353,12 +346,6 @@ export default function BrowserMode({
             onDragOver={handleContentDragOver}
             onDrop={handleContentDrop}
             onRetry={() => void handleRetry()}
-          />
-
-          {/* 浏览器进入遮罩 - 切换动画期间显示骨架屏 */}
-          <BrowserEnterOverlay
-            visible={isEnteringBrowser}
-            direction={transitionDirection}
           />
 
           {shouldShowStartupPlaceholder && (

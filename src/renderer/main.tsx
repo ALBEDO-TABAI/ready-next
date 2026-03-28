@@ -10,7 +10,24 @@ import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import './styles/index.css'
 
+async function hydrateStartupTheme() {
+  if (!window.electronAPI) return
+  const themeResult = await window.electronAPI?.theme.get()
+  if (!themeResult?.success || !themeResult.data) return
+
+  localStorage.setItem('ready-theme', themeResult.data.option)
+  document.documentElement.setAttribute('data-theme', themeResult.data.resolved)
+}
+
 async function bootstrap() {
+  const previewMode = new URLSearchParams(window.location.search).get('preview')
+  if (previewMode === 'settings' && !(window as Window & { electronAPI?: unknown }).electronAPI) {
+    const { installSettingsPreviewMocks } = await import('./preview/installSettingsPreviewMocks')
+    installSettingsPreviewMocks()
+  }
+
+  await hydrateStartupTheme()
+
   const { default: App } = await import('./App')
   const root = document.getElementById('root')
   if (!root) throw new Error('Root element #root not found')
@@ -22,6 +39,7 @@ async function bootstrap() {
       </HashRouter>
     </React.StrictMode>
   )
+
 }
 
 function renderFatalBootstrapError(error: unknown) {

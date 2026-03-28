@@ -1018,6 +1018,52 @@ export class BrowserController {
     return this.tabShellService.showActiveHost()
   }
 
+  async fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }> {
+    try {
+      const { view } = this.resolveTabView(tabId || null)
+      const metrics = await view.webContents.executeJavaScript(`(() => {
+        const root = document.documentElement
+        const body = document.body
+        if (!root || !body) {
+          return { viewportWidth: 0, contentWidth: 0 }
+        }
+
+        const viewportWidth = Math.max(window.innerWidth || 0, root.clientWidth || 0)
+        const contentWidth = Math.max(
+          root.scrollWidth || 0,
+          body.scrollWidth || 0,
+          root.offsetWidth || 0,
+          body.offsetWidth || 0,
+          ...Array.from(document.querySelectorAll('body *'))
+            .slice(0, 240)
+            .map((node) => {
+              if (!(node instanceof HTMLElement)) return 0
+              const style = window.getComputedStyle(node)
+              if (style.display === 'none' || style.visibility === 'hidden') return 0
+              const rect = node.getBoundingClientRect()
+              return rect.width > 40 && rect.height > 20 ? rect.right : 0
+            }),
+        )
+
+        return { viewportWidth, contentWidth }
+      })()`, true) as { viewportWidth?: number; contentWidth?: number }
+
+      const viewportWidth = Math.max(0, Number(metrics?.viewportWidth || 0))
+      const contentWidth = Math.max(0, Number(metrics?.contentWidth || 0))
+      let zoomFactor = 1
+
+      if (viewportWidth > 0 && contentWidth > viewportWidth + 24) {
+        zoomFactor = Math.max(0.72, Math.min(1, viewportWidth / contentWidth))
+      }
+
+      view.webContents.setZoomFactor(zoomFactor)
+
+      return { success: true, zoomFactor }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   async captureWindowSnapshot(bounds: BrowserRect): Promise<{ success: boolean; data?: string; error?: string }> {
     try {
       if (bounds.width <= 0 || bounds.height <= 0) {

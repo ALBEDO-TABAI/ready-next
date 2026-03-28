@@ -3,7 +3,6 @@ import { format, addDays, addMonths, subMonths, subDays, startOfWeek, startOfMon
 import { zhCN } from 'date-fns/locale'
 
 import CalendarWorkbenchShell from '../../components/calendar/CalendarWorkbenchShell'
-import CalendarEnterOverlay from '../../components/calendar/CalendarEnterOverlay'
 import { CalendarProvider } from '../../components/calendar/CalendarContext'
 import type { CalendarContextValue } from '../../components/calendar/CalendarContext'
 import EventModal from '../../components/calendar/EventModal'
@@ -22,15 +21,11 @@ import '../../styles/schedule-x.css'
 interface CalendarModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
-  isTransitioning?: boolean
-  transitionDirection?: -1 | 1
 }
 
 export default function CalendarMode({
   isActive = true,
   isMotionSettled = true,
-  isTransitioning = false,
-  transitionDirection = 1,
 }: CalendarModeProps) {
   const setVisibleRange = useCalendarSession((state) => state.setVisibleRange)
   const setSelectedSessionEvent = useCalendarSession((state) => state.setSelectedEvent)
@@ -413,12 +408,6 @@ export default function CalendarMode({
           onCloseQuickCreate={quickCreate.closeQuickCreate}
           onQuickCardSubmit={quickCreate.handleQuickCardSubmit}
           onCloseQuickCard={quickCreate.closeQuickCard}
-        />
-
-        {/* 日历进入骨架遮罩 */}
-        <CalendarEnterOverlay
-          visible={isActive && isTransitioning && !isMotionSettled}
-          direction={transitionDirection}
         />
 
         {modalOpen && (

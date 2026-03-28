@@ -2,7 +2,7 @@ appId: com.ready.app
 productName: Ready
 directories:
   buildResources: build
-  output: dist
+  output: exports
 files:
   - out/**/*
   - package.json
@@ -34,8 +34,10 @@ mac:
       arch:
         - arm64
   artifactName: "${productName}-${version}-${arch}.${ext}"
-  hardenedRuntime: true
+  hardenedRuntime: false
   gatekeeperAssess: false
+  identity: null
+afterPack: scripts/post-build.cjs
 dmg:
   contents:
     - x: 130

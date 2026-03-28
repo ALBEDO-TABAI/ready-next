@@ -20,7 +20,7 @@ export interface PromptMemoryRef {
 export interface PromptTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -47,6 +47,8 @@ export interface PromptAssemblyDeps {
   now?: () => Date
   memoryRepository?: MemoryRepository
   enableDatabaseMemory?: boolean
+  userProfileRepository?: any
+  agentPersonalityRepository?: any
 }
 
 interface TriggerDefinition {
@@ -83,7 +85,7 @@ const DEFAULT_FILES: Record<string, string> = {
   ].join('\n'),
   'TOOLS.md': [
     '# TOOLS.md',
-    '- browser/document/design/video/rss/calendar/system 工具族可用。',
+    '- browser/document/rss/calendar/skill/system/feishu/memory 工具族可用。',
   ].join('\n'),
   'SOUL.md': [
     '# SOUL.md',
@@ -107,10 +109,6 @@ const DEFAULT_FILES: Record<string, string> = {
   'docs/browser-rules.md': [
     '# 浏览器规则',
     '- 上传/输入/提交按阶段执行并逐步验证。',
-  ].join('\n'),
-  'docs/video-rules.md': [
-    '# 视频规则',
-    '- 渲染前确认 timeline schema、输出格式和元数据。',
   ].join('\n'),
   'docs/rss-rules.md': [
     '# RSS 规则',
@@ -163,16 +161,6 @@ const TRIGGERS: TriggerDefinition[] = [
     blocking: false,
     refs: [
       { path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' },
-    ],
-  },
-  {
-    id: 'video-render',
-    label: '视频渲染操作',
-    module: 'video',
-    pattern: /(视频|剪辑|渲染|导出)/i,
-    blocking: false,
-    refs: [
-      { path: 'docs/video-rules.md', title: '视频渲染规则', summary: '视频 schema、metadata 和导出规则' },
     ],
   },
   {
@@ -329,18 +317,135 @@ export class PromptAssemblyService {
     }
   }
 
-  private loadL0(): { text: string; refs: PromptMemoryRef[]; chars: number } {
-    const parts = [
-      ['MEMORY.md', '长期记忆'],
-      ['AGENTS.md', '运行指令'],
-      ['USER.md', '用户偏好'],
-      ['TOOLS.md', '工具索引'],
-      ['SOUL.md', '人格定义'],
-    ] as const
+  /**
+   * Load SOUL.md dynamically from database or fallback to file
+   */
+  private async loadSOUL(agentName: string): Promise<string> {
+    if (this.deps.enableDatabaseMemory && this.deps.agentPersonalityRepository) {
+      try {
+        const personality = await this.deps.agentPersonalityRepository.getPersonality(agentName)
+        if (personality) {
+          return personality.personalityText
+        }
+      } catch (error) {
+        console.error('[PromptAssembly] Failed to load personality from database:', error)
+      }
+    }
+    // Fallback to file-based SOUL.md
+    return this.readMemoryFile('SOUL.md')
+  }
 
-    const rendered = parts.map(([path, title]) => formatMemorySection(title, this.readMemoryFile(path))).join('\n\n')
+  /**
+   * Load USER.md dynamically from database or fallback to file
+   */
+  private async loadUSER(userId?: string): Promise<string> {
+    if (!userId || !this.deps.enableDatabaseMemory) {
+      return this.readMemoryFile('USER.md')
+    }
+
+    try {
+      // Load user profile
+      const profile = this.deps.userProfileRepository
+        ? await this.deps.userProfileRepository.getProfile(userId)
+        : null
+
+      if (!profile) {
+        return this.readMemoryFile('USER.md')
+      }
+
+      // Generate USER.md content from profile
+      const sections = [
+        `# User Profile: ${profile.name || userId}`,
+        `Language: ${profile.preferredLanguage}`,
+        profile.communicationStyle ? `Communication Style: ${profile.communicationStyle}` : '',
+      ]
+
+      // Load user-specific memories
+      if (this.deps.memoryRepository) {
+        const userMemories = await this.deps.memoryRepository.queryMemories({
+          userId,
+          category: 'user_preference',
+          includeArchived: false,
+          limit: 10,
+        })
+
+        if (userMemories.length > 0) {
+          sections.push('\n## Preferences')
+          for (const memory of userMemories) {
+            const content = await this.loadMemoryContent(memory.contentKey)
+            if (content) {
+              sections.push(`- ${memory.title}: ${content}`)
+            }
+          }
+        }
+      }
+
+      return sections.filter(Boolean).join('\n')
+    } catch (error) {
+      console.error('[PromptAssembly] Failed to load user profile from database:', error)
+      return this.readMemoryFile('USER.md')
+    }
+  }
+
+  /**
+   * Load MEMORY.md dynamically from database or fallback to file
+   */
+  private async loadMEMORY(): Promise<string> {
+    const sections = [this.readMemoryFile('MEMORY.md')]
+
+    if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
+      try {
+        // Load global facts from database
+        const globalFacts = await this.deps.memoryRepository.queryMemories({
+          category: 'global_fact',
+          includeArchived: false,
+          limit: 20,
+        })
+
+        if (globalFacts.length > 0) {
+          sections.push('\n## Learned Facts')
+          for (const fact of globalFacts) {
+            const content = await this.loadMemoryContent(fact.contentKey)
+            if (content) {
+              sections.push(`- ${fact.title}: ${content}`)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[PromptAssembly] Failed to load global facts from database:', error)
+      }
+    }
+
+    return sections.join('\n')
+  }
+
+  private async loadL0(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
+    // Load dynamic L0 files
+    const soul = await this.loadSOUL(scope.agent)
+    const memory = await this.loadMEMORY()
+    const user = await this.loadUSER(scope.userId)
+    const agents = this.readMemoryFile('AGENTS.md')
+    const tools = this.readMemoryFile('TOOLS.md')
+
+    const sections = [
+      formatMemorySection('长期记忆', memory),
+      formatMemorySection('运行指令', agents),
+      formatMemorySection('用户偏好', user),
+      formatMemorySection('工具索引', tools),
+      formatMemorySection('人格定义', soul),
+    ]
+
+    const rendered = sections.join('\n\n')
     const clipped = clip(rendered, MAX_L0_CHARS)
-    const refs = parts.map(([path, title]) => this.makeMemoryRef('l0', title, path, `L0 常驻：${title}`))
+
+    const refs = [
+      this.makeMemoryRef('l0', '长期记忆', 'MEMORY.md', 'L0 常驻：长期记忆'),
+      this.makeMemoryRef('l0', '运行指令', 'AGENTS.md', 'L0 常驻：运行指令'),
+      this.makeMemoryRef('l0', '用户偏好', 'USER.md', 'L0 常驻：用户偏好'),
+      this.makeMemoryRef('l0', '工具索引', 'TOOLS.md', 'L0 常驻：工具索引'),
+      this.makeMemoryRef('l0', '人格定义', 'SOUL.md', 'L0 常驻：人格定义'),
+    ]
+
     return { text: clipped, refs, chars: clipped.length }
   }
 
@@ -503,7 +608,7 @@ export class PromptAssemblyService {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
   }): Promise<PromptAssemblyResult> {
-    const l0 = this.loadL0()
+    const l0 = await this.loadL0(params.scope)
     const l1 = await this.loadL1(params.scope)
     const userText = extractTextFromMessage(params.message)
     const triggerMatches = await this.resolveTriggers(userText)
@@ -564,6 +669,110 @@ export class PromptAssemblyService {
       appendFileSync(path, `${lines.join('\n')}\n`, 'utf8')
     } catch {
       // Keep memory writebacks non-blocking; the main run should still succeed.
+    }
+  }
+
+  /**
+   * Create a memory from conversation content
+   * @param scope - Conversation scope
+   * @param category - Memory category (summary or learning)
+   * @param title - Memory title
+   * @param content - Memory content
+   * @param tags - Optional tags
+   * @param priority - Optional priority (default 0)
+   */
+  async createMemoryFromConversation(params: {
+    scope: ConversationScope
+    category: 'summary' | 'learning'
+    title: string
+    content: string
+    tags?: string[]
+    priority?: number
+  }): Promise<string | null> {
+    if (!this.deps.enableDatabaseMemory || !this.deps.memoryRepository) {
+      return null
+    }
+
+    try {
+      // Generate unique content key
+      const contentKey = `memory-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+
+      // Store content in agent_knowledge table
+      const { getDatabase } = await import('../database')
+      const dbManager = getDatabase()
+      const db = dbManager.getRawDb()
+      if (!db) return null
+
+      db.prepare('INSERT INTO agent_knowledge (key, value, created_at) VALUES (?, ?, ?)').run(
+        contentKey,
+        params.content,
+        Math.floor(Date.now() / 1000)
+      )
+
+      // Create memory metadata
+      const memory = await this.deps.memoryRepository.createMemory({
+        layer: 'l1',
+        scopeId: params.category === 'learning' ? null : params.scope.id, // Global for learnings
+        category: params.category,
+        title: params.title,
+        contentKey,
+        priority: params.priority ?? 0,
+        tags: params.tags,
+        // Summaries expire after 30 days, learnings never expire
+        expiresAt: params.category === 'summary' ? Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60 : null,
+      })
+
+      return memory.id
+    } catch (error) {
+      console.error('[PromptAssembly] Failed to create memory:', error)
+      return null
+    }
+  }
+
+  /**
+   * Create a trigger with associated memories
+   * @param label - Trigger label
+   * @param pattern - Regex pattern
+   * @param patternFlags - Regex flags (default 'i')
+   * @param memoryIds - Associated memory IDs
+   * @param module - Optional module name
+   * @param blocking - Whether trigger is blocking (default false)
+   * @param priority - Trigger priority (default 0)
+   */
+  async createTrigger(params: {
+    label: string
+    pattern: string
+    patternFlags?: string
+    memoryIds: string[]
+    module?: string
+    blocking?: boolean
+    priority?: number
+  }): Promise<string | null> {
+    if (!this.deps.enableDatabaseMemory || !this.deps.memoryRepository) {
+      return null
+    }
+
+    try {
+      // Create trigger
+      const trigger = await this.deps.memoryRepository.createTrigger({
+        label: params.label,
+        pattern: params.pattern,
+        patternFlags: params.patternFlags ?? 'i',
+        module: params.module ?? null,
+        blocking: params.blocking ?? false,
+        priority: params.priority ?? 0,
+        enabled: true,
+      })
+
+      // Associate memories with trigger
+      for (const memoryId of params.memoryIds) {
+        await this.deps.memoryRepository.addTriggerRef(trigger.id, memoryId, 0)
+      }
+
+      return trigger.id
+    } catch (error) {
+      console.error('[PromptAssembly] Failed to create trigger:', error)
+      return null
     }
   }
 }

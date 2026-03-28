@@ -196,8 +196,9 @@ export default function EventModal({
 
   const inputStyle: React.CSSProperties = {
     width: '100%', height: 32, padding: '6px 10px',
-    borderRadius: 6, border: '1px solid var(--border-default)',
-    background: 'var(--bg-primary)', fontSize: 12, color: 'var(--text-body)',
+    borderRadius: 6, border: '1px solid var(--input-slot-border)',
+    background: 'var(--input-slot-bg)', boxShadow: 'var(--input-slot-shadow)',
+    fontSize: 12, color: 'var(--text-body)',
     outline: 'none', fontFamily: 'Inter, system-ui, sans-serif',
     transition: 'border-color 0.2s',
   }
@@ -324,6 +325,7 @@ export default function EventModal({
                     type="time"
                     value={startTime}
                     onChange={e => setStartTime(e.target.value)}
+                    className="ready-input-slot-inner"
                     style={{
                       border: 'none', background: 'transparent', fontSize: 12,
                       color: 'var(--text-body)', outline: 'none', flex: 1, padding: 0,
@@ -350,6 +352,7 @@ export default function EventModal({
                     type="time"
                     value={endTime}
                     onChange={e => setEndTime(e.target.value)}
+                    className="ready-input-slot-inner"
                     style={{
                       border: 'none', background: 'transparent', fontSize: 12,
                       color: 'var(--text-body)', outline: 'none', flex: 1, padding: 0,
@@ -375,8 +378,9 @@ export default function EventModal({
               style={{
                 width: '100%', height: 52, padding: '6px 10px',
                 borderRadius: 6,
-                border: `1px solid ${descriptionDropActive ? 'var(--color-blue)' : 'var(--border-default)'}`,
-                background: 'var(--bg-primary)', fontSize: 12, color: 'var(--text-body)',
+                border: `1px solid ${descriptionDropActive ? 'var(--color-blue)' : 'var(--input-slot-border)'}`,
+                background: 'var(--input-slot-bg)', boxShadow: 'var(--input-slot-shadow)',
+                fontSize: 12, color: 'var(--text-body)',
                 outline: 'none', resize: 'none',
                 fontFamily: 'Inter, system-ui, sans-serif',
                 transition: 'border-color 0.2s',

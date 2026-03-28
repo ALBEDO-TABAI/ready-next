@@ -1,0 +1,51 @@
+{
+  "id": "video-expert-analyzer",
+  "name": "Video Expert Analyzer",
+  "description": "Analyze scene scores and produce review-ready visual reports for a video.",
+  "version": "2026.03.15",
+  "defaultAction": "video_expert_pipeline",
+  "requirementsFile": "requirements.txt",
+  "execution": {
+    "mode": "workflow",
+    "workflowFile": "skill.workflow.json",
+    "resultContractVersion": 1,
+    "autoAdvance": true
+  },
+  "actions": [
+    {
+      "name": "video_expert_pipeline",
+      "description": "启动 Video Expert Analyzer workflow，并自动推进到 blocker。",
+      "runtime": "python",
+      "entry": "scripts/ready_pipeline.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "params": [
+        { "name": "url", "type": "string", "description": "视频 URL", "required": true },
+        { "name": "outputDir", "type": "string", "description": "输出目录", "required": false },
+        { "name": "sceneThreshold", "type": "number", "description": "分镜阈值", "required": false },
+        { "name": "bestThreshold", "type": "number", "description": "精选阈值", "required": false }
+      ]
+    },
+    {
+      "name": "video_expert_ai_analyze",
+      "description": "直接运行 scene_scores.json 的 AI 评分。",
+      "runtime": "python",
+      "entry": "scripts/ready_ai_analyze.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "params": [
+        { "name": "sceneScoresPath", "type": "string", "description": "scene_scores.json 路径", "required": true },
+        { "name": "mode", "type": "string", "description": "评分模式", "required": false, "enum": ["agent", "api"] }
+      ]
+    },
+    {
+      "name": "video_expert_pipeline_runtime",
+      "description": "执行视频视觉分析的 deterministic pipeline。",
+      "runtime": "python",
+      "entry": "scripts/ready_pipeline.py",
+      "visibility": "internal",
+      "inputMode": "json",
+      "params": []
+    }
+  ]
+}

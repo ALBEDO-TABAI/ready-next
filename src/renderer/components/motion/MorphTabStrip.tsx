@@ -5,7 +5,6 @@ import {
   type ReactNode,
 } from 'react'
 import { LayoutGroup, MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import { useTheme } from '../../stores/useTheme'
 
 interface MorphTabStripProps extends HTMLAttributes<HTMLDivElement> {
   layoutId: string
@@ -15,6 +14,7 @@ interface MorphTabButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   layoutId: string
   active?: boolean
   secondaryActive?: boolean
+  suppressLiquidPill?: boolean
   children: ReactNode
   contentClassName?: string
   contentStyle?: CSSProperties
@@ -43,6 +43,7 @@ export function MorphTabButton({
   layoutId,
   active = false,
   secondaryActive = false,
+  suppressLiquidPill = false,
   children,
   className,
   style,
@@ -50,8 +51,6 @@ export function MorphTabButton({
   contentStyle,
   ...buttonProps
 }: MorphTabButtonProps) {
-  const skin = useTheme((state) => state.skin)
-  const enableMorph = skin === 'liquid-glass'
   const showPrimary = active
   const showSecondary = secondaryActive && !showPrimary
 
@@ -62,7 +61,7 @@ export function MorphTabButton({
       style={style}
       {...buttonProps}
     >
-      {enableMorph && showPrimary && (
+      {showPrimary && !suppressLiquidPill && (
         <motion.span
           layoutId={`${layoutId}-primary`}
           transition={PILL_TRANSITION}
@@ -70,7 +69,7 @@ export function MorphTabButton({
           aria-hidden="true"
         />
       )}
-      {enableMorph && showSecondary && (
+      {showSecondary && !suppressLiquidPill && (
         <motion.span
           layoutId={`${layoutId}-secondary`}
           transition={PILL_TRANSITION}

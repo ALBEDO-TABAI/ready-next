@@ -8,6 +8,7 @@ import { appendFileSync, readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
+import { getLogPath } from '../../utils/platform'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -55,7 +56,7 @@ function looksLikeReadableText(value: string): boolean {
   return printable / sample.length > 0.88
 }
 
-const LOG = '/tmp/ready-directchat.log'
+const LOG = getLogPath('ready-directchat.log')
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
@@ -138,7 +139,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       try {
         const capture = (resultPayload as { runCapture?: unknown }).runCapture
         if (capture && typeof capture === 'object') {
-          appendFileSync('/tmp/ready-design-run-captures.ndjson', `${JSON.stringify(capture)}\n`)
+          appendFileSync(getLogPath('ready-design-run-captures.ndjson'), `${JSON.stringify(capture)}\n`)
         }
       } catch {
         // ignore diagnostic persistence failures
@@ -1064,6 +1065,83 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       }
       const result = await lifecycle.runMaintenance()
       return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:memory:createFromConversation')
+  ipcMain.handle('agent:memory:createFromConversation', async (_, payload: {
+    scopeId: string
+    category: 'summary' | 'learning'
+    title: string
+    content: string
+    tags?: string[]
+    priority?: number
+  }): Promise<IPCResponse> => {
+    try {
+      const promptAssembly = runtime?.getPromptAssembly()
+      if (!promptAssembly) {
+        return { success: false, error: 'Prompt assembly not available' }
+      }
+
+      // Get scope
+      const scopes = runtime?.listConversationScopes()
+      const scope = scopes?.find((s) => s.id === payload.scopeId)
+      if (!scope) {
+        return { success: false, error: 'Scope not found' }
+      }
+
+      const memoryId = await promptAssembly.createMemoryFromConversation({
+        scope,
+        category: payload.category,
+        title: payload.title,
+        content: payload.content,
+        tags: payload.tags,
+        priority: payload.priority,
+      })
+
+      if (!memoryId) {
+        return { success: false, error: 'Failed to create memory' }
+      }
+
+      return { success: true, data: { memoryId } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.removeHandler('agent:trigger:createWithMemories')
+  ipcMain.handle('agent:trigger:createWithMemories', async (_, payload: {
+    label: string
+    pattern: string
+    patternFlags?: string
+    memoryIds: string[]
+    module?: string
+    blocking?: boolean
+    priority?: number
+  }): Promise<IPCResponse> => {
+    try {
+      const promptAssembly = runtime?.getPromptAssembly()
+      if (!promptAssembly) {
+        return { success: false, error: 'Prompt assembly not available' }
+      }
+
+      const triggerId = await promptAssembly.createTrigger({
+        label: payload.label,
+        pattern: payload.pattern,
+        patternFlags: payload.patternFlags,
+        memoryIds: payload.memoryIds,
+        module: payload.module,
+        blocking: payload.blocking,
+        priority: payload.priority,
+      })
+
+      if (!triggerId) {
+        return { success: false, error: 'Failed to create trigger' }
+      }
+
+      return { success: true, data: { triggerId } }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

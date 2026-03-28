@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { ViewType } from './schedule-x-utils'
+import {
+  buildFloatingMenuItemStyle,
+  buildFloatingMenuSurfaceStyle,
+} from '../ui/floatingMenuStyles'
 
 const VIEW_OPTIONS: { value: ViewType; label: string }[] = [
   { value: 'day', label: '日' },
@@ -44,13 +48,18 @@ export default function CalendarViewSelector({
       </button>
       {open && (
         <div
-          className="glass-surface-floating"
+          className="glass-surface-floating ready-floating-menu"
           style={{
-            position: 'absolute', top: '100%', left: 0, marginTop: 4,
-            background: 'var(--surface-floating-bg)', border: '1px solid var(--border-default)',
-            borderRadius: 8, padding: 4, zIndex: 50,
-            boxShadow: 'var(--surface-shadow)',
-            minWidth: 60,
+            ...buildFloatingMenuSurfaceStyle(84, {
+              maxHeight: 220,
+              minWidth: 84,
+              padding: 6,
+              zIndex: 80,
+            }),
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: 4,
           }}
         >
           {VIEW_OPTIONS.map(({ value, label }) => (
@@ -60,13 +69,13 @@ export default function CalendarViewSelector({
                 onViewTypeChange(value)
                 setOpen(false)
               }}
+              className={`ready-floating-menu-item ${viewType === value ? 'is-selected' : ''}`}
               style={{
-                display: 'block', width: '100%',
-                padding: '4px 10px', borderRadius: 6,
-                border: 'none', cursor: 'pointer', textAlign: 'left',
-                fontSize: 12, fontWeight: viewType === value ? 600 : 400,
-                color: viewType === value ? 'var(--color-blue)' : 'var(--text-body)',
-                background: viewType === value ? 'var(--color-blue-light)' : 'transparent',
+                ...buildFloatingMenuItemStyle({ compact: true, selected: viewType === value }),
+                display: 'block',
+                fontSize: 12,
+                fontWeight: viewType === value ? 600 : 500,
+                color: 'var(--text-body)',
               }}
             >
               {label}

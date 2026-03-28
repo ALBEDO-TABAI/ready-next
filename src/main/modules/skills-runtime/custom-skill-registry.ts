@@ -1,26 +1,19 @@
 import { basename, join } from 'path'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import type {
+  SkillActionDefinition,
+  SkillActionVisibility,
+  SkillExecutionMode,
+  SkillParamDefinition,
+  SkillRuntimeKind,
+  SkillSource,
+} from '../../../shared/skill-execution-types'
 
-export type SkillSource = 'embedded' | 'custom'
-export type SkillRuntimeKind = 'python' | 'node' | 'shell' | 'reference'
-
-export interface SkillParamDefinition {
-  name: string
-  type: string
-  description: string
-  required: boolean
-  enum?: string[]
-}
-
-export interface SkillActionDefinition {
-  name: string
-  description: string
-  runtime: SkillRuntimeKind
-  entry: string
-  timeoutMs?: number
-  params: SkillParamDefinition[]
-  baseArgs?: string[]
-  inputMode?: 'flags' | 'json'
+export interface CustomSkillExecutionConfig {
+  mode: Exclude<SkillExecutionMode, 'direct'>
+  workflowFile?: string
+  resultContractVersion?: number
+  autoAdvance?: boolean
 }
 
 export interface CustomSkillManifest {
@@ -36,6 +29,7 @@ export interface CustomSkillManifest {
   importedAt: string
   updatedAt: string
   actions: SkillActionDefinition[]
+  execution?: CustomSkillExecutionConfig
 }
 
 export interface RegisteredCustomSkill extends CustomSkillManifest {
@@ -206,6 +200,7 @@ function normalizeAction(name: string, raw: unknown, inheritedRuntime: SkillRunt
       entry: raw,
       params: [],
       inputMode: 'flags',
+      visibility: 'public',
     }
   }
 
@@ -230,6 +225,7 @@ function normalizeAction(name: string, raw: unknown, inheritedRuntime: SkillRunt
     params: normalizeParams(obj.params ?? obj.input_schema ?? obj.parameters),
     baseArgs: asStringArray(obj.args ?? obj.baseArgs),
     inputMode: asString(obj.inputMode) === 'json' ? 'json' : 'flags',
+    visibility: coerceVisibility(obj.visibility),
   }
 }
 
@@ -261,9 +257,20 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       entry: documentEntry,
       params: [],
       inputMode: 'flags',
+      visibility: 'public',
     })
   }
   return actions
+}
+
+function coerceVisibility(value: unknown): SkillActionVisibility {
+  return asString(value) === 'internal' ? 'internal' : 'public'
+}
+
+function coerceExecutionMode(value: unknown): Exclude<SkillExecutionMode, 'direct'> | null {
+  const raw = asString(value)?.toLowerCase()
+  if (raw === 'advisory' || raw === 'workflow') return raw
+  return null
 }
 
 function detectDocumentEntry(folderPath: string): string | null {
@@ -304,6 +311,7 @@ export function loadCustomSkillManifestFromFolder(folderPath: string): CustomSki
       importedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       actions: normalizeActions(undefined, 'reference', documentEntry),
+      execution: { mode: 'advisory', autoAdvance: false },
     }
   }
 
@@ -324,6 +332,8 @@ export function loadCustomSkillManifestFromFolder(folderPath: string): CustomSki
     asString(obj.defaultAction) ||
     asString(obj.default_action) ||
     actions[0].name
+  const executionObj = asObject(obj.execution)
+  const executionMode = coerceExecutionMode(executionObj?.mode)
 
   return {
     id,
@@ -340,6 +350,18 @@ export function loadCustomSkillManifestFromFolder(folderPath: string): CustomSki
     importedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     actions,
+    execution: executionMode
+      ? {
+        mode: executionMode,
+        workflowFile: asString(executionObj?.workflowFile) || asString(executionObj?.workflow_file) || undefined,
+        resultContractVersion: Number.isFinite(Number(executionObj?.resultContractVersion ?? executionObj?.result_contract_version))
+          ? Number(executionObj?.resultContractVersion ?? executionObj?.result_contract_version)
+          : undefined,
+        autoAdvance: typeof executionObj?.autoAdvance === 'boolean'
+          ? executionObj.autoAdvance
+          : (typeof executionObj?.auto_advance === 'boolean' ? executionObj.auto_advance : undefined),
+      }
+      : undefined,
   }
 }
 

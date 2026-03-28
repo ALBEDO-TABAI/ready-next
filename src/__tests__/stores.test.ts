@@ -75,7 +75,6 @@ const { useDocTabs } = await import('../renderer/stores/useDocTabs')
 const { useAgent } = await import('../renderer/stores/useAgent')
 const { useWorkspace } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
-const { useDesignSession } = await import('../renderer/stores/useDesignSession')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 
 // ============================================================
@@ -84,7 +83,7 @@ const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 
 describe('Mode Store Types', () => {
     it('should have valid WorkbenchMode values', () => {
-        const validModes = ['browser', 'document', 'design', 'video', 'rss', 'calendar']
+        const validModes = ['browser', 'document', 'rss', 'calendar']
         validModes.forEach(mode => {
             assert.strictEqual(typeof mode, 'string')
             assert.ok(mode.length > 0)
@@ -212,8 +211,8 @@ describe('useMode Store', () => {
     })
 
     it('should set each valid workbenchMode', () => {
-        const modes: Array<'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar'> =
-            ['browser', 'document', 'design', 'video', 'rss', 'calendar']
+        const modes: Array<'browser' | 'document' | 'rss' | 'calendar'> =
+            ['browser', 'document', 'rss', 'calendar']
         for (const mode of modes) {
             useMode.getState().setWorkbenchMode(mode)
             assert.strictEqual(useMode.getState().workbenchMode, mode)
@@ -223,8 +222,8 @@ describe('useMode Store', () => {
     it('should clear splitMode when setting workbenchMode', () => {
         useMode.getState().setSplitMode('document')
         assert.strictEqual(useMode.getState().splitMode, 'document')
-        useMode.getState().setWorkbenchMode('design')
-        assert.strictEqual(useMode.getState().workbenchMode, 'design')
+        useMode.getState().setWorkbenchMode('rss')
+        assert.strictEqual(useMode.getState().workbenchMode, 'rss')
         assert.strictEqual(useMode.getState().splitMode, null)
     })
 
@@ -238,8 +237,8 @@ describe('useMode Store', () => {
     it('should set readySubMode', () => {
         useMode.getState().setReadySubMode('calendar')
         assert.strictEqual(useMode.getState().readySubMode, 'calendar')
-        useMode.getState().setReadySubMode('video')
-        assert.strictEqual(useMode.getState().readySubMode, 'video')
+        useMode.getState().setReadySubMode('document')
+        assert.strictEqual(useMode.getState().readySubMode, 'document')
     })
 
     it('should toggle between workbench and ready', () => {
@@ -1188,7 +1187,7 @@ describe('useTheme Store', () => {
         useTheme.setState({
             theme: 'light',
             resolvedTheme: 'light',
-            skin: 'classic',
+            skin: 'liquid-glass',
         })
     })
 
@@ -1196,7 +1195,7 @@ describe('useTheme Store', () => {
         const state = useTheme.getState()
         assert.strictEqual(state.theme, 'light')
         assert.strictEqual(state.resolvedTheme, 'light')
-        assert.strictEqual(state.skin, 'classic')
+        assert.strictEqual(state.skin, 'liquid-glass')
     })
 
     it('should set theme to dark', () => {
@@ -1288,56 +1287,16 @@ describe('useTheme Store', () => {
         assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
     })
 
-    it('should toggle skin in cycle: classic -> liquid-glass -> classic', () => {
-        assert.strictEqual(useTheme.getState().skin, 'classic')
+    it('should keep skin pinned to liquid-glass', () => {
+        assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
 
         useTheme.getState().toggleSkin()
         assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
         assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
 
         useTheme.getState().toggleSkin()
-        assert.strictEqual(useTheme.getState().skin, 'classic')
-        assert.strictEqual(storage.get('ready-theme-skin'), 'classic')
-        assert.strictEqual(documentAttributes.get('data-skin'), 'classic')
-    })
-})
-
-// ============================================================
-// useDesignSession Store Tests
-// ============================================================
-
-describe('useDesignSession Store', () => {
-    beforeEach(() => {
-        useDesignSession.getState().reset()
-    })
-
-    it('should set active design file and reset transient status', () => {
-        useDesignSession.getState().markDirty()
-        useDesignSession.getState().setActiveFile('/tmp/mock.tldr')
-        const state = useDesignSession.getState()
-        assert.strictEqual(state.activeFile, '/tmp/mock.tldr')
-        assert.strictEqual(state.isDirty, false)
-        assert.strictEqual(state.saveStatus, 'idle')
-    })
-
-    it('should update save state transitions', () => {
-        const store = useDesignSession.getState()
-        store.setActiveFile('/tmp/mock.tldr')
-        store.markDirty()
-        assert.strictEqual(useDesignSession.getState().isDirty, true)
-        store.markSaving()
-        assert.strictEqual(useDesignSession.getState().saveStatus, 'saving')
-        store.markSaved()
-        assert.strictEqual(useDesignSession.getState().saveStatus, 'saved')
-        assert.strictEqual(useDesignSession.getState().isDirty, false)
-        assert.ok(useDesignSession.getState().lastSavedAt !== null)
-    })
-
-    it('should store error details when save fails', () => {
-        useDesignSession.getState().setActiveFile('/tmp/mock.tldr')
-        useDesignSession.getState().markError('disk full')
-        const state = useDesignSession.getState()
-        assert.strictEqual(state.saveStatus, 'error')
-        assert.strictEqual(state.lastError, 'disk full')
+        assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
+        assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
+        assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
     })
 })

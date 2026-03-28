@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import WorkbenchMode from './pages/WorkbenchMode'
 import ReadyMode from './pages/ReadyMode'
@@ -7,6 +7,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useTheme } from './stores/useTheme'
 import { initAgentListeners } from './stores/useAgent'
+
+const LiquidTest = lazy(() => import('./LiquidTest'))
 
 function App() {
   useKeyboardShortcuts()
@@ -41,6 +43,14 @@ function App() {
           <Route path="/workbench" element={<WorkbenchMode />} />
           <Route path="/ready" element={<ReadyMode />} />
           <Route path="/settings" element={<Settings />} />
+          <Route
+            path="/liquid-test"
+            element={(
+              <Suspense fallback={<div className="h-full w-full" />}>
+                <LiquidTest />
+              </Suspense>
+            )}
+          />
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Routes>
       </div>

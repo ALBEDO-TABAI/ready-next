@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type WorkbenchMode = 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar'
+export type WorkbenchMode = 'browser' | 'document' | 'rss' | 'calendar'
 export type AppMode = 'workbench' | 'ready'
 
 interface ModeState {

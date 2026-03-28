@@ -19,7 +19,6 @@ const topIcons = [
 export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false, expanded = true }: IconRailProps) {
   const handleClick = (id: string) => onIconClick?.(id)
 
-  // Task 4: Conditionally hidden for image/video modes
   if (hidden) return null
 
   return (

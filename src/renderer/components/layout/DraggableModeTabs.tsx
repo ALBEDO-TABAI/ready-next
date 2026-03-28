@@ -3,6 +3,8 @@ import { Globe, FileText, Rss, Calendar } from 'lucide-react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import '../../styles/workbench-sliders.css'
 import {
+  easeWorkbenchSliderClick,
+  WORKBENCH_SLIDER_CLICK_DURATION_MS,
   WORKBENCH_SLIDER_FRAME_STEP,
   WORKBENCH_SLIDER_SPRING,
 } from '../../modules/workbench/slider-motion'
@@ -31,21 +33,52 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
   const targetRef = useRef(modes.findIndex(m => m.id === activeMode))
   const currentRef = useRef(modes.findIndex(m => m.id === activeMode))
   const isDraggingRef = useRef(false)
+  const skipClickAnimationRef = useRef(false)
 
-  // Sync with external activeMode prop
-  useEffect(() => {
-    if (!isDraggingRef.current) {
-      const index = modes.findIndex(m => m.id === activeMode)
-      targetRef.current = index
-      startSpringAnimation()
-    }
-  }, [activeMode])
-
-  // Spring animation loop
-  const startSpringAnimation = useCallback(() => {
+  const cancelAnimation = useCallback(() => {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
     }
+  }, [])
+
+  const startClickAnimation = useCallback(() => {
+    cancelAnimation()
+    const start = currentRef.current
+    const target = targetRef.current
+
+    if (Math.abs(target - start) < 0.001) {
+      currentRef.current = target
+      setPosition(target)
+      return
+    }
+
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+
+    const animate = (timestamp: number) => {
+      const elapsed = timestamp - startedAt
+      const progress = elapsed / WORKBENCH_SLIDER_CLICK_DURATION_MS
+      const eased = easeWorkbenchSliderClick(progress)
+      const next = start + (target - start) * eased
+
+      currentRef.current = next
+      setPosition(next)
+
+      if (progress >= 1) {
+        currentRef.current = target
+        setPosition(target)
+        rafRef.current = null
+        return
+      }
+
+      rafRef.current = requestAnimationFrame(animate)
+    }
+
+    rafRef.current = requestAnimationFrame(animate)
+  }, [cancelAnimation])
+
+  const startSpringAnimation = useCallback(() => {
+    cancelAnimation()
 
     const animate = () => {
       const target = targetRef.current
@@ -70,13 +103,29 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     }
 
     rafRef.current = requestAnimationFrame(animate)
-  }, [])
+  }, [cancelAnimation])
+
+  // Sync with external activeMode prop
+  useEffect(() => {
+    if (isDraggingRef.current) return
+
+    const index = modes.findIndex(m => m.id === activeMode)
+    targetRef.current = index
+
+    if (skipClickAnimationRef.current) {
+      skipClickAnimationRef.current = false
+      startSpringAnimation()
+      return
+    }
+
+    startClickAnimation()
+  }, [activeMode, startClickAnimation, startSpringAnimation])
 
   useEffect(() => {
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      cancelAnimation()
     }
-  }, [])
+  }, [cancelAnimation])
 
   // Mouse down handler
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -88,11 +137,8 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     dragStartXRef.current = e.clientX
     dragStartPosRef.current = currentRef.current
 
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-  }, [])
+    cancelAnimation()
+  }, [cancelAnimation])
 
   // Global mouse move handler
   useEffect(() => {
@@ -124,6 +170,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
 
       const newMode = modes[snapIndex].id
       if (newMode !== activeMode) {
+        skipClickAnimationRef.current = true
         onChange(newMode)
       }
 

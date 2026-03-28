@@ -1,5 +1,7 @@
 import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT, WORKBENCH_TOOLBAR_ROW_HEIGHT } from '../../modules/workbench/chrome'
 
+// Semantic panel tokens for renderer layout surfaces.
+// This file should define panel-level spacing and semantic surface aliases, not raw theme colors or workbench geometry.
 export const SIDE_PANEL_DIMENSIONS = {
   defaultWidth: 220,
   minWidth: 220,

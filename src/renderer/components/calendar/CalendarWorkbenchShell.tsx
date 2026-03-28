@@ -7,6 +7,9 @@ import CalendarViewSelector from './CalendarViewSelector'
 import { NewEventCard, NewEventMenu } from './NewEventMenu'
 import type { ViewType } from './schedule-x-utils'
 import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
   WORKBENCH_HEADER_EDGE_X,
   WORKBENCH_SUPPORT_PANEL_WIDTH,
   WORKBENCH_TOOLBAR_ROW_HEIGHT,
@@ -133,7 +136,12 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
         </div>
       )}
 
-      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+        }}
+      >
         <div
           className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
           style={{

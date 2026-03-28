@@ -1,4 +1,4 @@
-import type { DragEvent, RefObject } from 'react'
+import type { DragEvent, ReactNode, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 
@@ -7,6 +7,7 @@ interface BrowserShellLayoutProps {
   contentRef: RefObject<HTMLDivElement | null>
   activeTab: BrowserTab | null
   toastVisible: boolean
+  freezeOverlay?: ReactNode
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: (event: DragEvent<HTMLDivElement>) => void
   onRetry: () => void | Promise<void>
@@ -17,6 +18,7 @@ export default function BrowserShellLayout({
   contentRef,
   activeTab,
   toastVisible,
+  freezeOverlay,
   onDragOver,
   onDrop,
   onRetry,
@@ -147,6 +149,8 @@ export default function BrowserShellLayout({
                 已保存登录状态
               </div>
             )}
+
+            {freezeOverlay}
           </div>
         </div>
       </div>

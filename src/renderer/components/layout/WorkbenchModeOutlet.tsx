@@ -1,11 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 
 type ModeComponentProps = {
   isActive?: boolean
   isMotionSettled?: boolean
-  isTransitioning?: boolean
-  transitionDirection?: -1 | 1
 }
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
@@ -25,13 +23,6 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
   calendar: CalendarMode,
 }
 
-const MODE_LABELS: Record<WorkbenchMode, string> = {
-  browser: '浏览器',
-  document: '文档',
-  rss: 'RSS',
-  calendar: '日历',
-}
-
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
 let hasPreloadedWorkbenchModes = false
@@ -40,7 +31,7 @@ function ModeFallback({ mode }: { mode: WorkbenchMode }) {
   return (
     <div className="flex h-full items-center justify-center" style={{ background: 'transparent' }}>
       <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-        {`加载${MODE_LABELS[mode]}...`}
+        加载中...
       </span>
     </div>
   )
@@ -53,6 +44,7 @@ export default function WorkbenchModeOutlet({
   mode: WorkbenchMode
   isMotionSettled?: boolean
 }) {
+  // Eager load all modes on mount
   useEffect(() => {
     if (hasPreloadedWorkbenchModes) return
     hasPreloadedWorkbenchModes = true
@@ -61,80 +53,57 @@ export default function WorkbenchModeOutlet({
     })
   }, [])
 
-  // Only render current and previous mode to reduce DOM overhead during transitions
-  const [lastActiveMode, setLastActiveMode] = useState<WorkbenchMode>(mode)
-  const [transitioningFrom, setTransitioningFrom] = useState<WorkbenchMode | null>(null)
-
-  useEffect(() => {
-    if (mode !== lastActiveMode) {
-      setTransitioningFrom(lastActiveMode)
-      setLastActiveMode(mode)
-      // Clear the transitioning state after animation completes
-      const timer = window.setTimeout(() => {
-        setTransitioningFrom(null)
-      }, 400)
-      return () => { window.clearTimeout(timer) }
-    }
-    return undefined
-  }, [mode, lastActiveMode])
-
-  // Determine which modes to render: current + transitioning (if any)
-  const modesToRender = useMemo(() => {
-    const modes = new Set<WorkbenchMode>([mode])
-    if (transitioningFrom) {
-      modes.add(transitioningFrom)
-    }
-    return modes
-  }, [mode, transitioningFrom])
-
-  // Calculate transition direction based on mode order
-  const transitionDirection = useMemo(() => {
-    if (!transitioningFrom) return 1
-    const fromIndex = ALL_WORKBENCH_MODES.indexOf(transitioningFrom)
-    const toIndex = ALL_WORKBENCH_MODES.indexOf(mode)
-    return toIndex > fromIndex ? 1 : -1
-  }, [mode, transitioningFrom])
-
-  // Generate mode panels
-  const modePanels = useMemo(() => {
-    return ALL_WORKBENCH_MODES.map((mountedMode) => {
-      // Skip rendering modes that are not active and not transitioning
-      if (!modesToRender.has(mountedMode)) {
-        return <div key={mountedMode} style={{ display: 'none' }} data-skipped-mode={mountedMode} />
-      }
-
-      const ModeComponent = MODE_COMPONENTS[mountedMode] || MODE_COMPONENTS.browser
-      const isActive = mountedMode === mode
-      const isTransitioning = mountedMode === transitioningFrom
-
-      return (
-        <div
-          key={mountedMode}
-          className={`absolute inset-0 flex min-h-0 flex-col overflow-hidden ${isActive ? 'flex' : 'hidden'}`}
-          aria-hidden={!isActive}
-          data-workbench-mode-panel={mountedMode}
-          style={{
-            background: 'transparent',
-            pointerEvents: isActive ? 'auto' : 'none',
-            zIndex: isActive ? 1 : 0,
-          }}
-        >
-          <Suspense fallback={isActive ? <ModeFallback mode={mountedMode} /> : null}>
-            <ModeComponent
-              isActive={isActive}
-              isMotionSettled={isActive ? isMotionSettled : false}
-              isTransitioning={isTransitioning}
-              transitionDirection={transitionDirection}
-            />
-          </Suspense>
-        </div>
-      )
-    })
-  }, [mode, modesToRender, isMotionSettled, transitioningFrom, transitionDirection])
+  const activeIndex = useMemo(() => {
+    return ALL_WORKBENCH_MODES.indexOf(mode)
+  }, [mode])
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden" style={{ background: 'transparent' }}>
-      {modePanels}
+    <div
+      className="relative h-full w-full overflow-hidden"
+      style={{
+        background: 'transparent',
+      }}
+    >
+      {/* 水平滚动容器 - 所有模式常驻 */}
+      <div
+        className="flex h-full w-full"
+        style={{
+          transform: `translateX(-${activeIndex * 100}%)`,
+          transition: isMotionSettled
+            ? 'none'
+            : 'transform 0.35s cubic-bezier(0.24, 1, 0.36, 1)',
+          willChange: isMotionSettled ? 'auto' : 'transform',
+        }}
+      >
+        {ALL_WORKBENCH_MODES.map((modeKey, index) => {
+          const ModeComponent = MODE_COMPONENTS[modeKey]
+          const isActive = index === activeIndex
+
+          // 相邻模式视为"即将激活"，提前准备
+          const isAdjacent = Math.abs(index - activeIndex) <= 1
+
+          return (
+            <div
+              key={modeKey}
+              className="h-full w-full flex-shrink-0 flex-grow-0 overflow-hidden"
+              style={{
+                // 非当前模式降低渲染优先级
+                contentVisibility: isAdjacent ? 'auto' : 'hidden',
+                contain: 'strict',
+              }}
+              data-workbench-mode-panel={modeKey}
+              aria-hidden={!isActive}
+            >
+              <Suspense fallback={<ModeFallback mode={modeKey} />}>
+                <ModeComponent
+                  isActive={isActive}
+                  isMotionSettled={isActive ? isMotionSettled : false}
+                />
+              </Suspense>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

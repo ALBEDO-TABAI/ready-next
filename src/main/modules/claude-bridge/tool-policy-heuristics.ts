@@ -2,9 +2,6 @@ const CONTEXT_MARKERS = [
   '### 当前文档上下文',
   '### Widget 更新上下文',
   '--- 文档内容开始 ---',
-  '### 当前设计画布上下文',
-  '### 设计项目引用',
-  '--- 引用设计项目:',
   '--- 附件:',
 ]
 
@@ -37,18 +34,12 @@ function scoreInstructionChunk(chunk: string): number {
     || /^(用户|助手|系统):/i.test(line)
   )).length
 
-  const designKeyword =
-    /(画板|画布|设计稿|设计图|设计模式|设计项目|封面|封面图|海报|版式|排版框架|视觉框架|小红书|首图|缩略图|youtube|shorts?|thumbnail|9[:：]16|16[:：]9|3[:：]4|4[:：]3|1[:：]1|\d{3,4}\s*[x×]\s*\d{3,4}|poster|cover|layout)/i
-  const designCreateIntent =
-    /(新建|创建|生成|搭一个|搭建|做一个|做版式|出一个|再来一个|再来个|再来一版|再出一版|来一个|来一版|换一个|换个|换一版|换个版式|换一种|放到画板|在画板|在画布|给我一个框架|给我一个版式|替换内容|直接替换|可直接替换|继续做封面|继续完成|塞到|排版|长图文|文本排版|诗歌排版|散文排版)/i
   const docKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
 
   let score = 0
   if (BOOTSTRAP_HEADER_PATTERN.test(lines[0] || '')) score -= 24
-  if (designKeyword.test(text)) score += 18
-  if (designCreateIntent.test(text)) score += 16
+  if (docKeyword.test(text)) score += 10
   if (/[？?]$/.test(text) || /^(请|帮我|在|给我)/.test(text)) score += 4
-  if (docKeyword.test(text)) score -= 4
   if (metadataLines > 0) score -= metadataLines * 6
   if (lines.every((line) => BOOTSTRAP_HEADER_PATTERN.test(line) || /^[-*]\s+/.test(line) || /^(用户|助手|系统):/i.test(line))) {
     score -= 18
@@ -92,128 +83,8 @@ export function extractPrimaryUserInstruction(raw: string): string {
   return stripped
 }
 
-/**
- * Determine if design tools should be suggested (not forced)
- * This function receives pure user input without environment context pollution
- */
-export function shouldSuggestDesignTools(pureUserInput: string, hasDesignEnvironment: boolean): boolean {
-  if (!pureUserInput) return false
-  const primaryInstruction = extractPrimaryUserInstruction(pureUserInput)
-  if (!primaryInstruction) return false
-
-  // 1. Exclude pure conversational questions
-  const conversationalQuestion =
-    /^(你是谁|你叫什么|你能做什么|你会什么|介绍一下|自我介绍|你好|谢谢|好的|明白|知道了|了解|收到|OK|ok|okay)/i
-  if (conversationalQuestion.test(primaryInstruction.trim())) return false
-
-  // 2. Exclude explanation questions (unless explicitly about design)
-  const explanationQuestion =
-    /(解释|说明|告诉我|什么是|为什么|怎么理解|如何理解|是什么意思|能不能说|讲讲|介绍下)/i
-  const designKeyword =
-    /(画板|画布|设计稿|设计图|设计模式|设计项目|封面|封面图|海报|版式|排版框架|视觉框架|小红书|首图|缩略图|youtube|shorts?|thumbnail|9[:：]16|16[:：]9|3[:：]4|4[:：]3|1[:：]1|\d{3,4}\s*[x×]\s*\d{3,4}|poster|cover|layout)/i
-  if (explanationQuestion.test(primaryInstruction) && !designKeyword.test(primaryInstruction)) return false
-
-  // 3. Exclude general questions (unless explicitly about design)
-  const generalQuestion =
-    /^(帮我|请|可以|能不能|能否)?(查|搜|找|看|问|想知道|了解|学习)/i
-  if (generalQuestion.test(primaryInstruction) && !designKeyword.test(primaryInstruction)) return false
-
-  // 4. Check design operation intent
-  const designCreateIntent =
-    /(新建|创建|生成|搭一个|搭建|做一个|做版式|出一个|再来一个|再来个|再来一版|再出一版|来一个|来一版|换一个|换个|换一版|换个版式|换一种|放到画板|在画板|在画布|给我一个框架|给我一个版式|替换内容|直接替换|可直接替换|继续做封面|继续完成|塞到|排版|长图文|文本排版|诗歌排版|散文排版)/i
-  const designEditIntent =
-    /(调整|修改|修正|优化|改成|偏左|偏右|偏上|偏下|去掉|不要|减少|增加|保留|延续|继续改|基于这个|在这个基础上|轻一点|重一点|更像|收紧|拉开|标题再|底部再|版面再|不要按钮|不要粗线|只有标题|字要更大|元素更大|更显著|标题占画幅|红色主题|蓝色主题|绿色主题|黑色主题)/i
-  const designStyleFollowUp =
-    /(版式|封面|标题|子标题|账号名|主题|颜色|红色|蓝色|绿色|黑色|字体|字要更大|元素更大|更显著|占画幅|标题旁边|附加信息)/i
-  const explicitDocumentIntent =
-    /(文档|文稿|原文|文章|章节|段落|markdown|docx?|\.md\b)/i
-
-  // 5. Judgment logic
-  const hasDesignKeyword = designKeyword.test(primaryInstruction)
-  const hasDesignIntent = designCreateIntent.test(primaryInstruction) || designEditIntent.test(primaryInstruction)
-  const hasStyleFollowUp = hasDesignEnvironment && designStyleFollowUp.test(primaryInstruction)
-
-  // Must satisfy:
-  // - Has design keyword OR (in design environment AND has design intent)
-  // - Has explicit design operation intent (create/edit/style)
-  // - Not a document operation
-  return (
-    (hasDesignKeyword || (hasDesignEnvironment && hasDesignIntent) || hasStyleFollowUp) &&
-    (designCreateIntent.test(primaryInstruction) || (hasDesignEnvironment && (designEditIntent.test(primaryInstruction) || designStyleFollowUp.test(primaryInstruction)))) &&
-    !explicitDocumentIntent.test(primaryInstruction)
-  )
-}
-
-/**
- * Legacy function for backward compatibility
- * @deprecated Use shouldSuggestDesignTools with pure input
- */
-export function shouldForceDesignToolCall(userText: string): boolean {
-  if (!userText) return false
-  const primaryInstruction = extractPrimaryUserInstruction(userText)
-  if (!primaryInstruction) return false
-
-  // 排除纯对话性问题 - 这些不应该触发设计工具
-  const conversationalQuestion =
-    /^(你是谁|你叫什么|你能做什么|你会什么|介绍一下|自我介绍|你好|谢谢|好的|明白|知道了|了解|收到|OK|ok|okay)/i
-  const explanationQuestion =
-    /(解释|说明|告诉我|什么是|为什么|怎么理解|如何理解|是什么意思|能不能说|讲讲|介绍下)/i
-  const generalQuestion =
-    /^(帮我|请|可以|能不能|能否)?(查|搜|找|看|问|想知道|了解|学习)/i
-
-  // 如果是纯对话性问题，直接返回 false
-  if (conversationalQuestion.test(primaryInstruction.trim())) return false
-  if (explanationQuestion.test(primaryInstruction) && !/(设计|画板|画布|封面|海报|版式)/.test(primaryInstruction)) return false
-  if (generalQuestion.test(primaryInstruction) && !/(设计|画板|画布|封面|海报|版式)/.test(primaryInstruction)) return false
-
-  const hasDesignContext =
-    userText.includes('### 当前设计画布上下文') ||
-    userText.includes('### 设计项目引用') ||
-    userText.includes('--- 引用设计项目:') ||
-    userText.includes('## 环境信息') && userText.includes('当前模式: 设计模式')
-  const designKeyword =
-    /(画板|画布|设计稿|设计图|设计模式|设计项目|封面|封面图|海报|版式|排版框架|视觉框架|小红书|首图|缩略图|youtube|shorts?|thumbnail|9[:：]16|16[:：]9|3[:：]4|4[:：]3|1[:：]1|\d{3,4}\s*[x×]\s*\d{3,4}|poster|cover|layout)/i
-  const designCreateIntent =
-    /(新建|创建|生成|搭一个|搭建|做一个|做版式|出一个|再来一个|再来个|再来一版|再出一版|来一个|来一版|换一个|换个|换一版|换个版式|换一种|放到画板|在画板|在画布|给我一个框架|给我一个版式|替换内容|直接替换|可直接替换|继续做封面|继续完成|塞到|排版|长图文|文本排版|诗歌排版|散文排版)/i
-  const designEditIntent =
-    /(调整|修改|修正|优化|改成|偏左|偏右|偏上|偏下|去掉|不要|减少|增加|保留|延续|继续改|基于这个|在这个基础上|轻一点|重一点|更像|收紧|拉开|标题再|底部再|版面再|不要按钮|不要粗线|只有标题|字要更大|元素更大|更显著|标题占画幅|红色主题|蓝色主题|绿色主题|黑色主题)/i
-  const designStyleFollowUp =
-    /(版式|封面|标题|子标题|账号名|主题|颜色|红色|蓝色|绿色|黑色|字体|字要更大|元素更大|更显著|占画幅|标题旁边|附加信息)/i
-  const explicitDocumentIntent =
-    /(文档|文稿|原文|文章|章节|段落|markdown|docx?|\.md\b)/i
-
-  // 必须同时满足：
-  // 1. 有设计上下文或设计关键词
-  // 2. 有明确的设计操作意图（创建/编辑/样式调整）
-  // 3. 不是文档操作
-  return (
-    (hasDesignContext || designKeyword.test(primaryInstruction)) &&
-    (designCreateIntent.test(primaryInstruction) || (hasDesignContext && (designEditIntent.test(primaryInstruction) || designStyleFollowUp.test(primaryInstruction)))) &&
-    !explicitDocumentIntent.test(primaryInstruction)
-  )
-}
-
-export function inferPreferredDesignTool(userText: string): string | null {
-  if (!shouldForceDesignToolCall(userText)) return null
-
-  const primaryInstruction = extractPrimaryUserInstruction(userText)
-  if (!primaryInstruction) return null
-
-  return 'design_run_task_controller'
-}
-
-export function shouldAllowMultipleDesignArtifacts(userText: string): boolean {
-  if (!shouldForceDesignToolCall(userText)) return false
-  const primaryInstruction = extractPrimaryUserInstruction(userText)
-  if (!primaryInstruction) return false
-
-  return /(多个版本|多个方案|两个版本|两个方案|三个版本|三种方案|多版|多套|给我几个|几种方向|AB版|A\/B|variation|variations|options|三版|两版)/i
-    .test(primaryInstruction)
-}
-
 export function shouldForceDocumentToolCall(userText: string): boolean {
   if (!userText) return false
-  if (shouldForceDesignToolCall(userText)) return false
   const primaryInstruction = extractPrimaryUserInstruction(userText)
   if (!primaryInstruction) return false
   const widgetTaskKind = inferDocumentWidgetTaskKind(primaryInstruction)
@@ -289,7 +160,6 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
 
 export function shouldPreferFormatOnly(userText: string): boolean {
   if (!userText) return false
-  if (shouldForceDesignToolCall(userText)) return false
   const formatIntent =
     /(格式|排版|版式|结构清晰|阅读流畅|可读性|美观|整洁|格式化|format|layout|typography|readability)/i
   const rewriteIntent =
@@ -299,7 +169,6 @@ export function shouldPreferFormatOnly(userText: string): boolean {
 
 export function shouldPreferSectionRewrite(userText: string): boolean {
   if (!userText) return false
-  if (shouldForceDesignToolCall(userText)) return false
   if (shouldPreferFormatOnly(userText)) return false
   const sectionHint =
     /(第[一二三四五六七八九十百0-9]+部分|第[一二三四五六七八九十百0-9]+章|章节|段落|开头|结尾|引言|摘要|第一部分|第二部分|第三部分)/i

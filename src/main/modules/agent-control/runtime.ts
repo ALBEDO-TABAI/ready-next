@@ -20,6 +20,9 @@ import { PromptAssemblyService } from './prompt-assembly'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
 import { MemoryLifecycleManager } from './memory-lifecycle'
+import { ReflectionService } from './reflection-service'
+import { UserProfileRepository } from '../repositories/user-profile-repository'
+import { AgentPersonalityRepository } from '../repositories/agent-personality-repository'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import type {
@@ -61,9 +64,43 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly toolGateway = new ToolGateway()
   private readonly memoryRepository = new MemoryRepository()
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
+  private readonly userProfileRepository = new UserProfileRepository()
+  private readonly agentPersonalityRepository = new AgentPersonalityRepository()
+  private readonly reflectionService = new ReflectionService({
+    memoryRepository: this.memoryRepository,
+    userProfileRepository: this.userProfileRepository,
+    knowledgeRepository: {
+      set: async (key: string, value: string) => {
+        const rawDb = this.db.getRawDb()
+        if (!rawDb) throw new Error('Database not available')
+        rawDb.prepare(`
+          INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        `).run(
+          `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          'system',
+          key,
+          value,
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+      },
+      get: async (key: string) => {
+        const rawDb = this.db.getRawDb()
+        if (!rawDb) return null
+        const row = rawDb.prepare(`
+          SELECT value FROM agent_knowledge WHERE agent_name = 'system' AND key = ?
+        `).get(key) as { value: string } | undefined
+        return row?.value || null
+      },
+    },
+  })
   private readonly promptAssembly = new PromptAssemblyService({
     getMemoryRoot: () => join(app.getPath('userData'), 'agent-memory'),
     memoryRepository: this.memoryRepository,
+    userProfileRepository: this.userProfileRepository,
+    agentPersonalityRepository: this.agentPersonalityRepository,
     enableDatabaseMemory: true,
   })
   private readonly agentManager: AgentManager
@@ -97,6 +134,7 @@ export class AgentControlRuntime extends EventEmitter {
       browserController,
       sidecarManager: this.sidecar,
     })
+    this.orchestrator.setRuntime(this)
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
@@ -109,6 +147,10 @@ export class AgentControlRuntime extends EventEmitter {
 
   getMemoryLifecycleManager(): MemoryLifecycleManager {
     return this.memoryLifecycle
+  }
+
+  getPromptAssembly(): PromptAssemblyService {
+    return this.promptAssembly
   }
 
   async start(): Promise<void> {
@@ -212,6 +254,11 @@ export class AgentControlRuntime extends EventEmitter {
 
   listConversationScopes(agent?: string): ConversationScope[] {
     return this.db.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
+  }
+
+  getConversationScope(scopeId: string): ConversationScope | null {
+    const row = this.db.getConversationScope(scopeId)
+    return row ? this.mapConversationRow(row) : null
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
@@ -387,6 +434,12 @@ export class AgentControlRuntime extends EventEmitter {
       finalText: result.finalText,
       usedTools: result.usedTools,
       success: true,
+    })
+
+    // Automatic reflection: extract facts and update memories
+    // Run in background to avoid blocking the response
+    this.reflectOnConversation(scope, result.usedTools).catch((error) => {
+      console.error('[Runtime] Reflection failed:', error)
     })
 
     if (scope.sourceKind === 'channel') {
@@ -879,6 +932,11 @@ export class AgentControlRuntime extends EventEmitter {
       message: assistantMessage,
     })
     await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(() => undefined)
+
+    // Automatic reflection: extract facts and update memories
+    this.reflectOnConversation(scope, result.usedTools).catch((error) => {
+      console.error('[Runtime] Channel reflection failed:', error)
+    })
   }
 
   private mapChannelRow(row: AgentChannelRecord): AgentChannelConfig {
@@ -915,6 +973,7 @@ export class AgentControlRuntime extends EventEmitter {
     return {
       id: row.id,
       agent: row.agent,
+      userId: row.user_id || undefined,
       title: row.title,
       sourceKind: row.source_kind,
       sourceId: row.source_id,
@@ -1212,6 +1271,34 @@ export class AgentControlRuntime extends EventEmitter {
       } catch {
         // ignore cleanup failures
       }
+    }
+  }
+
+  /**
+   * Reflect on a completed conversation and extract learnings
+   */
+  private async reflectOnConversation(scope: ConversationScope, usedTools: string[]): Promise<void> {
+    try {
+      // Get conversation messages
+      const messages = this.db.getChatMessages(scope.id).map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }))
+
+      // Skip reflection for very short conversations
+      if (messages.length < 2) {
+        return
+      }
+
+      // Run reflection
+      await this.reflectionService.reflectOnConversation({
+        scope,
+        messages,
+        usedTools,
+        success: true,
+      })
+    } catch (error) {
+      console.error('[Runtime] Failed to reflect on conversation:', error)
     }
   }
 }

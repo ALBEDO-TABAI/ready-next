@@ -9,11 +9,14 @@ function readWorkspaceFile(path: string): string {
 
 test('topbar module switcher uses stable widths and avoids vertical position jitter during mode changes', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
+  const draggableModeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
 
-  assert.match(topBar, /className="mode-tab-button relative flex h-\[24px\] w-\[34px\]/)
+  assert.match(topBar, /<DraggableModeTabs/)
   assert.doesNotMatch(topBar, /GooeySegmentedControl/)
-  assert.match(topBar, /transition-colors duration-150/)
+  assert.match(draggableModeTabs, /className="draggable-mode-tabs"/)
+  assert.match(draggableModeTabs, /className={`draggable-mode-tabs__icon/)
+  assert.match(draggableModeTabs, /transform: `translateX\(\$\{position \* 100\}%\)`/)
   assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
 })
 

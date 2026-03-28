@@ -1,6 +1,7 @@
 import { appendFile } from 'fs/promises'
+import { getLogPath } from '../../utils/platform'
 
-export const BROWSER_DIAGNOSTICS_LOG_PATH = '/tmp/ready-browser.log'
+export const BROWSER_DIAGNOSTICS_LOG_PATH = getLogPath('ready-browser.log')
 
 export class BrowserDiagnosticsService {
   private readonly recentEntries: string[] = []

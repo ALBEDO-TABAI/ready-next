@@ -138,10 +138,9 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
 
       {/* Search */}
       <div
-        className="flex items-center"
+        className="ready-input-shell flex items-center"
         style={{
           height: 28, borderRadius: 10,
-          background: '#EEEEEE',
           padding: '0 8px', gap: 4
         }}
       >
@@ -151,7 +150,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="搜索..."
-          className="flex-1 bg-transparent border-none outline-none"
+          className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
           style={{ fontSize: 11, color: 'var(--text-body)' }}
         />
       </div>

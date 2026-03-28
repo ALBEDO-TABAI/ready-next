@@ -10,7 +10,7 @@ interface UseBrowserTabActionsParams {
   activeTab: BrowserTab | null
   activeTabId: string | null
   normalizeUrl: (input: string) => string
-  sendBoundsImmediate: (options?: { forceExact?: boolean }) => void
+  sendBoundsImmediate: (options?: { forceExact?: boolean }) => Promise<void>
   setTabs: (tabs: BrowserTab[]) => void
   setActiveTabId: (tabId: string | null) => void
   setUrlInput: (value: string) => void
@@ -34,7 +34,7 @@ export function useBrowserTabActions({
 }: UseBrowserTabActionsParams) {
   const handleNewTab = useCallback(async () => {
     if (!isElectron) return
-    sendBoundsImmediate({ forceExact: true })
+    await sendBoundsImmediate({ forceExact: true })
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
     const result = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL) as { success: boolean; tabId?: string } | undefined
     if (result?.success && result.tabId) {

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
-export type ThemeSkin = 'classic' | 'liquid-glass'
+export type ThemeSkin = 'liquid-glass'
 
 interface ThemeState {
     theme: ThemeOption
@@ -28,11 +28,11 @@ const getStoredTheme = (): ThemeOption => {
 const getStoredSkin = (): ThemeSkin => {
     try {
         const stored = localStorage.getItem('ready-theme-skin')
-        if (stored === 'classic' || stored === 'liquid-glass') return stored
+        if (stored === 'liquid-glass') return stored
     } catch {
         // ignore storage access errors
     }
-    return 'classic'
+    return 'liquid-glass'
 }
 
 // Resolve the effective theme (system -> actual light/dark)
@@ -97,16 +97,15 @@ export const useTheme = create<ThemeState>((set, get) => {
             localStorage.setItem('ready-theme', next)
             set({ theme: next, resolvedTheme: newResolved })
         },
-        setSkin: (skin) => {
-            applySkin(skin)
-            localStorage.setItem('ready-theme-skin', skin)
-            set({ skin })
+        setSkin: (_skin) => {
+            applySkin('liquid-glass')
+            localStorage.setItem('ready-theme-skin', 'liquid-glass')
+            set({ skin: 'liquid-glass' })
         },
         toggleSkin: () => {
-            const next: ThemeSkin = get().skin === 'classic' ? 'liquid-glass' : 'classic'
-            applySkin(next)
-            localStorage.setItem('ready-theme-skin', next)
-            set({ skin: next })
+            applySkin('liquid-glass')
+            localStorage.setItem('ready-theme-skin', 'liquid-glass')
+            set({ skin: 'liquid-glass' })
         },
     }
 })

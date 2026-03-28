@@ -1,0 +1,69 @@
+{
+  "id": "lets-go-rss",
+  "name": "Let's Go RSS",
+  "description": "Multi-platform subscription aggregation, incremental updates, and digest reports.",
+  "version": "2026.03.15",
+  "defaultAction": "rss_update",
+  "requirementsFile": "requirements.txt",
+  "execution": {
+    "mode": "advisory",
+    "autoAdvance": false
+  },
+  "actions": [
+    {
+      "name": "rss_add",
+      "description": "添加一个订阅源 URL。",
+      "runtime": "python",
+      "entry": "scripts/ready_lets_go_rss.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "baseArgs": ["--action", "rss_add"],
+      "params": [
+        { "name": "url", "type": "string", "description": "订阅源 URL", "required": true }
+      ]
+    },
+    {
+      "name": "rss_update",
+      "description": "执行订阅更新并生成摘要。",
+      "runtime": "python",
+      "entry": "scripts/ready_lets_go_rss.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "baseArgs": ["--action", "rss_update"],
+      "params": [
+        { "name": "digest", "type": "boolean", "description": "摘要模式", "required": false },
+        { "name": "noLlm", "type": "boolean", "description": "禁用 LLM 分类", "required": false }
+      ]
+    },
+    {
+      "name": "rss_status",
+      "description": "读取最近一次缓存报告。",
+      "runtime": "python",
+      "entry": "scripts/ready_lets_go_rss.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "baseArgs": ["--action", "rss_status"],
+      "params": []
+    },
+    {
+      "name": "rss_list",
+      "description": "列出当前订阅列表。",
+      "runtime": "python",
+      "entry": "scripts/ready_lets_go_rss.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "baseArgs": ["--action", "rss_list"],
+      "params": []
+    },
+    {
+      "name": "rss_stats",
+      "description": "查看当前订阅统计。",
+      "runtime": "python",
+      "entry": "scripts/ready_lets_go_rss.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "baseArgs": ["--action", "rss_stats"],
+      "params": []
+    }
+  ]
+}

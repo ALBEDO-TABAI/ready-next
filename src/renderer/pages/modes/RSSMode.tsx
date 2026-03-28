@@ -3,7 +3,6 @@ import { RefreshCw, AlertCircle } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
-import RSSEnterOverlay from '../../components/rss/RSSEnterOverlay'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -55,15 +54,11 @@ interface RSSAnalysisJobState {
 interface RSSModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
-  isTransitioning?: boolean
-  transitionDirection?: -1 | 1
 }
 
 export default function RSSMode({
   isActive = true,
   isMotionSettled = true,
-  isTransitioning = false,
-  transitionDirection = 1,
 }: RSSModeProps) {
   const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
@@ -699,12 +694,6 @@ export default function RSSMode({
               isActive={isActive}
             />
           )}
-
-          {/* RSS 进入骨架遮罩 */}
-          <RSSEnterOverlay
-            visible={isActive && isTransitioning && !isMotionSettled}
-            direction={transitionDirection}
-          />
         </div>
       </div>
 

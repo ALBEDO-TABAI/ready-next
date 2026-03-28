@@ -75,14 +75,14 @@ export default function ActiveTabSurface({
         paddingLeft: 12,
         paddingRight: 10,
         gap: 8,
-        background: mode === 'primed'
-          ? 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)'
-          : 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)',
-        borderColor: mode === 'primed'
-          ? 'color-mix(in srgb, var(--color-blue) 32%, transparent)'
+        background: mode === 'primed' || mode === 'expanded' || mode === 'editing'
+          ? 'var(--input-slot-bg)'
           : 'transparent',
-        boxShadow: mode === 'primed'
-          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 24%, transparent), 0 10px 20px rgba(8, 16, 32, 0.12)'
+        borderColor: mode === 'primed' || mode === 'expanded' || mode === 'editing'
+          ? 'var(--input-slot-focus-border)'
+          : 'transparent',
+        boxShadow: mode === 'primed' || mode === 'expanded' || mode === 'editing'
+          ? 'var(--input-slot-shadow-focus)'
           : 'none',
       }}
     >
@@ -129,7 +129,7 @@ export default function ActiveTabSurface({
                 onCommitNavigation()
               }
             }}
-            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
+            className="ready-input-slot-inner h-full min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-body)] outline-none"
           />
         </div>
       ) : (

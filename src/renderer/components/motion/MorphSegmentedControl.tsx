@@ -1,6 +1,5 @@
 import { type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent } from 'react'
 import { LayoutGroup, MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import { useTheme } from '../../stores/useTheme'
 
 type ItemEvent = MouseEvent<HTMLButtonElement>
 type ItemKeyboardEvent = KeyboardEvent<HTMLButtonElement>
@@ -45,9 +44,7 @@ export default function MorphSegmentedControl({
   itemStyle,
   contentClassName,
 }: MorphSegmentedControlProps) {
-  const skin = useTheme((state) => state.skin)
   const reduceMotion = useReducedMotion()
-  const enableMorph = skin === 'liquid-glass'
   const transition = reduceMotion ? REDUCED_TRANSITION : SPRING_TRANSITION
 
   return (
@@ -59,16 +56,6 @@ export default function MorphSegmentedControl({
             const isPrimary = !!item.active
             const isSecondary = !!item.secondaryActive && !isPrimary
             const isActive = isPrimary || isSecondary
-            const fallbackStyle = enableMorph
-              ? null
-              : isPrimary
-                ? { background: 'var(--color-blue-light)' }
-                : isSecondary
-                  ? {
-                    background: 'var(--color-blue-light)',
-                    boxShadow: 'inset 0 -2px 0 var(--color-blue)',
-                  }
-                  : { background: 'transparent' }
 
             return (
               <motion.button
@@ -83,18 +70,18 @@ export default function MorphSegmentedControl({
                 disabled={item.disabled}
                 onClick={item.onClick}
                 onKeyDown={item.onKeyDown}
-                whileHover={enableMorph && !item.disabled && !reduceMotion ? { y: -1 } : undefined}
-                whileTap={enableMorph && !item.disabled && !reduceMotion ? { scale: 0.985, y: 0 } : undefined}
+                whileHover={!item.disabled && !reduceMotion ? { y: -1 } : undefined}
+                whileTap={!item.disabled && !reduceMotion ? { scale: 0.985, y: 0 } : undefined}
                 className={itemClassName ? `relative ${itemClassName}` : 'relative'}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   ...itemStyle,
-                  ...fallbackStyle,
+                  background: 'transparent',
                 }}
               >
-                {enableMorph && isPrimary && (
+                {isPrimary && (
                   <motion.span
                     layoutId={`${layoutId}-primary`}
                     transition={PILL_TRANSITION}
@@ -102,7 +89,7 @@ export default function MorphSegmentedControl({
                     aria-hidden="true"
                   />
                 )}
-                {enableMorph && isSecondary && (
+                {isSecondary && (
                   <motion.span
                     layoutId={`${layoutId}-secondary`}
                     transition={PILL_TRANSITION}
@@ -122,7 +109,6 @@ export default function MorphSegmentedControl({
                   }}
                 >
                   {Icon && <Icon className="flex-shrink-0" style={{ width: 13, height: 13 }} strokeWidth={2} />}
-                  <span>{item.label}</span>
                 </span>
               </motion.button>
             )

@@ -427,50 +427,6 @@ show-widget 规则：
 如果用户只提到站点名（例如“即梦”）但没有给 URL，且当前页也不能明确复用，先搜索该站点的官方入口并确认，再继续；若搜索结果仍不唯一，先向用户澄清，不要在无关页面反复进出。
 当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似”openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
 
-## 设计工具使用指导
-
-当用户需要创建带文字的矩形或控制排版布局时，请使用以下工作流：
-
-**创建自适应文字矩形**：
-1. 使用 design_measure_text 预先计算文本尺寸（可选但推荐）
-2. 使用 design_create_geo_shape 创建矩形，省略 h 参数让系统自动计算高度
-3. 通过 meta 参数精确控制字号、行高和内边距：
-   - meta.readyFontSize: 字号（如 16）
-   - meta.readyLineHeight: 行高倍数（如 1.6）
-   - meta.readyPaddingH: 水平内边距（如 12）
-   - meta.readyPaddingV: 垂直内边距（如 12）
-
-**使用排版占位符**：
-- 使用 design_create_rhythm_spacer 创建隐形占位符来控制段落间距和栅格对齐
-- 推荐尺寸：小间距 h=20-30，中间距 h=40-60，大间距 h=80-120
-- 占位符完全透明但占据空间，可用于维持视觉节奏
-
-**示例 - 标题 + 间距 + 正文**：
-\`\`\`
-design_create_geo_shape({
-  shape: 'rectangle',
-  label: '文章标题',
-  w: 760, x: 20, y: 20,
-  meta: { readyFontSize: 32, readyLineHeight: 1.2 }
-})
-
-design_create_rhythm_spacer({
-  w: 760, h: 40, x: 20, y: 80
-})
-
-design_create_geo_shape({
-  shape: 'rectangle',
-  label: '这是正文内容，会自动换行以适应宽度...',
-  w: 760, x: 20, y: 120,
-  meta: { readyFontSize: 16, readyLineHeight: 1.6 }
-})
-\`\`\`
-
-**注意事项**：
-- 双击矩形可直接编辑文字（tldraw 原生支持）
-- 自适应高度仅在创建时生效，编辑后需要手动调整或重新创建
-- 文字会自动换行，无需手动插入换行符（除非需要强制换行）
-
 如果系统当前未启用工具，请不要伪造工具调用，直接给出文本回答。
 `
 
@@ -1369,130 +1325,6 @@ export class DirectChatEngine extends EventEmitter {
   private buildToolGuidance(policy: ToolPolicy): string {
     const guidance: string[] = []
 
-    if (policy.forceDesignTool) {
-      guidance.push(`
-## 工具使用建议
-
-当前用户的请求可能涉及设计操作。如果用户明确要求创建、修改或调整设计，请使用 design_* 工具。
-
-**判断标准**:
-- "创建一个封面" → 使用 design_run_task_controller 或相关 design_* 工具
-- "调整标题大小" → 使用 design_update_selected 或相关工具
-- "你是谁" → 直接回答，不使用工具
-- "这个设计怎么样" → 直接回答，不使用工具
-- "解释一下这个设计" → 直接回答，不使用工具
-
-**重要**: 只在用户明确要求设计操作时才使用设计工具。对话、询问、解释等请直接回答。
-
-## 文本排版任务指导
-
-当用户提供文本内容需要排版时，**必须使用 design_run_task_controller 的 text-layout 任务类型**：
-
-**核心规则**:
-1. ✅ 读取 typography skill（如果有）- 提取字号、行高、间距规则
-2. ✅ 读取 ui-ux-pro-max-skill（如果有）- 提取视觉层次、留白原则
-3. ✅ 调用 design_run_task_controller({
-     taskType: 'text-layout',
-     designDirectiveText: "完整文本内容",
-     ratio: '9:16',
-     typography: {
-       baseFontSize: 16,      // 从 skill 提取
-       lineHeight: 1.8,       // 从 skill 提取
-       paragraphSpacing: 28,  // 从 skill 提取
-       headingScale: [32, 24, 20]  // 从 skill 提取
-     },
-     palette: {
-       text: '#333333',       // 从 skill 提取
-       heading: '#000000',    // 从 skill 提取
-       background: '#FFFFFF'  // 从 skill 提取
-     }
-   })
-4. ✅ 工具会自动创建 frame 容器
-5. ✅ 工具会自动使用 ui-text-block 创建文本
-6. ✅ 工具会自动应用字号、行高、间距、字重
-7. ✅ 工具会自动验证布局
-8. ❌ **严格禁止**使用 design_create_text 逐个创建
-9. ❌ **严格禁止**使用 design_compose_text_layout（已废弃）
-10. ❌ **严格禁止**手动创建 frame 和文本
-
-**Typography 参数说明**:
-- baseFontSize: 正文字号（px），默认 16
-- lineHeight: 行高倍数，默认 1.6
-- paragraphSpacing: 段落间距（px），默认 24
-- headingScale: 标题字号数组 [H1, H2, H3]，默认 [32, 24, 20]
-- emphasis: 强调方式 'bold' | 'color' | 'size'，默认 'bold'
-
-**Palette 参数说明**:
-- text: 正文颜色（hex）
-- heading: 标题颜色（hex）
-- background: 背景颜色（hex）
-- accent: 强调色（hex）
-
-**成功标准**:
-- 工具返回包含 "✅ 文本排版已完成" 的消息
-- 工具返回 status: 'success'
-- 工具返回 boardId 和 ownedNodeIds
-
-**如果工具返回成功，排版任务已 100% 完成，直接向用户报告结果，不要继续添加任何元素。**
-
-**示例 1 - 诗歌排版**:
-用户: "/skill typography read_skill\\n在设计画板里好好排版，变成美观优雅的小红书长图文\\n\\n被命名之日\\n凌晨的代码不再是\\"未命名\\"\\n..."
-✅ 正确流程:
-  1. 读取 typography skill，提取规则：
-     - 标题 24px 粗体
-     - 正文 16px
-     - 行高 1.8
-     - 段落间距 32px
-  2. 调用 design_run_task_controller({
-       taskType: 'text-layout',
-       designDirectiveText: "被命名之日\\n凌晨的代码不再是\\"未命名\\"\\n...",
-       ratio: '9:16',
-       typography: {
-         baseFontSize: 16,
-         lineHeight: 1.8,
-         paragraphSpacing: 32,
-         headingScale: [24, 20, 18]
-       }
-     })
-  3. 工具自动应用 typography 规则
-  4. 工具返回 "✅ 文本排版已完成"
-  5. 向用户报告："已完成排版，创建了 X 个文本块，应用了 typography 规则"
-  6. **停止** - 不要继续添加任何元素
-
-❌ 错误流程:
-  1. 读取 typography skill
-  2. 调用 design_run_task_controller
-  3. 工具返回成功
-  4. 继续调用 design_create_text 添加更多文本 ← **禁止！**
-
-**示例 2 - 应用 Typography + UI/UX Skill**:
-用户: "/skill typography read_skill\\n/skill ui_ux_pro_max_skill read_skill\\n在设计画板里好好排版..."
-✅ 正确流程:
-  1. 读取 typography skill，提取字号、行高规则
-  2. 读取 ui-ux-pro-max-skill，提取配色、间距规则
-  3. 调用 design_run_task_controller({
-       taskType: 'text-layout',
-       designDirectiveText: "...",
-       ratio: '9:16',
-       typography: { baseFontSize: 16, lineHeight: 1.8, ... },
-       palette: { text: '#333', heading: '#000', ... }
-     })
-  4. 工具自动应用所有规则
-  5. 任务完成
-
-**重要**: design_run_task_controller 的 text-layout 任务类型会自动处理所有排版细节，包括：
-- 解析 Markdown 内容（标题、段落、列表、引用）
-- 应用 typography 规则（字号、行高、间距、字重）
-- 应用 palette 配色
-- 创建 frame 容器和背景
-- 使用 ui-text-block 创建文本元素
-- 验证最终布局
-
-**不要尝试手动实现这些步骤，工具已经全部自动化处理。**
-
-`)
-    }
-
     if (policy.forceDocumentTool) {
       guidance.push(`
 ## 工具使用建议
@@ -1523,19 +1355,6 @@ export class DirectChatEngine extends EventEmitter {
     }
 
     return guidance.join('\n\n')
-  }
-
-  private buildForceDesignNudge(policy: ToolPolicy): string {
-    return [
-      '系统检查：你还没有执行真实设计工具。',
-      policy.primaryDesignInstruction
-        ? `当前用户要求：${policy.primaryDesignInstruction}`
-        : '当前用户要求是设计画板上的封面/版式创建。',
-      `优先动作：${policy.preferredDesignTool || 'design_run_task_controller'}`,
-      '直接调用 design_run_task_controller 或对应 design_* 工具，在设计画布执行观察、规划、落位、批次生成与复查。',
-      '如果仍缺少画布信息，先调用 design_get_editor_state 或 design_snapshot_layout。',
-      '不要输出纯说明，也不要改走 document_*。',
-    ].join('\n')
   }
 
   private applyDesignSourceInput(
@@ -2746,13 +2565,9 @@ export class DirectChatEngine extends EventEmitter {
         ? this.decideBrowserTask(pureUserInput, session, sessionId, incomingAttachmentHints)
         : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
 
-      // Detect environment
-      const hasDesignEnvironment = false // Design mode removed
       const hasDocumentEnvironment = userText.includes('## 环境信息') && userText.includes('当前模式: 文档模式')
 
       // Judge intent based on pure input (not polluted by environment context)
-      const forceDesignTool = false // Design tools removed
-      const preferredDesignTool = null
       const preferredSkillToolNames = hasTools && (this.findExplicitlyRequestedSkills(contextualUserInput).length > 0 || this.hasActiveSkillExecution(sessionId))
         ? this.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { DirectChatEngine, type MultimodalBlock } from '../claude-bridge/direct-chat'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
+import type { AgentControlRuntime } from './runtime'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 
@@ -114,6 +115,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
 
   setSidecarManager(manager: SidecarManager): void {
     this.engine.setSidecarManager(manager)
+  }
+
+  setRuntime(runtime: AgentControlRuntime): void {
+    this.engine.setRuntime(runtime)
   }
 
   setRendererToolActionRequester(

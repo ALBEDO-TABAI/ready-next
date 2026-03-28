@@ -150,6 +150,7 @@ const browserAPI = {
   hideAll: () => ipcRenderer.invoke('browser:hideAll'),
   hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost'),
   showActive: () => ipcRenderer.invoke('browser:showActive'),
+  fitActiveTabToBounds: (tabId?: string | null) => ipcRenderer.invoke('browser:fitActiveTabToBounds', tabId),
   captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),
   captureViewportSnapshot: (tabId?: string | null) => ipcRenderer.invoke('browser:captureViewportSnapshot', tabId),

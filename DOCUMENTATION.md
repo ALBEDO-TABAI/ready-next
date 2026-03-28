@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-03-20
+> 更新时间: 2026-03-27
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -16,14 +16,10 @@ Ready 采用 Electron 三层架构：
 `useMode` 当前维护的子模式：
 - `browser`
 - `document`
-- `design`
-- `video`
 - `rss`
 - `calendar`
 
 入口壳层：`src/renderer/pages/WorkbenchMode.tsx`
-
-> 旧 `image` 模式已废弃并迁移到 `design`。
 
 ## 3. 主模块说明
 ### 3.1 Browser
@@ -36,30 +32,11 @@ Ready 采用 Electron 三层架构：
 - 后端：`src/main/modules/document-engine/*`
 - 说明：多格式读取、编辑文本抽取、`document_*` 工具
 
-### 3.3 Design
-- 前端：`src/renderer/pages/modes/DesignMode.tsx`
-- 后端：`src/main/modules/design-engine/*`
-- 说明：TLDraw 画布、设计会话、Inspector 与导出链路
-- 关键组件：
-  - `ComponentPanel.tsx`：属性面板，控制选中元素的样式
-  - `shapes/`：自定义形状（TextBlockShape、ButtonShape、CardShape 等）
-  - `design-agent-handler.ts`：设计工具的 Agent 处理逻辑
-- 样式系统：
-  - tldraw 原生 text 使用 `DefaultSizeStyle` (s/m/l/xl)
-  - 实际字号映射：`{ s: 18px, m: 32px, l: 48px, xl: 64px }`
-  - 显示模式和编辑模式通过 CSS 强制统一字号（`src/renderer/styles/index.css`）
-  - 编辑模式使用 `tiptap ProseMirror` (contenteditable) 而非 textarea
-
-### 3.4 Video
-- 前端：`src/renderer/pages/modes/VideoMode.tsx`
-- 后端：`src/main/modules/video-engine/*`
-- 说明：Remotion 驱动的预览、时间轴、轨道与 Inspector
-
-### 3.5 RSS / Calendar
+### 3.3 RSS / Calendar
 - RSS：`src/renderer/pages/modes/RSSMode.tsx` + `src/main/modules/rss-engine/*`
 - Calendar：`src/renderer/pages/modes/CalendarMode.tsx` + `src/main/modules/calendar-engine/*`
 
-### 3.6 Agent / Skills / Remote IM
+### 3.4 Agent / Skills / Remote IM
 - Agent：`src/main/modules/claude-bridge/*`
 - 会话与远程通道：`src/main/modules/agent-control/*`
 - 工具：`src/main/modules/tools/*`
@@ -202,20 +179,33 @@ Ready 采用 Electron 三层架构：
 - 需要展示纯 DOM 覆盖层时，先 `hideAll()`
 - 恢复浏览内容时，再 `showActive()` 并更新 bounds
 - 工作台切到非 browser 可见态时，优先由壳层统一调用 `browser.hideAll()`，不要只隐藏 active tab host；否则 RSS preview / popup 这类原生子视图可能残留在前台
+- Browser 运行态初始化要尽量做到“一次准备，多次复用”：已有 tab 可在后台预热恢复，但不要因为后台预热强行新建空白页
+- browser 回场时可以在壳层离场覆盖还没收完之前提前露出原生 host，但 browser 切出时仍要尽早 `hideAll()`，不要让原生网页和 DOM 过场抢前台
 
 ### 9.3 Workbench Keep-Alive 约定
 - `src/renderer/components/layout/WorkbenchModeOutlet.tsx` 负责 browser / document / rss / calendar 四个主模式的常驻挂载
-- 模式切换只改 CSS 显隐（`hidden` / `display: none`），不再通过访问后首次挂载或切场动画来切整个重量级子树
+- 模式切换仍保持四模块常驻，不回退到“切一次挂一次”；但共享壳层现在会额外编排左右切页，让当前页和离场页短时并存后再收口
+- 左右切页只发生在共享壳层，不要把整区重动画重新下放到各模块内部
+- 动效语言固定为三类：
+  - document / rss / calendar 之间：整块水平切换，旧页完整横向离场，新页从反侧完整进入
+  - browser -> 非 browser：browser 保持原位不动，目标模块横向进入并覆盖它
+  - 非 browser -> browser：browser 保持原位不动，当前模块横向退出并把它露出来
+- 共享壳层若依赖截图做离场层，不能在点击后再同步等待截图结果才开始切换；应优先复用稳定缓存，避免“点了半拍后才动”
+- 连续快速切换时以最后一次点击目标为准；中途点击不能被静默丢弃
 - 页面级副作用必须感知 `isActive`
 - RSS：隐藏时暂停 analysis polling / auto refresh，可见时再做一次数据同步
 - Calendar：重量级 Schedule-X 初始化延后到首次激活，隐藏时不继续做 UI 同步
 - RSS preview：模式隐藏时必须关闭 preview host，重新显示时再按当前 item 恢复
 - 顶栏四模块切换器使用稳定最小宽度，避免 active/hover 状态引发布局抖动
+- 切换方向按 `browser -> document -> rss -> calendar` 的顺序决定：向右切时旧页向左出、新页从右入；向左切时严格镜像
 - browser/rss/calendar 的内部 header rail 需要和 document 模式共享左边界；`workbench-canvas-shell` 负责统一圆角矩形轮廓，子模块不要再各自切半圆角壳
 - BrowserMode 若通过 `requestAnimationFrame` 延后恢复原生 host，必须可取消；切出 browser 时统一走 `hideAll()`，避免旧 RAF 把 BrowserView 再次抬回前台
+- BrowserMode 在原生页面尚未稳定前，不应先露出真实顶部 chrome；优先只收起顶部浏览器栏，避免把整块浏览器区域一起藏掉
+- BrowserMode 若已经完成过 tab 恢复或首个 tab 创建，后续模块切回不应再把 `browserRuntimeReady` 重置到冷启动态
 - 主进程在 `browserHostsPresented = false` 时不应继续把 renderer bounds 应用到 active host；隐藏态只记录最新 bounds，不重新摆回可视区
 - liquid-glass 皮肤下若某模块没有额外顶部 shell 参与勾边，需要为该模块补回最小可见 outline；当前 RSS 使用这一例外规则
 - 顶栏四模块切换器当前使用普通稳定按钮组；如果未来重新引入高动态 segmented control，必须先验证 hover/active 不会造成几何偏移
+- 顶栏四模块切换器点击切换应优先走短促直达动画；只有拖动释放时才保留弹簧回弹，避免与主工作区过场叠加成拖泥带水
 
 ### 9.4 日志约定
 当前关键日志位于系统临时目录（macOS: `/tmp/`, Windows: `%TEMP%`）：

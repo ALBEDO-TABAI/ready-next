@@ -1,12 +1,12 @@
 # Ready 项目协作指引（CLAUDE）
 
-> 更新时间: 2026-03-07
+> 更新时间: 2026-03-18
 
 ## 0. 前置思考
 请使用第一性原理思考。不要默认用户已经把目标、限制和最佳路径都描述完整；当目标不清晰时先澄清，当路径不优时先提出更好的方案。
 
 ## 1. 项目定位
-Ready 是一个集成式创作工作台，统一承载：浏览、文稿、设计、剪辑、RSS、日程、AI Agent、技能中心与远程协作。
+Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS、日程、AI Agent、技能中心与远程协作。
 
 ## 2. 技术基线
 - Electron 34
@@ -34,12 +34,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、设�
 `useMode` 当前包含：
 - `browser`
 - `document`
-- `design`
-- `video`
 - `rss`
 - `calendar`
-
-> 旧 `image` 模式已迁移为 `design`。
 
 ## 6. 当前稳定性约定
 ### 6.1 白屏防护
@@ -114,8 +110,15 @@ npm run build
 - 若改动跨多层，必须同步更新根目录协作文档
 
 ## 11. 当前关键日志
-- Agent / 浏览器决策：`/tmp/ready-directchat.log`
-- 工具执行：`/tmp/ready-tools.log`
-- BrowserView / popup：`/tmp/ready-browser.log`
+- Agent / 浏览器决策：`<系统临时目录>/ready-directchat.log`
+- 工具执行：`<系统临时目录>/ready-tools.log`
+- BrowserView / popup：`<系统临时目录>/ready-browser.log`
+
+> macOS: `/tmp/`, Windows: `%TEMP%`
 
 > 调整 Browser Agent、远程 IM、会话 scope、BrowserView、AI provider 能力层、技能运行时等跨模块行为时，必须同步更新根目录协作文档。
+
+## 12. 指引同步与实验页约定
+- `CLAUDE.md` 与 `AGENTS.md` 的正文规则必须保持同步；如果一侧新增或修正约束，另一侧要在同次变更中补齐
+- 两份文件允许的差异仅限标题、面向代理的称谓与必要的工具名映射，不允许出现实质性行为分叉
+- 新增临时实验页时，优先采用 Renderer 内独立路由隔离，例如 `#/liquid-test`；不要替换默认入口，也不要改动现有工作台界面

@@ -1,6 +1,7 @@
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
+import { parseShowWidgetFences, tryParseWidgetPayload } from '../../components/document/widget-fence-parser'
 
 interface DocActionPayload {
   type: string
@@ -230,6 +231,446 @@ function rewriteSectionInDocument(
   }
 }
 
+function buildShowWidgetFence(title: string, widgetCode: string): string {
+  return [
+    '```show-widget',
+    JSON.stringify({
+      title: title.trim(),
+      widget_code: widgetCode,
+    }),
+    '```',
+  ].join('\n')
+}
+
+function validateWidgetCode(widgetCode: string): { valid: boolean; reason?: string } {
+  const normalized = widgetCode.trim()
+  if (!normalized) {
+    return { valid: false, reason: 'widget 内容为空' }
+  }
+
+  if (/<svg\b/i.test(normalized)) {
+    const textCount = (normalized.match(/<text\b/gi) || []).length
+    const scriptCount = (normalized.match(/<script\b/gi) || []).length
+    const shapeCount = (normalized.match(/<(rect|circle|ellipse|line|polyline|polygon|path|image|foreignObject|use)\b/gi) || []).length
+
+    if (textCount === 0 && scriptCount === 0 && shapeCount <= 1) {
+      return {
+        valid: false,
+        reason: 'SVG 看起来只有背景壳，没有实际文本、图形内容或交互逻辑',
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
+function normalizeWidgetTitleKey(title: string): string {
+  return title.trim().toLowerCase()
+}
+
+function ensureTrailingNewline(content: string): string {
+  return content.endsWith('\n') ? content : `${content}\n`
+}
+
+type WidgetRenderMode = 'static-svg' | 'static-html' | 'scripted'
+
+interface DocumentWidgetRecord {
+  index: number
+  title: string
+  widgetCode: string
+  rawFence: string
+  start: number
+  end: number
+  mode: WidgetRenderMode
+}
+
+function getWidgetRenderMode(widgetCode: string): WidgetRenderMode {
+  if (/<script\b/i.test(widgetCode)) return 'scripted'
+  if (/<svg\b/i.test(widgetCode)) return 'static-svg'
+  return 'static-html'
+}
+
+function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const regex = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
+  const widgets: DocumentWidgetRecord[] = []
+
+  for (const match of normalizedSource.matchAll(regex)) {
+    const fullMatch = match[0]
+    const body = match[1] || ''
+    const parsed = tryParseWidgetPayload(body, fullMatch)
+    if (!parsed) continue
+
+    const start = match.index ?? 0
+    widgets.push({
+      index: widgets.length + 1,
+      title: parsed.title?.trim() || `widget_${widgets.length + 1}`,
+      widgetCode: parsed.widgetCode,
+      rawFence: fullMatch,
+      start,
+      end: start + fullMatch.length,
+      mode: getWidgetRenderMode(parsed.widgetCode),
+    })
+  }
+
+  return widgets
+}
+
+function resolveWidgetRecord(
+  widgets: DocumentWidgetRecord[],
+  target: string,
+  occurrence?: number,
+): { widget: DocumentWidgetRecord | null; error?: string } {
+  if (widgets.length === 0) {
+    return { widget: null, error: '当前文档中没有 widget' }
+  }
+
+  const trimmed = target.trim()
+  if (!trimmed) {
+    return { widget: null, error: '缺少 widget 目标' }
+  }
+
+  const numeric = Number(trimmed)
+  if (Number.isInteger(numeric) && numeric >= 1) {
+    const byIndex = widgets[numeric - 1]
+    return byIndex ? { widget: byIndex } : { widget: null, error: `未找到序号为 ${numeric} 的 widget` }
+  }
+
+  const normalizedTarget = normalizeWidgetTitleKey(trimmed)
+  const exactMatches = widgets.filter((widget) => normalizeWidgetTitleKey(widget.title) === normalizedTarget)
+  const fuzzyMatches = exactMatches.length > 0
+    ? exactMatches
+    : widgets.filter((widget) => {
+        const titleKey = normalizeWidgetTitleKey(widget.title)
+        return titleKey.includes(normalizedTarget) || normalizedTarget.includes(titleKey)
+      })
+
+  if (fuzzyMatches.length === 0) {
+    return { widget: null, error: `未找到标题匹配“${trimmed}”的 widget` }
+  }
+
+  if (fuzzyMatches.length === 1 && occurrence == null) {
+    return { widget: fuzzyMatches[0] }
+  }
+
+  const pickedOccurrence = occurrence == null ? 1 : Math.trunc(occurrence)
+  if (!Number.isFinite(pickedOccurrence) || pickedOccurrence < 1) {
+    return { widget: null, error: `occurrence=${String(occurrence)} 无效，请提供从 1 开始的整数` }
+  }
+  const selected = fuzzyMatches[pickedOccurrence - 1]
+  if (!selected) {
+    return {
+      widget: null,
+      error: `标题“${trimmed}”共匹配到 ${fuzzyMatches.length} 个 widget，请使用更精确标题或正确的 occurrence`,
+    }
+  }
+  return { widget: selected }
+}
+
+function updateWidgetInDocument(
+  source: string,
+  target: string,
+  widgetCode: string,
+  title?: string,
+  occurrence?: number,
+): { content: string; found: boolean; widget?: DocumentWidgetRecord; error?: string } {
+  const validation = validateWidgetCode(widgetCode)
+  if (!validation.valid) {
+    return { content: source, found: false, error: validation.reason }
+  }
+
+  const widgets = collectDocumentWidgets(source)
+  const resolved = resolveWidgetRecord(widgets, target, occurrence)
+  if (!resolved.widget) {
+    return { content: source, found: false, error: resolved.error }
+  }
+
+  const nextTitle = typeof title === 'string' && title.trim().length > 0 ? title.trim() : resolved.widget.title
+  const replacementFence = buildShowWidgetFence(nextTitle, widgetCode)
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const nextContent = `${normalizedSource.slice(0, resolved.widget.start)}${replacementFence}${normalizedSource.slice(resolved.widget.end)}`
+  return {
+    content: ensureTrailingNewline(nextContent.replace(/\n{3,}/g, '\n\n').trimEnd()),
+    found: true,
+    widget: resolved.widget,
+  }
+}
+
+function removeWidgetFromDocument(
+  source: string,
+  target: string,
+  occurrence?: number,
+): { content: string; found: boolean; widget?: DocumentWidgetRecord; error?: string } {
+  const widgets = collectDocumentWidgets(source)
+  const resolved = resolveWidgetRecord(widgets, target, occurrence)
+  if (!resolved.widget) {
+    return { content: source, found: false, error: resolved.error }
+  }
+
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const nextContent = `${normalizedSource.slice(0, resolved.widget.start)}${normalizedSource.slice(resolved.widget.end)}`
+  return {
+    content: ensureTrailingNewline(nextContent.replace(/\n{3,}/g, '\n\n').trim()),
+    found: true,
+    widget: resolved.widget,
+  }
+}
+
+function upsertWidgetFenceByTitle(
+  source: string,
+  title: string,
+  widgetCode: string,
+): { content: string; replaced: boolean; removedDuplicates: number } | null {
+  const normalizedTitle = normalizeWidgetTitleKey(title)
+  if (!normalizedTitle) return null
+
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const fence = buildShowWidgetFence(title, widgetCode)
+  const regex = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
+  const chunks: string[] = []
+  let cursor = 0
+  let matchedCount = 0
+
+  for (const match of normalizedSource.matchAll(regex)) {
+    const fullMatch = match[0]
+    const body = match[1] || ''
+    const start = match.index ?? 0
+    const parsed = tryParseWidgetPayload(body, fullMatch)
+    const sameTitle = parsed?.title && normalizeWidgetTitleKey(parsed.title) === normalizedTitle
+
+    chunks.push(normalizedSource.slice(cursor, start))
+    if (sameTitle) {
+      matchedCount += 1
+      if (matchedCount === 1) {
+        chunks.push(fence)
+      }
+    } else {
+      chunks.push(fullMatch)
+    }
+    cursor = start + fullMatch.length
+  }
+
+  if (matchedCount === 0) return null
+
+  chunks.push(normalizedSource.slice(cursor))
+  const compacted = chunks.join('').replace(/\n{3,}/g, '\n\n').trimEnd()
+  return {
+    content: ensureTrailingNewline(compacted),
+    replaced: true,
+    removedDuplicates: Math.max(0, matchedCount - 1),
+  }
+}
+
+function extractStandaloneWidgets(content: string): Array<{ title?: string; widgetCode: string }> | null {
+  const segments = parseShowWidgetFences(content.replace(/\r\n/g, '\n'))
+  const widgets: Array<{ title?: string; widgetCode: string }> = []
+
+  for (const segment of segments) {
+    if (segment.type === 'widget') {
+      widgets.push({
+        title: segment.data.title,
+        widgetCode: segment.data.widgetCode,
+      })
+      continue
+    }
+    if (segment.content.trim().length > 0) {
+      return null
+    }
+  }
+
+  return widgets.length > 0 ? widgets : null
+}
+
+function mergeStandaloneWidgetsIntoDocument(
+  source: string,
+  incomingContent: string,
+): { content: string; inserted: number; updated: number; removedDuplicates: number; error?: string } | null {
+  const widgets = extractStandaloneWidgets(incomingContent)
+  if (!widgets) return null
+
+  let nextContent = source.replace(/\r\n/g, '\n')
+  let inserted = 0
+  let updated = 0
+  let removedDuplicates = 0
+
+  widgets.forEach((widget, index) => {
+    if (inserted < 0) return
+    const validation = validateWidgetCode(widget.widgetCode)
+    if (!validation.valid) {
+      inserted = -1
+      updated = 0
+      removedDuplicates = 0
+      nextContent = source.replace(/\r\n/g, '\n')
+      return
+    }
+    const fallbackTitle = widget.title?.trim() || `widget_${index + 1}`
+    const upserted = widget.title ? upsertWidgetFenceByTitle(nextContent, widget.title, widget.widgetCode) : null
+    if (upserted) {
+      nextContent = upserted.content
+      updated += 1
+      removedDuplicates += upserted.removedDuplicates
+      return
+    }
+
+    const appended = insertWidgetIntoDocument(nextContent, fallbackTitle, widget.widgetCode, 'append_end')
+    nextContent = appended.content
+    inserted += 1
+  })
+
+  if (inserted < 0) {
+    const invalidWidget = widgets.find((widget) => !validateWidgetCode(widget.widgetCode).valid)
+    return {
+      content: source.replace(/\r\n/g, '\n'),
+      inserted: 0,
+      updated: 0,
+      removedDuplicates: 0,
+      error: validateWidgetCode(invalidWidget?.widgetCode || '').reason || 'widget 内容不完整',
+    }
+  }
+
+  return {
+    content: nextContent,
+    inserted,
+    updated,
+    removedDuplicates,
+  }
+}
+
+function normalizePotentialWidgetPayloadContent(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n').trim()
+  if (!normalized || normalized.includes('```show-widget')) return content
+
+  const parts = normalized.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean)
+  if (parts.length === 0) return content
+
+  const fences = parts.map((part) => {
+    const widget = part.startsWith('{') && part.endsWith('}')
+      ? tryParseWidgetPayload(part, part)
+      : null
+    if (!widget) return null
+    return buildShowWidgetFence(widget.title || `widget_${Math.random().toString(36).slice(2, 8)}`, widget.widgetCode)
+  })
+
+  if (fences.every(Boolean)) {
+    return `${fences.join('\n\n')}\n`
+  }
+
+  return content
+}
+
+function insertWidgetIntoDocument(
+  source: string,
+  title: string,
+  widgetCode: string,
+  position: 'append_end' | 'after_section',
+  sectionTitle?: string,
+): { content: string; inserted: boolean; updatedExisting?: boolean; matchedTitle?: string; error?: string; removedDuplicates?: number } {
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const upserted = upsertWidgetFenceByTitle(normalizedSource, title, widgetCode)
+  if (upserted) {
+    return {
+      content: upserted.content,
+      inserted: true,
+      updatedExisting: true,
+      removedDuplicates: upserted.removedDuplicates,
+    }
+  }
+  const fence = buildShowWidgetFence(title, widgetCode)
+
+  if (position === 'append_end') {
+    const prefix = normalizedSource.trim().length > 0 ? `${normalizedSource.trimEnd()}\n\n` : ''
+    return {
+      content: `${prefix}${fence}\n`,
+      inserted: true,
+    }
+  }
+
+  if (!sectionTitle?.trim()) {
+    return { content: normalizedSource, inserted: false, error: 'after_section 模式缺少 sectionTitle' }
+  }
+
+  const lines = normalizedSource.split('\n')
+  const anchors = collectSectionAnchors(lines)
+  const anchor = findSectionAnchor(anchors, sectionTitle)
+  if (!anchor) {
+    return { content: normalizedSource, inserted: false, error: `未找到章节“${sectionTitle}”` }
+  }
+
+  const sectionEndLine = getSectionEndLine(anchors, anchor, lines.length)
+  const nextLines = [
+    ...lines.slice(0, sectionEndLine),
+    '',
+    fence,
+    '',
+    ...lines.slice(sectionEndLine),
+  ]
+
+  return {
+    content: nextLines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n',
+    inserted: true,
+    matchedTitle: anchor.title,
+  }
+}
+
+export function replaceExactTextInDocument(
+  source: string,
+  target: string,
+  replacement: string,
+  occurrence?: number,
+): { content: string; found: boolean; totalMatches: number; occurrenceUsed?: number; error?: string } {
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const normalizedTarget = target.replace(/\r\n/g, '\n')
+  const normalizedReplacement = replacement.replace(/\r\n/g, '\n')
+
+  if (!normalizedTarget) {
+    return { content: normalizedSource, found: false, totalMatches: 0, error: '精准替换缺少 target' }
+  }
+
+  const matchIndexes: number[] = []
+  let searchFrom = 0
+  while (searchFrom <= normalizedSource.length) {
+    const nextIndex = normalizedSource.indexOf(normalizedTarget, searchFrom)
+    if (nextIndex < 0) break
+    matchIndexes.push(nextIndex)
+    searchFrom = nextIndex + normalizedTarget.length
+  }
+
+  if (matchIndexes.length === 0) {
+    return { content: normalizedSource, found: false, totalMatches: 0, error: '未匹配到目标片段' }
+  }
+
+  const targetOccurrence = occurrence == null
+    ? (matchIndexes.length === 1 ? 1 : null)
+    : Math.trunc(occurrence)
+
+  if (targetOccurrence == null || !Number.isFinite(targetOccurrence) || targetOccurrence < 1) {
+    return {
+      content: normalizedSource,
+      found: false,
+      totalMatches: matchIndexes.length,
+      error: `目标片段共匹配到 ${matchIndexes.length} 处，请提供 occurrence 指定替换位置`,
+    }
+  }
+
+  const targetIndex = matchIndexes[targetOccurrence - 1]
+  if (targetIndex == null) {
+    return {
+      content: normalizedSource,
+      found: false,
+      totalMatches: matchIndexes.length,
+      error: `occurrence=${targetOccurrence} 超出范围，当前仅匹配到 ${matchIndexes.length} 处`,
+    }
+  }
+
+  const content = `${normalizedSource.slice(0, targetIndex)}${normalizedReplacement}${normalizedSource.slice(targetIndex + normalizedTarget.length)}`
+  return {
+    content,
+    found: true,
+    totalMatches: matchIndexes.length,
+    occurrenceUsed: targetOccurrence,
+  }
+}
+
 function formatParagraphIntoReadableChunks(paragraph: string): string {
   const cleaned = paragraph.replace(/\s+/g, ' ').trim()
   if (!cleaned) return ''
@@ -329,6 +770,32 @@ async function loadDocumentContentForEditing(path: string): Promise<{ success: b
   }
 }
 
+async function saveTabWithDialog(tabId: string, title: string, content: string, existingPath?: string | null): Promise<{
+  success: boolean
+  path?: string
+  error?: string
+}> {
+  if (typeof window === 'undefined' || !window.electronAPI?.document?.saveFileAs) {
+    return { success: false, error: '当前环境不支持另存为' }
+  }
+
+  const result = await window.electronAPI.document.saveFileAs({
+    content,
+    suggestedName: `${title || '新文档'}.md`,
+    defaultPath: existingPath || null,
+  })
+
+  if (!result.success || !result.path) {
+    return { success: false, error: result.error || '另存为已取消' }
+  }
+
+  const docStore = useDocTabs.getState()
+  docStore.setTabPath(tabId, result.path)
+  docStore.renameTab(tabId, result.path.split('/').pop() || title || '新文档')
+  docStore.markTabSaved(tabId)
+  return { success: true, path: result.path }
+}
+
 export function buildActiveDocumentContext(): string | null {
   const mode = useMode.getState().workbenchMode
   if (mode !== 'document') return null
@@ -407,7 +874,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   }
 
   if (type === 'set_content') {
-    const content = typeof action.content === 'string' ? action.content : ''
+    const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可写入的文档标签'
     if (tab.content === content) return `内容未变化，已跳过写入：${tab.title}`
@@ -416,12 +883,84 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   }
 
   if (type === 'append_content') {
-    const content = typeof action.content === 'string' ? action.content : ''
+    const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可追加的文档标签'
     if (!content) return `追加内容为空，已跳过：${tab.title}`
+    const mergedWidgets = mergeStandaloneWidgetsIntoDocument(tab.content, content)
+    if (mergedWidgets) {
+      if (mergedWidgets.error) return `widget 写入已拒绝：${mergedWidgets.error}`
+      if (mergedWidgets.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+      docStore.setTabContent(tab.id, mergedWidgets.content)
+      if (mergedWidgets.updated > 0) {
+        return `已更新 ${mergedWidgets.updated} 个 widget 到：${tab.title}${mergedWidgets.removedDuplicates > 0 ? `（已清理 ${mergedWidgets.removedDuplicates} 个重复块）` : ''}`
+      }
+      return `已追加 ${mergedWidgets.inserted} 个 widget 到：${tab.title}`
+    }
     docStore.appendTabContent(tab.id, content)
     return `已追加内容到：${tab.title}`
+  }
+
+  if (type === 'insert_widget') {
+    const title = typeof action.title === 'string' ? action.title.trim() : ''
+    const widgetCode = typeof action.widgetCode === 'string' ? action.widgetCode : ''
+    const position = action.position === 'after_section' ? 'after_section' : 'append_end'
+    const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
+    if (!title || !widgetCode.trim()) return 'insert_widget 缺少 title 或 widgetCode'
+    const widgetValidation = validateWidgetCode(widgetCode)
+    if (!widgetValidation.valid) return `widget 写入已拒绝：${widgetValidation.reason}`
+    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    if (!tab) return '没有可插入 widget 的文档标签'
+    const inserted = insertWidgetIntoDocument(tab.content, title, widgetCode, position, sectionTitle)
+    if (!inserted.inserted) return inserted.error || 'widget 插入失败'
+    if (inserted.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+    docStore.setTabContent(tab.id, inserted.content)
+    if (inserted.updatedExisting) {
+      return `已更新同标题 widget（${tab.title}）${inserted.removedDuplicates ? `，并清理 ${inserted.removedDuplicates} 个重复块` : ''}`
+    }
+    return position === 'after_section'
+      ? `已在章节“${inserted.matchedTitle || sectionTitle}”后插入 widget（${tab.title}）`
+      : `已在文档尾部插入 widget（${tab.title}）`
+  }
+
+  if (type === 'list_widgets') {
+    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    if (!tab) return '没有可读取 widget 的文档标签'
+    const widgets = collectDocumentWidgets(tab.content)
+    if (widgets.length === 0) return `当前文档没有 widget（${tab.title}）`
+    return [
+      `当前文档共有 ${widgets.length} 个 widget（${tab.title}）：`,
+      ...widgets.map((widget) => `${widget.index}. ${widget.title} [${widget.mode}]`),
+    ].join('\n')
+  }
+
+  if (type === 'update_widget') {
+    const target = typeof action.target === 'string' ? action.target.trim() : ''
+    const widgetCode = typeof action.widgetCode === 'string' ? action.widgetCode : ''
+    const nextTitle = typeof action.title === 'string' ? action.title.trim() : ''
+    const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
+    if (!target) return 'update_widget 缺少 target'
+    if (!widgetCode.trim()) return 'update_widget 缺少 widgetCode'
+    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    if (!tab) return '没有可更新 widget 的文档标签'
+    const updated = updateWidgetInDocument(tab.content, target, widgetCode, nextTitle, occurrence)
+    if (!updated.found) return updated.error || 'widget 更新失败'
+    if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+    docStore.setTabContent(tab.id, updated.content)
+    return `已更新 widget：${nextTitle || updated.widget?.title || target}（${tab.title}）`
+  }
+
+  if (type === 'remove_widget') {
+    const target = typeof action.target === 'string' ? action.target.trim() : ''
+    const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
+    if (!target) return 'remove_widget 缺少 target'
+    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    if (!tab) return '没有可删除 widget 的文档标签'
+    const removed = removeWidgetFromDocument(tab.content, target, occurrence)
+    if (!removed.found) return removed.error || 'widget 删除失败'
+    if (removed.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+    docStore.setTabContent(tab.id, removed.content)
+    return `已删除 widget：${removed.widget?.title || target}（${tab.title}）`
   }
 
   if (type === 'replace_text') {
@@ -435,6 +974,20 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (nextContent === tab.content) return `替换后内容无变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, nextContent)
     return `已替换文本（${tab.title}）`
+  }
+
+  if (type === 'replace_exact') {
+    const target = typeof action.target === 'string' ? action.target : ''
+    const replacement = typeof action.replacement === 'string' ? action.replacement : ''
+    const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
+    if (!target) return 'replace_exact 缺少 target'
+    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    if (!tab) return '没有可精准替换的文档标签'
+    const replaced = replaceExactTextInDocument(tab.content, target, replacement, occurrence)
+    if (!replaced.found) return replaced.error || '未匹配到目标片段'
+    if (replaced.content === tab.content) return `精准替换后内容无变化，已跳过：${tab.title}`
+    docStore.setTabContent(tab.id, replaced.content)
+    return `已精准替换第 ${replaced.occurrenceUsed || 1} 处目标片段（${tab.title}）`
   }
 
   if (type === 'format_section') {
@@ -465,7 +1018,10 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   if (type === 'save_tab') {
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可保存的文档标签'
-    if (!tab.path) return `文档 ${tab.title} 还没有文件路径，暂不能保存`
+    if (!tab.path) {
+      const saved = await saveTabWithDialog(tab.id, tab.title, tab.content, null)
+      return saved.success ? `已另存文档：${saved.path}` : `保存失败：${saved.error || tab.title}`
+    }
     if (!tab.isDirty) return `文档未改动，已跳过保存：${tab.path}`
     const saveBlockedReason = getDirectSaveBlockReason(tab.path)
     if (saveBlockedReason) return saveBlockedReason
@@ -494,8 +1050,37 @@ export function mapToolActionToDocAction(tool: string, args: Record<string, unkn
       return { type: 'set_content', content: args.content, tabId: args.tabId }
     case 'document.appendContent':
       return { type: 'append_content', content: args.content, tabId: args.tabId }
+    case 'document.insertWidget':
+      return {
+        type: 'insert_widget',
+        title: args.title,
+        widgetCode: args.widgetCode,
+        position: args.position,
+        sectionTitle: args.sectionTitle,
+        tabId: args.tabId,
+      }
+    case 'document.listWidgets':
+      return { type: 'list_widgets', tabId: args.tabId }
+    case 'document.updateWidget':
+      return {
+        type: 'update_widget',
+        target: args.target,
+        widgetCode: args.widgetCode,
+        title: args.title,
+        occurrence: args.occurrence,
+        tabId: args.tabId,
+      }
+    case 'document.removeWidget':
+      return {
+        type: 'remove_widget',
+        target: args.target,
+        occurrence: args.occurrence,
+        tabId: args.tabId,
+      }
     case 'document.replaceText':
       return { type: 'replace_text', from: args.from, to: args.to, tabId: args.tabId }
+    case 'document.replaceExact':
+      return { type: 'replace_exact', target: args.target, replacement: args.replacement, occurrence: args.occurrence, tabId: args.tabId }
     case 'document.formatSection':
       return { type: 'format_section', sectionTitle: args.sectionTitle, style: args.style, tabId: args.tabId }
     case 'document.rewriteSection':
@@ -518,7 +1103,12 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
         '`/doc new 标题`',
         '`/doc switch 1` 或 `/doc switch <tabId|标题>`',
         '`/doc write 内容` / `/doc append 内容`',
+        '`/doc list-widgets`',
+        '`/doc insert-widget 标题 => HTML/SVG/JS [:: append_end|after_section :: 章节标题]`',
+        '`/doc update-widget 目标 => 新HTML/SVG/JS [:: 新标题] [:: occurrence]`',
+        '`/doc remove-widget 目标 [:: occurrence]`',
         '`/doc replace 原文 => 新文`',
+        '`/doc replace-exact 原文 => 新文 [:: occurrence]`',
         '`/doc format 章节标题`',
         '`/doc rewrite 章节标题 => 新章节内容`',
         '`/doc rename 新标题`',
@@ -589,6 +1179,71 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
     return { handled: true, text: `已追加内容到：${tab.title}` }
   }
 
+  if (command === 'insert-widget') {
+    const tab = getActiveDocTab()
+    if (!tab) return { handled: true, text: '没有可插入 widget 的文档标签', isError: true }
+    const sep = arg.indexOf('=>')
+    if (sep <= 0) {
+      return { handled: true, text: '插入 widget 格式：/doc insert-widget 标题 => HTML/SVG/JS [:: append_end|after_section :: 章节标题]', isError: true }
+    }
+    const title = arg.slice(0, sep).trim()
+    const right = arg.slice(sep + 2).trim()
+    const pieces = right.split('::').map((piece) => piece.trim()).filter(Boolean)
+    const widgetCode = pieces[0] || ''
+    const position = pieces[1] === 'after_section' ? 'after_section' : 'append_end'
+    const sectionTitle = position === 'after_section' ? (pieces[2] || '') : ''
+    const inserted = insertWidgetIntoDocument(tab.content, title, widgetCode, position, sectionTitle)
+    if (!inserted.inserted) return { handled: true, text: inserted.error || 'widget 插入失败', isError: true }
+    docStore.setTabContent(tab.id, inserted.content)
+    return { handled: true, text: position === 'after_section' ? `已在章节后插入 widget：${inserted.matchedTitle || sectionTitle}` : `已在文档尾部插入 widget：${title}` }
+  }
+
+  if (command === 'list-widgets') {
+    const tab = getActiveDocTab()
+    if (!tab) return { handled: true, text: '没有可读取 widget 的文档标签', isError: true }
+    const widgets = collectDocumentWidgets(tab.content)
+    if (widgets.length === 0) return { handled: true, text: `当前文档没有 widget：${tab.title}` }
+    return {
+      handled: true,
+      text: [
+        `当前文档共有 ${widgets.length} 个 widget：`,
+        ...widgets.map((widget) => `${widget.index}. ${widget.title} [${widget.mode}]`),
+      ].join('\n'),
+    }
+  }
+
+  if (command === 'update-widget') {
+    const tab = getActiveDocTab()
+    if (!tab) return { handled: true, text: '没有可更新 widget 的文档标签', isError: true }
+    const sep = arg.indexOf('=>')
+    if (sep <= 0) {
+      return { handled: true, text: '更新 widget 格式：/doc update-widget 目标 => 新HTML/SVG/JS [:: 新标题] [:: occurrence]', isError: true }
+    }
+    const target = arg.slice(0, sep).trim()
+    const right = arg.slice(sep + 2).trim()
+    const pieces = right.split('::').map((piece) => piece.trim()).filter(Boolean)
+    const widgetCode = pieces[0] || ''
+    const title = pieces[1] || ''
+    const occurrenceRaw = pieces[2] || ''
+    const occurrence = occurrenceRaw ? Number(occurrenceRaw) : undefined
+    const updated = updateWidgetInDocument(tab.content, target, widgetCode, title, Number.isFinite(occurrence) ? occurrence : undefined)
+    if (!updated.found) return { handled: true, text: updated.error || 'widget 更新失败', isError: true }
+    docStore.setTabContent(tab.id, updated.content)
+    return { handled: true, text: `已更新 widget：${title || updated.widget?.title || target}` }
+  }
+
+  if (command === 'remove-widget') {
+    const tab = getActiveDocTab()
+    if (!tab) return { handled: true, text: '没有可删除 widget 的文档标签', isError: true }
+    const pieces = arg.split('::').map((piece) => piece.trim()).filter(Boolean)
+    const target = pieces[0] || ''
+    const occurrence = pieces[1] ? Number(pieces[1]) : undefined
+    const removed = removeWidgetFromDocument(tab.content, target, Number.isFinite(occurrence) ? occurrence : undefined)
+    if (!removed.found) return { handled: true, text: removed.error || 'widget 删除失败', isError: true }
+    docStore.setTabContent(tab.id, removed.content)
+    return { handled: true, text: `已删除 widget：${removed.widget?.title || target}` }
+  }
+
   if (command === 'replace') {
     const tab = getActiveDocTab()
     if (!tab) return { handled: true, text: '没有可替换的文档标签', isError: true }
@@ -598,6 +1253,23 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
     const to = arg.slice(sep + 2).trim()
     docStore.setTabContent(tab.id, tab.content.split(from).join(to))
     return { handled: true, text: `已在 ${tab.title} 中完成替换` }
+  }
+
+  if (command === 'replace-exact') {
+    const tab = getActiveDocTab()
+    if (!tab) return { handled: true, text: '没有可精准替换的文档标签', isError: true }
+    const sep = arg.indexOf('=>')
+    if (sep <= 0) return { handled: true, text: '精准替换格式：/doc replace-exact 原文 => 新文 [:: occurrence]', isError: true }
+    const left = arg.slice(0, sep).trim()
+    const right = arg.slice(sep + 2).trim()
+    const occurrenceSep = right.lastIndexOf('::')
+    const replacement = occurrenceSep > 0 ? right.slice(0, occurrenceSep).trim() : right
+    const occurrenceRaw = occurrenceSep > 0 ? right.slice(occurrenceSep + 2).trim() : ''
+    const occurrence = occurrenceRaw ? Number(occurrenceRaw) : undefined
+    const replaced = replaceExactTextInDocument(tab.content, left, replacement, Number.isFinite(occurrence) ? occurrence : undefined)
+    if (!replaced.found) return { handled: true, text: replaced.error || '未匹配到目标片段', isError: true }
+    docStore.setTabContent(tab.id, replaced.content)
+    return { handled: true, text: `已精准替换第 ${replaced.occurrenceUsed || 1} 处目标片段` }
   }
 
   if (command === 'format') {
@@ -635,7 +1307,12 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
   if (command === 'save') {
     const tab = getActiveDocTab()
     if (!tab) return { handled: true, text: '没有可保存的文档标签', isError: true }
-    if (!tab.path) return { handled: true, text: `文档 ${tab.title} 还没有文件路径，暂不能保存`, isError: true }
+    if (!tab.path) {
+      const saved = await saveTabWithDialog(tab.id, tab.title, tab.content, null)
+      return saved.success
+        ? { handled: true, text: `已另存：${saved.path}` }
+        : { handled: true, text: `保存失败：${saved.error || tab.title}`, isError: true }
+    }
     if (!tab.isDirty) return { handled: true, text: `文档未改动，已跳过保存：${tab.path}` }
     const saveBlockedReason = getDirectSaveBlockReason(tab.path)
     if (saveBlockedReason) return { handled: true, text: saveBlockedReason, isError: true }

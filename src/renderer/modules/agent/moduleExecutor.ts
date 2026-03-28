@@ -4,18 +4,17 @@ import { mapToolActionToDocAction, performDocAction } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ToolTraceEvent } from './types'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
-  if (tool === 'video.renderExport') return 'job'
   if (tool === 'rss.analyzeItem') return 'pipeline'
-  if (tool.startsWith('design.') || tool.startsWith('browser.')) return 'interactive'
+  if (tool.startsWith('browser.')) return 'interactive'
   return 'deterministic'
 }
 
 async function dispatchModuleAction(
-  module: 'design' | 'video' | 'rss' | 'calendar',
+  module: 'rss' | 'calendar',
   action: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const timeoutMs = module === 'design' ? 12000 : 4000
+  const timeoutMs = 4000
   return await requestModuleAgentAction({ module, action, args }, { timeoutMs, pollIntervalMs: 40 }) as Record<string, unknown>
 }
 
@@ -39,7 +38,7 @@ interface HandleModuleToolActionParams {
   tool: string
   args: Record<string, unknown>
   runId: string | null
-  activateWorkbenchMode: (mode: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar') => void
+  activateWorkbenchMode: (mode: 'browser' | 'document' | 'rss' | 'calendar') => void
   upsertScopeRunState: (scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState) => void
   getScopeRunState?: () => ScopeRunState | null
 }
@@ -116,8 +115,8 @@ export async function executeModuleToolAction(
 
   if (tool === 'app.switchMode') {
     const mode = args.mode
-    if (typeof mode === 'string' && ['browser', 'document', 'design', 'video', 'rss', 'calendar'].includes(mode)) {
-      activateWorkbenchMode(mode as 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar')
+    if (typeof mode === 'string' && ['browser', 'document', 'rss', 'calendar'].includes(mode)) {
+      activateWorkbenchMode(mode as 'browser' | 'document' | 'rss' | 'calendar')
     }
     pushTrace('result', `已切换到 ${String(mode || '指定')} 模式。`)
     return {
@@ -198,74 +197,29 @@ export async function executeModuleToolAction(
     }
   }
 
-  if (tool.startsWith('design.') || tool.startsWith('video.') || tool.startsWith('rss.') || tool.startsWith('calendar.')) {
-    const module = tool.startsWith('design.')
-      ? 'design'
-      : tool.startsWith('video.')
-        ? 'video'
-        : tool.startsWith('rss.')
-          ? 'rss'
-          : 'calendar'
+  if (tool.startsWith('rss.') || tool.startsWith('calendar.')) {
+    const module = tool.startsWith('rss.') ? 'rss' : 'calendar'
     activateWorkbenchMode(module)
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module, executionKind: toExecutionKind(tool) })
-    const progress = module === 'design'
-      ? (event: Record<string, unknown>) => {
-        const kind = event.kind === 'call' ? 'call' : 'result'
-        const text = typeof event.text === 'string' ? event.text : ''
-        if (!text) return
-        pushTrace(kind, text, 'tool_running', {
-          module,
-          executionKind: toExecutionKind(tool),
-          designPhase: typeof event.designPhase === 'string' ? event.designPhase as ScopeRunState['designPhase'] : undefined,
-          designTodo: Array.isArray(event.designTodo) ? event.designTodo as ScopeRunState['designTodo'] : undefined,
-          designReviewSummary: typeof event.designReviewSummary === 'string' ? event.designReviewSummary : undefined,
-          ownedNodeIds: Array.isArray(event.ownedNodeIds) ? event.ownedNodeIds as string[] : undefined,
-          repairScope: typeof event.repairScope === 'string' ? event.repairScope as ScopeRunState['repairScope'] : undefined,
-        })
-      }
-      : undefined
+    const progress = (event: Record<string, unknown>) => {
+      const kind = event.kind === 'call' ? 'call' : 'result'
+      const text = typeof event.text === 'string' ? event.text : ''
+      if (!text) return
+      pushTrace(kind, text, 'tool_running', {
+        module,
+        executionKind: toExecutionKind(tool),
+      })
+    }
     const currentScopeRunState = getScopeRunState?.()
-    const designContinuationArgs = module === 'design'
-      ? {
-        __currentScenePlanId: currentScopeRunState?.scenePlanId ?? null,
-        __currentBoardId: currentScopeRunState?.boardId ?? null,
-        __currentOwnedNodeIds: currentScopeRunState?.ownedNodeIds ?? [],
-        __currentStyleSystem: currentScopeRunState?.styleSystem ?? null,
-        __currentReviewFailures: currentScopeRunState?.reviewFailures ?? [],
-        __currentLastAcceptedScreenshot: currentScopeRunState?.lastAcceptedScreenshot ?? null,
-        __currentRepairScope: currentScopeRunState?.repairScope ?? null,
-        __currentDesignReviewSummary: currentScopeRunState?.designReviewSummary ?? null,
-      }
-      : {}
     let payload: Record<string, unknown>
     try {
       payload = await dispatchModuleAction(module, tool, {
         ...args,
-        ...designContinuationArgs,
         __scopeRunId: runId,
         __scopeId: scopeId,
         ...(progress ? { __onProgress: progress } : {}),
-        ...(module === 'design'
-          ? { __shouldCancel: () => getScopeRunState?.()?.phase === 'cancelled' }
-          : {}),
       })
     } catch (error) {
-      if (module === 'design' && error instanceof Error && error.name === 'AbortError') {
-        pushTrace('result', '已停止当前设计执行。', 'cancelled', {
-          module,
-          intent: tool,
-          executionKind: toExecutionKind(tool),
-          blockedReason: '用户已停止',
-        })
-        return {
-          handled: true,
-          payload: {
-            intent: tool,
-            status: 'cancelled',
-            summary: '已停止当前设计执行。',
-          },
-        }
-      }
       throw error
     }
     if (Array.isArray(payload.toolEvents) && payload.streamedToolEvents !== true) {
@@ -277,11 +231,6 @@ export async function executeModuleToolAction(
         pushTrace(kind, text, 'tool_running', {
           module,
           executionKind: toExecutionKind(tool),
-          designPhase: typeof event.designPhase === 'string' ? event.designPhase as ScopeRunState['designPhase'] : undefined,
-          designTodo: Array.isArray(payload.designTodo) ? payload.designTodo as ScopeRunState['designTodo'] : undefined,
-          designReviewSummary: typeof payload.designReviewSummary === 'string' ? payload.designReviewSummary : undefined,
-          ownedNodeIds: Array.isArray(payload.ownedNodeIds) ? payload.ownedNodeIds as string[] : undefined,
-          repairScope: typeof payload.repairScope === 'string' ? payload.repairScope as ScopeRunState['repairScope'] : undefined,
         })
       }
     }
@@ -294,16 +243,6 @@ export async function executeModuleToolAction(
       artifactRefs: artifacts,
       ownerResourceId: typeof payload.ownerResourceId === 'string' ? payload.ownerResourceId : null,
       lastEvidenceAt: new Date().toISOString(),
-      designPhase: typeof payload.designPhase === 'string' ? payload.designPhase as ScopeRunState['designPhase'] : undefined,
-      designTodo: Array.isArray(payload.designTodo) ? payload.designTodo as ScopeRunState['designTodo'] : undefined,
-      designReviewSummary: typeof payload.designReviewSummary === 'string' ? payload.designReviewSummary : undefined,
-      ownedNodeIds: Array.isArray(payload.ownedNodeIds) ? payload.ownedNodeIds as string[] : undefined,
-      repairScope: typeof payload.repairScope === 'string' ? payload.repairScope as ScopeRunState['repairScope'] : undefined,
-      scenePlanId: typeof payload.scenePlanId === 'string' ? payload.scenePlanId : undefined,
-      boardId: typeof payload.boardId === 'string' ? payload.boardId : undefined,
-      styleSystem: payload.styleSystem && typeof payload.styleSystem === 'object' ? payload.styleSystem as ScopeRunState['styleSystem'] : undefined,
-      reviewFailures: Array.isArray(payload.reviewFailures) ? payload.reviewFailures as string[] : undefined,
-      lastAcceptedScreenshot: typeof payload.lastAcceptedScreenshot === 'string' ? payload.lastAcceptedScreenshot : undefined,
     })
     return {
       handled: true,

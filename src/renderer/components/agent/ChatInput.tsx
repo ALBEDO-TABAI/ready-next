@@ -216,7 +216,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             onKeyDown={handleKeyDown}
             disabled={isStreaming}
             placeholder="Hi～今天有什么可以帮到你"
-            className="flex-1 bg-transparent border-none outline-none resize-none"
+            className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none resize-none"
             style={{
               fontSize: 13,
               fontWeight: 500,

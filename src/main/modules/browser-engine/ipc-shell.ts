@@ -55,6 +55,7 @@ interface BrowserShellIPCController {
   hideAllHosts(): { success: boolean }
   hideActiveHost(): { success: boolean }
   showActiveHost(): { success: boolean }
+  fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }>
   captureWindowSnapshot(bounds: { x: number; y: number; width: number; height: number }): Promise<{ success: boolean; data?: string; error?: string }>
   captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }>
   getTabList(): unknown
@@ -140,6 +141,13 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:hideActiveHost', () => controller.hideActiveHost())
 
   ipcMain.handle('browser:showActive', () => controller.showActiveHost())
+  ipcMain.handle('browser:fitActiveTabToBounds', async (_, tabId?: string | null) => {
+    try {
+      return await controller.fitActiveTabToBounds(tabId)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
 
   ipcMain.handle('browser:captureWindowSnapshot', async (_, bounds: { x: number; y: number; width: number; height: number }) => {
     try {

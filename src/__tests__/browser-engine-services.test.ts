@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 
 import { BrowserAutomationService } from '../main/modules/browser-engine/automation-service'
 import { BrowserPreviewService } from '../main/modules/browser-engine/preview-service'
+import { BrowserTabLifecycleService } from '../main/modules/browser-engine/tab-lifecycle-service'
 import { BrowserTabMetaService } from '../main/modules/browser-engine/tab-meta-service'
 import { BrowserTabShellService } from '../main/modules/browser-engine/tab-shell-service'
 import { BrowserWindowOpenService } from '../main/modules/browser-engine/window-open-service'
@@ -13,6 +14,24 @@ function createMockView(options?: {
   canGoForward?: boolean
   executeJavaScript?: (code: string) => unknown
 }) {
+  const listeners = new Map<string, Array<(...args: unknown[]) => void>>()
+  const onceListeners = new Map<string, Array<(...args: unknown[]) => void>>()
+  const addListener = (
+    target: Map<string, Array<(...args: unknown[]) => void>>,
+    event: string,
+    listener: (...args: unknown[]) => void,
+  ) => {
+    const handlers = target.get(event) ?? []
+    handlers.push(listener)
+    target.set(event, handlers)
+  }
+  const emit = (event: string, ...args: unknown[]) => {
+    const persistentHandlers = listeners.get(event) ?? []
+    const oneShotHandlers = onceListeners.get(event) ?? []
+    onceListeners.delete(event)
+    ;[...persistentHandlers, ...oneShotHandlers].forEach((handler) => handler(...args))
+  }
+
   const state = {
     attached: false,
     lastLoadedUrl: '',
@@ -22,6 +41,7 @@ function createMockView(options?: {
     insertedTexts: [] as string[],
     mouseCommands: [] as unknown[],
     keyCommands: [] as unknown[],
+    emit,
   }
 
   const view = {
@@ -32,7 +52,12 @@ function createMockView(options?: {
       reload: () => {
         state.reloadCalls += 1
       },
-      on: () => undefined,
+      once: (event: string, listener: (...args: unknown[]) => void) => {
+        addListener(onceListeners, event, listener)
+      },
+      on: (event: string, listener: (...args: unknown[]) => void) => {
+        addListener(listeners, event, listener)
+      },
       setWindowOpenHandler: () => undefined,
       setUserAgent: () => undefined,
       close: () => undefined,
@@ -259,6 +284,113 @@ describe('BrowserAutomationService', () => {
   })
 })
 
+describe('BrowserTabLifecycleService', () => {
+  it('shows a newly created active tab immediately with current bounds instead of waiting for page load completion', async () => {
+    const previous = createMockView()
+    const next = createMockView()
+    const tabs = new Map([
+      ['tab-0', {
+        id: 'tab-0',
+        url: 'https://before.example',
+        title: 'Before',
+        domain: 'before.example',
+        favicon: null,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        view: previous.view,
+      }],
+    ])
+    const events: string[] = []
+    let activeTabId: string | null = 'tab-0'
+    const service = new BrowserTabLifecycleService({
+      tabs: tabs as any,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => {
+        activeTabId = tabId
+      },
+      getNextTabId: () => 'tab-1',
+      getViewBounds: () => ({ x: 12, y: 24, width: 960, height: 640 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: () => next.view as any,
+      applyBounds: () => {
+        events.push('apply')
+      },
+      detachHost: (view) => {
+        if (view === previous.view) events.push('detach-previous')
+      },
+      showHost: (_view, bounds) => {
+        events.push(`show:${bounds.width}x${bounds.height}`)
+      },
+      sendToRenderer: () => undefined,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    const result = await service.createTab('https://example.com')
+
+    assert.deepStrictEqual(result, { success: true, tabId: 'tab-1' })
+    assert.strictEqual(activeTabId, 'tab-1')
+    assert.strictEqual(next.state.lastLoadedUrl, 'https://example.com')
+    assert.deepStrictEqual(events, ['apply', 'detach-previous', 'show:960x640'])
+  })
+
+  it('ignores subresource did-fail-load events when updating tab error state', async () => {
+    const next = createMockView()
+    const rendererEvents: Array<{ channel: string; data: unknown }> = []
+    const diagMessages: string[] = []
+    let activeTabId: string | null = null
+    const service = new BrowserTabLifecycleService({
+      tabs: new Map() as any,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => {
+        activeTabId = tabId
+      },
+      getNextTabId: () => 'tab-1',
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: () => next.view as any,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: (channel, data) => {
+        rendererEvents.push({ channel, data })
+      },
+      emitTabMeta: () => undefined,
+      logBrowserDiag: (message) => {
+        diagMessages.push(message)
+      },
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    await service.createTab('https://example.com')
+    next.state.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://cdn.example/script.js', false)
+
+    assert.deepStrictEqual(rendererEvents.filter((event) => event.channel === 'browser:tabUpdate' && (event.data as { type?: string }).type === 'error'), [])
+    assert.deepStrictEqual(diagMessages, [])
+  })
+})
+
 describe('BrowserPreviewService', () => {
   it('does not restore the active tab when preview did not hide a visible browser host', async () => {
     const mock = createMockView()
@@ -322,6 +454,41 @@ describe('BrowserPreviewService', () => {
     service.close()
 
     assert.deepStrictEqual(events, ['restore'])
+  })
+
+  it('ignores subresource did-fail-load events when updating preview error state', async () => {
+    const mock = createMockView()
+    const updates: unknown[] = []
+    const diagMessages: string[] = []
+    const service = new BrowserPreviewService({
+      useMock: false,
+      browserUserAgent: 'ready-test',
+      createHost: () => mock.view as any,
+      showHost: () => undefined,
+      hideHost: () => undefined,
+      detachHost: () => undefined,
+      applyPreviewBounds: () => undefined,
+      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setPreviewBounds: () => undefined,
+      sendToRenderer: (_channel, data) => {
+        updates.push(data)
+      },
+      logBrowserDiag: (message) => {
+        diagMessages.push(message)
+      },
+      bindPopup: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      hideActiveTab: () => false,
+      restoreActiveTab: () => undefined,
+    })
+
+    await service.open('https://example.com')
+    const updateCountBeforeFailure = updates.length
+    mock.state.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://cdn.example/script.js', false)
+
+    assert.strictEqual(updates.length, updateCountBeforeFailure)
+    assert.deepStrictEqual(diagMessages, [])
   })
 })
 

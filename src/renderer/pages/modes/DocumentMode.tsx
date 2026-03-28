@@ -6,7 +6,6 @@ import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
-import DocumentEnterOverlay from '../../components/document/DocumentEnterOverlay'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -106,15 +105,11 @@ function DocumentEditor({
 interface DocumentModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
-  isTransitioning?: boolean
-  transitionDirection?: -1 | 1
 }
 
 export default function DocumentMode({
   isActive = true,
   isMotionSettled = true,
-  isTransitioning = false,
-  transitionDirection = 1,
 }: DocumentModeProps) {
   const { selectedFile } = useWorkspace()
   const {
@@ -167,9 +162,6 @@ export default function DocumentMode({
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
-
-  // 是否正在切入文档模式（用于显示骨架遮罩）
-  const isEnteringDocument = isActive && isTransitioning && !isMotionSettled
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
@@ -348,12 +340,6 @@ export default function DocumentMode({
               </div>
             </div>
           )}
-
-          {/* 文档进入骨架遮罩 */}
-          <DocumentEnterOverlay
-            visible={isEnteringDocument}
-            direction={transitionDirection}
-          />
         </div>
       </div>
     </div>

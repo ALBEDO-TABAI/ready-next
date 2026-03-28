@@ -1117,11 +1117,9 @@ export default function ChatPanel() {
   const composerShellStyle = {
     ...LIQUID_INACTIVE_CHROME_STYLE,
     borderRadius: 10,
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 100%)',
-    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid transparent',
-    boxShadow: isDragOver
-      ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent), inset 0 1px 0 rgba(255,255,255,0.06)'
-      : 'inset 0 0 0 1px color-mix(in srgb, var(--border-input) 72%, transparent), inset 0 1px 0 rgba(255,255,255,0.24), inset 0 -10px 18px rgba(91, 141, 239, 0.12)',
+    background: 'var(--input-slot-bg)',
+    border: isDragOver ? '2px solid var(--text-muted)' : '1px solid var(--input-slot-border)',
+    boxShadow: isDragOver ? 'var(--input-slot-shadow-focus)' : 'var(--input-slot-shadow)',
   } as const
 
   // Format time for history panel

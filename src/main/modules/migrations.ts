@@ -625,6 +625,148 @@ const migrations: Migration[] = [
         ON CONFLICT(id) DO NOTHING
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 016
+  {
+    name: '016_create_user_identity_tables',
+    up: (db) => {
+      // User profiles table for per-user customization
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_profiles (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          avatar_url TEXT,
+          preferred_language TEXT DEFAULT 'zh',
+          communication_style TEXT,
+          preferences_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+
+      // Agent personalities table for SOUL.md management
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_personalities (
+          id TEXT PRIMARY KEY,
+          agent_name TEXT NOT NULL UNIQUE,
+          display_name TEXT,
+          personality_text TEXT NOT NULL,
+          tone TEXT,
+          meta_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+
+      // Extend agent_memory_metadata with user_id for per-user memories
+      const memoryColumns = db.prepare('PRAGMA table_info(agent_memory_metadata)').all<{ name: string }>()
+      const hasMemoryUserColumn = memoryColumns.some((column) => column.name === 'user_id')
+      if (!hasMemoryUserColumn) {
+        db.exec(`ALTER TABLE agent_memory_metadata ADD COLUMN user_id TEXT`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_user ON agent_memory_metadata(user_id, category)`)
+      }
+
+      // Extend chat_conversations with user_id for per-user conversations
+      const conversationColumns = db.prepare('PRAGMA table_info(chat_conversations)').all<{ name: string }>()
+      const hasConversationUserColumn = conversationColumns.some((column) => column.name === 'user_id')
+      if (!hasConversationUserColumn) {
+        db.exec(`ALTER TABLE chat_conversations ADD COLUMN user_id TEXT`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_conversations_user ON chat_conversations(user_id)`)
+      }
+
+      // Create default user profile
+      const now = Date.now()
+      db.prepare(`
+        INSERT INTO user_profiles (id, name, preferred_language, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run('default-user', 'Default User', 'zh', now, now)
+    }
+  },
+  {
+    name: '017_remove_design_video_data',
+    up: (db) => {
+      // Delete video-render trigger
+      db.exec(`DELETE FROM agent_triggers WHERE id = 'video-render'`)
+
+      // Clean up design/video related memories
+      db.exec(`
+        DELETE FROM agent_memory_metadata
+        WHERE category IN ('design', 'video')
+           OR title LIKE '%设计%'
+           OR title LIKE '%剪辑%'
+           OR title LIKE '%视频%'
+      `)
+
+      // Clean up design/video related agent knowledge
+      db.exec(`
+        DELETE FROM agent_knowledge
+        WHERE key LIKE '%design%'
+           OR key LIKE '%video%'
+      `)
+    }
+  },
+  {
+    name: '018_create_skill_execution_tables',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_executions (
+          id TEXT PRIMARY KEY,
+          skill_id TEXT NOT NULL,
+          entry_action TEXT NOT NULL,
+          session_id TEXT,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT,
+          current_step_id TEXT,
+          compiled_skill_json TEXT NOT NULL,
+          current_blocker_json TEXT,
+          last_frame_json TEXT,
+          errors_json TEXT,
+          step_outputs_json TEXT,
+          confirmations_json TEXT,
+          inputs_json TEXT
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_executions_updated_at ON skill_executions(updated_at DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_executions_session_status ON skill_executions(session_id, status, updated_at DESC)')
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_execution_steps (
+          id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          result_json TEXT,
+          message TEXT,
+          FOREIGN KEY (execution_id) REFERENCES skill_executions(id) ON DELETE CASCADE
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_steps_execution_step ON skill_execution_steps(execution_id, step_id, attempt)')
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_execution_artifacts (
+          id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          artifact_id TEXT NOT NULL,
+          label TEXT,
+          kind TEXT,
+          path TEXT,
+          mime_type TEXT,
+          metadata_json TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (execution_id) REFERENCES skill_executions(id) ON DELETE CASCADE
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_execution_step ON skill_execution_artifacts(execution_id, step_id, created_at DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_artifact_id ON skill_execution_artifacts(artifact_id)')
+    }
   }
 ]
 

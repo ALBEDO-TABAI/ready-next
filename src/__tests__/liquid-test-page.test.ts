@@ -1,0 +1,139 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { PassThrough } from 'node:stream'
+import { fileURLToPath } from 'node:url'
+import React from 'react'
+import { renderToPipeableStream, renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router-dom'
+
+const localStorageStore = new Map<string, string>()
+const documentAttributes = new Map<string, string>()
+
+const localStorageMock = {
+  getItem: (key: string) => localStorageStore.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    localStorageStore.set(key, value)
+  },
+  removeItem: (key: string) => {
+    localStorageStore.delete(key)
+  },
+  clear: () => {
+    localStorageStore.clear()
+  },
+}
+
+const documentMock = {
+  documentElement: {
+    setAttribute: (name: string, value: string) => {
+      documentAttributes.set(name, value)
+    },
+    getAttribute: (name: string) => documentAttributes.get(name) ?? null,
+  },
+}
+
+const matchMediaMock = (_query: string) => ({
+  matches: false,
+  media: _query,
+  onchange: null,
+  addListener: () => {},
+  removeListener: () => {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  dispatchEvent: () => true,
+})
+
+type TestWindow = typeof globalThis & {
+  localStorage: typeof localStorageMock
+  document: typeof documentMock
+  window: TestWindow
+  matchMedia: typeof matchMediaMock
+  addEventListener: () => void
+  removeEventListener: () => void
+  electronAPI?: unknown
+}
+
+const testWindow = globalThis as TestWindow
+
+testWindow.localStorage = localStorageMock
+testWindow.document = documentMock
+
+if (typeof testWindow.window === 'undefined') {
+  testWindow.window = testWindow
+}
+
+testWindow.window.matchMedia = matchMediaMock
+testWindow.window.addEventListener = () => {}
+testWindow.window.removeEventListener = () => {}
+testWindow.window.electronAPI = undefined
+testWindow.matchMedia = matchMediaMock
+
+const TEST_DIR = dirname(fileURLToPath(import.meta.url))
+const APP_FILE = resolve(TEST_DIR, '../renderer/App.tsx')
+
+async function renderAppRoute(pathname: string): Promise<string> {
+  const { default: App } = await import('../renderer/App')
+
+  return await new Promise((resolve, reject) => {
+    const output = new PassThrough()
+    let html = ''
+
+    output.on('data', (chunk) => {
+      html += chunk.toString()
+    })
+    output.on('end', () => {
+      resolve(html)
+    })
+    output.on('error', reject)
+
+    const { pipe, abort } = renderToPipeableStream(
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: [pathname] },
+        React.createElement(App)
+      ),
+      {
+        onAllReady() {
+          pipe(output)
+        },
+        onError(error) {
+          reject(error)
+        },
+      }
+    )
+
+    setTimeout(() => abort(), 5000)
+  })
+}
+
+describe('LiquidTest preview', () => {
+  it('registers an isolated liquid test route in the app shell', async () => {
+    const appSource = await readFile(APP_FILE, 'utf8')
+
+    assert.match(appSource, /path="\/liquid-test"/)
+    assert.match(appSource, /path="\*" element={<Navigate to="\/workbench" replace \/>}/)
+  })
+
+  it('renders the isolated route through the app shell', async () => {
+    const html = await renderAppRoute('/liquid-test')
+
+    assert.match(html, /Liquid Glass Sidebar/i)
+    assert.doesNotMatch(html, /workbench-mode-root/)
+  })
+
+  it('renders the temporary liquid glass sidebar page', async () => {
+    const { default: LiquidTest } = await import('../renderer/LiquidTest')
+    const html = renderToStaticMarkup(React.createElement(LiquidTest))
+
+    assert.match(html, /Liquid Glass Sidebar/i)
+    assert.match(html, /Inbox/i)
+    assert.match(html, /Design queue/i)
+    assert.match(html, /data-scene="maxrovensky-inspired"/)
+    assert.match(html, /data-glass-primitive="add-button"/)
+    assert.match(html, /data-glass-primitive="search"/)
+    assert.match(html, /data-glass-primitive="active-nav"/)
+    assert.match(html, /data-glass-primitive="focus-card"/)
+    assert.match(html, /data-glass-primitive="alert-card"/)
+  })
+})

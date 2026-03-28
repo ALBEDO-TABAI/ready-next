@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-26
+> 更新时间: 2026-03-27
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
@@ -22,15 +22,24 @@
 - 之前的 `database.ts` 静态/动态混合导入告警已清掉。
 
 5. Workbench 模块已进入统一执行模型。
-- design/video/rss/calendar 的 agent handler 已从页面组件中拆出。
-- browser/RSS/calendar/design/video 都有基础 diagnostics panel。
-- browser/document/design/video 的 tabs/chrome 已进入共享路径。
-- document 与 design 已从”tab 行里塞操作”改成”tabs + toolbar”结构。
-- browser / document / rss / calendar 的工作台切换已补上 keep-alive 壳层：四个主模式会在 outlet 内常驻挂载，切换只改 CSS 显隐，不再依赖访问后首次挂载 + motion 动画切场。
+- rss/calendar 的 agent handler 已从页面组件中拆出。
+- browser/RSS/calendar 都有基础 diagnostics panel。
+- browser/document/rss/calendar 的 tabs/chrome 已进入共享路径。
+- browser / document / rss / calendar 的工作台切换已补上 keep-alive 壳层：四个主模式会在 outlet 内常驻挂载，切换不再依赖重新挂载；共享壳层现在会在常驻前提下补一层左右切页过场。
 - 非活跃模式已开始进入“前台激活、后台挂起”节奏：RSS 轮询/自动刷新只在可见时运行，Calendar 的 Schedule-X 初始化延后到首次激活，RSS 预览在模式隐藏时会主动关闭原生 preview host。
 - 当当前可见模式集合不含 browser 时，Workbench 壳层会统一走 `browser.hideAll()`，避免只隐藏 active host 却遗漏 preview/native overlay。
 - 顶栏四模块切换器已收敛为稳定宽度，去掉了会造成视觉抖动的纵向位移；browser/rss/calendar 的工作区外轮廓和左边界也已向 document 模式对齐。
+- 四模块主工作区切换已进一步收紧为混合规则：document / rss / calendar 之间继续整块横切；browser 在切出和切回时都保持原位不动，只让其他页面横向盖上来或滑走露出它。
+- Workbench 切换前不再同步等待截图完成才开场，而是优先复用稳定画面缓存；连续快速切换也会记住最后一次目标，不再把中途点击直接吞掉。
+- 工作台切换时长也再收紧了一档，普通页面切换会比上一轮更利落一些。
 - BrowserMode 重新显示原生 host 的逻辑已加上 RAF 取消与 `hideAll()` 收口，避免切离 browser 后被延迟回调重新抬回前台；RSS 在 liquid-glass 下恢复了可见的圆角 outline。
+- BrowserMode 的“surface ready” 延迟回显现已补上定时器清理，避免刚切走 browser 时旧定时器又把冻结层提前放掉，减少回场时的半拍补出与跳层感。
+- 已撤回“真实双层页面切换”和“整块浏览器壳层遮住”的激进方案，回到更稳的单层过渡路径，避免普通模块切换进一步变卡以及浏览器整块消失。
+- 浏览器回场时现在只会暂时收起顶部浏览器栏，不再把整块浏览器区域一起藏掉，用更小范围的遮挡去压低“顶部先露出来”的分段感。
+- Browser 运行态现已补上“首次准备、后续复用”路径：已有 tab 会尝试后台预热恢复，后续切回 browser 不再每次都重走完整冷启动准备链。
+- Browser 回场新增“提前露出”时机：browser-enter 过场还没完全收口时，原生网页已经可以在离场覆盖层后面先就位，减少“动画播完网页才到”的慢半拍。
+- 顶栏四模块滑块现已拆成两种手感：点击切换用短促直达动画，拖动释放才走 spring 回弹，顶部控件不再和主内容一起拖泥带水。
+- WorkbenchModeOutlet 现在会主动预热四个主模式的代码分块，尽量把首次切换时的补载等待前移。
 - 顶栏四模块切换器已进一步退回普通按钮组，不再依赖 gooey segmented control；主进程隐藏态下也会跳过 BrowserView bounds 回写，进一步降低原生视图抢前台风险。
 - BrowserMode 顶部浏览器 chrome 已从 “`BrowserTabBar + BrowserAddressBar` 两层结构” 收口为单层 `BrowserHeader`：左侧 refresh dock 支持 hover reveal，激活标签改为可展开地址面，右侧工具按钮独立收口。
 - 浏览器右上收藏 / 下载 / 更多已切到主进程 native utility menu：renderer 不再通过 `activePanel` 拉起 `BrowserSidePanel`，`useBrowserViewBounds` 也不再把这类瞬时菜单当成布局变化源，点击按钮不会再把网页内容横向或纵向推移。
@@ -58,38 +67,18 @@
 - skills center 已新增 Recent Executions 和 blocker 继续入口
 - direct-chat 已加入视频输入下的 skill/python tools 保留策略，以及 OpenAI tool history repair
 
-7. **设计模块已完成核心改进（2026-03-10）**。
-- **”假成功”问题已修复**：所有设计工具调用都返回真实结果或明确错误，AI 能基于真实执行结果做决策。
-- **语义控制能力已扩展**：支持圆角、字号、字重、行高、对齐、间距、颜色、边框等高频控制。
-- **语义控制已应用到设计生成**：typography、board、layoutStrategy、styleGuide 生成逻辑已集成新的语义控制。
-- **创建工具支持 meta 属性**：可以一步到位设置样式，不需要二次更新。
-- **design_update_selected 工具已实现**：简化选中元素更新流程，从 2 步简化为 1 步。
-- **UI 增强已完成**：缩放控制、+ 键新增标签、水印移除。
-- **UI 视觉优化已完成**：隐藏横向分隔线、竖向分隔线隐约可见、所有面板统一浅米色背景。
-- 详见 `DESIGN_MODULE_IMPROVEMENTS_SUMMARY.md`、`DESIGN_UPDATE_SELECTED_IMPLEMENTATION.md`、`DESIGN_UI_ENHANCEMENTS.md`、`UI_VISUAL_OPTIMIZATION.md`。
-
 ## 当前最高优先级
 1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
 
 2. ~~工作台顶部三行视觉对齐~~（已完成）。
 
-3. ~~Design inspector 高频能力补齐~~（已完成）。
-- ✅ 修复”假成功”问题
-- ✅ 扩展语义控制类型（圆角、字号、字重、行高、对齐、间距、颜色、边框）
-- ✅ 创建工具支持 meta 属性
-- ✅ 应用语义控制到设计生成逻辑
-- ✅ design_update_selected 工具实现
-- ✅ UI 增强（缩放控制、+ 键行为、水印移除）
-- ✅ UI 视觉优化（隐藏横向分隔线、统一面板背景色）
-
-4. **下一阶段主线**：
+3. **下一阶段主线**：
 - `PromptAssemblyService + L0/L1/L2 memory`（Agent 记忆系统）
 - `Feishu capability replacement`（飞书能力替换）
 
 ## 当前未完成项
 - Weibo/Xiaohongshu/Douyin 仍未全部完成最终实机签收。
 - Workbench 顶部三行在各模块下仍需最后一轮视觉对齐。
-- ~~Design inspector 仍缺高频属性控制~~（已完成）。
 - Browser diagnostics 仍是 panel，不是完整 lab。
 - Browser orchestration 仍有最后一层收口空间。
 - Browser unified header 还需要一轮实机动效与窄宽度体验微调，但结构性切换已完成。
@@ -100,8 +89,7 @@
 ## 建议的继续顺序
 1. ~~先做 RSS 三条源的最终签收~~（已完成）。
 2. ~~再做顶部三行和 tabs 的视觉基线收口~~（已完成）。
-3. ~~再补 design inspector 高频缺口~~（已完成）。
-4. **接下来回到底座主线**：
+3. **接下来回到底座主线**：
    - **`PromptAssemblyService + L0/L1/L2 memory`**（Agent 记忆系统）
    - **`Feishu capability replacement`**（飞书能力替换）
    - Browser orchestration 最后收口
@@ -116,6 +104,7 @@
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-resize-stability-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/browser-startup-theme-contract.test.ts src/__tests__/workbench-slider-motion-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/browser-resize-stability-contract.test.ts` 通过
 - `npx tsx --test src/__tests__/floating-submenu-style-contract.test.ts src/__tests__/chat-header-menu-style-contract.test.ts` 通过
 - `npm run typecheck:web` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/skill-compiler-smoke.test.ts src/__tests__/skill-resolver-smoke.test.ts` 通过

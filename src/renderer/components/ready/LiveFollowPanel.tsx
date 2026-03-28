@@ -7,15 +7,12 @@ import WorkbenchModeOutlet from '../layout/WorkbenchModeOutlet'
 const agentModeMap: Record<string, WorkbenchMode> = {
   butler: 'browser',
   copywriter: 'document',
-  'video-editor': 'video',
   analyst: 'rss'
 }
 
 const subModeLabels: Record<WorkbenchMode, string> = {
   browser: '浏览器',
   document: '文档',
-  design: '设计',
-  video: '剪辑',
   rss: 'RSS',
   calendar: '日程'
 }
@@ -94,8 +91,6 @@ export default function LiveFollowPanel({ isFollowMode }: LiveFollowPanelProps) 
     switch (readySubMode) {
       case 'browser':
       case 'document':
-      case 'design':
-      case 'video':
       case 'rss':
       case 'calendar':
         return <WorkbenchModeOutlet mode={readySubMode} />

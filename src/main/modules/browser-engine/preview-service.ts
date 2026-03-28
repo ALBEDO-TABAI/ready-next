@@ -2,6 +2,10 @@ import type { WebContents } from 'electron'
 import { isAllowedBrowserURL } from './popup-policy'
 import { type BrowserHostView, type BrowserRect, createDefaultPreviewState, type PreviewTabState } from './host-types'
 
+function applyRoundedPreviewViewport(_view: BrowserHostView): void {
+  // Rounded clipping is handled at the native host view layer.
+}
+
 interface BrowserPreviewServiceDeps {
   useMock: boolean
   browserUserAgent: string
@@ -74,6 +78,10 @@ export class BrowserPreviewService {
     }
     this.deps.applyPreviewBounds(view)
 
+    view.webContents.on('dom-ready', () => {
+      applyRoundedPreviewViewport(view)
+    })
+
     view.webContents.on('page-title-updated', (_, title) => {
       this.previewState.title = title
       this.sendPreviewUpdate()
@@ -101,13 +109,15 @@ export class BrowserPreviewService {
     })
 
     view.webContents.on('did-stop-loading', () => {
+      applyRoundedPreviewViewport(view)
       this.previewState.loading = false
       this.previewState.canGoBack = view.webContents.navigationHistory.canGoBack()
       this.previewState.canGoForward = view.webContents.navigationHistory.canGoForward()
       this.sendPreviewUpdate()
     })
 
-    view.webContents.on('did-fail-load', (_, errorCode, errorDescription) => {
+    view.webContents.on('did-fail-load', (_, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
       this.deps.logBrowserDiag(`[browser-v3][fail-load][preview] code=${String(errorCode)} message=${errorDescription}`)
       this.previewState.loading = false
       this.previewState.error = `${errorDescription} (${errorCode})`

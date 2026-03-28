@@ -212,6 +212,7 @@ export type ConversationSourceKind = 'local' | 'channel'
 export interface ChatConversationRecord {
   id: string
   agent: string
+  user_id?: string | null
   title: string
   source_kind: ConversationSourceKind
   source_id: string
@@ -1112,6 +1113,7 @@ export class DatabaseManager {
   upsertConversationScope(payload: {
     id: string
     agent: string
+    userId?: string
     title: string
     sourceKind: ConversationSourceKind
     sourceId: string
@@ -1127,10 +1129,11 @@ export class DatabaseManager {
     const metaJson = JSON.stringify(payload.meta || {})
     this.db.prepare(
       `INSERT INTO chat_conversations (
-         id, agent, title, source_kind, source_id, thread_key, meta_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, agent, user_id, title, source_kind, source_id, thread_key, meta_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          agent = excluded.agent,
+         user_id = excluded.user_id,
          title = excluded.title,
          source_kind = excluded.source_kind,
          source_id = excluded.source_id,
@@ -1140,6 +1143,7 @@ export class DatabaseManager {
     ).run(
       id,
       payload.agent,
+      payload.userId || null,
       payload.title,
       payload.sourceKind,
       payload.sourceId,

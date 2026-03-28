@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
+import { getFilename } from '../utils/path'
 
 export interface DocTab {
     id: string
@@ -8,16 +10,27 @@ export interface DocTab {
     isDirty: boolean
 }
 
+export interface PendingDocReveal {
+    path: string
+    selection?: string
+    lineStart?: number
+    lineEnd?: number
+    sectionTitle?: string
+    requestedAt: number
+}
+
 interface DocTabsState {
     tabs: DocTab[]
     activeTabId: string
     splitTabId: string | null
     splitRatio: number
+    pendingReveal: PendingDocReveal | null
 
     openTab: (path: string) => void
     closeTab: (id: string) => void
     setActiveTab: (id: string) => void
     renameTab: (id: string, title: string) => void
+    setTabPath: (id: string, path: string | null) => void
     setTabContent: (id: string, content: string) => void
     appendTabContent: (id: string, content: string) => void
     updateTabContent: (id: string, content: string) => void
@@ -25,12 +38,45 @@ interface DocTabsState {
     reorderTabs: (fromIndex: number, toIndex: number) => void
     setSplitTab: (id: string | null) => void
     setSplitRatio: (ratio: number) => void
+    setPendingReveal: (reveal: PendingDocReveal | null) => void
 }
 
 let tabCounter = 0
 const makeId = () => `doc-${++tabCounter}`
 
-export const useDocTabs = create<DocTabsState>((set, get) => ({
+const STORAGE_KEY = 'ready-doc-tabs-v2'
+
+function syncTabCounterFromTabs(tabs: DocTab[]) {
+    const maxId = tabs.reduce((max, tab) => {
+        const match = tab.id.match(/^doc-(\d+)$/)
+        const numeric = match ? Number(match[1]) : 0
+        return Number.isFinite(numeric) ? Math.max(max, numeric) : max
+    }, 0)
+    tabCounter = Math.max(tabCounter, maxId)
+}
+
+function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'splitRatio'>) {
+    const tabs = state.tabs.length > 0
+        ? state.tabs
+        : [{ id: 'doc-1', path: null, title: '新文档', content: '', isDirty: false }]
+    syncTabCounterFromTabs(tabs)
+    const activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id
+    const splitTabId = state.splitTabId && tabs.some((tab) => tab.id === state.splitTabId) ? state.splitTabId : null
+    return {
+        tabs,
+        activeTabId,
+        splitTabId,
+        splitRatio: Math.max(20, Math.min(80, state.splitRatio || 50)),
+    }
+}
+
+const fallbackStorage = {
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+}
+
+export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     tabs: [
         {
             id: makeId(),
@@ -43,6 +89,7 @@ export const useDocTabs = create<DocTabsState>((set, get) => ({
     activeTabId: 'doc-1',
     splitTabId: null,
     splitRatio: 50,
+    pendingReveal: null,
 
     openTab: (path: string) => {
         const { tabs } = get()
@@ -65,7 +112,7 @@ export const useDocTabs = create<DocTabsState>((set, get) => ({
         }
         // Create new tab
         const id = makeId()
-        const title = path.split('/').pop() || '未知文件'
+        const title = getFilename(path)
         const newTab: DocTab = {
             id,
             path,
@@ -124,6 +171,14 @@ export const useDocTabs = create<DocTabsState>((set, get) => ({
         })
     },
 
+    setTabPath: (id: string, path: string | null) => {
+        set({
+            tabs: get().tabs.map(t =>
+                t.id === id ? { ...t, path, title: path ? getFilename(path) : t.title } : t
+            )
+        })
+    },
+
     setTabContent: (id: string, content: string) => {
         set({
             tabs: get().tabs.map(t =>
@@ -169,5 +224,54 @@ export const useDocTabs = create<DocTabsState>((set, get) => ({
 
     setSplitRatio: (ratio: number) => {
         set({ splitRatio: Math.max(20, Math.min(80, ratio)) })
+    },
+
+    setPendingReveal: (reveal: PendingDocReveal | null) => {
+        set({ pendingReveal: reveal })
+    },
+}), {
+    name: STORAGE_KEY,
+    version: 2,
+    storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? localStorage : fallbackStorage)),
+    partialize: (state) => {
+        const tabs = state.tabs.map((tab) => {
+            if (tab.path && !tab.isDirty) {
+                return { ...tab, content: '' }
+            }
+            return tab
+        })
+        return {
+            tabs,
+            activeTabId: state.activeTabId,
+            splitTabId: state.splitTabId,
+            splitRatio: state.splitRatio,
+        }
+    },
+    onRehydrateStorage: () => (state) => {
+      if (!state) return
+      const next = ensureTabsState({
+        tabs: state.tabs,
+        activeTabId: state.activeTabId,
+        splitTabId: state.splitTabId,
+        splitRatio: state.splitRatio,
+      })
+      state.tabs = next.tabs
+      state.activeTabId = next.activeTabId
+      state.splitTabId = next.splitTabId
+      state.splitRatio = next.splitRatio
+    },
+    migrate: (persistedState) => {
+      const state = persistedState as Partial<DocTabsState> | undefined
+      if (!state) return persistedState
+      const next = ensureTabsState({
+        tabs: Array.isArray(state.tabs) ? state.tabs : [],
+        activeTabId: typeof state.activeTabId === 'string' ? state.activeTabId : '',
+        splitTabId: typeof state.splitTabId === 'string' ? state.splitTabId : null,
+        splitRatio: typeof state.splitRatio === 'number' ? state.splitRatio : 50,
+      })
+      return {
+        ...state,
+        ...next,
+      }
     },
 }))

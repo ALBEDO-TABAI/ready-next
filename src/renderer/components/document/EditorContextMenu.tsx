@@ -7,6 +7,7 @@ import {
   MousePointer2,
   Undo2,
   Redo2,
+  MessageSquareQuote,
 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from '../layout/ContextMenu'
 
@@ -15,6 +16,8 @@ interface EditorContextMenuProps {
   visible: boolean
   position: { x: number; y: number }
   onClose: () => void
+  canQuote?: boolean
+  onQuoteToAgent?: () => void
 }
 
 export default function EditorContextMenu({
@@ -22,6 +25,8 @@ export default function EditorContextMenu({
   visible,
   position,
   onClose,
+  canQuote = false,
+  onQuoteToAgent,
 }: EditorContextMenuProps) {
   if (!visible) return null
 
@@ -45,10 +50,20 @@ export default function EditorContextMenu({
       },
     },
     {
+      id: 'quote-to-agent',
+      label: '引用到输入框',
+      icon: <MessageSquareQuote style={{ width: 16, height: 16 }} />,
+      disabled: !canQuote,
+      onClick: () => {
+        onQuoteToAgent?.()
+      },
+    },
+    {
       id: 'paste',
       label: '粘贴',
       shortcut: '⌘V',
       icon: <ClipboardPaste style={{ width: 16, height: 16 }} />,
+      disabled: !editor,
       onClick: async () => {
         if (!editor) return
         try {
@@ -66,6 +81,7 @@ export default function EditorContextMenu({
       shortcut: '⌫',
       danger: true,
       icon: <Trash2 style={{ width: 16, height: 16 }} />,
+      disabled: !editor,
       onClick: () => {
         editor?.chain().focus().deleteSelection().run()
       },
@@ -76,6 +92,7 @@ export default function EditorContextMenu({
       label: '全选',
       shortcut: '⌘A',
       icon: <MousePointer2 style={{ width: 16, height: 16 }} />,
+      disabled: !editor,
       onClick: () => {
         editor?.chain().focus().selectAll().run()
       },
@@ -85,6 +102,7 @@ export default function EditorContextMenu({
       label: '撤销',
       shortcut: '⌘Z',
       icon: <Undo2 style={{ width: 16, height: 16 }} />,
+      disabled: !editor,
       onClick: () => {
         editor?.chain().focus().undo().run()
       },
@@ -94,6 +112,7 @@ export default function EditorContextMenu({
       label: '重做',
       shortcut: '⌘⇧Z',
       icon: <Redo2 style={{ width: 16, height: 16 }} />,
+      disabled: !editor,
       onClick: () => {
         editor?.chain().focus().redo().run()
       },

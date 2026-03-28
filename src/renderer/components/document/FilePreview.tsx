@@ -1,6 +1,8 @@
 import { useMemo, lazy, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 import { type DocTab } from '../../stores/useDocTabs'
+import { toLocalFileUrl } from '../../utils/dragDrop'
+import { getFileExtension } from '../../utils/path'
 
 const PdfViewer = lazy(() => import('./PdfViewer'))
 const ArtVideoPlayer = lazy(() => import('./ArtVideoPlayer'))
@@ -8,7 +10,7 @@ const ImageGallery = lazy(() => import('./ImageGallery'))
 
 const getFileExt = (path: string | null): string => {
   if (!path) return ''
-  return (path.split('/').pop() || '').split('.').pop()?.toLowerCase() || ''
+  return getFileExtension(path)
 }
 
 const LoadingFallback = ({ bg = 'var(--bg-content)' }: { bg?: string }) => (
@@ -27,8 +29,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(currentExt)
   const isPdf = currentExt === 'pdf'
 
-  // Standard scheme URL: local-file:// + path (path already starts with /)
-  const fileUrl = tab.path ? `local-file://${encodeURI(tab.path).replace(/#/g, '%23')}` : ''
+  const fileUrl = tab.path ? toLocalFileUrl(tab.path) : ''
 
   if (isImage && tab.path) {
     return (

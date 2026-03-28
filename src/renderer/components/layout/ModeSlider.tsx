@@ -1,39 +1,32 @@
 import { useMode } from '../../stores/useMode'
-import { useNavigate } from 'react-router-dom'
-import { motion, useReducedMotion } from 'framer-motion'
-import { useTheme } from '../../stores/useTheme'
+import { motion } from 'framer-motion'
 
 export default function ModeSlider() {
-  const { appMode, toggleMode } = useMode()
-  const navigate = useNavigate()
-  const skin = useTheme((state) => state.skin)
-  const isLiquid = skin === 'liquid-glass'
-  const reduceMotion = useReducedMotion()
+  const { appMode } = useMode()
   const isReady = appMode === 'ready'
 
+  // Disabled - frozen in Workbench mode
   const handleToggle = () => {
-    toggleMode()
-    // Navigate to the other mode's route
-    navigate(appMode === 'workbench' ? '/ready' : '/')
+    // Do nothing - frozen
   }
 
   return (
     <motion.button
       onClick={handleToggle}
-      whileHover={isLiquid && !reduceMotion ? { y: -1 } : undefined}
-      whileTap={isLiquid && !reduceMotion ? { scale: 0.985, y: 0 } : undefined}
-      className="glass-surface-card morph-segmented-track relative h-[28px] w-[90px] overflow-hidden rounded-[16px]"
+      disabled={true}
+      className="glass-surface-card morph-segmented-track relative h-[28px] w-[90px] overflow-hidden rounded-[16px] opacity-50 cursor-not-allowed"
       style={{
         border: '1px solid var(--surface-border)',
       }}
+      title="模式切换已禁用"
     >
       <motion.span
         className="pointer-events-none absolute"
         animate={{
           x: isReady ? 0 : 38,
-          opacity: 1,
+          opacity: 0.6,
         }}
-        transition={reduceMotion ? { duration: 0.01 } : { duration: 0.18, ease: 'easeOut' }}
+        transition={{ duration: 0 }}
         style={{
           left: 10,
           top: 9,
@@ -48,12 +41,10 @@ export default function ModeSlider() {
         {isReady ? '工作台' : 'Ready'}
       </motion.span>
 
-      {/* Knob */}
+      {/* Knob - frozen in current position */}
       <motion.div
         animate={{ x: isReady ? 50 : 2 }}
-        transition={reduceMotion
-          ? { duration: 0.01 }
-          : { type: 'spring', stiffness: 420, damping: 22, mass: 0.62 }}
+        transition={{ duration: 0 }}
         className="absolute h-[22px] w-[30px] rounded-[11px]"
         style={{
           left: 2,
@@ -64,6 +55,7 @@ export default function ModeSlider() {
             ? 'color-mix(in srgb, var(--color-green-light) 45%, var(--surface-floating-bg))'
             : 'var(--surface-floating-bg)',
           boxShadow: 'var(--lg-shadow-contact)',
+          opacity: 0.6,
         }}
       />
     </motion.button>

@@ -21,6 +21,31 @@ export function useKeyboardShortcuts() {
   const { setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
   const { toggleSidebar } = useWorkspace()
 
+  const saveActiveDocument = useCallback(async () => {
+    const { activeTabId, tabs, setTabPath, renameTab, markTabSaved } = useDocTabs.getState()
+    if (!activeTabId) return
+    const tab = tabs.find((item) => item.id === activeTabId)
+    if (!tab || !window.electronAPI?.document) return
+
+    if (tab.path) {
+      const result = await window.electronAPI.document.writeFile(tab.path, tab.content)
+      if (result.success) {
+        markTabSaved(activeTabId)
+      }
+      return
+    }
+
+    const saveResult = await window.electronAPI.document.saveFileAs({
+      content: tab.content,
+      suggestedName: `${tab.title || '新文档'}.md`,
+    })
+    if (!saveResult.success || !saveResult.path) return
+
+    setTabPath(activeTabId, saveResult.path)
+    renameTab(activeTabId, saveResult.path.split('/').pop() || tab.title)
+    markTabSaved(activeTabId)
+  }, [])
+
   const activateWorkbenchMode = useCallback((mode: WorkbenchMode) => {
     setWorkbenchMode(mode)
     setReadySubMode(mode)
@@ -44,10 +69,8 @@ export function useKeyboardShortcuts() {
       const functionModeMap: Record<string, WorkbenchMode> = {
         F1: 'browser',
         F2: 'document',
-        F3: 'design',
-        F4: 'video',
-        F5: 'rss',
-        F6: 'calendar',
+        F3: 'rss',
+        F4: 'calendar',
       }
       const functionMode = functionModeMap[e.key]
       if (functionMode) {
@@ -71,15 +94,7 @@ export function useKeyboardShortcuts() {
 
     if (meta && e.key.toLowerCase() === 's' && !shift) {
       preventDefault()
-      const { workbenchMode } = useMode.getState()
-      if (workbenchMode === 'design') {
-        window.dispatchEvent(new CustomEvent('ready-design-save'))
-        return true
-      }
-      const { activeTabId, markTabSaved } = useDocTabs.getState()
-      if (activeTabId) {
-        markTabSaved(activeTabId)
-      }
+      void saveActiveDocument()
       return true
     }
 
@@ -110,10 +125,8 @@ export function useKeyboardShortcuts() {
       const modeMap: Record<string, WorkbenchMode> = {
         '1': 'browser',
         '2': 'document',
-        '3': 'design',
-        '4': 'video',
-        '5': 'rss',
-        '6': 'calendar',
+        '3': 'rss',
+        '4': 'calendar',
       }
       if (modeMap[e.key]) {
         preventDefault()
@@ -123,7 +136,7 @@ export function useKeyboardShortcuts() {
     }
 
     return false
-  }, [activateWorkbenchMode, navigate, setAppMode, setWorkbenchMode, toggleMode, toggleSidebar])
+  }, [activateWorkbenchMode, navigate, saveActiveDocument, setAppMode, setWorkbenchMode, toggleMode, toggleSidebar])
 
   useEffect(() => {
     const keydownHandler = (e: KeyboardEvent) => {

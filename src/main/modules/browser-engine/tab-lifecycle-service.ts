@@ -149,6 +149,7 @@ export class BrowserTabLifecycleService {
     })
 
     this.host.setActiveTabId(tabId)
+    finalizeSwap(true)
     view.webContents.loadURL(url).catch(() => {
       // handled by did-fail-load
     })
@@ -201,7 +202,8 @@ export class BrowserTabLifecycleService {
       this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: false })
     })
 
-    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
       this.host.logBrowserDiag(`[browser-v3][fail-load][tab:${tabId}] code=${String(errorCode)} message=${errorDescription}`)
       this.host.sendToRenderer('browser:tabUpdate', {
         type: 'error',
