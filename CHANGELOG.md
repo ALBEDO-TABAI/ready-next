@@ -118,6 +118,7 @@
 - 修正 widget 写入幂等性：同标题 `show-widget` 现在会优先更新已有围栏并清理重复块，`append_content` 误走时也会自动合并而不是越测越多
 - 新增 widget 维护工具：`document_list_widgets` / `document_update_widget` / `document_remove_widget`
 - 新增 widget 写入质量校验，明显残缺的背景壳 SVG 会被拒绝写入，避免半成品直接落盘
+- 对齐引用版本的文档底层行为：跨轮“修改 + 保存”现在会累计判断，不再因为分两轮执行而提前漏报完成；文档模式下发给 agent 的上下文会优先带当前文档正文；“根据某个文档生成信息卡”这类生成式 UI 请求也会更稳定地走文档工具链
 - 编辑态 `show-widget` 现已折叠成可操作卡片，支持预览跳转、查看源码、复制源码、删除确认，以及一键把当前 widget 交给 agent 更新
 - `show-widget` 现统一走 sandbox iframe 运行时，纯 HTML + 本地内联事件的计算器类 widget 也能在编辑态和预览态保持一致交互
 - 新文档 `Ctrl/Cmd+S` 现改为弹保存位置选择；未保存草稿支持本地持久化恢复，并增加状态版本迁移

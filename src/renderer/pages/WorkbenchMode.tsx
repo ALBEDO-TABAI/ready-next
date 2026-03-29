@@ -191,6 +191,11 @@ export default function WorkbenchMode() {
       window.clearTimeout(transitionTimerRef.current)
     }
 
+    // 关键修复：如果当前是 browser 模式，先触发截图保存当前画面
+    if (workbenchMode === 'browser') {
+      window.dispatchEvent(new CustomEvent('ready:browser-capture-freeze'))
+    }
+
     // 开始过渡：先标记为未稳定（BrowserView 等需要暂停更新）
     setIsMotionSettled(false)
 

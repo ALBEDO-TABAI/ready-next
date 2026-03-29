@@ -56,7 +56,7 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
-import { buildDocumentToolCompletionText } from './document-tool-flow'
+import { accumulateDocumentToolProgress, buildDocumentToolCompletionText } from './document-tool-flow'
 import { compactToolPolicyHistory, resolveToolPolicyInput } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS, resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
@@ -2881,6 +2881,11 @@ export class DirectChatEngine extends EventEmitter {
         let textToolBridgeNudges = 0
         let documentMutationCompleted = false
         let documentToolTaskCompleted = false
+        let documentToolProgress: {
+          executedMutatingDocActionCount: number
+          executedSaveDocActionCount: number
+          toolResults: string[]
+        } | null = null
         let lastDocumentInspectionResult: string | null = null
         let lastWidgetValidationError: string | null = null
 
@@ -3312,12 +3317,20 @@ export class DirectChatEngine extends EventEmitter {
             documentToolTaskCompleted = true
           }
 
+          if (toolPolicy.forceDocumentTool) {
+            documentToolProgress = accumulateDocumentToolProgress(documentToolProgress, {
+              executedMutatingDocActionCount,
+              executedSaveDocActionCount,
+              toolResults: documentToolResultsThisIteration,
+            })
+          }
+
           const documentToolCompletionText = buildDocumentToolCompletionText({
             forceDocumentTool: toolPolicy.forceDocumentTool,
-            executedMutatingDocActionCount,
-            executedSaveDocActionCount,
+            executedMutatingDocActionCount: documentToolProgress?.executedMutatingDocActionCount || 0,
+            executedSaveDocActionCount: documentToolProgress?.executedSaveDocActionCount || 0,
             lastWidgetValidationError,
-            toolResults: documentToolResultsThisIteration,
+            toolResults: documentToolProgress?.toolResults || [],
           })
           if (documentToolCompletionText) {
             emitOutput(documentToolCompletionText, 'text')

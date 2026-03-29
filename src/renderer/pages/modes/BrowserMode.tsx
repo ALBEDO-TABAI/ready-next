@@ -202,7 +202,7 @@ export default function BrowserMode({
     isActive,
     browserRuntimeReady,
     activeTabId,
-    surfaceRef: contentRef,
+    surfaceRef: shellRef,
     sendBoundsImmediate,
   })
   const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
@@ -441,46 +441,55 @@ export default function BrowserMode({
             onShowUtilityMenu={handleShowUtilityMenu}
           />
 
-          <BrowserShellLayout
-            isElectron={isElectron}
-            contentRef={contentRef}
-            activeTab={activeTab}
-            toastVisible={toastVisible}
-            freezeOverlay={shouldRenderFreezeFrame && visibleFreezeFrame ? (
-              <div
-                className="browser-resize-shell-freeze"
+          <div
+            style={{
+              position: 'relative',
+              zIndex: 1,
+            }}
+            className="flex min-h-0 flex-1"
+          >
+            <BrowserShellLayout
+              isElectron={isElectron}
+              contentRef={contentRef}
+              activeTab={activeTab}
+              toastVisible={toastVisible}
+              onDragOver={handleContentDragOver}
+              onDrop={handleContentDrop}
+              onRetry={() => void handleRetry()}
+            />
+          </div>
+
+          {shouldRenderFreezeFrame && visibleFreezeFrame ? (
+            <div
+              className="browser-resize-shell-freeze"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 40,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+                borderRadius: 'var(--workbench-canvas-radius)',
+                opacity: freezeFrameStyle.opacity,
+                filter: freezeFrameStyle.filter,
+                transform: freezeFrameStyle.transform,
+                willChange: freezeFrameStyle.opacity < 1 ? 'opacity, filter, transform' : 'auto',
+                transition: 'none', // 使用 JS 动画，不用 CSS transition
+              }}
+            >
+              <img
+                src={visibleFreezeFrame.src}
+                alt=""
+                draggable={false}
                 style={{
-                  position: 'absolute',
-                  inset: 0,
-                  zIndex: 40,
-                  pointerEvents: 'none',
-                  overflow: 'hidden',
-                  borderRadius: 'inherit',
-                  opacity: freezeFrameStyle.opacity,
-                  filter: freezeFrameStyle.filter,
-                  transform: freezeFrameStyle.transform,
-                  willChange: freezeFrameStyle.opacity < 1 ? 'opacity, filter, transform' : 'auto',
-                  transition: 'none', // 使用 JS 动画，不用 CSS transition
+                  width: '100%',
+                  height: '100%',
+                  display: 'block',
+                  objectFit: 'fill',
+                  userSelect: 'none',
                 }}
-              >
-                <img
-                  src={visibleFreezeFrame.src}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'block',
-                    objectFit: 'fill',
-                    userSelect: 'none',
-                  }}
-                />
-              </div>
-            ) : null}
-            onDragOver={handleContentDragOver}
-            onDrop={handleContentDrop}
-            onRetry={() => void handleRetry()}
-          />
+              />
+            </div>
+          ) : null}
 
           {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示（有过冻结帧时不显示，避免遮挡） */}
           {!shouldShowFreezeFrame && !isBrowserHostFullyVisible && (
@@ -488,7 +497,7 @@ export default function BrowserMode({
               className="browser-transition-mask"
               style={{
                 position: 'absolute',
-                inset: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+                inset: 0,
                 zIndex: 45,
                 pointerEvents: 'none',
                 borderRadius: 'var(--workbench-canvas-radius)',

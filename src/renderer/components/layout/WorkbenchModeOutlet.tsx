@@ -90,6 +90,9 @@ export default function WorkbenchModeOutlet({
                 // 非当前模式降低渲染优先级
                 contentVisibility: isAdjacent ? 'auto' : 'hidden',
                 contain: 'strict',
+                // 关键修复：非激活模式完全隐藏，防止视觉残留（如 document-path-bar）
+                visibility: isActive ? 'visible' : 'hidden',
+                pointerEvents: isActive ? 'auto' : 'none',
               }}
               data-workbench-mode-panel={modeKey}
               aria-hidden={!isActive}

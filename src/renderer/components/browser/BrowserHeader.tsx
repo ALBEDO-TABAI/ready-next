@@ -83,7 +83,10 @@ export default function BrowserHeader({
     <div
       ref={headerRootRef}
       className="browser-header-surface glass-surface-panel flex-shrink-0"
-      style={{ overflow: 'visible', zIndex: 8 }}
+      style={{
+        overflow: 'visible',
+        zIndex: 8,
+      }}
     >
       <div
         className="flex items-center no-drag"

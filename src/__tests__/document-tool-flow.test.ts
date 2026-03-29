@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildDocumentToolCompletionText } from '../main/modules/claude-bridge/document-tool-flow'
+import {
+  accumulateDocumentToolProgress,
+  buildDocumentToolCompletionText,
+} from '../main/modules/claude-bridge/document-tool-flow'
 
 describe('document tool flow completion', () => {
   it('completes after a real mutation and save pair', () => {
@@ -33,5 +36,40 @@ describe('document tool flow completion', () => {
     })
 
     assert.equal(text, null)
+  })
+
+  it('completes when mutation and save happen across separate iterations', () => {
+    const afterMutation = accumulateDocumentToolProgress(undefined, {
+      executedMutatingDocActionCount: 1,
+      executedSaveDocActionCount: 0,
+      toolResults: ['已插入 widget：weekly_focus_card（新文档.md）'],
+    })
+
+    const textAfterMutation = buildDocumentToolCompletionText({
+      forceDocumentTool: true,
+      executedMutatingDocActionCount: afterMutation.executedMutatingDocActionCount,
+      executedSaveDocActionCount: afterMutation.executedSaveDocActionCount,
+      lastWidgetValidationError: null,
+      toolResults: afterMutation.toolResults,
+    })
+
+    assert.equal(textAfterMutation, null)
+
+    const afterSave = accumulateDocumentToolProgress(afterMutation, {
+      executedMutatingDocActionCount: 0,
+      executedSaveDocActionCount: 1,
+      toolResults: ['已保存文档：/Users/user/新文档.md'],
+    })
+
+    const textAfterSave = buildDocumentToolCompletionText({
+      forceDocumentTool: true,
+      executedMutatingDocActionCount: afterSave.executedMutatingDocActionCount,
+      executedSaveDocActionCount: afterSave.executedSaveDocActionCount,
+      lastWidgetValidationError: null,
+      toolResults: afterSave.toolResults,
+    })
+
+    assert.match(textAfterSave || '', /已插入 widget/)
+    assert.match(textAfterSave || '', /已保存文档/)
   })
 })

@@ -266,7 +266,7 @@ export async function buildComposedAgentInput(params: {
   const { content, attachments, filePool } = params
   const activeDocContext = buildActiveDocumentContext()
   const environmentContext = buildEnvironmentContext()
-  const activeWorkbenchContext = environmentContext || activeDocContext
+  const activeWorkbenchContext = activeDocContext || environmentContext
   const baseUserMessage = activeWorkbenchContext ? `${content}\n\n${activeWorkbenchContext}` : content
   let finalMessage: string | MultimodalBlock[] = baseUserMessage
 

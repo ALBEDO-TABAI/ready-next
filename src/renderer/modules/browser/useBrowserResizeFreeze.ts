@@ -85,8 +85,16 @@ export function useBrowserResizeFreeze({
   const captureSnapshot = useCallback(async () => {
     if (!isElectron || !surfaceRef.current) return null
 
-    // 使用 captureViewportSnapshot 捕获 BrowserView，而不是主窗口
-    const result = await window.electronAPI?.browser?.captureViewportSnapshot?.()
+    const rect = surfaceRef.current.getBoundingClientRect()
+    const bounds = {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    }
+    if (bounds.width <= 0 || bounds.height <= 0) return null
+
+    const result = await window.electronAPI?.browser?.captureWindowSnapshot?.(bounds)
     if (!result?.success || !result.data) return null
 
     return { src: `data:image/png;base64,${result.data}` }

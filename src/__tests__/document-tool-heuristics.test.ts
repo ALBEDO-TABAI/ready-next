@@ -30,4 +30,10 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
     assert.equal(shouldForceDocumentToolCall(prompt), true)
   })
+
+  it('forces document widget creation for file-referenced info card requests', () => {
+    const prompt = '用@[20260324 Kleon - YC总裁每天只睡四小时，开源了他的”AI工程.md]的内容在@[新文档.md]中生成一张学习信息卡'
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'create')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
 })

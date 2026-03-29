@@ -5,9 +5,25 @@ import { resolve } from 'node:path'
 
 import { buildComposedAgentInput } from '../renderer/modules/agent/messageComposer'
 import { buildWidgetTargetUpdatePrompt, createDocumentWidgetTargetAttachment } from '../renderer/modules/agent/widget-target-attachment'
+import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { useMode } from '../renderer/stores/useMode'
 
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window
+  useMode.setState({
+    appMode: 'workbench',
+    workbenchMode: 'browser',
+    splitMode: null,
+    splitRatio: 50,
+    readySubMode: 'browser',
+  })
+  useDocTabs.setState({
+    tabs: [{ id: 'welcome', title: '未命名', path: null, content: '', isDirty: false }],
+    activeTabId: 'welcome',
+    splitTabId: null,
+    splitRatio: 50,
+    pendingReveal: null,
+  })
 })
 
 describe('document widget target context', () => {
@@ -61,6 +77,36 @@ describe('document widget target context', () => {
     assert.match(String(composed), /目标 widget: stock_price_chart/)
     assert.match(String(composed), /优先使用 document_update_widget/)
     assert.match(String(composed), /```show-widget/)
+  })
+
+  it('prefers active document content over generic environment text in document mode', async () => {
+    useMode.getState().setWorkbenchMode('document')
+    useDocTabs.setState({
+      tabs: [
+        {
+          id: 'doc-1',
+          title: '需求文档.md',
+          path: '/tmp/需求文档.md',
+          content: '这是当前文档的正文内容',
+          isDirty: false,
+        },
+      ],
+      activeTabId: 'doc-1',
+      splitTabId: null,
+      splitRatio: 50,
+      pendingReveal: null,
+    })
+
+    const composed = await buildComposedAgentInput({
+      content: '总结当前文档',
+      attachments: [],
+      filePool: [],
+    })
+
+    assert.equal(typeof composed, 'string')
+    assert.match(String(composed), /### 当前文档上下文/)
+    assert.match(String(composed), /这是当前文档的正文内容/)
+    assert.doesNotMatch(String(composed), /## 环境信息\n- 当前模式: 文档模式/)
   })
 
   it('teaches direct-chat to force document widget updates when the marker is present', () => {
