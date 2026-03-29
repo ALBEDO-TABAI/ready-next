@@ -34,6 +34,7 @@ interface WorkspaceState {
   renamingPath: string | null
   creatingType: 'file' | 'folder' | null
   creatingPath: string | null
+  documentOpenError: string | null
 
   // Navigation
   setCurrentPath: (path: string) => void
@@ -73,6 +74,10 @@ interface WorkspaceState {
   cancelRenaming: () => void
   startCreating: (type: 'file' | 'folder') => void
   cancelCreating: () => void
+
+  // Document error state
+  setDocumentOpenError: (path: string, error: string) => void
+  clearDocumentOpenError: () => void
 }
 
 const getPathSeparator = (path: string): '/' | '\\' => {
@@ -309,6 +314,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   renamingPath: null,
   creatingType: null,
   creatingPath: null,
+  documentOpenError: null,
 
   setCurrentPath: (path) => {
     set({ currentPath: path })
@@ -757,7 +763,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       void get().loadDirChildren(targetDir)
     }
   },
-  cancelCreating: () => set({ creatingType: null, creatingPath: null })
+  cancelCreating: () => set({ creatingType: null, creatingPath: null }),
+
+  setDocumentOpenError: (path, error) => set({ documentOpenError: error }),
+  clearDocumentOpenError: () => set({ documentOpenError: null }),
 }})
 
 // 订阅 sidePanelVariant 变化，自动保存到 localStorage

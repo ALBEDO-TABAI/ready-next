@@ -316,9 +316,8 @@ export default function DocumentMode() {
                 background: 'var(--color-orange-light)',
                 color: 'var(--color-orange)',
               }}
-              title={documentOpenError.path}
             >
-              {documentOpenError.message}
+              {documentOpenError}
             </div>
           )}
 
