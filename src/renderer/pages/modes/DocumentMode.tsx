@@ -3,12 +3,17 @@ import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
+import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
-import WorkbenchProjectTabs from '../../components/workbench/WorkbenchProjectTabs'
+import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
+import {
+  WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
+  WORKBENCH_CANVAS_OUTER_PADDING_TOP,
+  WORKBENCH_CANVAS_OUTER_PADDING_X,
+} from '../../modules/workbench/chrome'
 import { getFileExtension } from '../../utils/path'
 import {
-  getDocumentViewModeOptions,
   normalizeDocumentViewMode,
   type DocumentViewMode,
 } from '../../components/document/document-view-modes'
@@ -103,7 +108,15 @@ function DocumentEditor({
 }
 
 // --- DocumentMode main component ---
-export default function DocumentMode() {
+interface DocumentModeProps {
+  isActive?: boolean
+  isMotionSettled?: boolean
+}
+
+export default function DocumentMode({
+  isActive = true,
+  isMotionSettled = true,
+}: DocumentModeProps) {
   const {
     selectedFile,
     documentOpenError,
@@ -117,12 +130,23 @@ export default function DocumentMode() {
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
-  const [editorMode, setEditorMode] = useState<DocumentViewMode>('rich')
+  // 映射：edit -> source (源码), preview -> rich (排版)
+  const [uiMode, setUiMode] = useState<'edit' | 'preview'>('preview')
+  const [hasActivated, setHasActivated] = useState(isActive)
+
+  // 将 UI 模式映射到实际的文档视图模式
+  const editorMode: DocumentViewMode = uiMode === 'edit' ? 'source' : 'rich'
+
+  useEffect(() => {
+    if (isActive) {
+      setHasActivated(true)
+    }
+  }, [isActive])
 
   // Open the file selected in SidePanel
   useEffect(() => {
-    if (!selectedFile) {
-      clearDocumentOpenError()
+    if (!hasActivated || !selectedFile) {
+      if (!selectedFile) clearDocumentOpenError()
       return undefined
     }
 
@@ -160,11 +184,11 @@ export default function DocumentMode() {
     return () => {
       disposed = true
     }
-  }, [selectedFile, openTab, setDocumentOpenError, clearDocumentOpenError])
+  }, [hasActivated, selectedFile, openTab, setDocumentOpenError, clearDocumentOpenError])
 
   useEffect(() => {
     const handler = () => {
-      setEditorMode('source')
+      setUiMode('edit') // 切换到编辑模式（源码）
     }
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
     return () => window.removeEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
@@ -173,10 +197,6 @@ export default function DocumentMode() {
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
-  const availableViewModes = useMemo(
-    () => getDocumentViewModeOptions(activeTab?.path ?? null),
-    [activeTab?.path],
-  )
   const resolvedEditorMode = useMemo(
     () => normalizeDocumentViewMode(activeTab?.path ?? null, editorMode),
     [activeTab?.path, editorMode],
@@ -239,9 +259,14 @@ export default function DocumentMode() {
 
   return (
     <div className="workbench-mode-root">
-      <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
+        }}
+      >
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
-          <WorkbenchProjectTabs
+          <DocumentTabRail
             layoutId="document-tabs"
             tabs={tabs.map((tab) => {
               const isPrimary = tab.id === activeTabId
@@ -267,46 +292,12 @@ export default function DocumentMode() {
             onTabDragOver={handleDragOver}
             onTabDrop={handleDrop}
             onTabDragEnd={handleDragEnd}
-            rightActions={availableViewModes.length > 1 ? (
-              <div
-                className="glass-surface-card flex items-center"
-                style={{
-                  background: 'var(--bg-content)',
-                  borderRadius: 8,
-                  padding: 2,
-                  border: '1px solid transparent',
-                  height: 30,
-                }}
-              >
-                {availableViewModes.map((mode) => (
-                  <button
-                    key={mode.mode}
-                    onClick={() => setEditorMode(mode.mode)}
-                    className="transition-all duration-150 ease-out"
-                    title={mode.description}
-                    style={{
-                      padding: '0 12px',
-                      height: 26,
-                      fontSize: 12,
-                      borderRadius: 6,
-                      fontWeight: 500,
-                      ...(resolvedEditorMode === mode.mode ? {
-                        background: 'var(--color-blue-light)',
-                        color: 'var(--color-blue)',
-                        boxShadow: 'none',
-                        border: '1px solid transparent',
-                      } : {
-                        background: 'transparent',
-                        color: 'var(--text-muted)',
-                        border: '1px solid transparent',
-                      }),
-                    }}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            ) : undefined}
+            rightActions={
+              <DraggableModeSwitch
+                mode={uiMode}
+                onChange={setUiMode}
+              />
+            }
           />
 
           {documentOpenError && (
@@ -322,12 +313,12 @@ export default function DocumentMode() {
           )}
 
           <div
-            className="flex items-center min-w-0"
+            className="document-path-bar flex items-center min-w-0"
             style={{
               height: 30,
               paddingLeft: 18,
               paddingRight: 18,
-              background: 'var(--bg-content)',
+              background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))',
             }}
           >
             <div
