@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
-import TiptapEditor, { type TiptapEditorRef } from './TiptapEditor'
-import EditorFloatingToolbar from './EditorFloatingToolbar'
 import EditorContextMenu from './EditorContextMenu'
 import NotePreview from './NotePreview'
-import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
+import { addDocumentQuoteReference } from '../../modules/agent/chat-input-bridge'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -70,7 +68,6 @@ const getFileExt = (path: string | null): string => {
 interface MarkdownEditorProps {
   tab: DocTab
   viewMode?: 'edit' | 'preview'
-  onRequestPreview?: (title: string) => void
   previewFocusWidgetTitle?: string | null
 }
 
@@ -175,7 +172,6 @@ function getMarkdownForDroppedFiles(
 export default function MarkdownEditor({
   tab,
   viewMode = 'edit',
-  onRequestPreview,
   previewFocusWidgetTitle,
 }: MarkdownEditorProps) {
   const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
@@ -183,16 +179,7 @@ export default function MarkdownEditor({
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
-
-  // TiptapEditor ref
-  const tiptapRef = useRef<TiptapEditorRef>(null)
-
-  // Editor container ref for positioning floating toolbar
-  const editorContainerRef = useRef<HTMLDivElement>(null)
-
-  // Floating toolbar state
-  const [hasSelection, setHasSelection] = useState(false)
-  const [floatingToolbarPos, setFloatingToolbarPos] = useState({ x: 0, y: 0 })
+  const rawEditorRef = useRef<HTMLTextAreaElement>(null)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -208,9 +195,6 @@ export default function MarkdownEditor({
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
     return pendingReveal
   }, [pendingReveal, tab.path])
-
-  const showFloatingToolbar =
-    hasSelection && viewMode === 'edit'
 
   // ─── File loading ───────────────────────────────────────────
   useEffect(() => {
@@ -316,41 +300,21 @@ export default function MarkdownEditor({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleSave])
 
-  // ─── TiptapEditor callbacks ─────────────────────────────────
-  const handleEditorChange = useCallback(
-    (markdown: string) => {
-      updateTabContent(tab.id, markdown)
-      setSaveState('idle')
-    },
-    [tab.id, updateTabContent]
-  )
-
-  const handleSelectionChange = useCallback(
-    (selected: boolean) => {
-      setHasSelection(selected)
-      if (selected && tiptapRef.current?.editor && editorContainerRef.current) {
-        const editor = tiptapRef.current.editor
-        const { from, to } = editor.state.selection
-        const startCoords = editor.view.coordsAtPos(from)
-        const endCoords = editor.view.coordsAtPos(to)
-        const containerRect = editorContainerRef.current.getBoundingClientRect()
-
-        setFloatingToolbarPos({
-          x: (startCoords.left + endCoords.right) / 2 - containerRect.left,
-          y: startCoords.top - containerRect.top - 50,
-        })
-      }
-    },
-    []
-  )
+  const handleRawEditorChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updateTabContent(tab.id, e.target.value)
+    setSaveState('idle')
+  }, [tab.id, updateTabContent])
 
   // ─── Context menu handler ──────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    const selectedText = window.getSelection?.()?.toString() || ''
+    const rawEditor = rawEditorRef.current
+    const selectedText = viewMode === 'edit' && rawEditor
+      ? rawEditor.value.slice(rawEditor.selectionStart, rawEditor.selectionEnd)
+      : window.getSelection?.()?.toString() || ''
     setContextSelection(selectedText)
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY })
-  }, [])
+  }, [viewMode])
 
   const handleEditorDragOver = useCallback((e: React.DragEvent) => {
     const types = new Set(Array.from(e.dataTransfer.types || []))
@@ -373,12 +337,29 @@ export default function MarkdownEditor({
     const snippet = getMarkdownForDroppedFiles(droppedFiles, currentExt)
     if (!snippet) return
 
-    const prefix = tab.content.trim().length === 0
-      ? ''
-      : tab.content.endsWith('\n') ? '\n' : '\n\n'
-    updateTabContent(tab.id, `${tab.content}${prefix}${snippet}\n`)
+    const rawEditor = rawEditorRef.current
+    if (viewMode === 'edit' && rawEditor) {
+      const selectionStart = rawEditor.selectionStart
+      const selectionEnd = rawEditor.selectionEnd
+      const before = tab.content.slice(0, selectionStart)
+      const after = tab.content.slice(selectionEnd)
+      const needsLeadingBreak = before.length > 0 && !before.endsWith('\n')
+      const needsTrailingBreak = after.length > 0 && !snippet.endsWith('\n')
+      const insertion = `${needsLeadingBreak ? '\n\n' : ''}${snippet}${needsTrailingBreak ? '\n' : ''}`
+      updateTabContent(tab.id, `${before}${insertion}${after}`)
+      requestAnimationFrame(() => {
+        const nextCursor = before.length + insertion.length
+        rawEditor.focus()
+        rawEditor.setSelectionRange(nextCursor, nextCursor)
+      })
+    } else {
+      const prefix = tab.content.trim().length === 0
+        ? ''
+        : tab.content.endsWith('\n') ? '\n' : '\n\n'
+      updateTabContent(tab.id, `${tab.content}${prefix}${snippet}\n`)
+    }
     setSaveState('idle')
-  }, [currentExt, tab.content, tab.id, updateTabContent])
+  }, [currentExt, tab.content, tab.id, updateTabContent, viewMode])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }))
@@ -399,25 +380,37 @@ export default function MarkdownEditor({
     })
   }, [contextSelection, tab.content, tab.path, tab.title])
 
-  const requestAgentUpdateWidget = useCallback((widgetTitle: string, widgetCode: string) => {
-    addDocumentWidgetTargetReference({
-      documentTitle: tab.title,
-      documentPath: tab.path,
-      widgetTitle,
-      widgetCode,
-      widgetMode: /<script\b/i.test(widgetCode)
-        ? 'scripted'
-        : /<svg\b/i.test(widgetCode)
-          ? 'static-svg'
-          : 'static-html',
+  useEffect(() => {
+    if (viewMode !== 'edit' || !activeRevealTarget) return
+    const rawEditor = rawEditorRef.current
+    if (!rawEditor) return
+
+    let start = 0
+    let end = 0
+    const normalizedContent = normalizeDocText(tab.content)
+
+    if (activeRevealTarget.selection) {
+      const targetSelection = normalizeDocText(activeRevealTarget.selection).trim()
+      const index = targetSelection ? normalizedContent.indexOf(targetSelection) : -1
+      if (index >= 0) {
+        start = index
+        end = index + targetSelection.length
+      }
+    } else if (activeRevealTarget.lineStart) {
+      const lines = normalizedContent.split('\n')
+      const safeLineStart = Math.max(1, activeRevealTarget.lineStart)
+      const safeLineEnd = Math.max(safeLineStart, activeRevealTarget.lineEnd ?? safeLineStart)
+      start = lines.slice(0, safeLineStart - 1).join('\n').length + (safeLineStart > 1 ? 1 : 0)
+      end = lines.slice(0, safeLineEnd).join('\n').length
+    }
+
+    requestAnimationFrame(() => {
+      rawEditor.focus()
+      rawEditor.setSelectionRange(start, end || start)
+      rawEditor.scrollTop = rawEditor.scrollHeight * (start / Math.max(normalizedContent.length, 1))
+      setPendingReveal(null)
     })
-  }, [tab.path, tab.title])
-
-  // ─── View mode buttons ─────────────────────────────────────
-  // (Moved to DocumentMode header — no longer rendered here)
-
-  // Resolve TiptapEditor editor instance for context menu / toolbar
-  const editorInstance = tiptapRef.current?.editor ?? null
+  }, [activeRevealTarget, setPendingReveal, tab.content, viewMode])
 
   const renderLoadState = () => {
     if (loadError) {
@@ -445,7 +438,6 @@ export default function MarkdownEditor({
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
             <div
-              ref={editorContainerRef}
               className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"
               style={{ position: 'relative' }}
               onContextMenu={handleContextMenu}
@@ -457,19 +449,21 @@ export default function MarkdownEditor({
                   loadError ? (
                     renderLoadState()
                   ) : (
-                    <TiptapEditor
-                      ref={tiptapRef}
-                      content={tab.content}
-                      onChange={handleEditorChange}
-                      onSelectionChange={handleSelectionChange}
-                      onRequestPreview={onRequestPreview}
-                      onRequestAgentUpdate={requestAgentUpdateWidget}
-                      editable={!isLoading}
-                      revealTarget={activeRevealTarget}
-                      onRevealHandled={() => {
-                        if (activeRevealTarget) {
-                          setPendingReveal(null)
-                        }
+                    <textarea
+                      ref={rawEditorRef}
+                      value={tab.content}
+                      onChange={handleRawEditorChange}
+                      spellCheck={false}
+                      aria-label="Markdown source editor"
+                      className="w-full min-h-full resize-none border-0 bg-transparent outline-none"
+                      style={{
+                        minHeight: 'calc(100vh - 220px)',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace',
+                        fontSize: 14,
+                        lineHeight: 1.7,
+                        color: 'var(--text-primary)',
+                        whiteSpace: 'pre',
+                        tabSize: 2,
                       }}
                     />
                   )
@@ -477,13 +471,6 @@ export default function MarkdownEditor({
                   renderLoadState()
                 )}
               </div>
-
-              {/* ── Floating Toolbar (above selection) ── */}
-              <EditorFloatingToolbar
-                editor={editorInstance}
-                visible={showFloatingToolbar}
-                position={floatingToolbarPos}
-              />
             </div>
           )}
 
@@ -508,7 +495,7 @@ export default function MarkdownEditor({
 
       {/* ── Editor Context Menu (fixed position, portal-like) ── */}
       <EditorContextMenu
-        editor={editorInstance}
+        editor={null}
         visible={contextMenu.visible}
         position={{ x: contextMenu.x, y: contextMenu.y }}
         onClose={closeContextMenu}

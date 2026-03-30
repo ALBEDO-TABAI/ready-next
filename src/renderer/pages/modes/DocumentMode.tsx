@@ -64,12 +64,10 @@ function SplitResizeHandle({ onResize }: { onResize: (delta: number) => void }) 
 function DocumentEditor({
   tab,
   viewMode,
-  onRequestPreview,
   previewFocusWidgetTitle,
 }: {
   tab: DocTab
   viewMode: 'edit' | 'preview'
-  onRequestPreview?: (title: string) => void
   previewFocusWidgetTitle?: string | null
 }) {
   const ext = useMemo(() => getFileExt(tab.path), [tab.path])
@@ -95,7 +93,6 @@ function DocumentEditor({
     <MarkdownEditor
       tab={tab}
       viewMode={viewMode}
-      onRequestPreview={onRequestPreview}
       previewFocusWidgetTitle={previewFocusWidgetTitle}
     />
   )
@@ -299,10 +296,6 @@ export default function DocumentMode({
                   tab={activeTab}
                   viewMode={editorMode}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onRequestPreview={(title) => {
-                    setPreviewFocusWidgetTitle(title)
-                    setEditorMode('preview')
-                  }}
                 />
               </div>
               <SplitResizeHandle onResize={handleSplitResize} />
@@ -312,10 +305,6 @@ export default function DocumentMode({
                   tab={splitTab}
                   viewMode={editorMode}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onRequestPreview={(title) => {
-                    setPreviewFocusWidgetTitle(title)
-                    setEditorMode('preview')
-                  }}
                 />
               </div>
             </div>
@@ -326,10 +315,6 @@ export default function DocumentMode({
                 tab={activeTab}
                 viewMode={editorMode}
                 previewFocusWidgetTitle={previewFocusWidgetTitle}
-                onRequestPreview={(title) => {
-                  setPreviewFocusWidgetTitle(title)
-                  setEditorMode('preview')
-                }}
               />
             </div>
           ) : (
