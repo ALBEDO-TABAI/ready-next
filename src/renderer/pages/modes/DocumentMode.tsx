@@ -13,10 +13,6 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_X,
 } from '../../modules/workbench/chrome'
 import { getFileExtension } from '../../utils/path'
-import {
-  normalizeDocumentViewMode,
-  type DocumentViewMode,
-} from '../../components/document/document-view-modes'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -33,13 +29,6 @@ const getFileTypeColor = (path: string | null): string => {
   if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return '#EB5757' // red - video
   if (ext === 'pdf') return '#EB5757' // red - pdf
   return '#5B8DEF' // blue - default
-}
-
-function formatDocumentOpenError(message: string): string {
-  const normalized = message.trim()
-  if (!normalized) return '无法打开文档：未知错误。'
-  if (normalized.startsWith('无法打开文档')) return normalized
-  return `无法打开文档：${normalized}`
 }
 
 // --- SplitResizeHandle ---
@@ -75,11 +64,14 @@ function SplitResizeHandle({ onResize }: { onResize: (delta: number) => void }) 
 function DocumentEditor({
   tab,
   viewMode,
+  onRequestPreview,
+  previewFocusWidgetTitle,
 }: {
   tab: DocTab
-  viewMode: DocumentViewMode
+  viewMode: 'edit' | 'preview'
+  onRequestPreview?: (title: string) => void
+  previewFocusWidgetTitle?: string | null
 }) {
-  const normalizedViewMode = useMemo(() => normalizeDocumentViewMode(tab.path, viewMode), [tab.path, viewMode])
   const ext = useMemo(() => getFileExt(tab.path), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(ext)
@@ -102,7 +94,9 @@ function DocumentEditor({
   return (
     <MarkdownEditor
       tab={tab}
-      viewMode={normalizedViewMode}
+      viewMode={viewMode}
+      onRequestPreview={onRequestPreview}
+      previewFocusWidgetTitle={previewFocusWidgetTitle}
     />
   )
 }
@@ -117,12 +111,7 @@ export default function DocumentMode({
   isActive = true,
   isMotionSettled = true,
 }: DocumentModeProps) {
-  const {
-    selectedFile,
-    documentOpenError,
-    setDocumentOpenError,
-    clearDocumentOpenError,
-  } = useWorkspace()
+  const { selectedFile } = useWorkspace()
   const {
     tabs, activeTabId, splitTabId, splitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setSplitRatio,
@@ -130,12 +119,9 @@ export default function DocumentMode({
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
-  // 映射：edit -> source (源码), preview -> rich (排版)
-  const [uiMode, setUiMode] = useState<'edit' | 'preview'>('preview')
+  const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
+  const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
-
-  // 将 UI 模式映射到实际的文档视图模式
-  const editorMode: DocumentViewMode = uiMode === 'edit' ? 'source' : 'rich'
 
   useEffect(() => {
     if (isActive) {
@@ -145,50 +131,29 @@ export default function DocumentMode({
 
   // Open the file selected in SidePanel
   useEffect(() => {
-    if (!hasActivated || !selectedFile) {
-      if (!selectedFile) clearDocumentOpenError()
-      return undefined
-    }
+    if (!hasActivated || !selectedFile) return undefined
 
     let disposed = false
     void (async () => {
       if (!window.electronAPI?.document?.stat) {
-        if (!disposed) {
-          setDocumentOpenError(selectedFile, formatDocumentOpenError('当前环境不支持文档状态检查。'))
-        }
+        openTab(selectedFile)
         return
       }
-      const result: {
-        success: boolean
-        error?: string
-        data?: { isDirectory?: boolean }
-        stat?: { isDirectory?: boolean }
-      } = await window.electronAPI.document.stat(selectedFile).catch((error) => ({
-        success: false,
-        error: error instanceof Error ? error.message : '读取文档状态失败',
-      }))
-      const isDirectory = result.data?.isDirectory ?? result.stat?.isDirectory ?? false
-      if (disposed) return
-      if (!result.success) {
-        setDocumentOpenError(selectedFile, formatDocumentOpenError(result.error || '读取文档状态失败'))
-        return
+      const result = await window.electronAPI.document.stat(selectedFile).catch(() => null)
+      const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
+      if (!disposed && result?.success && !isDirectory) {
+        openTab(selectedFile)
       }
-      if (isDirectory) {
-        setDocumentOpenError(selectedFile, formatDocumentOpenError('该路径是目录，无法作为文档打开。'))
-        return
-      }
-      clearDocumentOpenError()
-      openTab(selectedFile)
     })()
 
     return () => {
       disposed = true
     }
-  }, [hasActivated, selectedFile, openTab, setDocumentOpenError, clearDocumentOpenError])
+  }, [hasActivated, selectedFile, openTab])
 
   useEffect(() => {
     const handler = () => {
-      setUiMode('edit') // 切换到编辑模式（源码）
+      setEditorMode('edit')
     }
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
     return () => window.removeEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
@@ -197,10 +162,6 @@ export default function DocumentMode({
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
-  const resolvedEditorMode = useMemo(
-    () => normalizeDocumentViewMode(activeTab?.path ?? null, editorMode),
-    [activeTab?.path, editorMode],
-  )
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
@@ -294,23 +255,11 @@ export default function DocumentMode({
             onTabDragEnd={handleDragEnd}
             rightActions={
               <DraggableModeSwitch
-                mode={uiMode}
-                onChange={setUiMode}
+                mode={editorMode}
+                onChange={setEditorMode}
               />
             }
           />
-
-          {documentOpenError && (
-            <div
-              className="mx-3 mt-2 rounded-[8px] px-3 py-2 text-[12px]"
-              style={{
-                background: 'var(--color-orange-light)',
-                color: 'var(--color-orange)',
-              }}
-            >
-              {documentOpenError}
-            </div>
-          )}
 
           <div
             className="document-path-bar flex items-center min-w-0"
@@ -348,7 +297,12 @@ export default function DocumentMode({
                 <DocumentEditor
                   key={activeTab.id}
                   tab={activeTab}
-                  viewMode={resolvedEditorMode}
+                  viewMode={editorMode}
+                  previewFocusWidgetTitle={previewFocusWidgetTitle}
+                  onRequestPreview={(title) => {
+                    setPreviewFocusWidgetTitle(title)
+                    setEditorMode('preview')
+                  }}
                 />
               </div>
               <SplitResizeHandle onResize={handleSplitResize} />
@@ -356,7 +310,12 @@ export default function DocumentMode({
                 <DocumentEditor
                   key={splitTab.id}
                   tab={splitTab}
-                  viewMode={resolvedEditorMode}
+                  viewMode={editorMode}
+                  previewFocusWidgetTitle={previewFocusWidgetTitle}
+                  onRequestPreview={(title) => {
+                    setPreviewFocusWidgetTitle(title)
+                    setEditorMode('preview')
+                  }}
                 />
               </div>
             </div>
@@ -365,7 +324,12 @@ export default function DocumentMode({
               <DocumentEditor
                 key={activeTab.id}
                 tab={activeTab}
-                viewMode={resolvedEditorMode}
+                viewMode={editorMode}
+                previewFocusWidgetTitle={previewFocusWidgetTitle}
+                onRequestPreview={(title) => {
+                  setPreviewFocusWidgetTitle(title)
+                  setEditorMode('preview')
+                }}
               />
             </div>
           ) : (

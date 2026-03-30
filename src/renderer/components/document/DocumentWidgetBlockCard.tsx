@@ -1,4 +1,4 @@
-import { Code2, Copy, MessageSquareQuote, Trash2 } from 'lucide-react'
+import { Code2, Copy, Eye, MessageSquareQuote, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import WidgetRenderer from './WidgetRenderer'
 
@@ -11,6 +11,7 @@ interface DocumentWidgetBlockCardProps {
   onCopySource: () => void
   onDelete: () => void
   onRequestAgentUpdate?: (title: string, widgetCode: string) => void
+  onRequestPreview?: (title: string) => void
 }
 
 export default function DocumentWidgetBlockCard({
@@ -22,6 +23,7 @@ export default function DocumentWidgetBlockCard({
   onCopySource,
   onDelete,
   onRequestAgentUpdate,
+  onRequestPreview,
 }: DocumentWidgetBlockCardProps) {
   const [copied, setCopied] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -64,6 +66,20 @@ export default function DocumentWidgetBlockCard({
             >
               <MessageSquareQuote size={13} strokeWidth={2} />
               <span>让 agent 更新</span>
+            </button>
+          ) : null}
+          {onRequestPreview ? (
+            <button
+              type="button"
+              className="ready-doc-widget-card-action"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onRequestPreview(title)
+              }}
+            >
+              <Eye size={13} strokeWidth={2} />
+              <span>预览</span>
             </button>
           ) : null}
           <button type="button" className="ready-doc-widget-card-action" onClick={onToggleSource}>
