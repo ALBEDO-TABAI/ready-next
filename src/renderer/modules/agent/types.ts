@@ -195,6 +195,8 @@ export interface ScopeRunState {
   checkpointExpiresAt?: number | null
   responseMessageId?: string | null
   responseBuffer?: string
+  responseSegmentBreakPending?: boolean
+  responseSegmentToolTraceStart?: number | null
   stepMetrics?: ScopeRunStepMetrics
   error?: string | null
   designPhase?: DesignControllerPhase | null

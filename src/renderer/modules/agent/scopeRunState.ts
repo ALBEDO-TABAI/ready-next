@@ -577,6 +577,8 @@ export function createEmptyScopeRunState(params: {
     checkpointExpiresAt: null,
     responseMessageId: params.responseMessageId || null,
     responseBuffer: '',
+    responseSegmentBreakPending: false,
+    responseSegmentToolTraceStart: 0,
     stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
     error: null,
     designPhase: null,

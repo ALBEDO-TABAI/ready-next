@@ -17,7 +17,9 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
   assert.doesNotMatch(chatPanel, /<TaskSection title="当前任务">/)
   assert.doesNotMatch(chatPanel, /<TaskSection title="后台任务">/)
   assert.match(chatPanel, /messageTaskSnapshots=\{messageTaskSnapshots\}/)
+  assert.match(chatPanel, /messageToolTraceSnapshots=\{messageToolTraceSnapshots\}/)
   assert.match(chatPanel, /pendingTaskRun=\{pendingTaskRun\}/)
+  assert.match(chatPanel, /pendingToolTrace=\{pendingToolTrace\}/)
   assert.match(viewModel, /title:\s*'计划与步骤'/)
   assert.match(viewModel, /title:\s*'执行细节'/)
   assert.match(viewModel, /title:\s*'产物'/)
@@ -32,5 +34,6 @@ test('chat panel can recover task snapshots from persisted assistant message met
 
   assert.match(chatPanel, /parseSerializedTaskSnapshot/)
   assert.match(chatPanel, /message\.meta\?\.taskSnapshot/)
+  assert.match(chatPanel, /message\.meta\?\.toolTraceSnapshot/)
   assert.match(chatPanel, /currentTaskRun\.responseMessageId/)
 })

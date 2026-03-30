@@ -16,6 +16,10 @@ interface RunPayloadLike {
   agent?: string
 }
 
+function generateResponseSegmentId(): string {
+  return `response-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
   if (!runState) return undefined
   return {
@@ -44,6 +48,30 @@ function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null,
         timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
       })),
     },
+  }
+}
+
+function buildToolTraceSnapshotMeta(runState: ScopeRunState | null): Record<string, unknown> | undefined {
+  if (!runState) return undefined
+  const startIndex = Math.max(0, runState.responseSegmentToolTraceStart || 0)
+  const toolTraceSnapshot = (runState.toolTrace || []).slice(startIndex).map((event) => ({
+    id: event.id,
+    kind: event.kind,
+    text: event.text,
+    timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
+  }))
+
+  if (toolTraceSnapshot.length === 0) return undefined
+  return { toolTraceSnapshot }
+}
+
+function buildResponseSegmentMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
+  const taskMeta = buildTaskSnapshotMeta(scopeId, scope, runState)
+  const toolMeta = buildToolTraceSnapshotMeta(runState)
+  if (!taskMeta && !toolMeta) return undefined
+  return {
+    ...(taskMeta || {}),
+    ...(toolMeta || {}),
   }
 }
 
@@ -108,7 +136,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
     const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
     const content = currentMessage?.content || runState.responseBuffer || ''
-    const snapshotMeta = buildTaskSnapshotMeta(scopeId, currentScope, runState)
+    const snapshotMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
     if (snapshotMeta) {
       store.setState((current: any) => ({
         messages: current.messages.map((item: AgentMessage) =>
@@ -119,6 +147,26 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       }))
     }
     await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
+  }
+
+  function sealResponseSegment(scopeId: string, runState: ScopeRunState | null): void {
+    if (!runState?.responseMessageId) return
+    const state = store.getState()
+    const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
+    const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
+    const content = currentMessage?.content || runState.responseBuffer || ''
+    if (!content.trim()) return
+    const segmentMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
+    if (segmentMeta) {
+      store.setState((current: any) => ({
+        messages: current.messages.map((item: AgentMessage) =>
+          item.id === runState.responseMessageId
+            ? { ...item, meta: { ...(item.meta || {}), ...segmentMeta } }
+            : item,
+        ),
+      }))
+    }
+    void persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, segmentMeta)
   }
 
   async function maybeAutoExecuteAssistantSkillCommand(scopeId: string, runState: ScopeRunState | null): Promise<void> {
@@ -193,13 +241,40 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
       const currentState = store.getState()
       const runState = currentState.scopeRunStates[scopeId] || null
-      const nextBuffer = `${runState?.responseBuffer || ''}${data.chunk}`
-      if (
+      const previousMessage = runState?.responseMessageId
+        ? currentState.messages.find((item: AgentMessage) => item.id === runState.responseMessageId) || null
+        : null
+      const shouldStartNewSegment = Boolean(
+        runState?.responseSegmentBreakPending ||
+        !runState?.responseMessageId ||
+        (scopeId === currentState.currentScopeId && runState?.responseMessageId && !previousMessage),
+      )
+
+      let targetResponseMessageId = runState?.responseMessageId || null
+      let nextBuffer = `${runState?.responseBuffer || ''}${data.chunk}`
+
+      if (shouldStartNewSegment) {
+        if (runState?.responseSegmentBreakPending) {
+          sealResponseSegment(scopeId, runState)
+        }
+        targetResponseMessageId = generateResponseSegmentId()
+        nextBuffer = data.chunk
+        if (scopeId === currentState.currentScopeId) {
+          currentState.addMessage({
+            id: targetResponseMessageId,
+            agent: data.agent,
+            content: data.chunk,
+            type: 'agent',
+            timestamp: new Date(),
+          })
+          store.setState({ streamingMessageId: targetResponseMessageId })
+        }
+      } else if (
         scopeId === currentState.currentScopeId &&
-        runState?.responseMessageId &&
-        currentState.messages.some((item: AgentMessage) => item.id === runState.responseMessageId)
+        targetResponseMessageId &&
+        currentState.messages.some((item: AgentMessage) => item.id === targetResponseMessageId)
       ) {
-        currentState.appendToMessage(runState.responseMessageId, data.chunk)
+        currentState.appendToMessage(targetResponseMessageId, data.chunk)
       }
 
       upsertScopeRunState(scopeId, (previous) => ({
@@ -225,8 +300,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         controllerId: previous?.controllerId || null,
         ownerTabId: previous?.ownerTabId || null,
         checkpointExpiresAt: previous?.checkpointExpiresAt || null,
-        responseMessageId: previous?.responseMessageId || null,
+        responseMessageId: targetResponseMessageId,
         responseBuffer: nextBuffer,
+        responseSegmentBreakPending: false,
+        responseSegmentToolTraceStart: shouldStartNewSegment
+          ? (previous?.toolTrace || []).length
+          : (previous?.responseSegmentToolTraceStart ?? 0),
         stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
         designPhase: previous?.designPhase || null,
         designTodo: previous?.designTodo || [],
@@ -493,7 +572,16 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       ? window.electronAPI.agent.onScopeRunEvent((event: any) => {
         if (!event.scopeId) return
 
-        upsertScopeRunState(event.scopeId, (previous) => {
+      upsertScopeRunState(event.scopeId, (previous) => {
+          const currentState = store.getState()
+          const activeMessage = previous?.responseMessageId
+            ? currentState.messages.find((item: AgentMessage) => item.id === previous.responseMessageId) || null
+            : null
+          const shouldBreakSegment = Boolean(
+            event.toolEvent &&
+            previous?.responseMessageId &&
+            String(activeMessage?.content || previous?.responseBuffer || '').trim(),
+          )
           const toolTrace = previous?.toolTrace || []
           const nextTrace = event.toolEvent
             ? [
@@ -533,6 +621,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             checkpointExpiresAt: patch.checkpointExpiresAt ?? previous?.checkpointExpiresAt ?? null,
             responseMessageId: previous?.responseMessageId || null,
             responseBuffer: previous?.responseBuffer || '',
+            responseSegmentBreakPending: shouldBreakSegment
+              ? true
+              : previous?.responseSegmentBreakPending ?? false,
+            responseSegmentToolTraceStart: previous?.responseSegmentToolTraceStart ?? 0,
             stepMetrics: patch.stepMetrics ?? previous?.stepMetrics ?? { toolCalls: 0, toolResults: 0, lastToolAt: null },
             designPhase: patch.designPhase ?? previous?.designPhase ?? null,
             designTodo: patch.designTodo ?? previous?.designTodo ?? [],

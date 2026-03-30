@@ -5,7 +5,9 @@ import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/
 interface ChatMessagesProps {
   messages: AgentMessage[]
   messageTaskSnapshots: Record<string, React.ReactNode>
+  messageToolTraceSnapshots: Record<string, React.ReactNode>
   pendingTaskRun: React.ReactNode | null
+  pendingToolTrace: React.ReactNode | null
   isStreaming: boolean
   streamingMessageId: string | null
   toolTrace: ToolTraceEvent[]
@@ -28,7 +30,9 @@ interface ChatMessagesProps {
 export default function ChatMessages({
   messages,
   messageTaskSnapshots,
+  messageToolTraceSnapshots,
   pendingTaskRun,
+  pendingToolTrace,
   isStreaming,
   streamingMessageId,
   toolTrace,
@@ -64,6 +68,7 @@ export default function ChatMessages({
   }, [messages.length])
 
   const latestToolEvent = toolTrace.length > 0 ? toolTrace[toolTrace.length - 1] : null
+  const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule && Object.keys(messageToolTraceSnapshots).length === 0 && !pendingToolTrace
 
   return (
     <div
@@ -138,6 +143,7 @@ export default function ChatMessages({
       {messages.map((msg, index) => {
         const showMessageDivider = index < messages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
+        const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
@@ -302,6 +308,17 @@ export default function ChatMessages({
               </div>
             ) : null}
 
+            {toolTraceSnapshot ? (
+              <div
+                data-chat-message-tool-trace={msg.id}
+                style={{
+                  paddingLeft: msg.type === 'agent' ? 10 : 0,
+                }}
+              >
+                {toolTraceSnapshot}
+              </div>
+            ) : null}
+
             {showMessageDivider ? (
               <div
                 data-chat-message-divider="true"
@@ -320,7 +337,7 @@ export default function ChatMessages({
       })}
 
       {/* Tool Trace Capsule */}
-      {showToolTraceCapsule && (
+      {shouldRenderGlobalToolTraceCapsule && (
         <div className="flex">
           <div
             className="max-w-[92%] w-full"
@@ -452,9 +469,18 @@ export default function ChatMessages({
         const streamMsg = messages.find((m) => m.id === streamingMessageId)
         if (!streamMsg || streamMsg.content.length === 0) {
           return (
-            pendingTaskRun ? (
-              <div data-chat-pending-task-snapshot="true">
-                {pendingTaskRun}
+            pendingTaskRun || pendingToolTrace ? (
+              <div className="flex flex-col" style={{ gap: 8 }}>
+                {pendingTaskRun ? (
+                  <div data-chat-pending-task-snapshot="true">
+                    {pendingTaskRun}
+                  </div>
+                ) : null}
+                {pendingToolTrace ? (
+                  <div data-chat-pending-tool-trace="true">
+                    {pendingToolTrace}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>

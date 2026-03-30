@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { X, FileText, Image, Film, Table, Globe, Puzzle, Pen, MessageSquareQuote, Folder, ChevronDown, PanelLeftClose, History, Plus } from 'lucide-react'
+import { X, FileText, Image, Film, Table, Globe, Puzzle, Pen, MessageSquareQuote, Folder, ChevronDown, PanelLeftClose, History, Plus, Wrench } from 'lucide-react'
 import { useAgent, initAgentListeners, ChatAttachment, ConversationScope, ScopeRunState } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings } from '../../stores/useSettings'
@@ -59,6 +59,7 @@ interface PersistedScopeRunSummary {
 
 interface TaskCardRun extends TaskCardRunLike {
   responseMessageId?: string | null
+  responseSegmentToolTraceStart?: number | null
 }
 
 interface SerializedTaskSnapshot {
@@ -85,6 +86,13 @@ interface SerializedTaskSnapshot {
     text: string
     timestamp: string
   }>
+}
+
+interface SerializedToolTraceSnapshotItem {
+  id: string
+  kind: 'call' | 'result'
+  text: string
+  timestamp: string
 }
 
 function parseMarkdown(raw: string): MarkdownNode[] {
@@ -542,6 +550,46 @@ function TaskCard({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ToolTraceCard({
+  events,
+  pending = false,
+}: {
+  events: Array<{ id: string; kind: 'call' | 'result'; text: string; timestamp: Date }>
+  pending?: boolean
+}) {
+  if (events.length === 0) return null
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        border: '1px solid var(--border-default)',
+        background: 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)',
+        padding: '9px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <Wrench style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }} strokeWidth={2} />
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+          {pending ? '进行中的工具调用' : '工具调用'}
+        </div>
+      </div>
+      <div className="flex flex-col" style={{ gap: 4 }}>
+        {events.slice(-3).map((event) => (
+          <div key={event.id} className="flex items-start gap-2" style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}>
+            <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
+              {event.kind === 'call' ? '•' : '✓'}
+            </span>
+            <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1053,6 +1101,7 @@ export default function ChatPanel() {
           updatedAt: run.updatedAt || scope.updatedAt,
           toolTrace: run.toolTrace,
           responseMessageId: run.responseMessageId || null,
+          responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0,
         } satisfies TaskCardRun
       })
       .filter(Boolean) as TaskCardRun[]
@@ -1091,6 +1140,7 @@ export default function ChatPanel() {
   }, [currentScopeId, mergedTaskRuns])
 
   const showToolTraceCapsule = !currentTaskRun && (toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled')
+  const shouldRenderGlobalToolTraceCapsule = !currentTaskRun
 
   const parseSerializedTaskSnapshot = useCallback((raw: unknown): TaskCardRun | null => {
     if (!raw || typeof raw !== 'object') return null
@@ -1120,6 +1170,23 @@ export default function ChatPanel() {
       })),
       responseMessageId: snapshot.responseMessageId || null,
     } as TaskCardRun
+  }, [])
+
+  const parseSerializedToolTraceSnapshot = useCallback((raw: unknown) => {
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        const event = item as SerializedToolTraceSnapshotItem
+        if (!event.id || !event.kind || !event.text || !event.timestamp) return null
+        return {
+          id: event.id,
+          kind: event.kind,
+          text: event.text,
+          timestamp: new Date(event.timestamp),
+        }
+      })
+      .filter(Boolean) as Array<{ id: string; kind: 'call' | 'result'; text: string; timestamp: Date }>
   }, [])
 
   useEffect(() => {
@@ -1568,12 +1635,50 @@ export default function ChatPanel() {
     return nextSnapshots
   }, [currentTaskRun, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
 
+  const currentToolTraceSegment = useMemo(() => {
+    if (!currentTaskRun) return []
+    const startIndex = Math.max(0, currentTaskRun.responseSegmentToolTraceStart || 0)
+    return (currentTaskRun.toolTrace || []).slice(startIndex)
+  }, [currentTaskRun])
+
+  const messageToolTraceSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
+    const nextSnapshots: Record<string, React.ReactNode> = {}
+    for (const message of messages) {
+      if (message.type !== 'agent') continue
+      const events = parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot)
+      if (events.length === 0) continue
+      nextSnapshots[message.id] = <ToolTraceCard key={`message-tool-${message.id}`} events={events} />
+    }
+
+    if (
+      currentTaskRun &&
+      currentTaskRun.responseMessageId &&
+      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
+      !nextSnapshots[currentTaskRun.responseMessageId] &&
+      currentToolTraceSegment.length > 0
+    ) {
+      nextSnapshots[currentTaskRun.responseMessageId] = (
+        <ToolTraceCard key={`live-tool-${currentTaskRun.responseMessageId}`} events={currentToolTraceSegment} />
+      )
+    }
+
+    return nextSnapshots
+  }, [currentTaskRun, currentToolTraceSegment, messages, parseSerializedToolTraceSnapshot])
+
   const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
     return renderTaskSnapshotCard(currentTaskRun, `pending-task-${currentTaskRun.scopeId}`)
   }, [currentTaskRun, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
+
+  const pendingToolTrace = useMemo<React.ReactNode | null>(() => {
+    const streamMessage = messages.find((message) => message.id === streamingMessageId)
+    if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
+    if (streamMessage && streamMessage.content.length > 0) return null
+    if (currentToolTraceSegment.length === 0) return null
+    return <ToolTraceCard key={`pending-tool-${currentTaskRun.scopeId}`} events={currentToolTraceSegment} pending />
+  }, [currentTaskRun, currentToolTraceSegment, isStreaming, messages, streamingMessageId])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -1890,14 +1995,16 @@ export default function ChatPanel() {
           <ChatMessages
             messages={messages}
             messageTaskSnapshots={messageTaskSnapshots}
+            messageToolTraceSnapshots={messageToolTraceSnapshots}
             pendingTaskRun={pendingTaskRun}
+            pendingToolTrace={pendingToolTrace}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}
             toolTrace={toolTrace}
             toolTraceStatus={toolTraceStatus}
             toolTraceExpanded={toolTraceExpanded}
             copiedMessageId={copiedMessageId}
-            showToolTraceCapsule={showToolTraceCapsule}
+            showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
             onSetInputSuggestion={setInputValue}
             onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
             onCopyMessage={handleCopyAgentMessage}
