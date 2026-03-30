@@ -7,6 +7,29 @@
 
 ## Supported Families
 
+### 0. Info Card
+- Best for: 摘要、结论、推荐、单条重点说明
+- Preferred implementation: `HTML + CSS`
+- Why: 结构简单，最适合先约束成稳定模板
+
+### 0.1 Data Table
+- Best for: 对照表、明细表、小型统计表
+- Preferred implementation: `HTML table`
+- Why: 结构化强，适合直接走字段约束而不是自由 HTML
+
+### 0.2 Callout Block
+- Best for: 提示、风险、建议、结论、提醒
+- Preferred implementation: `HTML + CSS`
+- Why: 比自由信息卡更容易保持语气和结构一致
+
+### 0.3 Comparison Grid
+- Best for: 方案对比、选项比较、优劣分栏
+- Preferred implementation: `HTML + CSS`
+
+### 0.4 Progress Snapshot
+- Best for: 完成度、阶段状态、推进概览
+- Preferred implementation: `HTML + CSS`
+
 ### 1. Stats Card
 - Best for: summary dashboards, reading notes, KPI snapshots
 - Preferred implementation: `SVG`
@@ -76,6 +99,49 @@ Prompt pattern:
   - avoid unbounded vertical growth after switching
 - Why: the interaction is semantically closer to a tabbed info card than a heavy chart runtime
 
+### 8. Day Schedule Card
+- Best for: 单日安排、今日事件卡、时间块概览
+- Preferred implementation: `HTML + CSS + minimal inline script`
+- Data source: `calendar`
+- Writeback: trigger existing calendar entrypoints
+
+### 9. Week Schedule Card
+- Best for: 周视角安排总览、每日重点预览
+- Preferred implementation: `HTML + CSS + minimal inline script`
+- Data source: `calendar`
+- Writeback: trigger existing calendar entrypoints
+
+### 10. Time Allocation Chart
+- Best for: 时间分配、时间占比、工作/内容/生活聚合
+- Preferred implementation: `SVG`
+- Data source: `calendar`
+
+### 11. Schedule Runtime Card
+- Best for: 自动计划、定时任务、运行状态概览
+- Preferred implementation: `HTML + CSS`
+- Data source: `schedule`
+- Writeback: trigger existing schedule entrypoints
+
+### 12. Todo List Manual
+- Best for: 文档内手填待办清单
+- Preferred implementation: `HTML + CSS + inline script`
+- Data source: `manual`
+
+### 13. Weekly Plan Board Manual
+- Best for: 文档内手填周计划板
+- Preferred implementation: `HTML + CSS`
+- Data source: `manual`
+
+### 14. Habit Streak Manual
+- Best for: 文档内手填习惯连续记录
+- Preferred implementation: `HTML + CSS`
+- Data source: `manual`
+
+### 15. Today Focus Snapshot
+- Best for: 今日重点摘要、今天的关键信息快照
+- Preferred implementation: `HTML + CSS`
+- Data source: `calendar + schedule`
+
 Prompt pattern:
 ```text
 请直接修改当前文档并保存。
@@ -124,6 +190,7 @@ Use these style words to reduce drift between user intent and generated widgets.
 
 ## Recommended Defaults
 - If a widget can be expressed clearly in SVG, prefer SVG first.
+- 优先使用受控组件家族：信息卡、表格、提示块、折线图、柱状图、对比网格、进度概览，以及个性化数据卡。
 - If interaction is needed, prefer tiny `HTML + CSS + inline script`.
 - Use `Chart.js` only for chart-shaped interaction, not as a generic rendering hammer.
 - If the user asks for weekly comparison or week switching, prefer the `weekly_focus_chart` pattern before inventing a custom multi-tab widget.

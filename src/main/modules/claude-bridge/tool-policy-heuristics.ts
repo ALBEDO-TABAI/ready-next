@@ -35,7 +35,7 @@ function scoreInstructionChunk(chunk: string): number {
   )).length
 
   const actionableKeyword =
-    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|计算器|修改|改写|重写|润色|整理|优化|调整|写入|追加|替换|保存|新建|编辑|插入|创建|生成|删除|移除|查看|列出|格式|排版)/i
+    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|修改|改写|重写|润色|整理|优化|调整|写入|追加|替换|保存|新建|编辑|插入|创建|生成|删除|移除|查看|列出|格式|排版)/i
 
   let score = 0
   if (BOOTSTRAP_HEADER_PATTERN.test(lines[0] || '')) score -= 24
@@ -98,12 +98,14 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   if (hasDocContext && editIntent.test(primaryInstruction)) return true
 
   const hasDocKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
+  const hasWidgetKeyword = /(widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
   const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
   const widgetSurfaceReference = /(预览|输入框|边框|底色|灰色底|卡片|面板|背景|外边框|垫底色块|计算器)/i
   const strongDirectness = /(直接|立刻|马上|立即|在原文中|就地)/i
   if (widgetTaskKind && (
     hasDocContext ||
     hasDocKeyword.test(primaryInstruction) ||
+    hasWidgetKeyword.test(primaryInstruction) ||
     existingWidgetReference.test(primaryInstruction) ||
     widgetSurfaceReference.test(primaryInstruction)
   )) {
@@ -122,13 +124,13 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
   if (!primaryInstruction) return null
 
   const widgetKeyword =
-    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|输入框|边框|底色|灰色底|卡片|信息卡|卡片式总结|预览)/i
+    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|输入框|边框|底色|灰色底|卡片|信息卡|卡片式总结|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|预览)/i
   if (!widgetKeyword.test(primaryInstruction)) return null
 
   const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
   const widgetSurfaceEdit = /(预览|输入框|边框|底色|灰色底|卡片|面板|背景|外边框|垫底色块)/i
 
-  if (/(列出|查看|看看|有哪些|当前.*widget|list)/i.test(primaryInstruction)) {
+  if (/((列出|查看|看看).*(widget|组件|图表|卡片)|有哪些|当前.*widget|\blist\b)/i.test(primaryInstruction)) {
     return 'inspect'
   }
 

@@ -1,0 +1,979 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "info_card": {
+      "$ref": "#/$defs/info_card"
+    },
+    "stats_card": {
+      "$ref": "#/$defs/stats_card"
+    },
+    "bar_chart": {
+      "$ref": "#/$defs/bar_chart"
+    },
+    "line_chart": {
+      "$ref": "#/$defs/line_chart"
+    },
+    "data_table": {
+      "$ref": "#/$defs/data_table"
+    },
+    "callout_block": {
+      "$ref": "#/$defs/callout_block"
+    },
+    "tab_info_block": {
+      "$ref": "#/$defs/tab_info_block"
+    },
+    "comparison_grid": {
+      "$ref": "#/$defs/comparison_grid"
+    },
+    "progress_snapshot": {
+      "$ref": "#/$defs/progress_snapshot"
+    },
+    "weekly_focus_chart": {
+      "$ref": "#/$defs/weekly_focus_chart"
+    },
+    "mini_calculator": {
+      "$ref": "#/$defs/mini_calculator"
+    },
+    "flow_diagram": {
+      "$ref": "#/$defs/flow_diagram"
+    },
+    "day_schedule_card": {
+      "$ref": "#/$defs/day_schedule_card"
+    },
+    "week_schedule_card": {
+      "$ref": "#/$defs/week_schedule_card"
+    },
+    "time_allocation_chart": {
+      "$ref": "#/$defs/time_allocation_chart"
+    },
+    "schedule_runtime_card": {
+      "$ref": "#/$defs/schedule_runtime_card"
+    },
+    "todo_list_manual": {
+      "$ref": "#/$defs/todo_list_manual"
+    },
+    "weekly_plan_board_manual": {
+      "$ref": "#/$defs/weekly_plan_board_manual"
+    },
+    "habit_streak_manual": {
+      "$ref": "#/$defs/habit_streak_manual"
+    },
+    "today_focus_snapshot": {
+      "$ref": "#/$defs/today_focus_snapshot"
+    }
+  },
+  "required": [
+    "info_card",
+    "stats_card",
+    "bar_chart",
+    "line_chart",
+    "data_table",
+    "callout_block",
+    "tab_info_block",
+    "comparison_grid",
+    "progress_snapshot",
+    "weekly_focus_chart",
+    "mini_calculator",
+    "flow_diagram",
+    "day_schedule_card",
+    "week_schedule_card",
+    "time_allocation_chart",
+    "schedule_runtime_card",
+    "todo_list_manual",
+    "weekly_plan_board_manual",
+    "habit_streak_manual",
+    "today_focus_snapshot"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "info_card": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "danger",
+            "neutral"
+          ]
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false,
+      "id": "info_card"
+    },
+    "stats_card": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "metrics": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "accent": {
+                "type": "string"
+              },
+              "trend": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "metrics"
+      ],
+      "additionalProperties": false,
+      "id": "stats_card"
+    },
+    "bar_chart": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "series": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "number"
+              },
+              "accent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "yLabel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "series"
+      ],
+      "additionalProperties": false,
+      "id": "bar_chart"
+    },
+    "line_chart": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "series": {
+          "minItems": 2,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "number"
+              },
+              "accent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "yLabel": {
+          "type": "string"
+        },
+        "annotation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "series"
+      ],
+      "additionalProperties": false,
+      "id": "line_chart"
+    },
+    "data_table": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "columns": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rows": {
+          "minItems": 1,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "additionalProperties": false,
+      "id": "data_table"
+    },
+    "callout_block": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "danger",
+            "neutral"
+          ]
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false,
+      "id": "callout_block"
+    },
+    "tab_info_block": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "tabs": {
+          "minItems": 2,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "body": {
+                "type": "string",
+                "minLength": 1
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "label",
+              "body"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "tabs"
+      ],
+      "additionalProperties": false,
+      "id": "tab_info_block"
+    },
+    "comparison_grid": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "columns": {
+          "minItems": 2,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "points": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "title",
+              "points"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "columns"
+      ],
+      "additionalProperties": false,
+      "id": "comparison_grid"
+    },
+    "progress_snapshot": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "items": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max": {
+                "type": "number",
+                "minimum": 1
+              },
+              "displayValue": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "id": "progress_snapshot"
+    },
+    "weekly_focus_chart": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "currentLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nextLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currentItems": {
+          "minItems": 1,
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "nextItems": {
+          "minItems": 1,
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "currentLabel",
+        "nextLabel",
+        "currentItems",
+        "nextItems"
+      ],
+      "additionalProperties": false,
+      "id": "weekly_focus_chart"
+    },
+    "mini_calculator": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "fields": {
+          "minItems": 2,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "outputLabel": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "fields",
+        "outputLabel"
+      ],
+      "additionalProperties": false,
+      "id": "mini_calculator"
+    },
+    "flow_diagram": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "nodes": {
+          "minItems": 2,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "edges": {
+          "minItems": 1,
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false,
+      "id": "flow_diagram"
+    },
+    "day_schedule_card": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "dateLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "events": {
+          "minItems": 0,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeLabel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "accent": {
+                "type": "string"
+              },
+              "meta": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "timeLabel"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "dateLabel",
+        "events"
+      ],
+      "additionalProperties": false,
+      "id": "day_schedule_card"
+    },
+    "week_schedule_card": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "weekLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "days": {
+          "minItems": 1,
+          "maxItems": 7,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "count": {
+                "type": "number",
+                "minimum": 0
+              },
+              "highlights": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "label",
+              "count"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "weekLabel",
+        "days"
+      ],
+      "additionalProperties": false,
+      "id": "week_schedule_card"
+    },
+    "time_allocation_chart": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "periodLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "segments": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "number"
+              },
+              "accent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "periodLabel",
+        "segments"
+      ],
+      "additionalProperties": false,
+      "id": "time_allocation_chart"
+    },
+    "schedule_runtime_card": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "jobs": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "paused",
+                  "running",
+                  "error"
+                ]
+              },
+              "nextRun": {
+                "type": "string"
+              },
+              "lastRun": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "additionalProperties": false,
+      "id": "schedule_runtime_card"
+    },
+    "todo_list_manual": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "items": {
+          "minItems": 1,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "done": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "id": "todo_list_manual"
+    },
+    "weekly_plan_board_manual": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "lanes": {
+          "minItems": 2,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "items": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "title",
+              "items"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "lanes"
+      ],
+      "additionalProperties": false,
+      "id": "weekly_plan_board_manual"
+    },
+    "habit_streak_manual": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "habits": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streak": {
+                "type": "number",
+                "minimum": 0
+              },
+              "completedToday": {
+                "type": "boolean"
+              },
+              "weekMarks": {
+                "minItems": 7,
+                "maxItems": 7,
+                "type": "array",
+                "items": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "streak",
+              "weekMarks"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "habits"
+      ],
+      "additionalProperties": false,
+      "id": "habit_streak_manual"
+    },
+    "today_focus_snapshot": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "dayLabel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "highlights": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metrics": {
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "dayLabel",
+        "highlights",
+        "metrics"
+      ],
+      "additionalProperties": false,
+      "id": "today_focus_snapshot"
+    }
+  }
+}

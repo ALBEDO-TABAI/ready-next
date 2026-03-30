@@ -2,6 +2,8 @@ import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import { parseShowWidgetFences, tryParseWidgetPayload } from '../../components/document/widget-fence-parser'
+import { compileDocumentWidgetComponentSpec } from './documentWidgetOpenUI'
+import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
 
 interface DocActionPayload {
   type: string
@@ -12,6 +14,30 @@ export interface CommandResult {
   handled: boolean
   text: string
   isError?: boolean
+}
+
+async function resolveWidgetCodeInput(
+  widgetCode: string,
+  componentSpec: unknown,
+): Promise<{ widgetCode: string; componentName?: string } | { error: string }> {
+  const normalizedWidgetCode = widgetCode.trim()
+  if (normalizedWidgetCode) {
+    return { widgetCode: normalizedWidgetCode }
+  }
+
+  if (!componentSpec || typeof componentSpec !== 'object') {
+    return { error: '缺少 widgetCode 或 componentSpec' }
+  }
+
+  try {
+    const compiled = await compileDocumentWidgetComponentSpec(componentSpec as DocumentWidgetComponentSpec)
+    return {
+      widgetCode: compiled.widgetCode,
+      componentName: compiled.component,
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 function getActiveDocTab() {
@@ -906,12 +932,14 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const widgetCode = typeof action.widgetCode === 'string' ? action.widgetCode : ''
     const position = action.position === 'after_section' ? 'after_section' : 'append_end'
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
-    if (!title || !widgetCode.trim()) return 'insert_widget 缺少 title 或 widgetCode'
-    const widgetValidation = validateWidgetCode(widgetCode)
+    if (!title) return 'insert_widget 缺少 title'
+    const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
+    if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
+    const widgetValidation = validateWidgetCode(resolvedWidget.widgetCode)
     if (!widgetValidation.valid) return `widget 写入已拒绝：${widgetValidation.reason}`
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可插入 widget 的文档标签'
-    const inserted = insertWidgetIntoDocument(tab.content, title, widgetCode, position, sectionTitle)
+    const inserted = insertWidgetIntoDocument(tab.content, title, resolvedWidget.widgetCode, position, sectionTitle)
     if (!inserted.inserted) return inserted.error || 'widget 插入失败'
     if (inserted.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, inserted.content)
@@ -940,10 +968,11 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const nextTitle = typeof action.title === 'string' ? action.title.trim() : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'update_widget 缺少 target'
-    if (!widgetCode.trim()) return 'update_widget 缺少 widgetCode'
+    const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
+    if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可更新 widget 的文档标签'
-    const updated = updateWidgetInDocument(tab.content, target, widgetCode, nextTitle, occurrence)
+    const updated = updateWidgetInDocument(tab.content, target, resolvedWidget.widgetCode, nextTitle, occurrence)
     if (!updated.found) return updated.error || 'widget 更新失败'
     if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, updated.content)
@@ -1055,6 +1084,7 @@ export function mapToolActionToDocAction(tool: string, args: Record<string, unkn
         type: 'insert_widget',
         title: args.title,
         widgetCode: args.widgetCode,
+        componentSpec: args.componentSpec,
         position: args.position,
         sectionTitle: args.sectionTitle,
         tabId: args.tabId,
@@ -1066,6 +1096,7 @@ export function mapToolActionToDocAction(tool: string, args: Record<string, unkn
         type: 'update_widget',
         target: args.target,
         widgetCode: args.widgetCode,
+        componentSpec: args.componentSpec,
         title: args.title,
         occurrence: args.occurrence,
         tabId: args.tabId,

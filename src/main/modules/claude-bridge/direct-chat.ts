@@ -53,6 +53,7 @@ import {
 import {
   buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
+  buildDocumentWidgetOpenUIRulesSnippet,
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from './widget-guidance'
@@ -407,6 +408,7 @@ const TOOL_SYSTEM_PROMPT = `
 show-widget 规则：
 - 使用 \`\`\`show-widget 围栏
 - JSON 结构为 {"title":"snake_case_id","widget_code":"<div>...</div>"}
+- 如能表达为结构化组件规格，优先使用 document_insert_widget / document_update_widget 的 componentSpec 参数，不要总是自由编写原始 HTML
 - widget_code 可使用本地内联事件（如 oninput / onclick）完成简单交互
 - 复杂本地交互可追加小型内联 <script>，但不要依赖网络
 - 如需把 widget 内交互结果发回 agent，可使用 \`window.__readyWidgetSendMessage("...")\` 或 \`data-ready-agent-message="..."\` 触发
@@ -1342,6 +1344,8 @@ export class DirectChatEngine extends EventEmitter {
 - "你是谁" → 直接回答，不使用工具
 - "这篇文章怎么样" → 直接回答，不使用工具
 `)
+
+      guidance.push(buildDocumentWidgetOpenUIRulesSnippet())
 
       const widgetGuidance = buildDocumentWidgetGuidanceSnippet(policy.documentWidgetProfile || null)
       if (widgetGuidance) {

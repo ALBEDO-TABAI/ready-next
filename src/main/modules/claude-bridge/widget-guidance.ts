@@ -1,12 +1,9 @@
-export type DocumentWidgetFamily =
-  | 'stats_card'
-  | 'bar_chart'
-  | 'line_chart'
-  | 'weekly_focus_chart'
-  | 'tab_info_block'
-  | 'mini_calculator'
-  | 'flow_diagram'
-  | null
+import {
+  buildDocumentWidgetOpenUIRulesSnippet as buildOpenUIRulesFromCatalog,
+  type DocumentWidgetComponentName,
+} from '../../../shared/document-widget-openui'
+
+export type DocumentWidgetFamily = DocumentWidgetComponentName | null
 
 export type DocumentWidgetStyle =
   | 'warm_minimal'
@@ -27,11 +24,24 @@ export interface DocumentWidgetProfile {
 }
 
 function looksLikeGenericWidgetAsk(userText: string): boolean {
-  return /(图表|可视化|widget|show-widget|生成式\s*ui|数据图|趋势图|卡片组件)/i.test(userText)
+  return /(图表|可视化|widget|show-widget|生成式\s*ui|数据图|趋势图|卡片组件|信息卡|表格|提示块|对比卡|进度卡|日程卡|待办|习惯|计划板)/i.test(userText)
 }
 
 function inferWidgetFamily(userText: string): DocumentWidgetFamily {
+  if (/(信息卡|摘要卡|推荐卡|结论卡|summary card|info card)/i.test(userText)) return 'info_card'
+  if (/(提示块|提醒块|告警块|callout|提醒卡|风险提示|结论提示)/i.test(userText)) return 'callout_block'
+  if (/(表格|清单表|数据表|table|对照表|明细表)/i.test(userText)) return 'data_table'
+  if (/(对比卡|对比表|comparison grid|对照卡)/i.test(userText)) return 'comparison_grid'
+  if (/(进度|完成率|完成进展|progress|阶段状态)/i.test(userText)) return 'progress_snapshot'
+  if (/(今天的?(日程|安排)卡?|今日(日程|安排)|单日(日程|安排)|day schedule|today schedule)/i.test(userText)) return 'day_schedule_card'
+  if (/(周日程|本周安排|一周安排|week schedule)/i.test(userText)) return 'week_schedule_card'
+  if (/(时间分配|时间投入|time allocation|时间占比)/i.test(userText)) return 'time_allocation_chart'
+  if (/(自动计划|定时任务|schedule runtime|cron)/i.test(userText)) return 'schedule_runtime_card'
+  if (/(待办|todo|任务清单|task list)/i.test(userText)) return 'todo_list_manual'
+  if (/(习惯|habit|streak|连续记录)/i.test(userText)) return 'habit_streak_manual'
+  if (/(今日重点|today focus|重点摘要)/i.test(userText)) return 'today_focus_snapshot'
   if (/(本周|下周|周报|周计划|weekly|week)/i.test(userText)) return 'weekly_focus_chart'
+  if (/(周计划板|计划板|kanban|board)/i.test(userText)) return 'weekly_plan_board_manual'
   if (/(评分|打分|计算器|预算|估算|score|calculator|estimate|budget)/i.test(userText)) return 'mini_calculator'
   if (/(流程|步骤|架构图|关系图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
   if (/(科研绘图|研究结果|实验结果|investment trend|投资趋向|数据动态|动态变化|走势分析)/i.test(userText)) return 'line_chart'
@@ -59,6 +69,56 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
   guidanceBullets: string[]
 } {
   switch (family) {
+    case 'info_card':
+      return {
+        interactionHint: '单卡信息摘要',
+        titleHint: 'info_card',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '适合摘要、推荐、重点说明，不要再扩成多列面板。',
+          '正文要短，优先一句结论加少量补充点。',
+        ],
+      }
+    case 'callout_block':
+      return {
+        interactionHint: '提示 / 风险 / 建议块',
+        titleHint: 'callout_block',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '用清晰语气区分提示、风险、建议，不要混成杂乱信息卡。',
+          '优先单卡表达，必要时再附 2-4 个要点。',
+        ],
+      }
+    case 'data_table':
+      return {
+        interactionHint: '结构化小表格',
+        titleHint: 'data_table',
+        implementationHint: 'HTML table',
+        guidanceBullets: [
+          '列数控制在 2-6 列，避免过宽。',
+          '优先明细和对照，不做复杂表头联动。',
+        ],
+      }
+    case 'comparison_grid':
+      return {
+        interactionHint: '2-4 列对比',
+        titleHint: 'comparison_grid',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '对比列不超过 4 个。',
+          '每列只保留最关键的差异点。',
+        ],
+      }
+    case 'progress_snapshot':
+      return {
+        interactionHint: '进度概览',
+        titleHint: 'progress_snapshot',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '优先 3-6 条进度项。',
+          '明确显示数值或完成比例。',
+        ],
+      }
     case 'weekly_focus_chart':
       return {
         interactionHint: '本周 / 下周 双态切换',
@@ -123,10 +183,90 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
     case 'stats_card':
       return {
         interactionHint: '静态指标概览',
-        titleHint: 'stats_summary_card',
+        titleHint: 'stats_card',
         implementationHint: 'SVG',
         guidanceBullets: [
           '只放 3-4 个核心指标，横向均分。',
+        ],
+      }
+    case 'day_schedule_card':
+      return {
+        interactionHint: '单日日程快照',
+        titleHint: 'day_schedule_card',
+        implementationHint: 'HTML + CSS + minimal inline script',
+        guidanceBullets: [
+          '优先展示时间、标题、来源标签。',
+          '操作按钮应复用现有日历入口，而不是另造编辑器。',
+        ],
+      }
+    case 'week_schedule_card':
+      return {
+        interactionHint: '周视角日程概览',
+        titleHint: 'week_schedule_card',
+        implementationHint: 'HTML + CSS + minimal inline script',
+        guidanceBullets: [
+          '按天分组展示，避免做复杂周历。',
+          '保留跳到现有日历的入口。',
+        ],
+      }
+    case 'time_allocation_chart':
+      return {
+        interactionHint: '时间分配可视化',
+        titleHint: 'time_allocation_chart',
+        implementationHint: 'SVG',
+        guidanceBullets: [
+          '更适合聚合分配，不要做深度钻取。',
+          '优先按来源或类型做 3-6 段统计。',
+        ],
+      }
+    case 'schedule_runtime_card':
+      return {
+        interactionHint: '自动计划状态概览',
+        titleHint: 'schedule_runtime_card',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '展示启用状态、下次运行、最近运行即可。',
+          '操作按钮复用现有计划入口。',
+        ],
+      }
+    case 'todo_list_manual':
+      return {
+        interactionHint: '本地勾选待办',
+        titleHint: 'todo_list_manual',
+        implementationHint: 'HTML + CSS + inline script',
+        guidanceBullets: [
+          '先做文档内手填版，不依赖全局待办数据层。',
+          '勾选状态应在组件内本地变化。',
+        ],
+      }
+    case 'weekly_plan_board_manual':
+      return {
+        interactionHint: '手填周计划板',
+        titleHint: 'weekly_plan_board_manual',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '用 2-4 列板块表达本周计划。',
+          '保持轻量，不做完整看板应用。',
+        ],
+      }
+    case 'habit_streak_manual':
+      return {
+        interactionHint: '手填习惯连续记录',
+        titleHint: 'habit_streak_manual',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '优先展示连续天数和最近一周状态。',
+          '不接全局习惯数据层。',
+        ],
+      }
+    case 'today_focus_snapshot':
+      return {
+        interactionHint: '今日重点摘要',
+        titleHint: 'today_focus_snapshot',
+        implementationHint: 'HTML + CSS',
+        guidanceBullets: [
+          '适合把今日亮点和关键数字合在一个摘要卡里。',
+          '优先单卡片，避免扩成复杂仪表盘。',
         ],
       }
     default:
@@ -186,10 +326,14 @@ export function buildDocumentWidgetClarificationSnippet(userText: string): strin
   return [
     '## Widget 澄清建议',
     '- 如果用户还没说明清楚，优先追问 1 个最关键问题，不要一次追问太多。',
-    '- 推荐优先澄清：这是要看趋势、做对比、做流程说明，还是做计算器？',
+    '- 推荐优先澄清：这是信息卡、表格、趋势图、柱状图，还是日程/待办类组件？',
     '- 如果图表类型还不清楚，可给出 3 个简短选项：折线趋势 / 柱状对比 / 流程图。',
-    '- 如果风格不清楚，可追问：更像周报数据板、研究图、还是笔记卡片？',
+    '- 如果是个性化组件，可再追问：要读真实日历/计划数据，还是只做文档内手填版？',
   ].join('\n')
+}
+
+export function buildDocumentWidgetOpenUIRulesSnippet(): string {
+  return buildOpenUIRulesFromCatalog()
 }
 
 export function buildDocumentWidgetGuidanceSnippet(profile: DocumentWidgetProfile | null): string {

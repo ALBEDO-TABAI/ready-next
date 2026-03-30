@@ -36,4 +36,14 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(prompt), 'create')
     assert.equal(shouldForceDocumentToolCall(prompt), true)
   })
+
+  it('forces document widget creation for tables and personal data cards', () => {
+    const tablePrompt = '在当前文档里做一个数据表格，把这周的发布数据对比列出来'
+    const schedulePrompt = '给我做一个今天的日程卡，按时间列出安排'
+
+    assert.equal(inferDocumentWidgetTaskKind(tablePrompt), 'create')
+    assert.equal(shouldForceDocumentToolCall(tablePrompt), true)
+    assert.equal(inferDocumentWidgetTaskKind(schedulePrompt), 'create')
+    assert.equal(shouldForceDocumentToolCall(schedulePrompt), true)
+  })
 })

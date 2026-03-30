@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import {
   buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
+  buildDocumentWidgetOpenUIRulesSnippet,
   inferDocumentWidgetProfile,
 } from '../main/modules/claude-bridge/widget-guidance'
 
@@ -37,12 +38,31 @@ describe('document widget guidance', () => {
     assert.equal(dynamic?.family, 'line_chart')
   })
 
+  it('maps info card, table, and schedule asks into approved families', () => {
+    const infoCard = inferDocumentWidgetProfile('做一个信息卡，概括这次改动的重点')
+    const dataTable = inferDocumentWidgetProfile('给我一个表格，把数据对比列出来')
+    const daySchedule = inferDocumentWidgetProfile('做一个今天的日程卡，按时间列出安排')
+
+    assert.equal(infoCard?.family, 'info_card')
+    assert.equal(dataTable?.family, 'data_table')
+    assert.equal(daySchedule?.family, 'day_schedule_card')
+  })
+
   it('builds readable widget guidance snippets for agent prompts', () => {
     const profile = inferDocumentWidgetProfile('做一个本周下周对比图，像周报')
     const snippet = buildDocumentWidgetGuidanceSnippet(profile)
     assert.match(snippet, /weekly_focus_chart/)
     assert.match(snippet, /本周 \/ 下周/)
     assert.match(snippet, /implementation/)
+  })
+
+  it('builds OpenUI rules snippets that cover common and personal widget groups', () => {
+    const snippet = buildDocumentWidgetOpenUIRulesSnippet()
+    assert.match(snippet, /OpenUI 文档组件规则/)
+    assert.match(snippet, /info_card/)
+    assert.match(snippet, /callout_block/)
+    assert.match(snippet, /day_schedule_card/)
+    assert.match(snippet, /todo_list_manual/)
   })
 
   it('suggests a minimal clarification path for ambiguous chart requests', () => {
@@ -77,6 +97,8 @@ describe('document widget guidance', () => {
 
     assert.match(matrix, /stats_card/)
     assert.match(matrix, /weekly_focus_chart/)
+    assert.match(matrix, /info_card/)
+    assert.match(matrix, /day_schedule_card/)
     assert.match(matrix, /partial|planned/i)
     assert.match(fixtureIndex, /score_calculator/)
     assert.match(fixtureIndex, /weekly_focus_chart/)

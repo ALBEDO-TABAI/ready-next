@@ -27,4 +27,29 @@ describe('document tool execution', () => {
     const result = await executeDocumentTool('document_save_tab', {})
     assert.equal(result, 'Document save queued: document.saveTab')
   })
+
+  it('accepts componentSpec payloads for widget insertion tools', async () => {
+    const result = await executeDocumentTool(
+      'document_insert_widget',
+      {
+        title: 'today_schedule',
+        position: 'append_end',
+        componentSpec: {
+          component: 'day_schedule_card',
+          dataSource: { type: 'calendar', preset: 'today' },
+        },
+      },
+      {
+        requestModuleToolAction: async (tool, args) => {
+          assert.equal(tool, 'document.insertWidget')
+          assert.equal(typeof args.componentSpec, 'object')
+          return {
+            summary: '已在文档尾部插入 widget（新文档.md）',
+          }
+        },
+      },
+    )
+
+    assert.match(result, /插入 widget/)
+  })
 })

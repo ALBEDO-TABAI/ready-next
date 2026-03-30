@@ -22,6 +22,7 @@
     "lint:check": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
     "test": "npx tsx@^4.19.2 --test src/__tests__/*.test.ts",
     "test:watch": "npx tsx@^4.19.2 --test --watch src/__tests__/*.test.ts",
+    "generate:document-widget-openui": "npx tsx@^4.19.2 ./scripts/generate-document-widget-openui-artifacts.ts",
     "verify": "npm run typecheck && npm run lint:check && npm run test",
     "verify:cloud": "npm run typecheck && npm run lint:check && npm run test"
   },
@@ -29,6 +30,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@hono/node-server": "^1.19.9",
     "@js-temporal/polyfill": "^0.5.1",
+    "@openuidev/react-lang": "^0.1.4",
     "@remotion/media": "^4.0.431",
     "@remotion/player": "^4.0.431",
     "@schedule-x/calendar": "^4.2.0",
@@ -77,6 +79,7 @@
     "tldraw": "^4.4.0",
     "xlsx": "^0.18.5",
     "yaml": "^2.8.1",
+    "zod": "^4.3.6",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
