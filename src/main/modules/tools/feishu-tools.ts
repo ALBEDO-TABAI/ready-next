@@ -1,9 +1,6 @@
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-}
+import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
+
+type ToolParam = ToolParamSchemaSpec
 
 interface FeishuToolDef {
   name: string
@@ -179,7 +176,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
       { name: 'start_time', type: 'string', description: '开始时间（ISO 8601 格式）', required: true },
       { name: 'end_time', type: 'string', description: '结束时间（ISO 8601 格式）', required: true },
       { name: 'location', type: 'string', description: '可选：地点', required: false },
-      { name: 'attendees', type: 'array', description: '可选：参与者 open_id 列表', required: false },
+      { name: 'attendees', type: 'array', description: '可选：参与者 open_id 列表', required: false, items: { type: 'string' } },
     ],
   },
   {
@@ -275,13 +272,6 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
   },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  return {
-    type: param.type,
-    description: param.description,
-  }
-}
-
 function toStructuredResult(tool: FeishuToolDef, message: string, extra?: Record<string, unknown>): string {
   return JSON.stringify({
     module: 'feishu',
@@ -294,26 +284,26 @@ function toStructuredResult(tool: FeishuToolDef, message: string, extra?: Record
 }
 
 export function getFeishuAnthropicTools(): Array<Record<string, unknown>> {
-  return FEISHU_TOOLS.map((tool) => ({
+  return FEISHU_TOOLS.map((tool) => normalizeAnthropicToolSchema({
     name: tool.name,
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map((p) => [p.name, toSchemaParam(p)])),
+      properties: Object.fromEntries(tool.params.map((p) => [p.name, buildToolParamSchema(p)])),
       required: tool.params.filter((p) => p.required).map((p) => p.name),
     },
   }))
 }
 
 export function getFeishuOpenAITools(): Array<Record<string, unknown>> {
-  return FEISHU_TOOLS.map((tool) => ({
+  return FEISHU_TOOLS.map((tool) => normalizeOpenAIToolSchema({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map((p) => [p.name, toSchemaParam(p)])),
+        properties: Object.fromEntries(tool.params.map((p) => [p.name, buildToolParamSchema(p)])),
         required: tool.params.filter((p) => p.required).map((p) => p.name),
       },
     },
@@ -494,4 +484,3 @@ export async function executeFeishuTool(
     return toStructuredResult(tool, `Error: ${errorMessage}`)
   }
 }
-

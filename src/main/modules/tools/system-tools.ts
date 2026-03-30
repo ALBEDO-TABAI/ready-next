@@ -3,6 +3,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { getLogPath } from '../../utils/platform'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
 
 const execFileAsync = promisify(execFile)
 const LOG = getLogPath('ready-system-tools.log')
@@ -11,13 +12,7 @@ function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
 
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-  enum?: string[]
-}
+type ToolParam = ToolParamSchemaSpec
 
 interface SystemToolDef {
   name: string
@@ -32,7 +27,7 @@ const SYSTEM_TOOLS: SystemToolDef[] = [
     params: [
       { name: 'code', type: 'string', description: '可选，直接执行的 Python 代码', required: false },
       { name: 'scriptPath', type: 'string', description: '可选，要执行的 Python 脚本绝对路径', required: false },
-      { name: 'args', type: 'array', description: '可选，脚本参数数组', required: false },
+      { name: 'args', type: 'array', description: '可选，脚本参数数组', required: false, items: { type: 'string' } },
       { name: 'cwd', type: 'string', description: '可选，执行目录', required: false },
       { name: 'timeoutMs', type: 'number', description: '可选，超时时间毫秒', required: false },
     ],
@@ -46,42 +41,27 @@ const SYSTEM_TOOLS: SystemToolDef[] = [
   },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  const schema: Record<string, unknown> = {
-    type: param.type,
-    description: param.description,
-  }
-  if (param.type === 'array') {
-    schema.items = { type: 'string' }
-  }
-  if (param.type === 'object') {
-    schema.additionalProperties = true
-  }
-  if (param.enum) schema.enum = param.enum
-  return schema
-}
-
 export function getSystemAnthropicTools(): Array<Record<string, unknown>> {
-  return SYSTEM_TOOLS.map((tool) => ({
+  return SYSTEM_TOOLS.map((tool) => normalizeAnthropicToolSchema({
     name: tool.name,
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+      properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
       required: tool.params.filter((param) => param.required).map((param) => param.name),
     },
   }))
 }
 
 export function getSystemOpenAITools(): Array<Record<string, unknown>> {
-  return SYSTEM_TOOLS.map((tool) => ({
+  return SYSTEM_TOOLS.map((tool) => normalizeOpenAIToolSchema({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+        properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
         required: tool.params.filter((param) => param.required).map((param) => param.name),
       },
     },

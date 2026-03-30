@@ -1,6 +1,7 @@
 import { appendFileSync } from 'fs'
 import type { ToolContext } from './tool-executor'
 import { getLogPath } from '../../utils/platform'
+import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
 
 const LOG = getLogPath('ready-memory-tools.log')
 
@@ -12,13 +13,7 @@ function log(msg: string) {
   }
 }
 
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-  enum?: string[]
-}
+type ToolParam = ToolParamSchemaSpec
 
 interface MemoryToolDef {
   name: string
@@ -46,6 +41,7 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
         type: 'array',
         description: '标签列表，用于分类和检索',
         required: false,
+        items: { type: 'string' },
       },
       {
         name: 'priority',
@@ -99,6 +95,7 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
         type: 'array',
         description: '新标签列表',
         required: false,
+        items: { type: 'string' },
       },
       {
         name: 'priority',
@@ -122,39 +119,27 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
   },
 ]
 
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  const schema: Record<string, unknown> = {
-    type: param.type,
-    description: param.description,
-  }
-  if (param.enum) schema.enum = param.enum
-  if (param.type === 'array') {
-    schema.items = { type: 'string' }
-  }
-  return schema
-}
-
 export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
-  return MEMORY_TOOLS.map((tool) => ({
+  return MEMORY_TOOLS.map((tool) => normalizeAnthropicToolSchema({
     name: tool.name,
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+      properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
       required: tool.params.filter((param) => param.required).map((param) => param.name),
     },
   }))
 }
 
 export function getMemoryOpenAITools(): Array<Record<string, unknown>> {
-  return MEMORY_TOOLS.map((tool) => ({
+  return MEMORY_TOOLS.map((tool) => normalizeOpenAIToolSchema({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
+        properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
         required: tool.params.filter((param) => param.required).map((param) => param.name),
       },
     },

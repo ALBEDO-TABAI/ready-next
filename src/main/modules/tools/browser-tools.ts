@@ -14,6 +14,7 @@ import { analyzeViewportWithVision } from './browser-vision'
 import { domainsLikelyMatch, findRecentBrowserAction, rememberBrowserAction } from '../agent-control/session-continuity'
 import { AgentRepository } from '../repositories/agent-repository'
 import { getLogPath } from '../../utils/platform'
+import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
 
 const LOG = getLogPath('ready-tools.log')
 function log(msg: string) {
@@ -38,13 +39,7 @@ function activePageLikelyMatchesTarget(activeUrl: string | undefined, target: st
 
 // ── Tool Definitions ────────────────────────────────────────────────
 
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-  enum?: string[]
-}
+type ToolParam = ToolParamSchemaSpec
 
 interface ToolDef {
   name: string
@@ -211,7 +206,7 @@ const BROWSER_TOOLS: ToolDef[] = [
     name: 'browser_download_urls',
     description: '批量下载 URL 到本地目录（默认 ~/Documents），可用于一次性保存多张图片。',
     params: [
-      { name: 'urls', type: 'array', description: '要下载的 URL 数组（http/https）', required: true },
+      { name: 'urls', type: 'array', description: '要下载的 URL 数组（http/https）', required: true, items: { type: 'string' } },
       { name: 'directory', type: 'string', description: '目标目录，默认 ~/Documents', required: false },
       { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选）', required: false },
       { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
@@ -256,7 +251,7 @@ const BROWSER_TOOLS: ToolDef[] = [
     description: '发送低层按键事件（例如 Enter、Escape、Tab）。',
     params: [
       { name: 'key', type: 'string', description: '键名，如 Enter/Escape/Tab/a', required: true },
-      { name: 'modifiers', type: 'array', description: '可选组合键数组：ctrl/shift/alt/meta', required: false },
+      { name: 'modifiers', type: 'array', description: '可选组合键数组：ctrl/shift/alt/meta', required: false, items: { type: 'string' } },
       { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
     ]
   },
@@ -291,7 +286,7 @@ const BROWSER_TOOLS: ToolDef[] = [
     name: 'browser_run_workflow',
     description: '批量执行多步骤浏览器任务（导航/搜索/点击/坐标点击/输入/坐标输入/滚动/按键/compose/等待/读取），适合复杂任务减少来回调用。',
     params: [
-      { name: 'steps', type: 'array', description: '步骤数组，每项形如 { action, ... }', required: true },
+      { name: 'steps', type: 'array', description: '步骤数组，每项形如 { action, ... }', required: true, items: { type: 'object', additionalProperties: true } },
       { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
       { name: 'continue_on_error', type: 'boolean', description: '遇错是否继续执行后续步骤，默认 false', required: false },
     ]
@@ -315,37 +310,27 @@ const BROWSER_TOOLS: ToolDef[] = [
 
 // ── Format converters ───────────────────────────────────────────────
 
-function toAnthropicParam(p: ToolParam): Record<string, unknown> {
-  const schema: Record<string, unknown> = { type: p.type, description: p.description }
-  if (p.enum) schema.enum = p.enum
-  return schema
-}
-
 export function getAnthropicTools(): Array<Record<string, unknown>> {
-  return BROWSER_TOOLS.map(tool => ({
+  return BROWSER_TOOLS.map(tool => normalizeAnthropicToolSchema({
     name: tool.name,
     description: tool.description,
     input_schema: {
       type: 'object',
-      properties: Object.fromEntries(tool.params.map(p => [p.name, toAnthropicParam(p)])),
+      properties: Object.fromEntries(tool.params.map(p => [p.name, buildToolParamSchema(p)])),
       required: tool.params.filter(p => p.required).map(p => p.name),
     }
   }))
 }
 
 export function getOpenAITools(): Array<Record<string, unknown>> {
-  return BROWSER_TOOLS.map(tool => ({
+  return BROWSER_TOOLS.map(tool => normalizeOpenAIToolSchema({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(tool.params.map(p => {
-          const schema: Record<string, unknown> = { type: p.type, description: p.description }
-          if (p.enum) schema.enum = p.enum
-          return [p.name, schema]
-        })),
+        properties: Object.fromEntries(tool.params.map(p => [p.name, buildToolParamSchema(p)])),
         required: tool.params.filter(p => p.required).map(p => p.name),
       }
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
@@ -208,6 +208,86 @@ const SETTING_SLOT_WIDTHS = {
   wide: 240,
 } as const
 
+function AISettingsFieldCard({
+  title,
+  description,
+  control,
+  wide = false,
+}: {
+  title: string
+  description: ReactNode
+  control: ReactNode
+  wide?: boolean
+}) {
+  return (
+    <div
+      className={`glass-surface-card rounded-2xl border ${wide ? 'md:col-span-2' : ''}`}
+      style={{
+        ...SETTINGS_CARD_STYLE,
+        padding: '14px 16px',
+      }}
+    >
+      <div className="min-w-0">
+        <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{title}</div>
+        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>{description}</div>
+      </div>
+      <div className="mt-3 min-w-0">{control}</div>
+    </div>
+  )
+}
+
+function AISettingsCapabilityChip({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  tone?: 'default' | 'positive' | 'muted'
+}) {
+  const color = tone === 'positive'
+    ? 'var(--color-green)'
+    : tone === 'muted'
+      ? 'var(--text-muted)'
+      : 'var(--color-blue)'
+
+  return (
+    <div
+      className="glass-surface-floating flex items-center gap-2 rounded-full border"
+      style={{
+        padding: '6px 10px',
+        borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
+        background: 'color-mix(in srgb, var(--surface-floating-bg) 74%, transparent)',
+      }}
+    >
+      <span className="text-[10px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)' }}>{label}</span>
+      <span className="text-[11px] font-semibold" style={{ color }}>{value}</span>
+    </div>
+  )
+}
+
+function AISettingsInfoChip({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
+  return (
+    <div
+      className="glass-surface-floating rounded-xl border"
+      style={{
+        padding: '10px 12px',
+        borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
+        background: 'color-mix(in srgb, var(--surface-floating-bg) 78%, transparent)',
+      }}
+    >
+      <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>{label}</div>
+      <div className="mt-1 text-[12px] font-medium leading-5" style={{ color: 'var(--text-body)' }}>{value}</div>
+    </div>
+  )
+}
+
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 function AISettingsPanel() {
   const {
@@ -301,6 +381,20 @@ function AISettingsPanel() {
     ...SETTINGS_INPUT_STYLE,
     padding: '6px 28px 6px 12px',
   }
+  const stackedInputStyle = {
+    ...compactInputStyle,
+    width: '100%',
+    textAlign: 'left' as const,
+  }
+  const stackedSelectStyle = {
+    ...compactSelectStyle,
+    width: '100%',
+  }
+  const toolTransportLabel = capabilities?.toolCallTransport === 'text'
+    ? '文本桥接'
+    : capabilities?.toolCallTransport === 'native'
+      ? '原生'
+      : '关闭'
 
   return (
     <div className="flex flex-col gap-6">
@@ -312,7 +406,7 @@ function AISettingsPanel() {
         >
           API 提供商
         </h4>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
           {AI_PROVIDERS.map((p) => {
             const isActive = config.provider === p.id
             const hasSaved = !!(savedConfigs[p.id as AIProviderType]?.apiKey)
@@ -322,7 +416,7 @@ function AISettingsPanel() {
                 onClick={() => switchProvider(p.id as AIProviderType)}
                 className="glass-surface-card flex items-center gap-2 rounded-xl border transition-all duration-200 text-left relative"
                 style={{
-                  padding: '10px 12px',
+                  padding: '9px 11px',
                   ...(isActive ? {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
@@ -355,116 +449,106 @@ function AISettingsPanel() {
         </div>
       </div>
 
-      {/* Config Form */}
-      <div className="flex flex-col" style={{ gap: 18 }}>
-        {/* API Base URL */}
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>API 地址</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              {currentProvider?.helpUrl ? (
-                <a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>
-                  查看文档
-                </a>
-              ) : '服务端点 URL'}
-            </div>
-          </div>
-          <input
-            type="text"
-            value={config.baseUrl}
-            onChange={(e) => updateField('baseUrl', e.target.value)}
-            placeholder={currentProvider?.baseUrl || 'https://...'}
-            className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
-            style={{
-              ...compactInputStyle,
-              width: 280,
-            }}
-          />
+      <div
+        className="glass-surface-card rounded-2xl border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          padding: '14px 16px',
+        }}
+      >
+        <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+          当前兼容状态
         </div>
-
-        {/* API Key */}
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>API Key</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              {currentProvider?.apiKeyPlaceholder || 'sk-...'}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={config.apiKey}
-              onChange={(e) => updateField('apiKey', e.target.value)}
-              placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-              className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
-              style={{
-                ...compactInputStyle,
-                width: 240,
-              }}
-            />
-            <button
-              onClick={() => setShowKey(!showKey)}
-              className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {showKey ? '隐藏' : '显示'}
-            </button>
-          </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <AISettingsCapabilityChip label="接口" value={resolvedAgentInterfaceLabel} />
+          <AISettingsCapabilityChip label="工具传输" value={toolTransportLabel} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
+          <AISettingsCapabilityChip label="工具调用" value={capabilities?.supportsToolCalls ? '开启' : '关闭'} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
+          <AISettingsCapabilityChip label="网页视觉" value={capabilities?.supportsVision ? '开启' : '关闭'} tone={capabilities?.supportsVision ? 'positive' : 'muted'} />
         </div>
+      </div>
 
-        {/* 配置命名槽 */}
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>配置名称</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              在聊天面板显示的配置名称（可选）
-            </div>
-          </div>
-          <input
-            type="text"
-            value={config.displayName || ''}
-            onChange={(e) => updateField('displayName', e.target.value)}
-            placeholder="自适应配置"
-            className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
-            style={{
-              ...compactInputStyle,
-              width: 180,
-            }}
-          />
-        </div>
-
-        {/* Volcano Engine Endpoint ID */}
-        {config.provider === 'volcengine' && (
-          <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-            <div className="flex-1 min-w-0 mr-4">
-              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>推理接入点 ID</div>
-              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-                在火山方舟控制台创建的 ep-xxx ID
-              </div>
-            </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <AISettingsFieldCard
+          wide
+          title="API 地址"
+          description={currentProvider?.helpUrl ? (
+            <>
+              服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
+            </>
+          ) : '服务端点 URL'}
+          control={(
             <input
               type="text"
-              value={config.endpointId || ''}
-              onChange={(e) => updateField('endpointId', e.target.value)}
-              placeholder="ep-20250101xxxxx"
-              className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
-              style={{
-                ...compactInputStyle,
-                width: 220,
-              }}
+              value={config.baseUrl}
+              onChange={(e) => updateField('baseUrl', e.target.value)}
+              placeholder={currentProvider?.baseUrl || 'https://...'}
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+              style={stackedInputStyle}
             />
-          </div>
+          )}
+        />
+
+        <AISettingsFieldCard
+          wide
+          title="API Key"
+          description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+          control={(
+            <div className="flex items-center gap-2">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={config.apiKey}
+                onChange={(e) => updateField('apiKey', e.target.value)}
+                placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                style={stackedInputStyle}
+              />
+              <button
+                onClick={() => setShowKey(!showKey)}
+                className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {showKey ? '隐藏' : '显示'}
+              </button>
+            </div>
+          )}
+        />
+
+        <AISettingsFieldCard
+          title="配置名称"
+          description="聊天面板里显示的别名，可选。"
+          control={(
+            <input
+              type="text"
+              value={config.displayName || ''}
+              onChange={(e) => updateField('displayName', e.target.value)}
+              placeholder="自适应配置"
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+              style={stackedInputStyle}
+            />
+          )}
+        />
+
+        {config.provider === 'volcengine' && (
+          <AISettingsFieldCard
+            title="推理接入点 ID"
+            description="火山方舟控制台生成的 ep-xxx。"
+            control={(
+              <input
+                type="text"
+                value={config.endpointId || ''}
+                onChange={(e) => updateField('endpointId', e.target.value)}
+                placeholder="ep-20250101xxxxx"
+                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
+                style={stackedInputStyle}
+              />
+            )}
+          />
         )}
 
-        {/* Model Select */}
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>默认模型</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              {models.find(m => m.id === config.model)?.description || '对话使用的模型'}
-            </div>
-          </div>
-          {isCustomProvider || config.model === '__custom__' || (!models.some(m => m.id === config.model) && config.model !== '') ? (
+        <AISettingsFieldCard
+          title="默认模型"
+          description={models.find(m => m.id === config.model)?.description || '对话默认使用的模型。'}
+          control={isCustomProvider || config.model === '__custom__' || (!models.some(m => m.id === config.model) && config.model !== '') ? (
             <div className="flex items-center gap-2">
               <input
                 type="text"
@@ -474,11 +558,8 @@ function AISettingsPanel() {
                   updateField('model', e.target.value)
                 }}
                 placeholder="模型 ID，如 kimi-for-coding"
-                className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
-                style={{
-                  ...compactInputStyle,
-                  width: 180,
-                }}
+                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                style={stackedInputStyle}
               />
               {!isCustomProvider && (
                 <button
@@ -486,7 +567,7 @@ function AISettingsPanel() {
                     setCustomModel('')
                     updateField('model', models[0]?.id || '')
                   }}
-                  className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors"
+                  className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
                   style={{ color: 'var(--text-muted)' }}
                 >
                   选列表
@@ -504,10 +585,8 @@ function AISettingsPanel() {
                   updateField('model', e.target.value)
                 }
               }}
-              className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={{
-                ...compactSelectStyle,
-              }}
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+              style={stackedSelectStyle}
             >
               {models.map(m => (
                 <option key={m.id} value={m.id}>
@@ -516,153 +595,149 @@ function AISettingsPanel() {
               ))}
             </select>
           )}
-        </div>
+        />
 
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>Agent 接口</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              切换供应商后，可在这里指定 Agent 对话接口。当前解析为 {resolvedAgentInterfaceLabel}
-            </div>
-          </div>
-          <select
-            value={config.agentProtocol || 'auto'}
-            onChange={(e) => updateField('agentProtocol', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.agentProtocol)}
-          className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-          style={{
-              ...compactSelectStyle,
-          }}
-          >
-            <option value="auto">自动</option>
-            <option value="openai">OpenAI 兼容</option>
-            <option value="anthropic">Anthropic 兼容</option>
-          </select>
-        </div>
-
-        {capabilities?.agentProtocol === 'openai' && (
-          <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-            <div className="flex-1 min-w-0 mr-4">
-              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>OpenAI API 形式</div>
-              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-                对 OpenAI 风格供应商，可选 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/chat/completions</code> 或 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/responses</code>
-              </div>
-            </div>
+        <AISettingsFieldCard
+          title="Agent 接口"
+          description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
+          control={(
             <select
-              value={config.wireApi || 'auto'}
-              onChange={(e) => updateField('wireApi', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.wireApi)}
-              className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={{
-                ...compactSelectStyle,
-              }}
+              value={config.agentProtocol || 'auto'}
+              onChange={(e) => updateField('agentProtocol', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.agentProtocol)}
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+              style={stackedSelectStyle}
             >
               <option value="auto">自动</option>
-              <option value="chat/completions">chat/completions</option>
-              <option value="responses">responses</option>
+              <option value="openai">OpenAI 兼容</option>
+              <option value="anthropic">Anthropic 兼容</option>
             </select>
-          </div>
+          )}
+        />
+
+        {capabilities?.agentProtocol === 'openai' && (
+          <AISettingsFieldCard
+            title="OpenAI API 形式"
+            description={(
+              <>
+                在 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/chat/completions</code> 和 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/responses</code> 之间切换。
+              </>
+            )}
+            control={(
+              <select
+                value={config.wireApi || 'auto'}
+                onChange={(e) => updateField('wireApi', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.wireApi)}
+                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                style={stackedSelectStyle}
+              >
+                <option value="auto">自动</option>
+                <option value="chat/completions">chat/completions</option>
+                <option value="responses">responses</option>
+              </select>
+            )}
+          />
         )}
 
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>工具调用</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              控制 Agent 是否尽可能调用浏览器 / 文档 / 技能工具。当前为 {capabilities?.supportsToolCalls ? '开启' : '关闭'}
-            </div>
-          </div>
-          <select
-            value={config.toolUseMode || 'auto'}
-            onChange={(e) => updateField('toolUseMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.toolUseMode)}
-            className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-            style={{
-              ...compactSelectStyle,
-            }}
-          >
-            <option value="auto">自动</option>
-            <option value="on">强制开启</option>
-            <option value="off">关闭</option>
-          </select>
-        </div>
+        <AISettingsFieldCard
+          title="工具调用"
+          description={`当前为 ${capabilities?.supportsToolCalls ? '开启' : '关闭'}。`}
+          control={(
+            <select
+              value={config.toolUseMode || 'auto'}
+              onChange={(e) => updateField('toolUseMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.toolUseMode)}
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+              style={stackedSelectStyle}
+            >
+              <option value="auto">自动</option>
+              <option value="on">强制开启</option>
+              <option value="off">关闭</option>
+            </select>
+          )}
+        />
 
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>网页视觉</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              浏览器自动化里定位输入框、发送按钮等时会使用视觉分析。当前为 {capabilities?.supportsVision ? '开启' : '关闭'}
-            </div>
-          </div>
-          <select
-            value={config.visionMode || 'auto'}
-            onChange={(e) => updateField('visionMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.visionMode)}
-            className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-            style={{
-              ...compactSelectStyle,
-            }}
-          >
-            <option value="auto">自动</option>
-            <option value="on">强制开启</option>
-            <option value="off">关闭</option>
-          </select>
-        </div>
+        <AISettingsFieldCard
+          title="网页视觉"
+          description={`浏览器自动化视觉分析当前为 ${capabilities?.supportsVision ? '开启' : '关闭'}。`}
+          control={(
+            <select
+              value={config.visionMode || 'auto'}
+              onChange={(e) => updateField('visionMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.visionMode)}
+              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+              style={stackedSelectStyle}
+            >
+              <option value="auto">自动</option>
+              <option value="on">强制开启</option>
+              <option value="off">关闭</option>
+            </select>
+          )}
+        />
 
         {showReasoningEffort && (
-          <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-            <div className="flex-1 min-w-0 mr-4">
-              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>思考强度</div>
-              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>自适应配置的 reasoning.effort 参数</div>
-            </div>
-            <select
-              value={config.reasoningEffort || 'high'}
-              onChange={(e) => updateField('reasoningEffort', e.target.value as typeof config.reasoningEffort)}
-              className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={{
-                ...compactSelectStyle,
-              }}
-            >
-              <option value="minimal">minimal</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-          </div>
+          <AISettingsFieldCard
+            title="思考强度"
+            description="只在 responses 风格接口下显示。"
+            control={(
+              <select
+                value={config.reasoningEffort || 'high'}
+                onChange={(e) => updateField('reasoningEffort', e.target.value as typeof config.reasoningEffort)}
+                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                style={stackedSelectStyle}
+              >
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            )}
+          />
         )}
 
-        {/* Test Connection */}
-        <div className="flex items-start justify-between gap-4 flex-wrap" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>测试连接</div>
-            <div className="text-[11px] mt-0.5 flex items-center gap-1.5" style={{ color: testStatus === 'success' ? 'var(--color-green)' : testStatus === 'error' ? 'var(--color-red)' : 'var(--text-light)' }}>
-              {testStatus === 'testing' && <Loader2 className="w-3 h-3 animate-spin" />}
-              {testStatus === 'success' && <CheckCircle2 className="w-3 h-3" />}
-              {testStatus === 'error' && <XCircle className="w-3 h-3" />}
-              {testMessage || '验证 API 配置是否有效'}
+        <AISettingsFieldCard
+          wide
+          title="测试连接"
+          description="验证当前地址、密钥和模型是否能通。"
+          control={(
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] flex items-center gap-1.5 min-w-0" style={{ color: testStatus === 'success' ? 'var(--color-green)' : testStatus === 'error' ? 'var(--color-red)' : 'var(--text-light)' }}>
+                {testStatus === 'testing' && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+                {testStatus === 'success' && <CheckCircle2 className="w-3 h-3 shrink-0" />}
+                {testStatus === 'error' && <XCircle className="w-3 h-3 shrink-0" />}
+                <span className="truncate">{testMessage || '验证 API 配置是否有效'}</span>
+                {typeof testLatency === 'number' && testStatus === 'success' && (
+                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{testLatency} ms</span>
+                )}
+              </div>
+              <button
+                onClick={() => testConnection()}
+                disabled={testStatus === 'testing'}
+                className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                style={{
+                  ...SETTINGS_PRIMARY_BUTTON_STYLE,
+                  padding: '7px 16px',
+                }}
+              >
+                {testStatus === 'testing' ? '测试中...' : '测试'}
+              </button>
             </div>
-          </div>
-          <button
-            onClick={() => testConnection()}
-            disabled={testStatus === 'testing'}
-          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-          style={{
-              ...SETTINGS_PRIMARY_BUTTON_STYLE,
-              padding: '7px 16px',
-          }}
-        >
-            {testStatus === 'testing' ? '测试中...' : '测试'}
-          </button>
-        </div>
+          )}
+        />
       </div>
 
       {/* Message Coalescing */}
-      <div className="flex flex-col" style={{ gap: 14 }}>
-        <div className="flex items-center justify-between" style={{ padding: 0 }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>对话发送</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
-              当用户在很短时间内连续发送多条消息时，先合并再统一交给 Agent，减少逐次等待。
-            </div>
+      <div
+        className="glass-surface-card rounded-2xl border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          padding: '14px 16px',
+        }}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>对话发送</div>
+          <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+            当用户在很短时间内连续发送多条消息时，先合并再统一交给 Agent，减少逐次等待。
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3" style={{ padding: 0 }}>
-          <label className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)]">
+          <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用连续消息合并</span>
             <input
               type="checkbox"
@@ -674,15 +749,15 @@ function AISettingsPanel() {
               }}
             />
           </label>
-          <div className="rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
+          <label className="rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
             <select
               value={messageCoalesceWindowMs}
               onChange={(e) => {
                 setMessageCoalesceWindowMs(e.target.value)
                 persistBridgeSetting('agent_message_coalesce_window_ms', e.target.value)
               }}
-              className="w-full bg-transparent text-[12px] outline-none cursor-pointer"
+              className="mt-1 w-full bg-transparent text-[12px] outline-none cursor-pointer"
               style={{ color: 'var(--text-body)' }}
             >
               <option value="600">0.6 秒</option>
@@ -691,7 +766,7 @@ function AISettingsPanel() {
               <option value="1800">1.8 秒</option>
               <option value="2500">2.5 秒</option>
             </select>
-          </div>
+          </label>
         </div>
       </div>
 
@@ -700,10 +775,10 @@ function AISettingsPanel() {
         className="glass-surface-card rounded-2xl border overflow-hidden"
         style={SETTINGS_CARD_STYLE}
       >
-        <div className="flex items-center justify-between" style={{ padding: '14px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+        <div className="flex items-center justify-between gap-3" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
           <div className="flex-1 min-w-0 mr-4">
             <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>Agent Runtime</div>
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-light)' }}>
+            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
               Claude SDK 单核编排，Python sidecar 提供 Channels / Heartbeat / cron
             </div>
           </div>
@@ -720,8 +795,8 @@ function AISettingsPanel() {
             刷新状态
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-3" style={{ padding: '14px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <label className="glass-surface-card flex items-center justify-between gap-2 rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+        <div className="grid gap-2 md:grid-cols-2" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+          <label className="glass-surface-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用远程 Channels</span>
             <input
               type="checkbox"
@@ -733,7 +808,7 @@ function AISettingsPanel() {
               }}
             />
           </label>
-          <label className="glass-surface-card flex items-center justify-between gap-2 rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+          <label className="glass-surface-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启动时自动拉起 Sidecar</span>
             <input
               type="checkbox"
@@ -746,36 +821,48 @@ function AISettingsPanel() {
             />
           </label>
         </div>
-        <div className="grid grid-cols-2 gap-3" style={{ padding: '14px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <div className="glass-surface-card rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>Bind Host</div>
+        <div className="grid gap-2 md:grid-cols-2" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+          <div className="glass-surface-card rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>Bind Host</div>
             <input
               type="text"
               value={sidecarHost}
               onChange={(e) => setSidecarHost(e.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_host', sidecarHost)}
-              className="w-full bg-transparent text-[12px] outline-none"
+              className="mt-1 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
             />
           </div>
-          <div className="glass-surface-card rounded-lg border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>Bind Port</div>
+          <div className="glass-surface-card rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>Bind Port</div>
             <input
               type="text"
               value={sidecarPort}
               onChange={(e) => setSidecarPort(e.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_port', sidecarPort)}
-              className="w-full bg-transparent text-[12px] outline-none"
+              className="mt-1 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
             />
           </div>
         </div>
-        <div style={{ padding: '14px 20px' }}>
-          <div className="text-[12px] leading-6" style={{ color: 'var(--text-body)' }}>
-            <div>编排内核: <span style={{ color: 'var(--color-blue)' }}>Claude SDK</span></div>
-            <div>Sidecar: {runtimeSummary?.sidecarStatus || 'unknown'} {runtimeSummary?.sidecarPort ? `(port ${runtimeSummary.sidecarPort})` : ''}</div>
-            <div>Channels: {runtimeSummary?.channelCount ?? 0} · Schedules: {runtimeSummary?.scheduleCount ?? 0}</div>
-            <div>活跃任务: {runtimeSummary?.activeTasks ?? 0}</div>
+        <div style={{ padding: '12px 16px' }}>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <AISettingsInfoChip
+              label="编排内核"
+              value={<span style={{ color: 'var(--color-blue)' }}>Claude SDK</span>}
+            />
+            <AISettingsInfoChip
+              label="Sidecar"
+              value={`${runtimeSummary?.sidecarStatus || 'unknown'}${runtimeSummary?.sidecarPort ? ` · ${runtimeSummary.sidecarPort}` : ''}`}
+            />
+            <AISettingsInfoChip
+              label="Channels / Schedules"
+              value={`${runtimeSummary?.channelCount ?? 0} / ${runtimeSummary?.scheduleCount ?? 0}`}
+            />
+            <AISettingsInfoChip
+              label="活跃任务"
+              value={String(runtimeSummary?.activeTasks ?? 0)}
+            />
           </div>
         </div>
       </div>

@@ -34,6 +34,7 @@ import {
   getDocumentOpenAITools,
   executeToolCall,
 } from '../tools'
+import { normalizeOpenAIToolSchema, normalizeToolJsonSchema } from '../tools/tool-schema'
 import { findSkillToolBySkillAction } from '../tools/skills-tools'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import {
@@ -3524,7 +3525,7 @@ export class DirectChatEngine extends EventEmitter {
         return typeof fn === 'string' ? allowed.has(fn) : false
       })
     }
-    return tools
+    return tools.map((tool) => normalizeOpenAIToolSchema(tool))
   }
 
   private collectToolNames(
@@ -4034,14 +4035,15 @@ export class DirectChatEngine extends EventEmitter {
   private convertOpenAIToolsToResponses(tools: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     return tools
       .map((tool) => {
-        if (tool.type !== 'function') return null
-        const fn = tool.function as Record<string, unknown> | undefined
+        const normalizedTool = normalizeOpenAIToolSchema(tool)
+        if (normalizedTool.type !== 'function') return null
+        const fn = normalizedTool.function as Record<string, unknown> | undefined
         if (!fn) return null
         return {
           type: 'function',
           name: String(fn.name || ''),
           description: typeof fn.description === 'string' ? fn.description : '',
-          parameters: (fn.parameters && typeof fn.parameters === 'object') ? fn.parameters : { type: 'object', properties: {} },
+          parameters: normalizeToolJsonSchema((fn.parameters && typeof fn.parameters === 'object') ? fn.parameters : { type: 'object', properties: {} }),
         }
       })
       .filter(Boolean) as Array<Record<string, unknown>>
