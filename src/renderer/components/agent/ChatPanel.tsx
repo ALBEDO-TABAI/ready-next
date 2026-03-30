@@ -10,6 +10,15 @@ import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT } from '../../modules
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
 import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
+import {
+  buildTaskCardViewModel,
+  createDefaultTaskDisclosureState,
+  groupTaskRunsForDisplay,
+  type TaskCardRunLike,
+  type TaskDisplayGroup,
+  type TaskDisplayEntry,
+  type TaskSectionKey,
+} from '../../modules/agent/taskCardViewModel'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -51,23 +60,7 @@ interface PersistedScopeRunSummary {
   updatedAt: string
 }
 
-interface TaskCardRun {
-  scopeId: string
-  phase: ScopeRunState['phase']
-  title: string
-  taskTitle?: string | null
-  taskSummary?: string | null
-  steps?: ScopeRunState['steps']
-  currentStepId?: string | null
-  waitingFor?: ScopeRunState['waitingFor']
-  resumableActions?: ScopeRunState['resumableActions']
-  recentArtifacts?: ScopeRunState['recentArtifacts']
-  taskContinuation?: ScopeRunState['taskContinuation']
-  memoryCapture?: ScopeRunState['memoryCapture']
-  blockedReason?: string | null
-  error?: string | null
-  updatedAt: string
-}
+interface TaskCardRun extends TaskCardRunLike {}
 
 function parseMarkdown(raw: string): MarkdownNode[] {
   const nodes: MarkdownNode[] = []
@@ -296,7 +289,10 @@ function TaskSection({
 
 function TaskCard({
   run,
+  taskKey,
   compact = false,
+  disclosureState,
+  onToggleSection,
   onOpenScope,
   onOpenArtifact,
   onDismissMemoryCapture,
@@ -309,7 +305,10 @@ function TaskCard({
   onCancelExecution,
 }: {
   run: TaskCardRun
+  taskKey: string
   compact?: boolean
+  disclosureState?: Record<string, boolean>
+  onToggleSection?: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
   onOpenScope?: (scopeId: string) => void
   onOpenArtifact?: (path: string) => void
   onDismissMemoryCapture?: (scopeId: string) => void
@@ -321,10 +320,51 @@ function TaskCard({
   onRetry?: (scopeId: string) => void
   onCancelExecution?: (scopeId: string) => void
 }) {
-  const primaryTitle = run.taskTitle || run.title || '任务'
+  const vm = buildTaskCardViewModel(run, disclosureState)
+  const primaryTitle = vm.title
   const steps = run.steps || []
   const recentArtifacts = run.recentArtifacts || []
   const visibleMemoryCapture = run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
+  const renderSectionButton = (sectionKey: TaskSectionKey) => {
+    const section = vm.sections[sectionKey]
+    if (section.count <= 0) return null
+    return (
+      <button
+        key={section.key}
+        type="button"
+        onClick={() => onToggleSection?.(taskKey, section.key, !section.expanded)}
+        className="flex items-center justify-between gap-3"
+        style={{
+          width: '100%',
+          border: 'none',
+          background: 'transparent',
+          padding: '6px 0',
+          cursor: 'pointer',
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>{section.title}</div>
+          {section.summary && (
+            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {section.summary}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-light)' }}>{section.count}</span>
+          <ChevronDown
+            style={{
+              width: 12,
+              height: 12,
+              color: 'var(--text-light)',
+              transform: section.expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 160ms ease',
+            }}
+          />
+        </div>
+      </button>
+    )
+  }
 
   return (
     <div
@@ -342,73 +382,105 @@ function TaskCard({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{primaryTitle}</div>
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
-            {run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)}
+            {vm.summary}
           </div>
+          {vm.currentStep && (
+            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
+              当前步骤：{vm.currentStep.title}
+            </div>
+          )}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
-          {taskPhaseLabel(run.phase)}
+          {vm.statusLabel}
         </div>
       </div>
 
-      {steps.length > 0 && (
-        <div className="flex flex-col" style={{ gap: 5 }}>
-          {steps.map((step) => (
-            <div key={step.id} className="flex items-start gap-2">
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  marginTop: 5,
-                  background:
-                    step.status === 'done'
-                      ? 'var(--color-green)'
-                      : step.status === 'running'
-                        ? 'var(--color-blue)'
-                        : step.status === 'blocked'
-                          ? 'var(--color-orange, #f59e0b)'
-                          : step.status === 'error'
-                            ? 'var(--color-red)'
-                            : 'var(--border-default)',
-                  flexShrink: 0,
-                }}
-              />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>{step.title}</div>
-                {step.detail && (
-                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>{step.detail}</div>
-                )}
-              </div>
+      {!compact && (
+        <div className="flex flex-col" style={{ gap: 2 }}>
+          {renderSectionButton('plan')}
+          {vm.sections.plan.expanded && steps.length > 0 && (
+            <div className="flex flex-col" style={{ gap: 5, paddingBottom: 6 }}>
+              {steps.map((step) => (
+                <div key={step.id} className="flex items-start gap-2">
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 999,
+                      marginTop: 5,
+                      background:
+                        step.status === 'done'
+                          ? 'var(--color-green)'
+                          : step.status === 'running'
+                            ? 'var(--color-blue)'
+                            : step.status === 'blocked'
+                              ? 'var(--color-orange, #f59e0b)'
+                              : step.status === 'error'
+                                ? 'var(--color-red)'
+                                : 'var(--border-default)',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>{step.title}</div>
+                    {step.detail && (
+                      <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>{step.detail}</div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {renderSectionButton('details')}
+          {vm.sections.details.expanded && vm.detailGroups.length > 0 && (
+            <div className="flex flex-col" style={{ gap: 8, paddingBottom: 6 }}>
+              {vm.detailGroups.map((group) => (
+                <div key={group.id} style={{ borderRadius: 8, background: 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)', padding: '7px 8px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>{group.title}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2 }}>{group.summary}</div>
+                  <div className="flex flex-col" style={{ gap: 3, marginTop: 6 }}>
+                    {group.events.map((event) => (
+                      <div key={event.id} style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}>
+                        {event.text}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {renderSectionButton('artifacts')}
+          {vm.sections.artifacts.expanded && recentArtifacts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" style={{ paddingBottom: 6 }}>
+              {recentArtifacts.slice(-3).map((artifact) => (
+                <button
+                  key={artifact.id}
+                  type="button"
+                  onClick={() => artifact.path && onOpenArtifact?.(artifact.path)}
+                  style={{
+                    padding: '4px 7px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-default)',
+                    background: 'transparent',
+                    fontSize: 10.5,
+                    color: 'var(--text-gray)',
+                    cursor: artifact.path ? 'pointer' : 'default',
+                  }}
+                  title={artifact.path || artifact.label}
+                >
+                  {artifact.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {renderSectionButton('memory')}
         </div>
       )}
 
-      {recentArtifacts.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {recentArtifacts.slice(-3).map((artifact) => (
-            <button
-              key={artifact.id}
-              type="button"
-              onClick={() => artifact.path && onOpenArtifact?.(artifact.path)}
-              style={{
-                padding: '4px 7px',
-                borderRadius: 8,
-                border: '1px solid var(--border-default)',
-                background: 'transparent',
-                fontSize: 10.5,
-                color: 'var(--text-gray)',
-                cursor: artifact.path ? 'pointer' : 'default',
-              }}
-              title={artifact.path || artifact.label}
-            >
-              {artifact.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {visibleMemoryCapture && (
+      {visibleMemoryCapture && vm.sections.memory.expanded && (
         <div
           style={{
             borderRadius: 10,
@@ -480,6 +552,59 @@ function TaskCard({
               打开会话
             </button>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskGroupCard({
+  entry,
+  expanded,
+  onToggle,
+  renderChild,
+}: {
+  entry: TaskDisplayGroup
+  expanded: boolean
+  onToggle: () => void
+  renderChild: (run: TaskCardRun) => React.ReactNode
+}) {
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        border: '1px solid var(--border-default)',
+        background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-start justify-between gap-3"
+        style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{entry.title}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>{entry.summary}</div>
+        </div>
+        <ChevronDown
+          style={{
+            width: 12,
+            height: 12,
+            color: 'var(--text-light)',
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 160ms ease',
+            flexShrink: 0,
+          }}
+        />
+      </button>
+      {expanded && (
+        <div className="flex flex-col" style={{ gap: 8 }}>
+          {entry.children.map((run) => renderChild(run as TaskCardRun))}
         </div>
       )}
     </div>
@@ -877,6 +1002,8 @@ export default function ChatPanel() {
     pendingSendCount,
     pendingSendFlushAt,
     loadSendPreferences,
+    taskDisclosureState,
+    setTaskSectionExpanded,
   } = useAgent()
 
   const { chatPanelVisible, chatPanelWidth, toggleChatPanel } = useWorkspace()
@@ -989,6 +1116,7 @@ export default function ChatPanel() {
           blockedReason: run.blockedReason,
           error: run.error,
           updatedAt: run.updatedAt || scope.updatedAt,
+          toolTrace: run.toolTrace,
         } satisfies TaskCardRun
       })
       .filter(Boolean) as TaskCardRun[]
@@ -1011,6 +1139,7 @@ export default function ChatPanel() {
       blockedReason: run.blockedReason,
       error: run.error,
       updatedAt: run.updatedAt,
+      toolTrace: [],
     }))
     const merged = new Map<string, TaskCardRun>()
     for (const run of mappedPersisted) merged.set(run.scopeId, run)
@@ -1029,7 +1158,11 @@ export default function ChatPanel() {
     return mergedTaskRuns.filter((item) => item.scopeId !== currentScopeId)
   }, [currentScopeId, mergedTaskRuns])
 
-  const showToolTraceCapsule = toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled'
+  const backgroundTaskEntries = useMemo<TaskDisplayEntry[]>(() => {
+    return groupTaskRunsForDisplay(backgroundTaskRuns, new Date())
+  }, [backgroundTaskRuns])
+
+  const showToolTraceCapsule = !currentTaskRun && (toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled')
 
   useEffect(() => {
     void loadSendPreferences()
@@ -1733,6 +1866,12 @@ export default function ChatPanel() {
                 <TaskSection title="当前任务">
                   <TaskCard
                     run={currentTaskRun}
+                    taskKey={currentTaskRun.scopeId}
+                    disclosureState={{
+                      ...createDefaultTaskDisclosureState(currentTaskRun),
+                      ...(taskDisclosureState[currentTaskRun.scopeId] || {}),
+                    }}
+                    onToggleSection={setTaskSectionExpanded}
                     onOpenArtifact={handleOpenTaskArtifact}
                     onDismissMemoryCapture={handleDismissMemoryCapture}
                     onUndoMemoryCapture={handleUndoMemoryCapture}
@@ -1749,22 +1888,60 @@ export default function ChatPanel() {
               {backgroundTaskRuns.length > 0 && (
                 <TaskSection title="后台任务">
                   <div className="flex flex-col" style={{ gap: 8 }}>
-                    {backgroundTaskRuns.slice(0, 4).map((run) => (
-                      <TaskCard
-                        key={run.scopeId}
-                        run={run}
-                        compact
-                        onOpenScope={handleLoadConversation}
-                        onOpenArtifact={handleOpenTaskArtifact}
-                        onDismissMemoryCapture={handleDismissMemoryCapture}
-                        onUndoMemoryCapture={handleUndoMemoryCapture}
-                        onSupplementMemoryCapture={handleSupplementMemoryCapture}
-                        onContinueInput={handleContinueTaskInput}
-                        onSubmitConfirmation={handleSubmitTaskConfirmation}
-                        onSubmitAgentResult={handleSubmitTaskAgentResult}
-                        onRetry={handleRetryTask}
-                        onCancelExecution={handleCancelTask}
-                      />
+                    {backgroundTaskEntries.slice(0, 4).map((entry) => (
+                      entry.kind === 'group' ? (
+                        <TaskGroupCard
+                          key={entry.key}
+                          entry={entry}
+                          expanded={Boolean(taskDisclosureState[entry.key]?.plan)}
+                          onToggle={() => setTaskSectionExpanded(entry.key, 'plan', !taskDisclosureState[entry.key]?.plan)}
+                          renderChild={(run) => (
+                            <TaskCard
+                              key={run.scopeId}
+                              run={run}
+                              taskKey={run.scopeId}
+                              compact
+                              disclosureState={{
+                                ...createDefaultTaskDisclosureState(run),
+                                ...(taskDisclosureState[run.scopeId] || {}),
+                              }}
+                              onToggleSection={setTaskSectionExpanded}
+                              onOpenScope={handleLoadConversation}
+                              onOpenArtifact={handleOpenTaskArtifact}
+                              onDismissMemoryCapture={handleDismissMemoryCapture}
+                              onUndoMemoryCapture={handleUndoMemoryCapture}
+                              onSupplementMemoryCapture={handleSupplementMemoryCapture}
+                              onContinueInput={handleContinueTaskInput}
+                              onSubmitConfirmation={handleSubmitTaskConfirmation}
+                              onSubmitAgentResult={handleSubmitTaskAgentResult}
+                              onRetry={handleRetryTask}
+                              onCancelExecution={handleCancelTask}
+                            />
+                          )}
+                        />
+                      ) : (
+                        <TaskCard
+                          key={entry.key}
+                          run={entry.run as TaskCardRun}
+                          taskKey={entry.run.scopeId}
+                          compact
+                          disclosureState={{
+                            ...createDefaultTaskDisclosureState(entry.run),
+                            ...(taskDisclosureState[entry.run.scopeId] || {}),
+                          }}
+                          onToggleSection={setTaskSectionExpanded}
+                          onOpenScope={handleLoadConversation}
+                          onOpenArtifact={handleOpenTaskArtifact}
+                          onDismissMemoryCapture={handleDismissMemoryCapture}
+                          onUndoMemoryCapture={handleUndoMemoryCapture}
+                          onSupplementMemoryCapture={handleSupplementMemoryCapture}
+                          onContinueInput={handleContinueTaskInput}
+                          onSubmitConfirmation={handleSubmitTaskConfirmation}
+                          onSubmitAgentResult={handleSubmitTaskAgentResult}
+                          onRetry={handleRetryTask}
+                          onCancelExecution={handleCancelTask}
+                        />
+                      )
                     ))}
                   </div>
                 </TaskSection>

@@ -5,6 +5,7 @@ import {
   isActiveScopePhase,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
+import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
 import { runDocCommand as executeDocCommand } from '../modules/agent/documentActions'
 import { runSkillCommand as executeSkillCommand } from '../modules/agent/commandHandlers'
 import {
@@ -61,6 +62,7 @@ interface AgentState {
   sendCoalescingWindowMs: number
   pendingSendCount: number
   pendingSendFlushAt: number | null
+  taskDisclosureState: Record<string, TaskDisclosureState>
 
   setAgents: (agents: Agent[]) => void
   selectAgent: (name: string) => void
@@ -89,6 +91,8 @@ interface AgentState {
   setSendCoalescingEnabled: (enabled: boolean) => Promise<void>
   setSendCoalescingWindowMs: (windowMs: number) => Promise<void>
   pickFiles: () => Promise<void>
+  setTaskSectionExpanded: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
+  toggleTaskSection: (taskKey: string, sectionKey: TaskSectionKey) => void
 }
 
 function generateSessionId(): string {
@@ -224,6 +228,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   sendCoalescingWindowMs: DEFAULT_SEND_COALESCE_WINDOW_MS,
   pendingSendCount: 0,
   pendingSendFlushAt: null,
+  taskDisclosureState: {},
 
   setAgents: (agents) => set({ agents }),
 
@@ -293,6 +298,29 @@ export const useAgent = create<AgentState>((set, get) => ({
         .catch(() => undefined)
     }
   },
+
+  setTaskSectionExpanded: (taskKey, sectionKey, expanded) => set((state) => ({
+    taskDisclosureState: {
+      ...state.taskDisclosureState,
+      [taskKey]: {
+        ...(state.taskDisclosureState[taskKey] || {}),
+        [sectionKey]: expanded,
+      },
+    },
+  })),
+
+  toggleTaskSection: (taskKey, sectionKey) => set((state) => {
+    const currentValue = Boolean(state.taskDisclosureState[taskKey]?.[sectionKey])
+    return {
+      taskDisclosureState: {
+        ...state.taskDisclosureState,
+        [taskKey]: {
+          ...(state.taskDisclosureState[taskKey] || {}),
+          [sectionKey]: !currentValue,
+        },
+      },
+    }
+  }),
 
   clearToolTrace: () => set((state) => {
     const scopeId = state.currentScopeId

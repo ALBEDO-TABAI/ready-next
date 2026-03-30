@@ -160,6 +160,7 @@ describe('Agent Store Types', () => {
             assert.ok(validStatuses.includes(status))
         })
     })
+
 })
 
 describe('Store Utilities', () => {

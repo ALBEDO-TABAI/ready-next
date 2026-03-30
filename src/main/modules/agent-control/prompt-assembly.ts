@@ -426,7 +426,7 @@ export class PromptAssemblyService {
 
   private async loadL1(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
     // Load from file-based system (backward compatibility)
-    const messages = (await this.getScopeMessages(scope.id)).slice(-6)
+    const messages = (await this.getScopeMessages(scope.id)).slice(-4)
     const transcript = messages
       .map((item) => `${item.role === 'user' ? '用户' : item.role === 'assistant' ? '助手' : '系统'}: ${String(item.content || '').slice(0, 240)}`)
       .join('\n')
@@ -464,7 +464,7 @@ export class PromptAssemblyService {
           scopeId: scope.id,
           category: 'summary',
           includeArchived: false,
-          limit: 5,
+          limit: 3,
         })
 
         for (const memory of scopeMemories) {
