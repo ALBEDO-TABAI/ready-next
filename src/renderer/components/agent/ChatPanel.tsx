@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { X, FileText, Image, Film, Table, Globe, Puzzle, Pen, MessageSquareQuote, Folder, ChevronDown, PanelLeftClose, History, Plus } from 'lucide-react'
-import { useAgent, initAgentListeners, ChatAttachment, ConversationScope } from '../../stores/useAgent'
+import { useAgent, initAgentListeners, ChatAttachment, ConversationScope, ScopeRunState } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings } from '../../stores/useSettings'
 import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
@@ -9,6 +9,7 @@ import { toLocalFileUrl } from '../../utils/dragDrop'
 import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT } from '../../modules/workbench/chrome'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
+import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -25,6 +26,47 @@ interface MarkdownNode {
   content: string
   level?: number // header level 1-3
   lang?: string  // code block language
+}
+
+interface PersistedScopeRunSummary {
+  scopeId: string
+  agent: string
+  title: string
+  sourceKind: 'local' | 'channel'
+  sourceId: string
+  channelKey: string
+  threadKey: string
+  phase: ScopeRunState['phase']
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunState['steps']
+  currentStepId?: string | null
+  waitingFor?: ScopeRunState['waitingFor']
+  resumableActions?: ScopeRunState['resumableActions']
+  recentArtifacts?: ScopeRunState['recentArtifacts']
+  taskContinuation?: ScopeRunState['taskContinuation']
+  memoryCapture?: ScopeRunState['memoryCapture']
+  blockedReason?: string | null
+  error?: string | null
+  updatedAt: string
+}
+
+interface TaskCardRun {
+  scopeId: string
+  phase: ScopeRunState['phase']
+  title: string
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunState['steps']
+  currentStepId?: string | null
+  waitingFor?: ScopeRunState['waitingFor']
+  resumableActions?: ScopeRunState['resumableActions']
+  recentArtifacts?: ScopeRunState['recentArtifacts']
+  taskContinuation?: ScopeRunState['taskContinuation']
+  memoryCapture?: ScopeRunState['memoryCapture']
+  blockedReason?: string | null
+  error?: string | null
+  updatedAt: string
 }
 
 function parseMarkdown(raw: string): MarkdownNode[] {
@@ -193,6 +235,265 @@ function MarkdownContent({ content }: { content: string }) {
       })}
     </div>
   )
+}
+
+function taskPhaseLabel(phase: ScopeRunState['phase']): string {
+  if (phase === 'planning') return '规划中'
+  if (phase === 'tool_running' || phase === 'responding' || phase === 'resuming') return '进行中'
+  if (phase === 'checkpoint' || phase === 'takeover') return '等待继续'
+  if (phase === 'done') return '已完成'
+  if (phase === 'error') return '失败'
+  if (phase === 'cancelled') return '已停止'
+  return '待处理'
+}
+
+function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
+  if (!run) return false
+  return Boolean(
+    run.taskTitle ||
+    run.taskSummary ||
+    (run.steps && run.steps.length > 0) ||
+    (run.memoryCapture && run.memoryCapture.status !== 'dismissed'),
+  )
+}
+
+function TaskSection({
+  title,
+  emptyText,
+  children,
+}: {
+  title: string
+  emptyText?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      style={{
+        padding: '8px 14px 0',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: 'var(--text-light)',
+          letterSpacing: '0.04em',
+        }}
+      >
+        {title}
+      </div>
+      {children || (
+        <div style={{ fontSize: 12, color: 'var(--text-light)' }}>
+          {emptyText || '暂无任务'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskCard({
+  run,
+  compact = false,
+  onOpenScope,
+  onOpenArtifact,
+  onDismissMemoryCapture,
+  onUndoMemoryCapture,
+  onSupplementMemoryCapture,
+  onContinueInput,
+  onSubmitConfirmation,
+  onSubmitAgentResult,
+  onRetry,
+  onCancelExecution,
+}: {
+  run: TaskCardRun
+  compact?: boolean
+  onOpenScope?: (scopeId: string) => void
+  onOpenArtifact?: (path: string) => void
+  onDismissMemoryCapture?: (scopeId: string) => void
+  onUndoMemoryCapture?: (scopeId: string) => void
+  onSupplementMemoryCapture?: (scopeId: string) => void
+  onContinueInput?: (scopeId: string) => void
+  onSubmitConfirmation?: (scopeId: string, confirmed: boolean) => void
+  onSubmitAgentResult?: (scopeId: string) => void
+  onRetry?: (scopeId: string) => void
+  onCancelExecution?: (scopeId: string) => void
+}) {
+  const primaryTitle = run.taskTitle || run.title || '任务'
+  const steps = run.steps || []
+  const recentArtifacts = run.recentArtifacts || []
+  const visibleMemoryCapture = run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
+
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        border: '1px solid var(--border-default)',
+        background: 'color-mix(in srgb, var(--surface-card-bg) 26%, transparent)',
+        padding: compact ? '10px 12px' : '12px 12px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{primaryTitle}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
+            {run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)}
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
+          {taskPhaseLabel(run.phase)}
+        </div>
+      </div>
+
+      {steps.length > 0 && (
+        <div className="flex flex-col" style={{ gap: 5 }}>
+          {steps.map((step) => (
+            <div key={step.id} className="flex items-start gap-2">
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  marginTop: 5,
+                  background:
+                    step.status === 'done'
+                      ? 'var(--color-green)'
+                      : step.status === 'running'
+                        ? 'var(--color-blue)'
+                        : step.status === 'blocked'
+                          ? 'var(--color-orange, #f59e0b)'
+                          : step.status === 'error'
+                            ? 'var(--color-red)'
+                            : 'var(--border-default)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>{step.title}</div>
+                {step.detail && (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>{step.detail}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {recentArtifacts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {recentArtifacts.slice(-3).map((artifact) => (
+            <button
+              key={artifact.id}
+              type="button"
+              onClick={() => artifact.path && onOpenArtifact?.(artifact.path)}
+              style={{
+                padding: '4px 7px',
+                borderRadius: 8,
+                border: '1px solid var(--border-default)',
+                background: 'transparent',
+                fontSize: 10.5,
+                color: 'var(--text-gray)',
+                cursor: artifact.path ? 'pointer' : 'default',
+              }}
+              title={artifact.path || artifact.label}
+            >
+              {artifact.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {visibleMemoryCapture && (
+        <div
+          style={{
+            borderRadius: 10,
+            background: 'color-mix(in srgb, var(--color-blue-light) 70%, transparent)',
+            padding: '8px 9px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+            已记录的长期偏好 / 本次摘要
+          </div>
+          <div className="flex flex-col" style={{ gap: 4 }}>
+            {visibleMemoryCapture.items.map((item) => (
+              <div key={item.memoryId} style={{ fontSize: 10.5, color: 'var(--text-body)' }}>
+                {item.title}{item.summary ? `：${item.summary}` : ''}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => onDismissMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              确认
+            </button>
+            <button type="button" onClick={() => onUndoMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              撤销
+            </button>
+            <button type="button" onClick={() => onSupplementMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              补充
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
+        <div className="flex flex-wrap gap-1.5">
+          {run.waitingFor === 'input' && (
+            <button type="button" onClick={() => onContinueInput?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              补充后继续
+            </button>
+          )}
+          {run.waitingFor === 'confirmation' && (
+            <>
+              <button type="button" onClick={() => onSubmitConfirmation?.(run.scopeId, true)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+                确认继续
+              </button>
+              <button type="button" onClick={() => onSubmitConfirmation?.(run.scopeId, false)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+                暂不继续
+              </button>
+            </>
+          )}
+          {run.waitingFor === 'agent_result' && (
+            <button type="button" onClick={() => onSubmitAgentResult?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              补交结果
+            </button>
+          )}
+          {(run.resumableActions || []).includes('retry') && (
+            <button type="button" onClick={() => onRetry?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              重试
+            </button>
+          )}
+          {(run.resumableActions || []).includes('cancel') && (
+            <button type="button" onClick={() => onCancelExecution?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              停止
+            </button>
+          )}
+          {compact && (
+            <button type="button" onClick={() => onOpenScope?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+              打开会话
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
+  padding: '4px 8px',
+  borderRadius: 8,
+  border: '1px solid var(--border-default)',
+  background: 'transparent',
+  fontSize: 10.5,
+  color: 'var(--text-body)',
+  cursor: 'pointer',
 }
 
 function CollapsedChatRail({
@@ -545,7 +846,9 @@ export default function ChatPanel() {
     agents,
     messages,
     currentAgent,
+    currentScopeId,
     currentScope,
+    scopeRunStates,
     inputValue,
     isStreaming,
     streamingMessageId,
@@ -583,8 +886,12 @@ export default function ChatPanel() {
   const [selectedChannelKey, setSelectedChannelKey] = useState('local:app')
   const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
+  const [persistedScopeRuns, setPersistedScopeRuns] = useState<PersistedScopeRunSummary[]>([])
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chatInputRef = useRef<ChatInputHandle | null>(null)
+  const focusInputWithResize = useCallback(() => {
+    chatInputRef.current?.focusWithResize()
+  }, [])
 
   const currentAgentData = agents.find(a => a.name === currentAgent)
   const getScopeChannelKey = useCallback((scope: ConversationScope) => {
@@ -647,6 +954,80 @@ export default function ChatPanel() {
         return bTime - aTime
       })
   }, [getScopeChannelKey, scopes, selectedChannelKey])
+
+  const refreshPersistedScopeRuns = useCallback(async () => {
+    if (!window.electronAPI?.agent?.listScopeRuns) return
+    const result = await window.electronAPI.agent.listScopeRuns({
+      channelKey: selectedChannelKey,
+      statuses: ['planning', 'tool_running', 'checkpoint', 'takeover', 'resuming', 'responding', 'done', 'error', 'cancelled'],
+      limit: 12,
+    }).catch(() => null)
+    if (!result?.success || !Array.isArray(result.data)) return
+    setPersistedScopeRuns(result.data as PersistedScopeRunSummary[])
+  }, [selectedChannelKey])
+
+  const inMemoryTaskRuns = useMemo<TaskCardRun[]>(() => {
+    return filteredScopes
+      .map((scope) => {
+        const run = scopeRunStates[scope.id]
+        if (!run || !isTaskVisible({ ...run, scopeId: scope.id, title: scope.title, updatedAt: run.updatedAt || scope.updatedAt })) {
+          return null
+        }
+        return {
+          scopeId: scope.id,
+          phase: run.phase,
+          title: scope.title,
+          taskTitle: run.taskTitle,
+          taskSummary: run.taskSummary,
+          steps: run.steps,
+          currentStepId: run.currentStepId,
+          waitingFor: run.waitingFor,
+          resumableActions: run.resumableActions,
+          recentArtifacts: run.recentArtifacts,
+          taskContinuation: run.taskContinuation,
+          memoryCapture: run.memoryCapture,
+          blockedReason: run.blockedReason,
+          error: run.error,
+          updatedAt: run.updatedAt || scope.updatedAt,
+        } satisfies TaskCardRun
+      })
+      .filter(Boolean) as TaskCardRun[]
+  }, [filteredScopes, scopeRunStates])
+
+  const mergedTaskRuns = useMemo<TaskCardRun[]>(() => {
+    const mappedPersisted = persistedScopeRuns.map((run) => ({
+      scopeId: run.scopeId,
+      phase: run.phase,
+      title: run.title,
+      taskTitle: run.taskTitle,
+      taskSummary: run.taskSummary,
+      steps: run.steps,
+      currentStepId: run.currentStepId,
+      waitingFor: run.waitingFor,
+      resumableActions: run.resumableActions,
+      recentArtifacts: run.recentArtifacts,
+      taskContinuation: run.taskContinuation,
+      memoryCapture: run.memoryCapture,
+      blockedReason: run.blockedReason,
+      error: run.error,
+      updatedAt: run.updatedAt,
+    }))
+    const merged = new Map<string, TaskCardRun>()
+    for (const run of mappedPersisted) merged.set(run.scopeId, run)
+    for (const run of inMemoryTaskRuns) merged.set(run.scopeId, run)
+    return Array.from(merged.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  }, [inMemoryTaskRuns, persistedScopeRuns])
+
+  const currentTaskRun = useMemo(() => {
+    const currentRun = currentScopeId
+      ? mergedTaskRuns.find((item) => item.scopeId === currentScopeId) || null
+      : null
+    return currentRun && isTaskVisible(currentRun) ? currentRun : null
+  }, [currentScopeId, mergedTaskRuns])
+
+  const backgroundTaskRuns = useMemo(() => {
+    return mergedTaskRuns.filter((item) => item.scopeId !== currentScopeId)
+  }, [currentScopeId, mergedTaskRuns])
 
   const showToolTraceCapsule = toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled'
 
@@ -796,6 +1177,10 @@ export default function ChatPanel() {
   }, [currentScope, getScopeChannelKey])
 
   useEffect(() => {
+    void refreshPersistedScopeRuns()
+  }, [refreshPersistedScopeRuns, currentScopeId, scopes.length])
+
+  useEffect(() => {
     return () => {
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
     }
@@ -855,12 +1240,183 @@ export default function ChatPanel() {
     deleteConversation(convId)
   }, [deleteConversation])
 
+  const patchScopeRun = useCallback((scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState | null) => {
+    useAgent.setState((state) => {
+      const previous = state.scopeRunStates[scopeId] || null
+      const next = updater(previous)
+      if (!next) return state
+      return {
+        scopeRunStates: {
+          ...state.scopeRunStates,
+          [scopeId]: next,
+        },
+      }
+    })
+  }, [])
+
+  const applySkillExecutionDetailToScope = useCallback((scopeId: string, detail: {
+    id: string
+    skillId: string
+    status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
+    startedAt: string
+    updatedAt: string
+    currentStepId?: string | null
+    blocker?: { type: string; message: string } | null
+    steps: Array<{ stepId: string; status: string }>
+    artifacts: Array<{ id?: string; label?: string; path?: string }>
+  }) => {
+    const patch = createTaskPatchFromSkillExecutionDetail(detail)
+    const nextPhase: ScopeRunState['phase'] =
+      detail.status === 'completed'
+        ? 'done'
+        : detail.status === 'failed'
+          ? 'error'
+          : detail.status === 'cancelled'
+            ? 'cancelled'
+            : detail.status === 'blocked'
+              ? 'checkpoint'
+              : 'tool_running'
+
+    patchScopeRun(scopeId, (previous) => ({
+      ...(previous || useAgent.getState().scopeRunStates[scopeId] || {
+        ...useAgent.getState().scopeRunStates[scopeId],
+      }),
+      ...patch,
+      scopeId,
+      agent: previous?.agent || currentAgent,
+      phase: nextPhase,
+      updatedAt: detail.updatedAt,
+      taskSummary: patch.taskSummary || previous?.taskSummary || null,
+      recentArtifacts: patch.recentArtifacts || previous?.recentArtifacts || [],
+      resumableActions: patch.resumableActions || previous?.resumableActions || [],
+      waitingFor: patch.waitingFor || previous?.waitingFor || 'none',
+      memoryCapture: previous?.memoryCapture || null,
+      toolTrace: previous?.toolTrace || [],
+      startedAt: previous?.startedAt || detail.startedAt,
+      responseBuffer: previous?.responseBuffer || '',
+      stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+    }) as ScopeRunState)
+  }, [currentAgent, patchScopeRun])
+
+  const handleContinueTaskInput = useCallback((scopeId: string) => {
+    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuation = run?.taskContinuation
+    const draft = [
+      '继续当前任务。',
+      continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
+      run?.taskSummary ? `需要补充：${run.taskSummary}` : null,
+      '我的补充是：',
+    ].filter(Boolean).join('\n')
+    setInputValue(draft)
+    focusInputWithResize()
+  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
+
+  const handleSubmitTaskConfirmation = useCallback(async (scopeId: string, confirmed: boolean) => {
+    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuation = run?.taskContinuation
+    if (!continuation?.executionId || !continuation.stepId) return
+    const result = await window.electronAPI.skills.submitConfirmation({
+      executionId: continuation.executionId,
+      stepId: continuation.stepId,
+      confirmed,
+    }).catch(() => null)
+    if (result?.success && result.data) {
+      applySkillExecutionDetailToScope(scopeId, result.data)
+    }
+  }, [applySkillExecutionDetailToScope, mergedTaskRuns])
+
+  const handleSubmitTaskAgentResult = useCallback((scopeId: string) => {
+    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuation = run?.taskContinuation
+    const draft = [
+      '继续当前任务。',
+      continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
+      continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
+      run?.taskSummary ? `需要补交结果：${run.taskSummary}` : null,
+      '我的结果是：',
+    ].filter(Boolean).join('\n')
+    setInputValue(draft)
+    focusInputWithResize()
+  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
+
+  const handleRetryTask = useCallback(async (scopeId: string) => {
+    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuation = run?.taskContinuation
+    if (continuation?.executionId && continuation.stepId) {
+      const result = await window.electronAPI.skills.restartFromStep({
+        executionId: continuation.executionId,
+        stepId: continuation.stepId,
+      }).catch(() => null)
+      if (result?.success && result.data) {
+        applySkillExecutionDetailToScope(scopeId, result.data)
+        return
+      }
+    }
+    setInputValue('请重试刚才的任务，并在开始前先说明你准备怎么继续。')
+    focusInputWithResize()
+  }, [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue])
+
+  const handleCancelTask = useCallback(async (scopeId: string) => {
+    const continuation = useAgent.getState().scopeRunStates[scopeId]?.taskContinuation
+      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.taskContinuation
+    if (!continuation?.executionId) return
+    const result = await window.electronAPI.skills.cancelExecution({
+      executionId: continuation.executionId,
+    }).catch(() => null)
+    if (result?.success && result.data) {
+      applySkillExecutionDetailToScope(scopeId, result.data)
+    }
+  }, [applySkillExecutionDetailToScope, mergedTaskRuns])
+
+  const handleOpenTaskArtifact = useCallback(async (path: string) => {
+    await window.electronAPI.document.openPath(path).catch(() => undefined)
+  }, [])
+
+  const handleDismissMemoryCapture = useCallback((scopeId: string) => {
+    patchScopeRun(scopeId, (previous) => previous ? {
+      ...previous,
+      memoryCapture: previous.memoryCapture ? { ...previous.memoryCapture, status: 'dismissed' } : null,
+    } : null)
+    setPersistedScopeRuns((current) => current.map((item) =>
+      item.scopeId === scopeId && item.memoryCapture
+        ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'dismissed' } }
+        : item,
+    ))
+  }, [patchScopeRun])
+
+  const handleUndoMemoryCapture = useCallback(async (scopeId: string) => {
+    const capture = useAgent.getState().scopeRunStates[scopeId]?.memoryCapture
+      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
+    if (!capture) return
+    await Promise.all(
+      capture.items.map((item) => window.electronAPI.memory.delete(item.memoryId).catch(() => undefined)),
+    )
+    patchScopeRun(scopeId, (previous) => previous ? {
+      ...previous,
+      memoryCapture: previous.memoryCapture ? { ...previous.memoryCapture, status: 'reverted' } : null,
+    } : null)
+    setPersistedScopeRuns((current) => current.map((item) =>
+      item.scopeId === scopeId && item.memoryCapture
+        ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'reverted' } }
+        : item,
+    ))
+  }, [mergedTaskRuns, patchScopeRun])
+
+  const handleSupplementMemoryCapture = useCallback((scopeId: string) => {
+    const capture = useAgent.getState().scopeRunStates[scopeId]?.memoryCapture
+      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
+    const draft = [
+      '请记住以下长期偏好或经验：',
+      ...(capture?.items.map((item) => `- ${item.title}${item.summary ? `：${item.summary}` : ''}`) || []),
+      '',
+      '我还想补充：',
+    ].join('\n')
+    setInputValue(draft)
+    focusInputWithResize()
+  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
+
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
-
-  const focusInputWithResize = useCallback(() => {
-    chatInputRef.current?.focusWithResize()
-  }, [])
 
   useEffect(() => {
     const handler = () => {
@@ -1170,6 +1726,51 @@ export default function ChatPanel() {
             onHistoryOpen={() => { void loadScopes() }}
             formatTime={formatTime}
           />
+
+          {(currentTaskRun || backgroundTaskRuns.length > 0) && (
+            <div style={{ paddingBottom: 4 }}>
+              {currentTaskRun && (
+                <TaskSection title="当前任务">
+                  <TaskCard
+                    run={currentTaskRun}
+                    onOpenArtifact={handleOpenTaskArtifact}
+                    onDismissMemoryCapture={handleDismissMemoryCapture}
+                    onUndoMemoryCapture={handleUndoMemoryCapture}
+                    onSupplementMemoryCapture={handleSupplementMemoryCapture}
+                    onContinueInput={handleContinueTaskInput}
+                    onSubmitConfirmation={handleSubmitTaskConfirmation}
+                    onSubmitAgentResult={handleSubmitTaskAgentResult}
+                    onRetry={handleRetryTask}
+                    onCancelExecution={handleCancelTask}
+                  />
+                </TaskSection>
+              )}
+
+              {backgroundTaskRuns.length > 0 && (
+                <TaskSection title="后台任务">
+                  <div className="flex flex-col" style={{ gap: 8 }}>
+                    {backgroundTaskRuns.slice(0, 4).map((run) => (
+                      <TaskCard
+                        key={run.scopeId}
+                        run={run}
+                        compact
+                        onOpenScope={handleLoadConversation}
+                        onOpenArtifact={handleOpenTaskArtifact}
+                        onDismissMemoryCapture={handleDismissMemoryCapture}
+                        onUndoMemoryCapture={handleUndoMemoryCapture}
+                        onSupplementMemoryCapture={handleSupplementMemoryCapture}
+                        onContinueInput={handleContinueTaskInput}
+                        onSubmitConfirmation={handleSubmitTaskConfirmation}
+                        onSubmitAgentResult={handleSubmitTaskAgentResult}
+                        onRetry={handleRetryTask}
+                        onCancelExecution={handleCancelTask}
+                      />
+                    ))}
+                  </div>
+                </TaskSection>
+              )}
+            </div>
+          )}
 
           <ChatMessages
             messages={messages}

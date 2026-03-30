@@ -7,7 +7,7 @@
  * - Session summaries (what was accomplished)
  */
 
-import type { ConversationScope } from './types'
+import type { ConversationScope, ScopeRunMemoryCapture } from './types'
 import type { MemoryRepository } from '../repositories/memory-repository'
 import type { UserProfileRepository } from '../repositories/user-profile-repository'
 
@@ -15,6 +15,7 @@ export interface ReflectionResult {
   globalFacts: Array<{ title: string; content: string }>
   userPreferences: Array<{ title: string; content: string }>
   sessionSummary?: string
+  memoryCapture?: ScopeRunMemoryCapture | null
 }
 
 export interface ReflectionDeps {
@@ -38,34 +39,43 @@ export class ReflectionService {
   }): Promise<ReflectionResult> {
     // Skip reflection for very short conversations
     if (params.messages.length < 2) {
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined }
+      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
     }
 
     try {
       // Use LLM to analyze conversation
       const reflection = await this.analyzeWithLLM(params)
-
-      // Store global facts
-      for (const fact of reflection.globalFacts) {
-        await this.storeGlobalFact(fact)
-      }
+      const captureItems: NonNullable<ScopeRunMemoryCapture['items']> = []
 
       // Store user preferences
       if (params.scope.userId) {
         for (const pref of reflection.userPreferences) {
-          await this.storeUserPreference(params.scope.userId, pref)
+          const stored = await this.storeUserPreference(params.scope.userId, pref)
+          if (stored) captureItems.push(stored)
         }
       }
 
       // Store session summary
       if (reflection.sessionSummary) {
-        await this.storeSessionSummary(params.scope, reflection.sessionSummary)
+        const stored = await this.storeSessionSummary(params.scope, reflection.sessionSummary)
+        if (stored) captureItems.push(stored)
       }
 
-      return reflection
+      return {
+        ...reflection,
+        globalFacts: [],
+        memoryCapture: captureItems.length > 0
+          ? {
+            status: 'ready',
+            createdAt: new Date().toISOString(),
+            note: '已保守记录本次稳定偏好和摘要，可直接撤销或补充。',
+            items: captureItems,
+          }
+          : null,
+      }
     } catch (error) {
       console.error('[ReflectionService] Failed to reflect on conversation:', error)
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined }
+      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
     }
   }
 
@@ -91,29 +101,25 @@ ${conversationText}
 Tools used: ${params.usedTools.join(', ')}
 Success: ${params.success}
 
-Extract the following:
+Extract the following conservatively:
 
-1. **Global Facts** - Project context, technical decisions, learned patterns, important information that should be remembered across all conversations. Examples:
-   - "Project uses TypeScript and React 19"
-   - "Database is SQLite with better-sqlite3"
-   - "User prefers Tailwind CSS for styling"
-
-2. **User Preferences** - Communication style, habits, preferences specific to this user. Examples:
+1. **User Preferences** - Communication style, habits, preferences specific to this user. Examples:
    - "User prefers concise answers"
-   - "User likes to see code examples"
-   - "User works in Chinese timezone"
+   - "User wants direct delivery-oriented updates"
+   - "User prefers Chinese language"
 
-3. **Session Summary** - Brief summary of what was accomplished in this conversation (1-2 sentences).
+2. **Session Summary** - Brief summary of what was accomplished in this conversation (1-2 sentences).
 
 Return ONLY valid JSON in this exact format:
 {
-  "globalFacts": [{"title": "Short title", "content": "Detailed content"}],
+  "globalFacts": [],
   "userPreferences": [{"title": "Short title", "content": "Detailed content"}],
   "sessionSummary": "Brief summary of what was accomplished"
 }
 
 Rules:
-- Only extract facts that are clearly stated or strongly implied
+- Only extract stable preferences that should persist across future tasks
+- Ignore temporary paths, one-off requests, and project facts
 - Avoid duplicating information that's likely already known
 - Keep titles short (under 50 chars) and content concise (under 200 chars)
 - If nothing significant to extract, return empty arrays
@@ -151,13 +157,14 @@ Rules:
       const parsed = JSON.parse(jsonText)
 
       return {
-        globalFacts: Array.isArray(parsed.globalFacts) ? parsed.globalFacts : [],
+        globalFacts: [],
         userPreferences: Array.isArray(parsed.userPreferences) ? parsed.userPreferences : [],
         sessionSummary: typeof parsed.sessionSummary === 'string' ? parsed.sessionSummary : undefined,
+        memoryCapture: null,
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to parse reflection response:', error)
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined }
+      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
     }
   }
 
@@ -169,17 +176,7 @@ Rules:
     usedTools: string[]
     success: boolean
   }): ReflectionResult {
-    const globalFacts: Array<{ title: string; content: string }> = []
     const userPreferences: Array<{ title: string; content: string }> = []
-
-    // Extract tool usage patterns
-    if (params.usedTools.length > 0) {
-      const toolSummary = params.usedTools.slice(0, 3).join(', ')
-      globalFacts.push({
-        title: 'Tools Used',
-        content: `Used tools: ${toolSummary}`,
-      })
-    }
 
     // Extract user preferences from explicit statements
     const userMessages = params.messages.filter((m) => m.role === 'user')
@@ -204,44 +201,52 @@ Rules:
     }
 
     return {
-      globalFacts,
+      globalFacts: [],
       userPreferences,
       sessionSummary: params.success
         ? `Completed task using ${params.usedTools.length} tools`
         : 'Task incomplete',
+      memoryCapture: null,
     }
   }
 
-  /**
-   * Store a global fact in the memory system
-   */
-  private async storeGlobalFact(fact: { title: string; content: string }): Promise<void> {
-    try {
-      // Generate unique content key
-      const contentKey = `fact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  private normalizeValue(value: string): string {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  }
 
-      // Store content in knowledge repository
-      if (this.deps.knowledgeRepository) {
-        await this.deps.knowledgeRepository.set(contentKey, fact.content)
+  private async isDuplicateMemory(params: {
+    category: 'user_preference' | 'summary'
+    scopeId?: string | null
+    userId?: string | null
+    title: string
+    content: string
+  }): Promise<boolean> {
+    const existing = await this.deps.memoryRepository.queryMemories({
+      category: params.category,
+      scopeId: params.scopeId === undefined ? undefined : params.scopeId,
+      userId: params.userId || undefined,
+      includeArchived: false,
+      limit: 20,
+    })
+    const normalizedTitle = this.normalizeValue(params.title)
+    const normalizedContent = this.normalizeValue(params.content)
+    for (const item of existing) {
+      const sameTitle = this.normalizeValue(item.title) === normalizedTitle
+      const sameSummary = this.normalizeValue(item.summary || '') === normalizedContent
+      let sameContent = false
+      if (this.deps.knowledgeRepository?.get && item.contentKey) {
+        try {
+          const stored = await this.deps.knowledgeRepository.get(item.contentKey)
+          sameContent = this.normalizeValue(stored || '') === normalizedContent
+        } catch {
+          sameContent = false
+        }
       }
-
-      // Create memory entry
-      await this.deps.memoryRepository.createMemory({
-        layer: 'l0',
-        scopeId: null,
-        userId: null,
-        category: 'global_fact',
-        title: fact.title,
-        summary: fact.content.slice(0, 100),
-        contentKey,
-        priority: 5,
-        tags: ['auto-learned'],
-      })
-
-      console.log(`[ReflectionService] Stored global fact: ${fact.title}`)
-    } catch (error) {
-      console.error('[ReflectionService] Failed to store global fact:', error)
+      if (sameTitle && (sameSummary || sameContent)) {
+        return true
+      }
     }
+    return false
   }
 
   /**
@@ -250,8 +255,18 @@ Rules:
   private async storeUserPreference(
     userId: string,
     pref: { title: string; content: string }
-  ): Promise<void> {
+  ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
     try {
+      if (await this.isDuplicateMemory({
+        category: 'user_preference',
+        scopeId: null,
+        userId,
+        title: pref.title,
+        content: pref.content,
+      })) {
+        return null
+      }
+
       // Generate unique content key
       const contentKey = `pref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
@@ -261,7 +276,7 @@ Rules:
       }
 
       // Create memory entry
-      await this.deps.memoryRepository.createMemory({
+      const created = await this.deps.memoryRepository.createMemory({
         layer: 'l0',
         scopeId: null,
         userId,
@@ -274,8 +289,15 @@ Rules:
       })
 
       console.log(`[ReflectionService] Stored user preference for ${userId}: ${pref.title}`)
+      return {
+        memoryId: created.id,
+        category: 'user_preference',
+        title: pref.title,
+        summary: pref.content.slice(0, 100),
+      }
     } catch (error) {
       console.error('[ReflectionService] Failed to store user preference:', error)
+      return null
     }
   }
 
@@ -285,8 +307,18 @@ Rules:
   private async storeSessionSummary(
     scope: ConversationScope,
     summary: string
-  ): Promise<void> {
+  ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
     try {
+      if (await this.isDuplicateMemory({
+        category: 'summary',
+        scopeId: scope.id,
+        userId: scope.userId || null,
+        title: `Session ${new Date().toISOString().split('T')[0]}`,
+        content: summary,
+      })) {
+        return null
+      }
+
       // Generate unique content key
       const contentKey = `summary-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
@@ -298,7 +330,7 @@ Rules:
       // Create memory entry with 30-day expiry
       const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
 
-      await this.deps.memoryRepository.createMemory({
+      const created = await this.deps.memoryRepository.createMemory({
         layer: 'l1',
         scopeId: scope.id,
         userId: scope.userId || null,
@@ -312,8 +344,15 @@ Rules:
       })
 
       console.log(`[ReflectionService] Stored session summary for scope ${scope.id}`)
+      return {
+        memoryId: created.id,
+        category: 'summary',
+        title: `Session ${new Date().toISOString().split('T')[0]}`,
+        summary: summary.slice(0, 100),
+      }
     } catch (error) {
       console.error('[ReflectionService] Failed to store session summary:', error)
+      return null
     }
   }
 }

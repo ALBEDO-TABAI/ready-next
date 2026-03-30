@@ -4,6 +4,17 @@
 
 ### 新增
 
+#### Agent 长任务摘要与聊天任务区
+- scope run 新增统一任务摘要字段：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
+- 主进程新增 `agent:listScopeRuns`，renderer 刷新后可恢复当前频道的最近任务
+- ChatPanel 新增 `当前任务 / 后台任务` 两块任务视图，tool trace 胶囊退居技术细节抽屉
+- workflow skill blocker 现在会映射成聊天里的等待态，并提供继续、确认、撤销、补充等入口
+
+#### 保守自动记忆沉淀
+- ReflectionService 改为保守模式：只自动写入 `user_preference` 与 `summary`
+- 自动写入会先做重复检查，不再把 `global_fact` 当作默认沉淀目标
+- 聊天任务完成卡片可直接展示本次记忆沉淀，并支持确认、撤销、补充
+
 #### Claude Skill Workflow 执行引擎
 - 新增 `skill-execution-types.ts` 统一 skill / workflow / blocker / execution 类型
 - 新增 skill compiler / loader，支持 `advisory / workflow / legacy direct` 三态兼容
@@ -52,6 +63,7 @@
 - `direct-chat` 在视频输入场景下，为显式 `/skill`、手动阶段控制、embedded python 请求、活跃 execution 保留 tools
 - OpenAI `chat/completions` 和 `responses` 请求前会自动修复缺失的 tool response history
 - 文本工具桥接与原生 tools 现在共用同一套 skill 可见性过滤，不再把 internal action 暴露给模型
+- workflow skill 的 execution 文本结果会进一步映射为聊天侧可恢复的任务摘要，而不只是一段工具输出
 
 #### Skills Center
 - 技能中心新增 Recent Executions 区域与 execution detail 卡片

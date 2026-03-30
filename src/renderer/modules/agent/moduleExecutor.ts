@@ -1,7 +1,7 @@
 import { requestModuleAgentAction } from '../../utils/moduleAgentBridge'
 import { createAgentArtifact, mergeArtifacts } from './scopeRunState'
 import { mapToolActionToDocAction, performDocAction } from './documentActions'
-import type { AgentArtifact, AgentModuleKind, ScopeRunState, ToolTraceEvent } from './types'
+import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
   if (tool === 'rss.analyzeItem') return 'pipeline'
@@ -30,6 +30,26 @@ function normalizeArtifacts(
         : null)
       .filter(Boolean) as AgentArtifact[]
     : []
+}
+
+function createSingleStepTask(title: string, detail: string, timestamp: string, status: ScopeRunState['phase'] = 'tool_running'): Pick<
+  ScopeRunState,
+  'taskTitle' | 'taskSummary' | 'steps' | 'currentStepId' | 'waitingFor' | 'resumableActions'
+> {
+  const stepStatus: ScopeRunTaskStepStatus = status === 'error' ? 'error' : status === 'done' ? 'done' : 'running'
+  return {
+    taskTitle: title,
+    taskSummary: detail,
+    steps: [{
+      id: 'execute',
+      title: detail,
+      status: stepStatus,
+      updatedAt: timestamp,
+    }],
+    currentStepId: 'execute',
+    waitingFor: 'none',
+    resumableActions: ['cancel'],
+  }
 }
 
 interface HandleModuleToolActionParams {
@@ -108,6 +128,15 @@ export async function executeModuleToolAction(
       styleSystem: patch?.styleSystem ?? previous?.styleSystem ?? null,
       reviewFailures: patch?.reviewFailures ?? previous?.reviewFailures ?? [],
       lastAcceptedScreenshot: patch?.lastAcceptedScreenshot ?? previous?.lastAcceptedScreenshot ?? null,
+      taskTitle: patch?.taskTitle ?? previous?.taskTitle ?? null,
+      taskSummary: patch?.taskSummary ?? previous?.taskSummary ?? null,
+      steps: patch?.steps ?? previous?.steps ?? [],
+      currentStepId: patch?.currentStepId ?? previous?.currentStepId ?? null,
+      waitingFor: patch?.waitingFor ?? previous?.waitingFor ?? 'none',
+      resumableActions: patch?.resumableActions ?? previous?.resumableActions ?? [],
+      recentArtifacts: mergeArtifacts(previous?.recentArtifacts, patch?.recentArtifacts),
+      taskContinuation: patch?.taskContinuation ?? previous?.taskContinuation ?? null,
+      memoryCapture: patch?.memoryCapture ?? previous?.memoryCapture ?? null,
       error: previous?.error || null,
       ...patch,
     }))
@@ -168,6 +197,7 @@ export async function executeModuleToolAction(
       ownerResourceId: path,
       artifactRefs: artifact ? [artifact] : [],
       lastEvidenceAt: new Date().toISOString(),
+      ...createSingleStepTask('文档任务', `写入文档：${path}`, new Date().toISOString()),
     })
     return {
       handled: true,
@@ -187,6 +217,7 @@ export async function executeModuleToolAction(
       intent: tool,
       executionKind: 'deterministic',
       lastEvidenceAt: new Date().toISOString(),
+      ...createSingleStepTask('文档任务', summary, new Date().toISOString()),
     })
     return {
       handled: true,
@@ -200,7 +231,11 @@ export async function executeModuleToolAction(
   if (tool.startsWith('rss.') || tool.startsWith('calendar.')) {
     const module = tool.startsWith('rss.') ? 'rss' : 'calendar'
     activateWorkbenchMode(module)
-    pushTrace('call', `执行 ${tool}`, 'tool_running', { module, executionKind: toExecutionKind(tool) })
+    pushTrace('call', `执行 ${tool}`, 'tool_running', {
+      module,
+      executionKind: toExecutionKind(tool),
+      ...createSingleStepTask(module === 'rss' ? 'RSS 任务' : '日程任务', `执行 ${tool}`, new Date().toISOString()),
+    })
     const progress = (event: Record<string, unknown>) => {
       const kind = event.kind === 'call' ? 'call' : 'result'
       const text = typeof event.text === 'string' ? event.text : ''
@@ -210,18 +245,12 @@ export async function executeModuleToolAction(
         executionKind: toExecutionKind(tool),
       })
     }
-    const currentScopeRunState = getScopeRunState?.()
-    let payload: Record<string, unknown>
-    try {
-      payload = await dispatchModuleAction(module, tool, {
-        ...args,
-        __scopeRunId: runId,
-        __scopeId: scopeId,
-        ...(progress ? { __onProgress: progress } : {}),
-      })
-    } catch (error) {
-      throw error
-    }
+    const payload = await dispatchModuleAction(module, tool, {
+      ...args,
+      __scopeRunId: runId,
+      __scopeId: scopeId,
+      ...(progress ? { __onProgress: progress } : {}),
+    })
     if (Array.isArray(payload.toolEvents) && payload.streamedToolEvents !== true) {
       for (const event of payload.toolEvents) {
         if (!event || typeof event !== 'object') continue
@@ -243,6 +272,7 @@ export async function executeModuleToolAction(
       artifactRefs: artifacts,
       ownerResourceId: typeof payload.ownerResourceId === 'string' ? payload.ownerResourceId : null,
       lastEvidenceAt: new Date().toISOString(),
+      ...createSingleStepTask(module === 'rss' ? 'RSS 任务' : '日程任务', String(payload.summary || `${tool} 已完成`), new Date().toISOString()),
     })
     return {
       handled: true,

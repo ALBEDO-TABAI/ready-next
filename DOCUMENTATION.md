@@ -118,6 +118,11 @@ Ready 采用 Electron 三层架构：
 ### 7.1 Scope 粒度
 会话按“来源频道 + 线程/本地 conversation + agent”隔离。
 
+### 7.1b Scope Run 摘要
+- 主进程会为最近 scope run 维护任务摘要，供聊天面板刷新后恢复最近任务。
+- 统一任务字段包括：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
+- Browser Agent V7 阶段会直接投影成步骤；workflow skill blocker 会映射成 `input / confirmation / agent_result` 等等待态。
+
 ### 7.2 附件安全边界
 - 图片/文件消息先进入会话资源层
 - 不能伪造成一条普通文本消息直接触发 agent
@@ -153,6 +158,12 @@ Ready 采用 Electron 三层架构：
 - 技能说明更新与删除/移除操作
 - Recent Executions 区域，展示 status / current step / blocker / recent artifacts
 - 在 blocker 为 `need_input / need_confirmation / need_agent_result` 时直接继续提交 execution
+
+### 8.3b ChatPanel 任务区
+- Agent 聊天面板新增 `当前任务 / 后台任务` 两块任务视图，不再只靠 tool trace 胶囊表达进度。
+- `当前任务` 优先显示当前 scope 的活动任务或刚完成任务。
+- `后台任务` 按当前频道来源显示最近仍活跃、阻塞中、或刚完成的 scope run。
+- 若任务带有 `memoryCapture`，聊天里会直接展示本次自动沉淀的偏好/摘要，并支持确认、撤销、补充。
 
 ### 8.4 Workflow Skill 协议
 - `ready-skill.json` 负责 skill 元信息、actions、visibility、execution mode

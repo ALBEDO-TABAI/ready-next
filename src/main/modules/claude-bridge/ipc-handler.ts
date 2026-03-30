@@ -264,6 +264,31 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:listScopeRuns', (_, payload?: {
+    channelKey?: string
+    statuses?: string[]
+    limit?: number
+  }): IPCResponse => {
+    try {
+      const statuses = Array.isArray(payload?.statuses)
+        ? payload?.statuses.filter((item): item is 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled' =>
+          item === 'queued' ||
+          item === 'planning' ||
+          item === 'tool_running' ||
+          item === 'checkpoint' ||
+          item === 'takeover' ||
+          item === 'resuming' ||
+          item === 'responding' ||
+          item === 'done' ||
+          item === 'error' ||
+          item === 'cancelled')
+        : undefined
+      return { success: true, data: runtime!.listScopeRuns({ ...payload, statuses }) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('agent:getConversationScopeMessages', (_, payload: { scopeId: string }): IPCResponse => {
     try {
       return { success: true, data: runtime!.getConversationScopeMessages(payload.scopeId) }
@@ -754,7 +779,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       if (data.sessionId) {
         const timestamp = new Date().toISOString()
         if (data.type === 'tool_use' || data.type === 'tool_result') {
-          mainWindow.webContents.send('agent:scopeRunEvent', {
+          const payload = {
             type: 'updated',
             scopeId: data.sessionId,
             agent: data.agent,
@@ -768,18 +793,22 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               timestamp,
             },
             timestamp,
-          })
+          } as const
+          runtime?.recordScopeRunEvent(payload)
+          mainWindow.webContents.send('agent:scopeRunEvent', payload)
         } else if (data.type === 'done') {
-          mainWindow.webContents.send('agent:scopeRunEvent', {
+          const payload = {
             type: 'finished',
             scopeId: data.sessionId,
             agent: data.agent,
             runId: data.runId,
             phase: 'done',
             timestamp,
-          })
+          } as const
+          runtime?.recordScopeRunEvent(payload)
+          mainWindow.webContents.send('agent:scopeRunEvent', payload)
         } else if (data.type === 'text') {
-          mainWindow.webContents.send('agent:scopeRunEvent', {
+          const payload = {
             type: 'updated',
             scopeId: data.sessionId,
             agent: data.agent,
@@ -787,7 +816,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             phase: 'responding',
             latestText: data.chunk || '',
             timestamp,
-          })
+          } as const
+          runtime?.recordScopeRunEvent(payload)
+          mainWindow.webContents.send('agent:scopeRunEvent', payload)
         }
       }
     }
@@ -806,7 +837,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               : data.status === 'error'
                 ? 'error'
                 : 'queued'
-        mainWindow.webContents.send('agent:scopeRunEvent', {
+        const payload = {
           type: data.status === 'working' ? 'started' : data.status === 'done' || data.status === 'cancelled' || data.status === 'error' ? 'finished' : 'updated',
           scopeId: data.sessionId,
           agent: data.agent,
@@ -814,7 +845,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           phase,
           latestText: typeof data.status === 'string' ? `状态：${data.status}` : undefined,
           timestamp: new Date().toISOString(),
-        })
+        } as const
+        runtime?.recordScopeRunEvent(payload)
+        mainWindow.webContents.send('agent:scopeRunEvent', payload)
       }
     }
   })
@@ -823,7 +856,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:error', data)
       if (data.sessionId) {
-        mainWindow.webContents.send('agent:scopeRunEvent', {
+        const payload = {
           type: 'finished',
           scopeId: data.sessionId,
           agent: data.agent,
@@ -832,7 +865,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           error: data.error,
           latestText: data.error,
           timestamp: new Date().toISOString(),
-        })
+        } as const
+        runtime?.recordScopeRunEvent(payload)
+        mainWindow.webContents.send('agent:scopeRunEvent', payload)
       }
     }
   })

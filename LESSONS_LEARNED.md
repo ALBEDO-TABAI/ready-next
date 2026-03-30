@@ -26,6 +26,11 @@
 - 仅靠 stdout/stderr 会迫使宿主猜结果，agent_task 也拿不到稳定 source materials。
 - 更稳的方式是让 wrapper 通过 `READY_SKILL_RESULT_PATH` 写回 `SkillActionResult`，stdout 只做日志，不做主协议。
 
+### 1.6 长任务不能只显示粗粒度 phase
+- 只有 `planning / tool_running / done` 这类粗粒度状态时，聊天面板很难解释“现在卡在哪一步”“还能怎么继续”。
+- 更稳的做法是把浏览器阶段、workflow blocker、最近产物和自动沉淀结果统一投影成宿主管理的任务摘要。
+- 这层摘要最好由主进程保留最近状态，renderer 刷新后直接恢复，不要只依赖前端内存。
+
 ## 2. BrowserView 与前端壳层经验
 ### 2.1 BrowserView 是原生覆盖层
 - BrowserView 不受 DOM `z-index` 控制。
@@ -114,6 +119,14 @@
 ### 3.5 视频输入不该一刀切关掉 tools
 - 之前只要会话里残留视频，tools 就会被整体关闭，导致 Claude 明明具备 skill / Python 能力却回答“做不到”。
 - 更稳的 gating 是：普通多模态轮次可降级，但显式 `/skill`、手动阶段控制、embedded python、活跃 execution 必须保留工具面。
+
+### 3.6 Browser 阶段最好直接暴露给用户
+- Browser Agent V7 已经有稳定阶段顺序，但如果只把这些阶段写到日志或 tool trace，用户仍然不知道当前处于“确认附件”“填写提示词”还是“结果复核”。
+- 更稳的方式是把阶段名直接投影到聊天任务卡里，并在刷新后保持最近任务摘要。
+
+### 3.7 自动记忆必须保守
+- 会话结束后自动沉淀确实能提升下一轮表现，但如果把一次性上下文、临时路径、偶发要求也写成长期记忆，后续任务会越来越偏。
+- 首版更稳的边界是只自动写入 `user_preference` 和 `summary`，并且允许在聊天里直接撤销或补充。
 
 ## 4. 远程 IM 经验
 ### 4.1 “已连接”不等于真的在线

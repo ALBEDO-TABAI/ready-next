@@ -201,6 +201,61 @@ interface ScopeRunContextBudgetData {
   droppedRefs: string[]
 }
 
+type ScopeRunTaskStepStatusData = 'pending' | 'running' | 'blocked' | 'done' | 'error'
+type ScopeRunWaitingForData = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+type ScopeRunResumableActionData = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
+
+interface ScopeRunTaskStepData {
+  id: string
+  title: string
+  status: ScopeRunTaskStepStatusData
+  detail?: string | null
+  updatedAt: string
+}
+
+interface ScopeRunTaskContinuationData {
+  executionId: string
+  stepId?: string | null
+  blockerType?: string | null
+}
+
+interface ScopeRunMemoryCaptureItemData {
+  memoryId: string
+  category: 'user_preference' | 'summary'
+  title: string
+  summary?: string | null
+}
+
+interface ScopeRunMemoryCaptureData {
+  status: 'ready' | 'dismissed' | 'reverted'
+  createdAt: string
+  note?: string | null
+  items: ScopeRunMemoryCaptureItemData[]
+}
+
+interface ScopeRunSummaryData {
+  scopeId: string
+  agent: string
+  title: string
+  sourceKind: ConversationSourceKind
+  sourceId: string
+  channelKey: string
+  threadKey: string
+  phase: ScopeRunEventData['phase']
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunTaskStepData[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingForData
+  resumableActions?: ScopeRunResumableActionData[]
+  recentArtifacts?: ScopeRunEventData['artifactRefs']
+  taskContinuation?: ScopeRunTaskContinuationData | null
+  memoryCapture?: ScopeRunMemoryCaptureData | null
+  blockedReason?: string | null
+  error?: string | null
+  updatedAt: string
+}
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -235,6 +290,15 @@ interface ScopeRunEventData {
   controllerId?: string
   ownerTabId?: string
   checkpointExpiresAt?: number
+  taskTitle?: string
+  taskSummary?: string
+  steps?: ScopeRunTaskStepData[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingForData
+  resumableActions?: ScopeRunResumableActionData[]
+  recentArtifacts?: ScopeRunEventData['artifactRefs']
+  taskContinuation?: ScopeRunTaskContinuationData | null
+  memoryCapture?: ScopeRunMemoryCaptureData | null
   stepMetrics?: {
     toolCalls: number
     toolResults: number
@@ -259,6 +323,7 @@ interface ElectronAgentAPI {
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
+  listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
   getConversationScopeMessages: (scopeId: string) => Promise<IPCResponse<ConversationScopeMessageData[]>>
   createLocalScope: (agent: string) => Promise<IPCResponse<ConversationScopeData>>
   listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>

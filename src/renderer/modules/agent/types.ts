@@ -132,6 +132,38 @@ export interface AgentArtifact {
   meta?: Record<string, unknown>
 }
 
+export type ScopeRunTaskStepStatus = 'pending' | 'running' | 'blocked' | 'done' | 'error'
+export type ScopeRunWaitingFor = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+export type ScopeRunResumableAction = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
+
+export interface ScopeRunTaskStep {
+  id: string
+  title: string
+  status: ScopeRunTaskStepStatus
+  detail?: string | null
+  updatedAt: string
+}
+
+export interface ScopeRunTaskContinuation {
+  executionId: string
+  stepId?: string | null
+  blockerType?: string | null
+}
+
+export interface ScopeRunMemoryCaptureItem {
+  memoryId: string
+  category: 'user_preference' | 'summary'
+  title: string
+  summary?: string | null
+}
+
+export interface ScopeRunMemoryCapture {
+  status: 'ready' | 'dismissed' | 'reverted'
+  createdAt: string
+  note?: string | null
+  items: ScopeRunMemoryCaptureItem[]
+}
+
 export interface ScopeRunStepMetrics {
   toolCalls: number
   toolResults: number
@@ -175,6 +207,15 @@ export interface ScopeRunState {
   styleSystem?: DesignStyleSystem | null
   reviewFailures?: string[]
   lastAcceptedScreenshot?: string | null
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunTaskStep[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingFor
+  resumableActions?: ScopeRunResumableAction[]
+  recentArtifacts?: AgentArtifact[]
+  taskContinuation?: ScopeRunTaskContinuation | null
+  memoryCapture?: ScopeRunMemoryCapture | null
 }
 
 export interface AttachmentPreviewState {

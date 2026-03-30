@@ -185,6 +185,61 @@ export interface ScopeRunContextBudget {
   droppedRefs: string[]
 }
 
+export type ScopeRunTaskStepStatus = 'pending' | 'running' | 'blocked' | 'done' | 'error'
+export type ScopeRunWaitingFor = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+export type ScopeRunResumableAction = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
+
+export interface ScopeRunTaskStep {
+  id: string
+  title: string
+  status: ScopeRunTaskStepStatus
+  detail?: string | null
+  updatedAt: string
+}
+
+export interface ScopeRunTaskContinuation {
+  executionId: string
+  stepId?: string | null
+  blockerType?: string | null
+}
+
+export interface ScopeRunMemoryCaptureItem {
+  memoryId: string
+  category: 'user_preference' | 'summary'
+  title: string
+  summary?: string | null
+}
+
+export interface ScopeRunMemoryCapture {
+  status: 'ready' | 'dismissed' | 'reverted'
+  createdAt: string
+  note?: string | null
+  items: ScopeRunMemoryCaptureItem[]
+}
+
+export interface ScopeRunSummary {
+  scopeId: string
+  agent: string
+  title: string
+  sourceKind: ConversationSourceKind
+  sourceId: string
+  channelKey: string
+  threadKey: string
+  phase: ScopeRunEventPayload['phase']
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunTaskStep[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingFor
+  resumableActions?: ScopeRunResumableAction[]
+  recentArtifacts?: ScopeRunEventPayload['artifactRefs']
+  taskContinuation?: ScopeRunTaskContinuation | null
+  memoryCapture?: ScopeRunMemoryCapture | null
+  blockedReason?: string | null
+  error?: string | null
+  updatedAt: string
+}
+
 export interface ScopeRunEventPayload {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -219,6 +274,26 @@ export interface ScopeRunEventPayload {
   controllerId?: string
   ownerTabId?: string
   checkpointExpiresAt?: number
+  taskTitle?: string
+  taskSummary?: string
+  steps?: ScopeRunTaskStep[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingFor
+  resumableActions?: ScopeRunResumableAction[]
+  recentArtifacts?: Array<{
+    id: string
+    module: string
+    kind: string
+    label: string
+    path?: string | null
+    url?: string | null
+    mimeType?: string | null
+    sourceRunId?: string | null
+    createdAt: string
+    meta?: Record<string, unknown>
+  }>
+  taskContinuation?: ScopeRunTaskContinuation | null
+  memoryCapture?: ScopeRunMemoryCapture | null
   stepMetrics?: {
     toolCalls: number
     toolResults: number

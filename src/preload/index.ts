@@ -19,6 +19,8 @@ const agentAPI = {
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
+  listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
+    ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
   getConversationScopeMessages: (scopeId: string) =>
     ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
   createLocalScope: (agent: string) => ipcRenderer.invoke('agent:createLocalScope', { agent }),

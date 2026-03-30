@@ -5,7 +5,13 @@ import type {
   AgentModuleKind,
   AgentTriggerHit,
   ModuleExecutionKind,
+  ScopeRunMemoryCapture,
+  ScopeRunResumableAction,
   ScopeRunState,
+  ScopeRunTaskContinuation,
+  ScopeRunTaskStep,
+  ScopeRunTaskStepStatus,
+  ScopeRunWaitingFor,
   ToolTraceEvent,
 } from './types'
 
@@ -185,6 +191,360 @@ export function mergeArtifacts(
   return merged
 }
 
+const BROWSER_STEP_TITLES: Record<string, string> = {
+  resolve_target_page: '确认目标页',
+  resolve_attachment: '确认附件',
+  navigate_target: '进入目标页',
+  ensure_upload: '上传附件',
+  ensure_prompt: '填写提示词',
+  submit: '提交执行',
+  final_reconcile: '结果复核',
+  recover: '恢复页面',
+}
+
+const BROWSER_STEP_IDS_BY_TITLE = Object.fromEntries(
+  Object.entries(BROWSER_STEP_TITLES).map(([id, title]) => [title, id]),
+) as Record<string, string>
+
+function toTaskStepStatus(value: string): ScopeRunTaskStepStatus {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'done' || normalized === 'completed' || normalized === 'success') return 'done'
+  if (normalized === 'running' || normalized === 'in_progress' || normalized === 'active') return 'running'
+  if (normalized === 'blocked' || normalized === 'waiting' || normalized === 'paused') return 'blocked'
+  if (normalized === 'error' || normalized === 'failed' || normalized === 'cancelled') return 'error'
+  return 'pending'
+}
+
+function normalizeWaitingFor(value: unknown): ScopeRunWaitingFor {
+  const normalized = String(value || '').trim()
+  if (normalized === 'input' || normalized === 'confirmation' || normalized === 'agent_result' || normalized === 'background') {
+    return normalized
+  }
+  return 'none'
+}
+
+function normalizeResumableActions(value: unknown): ScopeRunResumableAction[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => String(item || '').trim())
+    .filter((item): item is ScopeRunResumableAction =>
+      item === 'continue' || item === 'retry' || item === 'open_artifact' || item === 'cancel' || item === 'none',
+    )
+}
+
+function normalizeTaskSteps(input: unknown, timestamp: string): ScopeRunTaskStep[] {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const record = item as Record<string, unknown>
+      const id = String(record.id || '').trim()
+      const title = String(record.title || id || '').trim()
+      if (!id || !title) return null
+      return {
+        id,
+        title,
+        status: toTaskStepStatus(String(record.status || 'pending')),
+        detail: typeof record.detail === 'string' ? record.detail : null,
+        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : timestamp,
+      } satisfies ScopeRunTaskStep
+    })
+    .filter(Boolean) as ScopeRunTaskStep[]
+}
+
+function mergeTaskSteps(previous: ScopeRunTaskStep[] | undefined, nextSteps: ScopeRunTaskStep[] | undefined): ScopeRunTaskStep[] {
+  if (!nextSteps || nextSteps.length === 0) return previous || []
+  const merged = [...(previous || [])]
+  for (const step of nextSteps) {
+    const existingIndex = merged.findIndex((item) => item.id === step.id)
+    if (existingIndex >= 0) {
+      merged[existingIndex] = {
+        ...merged[existingIndex],
+        ...step,
+      }
+    } else {
+      merged.push(step)
+    }
+  }
+  return merged
+}
+
+function buildRecentArtifacts(artifacts: AgentArtifact[] | undefined): AgentArtifact[] {
+  return (artifacts || []).slice(-4)
+}
+
+function parseMemoryCapture(input: unknown): ScopeRunMemoryCapture | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  const items = Array.isArray(record.items)
+    ? record.items
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        const value = item as Record<string, unknown>
+        const memoryId = String(value.memoryId || '').trim()
+        const category = String(value.category || '').trim()
+        const title = String(value.title || '').trim()
+        if (!memoryId || !title || (category !== 'user_preference' && category !== 'summary')) return null
+        return {
+          memoryId,
+          category,
+          title,
+          summary: typeof value.summary === 'string' ? value.summary : null,
+        }
+      })
+      .filter(Boolean) as ScopeRunMemoryCapture['items']
+    : []
+  if (items.length === 0) return null
+  return {
+    status: record.status === 'dismissed' || record.status === 'reverted' ? record.status : 'ready',
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
+    note: typeof record.note === 'string' ? record.note : null,
+    items,
+  }
+}
+
+function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  const executionId = String(record.executionId || '').trim()
+  if (!executionId) return null
+  return {
+    executionId,
+    stepId: typeof record.stepId === 'string' ? record.stepId : null,
+    blockerType: typeof record.blockerType === 'string' ? record.blockerType : null,
+  }
+}
+
+function parseBrowserWorkflowTask(
+  text: string,
+  previous: ScopeRunState | null,
+  timestamp: string,
+): Partial<ScopeRunState> | null {
+  const planTargetMatch = text.match(/\[计划\]\s*目标：([^\n]+)/)
+  const planOrderMatch = text.match(/\[计划\]\s*顺序：([^\n]+)/)
+  if (planTargetMatch && planOrderMatch) {
+    const stepIds = planOrderMatch[1]
+      .split('->')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    return {
+      taskTitle: planTargetMatch[1].trim(),
+      taskSummary: '准备开始浏览器任务',
+      steps: stepIds.map((id) => ({
+        id,
+        title: BROWSER_STEP_TITLES[id] || id,
+        status: 'pending' as const,
+        updatedAt: timestamp,
+      })),
+      currentStepId: null,
+      waitingFor: 'none',
+      resumableActions: ['cancel'],
+    }
+  }
+
+  const stageMatch = text.match(/\[阶段\]\s*步骤\s*(\d+)\/(\d+)\s*([^：:]+)[：:]\s*(.+)$/)
+  if (!stageMatch) return null
+  const currentIndex = Math.max(0, Number(stageMatch[1]) - 1)
+  const title = stageMatch[3].trim()
+  const detail = stageMatch[4].trim()
+  const previousSteps = previous?.steps || []
+  const nextSteps = previousSteps.length > 0
+    ? previousSteps.map((step, index) => ({
+      ...step,
+      status: (index < currentIndex ? 'done' : index === currentIndex ? 'running' : 'pending') as ScopeRunTaskStepStatus,
+      detail: index === currentIndex ? detail : step.detail || null,
+      updatedAt: index <= currentIndex ? timestamp : step.updatedAt,
+    }))
+    : Array.from({ length: Number(stageMatch[2]) || currentIndex + 1 }).map((_, index) => {
+      const id = index === currentIndex
+        ? (BROWSER_STEP_IDS_BY_TITLE[title] || `step_${index + 1}`)
+        : `step_${index + 1}`
+      return {
+        id,
+        title: index === currentIndex ? title : `步骤 ${index + 1}`,
+        status: index < currentIndex ? 'done' : index === currentIndex ? 'running' : 'pending',
+        detail: index === currentIndex ? detail : null,
+        updatedAt: timestamp,
+      } satisfies ScopeRunTaskStep
+    })
+
+  return {
+    taskTitle: previous?.taskTitle || '浏览器任务',
+    taskSummary: `${title}：${detail}`,
+    steps: nextSteps,
+    currentStepId: nextSteps[currentIndex]?.id || null,
+    waitingFor: 'none',
+    resumableActions: ['cancel'],
+  }
+}
+
+function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
+  if (blockerType === 'need_input') return 'input'
+  if (blockerType === 'need_confirmation') return 'confirmation'
+  if (blockerType === 'need_agent_result') return 'agent_result'
+  return blockerType ? 'background' : 'none'
+}
+
+function createArtifactFromPath(pathOrLabel: string, fallbackRunId: string | null, timestamp: string): AgentArtifact {
+  return {
+    id: generateArtifactId(),
+    module: 'system',
+    kind: 'artifact',
+    label: pathOrLabel,
+    path: pathOrLabel.startsWith('/') ? pathOrLabel : null,
+    url: null,
+    mimeType: null,
+    sourceRunId: fallbackRunId,
+    createdAt: timestamp,
+  }
+}
+
+interface SkillExecutionTaskInput {
+  executionId: string
+  skillId: string
+  status: string
+  currentStepId?: string | null
+  blockerType?: string | null
+  blockerMessage?: string | null
+  steps: ScopeRunTaskStep[]
+  artifacts: AgentArtifact[]
+}
+
+function buildTaskPatchFromSkillExecutionTask(
+  input: SkillExecutionTaskInput,
+): Partial<ScopeRunState> {
+  const waitingFor = toSkillWaitingFor(input.blockerType || null)
+  const resumableActions: ScopeRunResumableAction[] = []
+  if (waitingFor !== 'none') resumableActions.push('continue')
+  if (input.artifacts.length > 0) resumableActions.push('open_artifact')
+  if (input.status === 'failed' || input.status === 'cancelled') resumableActions.push('retry')
+  resumableActions.push('cancel')
+
+  return {
+    taskTitle: `技能执行 · ${input.skillId}`,
+    taskSummary: input.blockerMessage || `当前步骤：${input.currentStepId || '进行中'}`,
+    steps: input.steps,
+    currentStepId: input.currentStepId || null,
+    waitingFor,
+    resumableActions,
+    taskContinuation: {
+      executionId: input.executionId,
+      stepId: input.currentStepId || null,
+      blockerType: input.blockerType || null,
+    },
+    recentArtifacts: buildRecentArtifacts(input.artifacts),
+  }
+}
+
+export function createTaskPatchFromSkillExecutionDetail(
+  detail: {
+    id: string
+    skillId: string
+    status: string
+    currentStepId?: string | null
+    blocker?: { type: string; message: string } | null
+    steps?: Array<{ stepId: string; status: string }>
+    artifacts?: Array<{ id?: string; label?: string; path?: string | null }>
+  },
+  timestamp = new Date().toISOString(),
+): Partial<ScopeRunState> {
+  return buildTaskPatchFromSkillExecutionTask({
+    executionId: detail.id,
+    skillId: detail.skillId,
+    status: detail.status,
+    currentStepId: detail.currentStepId || null,
+    blockerType: detail.blocker?.type || null,
+    blockerMessage: detail.blocker?.message || null,
+    steps: (detail.steps || []).map((step) => ({
+      id: step.stepId,
+      title: step.stepId,
+      status: toTaskStepStatus(step.status),
+      updatedAt: timestamp,
+    })),
+    artifacts: (detail.artifacts || []).map((artifact) => ({
+      id: String(artifact.id || generateArtifactId()),
+      module: 'system',
+      kind: 'artifact',
+      label: String(artifact.label || artifact.path || artifact.id || 'artifact'),
+      path: typeof artifact.path === 'string' ? artifact.path : null,
+      url: null,
+      mimeType: null,
+      sourceRunId: detail.id,
+      createdAt: timestamp,
+    })),
+  })
+}
+
+function parseSkillExecutionTaskFromText(text: string, previous: ScopeRunState | null, timestamp: string): Partial<ScopeRunState> | null {
+  if (!/Execution ID:\s*/.test(text) || !/Skill:\s*/.test(text)) return null
+  const executionId = text.match(/^Execution ID:\s*(.+)$/m)?.[1]?.trim() || ''
+  const skillId = text.match(/^Skill:\s*(.+)$/m)?.[1]?.trim() || ''
+  if (!executionId || !skillId) return null
+  const status = text.match(/^Status:\s*(.+)$/m)?.[1]?.trim() || 'running'
+  const currentStepId = text.match(/^Current step:\s*(.+)$/m)?.[1]?.trim() || previous?.currentStepId || null
+  const blockerMatch = text.match(/^Blocker:\s*([^-\n]+)-\s*(.+)$/m)
+  const blockerType = blockerMatch?.[1]?.trim() || null
+  const blockerMessage = blockerMatch?.[2]?.trim() || null
+  const recentSteps = text.match(/^Recent steps:\s*(.+)$/m)?.[1]?.trim() || ''
+  const steps = recentSteps
+    ? recentSteps.split(',').map((part) => part.trim()).filter(Boolean).map((part) => {
+      const match = part.match(/^(.+)\((.+)\)$/)
+      const id = (match?.[1] || part).trim()
+      return {
+        id,
+        title: id,
+        status: toTaskStepStatus((match?.[2] || 'pending').trim()),
+        updatedAt: timestamp,
+      } satisfies ScopeRunTaskStep
+    })
+    : previous?.steps || []
+  const recentArtifactsLine = text.match(/^Recent artifacts:\s*(.+)$/m)?.[1]?.trim() || ''
+  const artifacts = recentArtifactsLine
+    ? recentArtifactsLine.split(',').map((item) => item.trim()).filter(Boolean).map((item) => createArtifactFromPath(item, previous?.requestId || null, timestamp))
+    : previous?.recentArtifacts || []
+
+  return buildTaskPatchFromSkillExecutionTask({
+    executionId,
+    skillId,
+    status,
+    currentStepId,
+    blockerType,
+    blockerMessage,
+    steps,
+    artifacts,
+  })
+}
+
+function finalizeTaskState(
+  phase: ScopeRunState['phase'],
+  previous: ScopeRunState | null,
+  patch: Partial<ScopeRunState>,
+  timestamp: string,
+): void {
+  const steps = patch.steps || previous?.steps || []
+  if (steps.length === 0) return
+  if (phase === 'done') {
+    patch.steps = steps.map((step) => ({
+      ...step,
+      status: step.status === 'error' ? step.status : 'done',
+      updatedAt: timestamp,
+    }))
+    patch.waitingFor = 'none'
+    patch.resumableActions = (patch.recentArtifacts || previous?.recentArtifacts || []).length > 0 ? ['open_artifact'] : ['none']
+    patch.taskSummary = patch.taskSummary || previous?.taskSummary || '任务已完成'
+  } else if (phase === 'error' || phase === 'cancelled') {
+    const currentStepId = patch.currentStepId || previous?.currentStepId
+    patch.steps = steps.map((step) => ({
+      ...step,
+      status: step.id === currentStepId ? 'error' : step.status,
+      updatedAt: step.id === currentStepId ? timestamp : step.updatedAt,
+    }))
+    patch.waitingFor = 'none'
+    patch.resumableActions = ['retry', 'cancel']
+    patch.taskSummary = patch.taskSummary || previous?.taskSummary || (phase === 'error' ? '任务执行失败' : '任务已取消')
+  }
+}
+
 export function createEmptyScopeRunState(params: {
   scopeId: string
   agent: string
@@ -229,6 +589,15 @@ export function createEmptyScopeRunState(params: {
     styleSystem: null,
     reviewFailures: [],
     lastAcceptedScreenshot: null,
+    taskTitle: null,
+    taskSummary: null,
+    steps: [],
+    currentStepId: null,
+    waitingFor: 'none',
+    resumableActions: [],
+    recentArtifacts: [],
+    taskContinuation: null,
+    memoryCapture: null,
   }
 }
 
@@ -266,6 +635,26 @@ export function deriveScopeRunStatePatch(
     : []
   const structuredTriggerHits = triggerInputs.map(createTriggerHit).filter(Boolean) as AgentTriggerHit[]
   const structuredBudget = parseContextBudget(structuredPayload?.contextBudget)
+  const structuredTaskTitle = typeof structuredPayload?.taskTitle === 'string' ? structuredPayload.taskTitle : null
+  const structuredTaskSummary = typeof structuredPayload?.taskSummary === 'string' ? structuredPayload.taskSummary : null
+  const structuredSteps = normalizeTaskSteps(structuredPayload?.steps, event.timestamp)
+  const structuredWaitingFor = normalizeWaitingFor(structuredPayload?.waitingFor)
+  const structuredResumableActions = normalizeResumableActions(structuredPayload?.resumableActions)
+  const structuredRecentArtifacts = Array.isArray(structuredPayload?.recentArtifacts)
+    ? (structuredPayload.recentArtifacts as Array<Record<string, unknown>>)
+      .map((item) => createAgentArtifact(item, structuredModule || previous?.module || 'system', previous?.requestId || null))
+      .filter(Boolean) as AgentArtifact[]
+    : []
+  const structuredContinuation = parseTaskContinuation(structuredPayload?.taskContinuation)
+  const structuredMemoryCapture = parseMemoryCapture(structuredPayload?.memoryCapture)
+  const browserTaskPatch = event.toolEvent?.kind === 'result' && event.toolEvent.text
+    ? parseBrowserWorkflowTask(event.toolEvent.text, previous, event.timestamp)
+    : null
+  const skillTaskPatch = event.toolEvent?.kind === 'result' && event.toolEvent.text
+    ? parseSkillExecutionTaskFromText(event.toolEvent.text, previous, event.timestamp)
+    : event.latestText
+      ? parseSkillExecutionTaskFromText(event.latestText, previous, event.timestamp)
+      : null
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
     latestText: (typeof structuredPayload?.message === 'string' ? structuredPayload.message : event.latestText) ?? previous?.latestText ?? null,
@@ -321,6 +710,45 @@ export function deriveScopeRunStatePatch(
     lastAcceptedScreenshot: typeof structuredPayload?.lastAcceptedScreenshot === 'string'
       ? structuredPayload.lastAcceptedScreenshot
       : previous?.lastAcceptedScreenshot || null,
+    taskTitle: structuredTaskTitle
+      || skillTaskPatch?.taskTitle
+      || browserTaskPatch?.taskTitle
+      || previous?.taskTitle
+      || null,
+    taskSummary: structuredTaskSummary
+      || skillTaskPatch?.taskSummary
+      || browserTaskPatch?.taskSummary
+      || previous?.taskSummary
+      || null,
+    steps: mergeTaskSteps(
+      previous?.steps,
+      structuredSteps.length > 0
+        ? structuredSteps
+        : (skillTaskPatch?.steps || browserTaskPatch?.steps),
+    ),
+    currentStepId: (typeof structuredPayload?.currentStepId === 'string' ? structuredPayload.currentStepId : null)
+      || skillTaskPatch?.currentStepId
+      || browserTaskPatch?.currentStepId
+      || previous?.currentStepId
+      || null,
+    waitingFor: structuredWaitingFor !== 'none'
+      ? structuredWaitingFor
+      : skillTaskPatch?.waitingFor
+        || browserTaskPatch?.waitingFor
+        || previous?.waitingFor
+        || 'none',
+    resumableActions: structuredResumableActions.length > 0
+      ? structuredResumableActions
+      : skillTaskPatch?.resumableActions
+        || browserTaskPatch?.resumableActions
+        || previous?.resumableActions
+        || [],
+    recentArtifacts: buildRecentArtifacts(mergeArtifacts(
+      previous?.recentArtifacts,
+      structuredRecentArtifacts.length > 0 ? structuredRecentArtifacts : structuredArtifacts,
+    )),
+    taskContinuation: structuredContinuation || skillTaskPatch?.taskContinuation || previous?.taskContinuation || null,
+    memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,
   }
 
   if (event.toolEvent) {
@@ -362,6 +790,8 @@ export function deriveScopeRunStatePatch(
   if (typeof structuredPayload?.ownerTabId === 'string') {
     patch.ownerTabId = structuredPayload.ownerTabId
   }
+
+  finalizeTaskState(patch.phase || event.phase, previous, patch, event.timestamp)
 
   return patch
 }

@@ -19,7 +19,7 @@ Ready 是一个桌面创作工作台，目标是把以下工作流统一到一�
 - 剪辑：Remotion 预览、时间轴与 Inspector 结构已形成
 - RSS：订阅、更新、分析、统计与子代理链路可用
 - 日程：日/周/月视图与事件 CRUD 可用
-- Agent：统一会话 scope、工具调用、技能运行时、远程 IM 基础链路已接入
+- Agent：统一会话 scope、工具调用、技能运行时、远程 IM 基础链路已接入；聊天面板新增 `当前任务 / 后台任务` 任务区，长任务会持续投影为步骤、等待态、可继续动作与最近产物
 - 技能中心：支持系统级 embedded skills 与用户导入 custom skills 并行管理，并新增 workflow execution 视图与 blocker 继续控制
 - 设置页：支持多供应商、多协议、多工具模式配置
 
@@ -48,6 +48,7 @@ AI 配置不再只按 provider 名称分支，而是统一解析为：
 - 对不稳定或不暴露原生 tools 的 OpenAI 兼容通道，回退到文本工具桥接
 - Browser、Document、System、Skill 工具都从同一套工具注册中心暴露
 - Claude skill 执行改为 `advisory / workflow / legacy direct` 三态兼容，workflow 由宿主状态机自动推进
+- scope run 会额外记录任务摘要，用于聊天内任务恢复、技能 blocker 继续和自动记忆反馈
 
 ## 4. 技术栈
 - Electron 34
@@ -76,7 +77,7 @@ AI 配置不再只按 provider 名称分支，而是统一解析为：
 
 ## 7. 当前重点方向
 1. 继续提升 Browser Agent 在上传、输入、提交阶段的泛化能力与证据判定
-2. 稳定远程 IM 会话、附件消费与断线恢复体验
-3. 继续完善 Design / Video 的编辑细节与导出链路
-4. 继续收紧 AI 供应商切换时的协议、工具、视觉能力兼容
-5. 继续优化 Claude skill 执行效果，包括 execution blocker、OpenAI tool history 修复和 embedded Python 调用
+2. 稳定聊天面板里的当前任务 / 后台任务体验，包括刷新恢复与 blocker 继续
+3. 稳定远程 IM 会话、附件消费与断线恢复体验
+4. 继续完善 Design / Video 的编辑细节与导出链路
+5. 继续收紧 AI 供应商切换时的协议、工具、视觉能力兼容

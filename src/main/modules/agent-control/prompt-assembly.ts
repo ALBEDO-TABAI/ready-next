@@ -391,32 +391,7 @@ export class PromptAssemblyService {
    * Load MEMORY.md dynamically from database or fallback to file
    */
   private async loadMEMORY(): Promise<string> {
-    const sections = [this.readMemoryFile('MEMORY.md')]
-
-    if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
-      try {
-        // Load global facts from database
-        const globalFacts = await this.deps.memoryRepository.queryMemories({
-          category: 'global_fact',
-          includeArchived: false,
-          limit: 20,
-        })
-
-        if (globalFacts.length > 0) {
-          sections.push('\n## Learned Facts')
-          for (const fact of globalFacts) {
-            const content = await this.loadMemoryContent(fact.contentKey)
-            if (content) {
-              sections.push(`- ${fact.title}: ${content}`)
-            }
-          }
-        }
-      } catch (error) {
-        console.error('[PromptAssembly] Failed to load global facts from database:', error)
-      }
-    }
-
-    return sections.join('\n')
+    return this.readMemoryFile('MEMORY.md')
   }
 
   private async loadL0(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
@@ -487,6 +462,7 @@ export class PromptAssemblyService {
         const scopeMemories = await this.deps.memoryRepository.queryMemories({
           layer: 'l1',
           scopeId: scope.id,
+          category: 'summary',
           includeArchived: false,
           limit: 5,
         })
@@ -500,23 +476,6 @@ export class PromptAssemblyService {
           }
         }
 
-        // Load global learnings (cross-scope)
-        const globalLearnings = await this.deps.memoryRepository.queryMemories({
-          layer: 'l1',
-          scopeId: null,
-          category: 'learning',
-          includeArchived: false,
-          limit: 3,
-        })
-
-        for (const learning of globalLearnings) {
-          const content = await this.loadMemoryContent(learning.contentKey)
-          if (content) {
-            sections.push(formatMemorySection(`[全局] ${learning.title}`, content))
-            refs.push(this.makeMemoryRef('l1', learning.title, null, learning.summary || learning.title))
-            await this.deps.memoryRepository.incrementAccessCount(learning.id)
-          }
-        }
       } catch (error) {
         console.error('[PromptAssembly] Failed to load database memories:', error)
       }
