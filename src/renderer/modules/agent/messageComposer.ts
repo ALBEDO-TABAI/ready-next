@@ -242,6 +242,7 @@ export async function persistAssistantMessage(
   responseMessageId: string,
   content: string,
   scope: ConversationScope | null,
+  extraMeta?: Record<string, unknown>,
 ): Promise<void> {
   if (!content.trim()) return
   await persistMessage(scopeId, responseMessageId, 'assistant', content, {
@@ -249,6 +250,7 @@ export async function persistAssistantMessage(
     sourceId: scope?.sourceId || 'app',
     threadKey: scope?.threadKey || scopeId,
     direction: 'assistant-output',
+    ...(extraMeta || {}),
   })
 }
 

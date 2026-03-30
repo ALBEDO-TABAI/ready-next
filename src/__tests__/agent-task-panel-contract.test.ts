@@ -7,15 +7,17 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('chat panel uses task card view models and disclosure state for folded task sections', () => {
+test('chat panel feeds message-level task snapshots into chat messages instead of fixed top task sections', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const store = readWorkspaceFile('src/renderer/stores/useAgent.ts')
   const viewModel = readWorkspaceFile('src/renderer/modules/agent/taskCardViewModel.ts')
 
   assert.match(chatPanel, /buildTaskCardViewModel/)
   assert.match(chatPanel, /createDefaultTaskDisclosureState/)
-  assert.match(chatPanel, /<TaskSection title="当前任务">/)
-  assert.match(chatPanel, /<TaskSection title="后台任务">/)
+  assert.doesNotMatch(chatPanel, /<TaskSection title="当前任务">/)
+  assert.doesNotMatch(chatPanel, /<TaskSection title="后台任务">/)
+  assert.match(chatPanel, /messageTaskSnapshots=\{messageTaskSnapshots\}/)
+  assert.match(chatPanel, /pendingTaskRun=\{pendingTaskRun\}/)
   assert.match(viewModel, /title:\s*'计划与步骤'/)
   assert.match(viewModel, /title:\s*'执行细节'/)
   assert.match(viewModel, /title:\s*'产物'/)
@@ -25,11 +27,10 @@ test('chat panel uses task card view models and disclosure state for folded task
   assert.match(store, /toggleTaskSection:/)
 })
 
-test('chat panel groups similar background tasks instead of always flattening every card', () => {
+test('chat panel can recover task snapshots from persisted assistant message metadata and current live runs', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-  const viewModel = readWorkspaceFile('src/renderer/modules/agent/taskCardViewModel.ts')
 
-  assert.match(chatPanel, /TaskGroupCard/)
-  assert.match(viewModel, /groupTaskRunsForDisplay/)
-  assert.match(viewModel, /2 个子任务|个子任务/)
+  assert.match(chatPanel, /parseSerializedTaskSnapshot/)
+  assert.match(chatPanel, /message\.meta\?\.taskSnapshot/)
+  assert.match(chatPanel, /currentTaskRun\.responseMessageId/)
 })

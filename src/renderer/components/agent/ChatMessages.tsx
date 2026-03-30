@@ -4,6 +4,8 @@ import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/
 
 interface ChatMessagesProps {
   messages: AgentMessage[]
+  messageTaskSnapshots: Record<string, React.ReactNode>
+  pendingTaskRun: React.ReactNode | null
   isStreaming: boolean
   streamingMessageId: string | null
   toolTrace: ToolTraceEvent[]
@@ -25,6 +27,8 @@ interface ChatMessagesProps {
 
 export default function ChatMessages({
   messages,
+  messageTaskSnapshots,
+  pendingTaskRun,
   isStreaming,
   streamingMessageId,
   toolTrace,
@@ -130,138 +134,10 @@ export default function ChatMessages({
         </div>
       )}
 
-      {/* Tool Trace Capsule */}
-      {showToolTraceCapsule && (
-        <div className="flex">
-          <div
-            className="max-w-[92%] w-full"
-            style={{
-              borderRadius: 12,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-card-bg) 24%, transparent)',
-              overflow: 'hidden',
-              backdropFilter: 'blur(16px) saturate(132%)',
-              WebkitBackdropFilter: 'blur(16px) saturate(132%)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={onToggleToolTrace}
-              className="w-full text-left"
-              style={{
-                padding: '8px 10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-                <div
-                  className="flex items-center justify-center"
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: 999,
-                    background: 'color-mix(in srgb, var(--color-blue) 12%, transparent)',
-                    color: 'var(--color-blue)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {toolTraceStatus === 'running'
-                    ? <CircleDashed style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />
-                    : <CheckCircle2 style={{ width: 12, height: 12 }} strokeWidth={2} />}
-                </div>
-                <Wrench style={{ width: 13, height: 13, color: 'var(--text-gray)', flexShrink: 0 }} strokeWidth={2} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: 'var(--text-body)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {toolTraceStatus === 'running'
-                      ? '工具调用中'
-                      : toolTraceStatus === 'error'
-                        ? '工具调用失败'
-                        : toolTraceStatus === 'cancelled'
-                          ? '工具调用已停止'
-                          : '工具调用结束'}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--text-gray)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      marginTop: 1,
-                    }}
-                  >
-                    {latestToolEvent?.text || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
-                  </div>
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
-                  {toolTrace.length} 条
-                </div>
-                <ChevronRight
-                  style={{
-                    width: 13,
-                    height: 13,
-                    color: 'var(--text-light)',
-                    transform: toolTraceExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                    transition: 'transform 180ms ease',
-                    flexShrink: 0,
-                  }}
-                  strokeWidth={2}
-                />
-              </button>
-
-              {toolTraceExpanded && (
-                <div
-                  style={{
-                    padding: '8px 10px 10px',
-                    borderTop: '1px solid var(--border-default)',
-                    background: 'var(--bg-secondary)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                    maxHeight: 180,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {toolTrace.map((event) => (
-                    <div
-                      key={event.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: 6,
-                        fontSize: 11,
-                        color: 'var(--text-body)',
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
-                        {event.kind === 'call' ? '•' : '✓'}
-                      </span>
-                      <div style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-          </div>
-        </div>
-      )}
-
       {/* Messages */}
       {messages.map((msg, index) => {
         const showMessageDivider = index < messages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
+        const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
@@ -415,6 +291,17 @@ export default function ChatMessages({
               )}
             </div>
 
+            {taskSnapshot ? (
+              <div
+                data-chat-message-task-snapshot={msg.id}
+                style={{
+                  paddingLeft: msg.type === 'agent' ? 10 : 0,
+                }}
+              >
+                {taskSnapshot}
+              </div>
+            ) : null}
+
             {showMessageDivider ? (
               <div
                 data-chat-message-divider="true"
@@ -432,53 +319,188 @@ export default function ChatMessages({
         )
       })}
 
+      {/* Tool Trace Capsule */}
+      {showToolTraceCapsule && (
+        <div className="flex">
+          <div
+            className="max-w-[92%] w-full"
+            style={{
+              borderRadius: 12,
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--surface-card-bg) 24%, transparent)',
+              overflow: 'hidden',
+              backdropFilter: 'blur(16px) saturate(132%)',
+              WebkitBackdropFilter: 'blur(16px) saturate(132%)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={onToggleToolTrace}
+              className="w-full text-left"
+              style={{
+                padding: '8px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: 'color-mix(in srgb, var(--color-blue) 12%, transparent)',
+                  color: 'var(--color-blue)',
+                  flexShrink: 0,
+                }}
+              >
+                {toolTraceStatus === 'running'
+                  ? <CircleDashed style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />
+                  : <CheckCircle2 style={{ width: 12, height: 12 }} strokeWidth={2} />}
+              </div>
+              <Wrench style={{ width: 13, height: 13, color: 'var(--text-gray)', flexShrink: 0 }} strokeWidth={2} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--text-body)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {toolTraceStatus === 'running'
+                    ? '工具调用中'
+                    : toolTraceStatus === 'error'
+                      ? '工具调用失败'
+                      : toolTraceStatus === 'cancelled'
+                        ? '工具调用已停止'
+                        : '工具调用结束'}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-gray)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    marginTop: 1,
+                  }}
+                >
+                  {latestToolEvent?.text || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
+                </div>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
+                {toolTrace.length} 条
+              </div>
+              <ChevronRight
+                style={{
+                  width: 13,
+                  height: 13,
+                  color: 'var(--text-light)',
+                  transform: toolTraceExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 180ms ease',
+                  flexShrink: 0,
+                }}
+                strokeWidth={2}
+              />
+            </button>
+
+            {toolTraceExpanded && (
+              <div
+                style={{
+                  padding: '8px 10px 10px',
+                  borderTop: '1px solid var(--border-default)',
+                  background: 'var(--bg-secondary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                }}
+              >
+                {toolTrace.map((event) => (
+                  <div
+                    key={event.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 6,
+                      fontSize: 11,
+                      color: 'var(--text-body)',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
+                      {event.kind === 'call' ? '•' : '✓'}
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {isStreaming && (() => {
         const streamMsg = messages.find((m) => m.id === streamingMessageId)
         if (!streamMsg || streamMsg.content.length === 0) {
           return (
-            <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--bg-avatar)' }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
+            pendingTaskRun ? (
+              <div data-chat-pending-task-snapshot="true">
+                {pendingTaskRun}
               </div>
-              <div className="flex items-center gap-2.5" style={{ color: 'var(--text-gray)' }}>
-                <span style={{ fontSize: 12, fontWeight: 500 }}>思考中</span>
-                <div className="flex items-center gap-1.5" aria-label="agent-thinking">
-                  <span
-                    className="animate-pulse"
-                    style={{
-                      width: 4,
-                      height: 4,
-                      borderRadius: 999,
-                      background: 'var(--color-blue)',
-                      opacity: 0.5,
-                      animationDelay: '0ms',
-                    }}
-                  />
-                  <span
-                    className="animate-pulse"
-                    style={{
-                      width: 4,
-                      height: 4,
-                      borderRadius: 999,
-                      background: 'var(--color-blue)',
-                      opacity: 0.5,
-                      animationDelay: '180ms',
-                    }}
-                  />
-                  <span
-                    className="animate-pulse"
-                    style={{
-                      width: 4,
-                      height: 4,
-                      borderRadius: 999,
-                      background: 'var(--color-blue)',
-                      opacity: 0.5,
-                      animationDelay: '360ms',
-                    }}
-                  />
+            ) : (
+              <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--bg-avatar)' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
+                </div>
+                <div className="flex items-center gap-2.5" style={{ color: 'var(--text-gray)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>思考中</span>
+                  <div className="flex items-center gap-1.5" aria-label="agent-thinking">
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '0ms',
+                      }}
+                    />
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '180ms',
+                      }}
+                    />
+                    <span
+                      className="animate-pulse"
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 999,
+                        background: 'var(--color-blue)',
+                        opacity: 0.5,
+                        animationDelay: '360ms',
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )
           )
         }
         return null

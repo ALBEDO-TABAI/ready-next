@@ -16,6 +16,37 @@ interface RunPayloadLike {
   agent?: string
 }
 
+function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
+  if (!runState) return undefined
+  return {
+    taskSnapshot: {
+      scopeId,
+      agent: runState.agent,
+      title: scope?.title || '任务',
+      taskTitle: runState.taskTitle || null,
+      taskSummary: runState.taskSummary || null,
+      steps: runState.steps || [],
+      currentStepId: runState.currentStepId || null,
+      waitingFor: runState.waitingFor || 'none',
+      resumableActions: runState.resumableActions || [],
+      recentArtifacts: runState.recentArtifacts || [],
+      taskContinuation: runState.taskContinuation || null,
+      memoryCapture: runState.memoryCapture || null,
+      blockedReason: runState.blockedReason || null,
+      error: runState.error || null,
+      updatedAt: runState.updatedAt || new Date().toISOString(),
+      responseMessageId: runState.responseMessageId || null,
+      phase: runState.phase,
+      toolTrace: (runState.toolTrace || []).map((event) => ({
+        id: event.id,
+        kind: event.kind,
+        text: event.text,
+        timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
+      })),
+    },
+  }
+}
+
 export function syncActiveScopeRunAliases(
   state: Pick<{ currentScopeId: string | null; scopeRunStates: Record<string, ScopeRunState> }, 'currentScopeId' | 'scopeRunStates'>,
 ): Pick<{ isStreaming: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'toolTrace' | 'toolTraceStatus'> {
@@ -77,7 +108,17 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
     const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
     const content = currentMessage?.content || runState.responseBuffer || ''
-    await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope)
+    const snapshotMeta = buildTaskSnapshotMeta(scopeId, currentScope, runState)
+    if (snapshotMeta) {
+      store.setState((current: any) => ({
+        messages: current.messages.map((item: AgentMessage) =>
+          item.id === runState.responseMessageId
+            ? { ...item, meta: { ...(item.meta || {}), ...snapshotMeta } }
+            : item,
+        ),
+      }))
+    }
+    await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
   }
 
   async function maybeAutoExecuteAssistantSkillCommand(scopeId: string, runState: ScopeRunState | null): Promise<void> {

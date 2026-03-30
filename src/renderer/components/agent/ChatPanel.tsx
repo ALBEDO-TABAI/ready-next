@@ -13,10 +13,7 @@ import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/sco
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
-  groupTaskRunsForDisplay,
   type TaskCardRunLike,
-  type TaskDisplayGroup,
-  type TaskDisplayEntry,
   type TaskSectionKey,
 } from '../../modules/agent/taskCardViewModel'
 import ChatHeader from './ChatHeader'
@@ -60,7 +57,35 @@ interface PersistedScopeRunSummary {
   updatedAt: string
 }
 
-interface TaskCardRun extends TaskCardRunLike {}
+interface TaskCardRun extends TaskCardRunLike {
+  responseMessageId?: string | null
+}
+
+interface SerializedTaskSnapshot {
+  scopeId: string
+  agent: string
+  title: string
+  phase: ScopeRunState['phase']
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: ScopeRunState['steps']
+  currentStepId?: string | null
+  waitingFor?: ScopeRunState['waitingFor']
+  resumableActions?: ScopeRunState['resumableActions']
+  recentArtifacts?: ScopeRunState['recentArtifacts']
+  taskContinuation?: ScopeRunState['taskContinuation']
+  memoryCapture?: ScopeRunState['memoryCapture']
+  blockedReason?: string | null
+  error?: string | null
+  updatedAt: string
+  responseMessageId?: string | null
+  toolTrace?: Array<{
+    id: string
+    kind: 'call' | 'result'
+    text: string
+    timestamp: string
+  }>
+}
 
 function parseMarkdown(raw: string): MarkdownNode[] {
   const nodes: MarkdownNode[] = []
@@ -247,43 +272,6 @@ function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
     run.taskSummary ||
     (run.steps && run.steps.length > 0) ||
     (run.memoryCapture && run.memoryCapture.status !== 'dismissed'),
-  )
-}
-
-function TaskSection({
-  title,
-  emptyText,
-  children,
-}: {
-  title: string
-  emptyText?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      style={{
-        padding: '8px 14px 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color: 'var(--text-light)',
-          letterSpacing: '0.04em',
-        }}
-      >
-        {title}
-      </div>
-      {children || (
-        <div style={{ fontSize: 12, color: 'var(--text-light)' }}>
-          {emptyText || '暂无任务'}
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -552,59 +540,6 @@ function TaskCard({
               打开会话
             </button>
           )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function TaskGroupCard({
-  entry,
-  expanded,
-  onToggle,
-  renderChild,
-}: {
-  entry: TaskDisplayGroup
-  expanded: boolean
-  onToggle: () => void
-  renderChild: (run: TaskCardRun) => React.ReactNode
-}) {
-  return (
-    <div
-      style={{
-        borderRadius: 12,
-        border: '1px solid var(--border-default)',
-        background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
-        padding: '10px 12px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-start justify-between gap-3"
-        style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}
-      >
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{entry.title}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>{entry.summary}</div>
-        </div>
-        <ChevronDown
-          style={{
-            width: 12,
-            height: 12,
-            color: 'var(--text-light)',
-            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 160ms ease',
-            flexShrink: 0,
-          }}
-        />
-      </button>
-      {expanded && (
-        <div className="flex flex-col" style={{ gap: 8 }}>
-          {entry.children.map((run) => renderChild(run as TaskCardRun))}
         </div>
       )}
     </div>
@@ -1117,6 +1052,7 @@ export default function ChatPanel() {
           error: run.error,
           updatedAt: run.updatedAt || scope.updatedAt,
           toolTrace: run.toolTrace,
+          responseMessageId: run.responseMessageId || null,
         } satisfies TaskCardRun
       })
       .filter(Boolean) as TaskCardRun[]
@@ -1154,15 +1090,37 @@ export default function ChatPanel() {
     return currentRun && isTaskVisible(currentRun) ? currentRun : null
   }, [currentScopeId, mergedTaskRuns])
 
-  const backgroundTaskRuns = useMemo(() => {
-    return mergedTaskRuns.filter((item) => item.scopeId !== currentScopeId)
-  }, [currentScopeId, mergedTaskRuns])
-
-  const backgroundTaskEntries = useMemo<TaskDisplayEntry[]>(() => {
-    return groupTaskRunsForDisplay(backgroundTaskRuns, new Date())
-  }, [backgroundTaskRuns])
-
   const showToolTraceCapsule = !currentTaskRun && (toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled')
+
+  const parseSerializedTaskSnapshot = useCallback((raw: unknown): TaskCardRun | null => {
+    if (!raw || typeof raw !== 'object') return null
+    const snapshot = raw as SerializedTaskSnapshot
+    if (!snapshot.scopeId || !snapshot.updatedAt) return null
+    return {
+      scopeId: snapshot.scopeId,
+      phase: snapshot.phase,
+      title: snapshot.title || '任务',
+      taskTitle: snapshot.taskTitle,
+      taskSummary: snapshot.taskSummary,
+      steps: snapshot.steps,
+      currentStepId: snapshot.currentStepId || null,
+      waitingFor: snapshot.waitingFor,
+      resumableActions: snapshot.resumableActions,
+      recentArtifacts: snapshot.recentArtifacts,
+      taskContinuation: snapshot.taskContinuation,
+      memoryCapture: snapshot.memoryCapture,
+      blockedReason: snapshot.blockedReason,
+      error: snapshot.error,
+      updatedAt: snapshot.updatedAt,
+      toolTrace: (snapshot.toolTrace || []).map((event) => ({
+        id: event.id,
+        kind: event.kind,
+        text: event.text,
+        timestamp: new Date(event.timestamp),
+      })),
+      responseMessageId: snapshot.responseMessageId || null,
+    } as TaskCardRun
+  }, [])
 
   useEffect(() => {
     void loadSendPreferences()
@@ -1548,6 +1506,75 @@ export default function ChatPanel() {
     focusInputWithResize()
   }, [focusInputWithResize, mergedTaskRuns, setInputValue])
 
+  const renderTaskSnapshotCard = useCallback((run: TaskCardRun, key: string, compact = false) => {
+    return (
+      <TaskCard
+        key={key}
+        run={run}
+        taskKey={key}
+        compact={compact}
+        disclosureState={{
+          ...createDefaultTaskDisclosureState(run),
+          ...(taskDisclosureState[key] || {}),
+        }}
+        onToggleSection={setTaskSectionExpanded}
+        onOpenArtifact={handleOpenTaskArtifact}
+        onDismissMemoryCapture={handleDismissMemoryCapture}
+        onUndoMemoryCapture={handleUndoMemoryCapture}
+        onSupplementMemoryCapture={handleSupplementMemoryCapture}
+        onContinueInput={handleContinueTaskInput}
+        onSubmitConfirmation={handleSubmitTaskConfirmation}
+        onSubmitAgentResult={handleSubmitTaskAgentResult}
+        onRetry={handleRetryTask}
+        onCancelExecution={handleCancelTask}
+      />
+    )
+  }, [
+    handleCancelTask,
+    handleContinueTaskInput,
+    handleDismissMemoryCapture,
+    handleOpenTaskArtifact,
+    handleRetryTask,
+    handleSubmitTaskAgentResult,
+    handleSubmitTaskConfirmation,
+    handleSupplementMemoryCapture,
+    handleUndoMemoryCapture,
+    setTaskSectionExpanded,
+    taskDisclosureState,
+  ])
+
+  const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
+    const nextSnapshots: Record<string, React.ReactNode> = {}
+    for (const message of messages) {
+      if (message.type !== 'agent') continue
+      const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
+      if (!snapshot || !isTaskVisible(snapshot)) continue
+      nextSnapshots[message.id] = renderTaskSnapshotCard(snapshot, `message-snapshot-${message.id}`)
+    }
+
+    if (
+      currentTaskRun &&
+      currentTaskRun.responseMessageId &&
+      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
+      !nextSnapshots[currentTaskRun.responseMessageId] &&
+      isTaskVisible(currentTaskRun)
+    ) {
+      nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
+        currentTaskRun,
+        `live-snapshot-${currentTaskRun.responseMessageId}`,
+      )
+    }
+
+    return nextSnapshots
+  }, [currentTaskRun, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
+
+  const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
+    const streamMessage = messages.find((message) => message.id === streamingMessageId)
+    if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
+    if (streamMessage && streamMessage.content.length > 0) return null
+    return renderTaskSnapshotCard(currentTaskRun, `pending-task-${currentTaskRun.scopeId}`)
+  }, [currentTaskRun, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
+
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -1860,97 +1887,10 @@ export default function ChatPanel() {
             formatTime={formatTime}
           />
 
-          {(currentTaskRun || backgroundTaskRuns.length > 0) && (
-            <div style={{ paddingBottom: 4 }}>
-              {currentTaskRun && (
-                <TaskSection title="当前任务">
-                  <TaskCard
-                    run={currentTaskRun}
-                    taskKey={currentTaskRun.scopeId}
-                    disclosureState={{
-                      ...createDefaultTaskDisclosureState(currentTaskRun),
-                      ...(taskDisclosureState[currentTaskRun.scopeId] || {}),
-                    }}
-                    onToggleSection={setTaskSectionExpanded}
-                    onOpenArtifact={handleOpenTaskArtifact}
-                    onDismissMemoryCapture={handleDismissMemoryCapture}
-                    onUndoMemoryCapture={handleUndoMemoryCapture}
-                    onSupplementMemoryCapture={handleSupplementMemoryCapture}
-                    onContinueInput={handleContinueTaskInput}
-                    onSubmitConfirmation={handleSubmitTaskConfirmation}
-                    onSubmitAgentResult={handleSubmitTaskAgentResult}
-                    onRetry={handleRetryTask}
-                    onCancelExecution={handleCancelTask}
-                  />
-                </TaskSection>
-              )}
-
-              {backgroundTaskRuns.length > 0 && (
-                <TaskSection title="后台任务">
-                  <div className="flex flex-col" style={{ gap: 8 }}>
-                    {backgroundTaskEntries.slice(0, 4).map((entry) => (
-                      entry.kind === 'group' ? (
-                        <TaskGroupCard
-                          key={entry.key}
-                          entry={entry}
-                          expanded={Boolean(taskDisclosureState[entry.key]?.plan)}
-                          onToggle={() => setTaskSectionExpanded(entry.key, 'plan', !taskDisclosureState[entry.key]?.plan)}
-                          renderChild={(run) => (
-                            <TaskCard
-                              key={run.scopeId}
-                              run={run}
-                              taskKey={run.scopeId}
-                              compact
-                              disclosureState={{
-                                ...createDefaultTaskDisclosureState(run),
-                                ...(taskDisclosureState[run.scopeId] || {}),
-                              }}
-                              onToggleSection={setTaskSectionExpanded}
-                              onOpenScope={handleLoadConversation}
-                              onOpenArtifact={handleOpenTaskArtifact}
-                              onDismissMemoryCapture={handleDismissMemoryCapture}
-                              onUndoMemoryCapture={handleUndoMemoryCapture}
-                              onSupplementMemoryCapture={handleSupplementMemoryCapture}
-                              onContinueInput={handleContinueTaskInput}
-                              onSubmitConfirmation={handleSubmitTaskConfirmation}
-                              onSubmitAgentResult={handleSubmitTaskAgentResult}
-                              onRetry={handleRetryTask}
-                              onCancelExecution={handleCancelTask}
-                            />
-                          )}
-                        />
-                      ) : (
-                        <TaskCard
-                          key={entry.key}
-                          run={entry.run as TaskCardRun}
-                          taskKey={entry.run.scopeId}
-                          compact
-                          disclosureState={{
-                            ...createDefaultTaskDisclosureState(entry.run),
-                            ...(taskDisclosureState[entry.run.scopeId] || {}),
-                          }}
-                          onToggleSection={setTaskSectionExpanded}
-                          onOpenScope={handleLoadConversation}
-                          onOpenArtifact={handleOpenTaskArtifact}
-                          onDismissMemoryCapture={handleDismissMemoryCapture}
-                          onUndoMemoryCapture={handleUndoMemoryCapture}
-                          onSupplementMemoryCapture={handleSupplementMemoryCapture}
-                          onContinueInput={handleContinueTaskInput}
-                          onSubmitConfirmation={handleSubmitTaskConfirmation}
-                          onSubmitAgentResult={handleSubmitTaskAgentResult}
-                          onRetry={handleRetryTask}
-                          onCancelExecution={handleCancelTask}
-                        />
-                      )
-                    ))}
-                  </div>
-                </TaskSection>
-              )}
-            </div>
-          )}
-
           <ChatMessages
             messages={messages}
+            messageTaskSnapshots={messageTaskSnapshots}
+            pendingTaskRun={pendingTaskRun}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}
             toolTrace={toolTrace}
