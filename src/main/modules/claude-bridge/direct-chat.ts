@@ -44,6 +44,7 @@ import {
 } from './tool-bridge'
 import {
   extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
+  hasExplicitDocumentWidgetCreateIntent as hasExplicitDocumentWidgetCreateIntentFromText,
   inferDocumentWidgetTaskKind as inferDocumentWidgetTaskKindFromText,
   shouldForceDocumentToolCall as shouldForceDocumentToolCallFromText,
   shouldPreferFormatOnly as shouldPreferFormatOnlyFromText,
@@ -2544,7 +2545,8 @@ export class DirectChatEngine extends EventEmitter {
         log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
       }
       const userInstructionText = this.extractPrimaryUserInstruction(contextualUserInput)
-      const documentWidgetTaskKind = hasWidgetTargetContext ? 'update' : this.inferDocumentWidgetTaskKind(contextualUserInput)
+      const explicitWidgetCreateIntent = this.hasExplicitDocumentWidgetCreateIntent(contextualUserInput)
+      const documentWidgetTaskKind = hasWidgetTargetContext && !explicitWidgetCreateIntent ? 'update' : this.inferDocumentWidgetTaskKind(contextualUserInput)
       const documentWidgetProfile = inferDocumentWidgetProfile(contextualUserInput)
       const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
       const keepToolsWithVideo = this.shouldKeepToolsWithVideo(contextualUserInput, sessionId)
@@ -2576,7 +2578,7 @@ export class DirectChatEngine extends EventEmitter {
         ? this.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null
       const toolPolicy: ToolPolicy = {
-        forceDocumentTool: hasTools && (hasWidgetTargetContext || this.shouldForceDocumentToolCall(contextualUserInput)),
+        forceDocumentTool: hasTools && ((hasWidgetTargetContext && !explicitWidgetCreateIntent) || this.shouldForceDocumentToolCall(contextualUserInput)),
         forceDesignTool: false,
         preferredDesignTool: null,
         primaryDesignInstruction: null,
@@ -4188,6 +4190,10 @@ export class DirectChatEngine extends EventEmitter {
 
   private inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTaskKind {
     return inferDocumentWidgetTaskKindFromText(userText)
+  }
+
+  private hasExplicitDocumentWidgetCreateIntent(userText: string): boolean {
+    return hasExplicitDocumentWidgetCreateIntentFromText(userText)
   }
 
   private shouldPreferFormatOnly(userText: string): boolean {

@@ -116,7 +116,8 @@ describe('document widget target context', () => {
     )
 
     assert.match(source, /hasWidgetTargetContext = userText\.includes\('### Widget 更新上下文'\)/)
-    assert.match(source, /forceDocumentTool: hasTools && \(hasWidgetTargetContext \|\| this\.shouldForceDocumentToolCall/)
-    assert.match(source, /documentWidgetTaskKind = hasWidgetTargetContext \? 'update'/)
+    assert.match(source, /forceDocumentTool: hasTools && \(\(hasWidgetTargetContext && !explicitWidgetCreateIntent\) \|\| this\.shouldForceDocumentToolCall/)
+    assert.match(source, /const explicitWidgetCreateIntent = /)
+    assert.match(source, /documentWidgetTaskKind = hasWidgetTargetContext && !explicitWidgetCreateIntent \? 'update'/)
   })
 })

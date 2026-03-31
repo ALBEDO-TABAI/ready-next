@@ -46,4 +46,11 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(schedulePrompt), 'create')
     assert.equal(shouldForceDocumentToolCall(schedulePrompt), true)
   })
+
+  it('treats explicit bottom-insert info card requests as widget creation even when they mention minimalist style', () => {
+    const prompt = '直接在最下方开始做一个竖向 9:16 的极简绿色风格的信息卡'
+
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'create')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
 })

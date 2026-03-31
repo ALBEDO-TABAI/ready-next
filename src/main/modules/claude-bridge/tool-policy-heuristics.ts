@@ -84,6 +84,19 @@ export function extractPrimaryUserInstruction(raw: string): string {
   return stripped
 }
 
+export function hasExplicitDocumentWidgetCreateIntent(userText: string): boolean {
+  if (!userText) return false
+  const primaryInstruction = extractPrimaryUserInstruction(userText)
+  if (!primaryInstruction) return false
+
+  const createVerb = /(插入|新建|创建|生成|做一个|加一个|新增|添加一个|放一个|来一个|append|insert|create|add one)/i
+  const placementHint = /(最下方|底部|末尾|最后|下方|文末|结尾|append_end|after_section|开始做一个)/i
+  const widgetKeyword =
+    /(widget|show-widget|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
+
+  return createVerb.test(primaryInstruction) && widgetKeyword.test(primaryInstruction) && placementHint.test(primaryInstruction)
+}
+
 export function shouldForceDocumentToolCall(userText: string): boolean {
   if (!userText) return false
   const primaryInstruction = extractPrimaryUserInstruction(userText)
@@ -136,6 +149,10 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
 
   if (/(删除|删掉|移除|remove)/i.test(primaryInstruction)) {
     return 'remove'
+  }
+
+  if (hasExplicitDocumentWidgetCreateIntent(primaryInstruction)) {
+    return 'create'
   }
 
   if (existingWidgetReference.test(primaryInstruction) && /(增加|添加|加入|补充|扩展|加一个|加上|append|extend|enhance)/i.test(primaryInstruction)) {
