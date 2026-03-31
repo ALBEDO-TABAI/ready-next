@@ -17,6 +17,7 @@ test('chat messages render task snapshots directly under agent replies', () => {
   assert.match(chatMessages, /messageToolTraceSnapshots\[msg\.id\]/)
   assert.match(chatMessages, /data-chat-message-task-snapshot/)
   assert.match(chatMessages, /data-chat-message-tool-trace/)
+  assert.match(chatMessages, /shouldRenderGlobalToolTraceCapsule/)
 })
 
 test('chat messages expose a temporary pending task block while the next reply is still empty', () => {
@@ -27,4 +28,13 @@ test('chat messages expose a temporary pending task block while the next reply i
   assert.match(chatMessages, /data-chat-pending-task-snapshot/)
   assert.match(chatMessages, /data-chat-pending-tool-trace/)
   assert.match(chatMessages, /streamMsg\.content\.length === 0/)
+})
+
+test('task and tool cards stay collapsed by default and only reveal the latest line until expanded', () => {
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+
+  assert.match(chatPanel, /const collapsedSummary = /)
+  assert.match(chatPanel, /expanded \? vm\.summary : collapsedSummary/)
+  assert.match(chatPanel, /const visibleEvents = expanded \? events : events\.slice\(-1\)/)
+  assert.doesNotMatch(chatPanel, />\s*停止\s*</)
 })

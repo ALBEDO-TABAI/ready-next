@@ -287,7 +287,9 @@ function TaskCard({
   run,
   taskKey,
   compact = false,
+  expanded = false,
   disclosureState,
+  onToggleExpanded,
   onToggleSection,
   onOpenScope,
   onOpenArtifact,
@@ -298,12 +300,13 @@ function TaskCard({
   onSubmitConfirmation,
   onSubmitAgentResult,
   onRetry,
-  onCancelExecution,
 }: {
   run: TaskCardRun
   taskKey: string
   compact?: boolean
+  expanded?: boolean
   disclosureState?: Record<string, boolean>
+  onToggleExpanded?: () => void
   onToggleSection?: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
   onOpenScope?: (scopeId: string) => void
   onOpenArtifact?: (path: string) => void
@@ -314,13 +317,14 @@ function TaskCard({
   onSubmitConfirmation?: (scopeId: string, confirmed: boolean) => void
   onSubmitAgentResult?: (scopeId: string) => void
   onRetry?: (scopeId: string) => void
-  onCancelExecution?: (scopeId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
   const steps = run.steps || []
   const recentArtifacts = run.recentArtifacts || []
   const visibleMemoryCapture = run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
+  const latestStep = vm.currentStep || steps[steps.length - 1] || null
+  const collapsedSummary = latestStep?.detail || latestStep?.title || vm.summary
   const renderSectionButton = (sectionKey: TaskSectionKey) => {
     const section = vm.sections[sectionKey]
     if (section.count <= 0) return null
@@ -374,24 +378,51 @@ function TaskCard({
         gap: 8,
       }}
     >
-      <div className="flex items-start justify-between gap-3">
+      <button
+        type="button"
+        onClick={onToggleExpanded}
+        className="flex items-start justify-between gap-3"
+        style={{
+          border: 'none',
+          background: 'transparent',
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{primaryTitle}</div>
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
-            {vm.summary}
+            {expanded ? vm.summary : collapsedSummary}
           </div>
-          {vm.currentStep && (
+          {!expanded && latestStep && (
+            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
+              最近一步：{latestStep.title}
+            </div>
+          )}
+          {expanded && vm.currentStep && (
             <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
               当前步骤：{vm.currentStep.title}
             </div>
           )}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
-          {vm.statusLabel}
+        <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-light)' }}>
+            {vm.statusLabel}
+          </div>
+          <ChevronDown
+            style={{
+              width: 12,
+              height: 12,
+              color: 'var(--text-light)',
+              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 160ms ease',
+            }}
+          />
         </div>
-      </div>
+      </button>
 
-      {!compact && (
+      {expanded && !compact && (
         <div className="flex flex-col" style={{ gap: 2 }}>
           {renderSectionButton('plan')}
           {vm.sections.plan.expanded && steps.length > 0 && (
@@ -476,7 +507,7 @@ function TaskCard({
         </div>
       )}
 
-      {visibleMemoryCapture && vm.sections.memory.expanded && (
+      {expanded && visibleMemoryCapture && vm.sections.memory.expanded && (
         <div
           style={{
             borderRadius: 10,
@@ -511,7 +542,7 @@ function TaskCard({
         </div>
       )}
 
-      {(run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
+      {expanded && (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
         <div className="flex flex-wrap gap-1.5">
           {run.waitingFor === 'input' && (
             <button type="button" onClick={() => onContinueInput?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
@@ -538,11 +569,6 @@ function TaskCard({
               重试
             </button>
           )}
-          {(run.resumableActions || []).includes('cancel') && (
-            <button type="button" onClick={() => onCancelExecution?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-              停止
-            </button>
-          )}
           {compact && (
             <button type="button" onClick={() => onOpenScope?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
               打开会话
@@ -557,11 +583,17 @@ function TaskCard({
 function ToolTraceCard({
   events,
   pending = false,
+  expanded = false,
+  onToggleExpanded,
 }: {
   events: Array<{ id: string; kind: 'call' | 'result'; text: string; timestamp: Date }>
   pending?: boolean
+  expanded?: boolean
+  onToggleExpanded?: () => void
 }) {
   if (events.length === 0) return null
+  const visibleEvents = expanded ? events : events.slice(-1)
+  const latestEvent = events[events.length - 1]
   return (
     <div
       style={{
@@ -574,14 +606,35 @@ function ToolTraceCard({
         gap: 6,
       }}
     >
-      <div className="flex items-center gap-2">
-        <Wrench style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }} strokeWidth={2} />
-        <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
-          {pending ? '进行中的工具调用' : '工具调用'}
+      <button
+        type="button"
+        onClick={onToggleExpanded}
+        className="flex items-center justify-between gap-2"
+        style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <div className="flex items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
+          <Wrench style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }} strokeWidth={2} />
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+            {pending ? '进行中的工具调用' : '工具调用'}
+          </div>
+          {!expanded && latestEvent ? (
+            <div style={{ fontSize: 10.5, color: 'var(--text-gray)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {latestEvent.text}
+            </div>
+          ) : null}
         </div>
-      </div>
+        <ChevronDown
+          style={{
+            width: 12,
+            height: 12,
+            color: 'var(--text-light)',
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 160ms ease',
+          }}
+        />
+      </button>
       <div className="flex flex-col" style={{ gap: 4 }}>
-        {events.slice(-3).map((event) => (
+        {visibleEvents.map((event) => (
           <div key={event.id} className="flex items-start gap-2" style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}>
             <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
               {event.kind === 'call' ? '•' : '✓'}
@@ -1514,18 +1567,6 @@ export default function ChatPanel() {
     focusInputWithResize()
   }, [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue])
 
-  const handleCancelTask = useCallback(async (scopeId: string) => {
-    const continuation = useAgent.getState().scopeRunStates[scopeId]?.taskContinuation
-      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.taskContinuation
-    if (!continuation?.executionId) return
-    const result = await window.electronAPI.skills.cancelExecution({
-      executionId: continuation.executionId,
-    }).catch(() => null)
-    if (result?.success && result.data) {
-      applySkillExecutionDetailToScope(scopeId, result.data)
-    }
-  }, [applySkillExecutionDetailToScope, mergedTaskRuns])
-
   const handleOpenTaskArtifact = useCallback(async (path: string) => {
     await window.electronAPI.document.openPath(path).catch(() => undefined)
   }, [])
@@ -1574,16 +1615,19 @@ export default function ChatPanel() {
   }, [focusInputWithResize, mergedTaskRuns, setInputValue])
 
   const renderTaskSnapshotCard = useCallback((run: TaskCardRun, key: string, compact = false) => {
+    const expanded = Boolean(taskDisclosureState[key]?.overview)
     return (
       <TaskCard
         key={key}
         run={run}
         taskKey={key}
         compact={compact}
+        expanded={expanded}
         disclosureState={{
           ...createDefaultTaskDisclosureState(run),
           ...(taskDisclosureState[key] || {}),
         }}
+        onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
         onToggleSection={setTaskSectionExpanded}
         onOpenArtifact={handleOpenTaskArtifact}
         onDismissMemoryCapture={handleDismissMemoryCapture}
@@ -1593,11 +1637,9 @@ export default function ChatPanel() {
         onSubmitConfirmation={handleSubmitTaskConfirmation}
         onSubmitAgentResult={handleSubmitTaskAgentResult}
         onRetry={handleRetryTask}
-        onCancelExecution={handleCancelTask}
       />
     )
   }, [
-    handleCancelTask,
     handleContinueTaskInput,
     handleDismissMemoryCapture,
     handleOpenTaskArtifact,
@@ -1647,7 +1689,16 @@ export default function ChatPanel() {
       if (message.type !== 'agent') continue
       const events = parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot)
       if (events.length === 0) continue
-      nextSnapshots[message.id] = <ToolTraceCard key={`message-tool-${message.id}`} events={events} />
+      const toolKey = `message-tool-${message.id}`
+      const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
+      nextSnapshots[message.id] = (
+        <ToolTraceCard
+          key={toolKey}
+          events={events}
+          expanded={expanded}
+          onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
+        />
+      )
     }
 
     if (
@@ -1657,13 +1708,20 @@ export default function ChatPanel() {
       !nextSnapshots[currentTaskRun.responseMessageId] &&
       currentToolTraceSegment.length > 0
     ) {
+      const toolKey = `live-tool-${currentTaskRun.responseMessageId}`
+      const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
       nextSnapshots[currentTaskRun.responseMessageId] = (
-        <ToolTraceCard key={`live-tool-${currentTaskRun.responseMessageId}`} events={currentToolTraceSegment} />
+        <ToolTraceCard
+          key={toolKey}
+          events={currentToolTraceSegment}
+          expanded={expanded}
+          onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
+        />
       )
     }
 
     return nextSnapshots
-  }, [currentTaskRun, currentToolTraceSegment, messages, parseSerializedToolTraceSnapshot])
+  }, [currentTaskRun, currentToolTraceSegment, messages, parseSerializedToolTraceSnapshot, setTaskSectionExpanded, taskDisclosureState])
 
   const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
@@ -1677,8 +1735,18 @@ export default function ChatPanel() {
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
     if (currentToolTraceSegment.length === 0) return null
-    return <ToolTraceCard key={`pending-tool-${currentTaskRun.scopeId}`} events={currentToolTraceSegment} pending />
-  }, [currentTaskRun, currentToolTraceSegment, isStreaming, messages, streamingMessageId])
+    const toolKey = `pending-tool-${currentTaskRun.scopeId}`
+    const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
+    return (
+      <ToolTraceCard
+        key={toolKey}
+        events={currentToolTraceSegment}
+        pending
+        expanded={expanded}
+        onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
+      />
+    )
+  }, [currentTaskRun, currentToolTraceSegment, isStreaming, messages, setTaskSectionExpanded, streamingMessageId, taskDisclosureState])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)

@@ -266,6 +266,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             content: data.chunk,
             type: 'agent',
             timestamp: new Date(),
+            meta: { transient: true },
           })
           store.setState({ streamingMessageId: targetResponseMessageId })
         }

@@ -20,6 +20,8 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
   assert.match(chatPanel, /messageToolTraceSnapshots=\{messageToolTraceSnapshots\}/)
   assert.match(chatPanel, /pendingTaskRun=\{pendingTaskRun\}/)
   assert.match(chatPanel, /pendingToolTrace=\{pendingToolTrace\}/)
+  assert.match(chatPanel, /const expanded = Boolean\(taskDisclosureState\[key\]\?\.overview\)/)
+  assert.doesNotMatch(chatPanel, /onCancelExecution=/)
   assert.match(viewModel, /title:\s*'计划与步骤'/)
   assert.match(viewModel, /title:\s*'执行细节'/)
   assert.match(viewModel, /title:\s*'产物'/)
@@ -31,9 +33,12 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
 
 test('chat panel can recover task snapshots from persisted assistant message metadata and current live runs', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const runtimeDriver = readWorkspaceFile('src/renderer/modules/agent/runtimeDriver.ts')
 
   assert.match(chatPanel, /parseSerializedTaskSnapshot/)
   assert.match(chatPanel, /message\.meta\?\.taskSnapshot/)
   assert.match(chatPanel, /message\.meta\?\.toolTraceSnapshot/)
   assert.match(chatPanel, /currentTaskRun\.responseMessageId/)
+  assert.match(runtimeDriver, /responseSegmentBreakPending/)
+  assert.match(runtimeDriver, /responseSegmentToolTraceStart/)
 })

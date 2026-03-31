@@ -526,6 +526,15 @@ export const useAgent = create<AgentState>((set, get) => ({
         attachments: extractPersistedAttachments(m.meta),
         meta: m.meta || {},
       }))
+      const currentMessages = get().currentScopeId === scopeId ? get().messages : []
+      const transientMessages = currentMessages.filter((message) =>
+        message.meta?.transient &&
+        !messages.some((persisted) => persisted.id === message.id),
+      )
+      if (transientMessages.length > 0) {
+        messages.push(...transientMessages)
+        messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+      }
       if (
         activeRunState?.responseMessageId &&
         activeRunState.responseBuffer &&
@@ -833,7 +842,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       agent: currentAgent,
       content: '',
       type: 'agent',
-      timestamp: new Date()
+      timestamp: new Date(),
+      meta: { transient: true },
     })
     set((state) => ({
       streamingMessageId: responseId,
