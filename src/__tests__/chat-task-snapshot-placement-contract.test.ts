@@ -36,5 +36,8 @@ test('task and tool cards stay collapsed by default and only reveal the latest l
   assert.match(chatPanel, /const collapsedSummary = /)
   assert.match(chatPanel, /expanded \? vm\.summary : collapsedSummary/)
   assert.match(chatPanel, /const visibleEvents = expanded \? events : events\.slice\(-1\)/)
+  assert.doesNotMatch(chatPanel, /最近一步：/)
+  assert.match(chatPanel, /whiteSpace:\s*'nowrap'/)
+  assert.match(chatPanel, /flexShrink:\s*0/)
   assert.doesNotMatch(chatPanel, />\s*停止\s*</)
 })

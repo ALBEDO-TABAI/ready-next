@@ -323,8 +323,7 @@ function TaskCard({
   const steps = run.steps || []
   const recentArtifacts = run.recentArtifacts || []
   const visibleMemoryCapture = run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
-  const latestStep = vm.currentStep || steps[steps.length - 1] || null
-  const collapsedSummary = latestStep?.detail || latestStep?.title || vm.summary
+  const collapsedSummary = vm.summary
   const renderSectionButton = (sectionKey: TaskSectionKey) => {
     const section = vm.sections[sectionKey]
     if (section.count <= 0) return null
@@ -395,11 +394,6 @@ function TaskCard({
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
             {expanded ? vm.summary : collapsedSummary}
           </div>
-          {!expanded && latestStep && (
-            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
-              最近一步：{latestStep.title}
-            </div>
-          )}
           {expanded && vm.currentStep && (
             <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
               当前步骤：{vm.currentStep.title}
@@ -614,11 +608,29 @@ function ToolTraceCard({
       >
         <div className="flex items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
           <Wrench style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }} strokeWidth={2} />
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+          <div
+            style={{
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: 'var(--text-body)',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
             {pending ? '进行中的工具调用' : '工具调用'}
           </div>
           {!expanded && latestEvent ? (
-            <div style={{ fontSize: 10.5, color: 'var(--text-gray)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div
+              style={{
+                fontSize: 10.5,
+                color: 'var(--text-gray)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+                flex: 1,
+              }}
+            >
               {latestEvent.text}
             </div>
           ) : null}
