@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-03-27
+> 更新时间: 2026-03-31
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -34,6 +34,7 @@ Ready 采用 Electron 三层架构：
 
 ### 3.3 RSS / Calendar
 - RSS：`src/renderer/pages/modes/RSSMode.tsx` + `src/main/modules/rss-engine/*`
+- 微博 / 抖音 / 小红书已统一按应用内浏览器主链抓取；失败时优先引导回 Ready 浏览器处理登录态或验证，不再走 RSSHub 回退
 - Calendar：`src/renderer/pages/modes/CalendarMode.tsx` + `src/main/modules/calendar-engine/*`
 
 ### 3.4 Agent / Skills / Remote IM

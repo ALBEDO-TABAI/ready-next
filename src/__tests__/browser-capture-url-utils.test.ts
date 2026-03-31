@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { isReusableCaptureTabUrl } from '../main/modules/browser-engine/capture-url-utils'
+import { findReusableCaptureTabId, isReusableCaptureTabUrl } from '../main/modules/browser-engine/capture-url-utils'
 
 describe('browser capture URL reuse matching', () => {
   it('reuses only the same xiaohongshu profile tab', () => {
@@ -51,5 +51,18 @@ describe('browser capture URL reuse matching', () => {
       false,
     )
   })
-})
 
+  it('prefers a reusable non-active tab for the same creator page', () => {
+    const tabId = findReusableCaptureTabId(
+      'https://weibo.com/u/6182606334',
+      [
+        { id: 'active', url: 'https://weibo.com/u/6182606334' },
+        { id: 'candidate', url: 'https://m.weibo.cn/profile/6182606334' },
+        { id: 'other', url: 'https://weibo.com/u/9999999999' },
+      ],
+      'active',
+    )
+
+    assert.equal(tabId, 'candidate')
+  })
+})

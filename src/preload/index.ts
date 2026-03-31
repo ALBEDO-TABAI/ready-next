@@ -139,6 +139,7 @@ const memoryLifecycleAPI = {
 // Browser API
 const browserAPI = {
   createTab: (url: string) => ipcRenderer.invoke('browser:createTab', url),
+  openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
   closeTab: (tabId: string) => ipcRenderer.invoke('browser:closeTab', tabId),
   switchTab: (tabId: string) => ipcRenderer.invoke('browser:switchTab', tabId),
   navigate: (tabId: string, url: string) => ipcRenderer.invoke('browser:navigate', { tabId, url }),

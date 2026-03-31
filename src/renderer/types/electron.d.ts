@@ -489,6 +489,7 @@ interface BrowserAdblockStateData {
 
 interface ElectronBrowserAPI {
   createTab: (url: string) => Promise<{ success: boolean; tabId?: string; title?: string; error?: string; mock?: boolean }>
+  openForCaptureTarget: (url: string) => Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   closeTab: (tabId: string) => Promise<{ success: boolean; error?: string }>
   switchTab: (tabId: string) => Promise<{
     success: boolean

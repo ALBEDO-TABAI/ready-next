@@ -8,6 +8,7 @@ import {
   getRouteCapabilityMatrix,
   recordSourceRouteAttempt,
 } from '../main/modules/rss-engine/source-diagnostics'
+import { needsRSSHub } from '../main/modules/rss-engine/scrapers/index'
 
 describe('RSS source diagnostics', () => {
   it('marks browser-backed failures with structured failure kinds', () => {
@@ -107,10 +108,13 @@ describe('RSS benchmark summary', () => {
 
   it('exposes the fixed route capability matrix', () => {
     const matrix = getRouteCapabilityMatrix()
+    const weibo = matrix.find((entry) => entry.platform === 'weibo')
     const douyin = matrix.find((entry) => entry.platform === 'douyin')
     const xiaohongshu = matrix.find((entry) => entry.platform === 'xiaohongshu')
     const behance = matrix.find((entry) => entry.platform === 'behance')
 
+    assert.equal(weibo?.backend, 'browser')
+    assert.deepEqual(weibo?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(douyin?.backend, 'browser')
     assert.deepEqual(douyin?.fallbackOrder, ['browser', 'scrapling'])
     assert.deepEqual(xiaohongshu?.fallbackOrder, ['browser', 'scrapling'])
@@ -119,9 +123,16 @@ describe('RSS benchmark summary', () => {
     assert.equal(behance?.scraplingEligible, false)
   })
 
-  it('allows RSSHub fallback after browser only for weibo', () => {
-    assert.equal(allowsRSSHubFallbackAfterBrowser('weibo'), true)
+  it('disables RSSHub fallback after browser for browser-first creator platforms', () => {
+    assert.equal(allowsRSSHubFallbackAfterBrowser('weibo'), false)
     assert.equal(allowsRSSHubFallbackAfterBrowser('douyin'), false)
     assert.equal(allowsRSSHubFallbackAfterBrowser('xiaohongshu'), false)
+  })
+
+  it('treats only bilibili as RSSHub-required among creator platforms', () => {
+    assert.equal(needsRSSHub('bilibili'), true)
+    assert.equal(needsRSSHub('weibo'), false)
+    assert.equal(needsRSSHub('douyin'), false)
+    assert.equal(needsRSSHub('xiaohongshu'), false)
   })
 })

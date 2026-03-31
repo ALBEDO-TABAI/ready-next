@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-28
+> 更新时间: 2026-03-31
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
@@ -63,6 +63,7 @@
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
 - route diagnostics 和 benchmark 结果会持久化。
 - browser-backed acquisition 已切到优先复用应用内浏览器路线。
+- 微博 / 抖音 / 小红书现已进一步收口到浏览器主链：不再把这三类来源视为 RSSHub 必需来源，刷新失败时会直接给出“去浏览器登录 / 继续验证 / 查看页面”的引导动作；当判断为登录或扫码验证时，RSS 会直接弹出确认框引导跳转。
 - 单源刷新语义、`lastFetchInvocation` 诊断、preview 关闭覆盖 RSS 面板 bug 都已收口。
 
 7. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
@@ -86,7 +87,7 @@
 - `Feishu capability replacement`（飞书能力替换）
 
 ## 当前未完成项
-- Weibo/Xiaohongshu/Douyin 仍未全部完成最终实机签收。
+- Weibo/Xiaohongshu/Douyin 的“浏览器主链 + 登录引导”已完成代码收口，但仍缺最后一轮实机签收。
 - Workbench 顶部三行在各模块下仍需最后一轮视觉对齐。
 - Browser diagnostics 仍是 panel，不是完整 lab。
 - Browser orchestration 仍有最后一层收口空间。

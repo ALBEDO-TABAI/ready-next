@@ -65,3 +65,12 @@ export function isReusableCaptureTabUrl(targetUrl: string, currentUrl: string): 
   return targetKey === currentKey
 }
 
+export function findReusableCaptureTabId(
+  targetUrl: string,
+  tabs: Array<{ id: string; url: string }>,
+  activeTabId?: string | null,
+): string | null {
+  const matches = tabs.filter((tab) => isReusableCaptureTabUrl(targetUrl, tab.url))
+  if (matches.length === 0) return null
+  return matches.find((tab) => tab.id !== activeTabId)?.id || matches[0]?.id || null
+}

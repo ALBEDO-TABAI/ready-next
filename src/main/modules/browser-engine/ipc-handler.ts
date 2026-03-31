@@ -13,7 +13,7 @@ import type {
 import { AuthPopupManager } from './auth-popup-manager'
 import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
 import { BrowserContextMenuService } from './context-menu-service'
-import { isReusableCaptureTabUrl } from './capture-url-utils'
+import { findReusableCaptureTabId, isReusableCaptureTabUrl } from './capture-url-utils'
 import { BrowserDataService, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService } from './download-service'
 import { BROWSER_DIAGNOSTICS_LOG_PATH, BrowserDiagnosticsService } from './diagnostics-service'
@@ -364,13 +364,17 @@ export class BrowserController {
   }
 
   private findReusableTabForCapture(targetUrl: string): Tab | null {
-    const candidates = Array.from(this.tabs.values()).filter((tab) => {
-      if (!tab.view) return false
-      const currentUrl = tab.view.webContents.getURL() || tab.url
-      return isReusableCaptureTabUrl(targetUrl, currentUrl)
-    })
-    if (candidates.length === 0) return null
-    return candidates.find((tab) => tab.id !== this.activeTabId) || candidates[0] || null
+    const candidateId = findReusableCaptureTabId(
+      targetUrl,
+      Array.from(this.tabs.values())
+        .filter((tab) => tab.view)
+        .map((tab) => ({
+          id: tab.id,
+          url: tab.view?.webContents.getURL() || tab.url,
+        })),
+      this.activeTabId,
+    )
+    return candidateId ? this.tabs.get(candidateId) || null : null
   }
 
   private async loadWebContentsURL(
@@ -595,6 +599,41 @@ export class BrowserController {
    */
   async createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }> {
     return this.tabLifecycleService.createTab(url)
+  }
+
+  async openForCaptureTarget(
+    url: string,
+  ): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }> {
+    if (!isAllowedBrowserURL(url)) {
+      return { success: false, error: 'Blocked URL protocol. Only http: and https: are allowed.' }
+    }
+
+    const reusable = this.findReusableTabForCapture(url)
+    if (!reusable?.id) {
+      const created = await this.createTab(url)
+      return created.success
+        ? { success: true, tabId: created.tabId, reused: false }
+        : { success: false, error: created.error }
+    }
+
+    const currentUrl = reusable.view?.webContents.getURL() || reusable.url
+    if (currentUrl !== url) {
+      const navigation = await this.navigate(reusable.id, url)
+      if (!navigation.success) {
+        return { success: false, error: navigation.error }
+      }
+    }
+
+    const switched = this.switchTab(reusable.id)
+    if (!switched.success) {
+      return { success: false, error: switched.error }
+    }
+
+    return { success: true, tabId: reusable.id, reused: true }
+  }
+
+  hasReusableCaptureTarget(url: string): boolean {
+    return !!this.findReusableTabForCapture(url)
   }
 
   /**

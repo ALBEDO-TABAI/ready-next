@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, AlertCircle } from 'lucide-react'
+import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
+import Modal from '../../components/ui/Modal'
+import { useModal } from '../../components/ui/useModal'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -12,6 +14,7 @@ import {
 } from '../../modules/workbench/chrome'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
+import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
 
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
 
@@ -76,6 +79,7 @@ export default function RSSMode({
   const [showAddModal, setShowAddModal] = useState(false)
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
   const [backgroundWarning, setBackgroundWarning] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
@@ -83,7 +87,9 @@ export default function RSSMode({
   const previousItemIdsRef = useRef<Set<string>>(new Set())
   const sourcesRef = useRef<RSSSource[]>([])
   const becameVisibleRef = useRef(false)
+  const lastModalActionKeyRef = useRef<string | null>(null)
   const shouldPoll = isActive && hasHydrated
+  const { modalProps, showConfirm } = useModal()
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -338,6 +344,31 @@ export default function RSSMode({
   }, [statusMessage])
 
   useEffect(() => {
+    if (!statusAction) return
+    const timer = setTimeout(() => setStatusAction(null), 6000)
+    return () => clearTimeout(timer)
+  }, [statusAction])
+
+  useEffect(() => {
+    if (!statusAction) return
+    if (!(statusAction.reason === 'login' || statusAction.reason === 'verify')) return
+    const actionKey = `${statusAction.reason}:${statusAction.url}`
+    if (lastModalActionKeyRef.current === actionKey) return
+    lastModalActionKeyRef.current = actionKey
+
+    const title = statusAction.reason === 'login' ? '需要先登录' : '需要先扫码验证'
+    const message =
+      statusAction.reason === 'login'
+        ? '这个账号当前需要先在 Ready 浏览器里登录后才能继续刷新。现在要打开对应主页吗？'
+        : '这个账号当前需要先在 Ready 浏览器里打开目标主页，并按页面提示完成扫码验证。现在要跳转过去吗？'
+
+    void showConfirm(message, title).then((confirmed) => {
+      if (!confirmed) return
+      void window.electronAPI?.browser?.openForCaptureTarget(statusAction.url)
+    })
+  }, [showConfirm, statusAction])
+
+  useEffect(() => {
     if (!selectedItem) return
     const stillExists = items.some((item) => item.id === selectedItem.id)
     if (!stillExists) {
@@ -393,6 +424,7 @@ export default function RSSMode({
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
     setRefreshing(true)
+    setStatusAction(null)
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const latestSelectedSourceId = useRSSSession.getState().selectedSourceId
@@ -404,10 +436,12 @@ export default function RSSMode({
           const result = await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
           if (!result.success) {
             setStatusMessage(result.error || '刷新失败')
+            setStatusAction(result.data?.browserAction || null)
           } else if (result.data?.running) {
             setStatusMessage(`${selectedSourceEntry.name} 正在刷新中`)
           } else if (result.data?.errors?.length) {
             setStatusMessage(`${selectedSourceEntry.name} 刷新完成，但存在错误：${result.data.errors[0]}`)
+            setStatusAction(result.data?.browserAction || null)
           } else if (typeof result.data?.itemCount === 'number') {
             const writtenLabel = typeof result.data?.fetched === 'number'
               ? `，写入 ${result.data.fetched} 条`
@@ -436,6 +470,11 @@ export default function RSSMode({
       setRefreshing(false)
     }
   }, [loadRSSData, refreshing])
+
+  const handleStatusAction = useCallback(async () => {
+    if (!statusAction?.url) return
+    await window.electronAPI?.browser?.openForCaptureTarget(statusAction.url)
+  }, [statusAction])
 
   useRSSAgentAdapter({
     items,
@@ -671,7 +710,7 @@ export default function RSSMode({
               onResumeAnalysisJob={handleResumeAnalysisJob}
               onDeleteAnalysisJob={handleDeleteAnalysisJob}
             />
-            {(statusMessage || backgroundWarning) && (
+            {(statusMessage || backgroundWarning || statusAction) && (
               <div
                 className="glass-surface-floating absolute top-[62px] right-4 z-20 rounded-lg px-3 py-2 text-[12px]"
                 style={{
@@ -681,7 +720,23 @@ export default function RSSMode({
                   boxShadow: 'var(--shadow-sm)',
                 }}
               >
-                {statusMessage || backgroundWarning}
+                {statusMessage || backgroundWarning ? (
+                  <div>{statusMessage || backgroundWarning}</div>
+                ) : null}
+                {statusAction ? (
+                  <button
+                    onClick={() => void handleStatusAction()}
+                    className="mt-2 inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{
+                      borderColor: 'var(--border-default)',
+                      color: 'var(--text-title)',
+                      background: 'rgba(255,255,255,0.74)',
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    {statusAction.label}
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -703,6 +758,7 @@ export default function RSSMode({
         onClose={() => setShowAddModal(false)}
         onSuccess={handleAddSourceSuccess}
       />
+      <Modal {...modalProps} />
     </div>
   )
 }

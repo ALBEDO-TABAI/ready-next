@@ -72,6 +72,13 @@ function failureSummary(entry: RSSSourceDiagnosticsEntry): string {
   return '无'
 }
 
+function browserActionLabel(entry: RSSSourceDiagnosticsEntry): string {
+  const kind = entry.lastRouteError?.kind
+  if (kind === 'auth') return '在 Ready 浏览器中登录'
+  if (kind === 'anti_bot' || kind === 'waf') return '在 Ready 浏览器中继续验证'
+  return '在 Ready 浏览器中查看'
+}
+
 export default function RSSSourceCapabilityMatrix({
   diagnostics,
   benchmark,
@@ -104,7 +111,7 @@ export default function RSSSourceCapabilityMatrix({
             按源查看 backend、失败分类和 Scrapling 候选
           </div>
           <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>
-            先修现有 lets-go-rss / RSSHub / browser 路径，Scrapling 只在候选平台做 benchmark。
+            微博、抖音、小红书已按浏览器主链展示；Scrapling 只在候选平台做 benchmark。
           </div>
         </div>
 
@@ -215,9 +222,9 @@ export default function RSSSourceCapabilityMatrix({
                     <div style={{ color: 'var(--text-light)' }}>
                       {entry.scraplingEligible ? '可评估 Scrapling' : '保持当前链路'}
                     </div>
-                    {entry.backend === 'browser' && entry.lastRouteError?.kind === 'auth' ? (
+                    {entry.backend === 'browser' && entry.lastRouteError ? (
                       <button
-                        onClick={() => void window.electronAPI?.browser?.createTab(entry.url)}
+                        onClick={() => void window.electronAPI?.browser?.openForCaptureTarget(entry.url)}
                         className="mt-2 inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-[10px] transition-colors hover:bg-[var(--bg-hover)]"
                         style={{
                           borderColor: 'var(--border-default)',
@@ -226,7 +233,7 @@ export default function RSSSourceCapabilityMatrix({
                         }}
                       >
                         <ExternalLink className="h-3 w-3" />
-                        在 Ready 浏览器中登录
+                        {browserActionLabel(entry)}
                       </button>
                     ) : null}
                   </td>

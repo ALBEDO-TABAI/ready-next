@@ -12,9 +12,9 @@ function detectPlatformHint(url: string): string | null {
   const lower = url.toLowerCase()
   if (lower.includes('youtube.com') || lower.includes('youtu.be')) return 'YouTube'
   if (lower.includes('bilibili.com') || lower.includes('b23.tv') || lower.includes('bili2233.cn')) return 'Bilibili (需要 RSSHub)'
-  if (lower.includes('weibo.com')) return '微博 (需要 RSSHub)'
-  if (lower.includes('douyin.com')) return '抖音 (需要 RSSHub)'
-  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com')) return '小红书 (需要 RSSHub)'
+  if (lower.includes('weibo.com')) return '微博 (需要应用内浏览器登录态)'
+  if (lower.includes('douyin.com')) return '抖音 (需要应用内浏览器登录态)'
+  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com')) return '小红书 (需要应用内浏览器登录态)'
   if (lower.includes('x.com') || lower.includes('twitter.com')) return 'Twitter/X'
   if (lower.includes('vimeo.com')) return 'Vimeo'
   if (lower.includes('behance.net')) return 'Behance'

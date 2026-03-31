@@ -115,6 +115,50 @@ describe('RSS browser acquisition', () => {
     assert.equal(result.error, undefined)
   })
 
+  it('treats xiaohongshu fallback profile cards with changed content as new items', async () => {
+    const firstController = {
+      captureBackgroundPage: async () => ({
+        title: '创作者主页',
+        finalUrl: 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60',
+        items: [
+          {
+            title: '小红书内容',
+            link: 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60#note-card-1',
+            description: '第一条图文内容',
+          },
+        ],
+      }),
+    }
+    const secondController = {
+      captureBackgroundPage: async () => ({
+        title: '创作者主页',
+        finalUrl: 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60',
+        items: [
+          {
+            title: '小红书内容',
+            link: 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60#note-card-1',
+            description: '第二条新内容',
+          },
+        ],
+      }),
+    }
+
+    const first = await fetchFeedViaBrowserSession(
+      firstController as any,
+      'xiaohongshu',
+      'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60',
+    )
+    const second = await fetchFeedViaBrowserSession(
+      secondController as any,
+      'xiaohongshu',
+      'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60',
+    )
+
+    assert.equal(first.items.length, 1)
+    assert.equal(second.items.length, 1)
+    assert.notEqual(first.items[0]?.itemId, second.items[0]?.itemId)
+  })
+
   it('normalizes browser acquisition URLs into canonical profile routes', async () => {
     const douyin = await normalizeBrowserAcquisitionUrl(
       'douyin',

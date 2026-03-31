@@ -80,6 +80,14 @@ export interface RSSRouteErrorInfoData {
   recordedAt: string
 }
 
+export interface RSSBrowserOpenActionData {
+  type: 'open_in_browser'
+  label: string
+  url: string
+  platform: string
+  reason: 'login' | 'verify' | 'inspect'
+}
+
 export interface RouteCapabilityMatrixEntry {
   platform: string
   label: string
@@ -170,4 +178,5 @@ export interface RSSRefreshSourceResultData {
   itemCount?: number
   running?: boolean
   errors?: string[]
+  browserAction?: RSSBrowserOpenActionData
 }

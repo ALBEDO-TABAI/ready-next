@@ -133,7 +133,7 @@ interface RouteAttemptInput {
 const routeAttemptStore = new Map<string, RecordedRouteAttempt>()
 
 export function allowsRSSHubFallbackAfterBrowser(platform: PlatformType): boolean {
-  return platform === 'weibo'
+  return false
 }
 
 const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = {
@@ -177,10 +177,10 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
     platform: 'weibo',
     label: platformLabel('weibo'),
     backend: 'browser',
-    fallbackOrder: ['browser', 'rsshub', 'scrapling'],
+    fallbackOrder: ['browser', 'scrapling'],
     chromiumRequired: true,
     scraplingEligible: true,
-    notes: '优先复用应用内浏览器 session，RSSHub 退回兼容链，Scrapling 仅做候选 fallback。',
+    notes: '统一复用应用内浏览器 session；失败时优先引导回浏览器处理登录或验证，Scrapling 仅做候选 fallback。',
   },
   douyin: {
     platform: 'douyin',

@@ -20,6 +20,11 @@ import { rssUpdateLock } from './update-lock'
 import { getRSSItemAnalysisManager } from './item-analysis-manager'
 import { fetchFeedViaBrowserSession, supportsBrowserSessionAcquisition } from './browser-acquisition'
 import {
+  buildRSSBrowserOpenAction,
+  shouldPauseSilentBrowserRetry,
+  type RSSBrowserOpenAction,
+} from './browser-handoff'
+import {
   allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
   buildSourceDiagnostics,
@@ -159,8 +164,8 @@ function createSuccessResponse<T>(data: T, isMock: boolean): RSSResponse<T> {
   return { success: true, mock: isMock, data }
 }
 
-function createErrorResponse(error: string): RSSResponse<never> {
-  return { success: false, mock: false, error }
+function createErrorResponse<T = never>(error: string, data?: T): RSSResponse<T> {
+  return data === undefined ? { success: false, mock: false, error } : { success: false, mock: false, error, data }
 }
 
 const mockSources = [
@@ -499,10 +504,33 @@ async function fetchSourceWithCurrentStack(
   platform: PlatformType,
   rsshubBase?: string,
 ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
-  const scraper = createScraper(platform, rsshubBase)
   const allowRSSHubFallback = allowsRSSHubFallbackAfterBrowser(platform)
 
-  if (rssBrowserController && supportsBrowserSessionAcquisition(platform)) {
+  if (supportsBrowserSessionAcquisition(platform)) {
+    if (!rssBrowserController) {
+      return {
+        result: {
+          items: [],
+          feedTitle: '',
+          platform,
+          error: `${platformLabel(platform)} 当前需要 Ready 应用内浏览器运行态，请稍后重试。`,
+        },
+        backendUsed: 'browser',
+      }
+    }
+
+    if (shouldPauseSilentBrowserFetch(source, platform)) {
+      return {
+        result: {
+          items: [],
+          feedTitle: '',
+          platform,
+          error: `${platformLabel(platform)} 最近刚触发验证码/风控，已暂停后台静默刷新。请先在 Ready 浏览器中打开该主页并完成验证后再重试。`,
+        },
+        backendUsed: 'browser',
+      }
+    }
+
     try {
       const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url)
       if (browserResult.items.length > 0 || !browserResult.error) {
@@ -519,6 +547,7 @@ async function fetchSourceWithCurrentStack(
         }
       }
 
+      const scraper = createScraper(platform, rsshubBase)
       const rsshubResult = await scraper.fetchItems(source.url)
       if (rsshubResult.items.length > 0 || !rsshubResult.error) {
         return {
@@ -553,6 +582,7 @@ async function fetchSourceWithCurrentStack(
         }
       }
 
+      const scraper = createScraper(platform, rsshubBase)
       const rsshubResult = await scraper.fetchItems(source.url)
       if (rsshubResult.items.length > 0 || !rsshubResult.error) {
         return {
@@ -576,11 +606,50 @@ async function fetchSourceWithCurrentStack(
     }
   }
 
+  const scraper = createScraper(platform, rsshubBase)
   const result = await scraper.fetchItems(source.url)
   return {
     result,
     backendUsed: resolveSourceBackend(platform),
   }
+}
+
+function buildBrowserActionFromSource(
+  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name'>,
+  platform: PlatformType,
+): RSSBrowserOpenAction | null {
+  if (!supportsBrowserSessionAcquisition(platform)) return null
+  const [entry] = buildSourceDiagnostics([
+    {
+      id: source.id,
+      name: source.name,
+      url: source.url,
+      group_name: source.group_name,
+      platform,
+    },
+  ])
+  return buildRSSBrowserOpenAction(platform, source.url, entry?.lastRouteError?.kind)
+}
+
+function shouldPauseSilentBrowserFetch(
+  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name'>,
+  platform: PlatformType,
+): boolean {
+  if (!supportsBrowserSessionAcquisition(platform)) return false
+  const [entry] = buildSourceDiagnostics([
+    {
+      id: source.id,
+      name: source.name,
+      url: source.url,
+      group_name: source.group_name,
+      platform,
+    },
+  ])
+  const hasReusablePage =
+    rssBrowserController && typeof rssBrowserController.hasReusableCaptureTarget === 'function'
+      ? rssBrowserController.hasReusableCaptureTarget(source.url)
+      : false
+  return shouldPauseSilentBrowserRetry(entry?.lastRouteError?.kind, entry?.lastAttemptAt, hasReusablePage)
 }
 
 async function loadLatestBenchmarkSnapshot(): Promise<{
@@ -1364,7 +1433,12 @@ export function setupRSSIPC(useMock = false): void {
           error: message,
         })
         persistRouteDiagnosticsSnapshot()
-        return createErrorResponse(message)
+        return createErrorResponse(message, {
+          message,
+          fetched: 0,
+          sourceId,
+          sourceName: source.name,
+        })
       }
 
       const { result, backendUsed } = await fetchSourceWithCurrentStack(source, platform, rsshubBase)
@@ -1383,7 +1457,16 @@ export function setupRSSIPC(useMock = false): void {
           error: message,
         })
         persistRouteDiagnosticsSnapshot()
-        return createErrorResponse(message)
+        const browserAction = buildBrowserActionFromSource(source, platform)
+        return createErrorResponse(message, {
+          message,
+          fetched: 0,
+          sourceId,
+          sourceName: source.name,
+          backend: backendUsed,
+          errors: [result.error],
+          browserAction: browserAction ?? undefined,
+        })
       }
 
       const dbItems = result.items.map((item: ScrapedItem) => ({
@@ -1459,8 +1542,23 @@ export function setupRSSIPC(useMock = false): void {
           error: message,
         })
         persistRouteDiagnosticsSnapshot()
+        const browserAction = buildBrowserActionFromSource(source, platform)
+        return createErrorResponse(message, {
+          message,
+          fetched: 0,
+          sourceId,
+          sourceName: source.name,
+          backend: resolveSourceBackend(platform),
+          errors: [message],
+          browserAction: browserAction ?? undefined,
+        })
       }
-      return createErrorResponse(message)
+      return createErrorResponse(message, {
+        message,
+        fetched: 0,
+        sourceId,
+        errors: [message],
+      })
     } finally {
       sourceRefreshInFlight.delete(sourceId)
     }

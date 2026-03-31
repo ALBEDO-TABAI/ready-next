@@ -9,6 +9,8 @@ interface BrowserFeedCandidate {
   description?: string
   author?: string
   pubDate?: string
+  coverImage?: string
+  fingerprint?: string
 }
 
 type BrowserFeedExtractionState = 'ready' | 'auth' | 'anti_bot' | 'waf' | 'empty'
@@ -46,6 +48,28 @@ function isValidBrowserCandidateLink(platform: PlatformType, link: string): bool
   return true
 }
 
+function isXiaohongshuProfileFallbackLink(link: string): boolean {
+  return /xiaohongshu\.com\/user\/profile\/[a-zA-Z0-9_-]+#note-/i.test(link)
+}
+
+function buildBrowserCandidateKey(
+  platform: PlatformType,
+  row: BrowserFeedCandidate,
+  link: string,
+  title: string,
+  description: string,
+  coverImage: string,
+): string {
+  const fingerprint = clipText(row.fingerprint, 500)
+  if (fingerprint) return `${link}|${fingerprint}`
+
+  if (platform === 'xiaohongshu' && isXiaohongshuProfileFallbackLink(link)) {
+    return [link, title, description, coverImage].filter(Boolean).join('|')
+  }
+
+  return [link, title].filter(Boolean).join('|')
+}
+
 function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionResult): ScrapedItem[] {
   const seen = new Set<string>()
   const rows = Array.isArray(payload.items) ? payload.items : []
@@ -57,15 +81,19 @@ function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionRe
     seen.add(link)
     const title = clipText(row.title, 160) || '(Untitled)'
     const description = clipText(row.description, 500)
+    const coverImage = clipText(row.coverImage, 500)
+    const itemKey = buildBrowserCandidateKey(platform, row, link, title, description, coverImage)
     mapped.push({
-      itemId: generateItemId(platform, `${link}|${title}`),
+      itemId: generateItemId(platform, itemKey),
       title,
       description,
       link,
       pubDate: clipText(row.pubDate, 80),
       author: clipText(row.author, 80),
-      coverImage: null,
-      metadata: {},
+      coverImage: coverImage || null,
+      metadata: clipText(row.fingerprint, 500)
+        ? { fingerprint: clipText(row.fingerprint, 500) }
+        : {},
     })
     if (mapped.length >= 20) break
   }
@@ -198,6 +226,16 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
       (async () => {
         ${commonHelpers}
         const targetUserId = ${JSON.stringify(targetUserId)};
+        const readNodeImage = (node) => {
+          if (!node || typeof node.querySelector !== 'function') return '';
+          const image = node.querySelector('img');
+          const src = image?.getAttribute('src') || image?.getAttribute('data-src') || image?.currentSrc || '';
+          if (src) return abs(src);
+          const candidate = node.querySelector('[style*="background-image"]');
+          const background = candidate?.style?.backgroundImage || '';
+          const match = background.match(/url\\((['"]?)(.*?)\\1\\)/i);
+          return match?.[2] ? abs(match[2]) : '';
+        };
         const clickNotesTabIfPresent = () => {
           const preferred = Array.from(document.querySelectorAll('div, button, a'));
           for (const node of preferred) {
@@ -287,6 +325,8 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
               description: clip(lines.slice(1, 4).join(' '), 280),
               author: clip(author, 80),
               pubDate: '',
+              coverImage: clip(readNodeImage(section), 500),
+              fingerprint: clip([title, lines.slice(0, 4).join(' '), readNodeImage(section)].filter(Boolean).join('|'), 500),
             });
           }
           return items;
@@ -326,6 +366,8 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
               description: clip(lines.slice(1, 4).join(' '), 280),
               author: clip(author, 80),
               pubDate: '',
+              coverImage: clip(readNodeImage(container), 500),
+              fingerprint: clip([title, lines.slice(0, 4).join(' '), readNodeImage(container)].filter(Boolean).join('|'), 500),
             });
           }
           return items;
@@ -355,12 +397,22 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
                 if (targetUserId && nodeUserId && String(nodeUserId) !== targetUserId) return;
                 if (typeof noteId !== 'string' || !/^[a-zA-Z0-9]{8,}$/.test(noteId)) return;
                 if (typeof noteId === 'string' && typeof title === 'string') {
+                  const coverImage =
+                    node.cover?.urlDefault ||
+                    node.cover?.url ||
+                    node.imageList?.[0]?.urlDefault ||
+                    node.imageList?.[0]?.url ||
+                    node.imagesList?.[0]?.urlDefault ||
+                    node.imagesList?.[0]?.url ||
+                    '';
                   items.push({
                     title: clip(title, 160),
                     link: abs('/explore/' + noteId),
                     description: clip(node.desc || node.content || title, 280),
                     author: clip(node.nickname || node.user?.nickname || '', 80),
                     pubDate: '',
+                    coverImage: clip(coverImage, 500),
+                    fingerprint: clip([noteId, title, node.desc || node.content || '', coverImage].filter(Boolean).join('|'), 500),
                   });
                 }
               });
