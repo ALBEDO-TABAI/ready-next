@@ -6,6 +6,7 @@ const CONTEXT_MARKERS = [
 ]
 
 export type DocumentWidgetTaskKind = 'create' | 'inspect' | 'update' | 'remove' | null
+type DocumentWidgetReferenceIntent = 'additive_create' | 'replace_existing' | 'update_existing' | 'none'
 
 const BOOTSTRAP_HEADER_PATTERN =
   /^##\s+(L1 会话上下文|L2 按需规则|当前 Scope|最近会话摘要|\d{4}-\d{2}-\d{2}\.md)\b/i
@@ -84,17 +85,34 @@ export function extractPrimaryUserInstruction(raw: string): string {
   return stripped
 }
 
-export function hasExplicitDocumentWidgetCreateIntent(userText: string): boolean {
-  if (!userText) return false
+function inferDocumentWidgetReferenceIntent(userText: string): DocumentWidgetReferenceIntent {
+  if (!userText) return 'none'
   const primaryInstruction = extractPrimaryUserInstruction(userText)
-  if (!primaryInstruction) return false
+  if (!primaryInstruction) return 'none'
+
+  const widgetKeyword =
+    /(widget|show-widget|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
+  if (!widgetKeyword.test(primaryInstruction)) return 'none'
 
   const createVerb = /(插入|新建|创建|生成|做一个|加一个|新增|添加一个|放一个|来一个|append|insert|create|add one)/i
   const placementHint = /(最下方|底部|末尾|最后|下方|文末|结尾|append_end|after_section|开始做一个)/i
-  const widgetKeyword =
-    /(widget|show-widget|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
+  const additiveHint = /(再|另外|另做|另加|再做一个|再加一个|保留原来的|照着.+再做一个|基于.+再做一个)/i
+  const replaceVerb = /(替换|换成|换成新的|取代|顶替|覆盖|重做成)/i
+  const updateVerb = /(修改|调整|优化|统一|改成|改为|去掉|拿掉|补上|恢复|简化|极简)/i
+  const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里|最下方那张|最下方的卡片)/i
 
-  return createVerb.test(primaryInstruction) && widgetKeyword.test(primaryInstruction) && placementHint.test(primaryInstruction)
+  if (replaceVerb.test(primaryInstruction)) return 'replace_existing'
+  if ((additiveHint.test(primaryInstruction) || placementHint.test(primaryInstruction)) && createVerb.test(primaryInstruction)) {
+    return 'additive_create'
+  }
+  if (existingWidgetReference.test(primaryInstruction) && updateVerb.test(primaryInstruction)) {
+    return 'update_existing'
+  }
+  return 'none'
+}
+
+export function hasExplicitDocumentWidgetCreateIntent(userText: string): boolean {
+  return inferDocumentWidgetReferenceIntent(userText) === 'additive_create'
 }
 
 export function shouldForceDocumentToolCall(userText: string): boolean {
@@ -142,6 +160,7 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
 
   const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
   const widgetSurfaceEdit = /(预览|输入框|边框|底色|灰色底|卡片|面板|背景|外边框|垫底色块)/i
+  const referenceIntent = inferDocumentWidgetReferenceIntent(primaryInstruction)
 
   if (/((列出|查看|看看).*(widget|组件|图表|卡片)|有哪些|当前.*widget|\blist\b)/i.test(primaryInstruction)) {
     return 'inspect'
@@ -151,7 +170,11 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
     return 'remove'
   }
 
-  if (hasExplicitDocumentWidgetCreateIntent(primaryInstruction)) {
+  if (referenceIntent === 'replace_existing' || referenceIntent === 'update_existing') {
+    return 'update'
+  }
+
+  if (referenceIntent === 'additive_create') {
     return 'create'
   }
 

@@ -53,4 +53,18 @@ describe('document tool heuristics', () => {
     assert.equal(inferDocumentWidgetTaskKind(prompt), 'create')
     assert.equal(shouldForceDocumentToolCall(prompt), true)
   })
+
+  it('treats explicit replacement wording as updating the existing widget instead of creating a new one', () => {
+    const prompt = '把最下方的卡片替换成竖向 9:16 的极简绿色风格的信息卡'
+
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'update')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
+
+  it('treats “reference the current one and make another new one” as creation', () => {
+    const prompt = '照着最下方那张卡片，再做一个新的竖向 9:16 极简绿色信息卡'
+
+    assert.equal(inferDocumentWidgetTaskKind(prompt), 'create')
+    assert.equal(shouldForceDocumentToolCall(prompt), true)
+  })
 })
