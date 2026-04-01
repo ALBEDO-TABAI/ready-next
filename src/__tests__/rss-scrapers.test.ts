@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { detectPlatform } from '../main/modules/rss-engine/scrapers/index'
-import { DouyinScraper, WeiboScraper, XiaohongshuScraper } from '../main/modules/rss-engine/scrapers/rsshub'
+import {
+  BilibiliScraper,
+  DouyinScraper,
+  WeiboScraper,
+  XiaohongshuScraper,
+  isLikelyStaleBilibiliResult,
+  resolveBilibiliStaleRouteResult,
+} from '../main/modules/rss-engine/scrapers/rsshub'
 
 describe('RSS scraper platform detection', () => {
   it('detects creator watchlist URLs by platform', () => {
@@ -54,6 +61,179 @@ describe('DouyinScraper', () => {
     await scraper.fetchItems('https://www.douyin.com/user/MS4wLjABAAAATEST')
 
     assert.equal(attempts, 1)
+  })
+})
+
+describe('Bilibili freshness heuristic', () => {
+  it('treats very old bilibili route results as likely stale', () => {
+    const stale = isLikelyStaleBilibiliResult({
+      items: [
+        {
+          itemId: 'bilibili_1',
+          title: '旧视频',
+          description: '',
+          link: 'https://www.bilibili.com/video/BV1fr421M7y7',
+          pubDate: '2026-03-04T11:00:00.000Z',
+          author: '',
+          coverImage: null,
+          metadata: {},
+        },
+      ],
+      feedTitle: 'Bilibili 39627524',
+      platform: 'bilibili',
+    }, Date.parse('2026-03-31T08:00:00.000Z'))
+
+    assert.equal(stale, true)
+  })
+
+  it('prefers browser items when stale bilibili upstream data is replaced by a fresher browser result', () => {
+    const resolved = resolveBilibiliStaleRouteResult(
+      {
+        items: [
+          {
+            itemId: 'bilibili_old',
+            title: '旧视频',
+            description: '',
+            link: 'https://www.bilibili.com/video/BV1oldoldold',
+            pubDate: '2026-03-04T11:00:00.000Z',
+            author: '',
+            coverImage: null,
+            metadata: {},
+          },
+        ],
+        feedTitle: 'Bilibili 39627524',
+        platform: 'bilibili',
+      },
+      {
+        items: [
+          {
+            itemId: 'bilibili_new',
+            title: '新视频',
+            description: '',
+            link: 'https://www.bilibili.com/video/BV1newnewnew',
+            pubDate: '',
+            author: '',
+            coverImage: null,
+            metadata: {},
+          },
+        ],
+        feedTitle: '某幻君投稿视频',
+        platform: 'bilibili',
+      },
+      Date.parse('2026-03-31T08:00:00.000Z'),
+    )
+
+    assert.equal(resolved.backend, 'browser')
+    assert.equal(resolved.result.items[0]?.title, '新视频')
+    assert.match(resolved.result.error || '', /浏览器页面兜底/)
+  })
+
+  it('surfaces the browser failure instead of silently accepting stale bilibili results', () => {
+    const resolved = resolveBilibiliStaleRouteResult(
+      {
+        items: [
+          {
+            itemId: 'bilibili_old',
+            title: '旧视频',
+            description: '',
+            link: 'https://www.bilibili.com/video/BV1oldoldold',
+            pubDate: '2026-03-04T11:00:00.000Z',
+            author: '',
+            coverImage: null,
+            metadata: {},
+          },
+        ],
+        feedTitle: 'Bilibili 39627524',
+        platform: 'bilibili',
+      },
+      {
+        items: [],
+        feedTitle: '某幻君投稿视频',
+        platform: 'bilibili',
+        error: 'Bilibili 应用内浏览器会话当前未登录，或已被重定向到登录页。',
+      },
+      Date.parse('2026-03-31T08:00:00.000Z'),
+    )
+
+    assert.equal(resolved.backend, 'browser')
+    assert.equal(resolved.result.items.length, 0)
+    assert.match(resolved.result.error || '', /接口返回内容偏旧/)
+    assert.match(resolved.result.error || '', /未登录/)
+  })
+})
+
+describe('BilibiliScraper route priority', () => {
+  it('prefers the rsshub video route over older polymer fallback data', async () => {
+    const scraper = new BilibiliScraper('http://127.0.0.1:1240') as BilibiliScraper & {
+      resolveUserId: (url: string) => Promise<string | null>
+      fetchViaPolymerAPI: (userId: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
+      fetchRoute: (routePath: string, platform: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
+      fetchViaOfficialAPI: (userId: string) => Promise<import('../main/modules/rss-engine/scrapers/base').ScrapeResult>
+    }
+
+    const calls: string[] = []
+    scraper.resolveUserId = async () => '946974'
+    scraper.fetchViaPolymerAPI = async () => {
+      calls.push('polymer')
+      return {
+        items: [
+          {
+            itemId: 'polymer_old',
+            title: '旧合集内容',
+            description: '',
+            link: 'https://www.bilibili.com/video/BV1oldoldold',
+            pubDate: '2026-01-06T09:00:00.000Z',
+            author: '',
+            coverImage: null,
+            metadata: {},
+          },
+        ],
+        feedTitle: '影视飓风',
+        platform: 'bilibili',
+      }
+    }
+    scraper.fetchRoute = async (routePath, platform) => {
+      calls.push(routePath)
+      if (routePath.includes('/video/')) {
+        return {
+          items: [
+            {
+              itemId: 'rsshub_new',
+              title: '最新投稿',
+              description: '',
+              link: 'https://www.bilibili.com/video/BV1newnewnew',
+              pubDate: '2026-03-31T09:00:00.000Z',
+              author: '',
+              coverImage: null,
+              metadata: {},
+            },
+          ],
+          feedTitle: '影视飓风',
+          platform,
+        }
+      }
+      return {
+        items: [],
+        feedTitle: '',
+        platform,
+        error: 'should not reach dynamic when video route already works',
+      }
+    }
+    scraper.fetchViaOfficialAPI = async () => {
+      calls.push('official')
+      return {
+        items: [],
+        feedTitle: '',
+        platform: 'bilibili',
+        error: 'should not reach official when video route already works',
+      }
+    }
+
+    const result = await scraper.fetchItems('https://space.bilibili.com/946974')
+
+    assert.equal(result.items[0]?.title, '最新投稿')
+    assert.equal(calls[0], '/bilibili/user/video/946974')
+    assert.equal(calls.includes('polymer'), false)
   })
 })
 

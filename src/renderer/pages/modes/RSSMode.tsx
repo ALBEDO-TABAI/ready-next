@@ -141,6 +141,7 @@ export default function RSSMode({
             author: item.author ?? '',
             source: item.source ?? '',
             publishedAt: item.publishedAt ? new Date(item.publishedAt).toLocaleString() : '',
+            inboxVisible: item.inboxVisible ?? true,
             read: item.read,
             starred: item.starred,
             coverImage: item.coverImage ?? undefined,
@@ -198,13 +199,17 @@ export default function RSSMode({
           {
             id: '1', sourceId: '1', title: 'AI 创作工具的下一个十年',
             link: 'https://36kr.com/p/123456', summary: '探讨 AI 如何改变内容创作行业...',
+            author: '',
             source: '36氪', publishedAt: new Date(Date.now() - 3600000).toLocaleString(),
+            inboxVisible: true,
             read: false, starred: false,
           },
           {
             id: '2', sourceId: '2', title: '自媒体运营的核心方法论',
             link: 'https://www.huxiu.com/article/789', summary: '从 0 到 1 打造个人 IP 的实战经验...',
+            author: '',
             source: '虎嗅', publishedAt: new Date(Date.now() - 7200000).toLocaleString(),
+            inboxVisible: true,
             read: false, starred: true,
           },
         ])
@@ -414,11 +419,23 @@ export default function RSSMode({
   }, [computeUnreadCounts])
 
   const handleToggleStar = useCallback((itemId: string) => {
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, starred: !i.starred } : i))
+    setItems(prev => {
+      const current = prev.find((entry) => entry.id === itemId)
+      if (!current) return prev
+      const nextStarred = !current.starred
+      const next = prev
+        .map(i => i.id === itemId ? { ...i, starred: nextStarred } : i)
+        .filter((entry) => !(entry.id === itemId && !nextStarred && entry.inboxVisible === false))
+      const unreadCounts = computeUnreadCounts(next)
+      setSources((prevSources) =>
+        prevSources.map((source) => ({ ...source, count: unreadCounts.get(source.id) ?? 0 })),
+      )
+      return next
+    })
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.rss.toggleStarred(itemId)
     }
-  }, [])
+  }, [computeUnreadCounts])
 
   // Task 6: Manual refresh with loading state
   const handleRefresh = useCallback(async () => {
@@ -508,13 +525,14 @@ export default function RSSMode({
 
   const handleClearRead = useCallback(async () => {
     const scoped = getScopedItems(items)
-    const deleteIds = scoped.map((item) => item.id)
-    if (deleteIds.length === 0) {
+    const hideIds = scoped.filter((item) => !item.starred).map((item) => item.id)
+    const preservedStarredCount = scoped.length - hideIds.length
+    if (hideIds.length === 0) {
       setStatusMessage('当前范围内没有可清空的内容')
       return
     }
 
-    const deleteSet = new Set(deleteIds)
+    const deleteSet = new Set(hideIds)
     setItems((prev) => {
       const next = prev.filter((item) => !deleteSet.has(item.id))
       const unreadCounts = computeUnreadCounts(next)
@@ -526,15 +544,19 @@ export default function RSSMode({
     setNewItemIds((prev) => {
       let changed = false
       const next = new Set(prev)
-      for (const id of deleteIds) {
+      for (const id of hideIds) {
         if (next.delete(id)) changed = true
       }
       return changed ? next : prev
     })
     setSelectedItem((prev) => (prev && deleteSet.has(prev.id) ? null : prev))
 
-    await window.electronAPI?.rss?.deleteItems(deleteIds)
-    setStatusMessage(`已清空 ${deleteIds.length} 条内容`)
+    await window.electronAPI?.rss?.deleteItems({ itemIds: scoped.map((item) => item.id), preserveStarred: true })
+    setStatusMessage(
+      preservedStarredCount > 0
+        ? `已清空 ${hideIds.length} 条内容，保留 ${preservedStarredCount} 条收藏`
+        : `已清空 ${hideIds.length} 条内容`,
+    )
   }, [computeUnreadCounts, getScopedItems, items])
 
   const handleDeleteItem = useCallback(
@@ -555,7 +577,7 @@ export default function RSSMode({
         return next
       })
       setSelectedItem((prev) => (prev?.id === itemId ? null : prev))
-      await window.electronAPI?.rss?.deleteItems([itemId])
+      await window.electronAPI?.rss?.deleteItems({ itemIds: [itemId], preserveStarred: false })
     },
     [computeUnreadCounts],
   )

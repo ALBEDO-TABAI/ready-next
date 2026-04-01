@@ -21,9 +21,11 @@ export interface RSSItem {
   id: string
   title: string
   source: string
+  author: string
   sourceId: string
   summary: string
   publishedAt: string
+  inboxVisible?: boolean
   read: boolean
   starred: boolean
   coverImage?: string
@@ -652,11 +654,14 @@ export default function RSSFeed({
                             </span>
                           )}
                         </div>
-                        <p className="text-[12px] text-[var(--text-muted)] truncate mb-1.5">
-                          {item.summary}
-                        </p>
+                        {item.summary ? (
+                          <p className="text-[12px] text-[var(--text-muted)] truncate mb-1.5">
+                            {item.summary}
+                          </p>
+                        ) : null}
                         <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--text-gray)' }}>
                           <span>{item.source}</span>
+                          {item.author && item.author !== item.source ? <span>{item.author}</span> : null}
                           <span>{item.publishedAt}</span>
                         </div>
                       </div>

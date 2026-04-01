@@ -265,10 +265,13 @@ const rssAPI = {
   addSource: (source: unknown) => ipcRenderer.invoke('rss:addSource', source),
   removeSource: (id: string) => ipcRenderer.invoke('rss:removeSource', id),
   getItems: (sourceId?: string) => ipcRenderer.invoke('rss:getItems', sourceId),
+  getDraftStoreSources: () => ipcRenderer.invoke('rss:getDraftStoreSources'),
   markRead: (itemId: string) => ipcRenderer.invoke('rss:markRead', itemId),
   markReadBatch: (itemIds: string[]) => ipcRenderer.invoke('rss:markReadBatch', itemIds),
-  deleteItems: (itemIds: string[]) => ipcRenderer.invoke('rss:deleteItems', itemIds),
+  deleteItems: (payload: string[] | { itemIds: string[]; preserveStarred?: boolean }) =>
+    ipcRenderer.invoke('rss:deleteItems', payload),
   toggleStarred: (itemId: string) => ipcRenderer.invoke('rss:toggleStarred', itemId),
+  clearDraftStore: (payload?: { sourceId?: string }) => ipcRenderer.invoke('rss:clearDraftStore', payload),
   refreshSource: (sourceId: string) => ipcRenderer.invoke('rss:refreshSource', { sourceId }),
   fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
     ipcRenderer.invoke('rss:fetchAll', options),

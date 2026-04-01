@@ -65,6 +65,12 @@
 - browser-backed acquisition 已切到优先复用应用内浏览器路线。
 - 微博 / 抖音 / 小红书现已进一步收口到浏览器主链：不再把这三类来源视为 RSSHub 必需来源，刷新失败时会直接给出“去浏览器登录 / 继续验证 / 查看页面”的引导动作；当判断为登录或扫码验证时，RSS 会直接弹出确认框引导跳转。
 - 单源刷新语义、`lastFetchInvocation` 诊断、preview 关闭覆盖 RSS 面板 bug 都已收口。
+- B 站单源刷新已补上“旧接口误判”收口：当上游只返回陈旧列表时，系统会优先尝试应用内浏览器；若浏览器实际落在未登录空页，会明确提示先登录，不再静默写出“无新增”。
+- B 站最新一轮又补上“抓取顺序”修正：优先读取最新投稿 feed，再退回旧的合集备用结果。实测 `946974` 已从之前停在 `2026-01-06` 改为可拿到 `2026-03-31` 的最新视频。
+- B 站浏览器补救结果的展示也已收口：会自动补齐播放量和完整发布时间，并把列表次信息改回“账号名 → 播放量 → 完整时间”的顺序，避免统计串挤进摘要。
+- RSS 新增“底稿仓库 / 界面收件箱”双层模型：长期底稿不再随着界面清空而被删除，RSS 页面只展示当前收件箱内容和保留中的收藏。
+- RSS 设置页已补上底稿仓库管理入口，可查看每个源的底稿数量、收件箱数量、收藏数量，以及当前是“首次完整”还是“后续轻量”刷新方式。
+- 小红书刷新已开始按源状态分流：首次抓取仍负责补齐历史，后续刷新改成更轻的主页检查模式，并只把真正新增的内容重新送回界面列表。
 
 7. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
 - 新增 `skill-execution-types.ts`、compiler / loader、execution state store、execution coordinator、prompt builder。
@@ -106,6 +112,10 @@
    - Diagnostics labs 完整化
 
 ## 最近一次有效校验
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/rss-browser-acquisition.test.ts src/__tests__/rss-draft-store-contract.test.ts src/__tests__/rss-draft-store-ui-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/rss-diagnostics.test.ts src/__tests__/rss-browser-acquisition.test.ts src/__tests__/rss-scrapers.test.ts` 通过
 - `npm run typecheck:node` 通过
 - `npm run typecheck:web` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/ui-browser-hook-split-contract.test.ts src/__tests__/browser-engine-services.test.ts src/__tests__/browser-unified-header-contract.test.ts` 通过

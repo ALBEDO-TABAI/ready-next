@@ -44,6 +44,18 @@ interface SettingItem {
   slotWidth?: 'short' | 'medium' | 'wide'
 }
 
+interface RSSDraftStoreSourceRow {
+  sourceId: string
+  sourceName: string
+  sourceUrl: string
+  platform: string
+  storedCount: number
+  inboxCount: number
+  starredCount: number
+  refreshMode: 'full' | 'incremental'
+  lastFetchedAt: string | null
+}
+
 const settingsData: SettingSection[] = [
   {
     id: 'account',
@@ -89,6 +101,13 @@ const settingsData: SettingSection[] = [
     icon: Users,
     description: '管理用户偏好和个性化设置',
     settings: [] // Rendered dynamically via UserProfileEditor
+  },
+  {
+    id: 'rss-storage',
+    title: 'RSS 底稿',
+    icon: HardDrive,
+    description: '管理 RSS 底稿仓库、增量收件箱和刷新重置',
+    settings: []
   },
   {
     id: 'appearance',
@@ -794,6 +813,142 @@ function AISettingsPanel() {
   )
 }
 
+function RSSDraftStoreSettingsPanel() {
+  const [sources, setSources] = useState<RSSDraftStoreSourceRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const loadSources = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.electronAPI?.rss?.getDraftStoreSources) return
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.rss.getDraftStoreSources()
+      if (!result.success || !result.data) {
+        setMessage(result.error || '读取 RSS 底稿仓库失败')
+        setSources([])
+        return
+      }
+      setSources(result.data)
+      setMessage(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadSources()
+  }, [loadSources])
+
+  const handleClear = useCallback(async (sourceId?: string, sourceName?: string) => {
+    if (!window.electronAPI?.rss?.clearDraftStore) return
+    setBusyKey(sourceId || 'all')
+    try {
+      const result = await window.electronAPI.rss.clearDraftStore(sourceId ? { sourceId } : undefined)
+      if (!result.success || !result.data) {
+        setMessage(result.error || '重置 RSS 底稿仓库失败')
+        return
+      }
+      setMessage(
+        sourceId
+          ? `${sourceName || '当前源'} 已重置，下次刷新会重新走首次完整抓取`
+          : '全部 RSS 底稿已重置，下次刷新会重新走首次完整抓取',
+      )
+      await loadSources()
+    } finally {
+      setBusyKey(null)
+    }
+  }, [loadSources])
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div
+        className="glass-surface-card rounded-[24px] border"
+        style={{ ...SETTINGS_CARD_STYLE, padding: '20px 22px' }}
+      >
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>底稿仓库说明</div>
+            <div className="text-[12px] mt-1 leading-6" style={{ color: 'var(--text-light)', maxWidth: 760 }}>
+              首次刷新会尽量补齐历史内容，之后只做轻量检查。清空 RSS 页面列表不会删掉这里的底稿；如果你在这里重置某个源或全部底稿，下次刷新会重新回到首次抓取方式。
+            </div>
+          </div>
+          <button
+            onClick={() => void handleClear()}
+            disabled={busyKey !== null}
+            className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+            style={SETTINGS_DANGER_BUTTON_STYLE}
+          >
+            {busyKey === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            清空全部底稿
+          </button>
+        </div>
+        {message && (
+          <div className="text-[12px] mt-4" style={{ color: 'var(--text-muted)' }}>
+            {message}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {loading ? (
+          <div className="glass-surface-card rounded-[24px] border flex items-center gap-3" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
+            <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--color-blue)' }} />
+            <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>正在读取 RSS 底稿列表…</span>
+          </div>
+        ) : sources.length === 0 ? (
+          <div className="glass-surface-card rounded-[24px] border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
+            <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>还没有底稿内容</div>
+            <div className="text-[12px] mt-1" style={{ color: 'var(--text-light)' }}>等你添加源并刷新后，这里会显示每个源的存量和当前刷新状态。</div>
+          </div>
+        ) : (
+          sources.map((source) => (
+            <div
+              key={source.sourceId}
+              className="glass-surface-card rounded-[24px] border"
+              style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}
+            >
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-semibold truncate" style={{ color: 'var(--text-title)' }}>{source.sourceName}</div>
+                  <div className="text-[11px] mt-1 truncate" style={{ color: 'var(--text-light)' }}>{source.sourceUrl}</div>
+                </div>
+                <button
+                  onClick={() => void handleClear(source.sourceId, source.sourceName)}
+                  disabled={busyKey !== null}
+                  className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={SETTINGS_DANGER_BUTTON_STYLE}
+                >
+                  {busyKey === source.sourceId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  重置此源
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                {[
+                  { label: '底稿总数', value: String(source.storedCount) },
+                  { label: '界面收件箱', value: String(source.inboxCount) },
+                  { label: '已收藏', value: String(source.starredCount) },
+                  { label: '刷新方式', value: source.refreshMode === 'incremental' ? '后续轻量' : '首次完整' },
+                ].map((entry) => (
+                  <div
+                    key={entry.label}
+                    className="rounded-[18px]"
+                    style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '12px 14px' }}
+                  >
+                    <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)' }}>{entry.label}</div>
+                    <div className="text-[13px] font-semibold mt-2" style={{ color: 'var(--text-title)' }}>{entry.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface SettingsPageProps {
   initialSection?: string
 }
@@ -836,7 +991,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'memory', 'personalities', 'user-profiles'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'memory', 'personalities', 'user-profiles', 'rss-storage'].includes(currentSection.id)
     : false
 
   return (
@@ -980,6 +1135,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
+                {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
                 {currentSection.id === 'memory' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>

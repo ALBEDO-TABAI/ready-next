@@ -24,6 +24,8 @@ interface BrowserFeedExtractionResult {
   textSnippet?: string
 }
 
+export type BrowserAcquisitionMode = 'full' | 'incremental'
+
 function generateItemId(platform: PlatformType, key: string): string {
   const hash = createHash('md5').update(key).digest('hex').slice(0, 12)
   return `${platform}_${hash}`
@@ -37,6 +39,10 @@ function clipText(input: string | undefined, maxChars: number): string {
 
 function isValidBrowserCandidateLink(platform: PlatformType, link: string): boolean {
   if (!link) return false
+
+  if (platform === 'bilibili') {
+    return /bilibili\.com\/video\/(?:BV[0-9A-Za-z]+|av\d+)/i.test(link)
+  }
 
   if (platform === 'xiaohongshu') {
     return (
@@ -70,6 +76,45 @@ function buildBrowserCandidateKey(
   return [link, title].filter(Boolean).join('|')
 }
 
+function extractBilibiliVideoIdentity(link: string): { bvid?: string; aid?: string } | null {
+  const bvid = link.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1]
+  if (bvid) return { bvid }
+  const aid = link.match(/\/video\/av(\d+)/i)?.[1]
+  if (aid) return { aid }
+  return null
+}
+
+function formatBilibiliViewCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value >= 100000000) return `${(value / 100000000).toFixed(value >= 1000000000 ? 0 : 1).replace(/\.0$/, '')}亿`
+  if (value >= 10000) return `${(value / 10000).toFixed(value >= 100000 ? 1 : 2).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')}万`
+  return String(value)
+}
+
+function sanitizeBilibiliBrowserDescription(value: string): string {
+  const text = clipText(value, 500)
+  if (!text) return ''
+
+  const cleaned = text
+    .replace(/(?:播放量?|播放|观看)\s*[\d.]+[万亿wW]?/gi, ' ')
+    .replace(/(?:点赞|赞|弹幕|评论|收藏|投币|分享|转发)\s*[\d.]+[万亿wW]?/gi, ' ')
+    .replace(/\b\d{1,2}[-/月]\d{1,2}(?:\s+\d{1,2}:\d{2})?\b/g, ' ')
+    .replace(/\b(?:今天|昨天|前天|\d+\s*(?:分钟前|小时前|天前))\b/g, ' ')
+    .replace(/[\d.]+(?:万|亿|w|W)?/g, ' ')
+    .replace(/\b(?:万|亿|w|W)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!cleaned) return ''
+
+  // A lone short token is usually the uploader name carried over from the card footer, not a useful summary.
+  if (cleaned.length <= 16 && !cleaned.includes(' ') && !/[，。！？,.!?:：]/.test(cleaned)) {
+    return ''
+  }
+
+  return cleaned
+}
+
 function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionResult): ScrapedItem[] {
   const seen = new Set<string>()
   const rows = Array.isArray(payload.items) ? payload.items : []
@@ -99,6 +144,49 @@ function normalizeItems(platform: PlatformType, payload: BrowserFeedExtractionRe
   }
 
   return mapped
+}
+
+export async function enrichBilibiliBrowserItems(items: ScrapedItem[]): Promise<ScrapedItem[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      const identity = extractBilibiliVideoIdentity(item.link)
+      if (!identity) return item
+
+      const apiUrl = identity.bvid
+        ? `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(identity.bvid)}`
+        : `https://api.bilibili.com/x/web-interface/view?aid=${encodeURIComponent(identity.aid || '')}`
+
+      try {
+        const response = await fetch(apiUrl, {
+          headers: {
+            ...BROWSER_ACQUISITION_HEADERS,
+            Accept: 'application/json, text/plain, */*',
+          },
+        })
+        const payload = await response.json() as {
+          code?: number
+          data?: {
+            desc?: string
+            pubdate?: number
+            stat?: { view?: number }
+          }
+        }
+        if (payload?.code !== 0 || !payload.data) return item
+
+        const desc = clipText(payload.data.desc, 500)
+        const view = Number(payload.data.stat?.view || 0)
+        const viewText = formatBilibiliViewCount(view)
+        return {
+          ...item,
+          description: desc || sanitizeBilibiliBrowserDescription(item.description),
+          author: viewText ? `播放量 ${viewText}` : item.author,
+          pubDate: payload.data.pubdate ? new Date(payload.data.pubdate * 1000).toISOString() : item.pubDate,
+        }
+      } catch {
+        return item
+      }
+    }),
+  )
 }
 
 const BROWSER_ACQUISITION_HEADERS: Record<string, string> = {
@@ -145,6 +233,50 @@ function extractXiaohongshuUserId(url: string): string | null {
   return match ? match[1] : null
 }
 
+function extractBilibiliUserId(url: string): string | null {
+  const match = url.match(/space\.bilibili\.com\/(\d+)/i)
+  return match ? match[1] : null
+}
+
+async function resolveBilibiliUserId(url: string): Promise<string | null> {
+  const direct = extractBilibiliUserId(url)
+  if (direct) return direct
+
+  let resolvedUrl = url
+  const lower = url.toLowerCase()
+  if (lower.includes('b23.tv') || lower.includes('bili2233.cn')) {
+    try {
+      resolvedUrl = await resolveFinalUrl(url)
+    } catch {
+      resolvedUrl = url
+    }
+  }
+
+  const fromResolved = extractBilibiliUserId(resolvedUrl)
+  if (fromResolved) return fromResolved
+
+  const bvid = resolvedUrl.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1]
+  const aid = resolvedUrl.match(/\/video\/av(\d+)/i)?.[1]
+  if (!bvid && !aid) return null
+
+  const apiUrl = bvid
+    ? `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`
+    : `https://api.bilibili.com/x/web-interface/view?aid=${encodeURIComponent(aid || '')}`
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        ...BROWSER_ACQUISITION_HEADERS,
+        Accept: 'application/json, text/plain, */*',
+      },
+    })
+    const payload = await response.json() as { data?: { owner?: { mid?: number | string } } }
+    const mid = payload?.data?.owner?.mid
+    return mid ? String(mid) : null
+  } catch {
+    return null
+  }
+}
+
 export async function normalizeBrowserAcquisitionUrl(
   platform: PlatformType,
   url: string,
@@ -154,6 +286,11 @@ export async function normalizeBrowserAcquisitionUrl(
 
   if (platform === 'douyin') {
     return url
+  }
+
+  if (platform === 'bilibili') {
+    const userId = await resolveBilibiliUserId(url)
+    return userId ? `https://space.bilibili.com/${userId}/upload/video` : url
   }
 
   if (
@@ -180,7 +317,11 @@ export async function normalizeBrowserAcquisitionUrl(
   return resolvedUrl
 }
 
-function buildExtractionScript(platform: PlatformType, targetUrl: string): string {
+function buildExtractionScript(
+  platform: PlatformType,
+  targetUrl: string,
+  mode: BrowserAcquisitionMode = 'full',
+): string {
   const commonHelpers = String.raw`
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -226,6 +367,7 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
       (async () => {
         ${commonHelpers}
         const targetUserId = ${JSON.stringify(targetUserId)};
+        const acquisitionMode = ${JSON.stringify(mode)};
         const readNodeImage = (node) => {
           if (!node || typeof node.querySelector !== 'function') return '';
           const image = node.querySelector('img');
@@ -423,8 +565,9 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           return items;
         };
 
+        const maxAttempts = acquisitionMode === 'incremental' ? 3 : 70;
         let attemptedTabSwitch = false;
-        for (let attempt = 0; attempt < 70; attempt += 1) {
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           const href = location.href;
           if (href.includes('/login') || textHas(['登录后查看更多', '登录后即可']) || document.querySelector('input[type="password"]')) {
             return {
@@ -458,10 +601,98 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
           if (stateItems.length > 0) {
             return { title: document.title || '', finalUrl: href, state: 'ready', items: stateItems };
           }
-          if (!attemptedTabSwitch && attempt >= 4) {
+          if (acquisitionMode !== 'incremental' && !attemptedTabSwitch && attempt >= 4) {
             attemptedTabSwitch = clickNotesTabIfPresent();
           }
           await sleep(500);
+        }
+
+        return {
+          title: document.title || '',
+          finalUrl: location.href,
+          state: 'empty',
+          detail: 'browser_loaded_but_no_feed_candidates',
+          textSnippet: bodyText(),
+          items: [],
+        };
+      })()
+    `
+  }
+
+  if (platform === 'bilibili') {
+    return `
+      (async () => {
+        ${commonHelpers}
+        const readNodeImage = (node) => {
+          if (!node || typeof node.querySelector !== 'function') return '';
+          const image = node.querySelector('img');
+          const src = image?.getAttribute('src') || image?.getAttribute('data-src') || image?.currentSrc || '';
+          return src ? abs(src) : '';
+        };
+        const collectVideoAnchors = () => {
+          const anchors = Array.from(document.querySelectorAll('a[href*="/video/BV"], a[href*="/video/av"]'));
+          const seen = new Set();
+          const items = [];
+          for (const anchor of anchors) {
+            const href = abs(anchor.getAttribute('href'));
+            if (!/bilibili\\.com\\/video\\/(?:BV[0-9A-Za-z]+|av\\d+)/i.test(href)) continue;
+            if (seen.has(href)) continue;
+            seen.add(href);
+            const container =
+              anchor.closest('li, article, .small-item, .bili-video-card, .list-item, [class*="video-card"], [class*="video-item"]') ||
+              anchor.parentElement ||
+              anchor;
+            const title =
+              normalize(anchor.getAttribute('title') || '') ||
+              normalize(container?.querySelector('img[alt]')?.getAttribute('alt') || '') ||
+              normalize(container?.querySelector('h3, h4, [title]')?.textContent || '') ||
+              'Bilibili 视频';
+            const body = normalize(container?.innerText || anchor.textContent || '');
+            items.push({
+              title: clip(title, 160),
+              link: href,
+              description: clip(body.replace(title, '').trim(), 280),
+              author: '',
+              pubDate: '',
+              coverImage: clip(readNodeImage(container), 500),
+              fingerprint: clip([href, title, readNodeImage(container)].filter(Boolean).join('|'), 500),
+            });
+            if (items.length >= 20) break;
+          }
+          return items;
+        };
+
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const href = location.href;
+          if (
+            href.includes('/login') ||
+            textHas(['登录后你可以', '立即登录', '首次使用？ 点我注册', '免费看高清视频'])
+          ) {
+            return {
+              title: document.title || '',
+              finalUrl: href,
+              state: 'auth',
+              detail: 'browser_session_login_required',
+              textSnippet: bodyText(),
+              items: [],
+            };
+          }
+          if (textHas(['访问异常', '稍后再试', '安全验证', '验证'])) {
+            return {
+              title: document.title || '',
+              finalUrl: href,
+              state: 'anti_bot',
+              detail: 'risk_control_or_waf',
+              textSnippet: bodyText(),
+              items: [],
+            };
+          }
+          const items = collectVideoAnchors();
+          if (items.length > 0) {
+            return { title: document.title || '', finalUrl: href, state: 'ready', items };
+          }
+          window.scrollTo(0, Math.min(document.body?.scrollHeight || 0, (attempt + 1) * 900));
+          await sleep(400);
         }
 
         return {
@@ -744,8 +975,12 @@ function buildExtractionScript(platform: PlatformType, targetUrl: string): strin
   `
 }
 
-export function buildExtractionScriptForTest(platform: PlatformType, targetUrl: string): string {
-  return buildExtractionScript(platform, targetUrl)
+export function buildExtractionScriptForTest(
+  platform: PlatformType,
+  targetUrl: string,
+  mode: BrowserAcquisitionMode = 'full',
+): string {
+  return buildExtractionScript(platform, targetUrl, mode)
 }
 
 function describeBrowserFailure(platform: PlatformType, payload: BrowserFeedExtractionResult): string {
@@ -776,12 +1011,16 @@ export async function fetchFeedViaBrowserSession(
   controller: BrowserController,
   platform: PlatformType,
   url: string,
+  options?: {
+    mode?: BrowserAcquisitionMode
+  },
 ): Promise<ScrapeResult> {
+  const mode = options?.mode ?? 'full'
   const acquisitionUrl = await normalizeBrowserAcquisitionUrl(platform, url)
   const captureOptions = {
-    timeoutMs: platform === 'xiaohongshu' ? 65_000 : 45_000,
+    timeoutMs: platform === 'xiaohongshu' ? (mode === 'incremental' ? 6_000 : 65_000) : 45_000,
     settleMs: 1_000,
-    script: buildExtractionScript(platform, acquisitionUrl),
+    script: buildExtractionScript(platform, acquisitionUrl, mode),
   }
 
   let snapshot: (BrowserFeedExtractionResult & { __readyCaptureError?: string }) | null = null
@@ -832,8 +1071,10 @@ export async function fetchFeedViaBrowserSession(
     }
   }
 
+  const enrichedItems = platform === 'bilibili' ? await enrichBilibiliBrowserItems(items) : items
+
   return {
-    items,
+    items: enrichedItems,
     feedTitle: clipText(snapshot?.title, 160),
     platform,
   }

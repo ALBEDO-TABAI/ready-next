@@ -248,6 +248,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
               <h1 className="text-[20px] font-bold text-[var(--text-title)] mb-3">{item.title}</h1>
               <div className="flex items-center gap-3 mb-6 text-[12px] text-[var(--text-muted)]">
                 <span>{item.source}</span>
+                {item.author && item.author !== item.source ? <span>{item.author}</span> : null}
                 <span>{item.publishedAt}</span>
               </div>
               <p className="text-[14px] text-[var(--text-body)] leading-relaxed mb-6">{item.summary}</p>

@@ -75,6 +75,58 @@ function isWafRouteError(message: string): boolean {
   )
 }
 
+export function isLikelyStaleBilibiliResult(
+  result: Pick<ScrapeResult, 'items' | 'platform'>,
+  now = Date.now(),
+  maxAgeDays = 14,
+): boolean {
+  if (result.platform !== 'bilibili') return false
+  if (!Array.isArray(result.items) || result.items.length === 0) return false
+  const latestMs = Math.max(
+    ...result.items.map((item) => {
+      const value = item.pubDate ? Date.parse(item.pubDate) : NaN
+      return Number.isFinite(value) ? value : 0
+    }),
+  )
+  if (!latestMs) return false
+  return now - latestMs > maxAgeDays * 24 * 60 * 60 * 1000
+}
+
+export function resolveBilibiliStaleRouteResult(
+  primary: ScrapeResult,
+  browserResult: ScrapeResult | null,
+  now = Date.now(),
+): { result: ScrapeResult; backend: 'rsshub' | 'browser' } {
+  if (!isLikelyStaleBilibiliResult(primary, now) || !browserResult) {
+    return {
+      result: primary,
+      backend: 'rsshub',
+    }
+  }
+
+  if (browserResult.items.length > 0) {
+    return {
+      result: {
+        ...browserResult,
+        error: 'Bilibili 上游接口返回内容偏旧，已改用浏览器页面兜底。',
+      },
+      backend: 'browser',
+    }
+  }
+
+  const browserError =
+    browserResult.error || 'Bilibili 应用内浏览器未提取到可用条目，请先在 Ready 浏览器中打开该 UP 主页后重试。'
+  return {
+    result: {
+      items: [],
+      feedTitle: browserResult.feedTitle || primary.feedTitle,
+      platform: primary.platform,
+      error: `Bilibili 上游接口返回内容偏旧。${browserError}`,
+    },
+    backend: 'browser',
+  }
+}
+
 class RSSHubScraper extends BaseScraper {
   protected rsshubBase: string
   protected routeTemplate: string
@@ -510,15 +562,6 @@ export class BilibiliScraper extends RSSHubScraper {
       }
     }
 
-    const polymer = await this.fetchViaPolymerAPI(userId)
-    if (polymer.items.length > 0) {
-      console.log(`[rss:bilibili] polymer api success user=${userId} items=${polymer.items.length}`)
-      return polymer
-    }
-    if (polymer.error) {
-      console.warn(`[rss:bilibili] polymer api failed user=${userId}: ${polymer.error}`)
-    }
-
     const primary = await this.fetchRoute(this.routeTemplate.replace('{id}', userId), this.platform)
     if (primary.items.length > 0) {
       console.log(`[rss:bilibili] rsshub video success user=${userId} items=${primary.items.length}`)
@@ -537,7 +580,16 @@ export class BilibiliScraper extends RSSHubScraper {
       return official
     }
 
-    const errorParts = [polymer.error, primary.error, fallback.error, official.error].filter(Boolean)
+    const polymer = await this.fetchViaPolymerAPI(userId)
+    if (polymer.items.length > 0) {
+      console.log(`[rss:bilibili] polymer api success user=${userId} items=${polymer.items.length}`)
+      return polymer
+    }
+    if (polymer.error) {
+      console.warn(`[rss:bilibili] polymer api failed user=${userId}: ${polymer.error}`)
+    }
+
+    const errorParts = [primary.error, fallback.error, official.error, polymer.error].filter(Boolean)
     return {
       items: [],
       feedTitle: '',

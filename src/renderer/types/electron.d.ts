@@ -776,6 +776,18 @@ interface RSSSourceData {
   platform?: string
 }
 
+interface RSSDraftStoreSourceData {
+  sourceId: string
+  sourceName: string
+  sourceUrl: string
+  platform: string
+  storedCount: number
+  inboxCount: number
+  starredCount: number
+  refreshMode: 'full' | 'incremental'
+  lastFetchedAt: string | null
+}
+
 /** RSS item record */
 interface RSSItemData {
   id: string
@@ -786,6 +798,7 @@ interface RSSItemData {
   author?: string
   source?: string
   publishedAt: string
+  inboxVisible?: boolean
   read: boolean
   starred: boolean
   coverImage?: string | null
@@ -856,10 +869,12 @@ interface ElectronRSSAPI {
   addSource: (source: RSSAddSourceInput) => Promise<RSSResponse<{ id: string; platform?: string; name?: string; itemCount?: number; warning?: string }>>
   removeSource: (id: string) => Promise<RSSResponse<{ removed: boolean }>>
   getItems: (sourceId?: string) => Promise<RSSResponse<RSSItemData[]>>
+  getDraftStoreSources: () => Promise<RSSResponse<RSSDraftStoreSourceData[]>>
   markRead: (itemId: string) => Promise<RSSResponse<{ marked: boolean }>>
   markReadBatch: (itemIds: string[]) => Promise<RSSResponse<{ marked: number }>>
-  deleteItems: (itemIds: string[]) => Promise<RSSResponse<{ deleted: number }>>
+  deleteItems: (payload: string[] | { itemIds: string[]; preserveStarred?: boolean }) => Promise<RSSResponse<{ deleted: number; dismissed?: number }>>
   toggleStarred: (itemId: string) => Promise<RSSResponse<{ toggled: boolean }>>
+  clearDraftStore: (payload?: { sourceId?: string }) => Promise<RSSResponse<{ deletedItems: number; resetSources: number }>>
   refreshSource: (sourceId: string) => Promise<RSSResponse<import('../modules/rss/types').RSSRefreshSourceResultData>>
   fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
     Promise<RSSResponse<{ message: string; fetched: number; digest?: boolean; running?: boolean; errors?: string[]; status?: unknown }>>

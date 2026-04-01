@@ -29,6 +29,7 @@ export interface RSSSource {
   enabled: number
   created_at: number
   platform?: string
+  draft_seeded?: number
 }
 
 export interface RSSItem {
@@ -42,10 +43,23 @@ export interface RSSItem {
   author: string | null
   published_at: number | null
   fetched_at: number
+  inbox_visible?: number
   read: number
   starred: number
   ai_score: number | null
   ai_tags: string | null
+}
+
+export interface RSSDraftStoreSourceSummary {
+  source_id: string
+  source_name: string
+  source_url: string
+  platform: string
+  stored_count: number
+  inbox_count: number
+  starred_count: number
+  draft_seeded: number
+  last_fetched: number | null
 }
 
 export interface RSSStats {
@@ -370,10 +384,32 @@ export class DatabaseManager {
     if (!this.db) return []
     if (sourceId) {
       return this.db.prepare(
-        'SELECT * FROM rss_items WHERE source_id = ? ORDER BY published_at DESC'
+        `SELECT * FROM rss_items
+         WHERE source_id = ?
+           AND (inbox_visible = 1 OR starred = 1)
+         ORDER BY COALESCE(published_at, fetched_at) DESC`
       ).all<RSSItem>(sourceId)
     }
-    return this.db.prepare('SELECT * FROM rss_items ORDER BY published_at DESC').all<RSSItem>()
+    return this.db.prepare(
+      `SELECT * FROM rss_items
+       WHERE inbox_visible = 1 OR starred = 1
+       ORDER BY COALESCE(published_at, fetched_at) DESC`
+    ).all<RSSItem>()
+  }
+
+  getAllRSSItems(sourceId?: string): RSSItem[] {
+    if (!this.db) return []
+    if (sourceId) {
+      return this.db.prepare(
+        `SELECT * FROM rss_items
+         WHERE source_id = ?
+         ORDER BY COALESCE(published_at, fetched_at) DESC`
+      ).all<RSSItem>(sourceId)
+    }
+    return this.db.prepare(
+      `SELECT * FROM rss_items
+       ORDER BY COALESCE(published_at, fetched_at) DESC`
+    ).all<RSSItem>()
   }
 
   getRSSItemsWithSource(sourceId?: string): Array<RSSItem & { source_name: string }> {
@@ -382,13 +418,16 @@ export class DatabaseManager {
       return this.db.prepare(
         `SELECT i.*, s.name AS source_name FROM rss_items i
          LEFT JOIN rss_sources s ON i.source_id = s.id
-         WHERE i.source_id = ? ORDER BY i.published_at DESC`
+         WHERE i.source_id = ?
+           AND (i.inbox_visible = 1 OR i.starred = 1)
+         ORDER BY COALESCE(i.published_at, i.fetched_at) DESC`
       ).all<RSSItem & { source_name: string }>(sourceId)
     }
     return this.db.prepare(
       `SELECT i.*, s.name AS source_name FROM rss_items i
        LEFT JOIN rss_sources s ON i.source_id = s.id
-       ORDER BY i.published_at DESC`
+       WHERE i.inbox_visible = 1 OR i.starred = 1
+       ORDER BY COALESCE(i.published_at, i.fetched_at) DESC`
     ).all<RSSItem & { source_name: string }>()
   }
 
@@ -406,9 +445,19 @@ export class DatabaseManager {
     if (!this.db) throw new Error('Database not available')
     let inserted = 0
     const stmt = this.db.prepare(
-      `INSERT OR IGNORE INTO rss_items
-       (id, source_id, guid, title, link, summary, cover_image, author, published_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO rss_items
+       (id, source_id, guid, title, link, summary, cover_image, author, published_at, inbox_visible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       ON CONFLICT(id) DO UPDATE SET
+         source_id = excluded.source_id,
+         guid = excluded.guid,
+         title = excluded.title,
+         link = excluded.link,
+         summary = excluded.summary,
+         cover_image = excluded.cover_image,
+         author = excluded.author,
+         published_at = excluded.published_at,
+         fetched_at = unixepoch()`
     )
     for (const item of items) {
       const result = stmt.run(
@@ -450,6 +499,20 @@ export class DatabaseManager {
     return result.changes ?? 0
   }
 
+  dismissRSSItemsFromInbox(itemIds: string[], preserveStarred = false): number {
+    if (!this.db) throw new Error('Database not available')
+    if (itemIds.length === 0) return 0
+    const placeholders = itemIds.map(() => '?').join(', ')
+    const stmt = this.db.prepare(
+      `UPDATE rss_items
+       SET inbox_visible = 0
+       WHERE id IN (${placeholders})
+         ${preserveStarred ? 'AND starred = 0' : ''}`
+    )
+    const result = stmt.run(...itemIds) as { changes?: number }
+    return result.changes ?? 0
+  }
+
   deleteRSSItemsBySource(sourceId: string): number {
     if (!this.db) throw new Error('Database not available')
     const result = this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(sourceId) as { changes?: number }
@@ -464,6 +527,52 @@ export class DatabaseManager {
   updateRSSSourceLastFetched(sourceId: string): void {
     if (!this.db) return
     this.db.prepare('UPDATE rss_sources SET last_fetched = unixepoch() WHERE id = ?').run(sourceId)
+  }
+
+  setRSSSourceDraftSeeded(sourceId: string, seeded: boolean): void {
+    if (!this.db) throw new Error('Database not available')
+    this.db.prepare('UPDATE rss_sources SET draft_seeded = ? WHERE id = ?').run(seeded ? 1 : 0, sourceId)
+  }
+
+  getRSSDraftStoreSources(): RSSDraftStoreSourceSummary[] {
+    if (!this.db) return []
+    return this.db.prepare(
+      `SELECT
+         s.id AS source_id,
+         s.name AS source_name,
+         s.url AS source_url,
+         COALESCE(s.platform, 'rss') AS platform,
+         COUNT(i.id) AS stored_count,
+         SUM(CASE WHEN i.inbox_visible = 1 THEN 1 ELSE 0 END) AS inbox_count,
+         SUM(CASE WHEN i.starred = 1 THEN 1 ELSE 0 END) AS starred_count,
+         COALESCE(s.draft_seeded, 0) AS draft_seeded,
+         s.last_fetched AS last_fetched
+       FROM rss_sources s
+       LEFT JOIN rss_items i ON i.source_id = s.id
+       WHERE s.enabled = 1
+       GROUP BY s.id
+       ORDER BY s.created_at DESC`
+    ).all<RSSDraftStoreSourceSummary>()
+  }
+
+  clearRSSDraftStore(sourceId?: string): { deletedItems: number; resetSources: number } {
+    if (!this.db) throw new Error('Database not available')
+
+    if (sourceId) {
+      const deleted = this.db.prepare('DELETE FROM rss_items WHERE source_id = ?').run(sourceId) as { changes?: number }
+      const reset = this.db.prepare('UPDATE rss_sources SET draft_seeded = 0 WHERE id = ?').run(sourceId) as { changes?: number }
+      return {
+        deletedItems: deleted.changes ?? 0,
+        resetSources: reset.changes ?? 0,
+      }
+    }
+
+    const deleted = this.db.prepare('DELETE FROM rss_items').run() as { changes?: number }
+    const reset = this.db.prepare('UPDATE rss_sources SET draft_seeded = 0').run() as { changes?: number }
+    return {
+      deletedItems: deleted.changes ?? 0,
+      resetSources: reset.changes ?? 0,
+    }
   }
 
   getRSSItemsByIds(itemIds: string[]): RSSItem[] {

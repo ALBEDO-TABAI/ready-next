@@ -12,13 +12,18 @@ import {
   platformLabel,
   type PlatformType,
 } from './scrapers/index'
+import { isLikelyStaleBilibiliResult, resolveBilibiliStaleRouteResult } from './scrapers/rsshub'
 import { classifyItem } from './classifier'
 import { rsshubManager } from './rsshub-process'
 import type { ScrapedItem, ScrapeResult } from './scrapers/base'
 import { generateRSSArtifacts, generateRSSBenchmarkArtifacts } from './reports'
 import { rssUpdateLock } from './update-lock'
 import { getRSSItemAnalysisManager } from './item-analysis-manager'
-import { fetchFeedViaBrowserSession, supportsBrowserSessionAcquisition } from './browser-acquisition'
+import {
+  fetchFeedViaBrowserSession,
+  supportsBrowserSessionAcquisition,
+  type BrowserAcquisitionMode,
+} from './browser-acquisition'
 import {
   buildRSSBrowserOpenAction,
   shouldPauseSilentBrowserRetry,
@@ -70,6 +75,7 @@ interface DBRSSItem {
   author: string | null
   published_at: number | null
   fetched_at: number
+  inbox_visible?: number
   read: number
   starred: number
   ai_score: number | null
@@ -88,6 +94,7 @@ interface DBRSSSource {
   enabled: number
   created_at: number
   platform: string
+  draft_seeded?: number
 }
 
 interface MappedRSSItem {
@@ -99,6 +106,7 @@ interface MappedRSSItem {
   author: string
   source: string
   publishedAt: string
+  inboxVisible: boolean
   read: boolean
   starred: boolean
   coverImage: string | null
@@ -113,6 +121,18 @@ interface MappedRSSSource {
   group: string
   enabled: boolean
   platform: string
+}
+
+interface MappedRSSDraftStoreSource {
+  sourceId: string
+  sourceName: string
+  sourceUrl: string
+  platform: string
+  storedCount: number
+  inboxCount: number
+  starredCount: number
+  refreshMode: BrowserAcquisitionMode
+  lastFetchedAt: string | null
 }
 
 interface MappedRSSAnalysisJob {
@@ -201,6 +221,7 @@ function mapDBItemToAPI(item: DBRSSItem): MappedRSSItem {
     author: item.author ?? '',
     source: item.source_name ?? '',
     publishedAt: item.published_at ? new Date(item.published_at * 1000).toISOString() : '',
+    inboxVisible: item.inbox_visible !== 0,
     read: item.read === 1,
     starred: item.starred === 1,
     coverImage: item.cover_image ?? null,
@@ -217,6 +238,22 @@ function mapDBSourceToAPI(source: DBRSSSource): MappedRSSSource {
     group: source.group_name ?? 'default',
     enabled: source.enabled === 1,
     platform: source.platform ?? 'rss',
+  }
+}
+
+function mapDraftStoreSourceToAPI(
+  source: import('../database').RSSDraftStoreSourceSummary,
+): MappedRSSDraftStoreSource {
+  return {
+    sourceId: source.source_id,
+    sourceName: source.source_name,
+    sourceUrl: source.source_url,
+    platform: source.platform || 'rss',
+    storedCount: Number(source.stored_count) || 0,
+    inboxCount: Number(source.inbox_count) || 0,
+    starredCount: Number(source.starred_count) || 0,
+    refreshMode: source.draft_seeded === 1 ? 'incremental' : 'full',
+    lastFetchedAt: source.last_fetched ? new Date(source.last_fetched * 1000).toISOString() : null,
   }
 }
 
@@ -470,6 +507,14 @@ function requiresStrictRSSHubAvailability(platform: PlatformType): boolean {
   return needsRSSHub(platform) && !(rssBrowserController && supportsBrowserSessionAcquisition(platform))
 }
 
+function resolveBrowserAcquisitionMode(
+  source: Pick<DBRSSSource, 'draft_seeded'> | Pick<{ draft_seeded?: number }, 'draft_seeded'>,
+  platform: PlatformType,
+): BrowserAcquisitionMode {
+  if (platform !== 'xiaohongshu') return 'full'
+  return source.draft_seeded === 1 ? 'incremental' : 'full'
+}
+
 function filterSelectedSources(
   sources: DBRSSSource[],
   options?: { group?: string; sourceIds?: string[] },
@@ -491,7 +536,7 @@ function filterSelectedSources(
 
 async function ensureArtifactFiles() {
   const sources = rssRepository.getRSSSources() as DBRSSSource[]
-  const allItems = rssRepository.getRSSItems() as DBRSSItem[]
+  const allItems = rssRepository.getAllRSSItems() as DBRSSItem[]
   return generateRSSArtifacts({
     sources,
     allItems,
@@ -500,7 +545,7 @@ async function ensureArtifactFiles() {
 }
 
 async function fetchSourceWithCurrentStack(
-  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name'>,
+  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
   platform: PlatformType,
   rsshubBase?: string,
 ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
@@ -532,7 +577,9 @@ async function fetchSourceWithCurrentStack(
     }
 
     try {
-      const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url)
+      const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url, {
+        mode: resolveBrowserAcquisitionMode(source, platform),
+      })
       if (browserResult.items.length > 0 || !browserResult.error) {
         return {
           result: browserResult,
@@ -608,6 +655,16 @@ async function fetchSourceWithCurrentStack(
 
   const scraper = createScraper(platform, rsshubBase)
   const result = await scraper.fetchItems(source.url)
+  if (platform === 'bilibili' && rssBrowserController && isLikelyStaleBilibiliResult(result)) {
+    const browserResult = await fetchFeedViaBrowserSession(rssBrowserController, platform, source.url, {
+      mode: 'full',
+    })
+    const resolved = resolveBilibiliStaleRouteResult(result, browserResult)
+    return {
+      result: resolved.result,
+      backendUsed: resolved.backend,
+    }
+  }
   return {
     result,
     backendUsed: resolveSourceBackend(platform),
@@ -750,6 +807,7 @@ export function setupRSSIPC(useMock = false): void {
           name: source.name?.trim() || feedUrl,
           url: feedUrl,
           group_name: source.group || 'default',
+          draft_seeded: 0,
         },
         platform,
         rsshubBase,
@@ -782,6 +840,7 @@ export function setupRSSIPC(useMock = false): void {
         }))
         itemCount = rssRepository.upsertRSSItems(dbItems)
         rssRepository.updateRSSSourceLastFetched(id)
+        rssRepository.setRSSSourceDraftSeeded(id, true)
       }
 
       if (result.error && result.items.length === 0 && !allowSourceWithoutInitialItems) {
@@ -861,6 +920,17 @@ export function setupRSSIPC(useMock = false): void {
     }
   })
 
+  ipcMain.handle('rss:getDraftStoreSources', async () => {
+    if (useMock) return createSuccessResponse([], true)
+
+    try {
+      const sources = rssRepository.getRSSDraftStoreSources()
+      return createSuccessResponse(sources.map(mapDraftStoreSourceToAPI), false)
+    } catch (error) {
+      return createErrorResponse(error instanceof Error ? error.message : String(error))
+    }
+  })
+
   ipcMain.handle('rss:markRead', async (_, itemId: string) => {
     if (useMock) return createSuccessResponse({ marked: true }, true)
 
@@ -884,13 +954,15 @@ export function setupRSSIPC(useMock = false): void {
     }
   })
 
-  ipcMain.handle('rss:deleteItems', async (_, itemIds: string[]) => {
+  ipcMain.handle('rss:deleteItems', async (_, payload: string[] | { itemIds: string[]; preserveStarred?: boolean }) => {
+    const itemIds = Array.isArray(payload) ? payload : payload?.itemIds ?? []
+    const preserveStarred = Array.isArray(payload) ? false : payload?.preserveStarred === true
     if (useMock) return createSuccessResponse({ deleted: itemIds.length }, true)
 
     try {
-      const deleted = rssRepository.deleteRSSItems(itemIds)
-      console.log(`[rss:batch] deleteItems size=${itemIds.length} deleted=${deleted}`)
-      return createSuccessResponse({ deleted }, false)
+      const dismissed = rssRepository.dismissRSSItemsFromInbox(itemIds, preserveStarred)
+      console.log(`[rss:batch] deleteItems size=${itemIds.length} dismissed=${dismissed} preserveStarred=${preserveStarred}`)
+      return createSuccessResponse({ deleted: dismissed, dismissed }, false)
     } catch (error) {
       return createErrorResponse(error instanceof Error ? error.message : String(error))
     }
@@ -902,6 +974,19 @@ export function setupRSSIPC(useMock = false): void {
     try {
       rssRepository.toggleRSSStarred(itemId)
       return createSuccessResponse({ toggled: true }, false)
+    } catch (error) {
+      return createErrorResponse(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  ipcMain.handle('rss:clearDraftStore', async (_, payload?: { sourceId?: string }) => {
+    if (useMock) {
+      return createSuccessResponse({ deletedItems: 0, resetSources: payload?.sourceId ? 1 : 0 }, true)
+    }
+
+    try {
+      const result = rssRepository.clearRSSDraftStore(payload?.sourceId?.trim() || undefined)
+      return createSuccessResponse(result, false)
     } catch (error) {
       return createErrorResponse(error instanceof Error ? error.message : String(error))
     }
@@ -1266,8 +1351,11 @@ export function setupRSSIPC(useMock = false): void {
           const existingIds = new Set(rssRepository.getRSSItemsByIds(candidateIds).map((item) => item.id))
           const newIds = candidateIds.filter((id) => !existingIds.has(id))
 
-          const inserted = rssRepository.upsertRSSItems(dbItems)
+          rssRepository.upsertRSSItems(dbItems)
           rssRepository.updateRSSSourceLastFetched(source.id)
+          if (result.items.length > 0) {
+            rssRepository.setRSSSourceDraftSeeded(source.id, true)
+          }
           recordSourceRouteAttempt({
             sourceId: source.id,
             sourceName: source.name,
@@ -1283,7 +1371,7 @@ export function setupRSSIPC(useMock = false): void {
           persistRouteDiagnosticsSnapshot()
           return {
             sourceId: source.id,
-            inserted,
+            inserted: newIds.length,
             insertedIds: newIds,
           }
         })
@@ -1301,7 +1389,7 @@ export function setupRSSIPC(useMock = false): void {
           }
         }
 
-        const allItems = rssRepository.getRSSItems() as DBRSSItem[]
+        const allItems = rssRepository.getAllRSSItems() as DBRSSItem[]
         const insertedItems = rssRepository.getRSSItemsByIds(insertedItemIds) as DBRSSItem[]
 
         await generateRSSArtifacts({
@@ -1481,14 +1569,14 @@ export function setupRSSIPC(useMock = false): void {
         published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
         ai_tags: null,
       }))
-      if (supportsBrowserSessionAcquisition(platform) && backendUsed === 'browser' && dbItems.length > 0) {
-        rssRepository.deleteRSSItemsBySource(source.id)
-      }
       const candidateIds = dbItems.map((item) => item.id)
       const existingIds = new Set(rssRepository.getRSSItemsByIds(candidateIds).map((item) => item.id))
       const newIds = candidateIds.filter((id) => !existingIds.has(id))
-      const inserted = rssRepository.upsertRSSItems(dbItems)
+      rssRepository.upsertRSSItems(dbItems)
       rssRepository.updateRSSSourceLastFetched(source.id)
+      if (result.items.length > 0) {
+        rssRepository.setRSSSourceDraftSeeded(source.id, true)
+      }
       recordSourceRouteAttempt({
         sourceId: source.id,
         sourceName: source.name,
@@ -1505,14 +1593,14 @@ export function setupRSSIPC(useMock = false): void {
 
       await generateRSSArtifacts({
         sources: rssRepository.getRSSSources() as DBRSSSource[],
-        allItems: rssRepository.getRSSItems() as DBRSSItem[],
+        allItems: rssRepository.getAllRSSItems() as DBRSSItem[],
         insertedItems: rssRepository.getRSSItemsByIds(newIds) as DBRSSItem[],
       })
 
       return createSuccessResponse(
         {
-          message: `Refreshed 1 source via ${backendUsed}, ${result.items.length} items, ${inserted} written`,
-          fetched: inserted,
+          message: `Refreshed 1 source via ${backendUsed}, ${result.items.length} items, ${newIds.length} written`,
+          fetched: newIds.length,
           sourceId,
           sourceName: source.name,
           backend: backendUsed,

@@ -2,6 +2,7 @@ import type {
   RSSAnalysisAction,
   RSSAnalysisJob,
   RSSAnalysisJobStatus,
+  RSSDraftStoreSourceSummary,
   RSSItem,
   RSSSource,
   RSSStats,
@@ -37,6 +38,10 @@ export class RSSRepository {
     return getDatabase().getRSSItems(sourceId)
   }
 
+  getAllRSSItems(sourceId?: string): RSSItem[] {
+    return getDatabase().getAllRSSItems(sourceId)
+  }
+
   getRSSItemsWithSource(sourceId?: string): Array<RSSItem & { source_name: string }> {
     return getDatabase().getRSSItemsWithSource(sourceId)
   }
@@ -68,6 +73,10 @@ export class RSSRepository {
     return getDatabase().deleteRSSItems(itemIds)
   }
 
+  dismissRSSItemsFromInbox(itemIds: string[], preserveStarred = false): number {
+    return getDatabase().dismissRSSItemsFromInbox(itemIds, preserveStarred)
+  }
+
   deleteRSSItemsBySource(sourceId: string): number {
     return getDatabase().deleteRSSItemsBySource(sourceId)
   }
@@ -80,8 +89,20 @@ export class RSSRepository {
     getDatabase().updateRSSSourceLastFetched(sourceId)
   }
 
+  setRSSSourceDraftSeeded(sourceId: string, seeded: boolean): void {
+    getDatabase().setRSSSourceDraftSeeded(sourceId, seeded)
+  }
+
   getRSSItemsByIds(itemIds: string[]): RSSItem[] {
     return getDatabase().getRSSItemsByIds(itemIds)
+  }
+
+  getRSSDraftStoreSources(): RSSDraftStoreSourceSummary[] {
+    return getDatabase().getRSSDraftStoreSources()
+  }
+
+  clearRSSDraftStore(sourceId?: string): { deletedItems: number; resetSources: number } {
+    return getDatabase().clearRSSDraftStore(sourceId)
   }
 
   getLatestPerSource(): RSSItem[] {

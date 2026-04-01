@@ -767,6 +767,28 @@ const migrations: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_execution_step ON skill_execution_artifacts(execution_id, step_id, created_at DESC)')
       db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_artifact_id ON skill_execution_artifacts(artifact_id)')
     }
+  },
+
+  // ------------------------------------------------------------------ 019
+  {
+    name: '019_add_rss_draft_store_fields',
+    up: (db) => {
+      const rssItemColumns = db.prepare("PRAGMA table_info(rss_items)").all<{ name: string }>()
+      const hasInboxVisible = rssItemColumns.some((column) => column.name === 'inbox_visible')
+      if (!hasInboxVisible) {
+        db.exec('ALTER TABLE rss_items ADD COLUMN inbox_visible INTEGER DEFAULT 1')
+      }
+
+      const rssSourceColumns = db.prepare("PRAGMA table_info(rss_sources)").all<{ name: string }>()
+      const hasDraftSeeded = rssSourceColumns.some((column) => column.name === 'draft_seeded')
+      if (!hasDraftSeeded) {
+        db.exec('ALTER TABLE rss_sources ADD COLUMN draft_seeded INTEGER DEFAULT 0')
+      }
+
+      db.exec('CREATE INDEX IF NOT EXISTS idx_rss_items_inbox_visible ON rss_items(inbox_visible, starred, published_at DESC)')
+      db.exec('UPDATE rss_items SET inbox_visible = 1 WHERE inbox_visible IS NULL')
+      db.exec('UPDATE rss_sources SET draft_seeded = 0 WHERE draft_seeded IS NULL')
+    }
   }
 ]
 
