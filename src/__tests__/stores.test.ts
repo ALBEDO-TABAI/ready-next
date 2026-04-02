@@ -964,16 +964,14 @@ describe('useWorkspace Store', () => {
     it('should set and clamp side panel width by variant', () => {
         const store = useWorkspace.getState()
         store.setSidePanelWidth('skills', 360)
-        assert.strictEqual(useWorkspace.getState().sidePanelWidths.skills, 360)
+        assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 360)
         store.setSidePanelWidth('search', 100)
-        assert.strictEqual(useWorkspace.getState().sidePanelWidths.search, 220)
+        assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 220)
         store.setSidePanelWidth('files', 999)
-        assert.strictEqual(useWorkspace.getState().sidePanelWidths.files, 420)
+        assert.strictEqual(useWorkspace.getState().sidePanelWidths.shared, 420)
 
         const persisted = JSON.parse(storage.get('ready-side-panel-widths-v2') || '{}')
-        assert.strictEqual(persisted.skills, 360)
-        assert.strictEqual(persisted.search, 220)
-        assert.strictEqual(persisted.files, 420)
+        assert.strictEqual(persisted.shared, 420)
     })
 
     it('should set and persist skills split ratio with clamp', () => {
