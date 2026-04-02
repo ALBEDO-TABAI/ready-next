@@ -12,6 +12,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_X,
   WORKBENCH_SUPPORT_PANEL_WIDTH,
 } from '../../modules/workbench/chrome'
+import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
@@ -59,6 +60,12 @@ interface RSSModeProps {
   isMotionSettled?: boolean
 }
 
+interface AddSourceDraftState {
+  browserPresetUrl: string
+  browserPresetName: string
+  browserPresetLabel: string | null
+}
+
 export default function RSSMode({
   isActive = true,
   isMotionSettled = true,
@@ -67,6 +74,8 @@ export default function RSSMode({
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
   const setSelection = useRSSSession((state) => state.setSelection)
   const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
+  const browserTabs = useBrowserTabs((state) => state.tabs)
+  const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
   const selectedSource = selectedSourceId
   const [items, setItems] = useState<RSSItem[]>([])
   const [sources, setSources] = useState<RSSSource[]>([])
@@ -77,6 +86,11 @@ export default function RSSMode({
   const [isMock, setIsMock] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [addSourceDraft, setAddSourceDraft] = useState<AddSourceDraftState>({
+    browserPresetUrl: '',
+    browserPresetName: '',
+    browserPresetLabel: null,
+  })
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
@@ -90,6 +104,15 @@ export default function RSSMode({
   const lastModalActionKeyRef = useRef<string | null>(null)
   const shouldPoll = isActive && hasHydrated
   const { modalProps, showConfirm } = useModal()
+  const activeBrowserTab = useMemo(
+    () => browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null,
+    [activeBrowserTabId, browserTabs],
+  )
+  const activeBrowserPageLabel = useMemo(() => {
+    if (!activeBrowserTab?.url) return null
+    const label = activeBrowserTab.title?.trim() || activeBrowserTab.domain?.trim() || activeBrowserTab.url
+    return `当前页：${label}`
+  }, [activeBrowserTab])
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -392,6 +415,15 @@ export default function RSSMode({
   const handleSourceChange = useCallback((sourceId: string | null) => {
     setSelection({ selectedSourceId: sourceId })
   }, [setSelection])
+
+  const handleAddSource = useCallback(() => {
+    setAddSourceDraft({
+      browserPresetUrl: activeBrowserTab?.url || '',
+      browserPresetName: activeBrowserTab?.title?.trim() || '',
+      browserPresetLabel: activeBrowserPageLabel || null,
+    })
+    setShowAddModal(true)
+  }, [activeBrowserPageLabel, activeBrowserTab])
 
   const handleItemClick = useCallback((item: RSSItem) => {
     setSelectedItem(item)
@@ -726,7 +758,7 @@ export default function RSSMode({
               onDownloadItem={handleDownloadItem}
               onOpenAnalysisOutput={handleOpenAnalysisOutput}
               onRefresh={handleRefresh}
-              onAddSource={() => setShowAddModal(true)}
+              onAddSource={handleAddSource}
               onClearRead={handleClearRead}
               onPauseAnalysisJob={handlePauseAnalysisJob}
               onResumeAnalysisJob={handleResumeAnalysisJob}
@@ -779,6 +811,9 @@ export default function RSSMode({
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onSuccess={handleAddSourceSuccess}
+        browserPresetUrl={addSourceDraft.browserPresetUrl}
+        browserPresetName={addSourceDraft.browserPresetName}
+        browserPresetLabel={addSourceDraft.browserPresetLabel}
       />
       <Modal {...modalProps} />
     </div>
