@@ -718,7 +718,7 @@ function ChatPanelMotionLayer({
           gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`,
         }}
       >
-        <div className="relative overflow-hidden">
+        <div className="relative overflow-visible" style={{ zIndex: 4 }}>
           <motion.div
             className="absolute inset-0"
             style={{
@@ -750,7 +750,7 @@ function ChatPanelMotionLayer({
           </motion.div>
         </div>
 
-        <div className="relative min-h-0 overflow-hidden">
+        <div className="relative min-h-0 overflow-hidden" style={{ zIndex: 1 }}>
           <motion.div
             className="absolute inset-0 flex min-h-0 flex-col"
             style={{
