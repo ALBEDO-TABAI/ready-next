@@ -1,7 +1,8 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ChevronRight, ChevronDown, Minus, Plus,
-  FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2,
+  FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2, Globe, BookOpen,
   FilePlus2, FolderPlus, Copy, RefreshCw, Trash2,
 } from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
@@ -10,6 +11,18 @@ import { toLocalFileUrl } from '../../utils/dragDrop'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { FolderPreview } from './FolderPreview'
 import { describeFolderPreview } from './folderPreviewModel'
+import {
+  buildFloatingMenuItemStyle,
+  buildFloatingMenuSurfaceStyle,
+} from '../ui/floatingMenuStyles'
+import {
+  clampDropMenuPositionToBoundary,
+  parseBrowserTabDragPayload,
+  resolveBrowserTabDropTarget,
+  type BrowserTabDragPayload,
+  type BrowserTabDropTarget,
+} from './fileTreeBrowserTabDrop'
+import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
   'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt',
@@ -130,6 +143,15 @@ interface RSSDragPayload {
   summary?: string
   source?: string
   publishedAt?: string
+}
+
+type BrowserTabDropAction = 'web-clip' | 'content-study' | 'copy-analysis' | 'visual-analysis'
+
+interface BrowserTabDropMenuState {
+  x: number
+  y: number
+  payload: BrowserTabDragPayload
+  target: BrowserTabDropTarget
 }
 
 function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
@@ -260,6 +282,8 @@ function FileTreeItem({
   isExpanded,
   isRenaming,
   isDropTarget,
+  isBrowserDropInside,
+  browserDropLine,
   draggableEnabled,
   dragMovable,
   depth,
@@ -278,6 +302,8 @@ function FileTreeItem({
   isExpanded: boolean
   isRenaming: boolean
   isDropTarget: boolean
+  isBrowserDropInside?: boolean
+  browserDropLine?: 'before' | 'after' | null
   draggableEnabled?: boolean
   dragMovable?: boolean
   depth: number
@@ -291,6 +317,9 @@ function FileTreeItem({
   onRenameConfirm: (newName: string) => void
   onRenameCancel: () => void
 }) {
+  const lineInset = 12 + depth * 22
+  const isBrowserDropAccent = isBrowserDropInside || Boolean(browserDropLine)
+
   return (
     <div
       draggable={draggableEnabled ?? true}
@@ -309,14 +338,59 @@ function FileTreeItem({
         ${isActive ? '' : 'hover:bg-black/5'}
       `}
       style={{
+        position: 'relative',
         padding: '6px 8px',
         paddingLeft: `${8 + depth * 22}px`,
-        ...(isActive ? { background: 'var(--bg-hover)' } : {}),
+        ...(isActive
+          ? {
+              background: 'rgba(255, 255, 255, 0.52)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.44), 0 1px 2px rgba(15,23,42,0.04)',
+            }
+          : {}),
         ...(isDropTarget
           ? { outline: '1px dashed var(--color-blue)', background: 'var(--color-blue-light)' }
           : {}),
+        ...(isBrowserDropAccent
+          ? {
+              background: 'color-mix(in srgb, rgba(255, 255, 255, 0.74) 46%, var(--color-blue-light))',
+              boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 44%, rgba(255,255,255,0.68)), 0 4px 16px rgba(59,130,246,0.08)',
+            }
+          : {}),
       }}
     >
+      {browserDropLine && (
+        <>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={{
+              left: lineInset,
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--color-blue)',
+              boxShadow: '0 0 0 2px rgba(255,255,255,0.76), 0 4px 12px rgba(59,130,246,0.24)',
+              top: browserDropLine === 'before' ? -2 : undefined,
+              bottom: browserDropLine === 'after' ? -2 : undefined,
+            }}
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={{
+              left: lineInset + 10,
+              right: 8,
+              height: 3,
+              borderRadius: 999,
+              background: 'color-mix(in srgb, var(--color-blue) 88%, rgba(255,255,255,0.24))',
+              boxShadow: '0 0 0 1px rgba(255,255,255,0.28), 0 4px 12px rgba(59,130,246,0.18)',
+              top: browserDropLine === 'before' ? 0 : undefined,
+              bottom: browserDropLine === 'after' ? 0 : undefined,
+            }}
+          />
+        </>
+      )}
+
       {item.isDirectory ? (
         <button
           type="button"
@@ -486,12 +560,13 @@ function FileTreeRecursive({
   queryLower,
   filters,
   moveDropTargetDir,
+  browserTabDropTarget,
   onToggleDir,
   onOpenFile,
   onContextMenu,
-  onDirectoryDragOver,
-  onDirectoryDragLeave,
-  onDirectoryDrop,
+  onItemDragOver,
+  onItemDragLeave,
+  onItemDrop,
   onRenameConfirm,
   onRenameCancel,
   onCreateConfirm,
@@ -509,12 +584,13 @@ function FileTreeRecursive({
   queryLower: string
   filters: FileFilterMap
   moveDropTargetDir: string | null
+  browserTabDropTarget: BrowserTabDropTarget | null
   onToggleDir: (path: string) => Promise<void>
   onOpenFile: (item: FileItem) => void
   onContextMenu: (e: React.MouseEvent, item: FileItem) => void
-  onDirectoryDragOver: (e: React.DragEvent, dirPath: string) => void
-  onDirectoryDragLeave: (e: React.DragEvent, dirPath: string) => void
-  onDirectoryDrop: (e: React.DragEvent, dirPath: string) => void
+  onItemDragOver: (e: React.DragEvent, item: FileItem, containerPath: string) => void
+  onItemDragLeave: (e: React.DragEvent, item: FileItem) => void
+  onItemDrop: (e: React.DragEvent, item: FileItem, containerPath: string) => void
   onRenameConfirm: (path: string, newName: string) => void
   onRenameCancel: () => void
   onCreateConfirm: (newName: string) => void
@@ -544,6 +620,12 @@ function FileTreeRecursive({
       {visibleItems.map((item) => {
         const isExpanded = expandedDirs.has(item.path)
         const children = dirChildren.get(item.path) || []
+        const browserDropLine =
+          browserTabDropTarget?.kind === 'insert-before' && browserTabDropTarget.anchorPath === item.path
+            ? 'before'
+            : browserTabDropTarget?.kind === 'insert-after' && browserTabDropTarget.anchorPath === item.path
+              ? 'after'
+              : null
         return (
           <div key={item.path}>
             <FileTreeItem
@@ -552,13 +634,17 @@ function FileTreeRecursive({
               isExpanded={isExpanded}
               isRenaming={renamingPath === item.path}
               isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
+              isBrowserDropInside={
+                browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path
+              }
+              browserDropLine={browserDropLine}
               depth={depth}
               onToggleDir={() => onToggleDir(item.path)}
               onOpenFile={() => onOpenFile(item)}
               onContextMenu={(e) => onContextMenu(e, item)}
-              onDragOver={(e) => item.isDirectory && onDirectoryDragOver(e, item.path)}
-              onDragLeave={(e) => item.isDirectory && onDirectoryDragLeave(e, item.path)}
-              onDrop={(e) => item.isDirectory && onDirectoryDrop(e, item.path)}
+              onDragOver={(e) => onItemDragOver(e, item, containerPath)}
+              onDragLeave={(e) => onItemDragLeave(e, item)}
+              onDrop={(e) => onItemDrop(e, item, containerPath)}
               onRenameConfirm={(newName) => onRenameConfirm(item.path, newName)}
               onRenameCancel={onRenameCancel}
             />
@@ -576,12 +662,13 @@ function FileTreeRecursive({
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
+                browserTabDropTarget={browserTabDropTarget}
                 onToggleDir={onToggleDir}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
-                onDirectoryDragOver={onDirectoryDragOver}
-                onDirectoryDragLeave={onDirectoryDragLeave}
-                onDirectoryDrop={onDirectoryDrop}
+                onItemDragOver={onItemDragOver}
+                onItemDragLeave={onItemDragLeave}
+                onItemDrop={onItemDrop}
                 onRenameConfirm={onRenameConfirm}
                 onRenameCancel={onRenameCancel}
                 onCreateConfirm={onCreateConfirm}
@@ -637,9 +724,12 @@ export default function FileTree({
     dirPath: string
     payload: RSSDragPayload
   } | null>(null)
+  const [browserTabDropMenu, setBrowserTabDropMenu] = useState<BrowserTabDropMenuState | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
+  const [browserTabDropTarget, setBrowserTabDropTarget] = useState<BrowserTabDropTarget | null>(null)
   const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
+  const treeRootRef = useRef<HTMLDivElement>(null)
   const gridPreviewLoadingRef = useRef(new Set<string>())
   const queryLower = query.trim().toLowerCase()
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
@@ -687,6 +777,11 @@ export default function FileTree({
     await moveItem(payload.path, nextPath)
   }, [moveItem])
 
+  const getBrowserTabPayload = useCallback((dataTransfer: DataTransfer) => {
+    const raw = dataTransfer.getData('application/x-ready-drag')
+    return parseBrowserTabDragPayload(raw)
+  }, [])
+
   const handleDirectoryDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
     if (payload && canMoveToDirectory(payload, dirPath)) {
@@ -694,6 +789,21 @@ export default function FileTree({
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'move'
       if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
+      setBrowserTabDropTarget(null)
+      return
+    }
+    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
+    if (browserTabPayload) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      setMoveDropTargetDir(null)
+      setBrowserTabDropTarget({
+        kind: 'inside-directory',
+        dirPath,
+        itemPath: dirPath,
+        containerPath: dirPath,
+      })
       return
     }
     const rssPayload = parseRSSDragPayload(e.dataTransfer)
@@ -701,20 +811,47 @@ export default function FileTree({
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'copy'
+    setBrowserTabDropTarget(null)
     if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
-  }, [moveDropTargetDir])
+  }, [getBrowserTabPayload, moveDropTargetDir])
 
   const handleDirectoryDragLeave = useCallback((e: React.DragEvent, dirPath: string) => {
     e.stopPropagation()
     if (moveDropTargetDir === dirPath) setMoveDropTargetDir(null)
-  }, [moveDropTargetDir])
+    if (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.dirPath === dirPath) {
+      setBrowserTabDropTarget(null)
+    }
+  }, [browserTabDropTarget, moveDropTargetDir])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
+    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
+    if (browserTabPayload) {
+      e.preventDefault()
+      e.stopPropagation()
+      setMoveDropTargetDir(null)
+      setBrowserTabDropTarget(null)
+      setContextMenu(null)
+      setRssDropMenu(null)
+      setBrowserTabDropMenu({
+        x: e.clientX,
+        y: e.clientY,
+        payload: browserTabPayload,
+        target: {
+          kind: 'inside-directory',
+          dirPath,
+          itemPath: dirPath,
+          containerPath: dirPath,
+        },
+      })
+      return
+    }
+
     const rssPayload = parseRSSDragPayload(e.dataTransfer)
     if (rssPayload) {
       e.preventDefault()
       e.stopPropagation()
       setMoveDropTargetDir(null)
+      setBrowserTabDropTarget(null)
       setContextMenu(null)
       setRssDropMenu({
         x: e.clientX,
@@ -730,8 +867,102 @@ export default function FileTree({
     e.preventDefault()
     e.stopPropagation()
     setMoveDropTargetDir(null)
+    setBrowserTabDropTarget(null)
     void moveWorkspaceItem(payload, dirPath)
-  }, [moveWorkspaceItem])
+  }, [getBrowserTabPayload, moveWorkspaceItem])
+
+  const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
+    const workspacePayload = parseWorkspaceDragPayload(e.dataTransfer)
+    if (item.isDirectory && workspacePayload && canMoveToDirectory(workspacePayload, item.path)) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
+      setBrowserTabDropTarget(null)
+      return
+    }
+
+    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
+    if (browserTabPayload) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      setMoveDropTargetDir(null)
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+      setBrowserTabDropTarget(
+        resolveBrowserTabDropTarget({
+          itemPath: item.path,
+          isDirectory: item.isDirectory,
+          containerPath,
+          pointerY: e.clientY,
+          rectTop: rect.top,
+          rectHeight: rect.height,
+        }),
+      )
+      return
+    }
+
+    if (item.isDirectory && parseRSSDragPayload(e.dataTransfer)) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      setBrowserTabDropTarget(null)
+      if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
+    }
+  }, [getBrowserTabPayload, moveDropTargetDir])
+
+  const handleItemDragLeave = useCallback((e: React.DragEvent, item: FileItem) => {
+    const nextTarget = e.relatedTarget as Node | null
+    if (nextTarget && (e.currentTarget as HTMLElement).contains(nextTarget)) return
+
+    if (moveDropTargetDir === item.path) {
+      setMoveDropTargetDir(null)
+    }
+
+    if (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path) {
+      setBrowserTabDropTarget(null)
+      return
+    }
+
+    if (
+      (browserTabDropTarget?.kind === 'insert-before' || browserTabDropTarget?.kind === 'insert-after') &&
+      browserTabDropTarget.anchorPath === item.path
+    ) {
+      setBrowserTabDropTarget(null)
+    }
+  }, [browserTabDropTarget, moveDropTargetDir])
+
+  const handleItemDrop = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
+    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
+    if (browserTabPayload) {
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+      const target = resolveBrowserTabDropTarget({
+        itemPath: item.path,
+        isDirectory: item.isDirectory,
+        containerPath,
+        pointerY: e.clientY,
+        rectTop: rect.top,
+        rectHeight: rect.height,
+      })
+      setMoveDropTargetDir(null)
+      setBrowserTabDropTarget(null)
+      setContextMenu(null)
+      setRssDropMenu(null)
+      setBrowserTabDropMenu({
+        x: e.clientX,
+        y: e.clientY,
+        payload: browserTabPayload,
+        target,
+      })
+      return
+    }
+
+    if (item.isDirectory) {
+      handleDirectoryDrop(e, item.path)
+    }
+  }, [getBrowserTabPayload, handleDirectoryDrop])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -745,17 +976,22 @@ export default function FileTree({
       e.dataTransfer.dropEffect = 'copy'
       return
     }
+    if (getBrowserTabPayload(e.dataTransfer)) {
+      e.dataTransfer.dropEffect = 'copy'
+      return
+    }
     if (e.dataTransfer.types.includes('Files')) {
       e.dataTransfer.dropEffect = 'copy'
       setIsDragOver(true)
     }
-  }, [currentPath])
+  }, [currentPath, getBrowserTabPayload])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
     setMoveDropTargetDir(null)
+    setBrowserTabDropTarget(null)
     setRssDropMenu(null)
   }, [])
 
@@ -764,6 +1000,8 @@ export default function FileTree({
     e.stopPropagation()
     setIsDragOver(false)
     setMoveDropTargetDir(null)
+    const lastBrowserTabDropTarget = browserTabDropTarget
+    setBrowserTabDropTarget(null)
     setRssDropMenu(null)
 
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
@@ -776,6 +1014,19 @@ export default function FileTree({
       return
     }
 
+    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
+    if (browserTabPayload && lastBrowserTabDropTarget) {
+      setContextMenu(null)
+      setRssDropMenu(null)
+      setBrowserTabDropMenu({
+        x: e.clientX,
+        y: e.clientY,
+        payload: browserTabPayload,
+        target: lastBrowserTabDropTarget,
+      })
+      return
+    }
+
     const droppedFiles = e.dataTransfer.files
     if (!droppedFiles || droppedFiles.length === 0) return
     if (typeof window !== 'undefined' && window.electronAPI) {
@@ -784,7 +1035,7 @@ export default function FileTree({
         if (p) addPinnedFolder(p)
       }
     }
-  }, [addPinnedFolder, currentPath, moveWorkspaceItem])
+  }, [addPinnedFolder, browserTabDropTarget, currentPath, getBrowserTabPayload, moveWorkspaceItem])
 
   const handleRssDropAction = useCallback(
     async (action: 'web-clip' | 'copy-analysis' | 'visual-analysis') => {
@@ -836,6 +1087,25 @@ export default function FileTree({
     [rssDropMenu],
   )
 
+  const handleBrowserTabDropAction = useCallback((action: BrowserTabDropAction) => {
+    if (!browserTabDropMenu) return
+    const { payload, target } = browserTabDropMenu
+    setBrowserTabDropMenu(null)
+
+    const targetLabel = target.kind === 'inside-directory'
+      ? `folder:${target.dirPath}`
+      : `${target.kind}:${target.anchorPath}`
+
+    console.info('[browser-tab-drop-action] placeholder', {
+      type: 'browser-tab',
+      action,
+      target: targetLabel,
+      title: payload.title,
+      url: payload.url,
+      tabId: payload.tabId,
+    })
+  }, [browserTabDropMenu])
+
   const renderTreeContent = () => {
     if (pinnedFolders.length > 0) {
       const visiblePinned = pinnedFolders.filter((folderPath) => {
@@ -859,6 +1129,12 @@ export default function FileTree({
         const folderName = folderPath.split('/').pop() || folderPath
         const isExpanded = expandedDirs.has(folderPath)
         const children = dirChildren.get(folderPath) || []
+        const browserDropLine =
+          browserTabDropTarget?.kind === 'insert-before' && browserTabDropTarget.anchorPath === folderPath
+            ? 'before'
+            : browserTabDropTarget?.kind === 'insert-after' && browserTabDropTarget.anchorPath === folderPath
+              ? 'after'
+              : null
         const pinnedItem: FileItem = {
           name: folderName,
           path: folderPath,
@@ -874,6 +1150,10 @@ export default function FileTree({
               isExpanded={isExpanded}
               isRenaming={renamingPath === folderPath}
               isDropTarget={moveDropTargetDir === folderPath}
+              isBrowserDropInside={
+                browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === folderPath
+              }
+              browserDropLine={browserDropLine}
               dragMovable={false}
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
@@ -883,9 +1163,9 @@ export default function FileTree({
                 e.stopPropagation()
                 setContextMenu({ x: e.clientX, y: e.clientY, item: pinnedItem })
               }}
-              onDragOver={(e) => handleDirectoryDragOver(e, folderPath)}
-              onDragLeave={(e) => handleDirectoryDragLeave(e, folderPath)}
-              onDrop={(e) => handleDirectoryDrop(e, folderPath)}
+              onDragOver={(e) => handleItemDragOver(e, pinnedItem, currentPath)}
+              onDragLeave={(e) => handleItemDragLeave(e, pinnedItem)}
+              onDrop={(e) => handleItemDrop(e, pinnedItem, currentPath)}
               onRenameConfirm={(newName) => renameItem(folderPath, newName)}
               onRenameCancel={cancelRenaming}
             />
@@ -903,6 +1183,7 @@ export default function FileTree({
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
+                browserTabDropTarget={browserTabDropTarget}
                 onToggleDir={toggleDir}
                 onOpenFile={handleOpenFile}
                 onContextMenu={(e, item) => {
@@ -910,9 +1191,9 @@ export default function FileTree({
                   e.stopPropagation()
                   setContextMenu({ x: e.clientX, y: e.clientY, item })
                 }}
-                onDirectoryDragOver={handleDirectoryDragOver}
-                onDirectoryDragLeave={handleDirectoryDragLeave}
-                onDirectoryDrop={handleDirectoryDrop}
+                onItemDragOver={handleItemDragOver}
+                onItemDragLeave={handleItemDragLeave}
+                onItemDrop={handleItemDrop}
                 onRenameConfirm={(path, newName) => renameItem(path, newName)}
                 onRenameCancel={cancelRenaming}
                 onCreateConfirm={(newName) => {
@@ -959,6 +1240,7 @@ export default function FileTree({
         queryLower={queryLower}
         filters={filters}
         moveDropTargetDir={moveDropTargetDir}
+        browserTabDropTarget={browserTabDropTarget}
         onToggleDir={toggleDir}
         onOpenFile={handleOpenFile}
         onContextMenu={(e, item) => {
@@ -966,9 +1248,9 @@ export default function FileTree({
           e.stopPropagation()
           setContextMenu({ x: e.clientX, y: e.clientY, item })
         }}
-        onDirectoryDragOver={handleDirectoryDragOver}
-        onDirectoryDragLeave={handleDirectoryDragLeave}
-        onDirectoryDrop={handleDirectoryDrop}
+        onItemDragOver={handleItemDragOver}
+        onItemDragLeave={handleItemDragLeave}
+        onItemDrop={handleItemDrop}
         onRenameConfirm={(path, newName) => renameItem(path, newName)}
         onRenameCancel={cancelRenaming}
         onCreateConfirm={(newName) => {
@@ -1188,7 +1470,13 @@ export default function FileTree({
               key={item.path}
               item={item}
               isActive={selectedFile === item.path}
-              isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
+              isDropTarget={
+                item.isDirectory &&
+                (
+                  moveDropTargetDir === item.path ||
+                  (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path)
+                )
+              }
               thumbnailSize={thumbnailSize}
               folderChildren={item.isDirectory ? dirChildren.get(item.path) : undefined}
               folderChildrenLoaded={item.isDirectory ? dirChildren.has(item.path) : true}
@@ -1218,6 +1506,7 @@ export default function FileTree({
 
   return (
     <div
+      ref={treeRootRef}
       className="panel-hover-scrollbar flex-1 overflow-auto relative"
       style={{ padding: '6px 8px' }}
       onDragOver={handleDragOver}
@@ -1240,6 +1529,15 @@ export default function FileTree({
           contextMenu={contextMenu}
           onClose={() => setContextMenu(null)}
           onOpenFile={handleOpenFile}
+        />
+      )}
+
+      {browserTabDropMenu && (
+        <BrowserTabDropActionMenu
+          menu={browserTabDropMenu}
+          boundaryRect={treeRootRef.current?.getBoundingClientRect() ?? null}
+          onAction={handleBrowserTabDropAction}
+          onClose={() => setBrowserTabDropMenu(null)}
         />
       )}
 
@@ -1269,6 +1567,157 @@ export default function FileTree({
       )}
     </div>
   )
+}
+
+function BrowserTabDropActionMenu({
+  menu,
+  boundaryRect,
+  onAction,
+  onClose,
+}: {
+  menu: BrowserTabDropMenuState
+  boundaryRect: DOMRect | null
+  onAction: (action: BrowserTabDropAction) => void
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [adjustedPos, setAdjustedPos] = useState({ x: menu.x, y: menu.y })
+  const portalRoot = typeof document !== 'undefined' ? document.body : null
+  const surfaceStyle = useMemo(
+    () => buildFloatingMenuSurfaceStyle(208, {
+      padding: 6,
+      zIndex: 260,
+    }),
+    [],
+  )
+  const actionItems = useMemo(() => ([
+    {
+      id: 'web-clip' as const,
+      label: '网页剪藏',
+      icon: <Globe style={{ width: 15, height: 15 }} />,
+    },
+    {
+      id: 'content-study' as const,
+      label: '内容学习',
+      icon: <BookOpen style={{ width: 15, height: 15 }} />,
+    },
+    {
+      id: 'copy-analysis' as const,
+      label: '文案分析',
+      icon: <FileText style={{ width: 15, height: 15 }} />,
+    },
+    {
+      id: 'visual-analysis' as const,
+      label: '视觉分析',
+      icon: <Image style={{ width: 15, height: 15 }} />,
+    },
+  ]), [])
+
+  useLayoutEffect(() => {
+    if (!menuRef.current) return
+    const rect = menuRef.current.getBoundingClientRect()
+    if (!boundaryRect) {
+      const maxX = Math.max(8, window.innerWidth - rect.width - 8)
+      const maxY = Math.max(8, window.innerHeight - rect.height - 8)
+      setAdjustedPos({
+        x: Math.max(8, Math.min(menu.x, maxX)),
+        y: Math.max(8, Math.min(menu.y, maxY)),
+      })
+      return
+    }
+    setAdjustedPos(
+      clampDropMenuPositionToBoundary({
+        x: menu.x,
+        y: menu.y,
+        menuWidth: rect.width,
+        menuHeight: rect.height,
+        boundaryLeft: boundaryRect.left,
+        boundaryTop: boundaryRect.top,
+        boundaryRight: boundaryRect.right,
+        boundaryBottom: boundaryRect.bottom,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      }),
+    )
+  }, [actionItems.length, boundaryRect, menu.x, menu.y])
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return
+      onClose()
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+
+    const timer = window.setTimeout(() => {
+      window.addEventListener('mousedown', handleClick)
+      window.addEventListener('contextmenu', handleClick)
+    }, 0)
+    window.addEventListener('keydown', handleKey)
+
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('mousedown', handleClick)
+      window.removeEventListener('contextmenu', handleClick)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
+
+  const content = (
+    <div
+      ref={menuRef}
+      className="glass-surface-floating ready-floating-menu"
+      style={{
+        ...surfaceStyle,
+        position: 'fixed',
+        left: adjustedPos.x,
+        top: adjustedPos.y,
+      }}
+    >
+      {actionItems.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="ready-floating-menu-item"
+          style={{
+            ...buildFloatingMenuItemStyle({ compact: true }),
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            minHeight: 38,
+          }}
+          onClick={() => onAction(item.id)}
+        >
+          <span
+            style={{
+              width: 16,
+              height: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-body)',
+              flexShrink: 0,
+            }}
+          >
+            {item.icon}
+          </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-title)',
+              lineHeight: 1.2,
+            }}
+          >
+            {item.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+
+  return portalRoot ? createPortal(content, portalRoot) : content
 }
 
 function ContextMenuBridge({
