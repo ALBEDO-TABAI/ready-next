@@ -9,24 +9,26 @@ function readWorkspaceFile(path: string): string {
 
 test('document mode toggle follows refined iOS Segmented Control style', () => {
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+  const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(documentMode, /className="document-mode-switch glass-surface-card relative flex items-center"/)
-  assert.match(documentMode, /className="document-mode-switch__thumb"/)
-  assert.match(documentMode, /document-mode-switch__button/)
-  assert.match(documentMode, /editorMode === mode \? 'is-active' : ''/)
+  assert.match(documentMode, /<DraggableModeSwitch\s+mode=\{editorMode\}\s+onChange=\{setEditorMode\}/)
+  assert.match(modeSwitch, /className="draggable-mode-switch"/)
+  assert.match(modeSwitch, /draggable-mode-switch__thumb/)
+  assert.match(modeSwitch, /draggable-mode-switch__label/)
+  assert.match(modeSwitch, /position < 0\.5 \? 'is-active' : ''/)
 
   // 更小巧的尺寸
-  assert.match(styles, /\.document-mode-switch\s*\{[\s\S]*?height:\s*30px/)
-  assert.match(styles, /\.document-mode-switch\s*\{[\s\S]*?padding:\s*2px/)
+  assert.match(styles, /\.draggable-mode-switch\s*\{[\s\S]*?height:\s*30px/)
+  assert.match(styles, /\.draggable-mode-switch\s*\{[\s\S]*?padding:\s*2px/)
   // 滑块紧贴边缘 (100% - 4px)
-  assert.match(styles, /\.document-mode-switch__thumb\s*\{[\s\S]*?width:\s*calc\(\(100% - 4px\) \/ 2\)/)
-  assert.match(styles, /\.document-mode-switch__thumb\s*\{[\s\S]*?top:\s*2px/)
-  assert.match(styles, /\.document-mode-switch__thumb\s*\{[\s\S]*?left:\s*2px/)
+  assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?width:\s*calc\(\(100% - 4px\) \/ 2\)/)
+  assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?top:\s*2px/)
+  assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?left:\s*2px/)
   // 滑块边缘高光
-  assert.match(styles, /\.document-mode-switch__thumb::before\s*\{[\s\S]*?border:/)
-  assert.match(styles, /\.document-mode-switch__thumb::after\s*\{[\s\S]*?background:\s*linear-gradient/)
+  assert.match(styles, /\.draggable-mode-switch__thumb::before\s*\{[\s\S]*?border:/)
+  assert.match(styles, /\.draggable-mode-switch__thumb::after\s*\{[\s\S]*?background:\s*linear-gradient/)
   // 更小的字号
-  assert.match(styles, /\.document-mode-switch__button\s*\{[\s\S]*?font-size:\s*11px/)
-  assert.match(styles, /\.document-mode-switch__button\.is-active\s*\{[\s\S]*?font-size:\s*12px/)
+  assert.match(styles, /\.draggable-mode-switch__label\s*\{[\s\S]*?font-size:\s*11px/)
+  assert.match(styles, /\.draggable-mode-switch__label\.is-active\s*\{[\s\S]*?font-weight:\s*500/)
 })
