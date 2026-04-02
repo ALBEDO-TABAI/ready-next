@@ -10,8 +10,12 @@ function readWorkspaceFile(path: string): string {
 test('chat header keeps session-window switching and history browsing as two separate controls', () => {
   const chatHeader = readWorkspaceFile('src/renderer/components/agent/ChatHeader.tsx')
 
+  assert.match(chatHeader, /import \{ createPortal \} from 'react-dom'/)
   assert.match(chatHeader, /data-chat-session-switcher="true"/)
   assert.match(chatHeader, /data-chat-session-menu="true"/)
+  assert.match(chatHeader, /const portalRoot = typeof document !== 'undefined' \? document.body : null/)
+  assert.match(chatHeader, /createPortal\(/)
+  assert.match(chatHeader, /position: 'fixed' as const/)
   assert.match(chatHeader, /channelOptions\.map/)
   assert.match(chatHeader, /filteredScopes\.map/)
   assert.match(chatHeader, /History/)
