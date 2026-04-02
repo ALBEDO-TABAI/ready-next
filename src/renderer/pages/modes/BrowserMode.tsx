@@ -206,6 +206,7 @@ export default function BrowserMode({
     sendBoundsImmediate,
   })
   const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
+  const shouldUseNeutralFreezeFrameExit = !freezeFrame && Boolean(cachedFreezeFrame?.src)
   // 关键修复：在切换动画期间（!isMotionSettled）或浏览器未准备好时，显示冻结帧
   const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (!isMotionSettled || !isBrowserSurfaceReady || Boolean(freezeFrame))
 
@@ -214,6 +215,7 @@ export default function BrowserMode({
     if (!isElectron) return
 
     const handleCaptureFreeze = () => {
+      if (!isActive) return
       void captureStableFrame()
     }
 
@@ -221,7 +223,7 @@ export default function BrowserMode({
     return () => {
       window.removeEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
     }
-  }, [isElectron, captureStableFrame])
+  }, [isActive, isElectron, captureStableFrame])
 
   // 关键修复：在 isActive 变为 false 前（离开浏览器模式前）捕获截图
   // 使用 useLayoutEffect 确保在 DOM 变化前执行
@@ -250,17 +252,12 @@ export default function BrowserMode({
   }, [])
 
   useEffect(() => {
-    if (!isElectron) return
+    if (!isElectron || isMotionSettled) return
 
-    // D方案关键修复：水平滚动动画期间强制隐藏 BrowserView
-    // 防止 BrowserView 看起来"从文件管理面板上方飘进来"
-    if (!isMotionSettled) {
-      // 关键：先截图保存当前画面，等待截图完成后再隐藏 BrowserView
-      void captureStableFrame().then(() => {
-        void window.electronAPI?.browser?.hideAll?.()
-      })
-    }
-  }, [isElectron, isMotionSettled, captureStableFrame])
+    // 切换滑动期间只隐藏原生 BrowserView，避免在位移中的壳层区域上重抓冻结帧，
+    // 否则会把左侧文件面板等错位画面缓存进浏览器区域里。
+    void window.electronAPI?.browser?.hideAll?.()
+  }, [isElectron, isMotionSettled])
 
   useEffect(() => {
     if (!shouldRevealBrowserHost || !browserRuntimeReady) {
@@ -358,8 +355,10 @@ export default function BrowserMode({
         const easeOut = 1 - Math.pow(1 - progress, 4)
 
         const opacity = 1 - easeOut
-        const blur = FREEZE_FRAME_CONFIG.blurStartPx + (FREEZE_FRAME_CONFIG.blurEndPx - FREEZE_FRAME_CONFIG.blurStartPx) * easeOut
-        const scale = FREEZE_FRAME_CONFIG.scaleStart + (FREEZE_FRAME_CONFIG.scaleEnd - FREEZE_FRAME_CONFIG.scaleStart) * easeOut
+        const targetBlur = shouldUseNeutralFreezeFrameExit ? 0 : FREEZE_FRAME_CONFIG.blurEndPx
+        const targetScale = shouldUseNeutralFreezeFrameExit ? 1 : FREEZE_FRAME_CONFIG.scaleEnd
+        const blur = FREEZE_FRAME_CONFIG.blurStartPx + (targetBlur - FREEZE_FRAME_CONFIG.blurStartPx) * easeOut
+        const scale = FREEZE_FRAME_CONFIG.scaleStart + (targetScale - FREEZE_FRAME_CONFIG.scaleStart) * easeOut
 
         setFreezeFrameStyle({
           opacity,
@@ -389,7 +388,7 @@ export default function BrowserMode({
     })
     prevShouldShowRef.current = shouldShowFreezeFrame
     return undefined
-  }, [clearFreezeFrameAnim, shouldShowFreezeFrame])
+  }, [clearFreezeFrameAnim, shouldShowFreezeFrame, shouldUseNeutralFreezeFrameExit])
 
   useEffect(() => {
     return () => {
@@ -415,6 +414,7 @@ export default function BrowserMode({
       >
         <div ref={shellRef} className="workbench-canvas-shell relative flex h-full min-h-0 flex-col">
           <BrowserHeader
+            isActive={isActive}
             tabs={tabs}
             activeTabId={activeTabId}
             urlInput={urlInput}

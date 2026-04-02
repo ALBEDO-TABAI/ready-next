@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type ActiveTabMode = 'compact' | 'primed' | 'expanded' | 'editing'
 export type RefreshDockMode = 'idle' | 'primed' | 'revealed'
 
-export function useBrowserHeaderInteraction() {
+export function useBrowserHeaderInteraction(isActive = true) {
   const headerRootRef = useRef<HTMLDivElement>(null)
   const activeTabSurfaceRef = useRef<HTMLDivElement>(null)
   const refreshDockRef = useRef<HTMLDivElement>(null)
@@ -66,6 +66,16 @@ export function useBrowserHeaderInteraction() {
     }
     setRefreshDockMode('idle')
   }, [])
+
+  useEffect(() => {
+    if (isActive) return
+    if (refreshDockTimerRef.current) {
+      window.clearTimeout(refreshDockTimerRef.current)
+      refreshDockTimerRef.current = null
+    }
+    setActiveTabMode('compact')
+    setRefreshDockMode('idle')
+  }, [isActive])
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {

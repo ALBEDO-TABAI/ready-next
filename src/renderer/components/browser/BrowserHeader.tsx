@@ -6,6 +6,7 @@ import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 
 interface BrowserHeaderProps {
+  isActive: boolean
   tabs: BrowserTab[]
   activeTabId: string | null
   urlInput: string
@@ -33,6 +34,7 @@ interface BrowserHeaderProps {
 }
 
 export default function BrowserHeader({
+  isActive,
   tabs,
   activeTabId,
   urlInput,
@@ -71,7 +73,7 @@ export default function BrowserHeader({
     stopEditing,
     beginRefreshDockHover,
     endRefreshDockHover,
-  } = useBrowserHeaderInteraction()
+  } = useBrowserHeaderInteraction(isActive)
 
   const collapseAndReset = () => {
     onBlur()
@@ -103,6 +105,7 @@ export default function BrowserHeader({
         }}
       >
         <TabRail
+          isActive={isActive}
           tabs={tabs}
           activeTabId={activeTabId}
           activeTabMode={activeTabMode}

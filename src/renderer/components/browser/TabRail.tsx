@@ -13,6 +13,7 @@ import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
 
 interface TabRailProps {
+  isActive: boolean
   tabs: BrowserTab[]
   activeTabId: string | null
   activeTabMode: ActiveTabMode
@@ -45,6 +46,7 @@ interface TabRailProps {
 }
 
 export default function TabRail({
+  isActive,
   tabs,
   activeTabId,
   activeTabMode,
@@ -131,12 +133,12 @@ export default function TabRail({
 
     const frame = requestAnimationFrame(() => {
       const targetLeft = Math.max(0, element.scrollWidth - element.clientWidth)
-      element.scrollTo({ left: targetLeft, behavior: 'smooth' })
+      element.scrollTo({ left: targetLeft, behavior: isActive ? 'smooth' : 'auto' })
       checkOverflow()
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [activeTabId, checkOverflow, tabs])
+  }, [activeTabId, checkOverflow, isActive, tabs])
 
   const handleDragStart = (event: React.DragEvent, index: number) => {
     dragIndexRef.current = index
@@ -182,15 +184,18 @@ export default function TabRail({
 
   return (
     <div className="flex min-w-0 flex-1 items-center" style={{ gap: 6 }}>
-      {showLeftArrow && (
+      <div className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center">
         <button
           type="button"
           onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
           className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+          style={{ opacity: showLeftArrow ? 1 : 0, pointerEvents: showLeftArrow ? 'auto' : 'none' }}
+          tabIndex={showLeftArrow ? 0 : -1}
+          aria-hidden={!showLeftArrow}
         >
           <ChevronLeft style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
         </button>
-      )}
+      </div>
 
       <div
         ref={scrollRef}
@@ -398,15 +403,18 @@ export default function TabRail({
         </button>
       </div>
 
-      {showRightArrow && (
+      <div className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center">
         <button
           type="button"
           onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
           className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
+          style={{ opacity: showRightArrow ? 1 : 0, pointerEvents: showRightArrow ? 'auto' : 'none' }}
+          tabIndex={showRightArrow ? 0 : -1}
+          aria-hidden={!showRightArrow}
         >
           <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
         </button>
-      )}
+      </div>
     </div>
   )
 }
