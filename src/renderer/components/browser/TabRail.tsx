@@ -9,6 +9,10 @@ import {
 } from '../../modules/workbench/chrome'
 import type { ActiveTabMode, RefreshDockMode } from '../../modules/browser/useBrowserHeaderInteraction'
 import { getTabRailLayoutMetrics } from '../../modules/browser/tab-rail-layout'
+import {
+  beginBrowserTabDragSession,
+  endBrowserTabDragSession,
+} from '../../modules/browser/browserTabDragSession'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
 
@@ -82,12 +86,13 @@ export default function TabRail({
   const [showLeftArrow, setShowLeftArrow] = useState(false)
   const [showRightArrow, setShowRightArrow] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null)
   const dragIndexRef = useRef<number | null>(null)
   const layoutMetrics = getTabRailLayoutMetrics(tabs.length)
 
   const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
-    const data = JSON.stringify({
+    const payload = {
       type: 'browser-tab' as const,
       name: tab.title || 'New Tab',
       title: tab.title || 'New Tab',
@@ -95,7 +100,9 @@ export default function TabRail({
       ext: '.url',
       tabId: tab.id,
       draggedAt: Date.now(),
-    })
+    }
+    beginBrowserTabDragSession(payload)
+    const data = JSON.stringify(payload)
     event.dataTransfer.setData('application/x-ready-drag', data)
   }, [])
 
@@ -140,23 +147,67 @@ export default function TabRail({
     return () => cancelAnimationFrame(frame)
   }, [activeTabId, checkOverflow, isActive, tabs])
 
+  const clearGlobalDragState = useCallback(() => {
+    dragIndexRef.current = null
+    setDragOverIndex(null)
+    setDraggingTabId(null)
+    endBrowserTabDragSession()
+  }, [])
+
+  useEffect(() => {
+    clearGlobalDragState()
+    return clearGlobalDragState
+  }, [clearGlobalDragState])
+
+  useEffect(() => {
+    const handleGlobalDragCleanup = () => {
+      clearGlobalDragState()
+    }
+    const handleVisibilityCleanup = () => {
+      if (document.visibilityState === 'hidden') {
+        clearGlobalDragState()
+      }
+    }
+
+    window.addEventListener('dragend', handleGlobalDragCleanup)
+    window.addEventListener('drop', handleGlobalDragCleanup)
+    window.addEventListener('mouseup', handleGlobalDragCleanup)
+    window.addEventListener('pointerup', handleGlobalDragCleanup)
+    window.addEventListener('pointercancel', handleGlobalDragCleanup)
+    window.addEventListener('blur', handleGlobalDragCleanup)
+    document.addEventListener('visibilitychange', handleVisibilityCleanup)
+
+    return () => {
+      window.removeEventListener('dragend', handleGlobalDragCleanup)
+      window.removeEventListener('drop', handleGlobalDragCleanup)
+      window.removeEventListener('mouseup', handleGlobalDragCleanup)
+      window.removeEventListener('pointerup', handleGlobalDragCleanup)
+      window.removeEventListener('pointercancel', handleGlobalDragCleanup)
+      window.removeEventListener('blur', handleGlobalDragCleanup)
+      document.removeEventListener('visibilitychange', handleVisibilityCleanup)
+    }
+  }, [clearGlobalDragState])
+
+  useEffect(() => {
+    if (!draggingTabId) return
+    if (!isActive || !tabs.some((tab) => tab.id === draggingTabId)) {
+      clearGlobalDragState()
+    }
+  }, [clearGlobalDragState, draggingTabId, isActive, tabs])
+
   const handleDragStart = (event: React.DragEvent, index: number) => {
     dragIndexRef.current = index
     event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData('text/plain', String(index))
     const tab = tabs[index]
     if (tab) {
+      setDraggingTabId(tab.id)
       setBrowserTabDragPayload(event, tab)
     }
-    const target = event.currentTarget as HTMLElement
-    target.style.opacity = '0.5'
   }
 
-  const handleDragEnd = (event: React.DragEvent) => {
-    const target = event.currentTarget as HTMLElement
-    target.style.opacity = '1'
-    dragIndexRef.current = null
-    setDragOverIndex(null)
+  const handleDragEnd = () => {
+    clearGlobalDragState()
   }
 
   const handleDragOver = (event: React.DragEvent, index: number) => {
@@ -171,8 +222,7 @@ export default function TabRail({
     if (fromIndex !== null && fromIndex !== toIndex) {
       onReorder(fromIndex, toIndex)
     }
-    dragIndexRef.current = null
-    setDragOverIndex(null)
+    clearGlobalDragState()
   }
 
   const handleAuxClick = (event: React.MouseEvent, id: string) => {
@@ -206,11 +256,16 @@ export default function TabRail({
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
+            const isDragging = draggingTabId === tab.id
             const isHovered = hoveredTabId === tab.id
 
             if (isActive) {
               return (
-                <div key={tab.id} className="relative z-[2] flex min-w-0 items-center gap-[6px]">
+                <div
+                  key={tab.id}
+                  className="relative z-[2] flex min-w-0 items-center gap-[6px]"
+                  style={{ opacity: isDragging ? 0.72 : 1 }}
+                >
                   <RefreshDock
                     loading={loading}
                     canGoBack={canGoBack}
@@ -277,6 +332,7 @@ export default function TabRail({
                   width: layoutMetrics.inactiveWidth,
                   minWidth: layoutMetrics.inactiveMinWidth,
                   maxWidth: WORKBENCH_TAB_MAX_WIDTH,
+                  opacity: isDragging ? 0.72 : 1,
                   background: isHovered
                     ? 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)'
                     : 'transparent',

@@ -22,6 +22,7 @@ import {
   type BrowserTabDragPayload,
   type BrowserTabDropTarget,
 } from './fileTreeBrowserTabDrop'
+import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -319,6 +320,7 @@ function FileTreeItem({
 }) {
   const lineInset = 12 + depth * 22
   const isBrowserDropAccent = isBrowserDropInside || Boolean(browserDropLine)
+  const [isHovered, setIsHovered] = useState(false)
 
   return (
     <div
@@ -330,12 +332,13 @@ function FileTreeItem({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onClick={() => onOpenFile()}
       onContextMenu={onContextMenu}
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
         transition-all duration-200 ease-out group
-        ${isActive ? '' : 'hover:bg-black/5'}
       `}
       style={{
         position: 'relative',
@@ -343,8 +346,14 @@ function FileTreeItem({
         paddingLeft: `${8 + depth * 22}px`,
         ...(isActive
           ? {
-              background: 'rgba(255, 255, 255, 0.52)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.44), 0 1px 2px rgba(15,23,42,0.04)',
+              background: 'rgba(255, 255, 255, 0.36)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.36), 0 1px 2px rgba(15,23,42,0.03)',
+            }
+          : {}),
+        ...(!isActive && !isDropTarget && !isBrowserDropAccent && isHovered
+          ? {
+              background: 'rgba(255, 255, 255, 0.28)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.24)',
             }
           : {}),
         ...(isDropTarget
@@ -352,8 +361,9 @@ function FileTreeItem({
           : {}),
         ...(isBrowserDropAccent
           ? {
-              background: 'color-mix(in srgb, rgba(255, 255, 255, 0.74) 46%, var(--color-blue-light))',
-              boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 44%, rgba(255,255,255,0.68)), 0 4px 16px rgba(59,130,246,0.08)',
+              background: 'color-mix(in srgb, rgba(255, 255, 255, 0.28) 62%, var(--color-blue-light) 38%)',
+              boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 48%, rgba(255,255,255,0.62)), 0 4px 14px rgba(59,130,246,0.09)',
+              zIndex: 2,
             }
           : {}),
       }}
@@ -370,6 +380,7 @@ function FileTreeItem({
               borderRadius: '50%',
               background: 'var(--color-blue)',
               boxShadow: '0 0 0 2px rgba(255,255,255,0.76), 0 4px 12px rgba(59,130,246,0.24)',
+              zIndex: 3,
               top: browserDropLine === 'before' ? -2 : undefined,
               bottom: browserDropLine === 'after' ? -2 : undefined,
             }}
@@ -384,6 +395,7 @@ function FileTreeItem({
               borderRadius: 999,
               background: 'color-mix(in srgb, var(--color-blue) 88%, rgba(255,255,255,0.24))',
               boxShadow: '0 0 0 1px rgba(255,255,255,0.28), 0 4px 12px rgba(59,130,246,0.18)',
+              zIndex: 3,
               top: browserDropLine === 'before' ? 0 : undefined,
               bottom: browserDropLine === 'after' ? 0 : undefined,
             }}
@@ -779,7 +791,7 @@ export default function FileTree({
 
   const getBrowserTabPayload = useCallback((dataTransfer: DataTransfer) => {
     const raw = dataTransfer.getData('application/x-ready-drag')
-    return parseBrowserTabDragPayload(raw)
+    return parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
   }, [])
 
   const handleDirectoryDragOver = useCallback((e: React.DragEvent, dirPath: string) => {

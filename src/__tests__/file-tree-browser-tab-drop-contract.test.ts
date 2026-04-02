@@ -33,14 +33,22 @@ test('selected file rows use a brighter active surface instead of the generic ho
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
 
   assert.doesNotMatch(source, /isActive \? \{ background: 'var\(--bg-hover\)' \} : \{\}/)
-  assert.match(source, /background: 'rgba\(255,\s*255,\s*255,\s*0\.52\)'/)
+  assert.match(source, /background: 'rgba\(255,\s*255,\s*255,\s*0\.36\)'/)
+})
+
+test('hovering unselected rows uses the intermediate bright state instead of the old dark hover wash', () => {
+  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+
+  assert.doesNotMatch(source, /hover:bg-black\/5/)
+  assert.match(source, /const \[isHovered,\s*setIsHovered\] = useState\(false\)/)
+  assert.match(source, /background: 'rgba\(255,\s*255,\s*255,\s*0\.28\)'/)
 })
 
 test('browser tab drag affordances brighten the target row and render a thicker glowing insertion marker', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
 
   assert.match(source, /const isBrowserDropAccent = isBrowserDropInside \|\| Boolean\(browserDropLine\)/)
-  assert.match(source, /background: 'color-mix\(in srgb, rgba\(255,\s*255,\s*255,\s*0\.74\) 46%, var\(--color-blue-light\)\)'/)
+  assert.match(source, /background: 'color-mix\(in srgb, rgba\(255,\s*255,\s*255,\s*0\.28\) 62%, var\(--color-blue-light\) 38%\)'/)
   assert.match(source, /height: 3,/)
   assert.match(source, /width: 8,/)
   assert.match(source, /boxShadow: '0 0 0 2px rgba\(255,\s*255,\s*255,\s*0\.76\), 0 4px 12px rgba\(59,\s*130,\s*246,\s*0\.24\)'/)
