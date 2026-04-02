@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'framer-motion'
 import { X, FileText, Image, Film, Table, Globe, Puzzle, Pen, MessageSquareQuote, Folder, ChevronDown, PanelLeftClose, History, Plus, Wrench } from 'lucide-react'
 import { useAgent, initAgentListeners, ChatAttachment, ConversationScope, ScopeRunState } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -6,7 +7,7 @@ import { useSettings } from '../../stores/useSettings'
 import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import { toLocalFileUrl } from '../../utils/dragDrop'
-import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT } from '../../modules/workbench/chrome'
+import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT, WORKBENCH_TOPBAR_PADDING_RIGHT } from '../../modules/workbench/chrome'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
 import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
@@ -669,6 +670,122 @@ const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   cursor: 'pointer',
 }
 
+const STREAM_EASE = [0.22, 1, 0.36, 1] as const
+const HEADER_STREAM_DURATION = 0.22
+const CONTENT_STREAM_DURATION = 0.26
+const REDUCED_STREAM_DURATION = 0.12
+const HEADER_STREAM_OFFSET = 18
+const CONTENT_STREAM_OFFSET = 26
+
+function ChatPanelMotionLayer({
+  header,
+  body,
+  children,
+}: {
+  header?: React.ReactNode
+  body?: React.ReactNode
+  children?: React.ReactNode
+}) {
+  const isPresent = useIsPresent()
+  const layerZIndex = isPresent ? 1 : 2
+  const reduceMotion = useReducedMotion()
+
+  if (!header || !body) {
+    return (
+      <div
+        className="absolute inset-0 overflow-hidden"
+        style={{
+          zIndex: layerZIndex,
+          pointerEvents: isPresent ? 'auto' : 'none',
+        }}
+      >
+        {children}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={{
+        zIndex: layerZIndex,
+        pointerEvents: isPresent ? 'auto' : 'none',
+      }}
+    >
+      <div
+        className="grid h-full min-h-0"
+        style={{
+          gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`,
+        }}
+      >
+        <div className="relative overflow-hidden">
+          <motion.div
+            className="absolute inset-0"
+            style={{
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              transform: 'translateZ(0)',
+            }}
+            initial={reduceMotion ? false : { y: HEADER_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(12% 0 0 0)' }}
+            animate={{
+              y: 0,
+              opacity: 1,
+              clipPath: 'inset(0% 0 0 0)',
+              transition: reduceMotion
+                ? { duration: REDUCED_STREAM_DURATION }
+                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+            }}
+            exit={
+              reduceMotion
+                ? undefined
+                : {
+                    y: -HEADER_STREAM_OFFSET,
+                    opacity: 0.01,
+                    clipPath: 'inset(28% 0 0 0)',
+                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+                  }
+            }
+          >
+            {header}
+          </motion.div>
+        </div>
+
+        <div className="relative min-h-0 overflow-hidden">
+          <motion.div
+            className="absolute inset-0 flex min-h-0 flex-col"
+            style={{
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              transform: 'translateZ(0)',
+            }}
+            initial={reduceMotion ? false : { y: CONTENT_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(10% 0 0 0)' }}
+            animate={{
+              y: 0,
+              opacity: 1,
+              clipPath: 'inset(0% 0 0 0)',
+              transition: reduceMotion
+                ? { duration: REDUCED_STREAM_DURATION }
+                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+            }}
+            exit={
+              reduceMotion
+                ? undefined
+                : {
+                    y: -CONTENT_STREAM_OFFSET,
+                    opacity: 0.01,
+                    clipPath: 'inset(22% 0 0 0)',
+                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+                  }
+            }
+          >
+            {body}
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CollapsedChatRail({
   onTogglePanel,
   onHistoryOpen,
@@ -680,15 +797,18 @@ function CollapsedChatRail({
 }) {
   return (
     <div
-      className="flex h-full flex-col items-center"
+      className="flex h-full w-full flex-col"
       style={{
         width: WORKBENCH_EDGE_RAIL_SIZE,
         minWidth: WORKBENCH_EDGE_RAIL_SIZE,
         background: 'transparent',
+        alignItems: 'flex-end',
+        paddingRight: WORKBENCH_TOPBAR_PADDING_RIGHT,
+        boxSizing: 'border-box',
       }}
     >
       <div
-        className="flex w-full items-center justify-center"
+        className="flex w-full items-center justify-end"
         style={{
           height: WORKBENCH_TOPBAR_HEIGHT,
           borderBottom: '1px solid transparent',
@@ -702,7 +822,7 @@ function CollapsedChatRail({
         />
       </div>
 
-      <div className="flex flex-col items-center gap-2 pt-3">
+      <div className="flex w-full flex-col items-end gap-2 pt-3">
         <IconButton
           icon={<History style={{ width: 14, height: 14 }} strokeWidth={2} />}
           onClick={onHistoryOpen}
@@ -2038,11 +2158,107 @@ export default function ChatPanel() {
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
+  const expandedPanelHeader = (
+    <ChatHeader
+      currentChannel={currentChannel}
+      channelOptions={channelOptions}
+      filteredScopes={filteredScopes}
+      onChannelSelect={handleChannelSelect}
+      onTogglePanel={toggleChatPanel}
+      onNewSession={handleNewSession}
+      onLoadConversation={handleLoadConversation}
+      onDeleteConversation={handleDeleteConversation}
+      onHistoryOpen={() => { void loadScopes() }}
+      formatTime={formatTime}
+    />
+  )
+
+  const expandedPanelBody = (
+    <>
+      <ChatMessages
+        messages={messages}
+        messageTaskSnapshots={messageTaskSnapshots}
+        messageToolTraceSnapshots={messageToolTraceSnapshots}
+        pendingTaskRun={pendingTaskRun}
+        pendingToolTrace={pendingToolTrace}
+        isStreaming={isStreaming}
+        streamingMessageId={streamingMessageId}
+        toolTrace={toolTrace}
+        toolTraceStatus={toolTraceStatus}
+        toolTraceExpanded={toolTraceExpanded}
+        copiedMessageId={copiedMessageId}
+        showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
+        onSetInputSuggestion={setInputValue}
+        onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
+        onCopyMessage={handleCopyAgentMessage}
+        onAttachmentPreview={handleAttachmentPreview}
+        onRevealDocumentQuote={revealDocumentQuoteAttachment}
+        getDocumentQuoteTooltip={getDocumentQuoteTooltip}
+        getAttachmentMetaSummary={getAttachmentMetaSummary}
+        getAttachmentPreviewSrc={getAttachmentPreviewSrc}
+        renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+        renderMarkdown={(content) => <MarkdownContent content={content} />}
+      />
+
+      <div
+        style={{
+          padding: '10px 0 0',
+          borderTop: '1px solid transparent',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          background: 'transparent',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          boxShadow: 'none',
+        }}
+      >
+        <ChatAttachments
+          attachments={attachments}
+          onRemove={removeAttachment}
+          onPreview={handleAttachmentPreview}
+          onRevealDocumentQuote={revealDocumentQuoteAttachment}
+          getDocumentQuoteTooltip={getDocumentQuoteTooltip}
+          getAttachmentMetaSummary={getAttachmentMetaSummary}
+          renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+          toLocalFileUrl={toLocalFileUrl}
+        />
+
+        <ChatInput
+          ref={chatInputRef}
+          inputValue={inputValue}
+          isStreaming={isStreaming}
+          attachmentsCount={attachments.length}
+          hasUserMessages={messages.some((m) => m.type === 'user')}
+          pendingSendCount={pendingSendCount}
+          pendingSendCountdown={pendingSendCountdown}
+          isDragOver={isDragOver}
+          composerShellStyle={composerShellStyle}
+          filePool={filePool}
+          filePoolCount={filePool.length}
+          currentAgent={currentAgent}
+          currentAgentAvatar={currentAgentData?.avatar || '🤖'}
+          currentAgentDisplayName={currentAgentData?.displayName || '管家'}
+          agents={agents}
+          isChannelScope={currentScope?.sourceKind === 'channel'}
+          onInputChange={setInputValue}
+          onSend={() => { void handleSend() }}
+          onStop={stopStreaming}
+          onUndo={undoLastMessage}
+          onPickFiles={pickFiles}
+          onAgentSelect={handleAgentSelect}
+          renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+          ModelSelector={ModelSelector}
+        />
+      </div>
+    </>
+  )
+
   return (
     <div
       data-chat-panel-root="true"
       data-liquid-shell="chat-panel"
-      className="workbench-panel-frame flex-shrink-0 flex flex-col overflow-hidden"
+      className="workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden"
       style={{
         width: chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE,
         minWidth: chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE,
@@ -2051,117 +2267,35 @@ export default function ChatPanel() {
         border: chatPanelVisible
           ? '1px solid transparent'
           : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
-        transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out',
+        transition: 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), min-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
-      {chatPanelVisible ? (
-        <>
-          <ChatHeader
-            currentChannel={currentChannel}
-            channelOptions={channelOptions}
-            filteredScopes={filteredScopes}
-            onChannelSelect={handleChannelSelect}
-            onTogglePanel={toggleChatPanel}
-            onNewSession={handleNewSession}
-            onLoadConversation={handleLoadConversation}
-            onDeleteConversation={handleDeleteConversation}
-            onHistoryOpen={() => { void loadScopes() }}
-            formatTime={formatTime}
+      <AnimatePresence initial={false} mode="wait">
+        {chatPanelVisible ? (
+          <ChatPanelMotionLayer
+            key="expanded-chat-panel"
+            header={expandedPanelHeader}
+            body={expandedPanelBody}
           />
-
-          <ChatMessages
-            messages={messages}
-            messageTaskSnapshots={messageTaskSnapshots}
-            messageToolTraceSnapshots={messageToolTraceSnapshots}
-            pendingTaskRun={pendingTaskRun}
-            pendingToolTrace={pendingToolTrace}
-            isStreaming={isStreaming}
-            streamingMessageId={streamingMessageId}
-            toolTrace={toolTrace}
-            toolTraceStatus={toolTraceStatus}
-            toolTraceExpanded={toolTraceExpanded}
-            copiedMessageId={copiedMessageId}
-            showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
-            onSetInputSuggestion={setInputValue}
-            onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
-            onCopyMessage={handleCopyAgentMessage}
-            onAttachmentPreview={handleAttachmentPreview}
-            onRevealDocumentQuote={revealDocumentQuoteAttachment}
-            getDocumentQuoteTooltip={getDocumentQuoteTooltip}
-            getAttachmentMetaSummary={getAttachmentMetaSummary}
-            getAttachmentPreviewSrc={getAttachmentPreviewSrc}
-            renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
-            renderMarkdown={(content) => <MarkdownContent content={content} />}
-          />
-
-          <div
-            style={{
-              padding: '10px 0 0',
-              borderTop: '1px solid transparent',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              background: 'transparent',
-              backdropFilter: 'none',
-              WebkitBackdropFilter: 'none',
-              boxShadow: 'none',
-            }}
-          >
-            <ChatAttachments
-              attachments={attachments}
-              onRemove={removeAttachment}
-              onPreview={handleAttachmentPreview}
-              onRevealDocumentQuote={revealDocumentQuoteAttachment}
-              getDocumentQuoteTooltip={getDocumentQuoteTooltip}
-              getAttachmentMetaSummary={getAttachmentMetaSummary}
-              renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
-              toLocalFileUrl={toLocalFileUrl}
+        ) : (
+          <ChatPanelMotionLayer key="collapsed-chat-panel">
+            <CollapsedChatRail
+              onTogglePanel={toggleChatPanel}
+              onHistoryOpen={() => {
+                void loadScopes()
+                toggleChatPanel()
+              }}
+              onNewSession={() => {
+                handleNewSession()
+                toggleChatPanel()
+              }}
             />
-
-            <ChatInput
-              ref={chatInputRef}
-              inputValue={inputValue}
-              isStreaming={isStreaming}
-              attachmentsCount={attachments.length}
-              hasUserMessages={messages.some((m) => m.type === 'user')}
-              pendingSendCount={pendingSendCount}
-              pendingSendCountdown={pendingSendCountdown}
-              isDragOver={isDragOver}
-              composerShellStyle={composerShellStyle}
-              filePool={filePool}
-              filePoolCount={filePool.length}
-              currentAgent={currentAgent}
-              currentAgentAvatar={currentAgentData?.avatar || '🤖'}
-              currentAgentDisplayName={currentAgentData?.displayName || '管家'}
-              agents={agents}
-              isChannelScope={currentScope?.sourceKind === 'channel'}
-              onInputChange={setInputValue}
-              onSend={() => { void handleSend() }}
-              onStop={stopStreaming}
-              onUndo={undoLastMessage}
-              onPickFiles={pickFiles}
-              onAgentSelect={handleAgentSelect}
-              renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
-              ModelSelector={ModelSelector}
-            />
-          </div>
-        </>
-      ) : (
-        <CollapsedChatRail
-          onTogglePanel={toggleChatPanel}
-          onHistoryOpen={() => {
-            void loadScopes()
-            toggleChatPanel()
-          }}
-          onNewSession={() => {
-            handleNewSession()
-            toggleChatPanel()
-          }}
-        />
-      )}
+          </ChatPanelMotionLayer>
+        )}
+      </AnimatePresence>
 
       {activeAttachmentPreview && (
         <div
