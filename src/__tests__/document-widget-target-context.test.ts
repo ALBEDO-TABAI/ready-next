@@ -14,14 +14,14 @@ afterEach(() => {
     appMode: 'workbench',
     workbenchMode: 'browser',
     splitMode: null,
-    splitRatio: 50,
+    workbenchSplitRatio: 50,
     readySubMode: 'browser',
   })
   useDocTabs.setState({
     tabs: [{ id: 'welcome', title: '未命名', path: null, content: '', isDirty: false }],
     activeTabId: 'welcome',
     splitTabId: null,
-    splitRatio: 50,
+    documentSplitRatio: 50,
     pendingReveal: null,
   })
 })
@@ -93,7 +93,7 @@ describe('document widget target context', () => {
       ],
       activeTabId: 'doc-1',
       splitTabId: null,
-      splitRatio: 50,
+      documentSplitRatio: 50,
       pendingReveal: null,
     })
 

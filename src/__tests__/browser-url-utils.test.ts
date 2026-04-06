@@ -8,10 +8,18 @@ import {
   isLikelyAbsolutePath,
   normalizeBrowserUrlInput,
 } from '../renderer/modules/browser/url-utils'
+import { getRegistrableDomain, getUrlHostname } from '../shared/url-utils'
 
 test('extractBrowserDomain handles regular urls and invalid input safely', () => {
   assert.equal(extractBrowserDomain('https://sub.example.com/path'), 'example.com')
   assert.equal(extractBrowserDomain('not-a-url'), '')
+})
+
+test('shared url helpers preserve hostname and registrable-domain semantics separately', () => {
+  assert.equal(getUrlHostname('https://sub.example.com/path'), 'sub.example.com')
+  assert.equal(getRegistrableDomain('https://sub.example.com/path'), 'example.com')
+  assert.equal(getUrlHostname('not-a-url'), '')
+  assert.equal(getRegistrableDomain('not-a-url'), '')
 })
 
 test('isLikelyAbsolutePath detects unix windows and UNC paths', () => {

@@ -206,5 +206,6 @@ export function useBrowserViewBounds({
   return {
     sendBounds,
     sendBoundsImmediate,
+    syncBrowserVisibility,
   }
 }

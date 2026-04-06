@@ -20,6 +20,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
+  WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 
 const BROWSER_SURFACE_READY_DELAY_MS = 16
@@ -50,8 +51,8 @@ export default function BrowserMode({
     setTabs, setActiveTabId, setUrlInput,
     addTab, updateTab, reorderTabs,
   } = useBrowserTabs()
-  const [isAddressEditing, setIsAddressEditing] = useState(false)
   const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
+  const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
   const modeRootRef = useRef<HTMLDivElement>(null)
@@ -69,17 +70,27 @@ export default function BrowserMode({
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
+  const setAddressEditing = useCallback((next: boolean) => {
+    isAddressEditingRef.current = next
+  }, [])
+  const handleBrowserEditStart = useCallback(() => {
+    setAddressEditing(true)
+  }, [setAddressEditing])
+  const handleBrowserEditEnd = useCallback(() => {
+    setAddressEditing(false)
+  }, [setAddressEditing])
 
   // === 分级显示策略 ===
   // Level 1: 准备层 - 只要当前模式是浏览器，就准备浏览器 Host（更新 bounds）
   const shouldPrepareBrowserHost = isActive
   // Level 2: 显示层 - 动画结束后才真正显示浏览器内容
   const shouldRevealBrowserHost = isActive && isMotionSettled
+  const shouldPresentBrowserHost = isActive && isMotionSettled
   // Level 3: 就绪层 - 浏览器 surface 已准备好
   const isBrowserHostFullyVisible = shouldRevealBrowserHost && isBrowserSurfaceReady
 
   const previousShouldPrepareBrowserHostRef = useRef(shouldPrepareBrowserHost)
-  const { sendBoundsImmediate } = useBrowserViewBounds({
+  const { sendBoundsImmediate, syncBrowserVisibility } = useBrowserViewBounds({
     isElectron,
     contentRef,
     isActive: shouldPrepareBrowserHost,
@@ -187,7 +198,7 @@ export default function BrowserMode({
   } = useBrowserRuntimeEffects({
     isElectron,
     isActive,
-    isAddressEditing,
+    isAddressEditingRef,
     sendBoundsImmediate,
     handleNewTab,
   })
@@ -267,7 +278,8 @@ export default function BrowserMode({
   }, [browserRuntimeReady, clearSurfaceReadyTimer, shouldRevealBrowserHost])
 
   useEffect(() => {
-    if (!isElectron || !shouldRevealBrowserHost) return
+    if (!isElectron) return
+    if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
 
     let cancelled = false
 
@@ -276,8 +288,7 @@ export default function BrowserMode({
         await window.electronAPI?.browser?.hideAll?.()
         return
       }
-      await sendBoundsImmediate({ forceExact: true })
-      await window.electronAPI?.browser?.showActive?.()
+      await syncBrowserVisibility({ forceExact: true })
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
       if (cancelled) return
       clearSurfaceReadyTimer()
@@ -294,29 +305,7 @@ export default function BrowserMode({
       cancelled = true
       clearSurfaceReadyTimer()
     }
-  }, [browserRuntimeReady, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, shouldRevealBrowserHost, tabs.length])
-
-  useEffect(() => {
-    if (!shouldRevealBrowserHost || !browserRuntimeReady || !activeTabId || activeTab?.loading) return
-
-    const timer = window.setTimeout(() => {
-      void captureStableFrame()
-    }, 180)
-
-    return () => window.clearTimeout(timer)
-  }, [activeTab?.loading, activeTabId, browserRuntimeReady, captureStableFrame, shouldRevealBrowserHost])
-
-  // 预截图机制：页面稳定后定期更新缓存，确保切换时画面不过旧
-  useEffect(() => {
-    if (!isElectron || !isActive || !browserRuntimeReady || !activeTabId || activeTab?.loading) return
-
-    // 页面稳定后每 30 秒更新一次缓存
-    const interval = window.setInterval(() => {
-      void captureStableFrame()
-    }, 30000)
-
-    return () => window.clearInterval(interval)
-  }, [isActive, activeTab?.loading, activeTabId, browserRuntimeReady, captureStableFrame, isElectron])
+  }, [browserRuntimeReady, clearSurfaceReadyTimer, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     return () => {
@@ -434,8 +423,8 @@ export default function BrowserMode({
             onRefresh={handleRefresh}
             onFocus={handleUrlFocus}
             onBlur={handleUrlBlur}
-            onEditStart={() => setIsAddressEditing(true)}
-            onEditEnd={() => setIsAddressEditing(false)}
+            onEditStart={handleBrowserEditStart}
+            onEditEnd={handleBrowserEditEnd}
             onToggleBookmark={handleToggleBookmark}
             onToggleBookmarkForTab={handleToggleBookmarkForTab}
             onShowUtilityMenu={handleShowUtilityMenu}
@@ -531,10 +520,13 @@ export default function BrowserMode({
               className="browser-surface-startup-mask"
               style={{
                 position: 'absolute',
-                inset: 0,
+                top: WORKBENCH_TAB_ROW_HEIGHT,
+                left: 0,
+                right: 0,
+                bottom: 0,
                 zIndex: 50,
-                pointerEvents: 'auto',
-                borderRadius: 'var(--workbench-canvas-radius)',
+                pointerEvents: 'none',
+                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
                 background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
                 backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
                 WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',

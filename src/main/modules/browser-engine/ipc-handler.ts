@@ -1,4 +1,5 @@
 import { BrowserWindow, shell } from 'electron'
+import { getUrlHostname } from '../../../shared/url-utils'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
 import type {
@@ -49,15 +50,6 @@ interface Tab extends BrowserTabMetaRecord {
 
 export type BrowserTabOwner = 'manual' | 'agent'
 export type BrowserTabActivity = 'idle' | 'running' | 'attention'
-
-function extractBrowserDomain(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase()
-  } catch {
-    return ''
-  }
-}
-
 
 // Re-export for use by tools module
 export { isAllowedBrowserURL }
@@ -175,7 +167,7 @@ export class BrowserController {
       getViewBounds: () => this.viewBounds,
       shouldPresentHosts: () => this.browserHostsPresented,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
-      extractDomain: (url) => extractBrowserDomain(url),
+      extractDomain: (url) => getUrlHostname(url),
       createHost: (partition) => this.createHost(partition),
       applyBounds: (view) => this.applyBounds(view),
       detachHost: (view) => this.detachHost(view),
@@ -293,11 +285,11 @@ export class BrowserController {
     if (!webContentsId) return ''
     for (const tab of this.tabs.values()) {
       if (tab.view?.webContents.id === webContentsId) {
-        return tab.domain || extractBrowserDomain(tab.url)
+        return tab.domain || getUrlHostname(tab.url)
       }
     }
     if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return extractBrowserDomain(this.previewService.getUrl())
+      return getUrlHostname(this.previewService.getUrl())
     }
     return ''
   }

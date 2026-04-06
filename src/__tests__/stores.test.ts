@@ -76,6 +76,7 @@ const { useAgent } = await import('../renderer/stores/useAgent')
 const { useWorkspace } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
+const { useSettings } = await import('../renderer/stores/useSettings')
 
 // ============================================================
 // Existing Type Validation Tests (preserved from original)
@@ -188,6 +189,7 @@ describe('useMode Store', () => {
             appMode: 'workbench',
             workbenchMode: 'browser',
             splitMode: null,
+            workbenchSplitRatio: 50,
             readySubMode: 'browser',
         })
     })
@@ -197,6 +199,7 @@ describe('useMode Store', () => {
         assert.strictEqual(state.appMode, 'workbench')
         assert.strictEqual(state.workbenchMode, 'browser')
         assert.strictEqual(state.splitMode, null)
+        assert.strictEqual(state.workbenchSplitRatio, 50)
         assert.strictEqual(state.readySubMode, 'browser')
     })
 
@@ -258,6 +261,17 @@ describe('useMode Store', () => {
         assert.strictEqual(state.splitMode, 'document')
         assert.notStrictEqual(state.workbenchMode, state.splitMode)
     })
+
+    it('should clamp workbench split ratio between 20 and 80', () => {
+        useMode.getState().setWorkbenchSplitRatio(50)
+        assert.strictEqual(useMode.getState().workbenchSplitRatio, 50)
+
+        useMode.getState().setWorkbenchSplitRatio(10)
+        assert.strictEqual(useMode.getState().workbenchSplitRatio, 20)
+
+        useMode.getState().setWorkbenchSplitRatio(90)
+        assert.strictEqual(useMode.getState().workbenchSplitRatio, 80)
+    })
 })
 
 describe('useRSSSession Store', () => {
@@ -313,7 +327,7 @@ describe('useDocTabs Store', () => {
             tabs: [{ id: 'reset-tab', path: null, title: '新文档', content: '', isDirty: false }],
             activeTabId: 'reset-tab',
             splitTabId: null,
-            splitRatio: 50,
+            documentSplitRatio: 50,
         })
     })
 
@@ -322,7 +336,7 @@ describe('useDocTabs Store', () => {
         assert.strictEqual(state.tabs.length, 1)
         assert.strictEqual(state.activeTabId, 'reset-tab')
         assert.strictEqual(state.splitTabId, null)
-        assert.strictEqual(state.splitRatio, 50)
+        assert.strictEqual(state.documentSplitRatio, 50)
     })
 
     it('should open a new tab by file path', () => {
@@ -457,21 +471,21 @@ describe('useDocTabs Store', () => {
         assert.strictEqual(useDocTabs.getState().splitTabId, null)
     })
 
-    it('should clamp split ratio between 20 and 80', () => {
-        useDocTabs.getState().setSplitRatio(50)
-        assert.strictEqual(useDocTabs.getState().splitRatio, 50)
+    it('should clamp document split ratio between 20 and 80', () => {
+        useDocTabs.getState().setDocumentSplitRatio(50)
+        assert.strictEqual(useDocTabs.getState().documentSplitRatio, 50)
 
-        useDocTabs.getState().setSplitRatio(10)
-        assert.strictEqual(useDocTabs.getState().splitRatio, 20)
+        useDocTabs.getState().setDocumentSplitRatio(10)
+        assert.strictEqual(useDocTabs.getState().documentSplitRatio, 20)
 
-        useDocTabs.getState().setSplitRatio(90)
-        assert.strictEqual(useDocTabs.getState().splitRatio, 80)
+        useDocTabs.getState().setDocumentSplitRatio(90)
+        assert.strictEqual(useDocTabs.getState().documentSplitRatio, 80)
 
-        useDocTabs.getState().setSplitRatio(20)
-        assert.strictEqual(useDocTabs.getState().splitRatio, 20)
+        useDocTabs.getState().setDocumentSplitRatio(20)
+        assert.strictEqual(useDocTabs.getState().documentSplitRatio, 20)
 
-        useDocTabs.getState().setSplitRatio(80)
-        assert.strictEqual(useDocTabs.getState().splitRatio, 80)
+        useDocTabs.getState().setDocumentSplitRatio(80)
+        assert.strictEqual(useDocTabs.getState().documentSplitRatio, 80)
     })
 
     it('should clear split when closing the split tab', () => {
@@ -488,6 +502,23 @@ describe('useDocTabs Store', () => {
         useDocTabs.getState().openTab('/a/b/c/deep-file.tsx')
         const tab = useDocTabs.getState().tabs[1]
         assert.strictEqual(tab.title, 'deep-file.tsx')
+    })
+
+    it('should migrate persisted splitRatio into documentSplitRatio', async () => {
+        const migrated = await (useDocTabs as typeof useDocTabs & {
+            persist: {
+                getOptions: () => { migrate?: (state: unknown) => Promise<Record<string, unknown>> | Record<string, unknown> }
+            }
+        }).persist.getOptions().migrate?.({
+            tabs: [{ id: 'doc-1', path: null, title: '旧文档', content: '', isDirty: false }],
+            activeTabId: 'doc-1',
+            splitTabId: null,
+            splitRatio: 62,
+        })
+
+        assert.ok(migrated)
+        assert.strictEqual(migrated?.documentSplitRatio, 62)
+        assert.strictEqual('splitRatio' in (migrated || {}), false)
     })
 })
 
@@ -1298,5 +1329,76 @@ describe('useTheme Store', () => {
         assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
         assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
         assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
+    })
+})
+
+describe('useSettings Store', () => {
+    beforeEach(() => {
+        storage.clear()
+        ;(globalThis as any).window.electronAPI = {
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+                get: async () => ({ success: false }),
+                setAIConfig: async () => ({ success: true }),
+                set: async () => ({ success: true }),
+                testAIConnection: async () => ({ success: false, error: 'not configured' }),
+            },
+        }
+        useSettings.setState({
+            config: {
+                provider: 'moonshot',
+                baseUrl: 'https://api.moonshot.cn/v1',
+                apiKey: '',
+                model: 'kimi-for-coding',
+                agentProtocol: 'openai',
+                wireApi: 'chat/completions',
+                reasoningEffort: 'medium',
+                toolUseMode: 'auto',
+                visionMode: 'auto',
+                nativeVideoMode: 'auto',
+            },
+            loaded: true,
+            testStatus: 'idle',
+            testMessage: '',
+            testLatency: null,
+            remoteModels: [],
+            savedConfigs: {},
+        })
+    })
+
+    it('debounces updateField persistence and only flushes the latest value', async () => {
+        const calls: string[] = []
+        ;(globalThis as any).window.electronAPI.settings.setAIConfig = async (config: { apiKey: string }) => {
+            calls.push(config.apiKey)
+            return { success: true }
+        }
+        ;(globalThis as any).window.electronAPI.settings.set = async () => ({ success: true })
+
+        useSettings.getState().updateField('apiKey', 'first')
+        useSettings.getState().updateField('apiKey', 'second')
+
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        assert.deepStrictEqual(calls, [])
+
+        await new Promise((resolve) => setTimeout(resolve, 260))
+        assert.deepStrictEqual(calls, ['second'])
+    })
+
+    it('flushes pending config before switching provider', async () => {
+        const calls: Array<{ provider: string; apiKey: string }> = []
+        ;(globalThis as any).window.electronAPI.settings.setAIConfig = async (config: { provider: string; apiKey: string }) => {
+            calls.push({ provider: config.provider, apiKey: config.apiKey })
+            return { success: true }
+        }
+        ;(globalThis as any).window.electronAPI.settings.set = async () => ({ success: true })
+
+        useSettings.getState().updateField('apiKey', 'buffered-key')
+        useSettings.getState().switchProvider('openai')
+
+        await new Promise((resolve) => setTimeout(resolve, 20))
+
+        assert.strictEqual(calls[0]?.provider, 'moonshot')
+        assert.strictEqual(calls[0]?.apiKey, 'buffered-key')
+        assert.strictEqual(calls[1]?.provider, 'openai')
     })
 })

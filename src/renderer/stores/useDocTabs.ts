@@ -23,7 +23,7 @@ interface DocTabsState {
     tabs: DocTab[]
     activeTabId: string
     splitTabId: string | null
-    splitRatio: number
+    documentSplitRatio: number
     pendingReveal: PendingDocReveal | null
 
     openTab: (path: string) => void
@@ -37,7 +37,7 @@ interface DocTabsState {
     markTabSaved: (id: string) => void
     reorderTabs: (fromIndex: number, toIndex: number) => void
     setSplitTab: (id: string | null) => void
-    setSplitRatio: (ratio: number) => void
+    setDocumentSplitRatio: (ratio: number) => void
     setPendingReveal: (reveal: PendingDocReveal | null) => void
 }
 
@@ -55,7 +55,7 @@ function syncTabCounterFromTabs(tabs: DocTab[]) {
     tabCounter = Math.max(tabCounter, maxId)
 }
 
-function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'splitRatio'>) {
+function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'>) {
     const tabs = state.tabs.length > 0
         ? state.tabs
         : [{ id: 'doc-1', path: null, title: '新文档', content: '', isDirty: false }]
@@ -66,7 +66,7 @@ function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'spl
         tabs,
         activeTabId,
         splitTabId,
-        splitRatio: Math.max(20, Math.min(80, state.splitRatio || 50)),
+        documentSplitRatio: Math.max(20, Math.min(80, state.documentSplitRatio || 50)),
     }
 }
 
@@ -88,7 +88,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     ],
     activeTabId: 'doc-1',
     splitTabId: null,
-    splitRatio: 50,
+    documentSplitRatio: 50,
     pendingReveal: null,
 
     openTab: (path: string) => {
@@ -222,8 +222,8 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         set({ splitTabId: id })
     },
 
-    setSplitRatio: (ratio: number) => {
-        set({ splitRatio: Math.max(20, Math.min(80, ratio)) })
+    setDocumentSplitRatio: (ratio: number) => {
+        set({ documentSplitRatio: Math.max(20, Math.min(80, ratio)) })
     },
 
     setPendingReveal: (reveal: PendingDocReveal | null) => {
@@ -244,7 +244,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             tabs,
             activeTabId: state.activeTabId,
             splitTabId: state.splitTabId,
-            splitRatio: state.splitRatio,
+            documentSplitRatio: state.documentSplitRatio,
         }
     },
     onRehydrateStorage: () => (state) => {
@@ -253,24 +253,30 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         tabs: state.tabs,
         activeTabId: state.activeTabId,
         splitTabId: state.splitTabId,
-        splitRatio: state.splitRatio,
+        documentSplitRatio: state.documentSplitRatio,
       })
       state.tabs = next.tabs
       state.activeTabId = next.activeTabId
       state.splitTabId = next.splitTabId
-      state.splitRatio = next.splitRatio
+      state.documentSplitRatio = next.documentSplitRatio
     },
     migrate: (persistedState) => {
-      const state = persistedState as Partial<DocTabsState> | undefined
+      const state = persistedState as (Partial<DocTabsState> & { splitRatio?: number }) | undefined
       if (!state) return persistedState
+      const legacyDocumentSplitRatio = typeof state.documentSplitRatio === 'number'
+        ? state.documentSplitRatio
+        : typeof state.splitRatio === 'number'
+          ? state.splitRatio
+          : 50
       const next = ensureTabsState({
         tabs: Array.isArray(state.tabs) ? state.tabs : [],
         activeTabId: typeof state.activeTabId === 'string' ? state.activeTabId : '',
         splitTabId: typeof state.splitTabId === 'string' ? state.splitTabId : null,
-        splitRatio: typeof state.splitRatio === 'number' ? state.splitRatio : 50,
+        documentSplitRatio: legacyDocumentSplitRatio,
       })
+      const { splitRatio: _legacySplitRatio, ...rest } = state
       return {
-        ...state,
+        ...rest,
         ...next,
       }
     },

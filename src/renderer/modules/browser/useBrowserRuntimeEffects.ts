@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import type { TabUpdateEvent } from './types'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
@@ -7,7 +7,7 @@ import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 interface UseBrowserRuntimeEffectsParams {
   isElectron: boolean
   isActive: boolean
-  isAddressEditing: boolean
+  isAddressEditingRef: RefObject<boolean>
   sendBoundsImmediate: (options?: { forceExact?: boolean }) => Promise<void>
   handleNewTab: () => void | Promise<void>
 }
@@ -15,7 +15,7 @@ interface UseBrowserRuntimeEffectsParams {
 export function useBrowserRuntimeEffects({
   isElectron,
   isActive,
-  isAddressEditing,
+  isAddressEditingRef,
   sendBoundsImmediate,
   handleNewTab,
 }: UseBrowserRuntimeEffectsParams) {
@@ -27,23 +27,28 @@ export function useBrowserRuntimeEffects({
   const restoreExistingTabs = useCallback(async () => {
     if (!isElectron) return false
     const existingTabs = await window.electronAPI?.browser?.getTabs()
-    if (!Array.isArray(existingTabs) || existingTabs.length === 0) return false
-
     const store = useBrowserTabs.getState()
+    if (!Array.isArray(existingTabs) || existingTabs.length === 0) {
+      store.setTabs([])
+      store.setActiveTabId(null)
+      store.setUrlInput('')
+      return false
+    }
+
     const hydratedTabs: BrowserTab[] = existingTabs.map((tab) => ({
       id: tab.id,
       url: tab.url,
       title: tab.title || 'New Tab',
-      loading: false,
-      canGoBack: false,
-      canGoForward: false,
+      loading: Boolean(tab.loading),
+      canGoBack: Boolean(tab.canGoBack),
+      canGoForward: Boolean(tab.canGoForward),
       domain: tab.domain || extractBrowserDomain(tab.url),
       favicon: tab.favicon || undefined,
       owner: tab.owner,
       required: tab.required,
       activity: tab.activity,
       lastAuditedAt: tab.lastAuditedAt,
-      error: undefined,
+      error: tab.error || undefined,
     }))
 
     const activeTab = existingTabs.find((tab) => tab.active) || existingTabs[existingTabs.length - 1]
@@ -56,36 +61,30 @@ export function useBrowserRuntimeEffects({
   const ensureBrowserRuntime = useCallback(async ({ allowNewTab }: { allowNewTab: boolean }) => {
     if (!isElectron) return true
 
-    if (!hasHydratedRuntimeRef.current) {
-      if (!hydrationPromiseRef.current) {
-        hydrationPromiseRef.current = (async () => {
-          const { tabs: currentTabs } = useBrowserTabs.getState()
-          const hasTabs = currentTabs.length > 0 || await restoreExistingTabs()
-          if (hasTabs) {
-            hasHydratedRuntimeRef.current = true
-          }
-          return hasTabs
-        })()
-      }
+    if (!hydrationPromiseRef.current) {
+      hydrationPromiseRef.current = restoreExistingTabs()
+    }
 
-      const hydrationTask = hydrationPromiseRef.current
-      try {
-        const hasTabs = await hydrationTask
-        if (hasTabs) return true
-      } finally {
-        if (hydrationPromiseRef.current === hydrationTask) {
-          hydrationPromiseRef.current = null
-        }
+    const hydrationTask = hydrationPromiseRef.current
+    try {
+      const hasTabs = await hydrationTask
+      if (hasTabs) {
+        hasHydratedRuntimeRef.current = true
+        return true
+      }
+    } finally {
+      if (hydrationPromiseRef.current === hydrationTask) {
+        hydrationPromiseRef.current = null
       }
     }
 
-    if (allowNewTab && !hasHydratedRuntimeRef.current) {
+    if (allowNewTab) {
       await handleNewTab()
       hasHydratedRuntimeRef.current = true
       return true
     }
 
-    return hasHydratedRuntimeRef.current
+    return false
   }, [handleNewTab, isElectron, restoreExistingTabs])
 
   useEffect(() => {
@@ -105,7 +104,7 @@ export function useBrowserRuntimeEffects({
             canGoForward: event.canGoForward || false,
             error: undefined,
           })
-          if (store.activeTabId === event.tabId && event.url && !isAddressEditing) {
+          if (store.activeTabId === event.tabId && event.url && !isAddressEditingRef.current) {
             store.setUrlInput(event.url === DEFAULT_BROWSER_URL ? '' : event.url)
           }
           break
@@ -131,7 +130,7 @@ export function useBrowserRuntimeEffects({
       }
     })
     return () => { cleanup?.() }
-  }, [isElectron, isAddressEditing])
+  }, [isElectron, isAddressEditingRef])
 
   useEffect(() => {
     if (!isElectron) return
@@ -188,13 +187,9 @@ export function useBrowserRuntimeEffects({
       return
     }
 
-    if (hasHydratedRuntimeRef.current) {
-      setBrowserRuntimeReady(true)
-      void sendBoundsImmediate({ forceExact: true })
-      return
+    if (!hasHydratedRuntimeRef.current) {
+      setBrowserRuntimeReady(false)
     }
-
-    setBrowserRuntimeReady(false)
     let cancelled = false
     activationFrameRef.current = requestAnimationFrame(async () => {
       activationFrameRef.current = null

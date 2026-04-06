@@ -6,7 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({
+      exclude: ['@openuidev/react-lang', '@openuidev/lang-core'],
+    })],
     build: {
       rollupOptions: {
         external: ['rsshub', /^rsshub\/.*/, '@puppeteer/browsers', /^@puppeteer\/browsers\/.*/],
@@ -18,7 +20,9 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({
+      exclude: ['@openuidev/react-lang', '@openuidev/lang-core'],
+    })],
     build: {
       rollupOptions: {
         input: {

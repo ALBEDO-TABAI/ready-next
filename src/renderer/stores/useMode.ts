@@ -7,12 +7,12 @@ interface ModeState {
   appMode: AppMode
   workbenchMode: WorkbenchMode
   splitMode: WorkbenchMode | null
-  splitRatio: number
+  workbenchSplitRatio: number
   readySubMode: WorkbenchMode
   setAppMode: (mode: AppMode) => void
   setWorkbenchMode: (mode: WorkbenchMode) => void
   setSplitMode: (mode: WorkbenchMode | null) => void
-  setSplitRatio: (ratio: number) => void
+  setWorkbenchSplitRatio: (ratio: number) => void
   setReadySubMode: (mode: WorkbenchMode) => void
   toggleMode: () => void
 }
@@ -21,12 +21,12 @@ export const useMode = create<ModeState>((set) => ({
   appMode: 'workbench',
   workbenchMode: 'browser',
   splitMode: null,
-  splitRatio: 50,
+  workbenchSplitRatio: 50,
   readySubMode: 'browser',
   setAppMode: (mode) => set({ appMode: mode }),
   setWorkbenchMode: (mode) => set({ workbenchMode: mode, splitMode: null }),
   setSplitMode: (mode) => set({ splitMode: mode }),
-  setSplitRatio: (ratio) => set({ splitRatio: Math.max(20, Math.min(80, ratio)) }),
+  setWorkbenchSplitRatio: (ratio) => set({ workbenchSplitRatio: Math.max(20, Math.min(80, ratio)) }),
   setReadySubMode: (mode) => set({ readySubMode: mode }),
   toggleMode: () => set((state) => ({
     appMode: state.appMode === 'workbench' ? 'ready' : 'workbench'

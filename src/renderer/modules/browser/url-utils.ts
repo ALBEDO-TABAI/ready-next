@@ -1,3 +1,5 @@
+import { getRegistrableDomain } from '../../../shared/url-utils'
+
 export const DEFAULT_BROWSER_URL = 'https://gemini.google.com'
 export const SEARCH_URL = 'https://www.google.com/search?q='
 
@@ -10,14 +12,7 @@ export const LOGIN_DOMAINS = [
 ]
 
 export function extractBrowserDomain(url: string): string {
-  try {
-    const hostname = new URL(url).hostname
-    const parts = hostname.split('.')
-    if (parts.length >= 2) return parts.slice(-2).join('.')
-    return hostname
-  } catch {
-    return ''
-  }
+  return getRegistrableDomain(url)
 }
 
 export function isLikelyAbsolutePath(value: string): boolean {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { Folder, FolderInput, FolderOpen, Pen, Trash2 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { useWorkspace } from '../../stores/useWorkspace'
+import { readStorage, removeStorage, writeStorage } from '../../utils/storage'
 import { PANEL_TOKENS, SKILLS_PANEL_DIMENSIONS } from './panelTokens'
 
 interface SkillActionDefinition {
@@ -88,7 +89,7 @@ function basename(input: string): string {
 function parseLegacyImportedFolders(): LegacyImportedFolderParseResult {
   if (typeof window === 'undefined') return { folders: [], error: null }
   try {
-    const raw = localStorage.getItem(IMPORTED_SKILL_KEY)
+    const raw = readStorage(IMPORTED_SKILL_KEY)
     if (!raw) return { folders: [], error: null }
     const parsed = JSON.parse(raw) as LegacyImportedSkillFolder[]
     if (!Array.isArray(parsed)) {
@@ -219,21 +220,21 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
       pushMessage(legacyFolders.error)
     }
     if (legacyFolders.folders.length === 0) {
-      localStorage.removeItem(IMPORTED_SKILL_KEY)
+      removeStorage(IMPORTED_SKILL_KEY)
       return
     }
 
     void (async () => {
       const { imported, failed } = await importFolders(legacyFolders.folders.map((item) => item.path))
       if (failed.length > 0) {
-        localStorage.setItem(
+        writeStorage(
           IMPORTED_SKILL_KEY,
           JSON.stringify(failed.map((path) => ({ path, name: basename(path), addedAt: Date.now() }))),
         )
         pushMessage(`旧版技能目录已迁移 ${imported} 个，失败 ${failed.length} 个`)
         return
       }
-      localStorage.removeItem(IMPORTED_SKILL_KEY)
+      removeStorage(IMPORTED_SKILL_KEY)
       if (imported > 0) {
         pushMessage(`已迁移 ${imported} 个旧版技能目录`)
       }

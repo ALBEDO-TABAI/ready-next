@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { readStorage, writeStorage } from '../utils/storage'
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
@@ -16,22 +17,14 @@ interface ThemeState {
 
 // Read initial theme from localStorage
 const getStoredTheme = (): ThemeOption => {
-    try {
-        const stored = localStorage.getItem('ready-theme')
-        if (stored === 'dark' || stored === 'light' || stored === 'system') return stored
-    } catch {
-        // ignore storage access errors
-    }
+    const stored = readStorage('ready-theme')
+    if (stored === 'dark' || stored === 'light' || stored === 'system') return stored
     return 'light'
 }
 
 const getStoredSkin = (): ThemeSkin => {
-    try {
-        const stored = localStorage.getItem('ready-theme-skin')
-        if (stored === 'liquid-glass') return stored
-    } catch {
-        // ignore storage access errors
-    }
+    const stored = readStorage('ready-theme-skin')
+    if (stored === 'liquid-glass') return stored
     return 'liquid-glass'
 }
 
@@ -83,7 +76,7 @@ export const useTheme = create<ThemeState>((set, get) => {
         setTheme: (theme) => {
             const newResolved = resolveTheme(theme)
             applyColorTheme(newResolved, theme)
-            localStorage.setItem('ready-theme', theme)
+            writeStorage('ready-theme', theme)
             set({ theme, resolvedTheme: newResolved })
         },
         toggleTheme: () => {
@@ -94,17 +87,17 @@ export const useTheme = create<ThemeState>((set, get) => {
                 state.theme === 'dark' ? 'system' : 'light'
             const newResolved = resolveTheme(next)
             applyColorTheme(newResolved, next)
-            localStorage.setItem('ready-theme', next)
+            writeStorage('ready-theme', next)
             set({ theme: next, resolvedTheme: newResolved })
         },
         setSkin: (_skin) => {
             applySkin('liquid-glass')
-            localStorage.setItem('ready-theme-skin', 'liquid-glass')
+            writeStorage('ready-theme-skin', 'liquid-glass')
             set({ skin: 'liquid-glass' })
         },
         toggleSkin: () => {
             applySkin('liquid-glass')
-            localStorage.setItem('ready-theme-skin', 'liquid-glass')
+            writeStorage('ready-theme-skin', 'liquid-glass')
             set({ skin: 'liquid-glass' })
         },
     }

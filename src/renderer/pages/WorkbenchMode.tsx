@@ -10,6 +10,7 @@ import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
+import { readStorage } from '../utils/storage'
 
 function ResizeHandle({
   onResize,
@@ -82,7 +83,7 @@ export default function WorkbenchMode() {
     sidePanelVariant,
     setSidePanelVariant,
   } = useWorkspace()
-  const { workbenchMode, splitMode, splitRatio, setSplitRatio, setWorkbenchMode } = useMode()
+  const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode } = useMode()
   const navigate = useNavigate()
   const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -96,12 +97,12 @@ export default function WorkbenchMode() {
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    setSplitRatio(splitRatio + deltaPercent)
-  }, [splitRatio, setSplitRatio])
+    setWorkbenchSplitRatio(workbenchSplitRatio + deltaPercent)
+  }, [workbenchSplitRatio, setWorkbenchSplitRatio])
 
   const initializeWorkspace = useCallback(async () => {
     try {
-      const savedRoot = localStorage.getItem('ready-workspace-root')
+      const savedRoot = readStorage('ready-workspace-root')
 
       if (typeof window === 'undefined' || !window.electronAPI) {
         setWorkspaceInitError('工作台初始化失败：当前环境未提供 Electron 文件系统能力。')
@@ -275,7 +276,7 @@ export default function WorkbenchMode() {
                 <div
                   className="flex flex-col min-w-0"
                   style={{
-                    flexBasis: `${splitRatio}%`,
+                    flexBasis: `${workbenchSplitRatio}%`,
                     flexShrink: 0,
                     flexGrow: 0,
                     background: 'transparent',

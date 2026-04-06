@@ -1,5 +1,6 @@
 import { session } from 'electron'
 
+import { getUrlHostname } from '../../../shared/url-utils'
 import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
 import { shouldAllowBrowserPermission } from './popup-policy'
 
@@ -25,14 +26,6 @@ const READY_ADBLOCK_HOST_PATTERNS = [
   'smartadserver.com',
   'taboola.com',
 ]
-
-function extractBrowserDomain(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase()
-  } catch {
-    return ''
-  }
-}
 
 interface BrowserSessionPolicyDeps {
   dataService: BrowserDataService
@@ -189,7 +182,7 @@ export class BrowserSessionPolicyService {
     if (isPreview && !this.adblockState.previewEnabled) return false
     if (resourceType === 'mainFrame') return false
     if (!/^https?:\/\//i.test(requestUrl)) return false
-    const host = extractBrowserDomain(requestUrl)
+    const host = getUrlHostname(requestUrl)
     if (!host || this.isWhitelistedDomain(host, originDomain)) return false
     return this.isKnownAdHost(host)
   }

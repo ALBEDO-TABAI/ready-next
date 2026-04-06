@@ -9,13 +9,14 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import './styles/index.css'
+import { writeStorage } from './utils/storage'
 
 async function hydrateStartupTheme() {
   if (!window.electronAPI) return
   const themeResult = await window.electronAPI?.theme.get()
   if (!themeResult?.success || !themeResult.data) return
 
-  localStorage.setItem('ready-theme', themeResult.data.option)
+  writeStorage('ready-theme', themeResult.data.option)
   document.documentElement.setAttribute('data-theme', themeResult.data.resolved)
 }
 

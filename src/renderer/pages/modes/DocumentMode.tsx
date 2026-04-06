@@ -110,8 +110,8 @@ export default function DocumentMode({
 }: DocumentModeProps) {
   const { selectedFile } = useWorkspace()
   const {
-    tabs, activeTabId, splitTabId, splitRatio,
-    openTab, closeTab, setActiveTab, setSplitTab, setSplitRatio,
+    tabs, activeTabId, splitTabId, documentSplitRatio,
+    openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
     reorderTabs,
   } = useDocTabs()
 
@@ -212,8 +212,8 @@ export default function DocumentMode({
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    setSplitRatio(splitRatio + deltaPercent)
-  }, [splitRatio, setSplitRatio])
+    setDocumentSplitRatio(documentSplitRatio + deltaPercent)
+  }, [documentSplitRatio, setDocumentSplitRatio])
 
   return (
     <div className="workbench-mode-root">
@@ -289,7 +289,7 @@ export default function DocumentMode({
             <div className="flex-1 flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 10 }}>
               <div
                 className="flex flex-col min-w-0 overflow-hidden"
-                style={{ flexBasis: `${splitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
               >
                 <DocumentEditor
                   key={activeTab.id}

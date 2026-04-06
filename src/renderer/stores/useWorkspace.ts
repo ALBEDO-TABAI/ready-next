@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { readJsonStorage, readStorage, removeStorage, writeJsonStorage, writeStorage } from '../utils/storage'
 
 export interface FileItem {
   name: string
@@ -227,9 +228,8 @@ const loadSidePanelWidthsFromStorage = (): SidePanelWidths => {
   const fallback: SidePanelWidths = {
     shared: DEFAULT_SIDE_PANEL_WIDTH,
   }
-  if (typeof localStorage === 'undefined') return fallback
   try {
-    const raw = localStorage.getItem(SIDE_PANEL_WIDTHS_KEY)
+    const raw = readStorage(SIDE_PANEL_WIDTHS_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<SidePanelWidths> | { files?: number; search?: number; skills?: number }
 
@@ -251,8 +251,7 @@ const loadSidePanelWidthsFromStorage = (): SidePanelWidths => {
 }
 
 const loadSkillsSplitRatioFromStorage = (): number => {
-  if (typeof localStorage === 'undefined') return DEFAULT_SKILLS_SPLIT_RATIO
-  const raw = localStorage.getItem(SKILLS_SPLIT_RATIO_KEY)
+  const raw = readStorage(SKILLS_SPLIT_RATIO_KEY)
   const parsed = raw ? Number(raw) : Number.NaN
   return clampSkillsSplitRatio(parsed)
 }
@@ -263,7 +262,7 @@ const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
     return 'files'
   }
   try {
-    const raw = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
+    const raw = readStorage(SIDE_PANEL_VARIANT_KEY)
     console.log('[SidePanelVariant] Loaded from storage:', raw)
     if (!raw) return 'files'
     const parsed = raw as WorkspaceSidePanelVariant
@@ -299,7 +298,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   selectedFile: null,
   expandedDirs: new Set<string>(),
   dirChildren: new Map<string, FileItem[]>(),
-  pinnedFolders: JSON.parse(localStorage.getItem('ready-pinned-folders') || '[]') as string[],
+  pinnedFolders: readJsonStorage('ready-pinned-folders', [] as string[]),
   sidebarVisible: true,
   sidePanelVariant: initialVariant,
   sidePanelWidths: loadSidePanelWidthsFromStorage(),
@@ -327,10 +326,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     // 先保存到 localStorage，确保持久化
     if (typeof localStorage !== 'undefined') {
       try {
-        localStorage.setItem(SIDE_PANEL_VARIANT_KEY, variant)
+        writeStorage(SIDE_PANEL_VARIANT_KEY, variant)
         console.log('[SidePanelVariant] Saved to storage:', variant)
         // 立即验证写入是否成功
-        const saved = localStorage.getItem(SIDE_PANEL_VARIANT_KEY)
+        const saved = readStorage(SIDE_PANEL_VARIANT_KEY)
         console.log('[SidePanelVariant] Verification read:', saved)
         if (saved !== variant) {
           console.error('[SidePanelVariant] Verification failed! Expected:', variant, 'Got:', saved)
@@ -351,7 +350,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         shared: clamped,
       }
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SIDE_PANEL_WIDTHS_KEY, JSON.stringify(next))
+        writeJsonStorage(SIDE_PANEL_WIDTHS_KEY, next)
       }
       return { sidePanelWidths: next }
     })
@@ -362,7 +361,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     if (get().skillsSplitRatio === next) return
     set({ skillsSplitRatio: next })
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(SKILLS_SPLIT_RATIO_KEY, String(next))
+      writeStorage(SKILLS_SPLIT_RATIO_KEY, String(next))
     }
   },
 
@@ -414,7 +413,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
   setWorkspaceRoot: (path) => {
     set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
-    localStorage.setItem('ready-workspace-root', path)
+    writeStorage('ready-workspace-root', path)
     get().refreshFiles()
   },
 
@@ -431,8 +430,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       creatingType: null,
       creatingPath: null,
     })
-    localStorage.removeItem('ready-workspace-root')
-    localStorage.removeItem('ready-pinned-folders')
+    removeStorage('ready-workspace-root')
+    removeStorage('ready-pinned-folders')
   },
 
   addPinnedFolder: (path) => {
@@ -440,27 +439,27 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     if (pinnedFolders.includes(path)) return
     const next = [...pinnedFolders, path]
     set({ pinnedFolders: next })
-    localStorage.setItem('ready-pinned-folders', JSON.stringify(next))
+    writeJsonStorage('ready-pinned-folders', next)
   },
 
   removePinnedFolder: (path) => {
     const { pinnedFolders } = get()
     const next = pinnedFolders.filter(p => p !== path)
     set({ pinnedFolders: next })
-    localStorage.setItem('ready-pinned-folders', JSON.stringify(next))
+    writeJsonStorage('ready-pinned-folders', next)
   },
 
   saveWorkspace: (name) => {
     const { pinnedFolders } = get()
     if (pinnedFolders.length === 0) return
-    const saved = JSON.parse(localStorage.getItem('ready-saved-workspaces') || '[]') as { name: string; folders: string[] }[]
+    const saved = readJsonStorage('ready-saved-workspaces', [] as { name: string; folders: string[] }[])
     const filtered = saved.filter(w => w.name !== name)
     filtered.push({ name, folders: [...pinnedFolders] })
-    localStorage.setItem('ready-saved-workspaces', JSON.stringify(filtered))
+    writeJsonStorage('ready-saved-workspaces', filtered)
   },
 
   getSavedWorkspaces: () => {
-    return JSON.parse(localStorage.getItem('ready-saved-workspaces') || '[]') as { name: string; folders: string[] }[]
+    return readJsonStorage('ready-saved-workspaces', [] as { name: string; folders: string[] }[])
   },
 
   loadSavedWorkspace: (folders) => {
@@ -472,17 +471,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       workspaceRoot: folders[0] || null,
       currentPath: folders[0] || '/',
     })
-    localStorage.setItem('ready-pinned-folders', JSON.stringify(folders))
+    writeJsonStorage('ready-pinned-folders', folders)
     if (folders[0]) {
-      localStorage.setItem('ready-workspace-root', folders[0])
+      writeStorage('ready-workspace-root', folders[0])
     }
     get().refreshFiles()
   },
 
   deleteSavedWorkspace: (name) => {
-    const saved = JSON.parse(localStorage.getItem('ready-saved-workspaces') || '[]') as { name: string; folders: string[] }[]
+    const saved = readJsonStorage('ready-saved-workspaces', [] as { name: string; folders: string[] }[])
     const filtered = saved.filter(w => w.name !== name)
-    localStorage.setItem('ready-saved-workspaces', JSON.stringify(filtered))
+    writeJsonStorage('ready-saved-workspaces', filtered)
   },
 
   openFolderDialog: async () => {
@@ -769,7 +768,7 @@ if (typeof window !== 'undefined') {
       console.log('[SidePanelVariant] Detected variant change via subscription:', previousVariant, '->', state.sidePanelVariant)
       if (typeof localStorage !== 'undefined') {
         try {
-          localStorage.setItem(SIDE_PANEL_VARIANT_KEY, state.sidePanelVariant)
+          writeStorage(SIDE_PANEL_VARIANT_KEY, state.sidePanelVariant)
           console.log('[SidePanelVariant] Auto-saved to storage via subscription:', state.sidePanelVariant)
         } catch (err) {
           console.error('[SidePanelVariant] Auto-save via subscription failed:', err)

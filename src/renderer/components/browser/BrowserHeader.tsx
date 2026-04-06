@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef } from 'react'
+
 import HeaderUtilityActions from './HeaderUtilityActions'
 import TabRail from './TabRail'
 import { useBrowserHeaderInteraction } from '../../modules/browser/useBrowserHeaderInteraction'
@@ -60,6 +62,15 @@ export default function BrowserHeader({
   onToggleBookmarkForTab,
   onShowUtilityMenu,
 }: BrowserHeaderProps) {
+  const committingNavigationRef = useRef(false)
+  const collapseActiveTabRef = useRef<() => void>(() => undefined)
+  const dismissAddressEditing = useCallback(() => {
+    committingNavigationRef.current = false
+    onBlur()
+    onEditEnd()
+    collapseActiveTabRef.current()
+  }, [onBlur, onEditEnd])
+
   const {
     headerRootRef,
     activeTabSurfaceRef,
@@ -73,13 +84,13 @@ export default function BrowserHeader({
     stopEditing,
     beginRefreshDockHover,
     endRefreshDockHover,
-  } = useBrowserHeaderInteraction(isActive)
+  } = useBrowserHeaderInteraction(isActive, dismissAddressEditing)
+  collapseActiveTabRef.current = collapseActiveTab
 
-  const collapseAndReset = () => {
-    onBlur()
-    onEditEnd()
-    collapseActiveTab()
-  }
+  useEffect(() => {
+    if (isActive) return
+    dismissAddressEditing()
+  }, [dismissAddressEditing, isActive])
 
   return (
     <div
@@ -117,7 +128,10 @@ export default function BrowserHeader({
           urlInput={urlInput}
           isBookmarked={isBookmarked}
           bookmarkedUrls={bookmarkedUrls}
-          onTabClick={onTabClick}
+          onTabClick={(tabId) => {
+            dismissAddressEditing()
+            onTabClick(tabId)
+          }}
           onTabClose={onTabClose}
           onNewTab={onNewTab}
           onReorder={onReorder}
@@ -129,43 +143,49 @@ export default function BrowserHeader({
           onHotspotEnter={primeActiveTab}
           onHotspotLeave={resetActiveTabPrime}
           onInputFocus={() => {
+            committingNavigationRef.current = false
             onFocus()
             onEditStart()
             beginEditing()
           }}
           onInputBlur={() => {
-            onEditEnd()
+            if (!committingNavigationRef.current) {
+              dismissAddressEditing()
+            } else {
+              onEditEnd()
+            }
             requestAnimationFrame(() => stopEditing())
           }}
           onRefreshDockEnter={beginRefreshDockHover}
           onRefreshDockLeave={endRefreshDockHover}
           onRefresh={() => {
-            collapseAndReset()
+            dismissAddressEditing()
             onRefresh()
           }}
           onGoBack={() => {
-            collapseAndReset()
+            dismissAddressEditing()
             onGoBack()
           }}
           onGoForward={() => {
-            collapseAndReset()
+            dismissAddressEditing()
             onGoForward()
           }}
           onCommitNavigation={() => {
+            committingNavigationRef.current = true
             onEditEnd()
             onNavigate()
             collapseActiveTab()
           }}
           onToggleBookmark={() => {
             onToggleBookmark()
-            collapseAndReset()
+            dismissAddressEditing()
           }}
           onToggleBookmarkForTab={onToggleBookmarkForTab}
         />
 
         <HeaderUtilityActions
           onShowUtilityMenu={(kind, anchorRect) => {
-            collapseAndReset()
+            dismissAddressEditing()
             onShowUtilityMenu(kind, anchorRect)
           }}
         />

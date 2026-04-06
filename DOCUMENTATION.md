@@ -21,6 +21,11 @@ Ready 采用 Electron 三层架构：
 
 入口壳层：`src/renderer/pages/WorkbenchMode.tsx`
 
+状态归属补充：
+- 工作台双模式分栏比例由 `useMode.workbenchSplitRatio` 管理
+- 文档页双栏分屏比例由 `useDocTabs.documentSplitRatio` 管理
+- 两者不是同一份状态，不要跨用
+
 ## 3. 主模块说明
 ### 3.1 Browser
 - 前端：`src/renderer/pages/modes/BrowserMode.tsx`
@@ -31,6 +36,7 @@ Ready 采用 Electron 三层架构：
 - 前端：`src/renderer/pages/modes/DocumentMode.tsx`
 - 后端：`src/main/modules/document-engine/*`
 - 说明：多格式读取、编辑文本抽取、`document_*` 工具
+- 文档页自己的双栏分屏状态保留在 `src/renderer/stores/useDocTabs.ts`
 
 ### 3.3 RSS / Calendar
 - RSS：`src/renderer/pages/modes/RSSMode.tsx` + `src/main/modules/rss-engine/*`
@@ -43,6 +49,14 @@ Ready 采用 Electron 三层架构：
 - 工具：`src/main/modules/tools/*`
 - 技能运行时：`src/main/modules/skills-runtime/*`
 - Python sidecar：`src/python/ready_sidecar/*`
+
+### 3.5 Shared / Renderer Utilities
+- 共享 URL 工具：`src/shared/url-utils.ts`
+  - `getUrlHostname()` 供主进程策略判断使用
+  - `getRegistrableDomain()` 供 renderer 展示与同域聚合使用
+- renderer 本地存储工具：`src/renderer/utils/storage.ts`
+  - 统一封装字符串与 JSON 的读写
+  - 保持现有 localStorage key 与数据格式不变
 
 ## 4. AI 供应商与能力层
 ### 4.1 共享配置模型

@@ -32,6 +32,33 @@ export function useBrowserTabActions({
   updateTab,
   reorderTabs,
 }: UseBrowserTabActionsParams) {
+  const syncTabsFromBackend = useCallback(async () => {
+    if (!isElectron) return
+    const backendTabs = await window.electronAPI?.browser?.getTabs?.()
+    if (!Array.isArray(backendTabs)) return
+
+    const hydratedTabs: BrowserTab[] = backendTabs.map((tab) => ({
+      id: tab.id,
+      url: tab.url,
+      title: tab.title || 'New Tab',
+      loading: false,
+      canGoBack: Boolean(tab.canGoBack),
+      canGoForward: Boolean(tab.canGoForward),
+      domain: tab.domain || extractBrowserDomain(tab.url),
+      favicon: tab.favicon || undefined,
+      owner: tab.owner,
+      required: tab.required,
+      activity: tab.activity,
+      lastAuditedAt: tab.lastAuditedAt,
+      error: undefined,
+    }))
+
+    setTabs(hydratedTabs)
+    const activeTab = backendTabs.find((tab) => tab.active) || backendTabs[backendTabs.length - 1]
+    setActiveTabId(activeTab?.id || hydratedTabs[hydratedTabs.length - 1]?.id || null)
+    setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
+  }, [isElectron, setActiveTabId, setTabs, setUrlInput])
+
   const handleNewTab = useCallback(async () => {
     if (!isElectron) return
     await sendBoundsImmediate({ forceExact: true })
@@ -53,9 +80,10 @@ export function useBrowserTabActions({
       addTab(newTab)
       setActiveTabId(result.tabId)
       setUrlInput('')
+      await syncTabsFromBackend()
       requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
     }
-  }, [isElectron, sendBoundsImmediate, addTab, setActiveTabId, setUrlInput])
+  }, [isElectron, sendBoundsImmediate, addTab, setActiveTabId, setUrlInput, syncTabsFromBackend])
 
   const handleCloseTab = useCallback(async (id: string) => {
     if (!isElectron) return
@@ -73,7 +101,8 @@ export function useBrowserTabActions({
       }
     }
     setTabs(remaining)
-  }, [isElectron, setTabs, setActiveTabId, setUrlInput])
+    await syncTabsFromBackend()
+  }, [isElectron, setTabs, setActiveTabId, setUrlInput, syncTabsFromBackend])
 
   const handleTabClick = useCallback(async (id: string) => {
     const { activeTabId: currentActive, tabs: currentTabs } = useBrowserTabs.getState()
@@ -107,8 +136,9 @@ export function useBrowserTabActions({
         canGoBack: result.canGoBack || false,
         canGoForward: result.canGoForward || false,
       })
+      await syncTabsFromBackend()
     }
-  }, [isElectron, setActiveTabId, setUrlInput, updateTab])
+  }, [isElectron, setActiveTabId, setUrlInput, updateTab, syncTabsFromBackend])
 
   const handleNavigate = useCallback(async (url?: string) => {
     if (!isElectron || !activeTabId) return

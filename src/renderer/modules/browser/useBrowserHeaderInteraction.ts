@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type ActiveTabMode = 'compact' | 'primed' | 'expanded' | 'editing'
 export type RefreshDockMode = 'idle' | 'primed' | 'revealed'
 
-export function useBrowserHeaderInteraction(isActive = true) {
+export function useBrowserHeaderInteraction(isActive = true, onDismissActiveTab?: () => void) {
   const headerRootRef = useRef<HTMLDivElement>(null)
   const activeTabSurfaceRef = useRef<HTMLDivElement>(null)
   const refreshDockRef = useRef<HTMLDivElement>(null)
@@ -73,9 +73,10 @@ export function useBrowserHeaderInteraction(isActive = true) {
       window.clearTimeout(refreshDockTimerRef.current)
       refreshDockTimerRef.current = null
     }
+    onDismissActiveTab?.()
     setActiveTabMode('compact')
     setRefreshDockMode('idle')
-  }, [isActive])
+  }, [isActive, onDismissActiveTab])
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -84,6 +85,7 @@ export function useBrowserHeaderInteraction(isActive = true) {
       if (target && activeTabSurfaceRef.current?.contains(target)) {
         return
       }
+      onDismissActiveTab?.()
       setActiveTabMode('compact')
     }
 
@@ -91,7 +93,7 @@ export function useBrowserHeaderInteraction(isActive = true) {
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown)
     }
-  }, [activeTabMode])
+  }, [activeTabMode, onDismissActiveTab])
 
   useEffect(() => {
     return () => {

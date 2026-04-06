@@ -392,6 +392,10 @@ interface BrowserTabInfo {
   title: string
   domain: string
   favicon: string | null
+  loading?: boolean
+  error?: string
+  canGoBack?: boolean
+  canGoForward?: boolean
   owner: 'manual' | 'agent'
   required: boolean
   activity: 'idle' | 'running' | 'attention'

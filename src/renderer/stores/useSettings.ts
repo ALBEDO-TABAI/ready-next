@@ -10,6 +10,19 @@ import {
   normalizeAIConfig,
 } from '../../shared/ai-providers'
 
+const SETTINGS_SAVE_DEBOUNCE_MS = 300
+
+let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingConfigSave: AIModelConfig | null = null
+
+function clearPendingConfigSave(): void {
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer)
+    pendingSaveTimer = null
+  }
+  pendingConfigSave = null
+}
+
 interface AISettingsState {
   /** Current AI model config (loaded from backend) */
   config: AIModelConfig
@@ -75,6 +88,7 @@ export const useSettings = create<AISettingsState>((set, get) => ({
   },
 
   saveConfig: async (config: AIModelConfig) => {
+    clearPendingConfigSave()
     const normalizedConfig = normalizeAIConfig(config)
     set({ config: normalizedConfig })
     try {
@@ -108,13 +122,26 @@ export const useSettings = create<AISettingsState>((set, get) => ({
     // Save current config to memory and persist
     const savedConfigs = { ...get().savedConfigs, [prev.provider]: newConfig }
     set({ config: newConfig, savedConfigs, testStatus: 'idle', testMessage: '' })
-    // Auto-save (including persisting savedConfigs)
-    get().saveConfig(newConfig)
+    pendingConfigSave = normalizeAIConfig(newConfig)
+    if (pendingSaveTimer) {
+      clearTimeout(pendingSaveTimer)
+    }
+    pendingSaveTimer = setTimeout(() => {
+      const configToPersist = pendingConfigSave
+      clearPendingConfigSave()
+      if (!configToPersist) return
+      void get().saveConfig(configToPersist)
+    }, SETTINGS_SAVE_DEBOUNCE_MS)
   },
 
   switchProvider: (provider: AIProviderType) => {
     const providerDef = getProviderDef(provider)
     if (!providerDef) return
+
+    const pendingConfig = pendingConfigSave
+    if (pendingConfig) {
+      void get().saveConfig(pendingConfig)
+    }
 
     // Save current config before switching
     const currentConfig = get().config

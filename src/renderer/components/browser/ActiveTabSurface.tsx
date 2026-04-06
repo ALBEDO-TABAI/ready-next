@@ -12,8 +12,8 @@ interface ActiveTabSurfaceProps {
   compactWidth: number
   compactMinWidth: number
   draggable?: boolean
-  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
-  onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
+  onDragStart?: (event: React.DragEvent<HTMLElement>) => void
+  onDragEnd?: (event: React.DragEvent<HTMLElement>) => void
   onUrlChange: (value: string) => void
   onExpandRequest: () => void
   onHotspotEnter: () => void
@@ -60,11 +60,35 @@ export default function ActiveTabSurface({
     return () => cancelAnimationFrame(frame)
   }, [isExpanded])
 
+  const tabIcon = tab.loading ? (
+    <Loader2
+      style={{ width: 14, height: 14 }}
+      className="animate-spin flex-shrink-0 text-[var(--color-blue)]"
+      strokeWidth={2}
+    />
+  ) : tab.favicon ? (
+    <img
+      src={tab.favicon}
+      alt=""
+      draggable={false}
+      className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
+    />
+  ) : (
+    <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--text-body)]" strokeWidth={2} />
+  )
+
   return (
     <div
       ref={surfaceRef}
-      draggable={draggable}
-      onDragStart={onDragStart}
+      draggable={draggable && !isExpanded}
+      onDragStart={(event) => {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('[data-browser-active-action]')) {
+          event.preventDefault()
+          return
+        }
+        onDragStart?.(event)
+      }}
       onDragEnd={onDragEnd}
       className="group relative flex min-w-0 items-center rounded-[14px] border transition-all duration-200"
       style={{
@@ -86,21 +110,7 @@ export default function ActiveTabSurface({
           : 'none',
       }}
     >
-      {tab.loading ? (
-        <Loader2
-          style={{ width: 14, height: 14 }}
-          className="animate-spin flex-shrink-0 text-[var(--color-blue)]"
-          strokeWidth={2}
-        />
-      ) : tab.favicon ? (
-        <img
-          src={tab.favicon}
-          alt=""
-          className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
-        />
-      ) : (
-        <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--text-body)]" strokeWidth={2} />
-      )}
+      {tabIcon}
 
       {isExpanded ? (
         <div
@@ -149,6 +159,7 @@ export default function ActiveTabSurface({
 
       <button
         type="button"
+        data-browser-active-action
         onClick={onToggleBookmark}
         className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
         title={isBookmarked ? '取消收藏' : '收藏此页面'}
@@ -163,6 +174,7 @@ export default function ActiveTabSurface({
 
       <button
         type="button"
+        data-browser-active-action
         onClick={onClose}
         className="flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
         title="关闭标签"
