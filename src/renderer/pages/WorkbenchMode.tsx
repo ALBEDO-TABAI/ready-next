@@ -95,6 +95,12 @@ export default function WorkbenchMode() {
   // D方案：仅用于控制 BrowserView 的显示时机
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const transitionTimerRef = useRef<number | null>(null)
+  const pendingWorkbenchModeRef = useRef<WorkbenchModeType | null>(null)
+  const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
+
+  useEffect(() => {
+    transitionTargetModeRef.current = workbenchMode
+  }, [workbenchMode])
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -183,7 +189,7 @@ export default function WorkbenchMode() {
   }, [sidePanelVariant])
 
   // D方案：简化的模式切换处理
-  const handleWorkbenchModeChange = useCallback((nextMode: WorkbenchModeType) => {
+  const handleWorkbenchModeChange = useCallback(function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
     if (nextMode === workbenchMode) return
 
     if (splitMode) {
@@ -191,13 +197,19 @@ export default function WorkbenchMode() {
       return
     }
 
+    if (!isMotionSettled) {
+      pendingWorkbenchModeRef.current = nextMode
+      return
+    }
+
     // 清除之前的定时器
     if (transitionTimerRef.current) {
       window.clearTimeout(transitionTimerRef.current)
+      transitionTimerRef.current = null
     }
 
     // 关键修复：如果当前是 browser 模式，先触发截图保存当前画面
-    if (workbenchMode === 'browser') {
+    if (transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
       window.dispatchEvent(new CustomEvent('ready:browser-capture-freeze'))
     }
 
@@ -205,14 +217,23 @@ export default function WorkbenchMode() {
     setIsMotionSettled(false)
 
     // 执行模式切换
+    transitionTargetModeRef.current = nextMode
     setWorkbenchMode(nextMode)
 
     // 过渡结束后标记为稳定
     transitionTimerRef.current = window.setTimeout(() => {
+      const queuedMode = pendingWorkbenchModeRef.current
+      if (queuedMode && queuedMode !== transitionTargetModeRef.current) {
+        pendingWorkbenchModeRef.current = null
+        transitionTimerRef.current = null
+        handleWorkbenchModeChange(queuedMode)
+        return
+      }
+      pendingWorkbenchModeRef.current = null
       setIsMotionSettled(true)
       transitionTimerRef.current = null
     }, MODE_TRANSITION_DURATION_MS)
-  }, [setWorkbenchMode, splitMode, workbenchMode])
+  }, [isMotionSettled, setWorkbenchMode, splitMode, workbenchMode])
 
   // 清理定时器
   useEffect(() => {
@@ -220,6 +241,7 @@ export default function WorkbenchMode() {
       if (transitionTimerRef.current) {
         window.clearTimeout(transitionTimerRef.current)
       }
+      pendingWorkbenchModeRef.current = null
     }
   }, [])
 
