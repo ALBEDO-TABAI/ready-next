@@ -8,7 +8,11 @@ import {
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 import type { ActiveTabMode, RefreshDockMode } from '../../modules/browser/useBrowserHeaderInteraction'
-import { getTabRailLayoutMetrics } from '../../modules/browser/tab-rail-layout'
+import {
+  getActiveTabSlotMetrics,
+  getActiveTabSurfaceMetrics,
+  getTabRailLayoutMetrics,
+} from '../../modules/browser/tab-rail-layout'
 import {
   beginBrowserTabDragSession,
   endBrowserTabDragSession,
@@ -91,7 +95,8 @@ export default function TabRail({
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null)
   const dragIndexRef = useRef<number | null>(null)
   const layoutMetrics = getTabRailLayoutMetrics(tabs.length)
-  const activeSlotWidth = layoutMetrics.activeCompactWidth + 36
+  const activeSurfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
+  const activeSlotMetrics = getActiveTabSlotMetrics(layoutMetrics, activeTabMode, refreshDockMode)
 
   const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
     const payload = {
@@ -193,7 +198,7 @@ export default function TabRail({
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [activeTabId, checkOverflow, isActive, keepTabSlotVisible, tabs.length])
+  }, [activeTabId, checkOverflow, isActive, keepTabSlotVisible, activeTabMode, refreshDockMode, tabs.length])
 
   const clearGlobalDragState = useCallback(() => {
     dragIndexRef.current = null
@@ -222,7 +227,6 @@ export default function TabRail({
     window.addEventListener('mouseup', handleGlobalDragCleanup)
     window.addEventListener('pointerup', handleGlobalDragCleanup)
     window.addEventListener('pointercancel', handleGlobalDragCleanup)
-    window.addEventListener('blur', handleGlobalDragCleanup)
     document.addEventListener('visibilitychange', handleVisibilityCleanup)
 
     return () => {
@@ -231,7 +235,6 @@ export default function TabRail({
       window.removeEventListener('mouseup', handleGlobalDragCleanup)
       window.removeEventListener('pointerup', handleGlobalDragCleanup)
       window.removeEventListener('pointercancel', handleGlobalDragCleanup)
-      window.removeEventListener('blur', handleGlobalDragCleanup)
       document.removeEventListener('visibilitychange', handleVisibilityCleanup)
     }
   }, [clearGlobalDragState])
@@ -315,8 +318,8 @@ export default function TabRail({
             const rightReserve = 34 + utilityCount * 18
 
             const tabIsBookmarked = bookmarkedUrls.includes(tab.url)
-            const slotWidth = isActive ? activeSlotWidth : layoutMetrics.inactiveWidth
-            const slotMinWidth = isActive ? activeSlotWidth : layoutMetrics.inactiveMinWidth
+            const slotWidth = isActive ? activeSlotMetrics.width : layoutMetrics.inactiveWidth
+            const slotMinWidth = isActive ? activeSlotMetrics.minWidth : layoutMetrics.inactiveMinWidth
 
             return (
               <div
@@ -324,9 +327,9 @@ export default function TabRail({
                 ref={registerTabSlot(tab.id)}
                 className="relative flex min-w-0 flex-shrink-0 items-center"
                 style={{
-                  width: isActive ? activeSlotWidth : layoutMetrics.inactiveWidth,
-                  minWidth: isActive ? activeSlotWidth : layoutMetrics.inactiveMinWidth,
-                  maxWidth: isActive ? activeSlotWidth : WORKBENCH_TAB_MAX_WIDTH,
+                  width: isActive ? activeSlotMetrics.width : layoutMetrics.inactiveWidth,
+                  minWidth: isActive ? activeSlotMetrics.minWidth : layoutMetrics.inactiveMinWidth,
+                  maxWidth: isActive ? activeSlotMetrics.width : WORKBENCH_TAB_MAX_WIDTH,
                   overflow: 'visible',
                 }}
               >
@@ -352,8 +355,8 @@ export default function TabRail({
                       urlInput={urlInput}
                       isBookmarked={isBookmarked}
                       surfaceRef={activeTabSurfaceRef}
-                      compactWidth={layoutMetrics.activeCompactWidth}
-                      compactMinWidth={layoutMetrics.activeCompactMinWidth}
+                      width={activeSurfaceMetrics.width}
+                      minWidth={activeSurfaceMetrics.minWidth}
                       draggable={activeTabMode !== 'expanded' && activeTabMode !== 'editing'}
                       onDragStart={(event) => handleDragStart(event, index)}
                       onDragEnd={handleDragEnd}

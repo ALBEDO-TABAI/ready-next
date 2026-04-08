@@ -118,6 +118,10 @@ function buildBookmarksHTML(items: BookmarkTransferItem[]): string {
 export class BrowserBookmarkTransferService {
   constructor(private readonly host: BrowserBookmarkTransferHost) {}
 
+  setMainWindow(mainWindow: BrowserWindow): void {
+    this.host.mainWindow = mainWindow
+  }
+
   private importBookmarksFromList(items: BookmarkTransferItem[]): { imported: number; skipped: number } {
     const seen = new Set<string>()
     let imported = 0

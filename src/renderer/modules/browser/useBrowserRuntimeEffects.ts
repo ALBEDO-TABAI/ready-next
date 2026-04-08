@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import type { TabUpdateEvent } from './types'
+import { browserTabActivationSequencer } from './browserTabActivationSequencer'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
 import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 
@@ -53,6 +54,7 @@ export function useBrowserRuntimeEffects({
 
     const activeTab = existingTabs.find((tab) => tab.active) || existingTabs[existingTabs.length - 1]
     store.setTabs(hydratedTabs)
+    browserTabActivationSequencer.invalidate()
     store.setActiveTabId(activeTab?.id || hydratedTabs[hydratedTabs.length - 1]?.id || null)
     store.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
     return true
@@ -61,30 +63,32 @@ export function useBrowserRuntimeEffects({
   const ensureBrowserRuntime = useCallback(async ({ allowNewTab }: { allowNewTab: boolean }) => {
     if (!isElectron) return true
 
-    if (!hydrationPromiseRef.current) {
-      hydrationPromiseRef.current = restoreExistingTabs()
+    if (!hasHydratedRuntimeRef.current) {
+      if (!hydrationPromiseRef.current) {
+        hydrationPromiseRef.current = restoreExistingTabs()
+      }
+
+      const hydrationTask = hydrationPromiseRef.current
+      try {
+        const hasTabs = await hydrationTask
+        if (hasTabs) {
+          hasHydratedRuntimeRef.current = true
+          return true
+        }
+      } finally {
+        if (hydrationPromiseRef.current === hydrationTask) {
+          hydrationPromiseRef.current = null
+        }
+      }
     }
 
-    const hydrationTask = hydrationPromiseRef.current
-    try {
-      const hasTabs = await hydrationTask
-      if (hasTabs) {
-        hasHydratedRuntimeRef.current = true
-        return true
-      }
-    } finally {
-      if (hydrationPromiseRef.current === hydrationTask) {
-        hydrationPromiseRef.current = null
-      }
-    }
-
-    if (allowNewTab) {
+    if (allowNewTab && !hasHydratedRuntimeRef.current) {
       await handleNewTab()
       hasHydratedRuntimeRef.current = true
       return true
     }
 
-    return false
+    return hasHydratedRuntimeRef.current
   }, [handleNewTab, isElectron, restoreExistingTabs])
 
   useEffect(() => {
@@ -152,6 +156,7 @@ export function useBrowserRuntimeEffects({
           activity: 'idle',
         }
         useBrowserTabs.getState().addTab(newTab)
+        browserTabActivationSequencer.invalidate()
         useBrowserTabs.getState().setActiveTabId(result.tabId)
         useBrowserTabs.getState().setUrlInput(url === DEFAULT_BROWSER_URL ? '' : url)
         requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
@@ -187,9 +192,13 @@ export function useBrowserRuntimeEffects({
       return
     }
 
-    if (!hasHydratedRuntimeRef.current) {
-      setBrowserRuntimeReady(false)
+    if (hasHydratedRuntimeRef.current) {
+      setBrowserRuntimeReady(true)
+      void sendBoundsImmediate({ forceExact: true })
+      return
     }
+
+    setBrowserRuntimeReady(false)
     let cancelled = false
     activationFrameRef.current = requestAnimationFrame(async () => {
       activationFrameRef.current = null

@@ -392,14 +392,14 @@ interface BrowserTabInfo {
   title: string
   domain: string
   favicon: string | null
-  loading?: boolean
-  error?: string
-  canGoBack?: boolean
-  canGoForward?: boolean
   owner: 'manual' | 'agent'
   required: boolean
   activity: 'idle' | 'running' | 'attention'
   lastAuditedAt: number | null
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string | null
   active: boolean
 }
 
@@ -510,6 +510,7 @@ interface ElectronBrowserAPI {
     error?: string
   }>
   navigate: (tabId: string, url: string) => Promise<{ success: boolean; error?: string }>
+  reorderTabs: (tabIds: string[]) => Promise<{ success: boolean; error?: string }>
   goBack: (tabId: string) => Promise<{ success: boolean; error?: string }>
   goForward: (tabId: string) => Promise<{ success: boolean; error?: string }>
   reload: (tabId: string) => Promise<{ success: boolean; error?: string }>

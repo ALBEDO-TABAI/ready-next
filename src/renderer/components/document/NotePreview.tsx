@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
 } from 'lucide-react'
+import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
 import {
@@ -280,6 +281,7 @@ export default function NotePreview({ content, notePath, focusWidgetTitle }: Not
             canGoForward: false,
           })
         }
+        browserTabActivationSequencer.invalidate()
         browserTabs.setActiveTabId(result.tabId)
         browserTabs.setUrlInput(href)
         useMode.getState().setWorkbenchMode('browser')

@@ -170,4 +170,126 @@ describe('browser-tools v2', () => {
     assert.strictEqual(payload.nearby_send_targets?.[0]?.label, '生成')
     assert.strictEqual(payload.nearby_send_targets?.[0]?.nearActiveInput, true)
   })
+
+  it('browser_extract_structured should delegate to the browser capability layer', async () => {
+    const controller = createControllerMock({
+      extractStructured: async (_tabId, options) => ({
+        items: [
+          {
+            sourceUrl: 'https://example.com/feed',
+            title: 'First post',
+            link: 'https://example.com/posts/1',
+          },
+        ],
+        template: options?.template || 'article_list',
+      }),
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool('browser_extract_structured', { template: 'article_list' }, controller)
+    const payload = JSON.parse(result) as { items: Array<{ title?: string }> }
+
+    assert.strictEqual(payload.items.length, 1)
+    assert.strictEqual(payload.items[0]?.title, 'First post')
+  })
+
+  it('browser_start_task and browser_get_task should expose persistent browser task progress', async () => {
+    const controller = createControllerMock({
+      startTask: async (_request) => ({
+        taskId: 'task-1',
+        kind: 'download_urls',
+        status: 'running',
+        progress: { total: 10, completed: 2, failed: 0, currentLabel: 'image-003.jpg' },
+      }),
+      getTask: async (_taskId) => ({
+        taskId: 'task-1',
+        kind: 'download_urls',
+        status: 'running',
+        progress: { total: 10, completed: 2, failed: 0, currentLabel: 'image-003.jpg' },
+      }),
+    } as Partial<BrowserController>)
+
+    const startResult = await executeBrowserTool('browser_start_task', {
+      kind: 'download_urls',
+      payload: { urls: ['https://example.com/a.jpg'] },
+    }, controller)
+    const startPayload = JSON.parse(startResult) as { taskId?: string; progress?: { completed?: number } }
+
+    const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-1' }, controller)
+    const getPayload = JSON.parse(getResult) as { status?: string; progress?: { currentLabel?: string } }
+
+    assert.strictEqual(startPayload.taskId, 'task-1')
+    assert.strictEqual(startPayload.progress?.completed, 2)
+    assert.strictEqual(getPayload.status, 'running')
+    assert.strictEqual(getPayload.progress?.currentLabel, 'image-003.jpg')
+  })
+
+  it('browser_resume_task, browser_cancel_task and browser_aggregate_results should use capability-backed helpers', async () => {
+    const controller = createControllerMock({
+      resumeTask: async (_taskId) => ({
+        taskId: 'task-1',
+        kind: 'research',
+        status: 'running',
+        progress: { total: 3, completed: 1, failed: 0, currentLabel: 'https://example.com/page-2' },
+      }),
+      cancelTask: async (_taskId) => ({
+        taskId: 'task-1',
+        kind: 'research',
+        status: 'cancelled',
+        progress: { total: 3, completed: 1, failed: 0, currentLabel: null },
+      }),
+      aggregateResults: (_items, _options) => ([
+        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
+      ]),
+    } as Partial<BrowserController>)
+
+    const resumeResult = await executeBrowserTool('browser_resume_task', { task_id: 'task-1' }, controller)
+    const cancelResult = await executeBrowserTool('browser_cancel_task', { task_id: 'task-1' }, controller)
+    const aggregateResult = await executeBrowserTool('browser_aggregate_results', {
+      items: [
+        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
+        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
+      ],
+      merge_strategy: 'dedupe',
+      sort_by: 'source',
+    }, controller)
+
+    assert.strictEqual((JSON.parse(resumeResult) as { status?: string }).status, 'running')
+    assert.strictEqual((JSON.parse(cancelResult) as { status?: string }).status, 'cancelled')
+    assert.strictEqual((JSON.parse(aggregateResult) as Array<{ title?: string }>).length, 1)
+  })
+
+  it('browser_download_gallery and browser_research_topic should offer thin task adapters for agents', async () => {
+    const controller = createControllerMock({
+      startTask: async (request) => {
+        if ((request as { kind?: string }).kind === 'scroll_collect') {
+          return {
+            taskId: 'gallery-task',
+            kind: 'scroll_collect',
+            status: 'running',
+            progress: { total: 0, completed: 0, failed: 0, currentLabel: 'https://example.com/gallery' },
+          }
+        }
+        return {
+          taskId: 'research-task',
+          kind: 'research',
+          status: 'running',
+          progress: { total: 0, completed: 0, failed: 0, currentLabel: 'climate change adaptation' },
+        }
+      },
+    } as Partial<BrowserController>)
+
+    const galleryResult = await executeBrowserTool('browser_download_gallery', {
+      url: 'https://example.com/gallery',
+      directory: '~/Downloads/gallery',
+      limit: 80,
+    }, controller)
+    const researchResult = await executeBrowserTool('browser_research_topic', {
+      query: 'climate change adaptation',
+      max_pages: 6,
+      limit_per_page: 10,
+    }, controller)
+
+    assert.strictEqual((JSON.parse(galleryResult) as { taskId?: string }).taskId, 'gallery-task')
+    assert.strictEqual((JSON.parse(researchResult) as { taskId?: string }).taskId, 'research-task')
+  })
 })

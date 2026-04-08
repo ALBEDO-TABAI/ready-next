@@ -171,6 +171,24 @@ export interface BrowserDownload {
   created_at: number
 }
 
+export interface BrowserTaskRecord {
+  id: string
+  kind: string
+  status: string
+  payload_json: string
+  checkpoint_json: string | null
+  result_json: string | null
+  progress_total: number
+  progress_completed: number
+  progress_failed: number
+  current_label: string | null
+  error: string | null
+  created_at: string
+  started_at: string | null
+  updated_at: string
+  finished_at: string | null
+}
+
 export type AgentChannelType =
   | 'local-debug'
   | 'generic-webhook'
@@ -1163,6 +1181,98 @@ export class DatabaseManager {
   clearDownloads(): void {
     if (!this.db) throw new Error('Database not available')
     this.db.prepare('DELETE FROM browser_downloads').run()
+  }
+
+  // ===================== Browser Tasks =====================
+
+  createBrowserTask(task: {
+    id: string
+    kind: string
+    status: string
+    payload_json: string
+    checkpoint_json?: string | null
+    result_json?: string | null
+    progress_total?: number
+    progress_completed?: number
+    progress_failed?: number
+    current_label?: string | null
+    error?: string | null
+    created_at: string
+    started_at?: string | null
+    updated_at: string
+    finished_at?: string | null
+  }): void {
+    if (!this.db) throw new Error('Database not available')
+    this.db.prepare(
+      `INSERT INTO browser_tasks (
+        id, kind, status, payload_json, checkpoint_json, result_json,
+        progress_total, progress_completed, progress_failed, current_label, error,
+        created_at, started_at, updated_at, finished_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      task.id,
+      task.kind,
+      task.status,
+      task.payload_json,
+      task.checkpoint_json ?? null,
+      task.result_json ?? null,
+      Number(task.progress_total || 0),
+      Number(task.progress_completed || 0),
+      Number(task.progress_failed || 0),
+      task.current_label ?? null,
+      task.error ?? null,
+      task.created_at,
+      task.started_at ?? null,
+      task.updated_at,
+      task.finished_at ?? null,
+    )
+  }
+
+  updateBrowserTask(
+    id: string,
+    updates: {
+      status?: string
+      checkpoint_json?: string | null
+      result_json?: string | null
+      progress_total?: number
+      progress_completed?: number
+      progress_failed?: number
+      current_label?: string | null
+      error?: string | null
+      started_at?: string | null
+      updated_at?: string
+      finished_at?: string | null
+    },
+  ): void {
+    if (!this.db) return
+    const setClauses: string[] = []
+    const values: unknown[] = []
+    for (const [key, value] of Object.entries(updates)) {
+      setClauses.push(`${key} = ?`)
+      values.push(value ?? null)
+    }
+    if (!('updated_at' in updates)) {
+      setClauses.push('updated_at = ?')
+      values.push(new Date().toISOString())
+    }
+    values.push(id)
+    this.db.prepare(`UPDATE browser_tasks SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
+  }
+
+  getBrowserTask(id: string): BrowserTaskRecord | undefined {
+    if (!this.db) return undefined
+    return this.db.prepare('SELECT * FROM browser_tasks WHERE id = ? LIMIT 1').get<BrowserTaskRecord>(id)
+  }
+
+  listBrowserTasks(statuses?: string[]): BrowserTaskRecord[] {
+    if (!this.db) return []
+    if (Array.isArray(statuses) && statuses.length > 0) {
+      const placeholders = statuses.map(() => '?').join(', ')
+      return this.db.prepare(
+        `SELECT * FROM browser_tasks WHERE status IN (${placeholders}) ORDER BY updated_at DESC`
+      ).all<BrowserTaskRecord>(...statuses)
+    }
+    return this.db.prepare('SELECT * FROM browser_tasks ORDER BY updated_at DESC').all<BrowserTaskRecord>()
   }
 
   // ===================== Chat History =====================

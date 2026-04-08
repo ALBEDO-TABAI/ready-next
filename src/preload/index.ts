@@ -143,6 +143,7 @@ const browserAPI = {
   closeTab: (tabId: string) => ipcRenderer.invoke('browser:closeTab', tabId),
   switchTab: (tabId: string) => ipcRenderer.invoke('browser:switchTab', tabId),
   navigate: (tabId: string, url: string) => ipcRenderer.invoke('browser:navigate', { tabId, url }),
+  reorderTabs: (tabIds: string[]) => ipcRenderer.invoke('browser:reorderTabs', tabIds),
   goBack: (tabId: string) => ipcRenderer.invoke('browser:goBack', tabId),
   goForward: (tabId: string) => ipcRenderer.invoke('browser:goForward', tabId),
   reload: (tabId: string) => ipcRenderer.invoke('browser:reload', tabId),

@@ -36,6 +36,12 @@ describe('browser popup policy', () => {
 
   it('should enforce media permission only on secure origin', () => {
     assert.strictEqual(shouldAllowBrowserPermission('camera', 'http://example.com'), false)
-    assert.strictEqual(shouldAllowBrowserPermission('camera', 'https://example.com'), true)
+    assert.strictEqual(shouldAllowBrowserPermission('camera', 'https://example.com'), false)
+  })
+
+  it('should only auto-grant low-risk browser permissions', () => {
+    assert.strictEqual(shouldAllowBrowserPermission('fullscreen', 'https://example.com'), true)
+    assert.strictEqual(shouldAllowBrowserPermission('notifications', 'https://example.com'), false)
+    assert.strictEqual(shouldAllowBrowserPermission('serial', 'https://example.com'), false)
   })
 })

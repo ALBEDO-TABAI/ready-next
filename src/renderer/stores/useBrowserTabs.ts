@@ -45,7 +45,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       activeTabId: typeof idOrUpdater === 'function' ? idOrUpdater(state.activeTabId) : idOrUpdater,
     })),
 
-  setUrlInput: (input) => set({ urlInput: input }),
+  setUrlInput: (input) =>
+    set((state) => (state.urlInput === input ? state : { urlInput: input })),
 
   addTab: (tab) =>
     set((state) => ({ tabs: [...state.tabs, tab] })),

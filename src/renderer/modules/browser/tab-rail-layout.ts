@@ -5,6 +5,25 @@ export interface TabRailLayoutMetrics {
   activeCompactMinWidth: number
 }
 
+export interface ActiveTabSurfaceMetrics {
+  width: number
+  minWidth: number
+}
+
+export interface ActiveTabSlotMetrics {
+  width: number
+  minWidth: number
+}
+
+type ActiveTabMode = 'compact' | 'primed' | 'expanded' | 'editing'
+type RefreshDockMode = 'idle' | 'primed' | 'revealed'
+
+const ACTIVE_TAB_EXPANDED_WIDTH = 420
+const ACTIVE_TAB_EXPANDED_MIN_WIDTH = 320
+const REFRESH_DOCK_COMPACT_WIDTH = 30
+const REFRESH_DOCK_REVEALED_WIDTH = 86
+const ACTIVE_TAB_INNER_GAP = 6
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -23,5 +42,36 @@ export function getTabRailLayoutMetrics(tabCount: number): TabRailLayoutMetrics 
     inactiveMinWidth,
     activeCompactWidth,
     activeCompactMinWidth,
+  }
+}
+
+export function getActiveTabSurfaceMetrics(
+  layoutMetrics: TabRailLayoutMetrics,
+  activeTabMode: ActiveTabMode,
+): ActiveTabSurfaceMetrics {
+  if (activeTabMode === 'expanded' || activeTabMode === 'editing') {
+    return {
+      width: ACTIVE_TAB_EXPANDED_WIDTH,
+      minWidth: ACTIVE_TAB_EXPANDED_MIN_WIDTH,
+    }
+  }
+
+  return {
+    width: layoutMetrics.activeCompactWidth,
+    minWidth: layoutMetrics.activeCompactMinWidth,
+  }
+}
+
+export function getActiveTabSlotMetrics(
+  layoutMetrics: TabRailLayoutMetrics,
+  activeTabMode: ActiveTabMode,
+  refreshDockMode: RefreshDockMode,
+): ActiveTabSlotMetrics {
+  const surfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
+  const refreshDockWidth = refreshDockMode === 'revealed' ? REFRESH_DOCK_REVEALED_WIDTH : REFRESH_DOCK_COMPACT_WIDTH
+
+  return {
+    width: surfaceMetrics.width + refreshDockWidth + ACTIVE_TAB_INNER_GAP,
+    minWidth: surfaceMetrics.minWidth + refreshDockWidth + ACTIVE_TAB_INNER_GAP,
   }
 }

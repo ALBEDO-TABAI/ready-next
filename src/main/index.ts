@@ -159,6 +159,12 @@ async function createWindow(): Promise<void> {
   })
 
   applyNativeWindowMaterial(mainWindow)
+  const closedWindow = mainWindow
+  mainWindow.on('closed', () => {
+    if (mainWindow === closedWindow) {
+      mainWindow = null
+    }
+  })
 
   // Keep renderer UI at 100% scale so panel sizing remains pixel-consistent with design specs.
   mainWindow.webContents.setZoomFactor(1)
@@ -194,6 +200,8 @@ async function createWindow(): Promise<void> {
     setRSSBrowserController(browserController)
     setupAgentIPC(agentManager, mainWindow, browserController)
     windowIPCRegistered = true
+  } else {
+    browserController?.attachWindow(mainWindow)
   }
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.

@@ -1,0 +1,80 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { resolveWorkbenchPanelShortcutAction } from '../renderer/modules/workbench/panel-shortcuts'
+
+test('plain Tab toggles the chat panel when focus is not in an editable area', () => {
+  const action = resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    selectionText: '',
+    target: { tagName: 'BUTTON' } as unknown as EventTarget,
+  })
+
+  assert.strictEqual(action, 'toggle-chat')
+})
+
+test('plain ` and plain · both toggle the sidebar when no selection is active', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: '`',
+    code: 'Backquote',
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), 'toggle-sidebar')
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: '·',
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), 'toggle-sidebar')
+})
+
+test('shortcuts stay disabled while typing, renaming, creating, or when text is selected', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    selectionText: '',
+    target: { tagName: 'TEXTAREA' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    selectionText: 'selected text',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    selectionText: '',
+    renamingPath: '/tmp/name',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: '`',
+    selectionText: '',
+    creatingType: 'file',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+})
+
+test('modifier keys and Shift+Tab do not trigger panel shortcuts', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    shiftKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    metaKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: '`',
+    ctrlKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+})

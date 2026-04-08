@@ -132,7 +132,7 @@ export function useBrowserViewBounds({
     }
 
     await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
-    window.electronAPI?.browser?.showActive()
+    await window.electronAPI?.browser?.showActive()
   }, [hasError, hostVisibleRef, isActive, isElectron, isVisibleAllowed, sendBoundsImmediate])
 
   useEffect(() => {

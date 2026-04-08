@@ -2266,7 +2266,7 @@ export default function ChatPanel() {
         boxShadow: 'none',
         border: chatPanelVisible
           ? '1px solid transparent'
-          : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+          : '1px solid transparent',
         transition: 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), min-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onDrop={handleDrop}

@@ -1,5 +1,3 @@
-import { getRegistrableDomain } from '../../../shared/url-utils'
-
 export const DEFAULT_BROWSER_URL = 'https://gemini.google.com'
 export const SEARCH_URL = 'https://www.google.com/search?q='
 
@@ -12,7 +10,14 @@ export const LOGIN_DOMAINS = [
 ]
 
 export function extractBrowserDomain(url: string): string {
-  return getRegistrableDomain(url)
+  try {
+    const hostname = new URL(url).hostname
+    const parts = hostname.split('.')
+    if (parts.length >= 2) return parts.slice(-2).join('.')
+    return hostname
+  } catch {
+    return ''
+  }
 }
 
 export function isLikelyAbsolutePath(value: string): boolean {
@@ -38,4 +43,8 @@ export function normalizeBrowserUrlInput(
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed
   if (trimmed.includes('.') && !trimmed.includes(' ')) return `https://${trimmed}`
   return `${SEARCH_URL}${encodeURIComponent(trimmed)}`
+}
+
+export function isSupportedBrowserNavigationUrl(url: string): boolean {
+  return /^https?:\/\//i.test(String(url || '').trim())
 }

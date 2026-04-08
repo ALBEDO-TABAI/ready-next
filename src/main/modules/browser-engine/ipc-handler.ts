@@ -1,7 +1,19 @@
 import { BrowserWindow, shell } from 'electron'
-import { getUrlHostname } from '../../../shared/url-utils'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
+import { BrowserCapabilityService } from './capability-service'
+import type {
+  BrowserAggregateOptions,
+  BrowserCapabilityTaskHandle,
+  BrowserExtractStructuredOptions,
+  BrowserExtractStructuredResult,
+  BrowserScrollCollectOptions,
+  BrowserScrollCollectResult,
+  BrowserStructuredItem,
+  BrowserStartTaskRequest,
+  BrowserWaitForConditionOptions,
+} from './capability-types'
+import { BrowserContentTaskRunner } from './content-task-runner'
 import type {
   BrowserCDPErrorCode,
   BrowserKeyEventPayload,
@@ -27,6 +39,7 @@ import { BrowserSessionPolicyService } from './session-policy-service'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
 import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
 import { BrowserTabShellService } from './tab-shell-service'
+import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
 import {
@@ -45,11 +58,24 @@ interface Tab extends BrowserTabMetaRecord {
   required: boolean
   activity: BrowserTabActivity
   lastAuditedAt: number | null
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
   view?: BrowserHostView
 }
 
 export type BrowserTabOwner = 'manual' | 'agent'
 export type BrowserTabActivity = 'idle' | 'running' | 'attention'
+
+function extractBrowserDomain(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 
 // Re-export for use by tools module
 export { isAllowedBrowserURL }
@@ -79,6 +105,8 @@ export class BrowserController {
   private readonly bookmarkTransferService: BrowserBookmarkTransferService
   private readonly hostLayoutService: BrowserHostLayoutService
   private readonly automationService: BrowserAutomationService
+  private readonly capabilityService: BrowserCapabilityService
+  private readonly contentTaskRunner: BrowserContentTaskRunner
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
@@ -143,6 +171,7 @@ export class BrowserController {
       logBrowserDiag: (message) => this.logBrowserDiag(message),
       bindPopup: (webContents) => this.popupManager.bindWindow(webContents),
       installContextMenu: (webContents) => this.contextMenuService.install(webContents),
+      ensureDownloadSession: (targetSession) => this.downloadService.ensureRegistered(targetSession),
       handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
       hideActiveTab: () => this.hideActiveTabHost(),
       restoreActiveTab: () => this.restoreActiveTabHost(),
@@ -152,6 +181,19 @@ export class BrowserController {
       createBrowserError: (code, message) => this.createBrowserError(code, message),
       getViewBounds: () => this.viewBounds,
     })
+    this.capabilityService = new BrowserCapabilityService({
+      openForCaptureTarget: (url) => this.openForCaptureTarget(url),
+      createTab: (url) => this.createTab(url),
+      navigate: (tabId, url) => this.navigate(tabId, url),
+      getActiveTab: () => this.getActiveTab(),
+      executeJS: (tabId, code) => this.executeJS(tabId, code),
+      captureLiveTabPage: (url, options) => this.captureLiveTabPage(url, options),
+      captureBackgroundPage: (url, options) => this.captureBackgroundPage(url, options),
+    })
+    this.contentTaskRunner = new BrowserContentTaskRunner(
+      this.capabilityService,
+      new BrowserTaskPersistenceService(),
+    )
     this.tabMetaService = new BrowserTabMetaService({
       tabs: this.tabs,
       getActiveTabId: () => this.activeTabId,
@@ -167,7 +209,7 @@ export class BrowserController {
       getViewBounds: () => this.viewBounds,
       shouldPresentHosts: () => this.browserHostsPresented,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
-      extractDomain: (url) => getUrlHostname(url),
+      extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
       applyBounds: (view) => this.applyBounds(view),
       detachHost: (view) => this.detachHost(view),
@@ -209,6 +251,7 @@ export class BrowserController {
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
       isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
+      getMainWindow: () => (this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null),
     })
     this.utilityMenuService = new BrowserUtilityMenuService({
       mainWindow,
@@ -258,6 +301,7 @@ export class BrowserController {
         shell.openExternal(url)
       },
     })
+    void this.contentTaskRunner.resumePendingTasks()
   }
 
   private logBrowserDiag(message: string): void {
@@ -285,17 +329,26 @@ export class BrowserController {
     if (!webContentsId) return ''
     for (const tab of this.tabs.values()) {
       if (tab.view?.webContents.id === webContentsId) {
-        return tab.domain || getUrlHostname(tab.url)
+        return tab.domain || extractBrowserDomain(tab.url)
       }
     }
     if (this.previewService.matchesWebContentsId(webContentsId)) {
-      return getUrlHostname(this.previewService.getUrl())
+      return extractBrowserDomain(this.previewService.getUrl())
     }
     return ''
   }
 
   private emitTabMeta(tabId: string): void {
     this.tabMetaService.emitTabMeta(tabId)
+  }
+
+  attachWindow(mainWindow: BrowserWindow): void {
+    this.mainWindow = mainWindow
+    this.hostLayoutService.setMainWindow(mainWindow)
+    this.popupManager.setMainWindow(mainWindow)
+    this.contextMenuService.setMainWindow(mainWindow)
+    this.bookmarkTransferService.setMainWindow(mainWindow)
+    this.utilityMenuService.setMainWindow(mainWindow)
   }
 
   private createHost(partition: string): BrowserHostView {
@@ -450,6 +503,10 @@ export class BrowserController {
     required: boolean
     activity: BrowserTabActivity
     lastAuditedAt: number | null
+    loading: boolean
+    canGoBack: boolean
+    canGoForward: boolean
+    error: string | null
     active: boolean
   }> {
     return this.tabMetaService.getTabList() as Array<{
@@ -462,6 +519,10 @@ export class BrowserController {
       required: boolean
       activity: BrowserTabActivity
       lastAuditedAt: number | null
+      loading: boolean
+      canGoBack: boolean
+      canGoForward: boolean
+      error: string | null
       active: boolean
     }>
   }
@@ -486,6 +547,54 @@ export class BrowserController {
 
   async getTabContext(tabId?: string | null): Promise<BrowserTabContextData> {
     return this.automationService.getTabContext(tabId)
+  }
+
+  async waitForCondition(
+    tabId: string | null,
+    options: BrowserWaitForConditionOptions,
+  ): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
+    return this.capabilityService.waitForCondition(tabId, options)
+  }
+
+  async extractStructured(
+    tabId: string | null,
+    options: BrowserExtractStructuredOptions,
+  ): Promise<BrowserExtractStructuredResult> {
+    return this.capabilityService.extractStructured(tabId, options)
+  }
+
+  async extractStructuredFromUrl(
+    url: string,
+    options: BrowserExtractStructuredOptions,
+  ): Promise<BrowserExtractStructuredResult> {
+    return this.capabilityService.extractStructuredFromUrl(url, options)
+  }
+
+  async scrollCollect(
+    tabId: string | null,
+    options: BrowserScrollCollectOptions,
+  ): Promise<BrowserScrollCollectResult> {
+    return this.capabilityService.scrollCollect(tabId, options)
+  }
+
+  aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[] {
+    return this.capabilityService.aggregateResults(items, options)
+  }
+
+  async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
+    return this.contentTaskRunner.startTask(request)
+  }
+
+  async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    return this.contentTaskRunner.getTask(taskId)
+  }
+
+  async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    return this.contentTaskRunner.resumeTask(taskId)
+  }
+
+  async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    return this.contentTaskRunner.cancelTask(taskId)
   }
 
   private createBrowserError(code: BrowserCDPErrorCode, message: string): Error {
@@ -956,6 +1065,18 @@ export class BrowserController {
     }
   }
 
+  async captureFromUrl(
+    url: string,
+    options: {
+      customScript: string
+      timeoutMs?: number
+      settleMs?: number
+      preferReuse?: boolean
+    },
+  ): Promise<unknown | null> {
+    return this.capabilityService.captureFromUrl(url, options)
+  }
+
   /**
    * Get the HTML content of a page (document.documentElement.outerHTML), truncated to 50K chars.
    */
@@ -1011,6 +1132,31 @@ export class BrowserController {
 
   closeTab(tabId: string): { success: boolean; error?: string } {
     return this.tabShellService.closeTab(tabId)
+  }
+
+  reorderTabs(tabIds: string[]): { success: boolean; error?: string } {
+    const seen = new Set<string>()
+    const reordered = new Map<string, Tab>()
+
+    for (const rawId of tabIds) {
+      const tabId = String(rawId || '')
+      if (!tabId || seen.has(tabId)) continue
+      const tab = this.tabs.get(tabId)
+      if (!tab) continue
+      reordered.set(tabId, tab)
+      seen.add(tabId)
+    }
+
+    for (const [tabId, tab] of this.tabs.entries()) {
+      if (seen.has(tabId)) continue
+      reordered.set(tabId, tab)
+    }
+
+    this.tabs.clear()
+    for (const [tabId, tab] of reordered.entries()) {
+      this.tabs.set(tabId, tab)
+    }
+    return { success: true }
   }
 
   switchTab(tabId: string): {

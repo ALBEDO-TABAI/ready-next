@@ -19,6 +19,7 @@ import {
   clampDropMenuPositionToBoundary,
   parseBrowserTabDragPayload,
   resolveBrowserTabDropTarget,
+  shouldKeepBrowserTabDropHintOnLeave,
   type BrowserTabDragPayload,
   type BrowserTabDropTarget,
 } from './fileTreeBrowserTabDrop'
@@ -747,6 +748,22 @@ export default function FileTree({
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
 
+  const shouldPreserveDropHint = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const currentTarget = event.currentTarget
+    const nextTarget = event.relatedTarget as Node | null
+    const rect = currentTarget.getBoundingClientRect()
+
+    return shouldKeepBrowserTabDropHintOnLeave({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      relatedTargetInside: Boolean(nextTarget && currentTarget.contains(nextTarget)),
+    })
+  }, [])
+
   const filteredCurrentItems = useMemo(() => {
     return files
       .filter(isFileAllowed)
@@ -829,11 +846,14 @@ export default function FileTree({
 
   const handleDirectoryDragLeave = useCallback((e: React.DragEvent, dirPath: string) => {
     e.stopPropagation()
+    if (shouldPreserveDropHint(e as React.DragEvent<HTMLElement>)) {
+      return
+    }
     if (moveDropTargetDir === dirPath) setMoveDropTargetDir(null)
     if (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.dirPath === dirPath) {
       setBrowserTabDropTarget(null)
     }
-  }, [browserTabDropTarget, moveDropTargetDir])
+  }, [browserTabDropTarget, moveDropTargetDir, shouldPreserveDropHint])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
     const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
@@ -924,8 +944,7 @@ export default function FileTree({
   }, [getBrowserTabPayload, moveDropTargetDir])
 
   const handleItemDragLeave = useCallback((e: React.DragEvent, item: FileItem) => {
-    const nextTarget = e.relatedTarget as Node | null
-    if (nextTarget && (e.currentTarget as HTMLElement).contains(nextTarget)) return
+    if (shouldPreserveDropHint(e as React.DragEvent<HTMLElement>)) return
 
     if (moveDropTargetDir === item.path) {
       setMoveDropTargetDir(null)
@@ -942,7 +961,7 @@ export default function FileTree({
     ) {
       setBrowserTabDropTarget(null)
     }
-  }, [browserTabDropTarget, moveDropTargetDir])
+  }, [browserTabDropTarget, moveDropTargetDir, shouldPreserveDropHint])
 
   const handleItemDrop = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
@@ -1001,11 +1020,14 @@ export default function FileTree({
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (shouldPreserveDropHint(e as React.DragEvent<HTMLElement>)) {
+      return
+    }
     setIsDragOver(false)
     setMoveDropTargetDir(null)
     setBrowserTabDropTarget(null)
     setRssDropMenu(null)
-  }, [])
+  }, [shouldPreserveDropHint])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()

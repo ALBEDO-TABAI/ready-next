@@ -2,6 +2,7 @@ import type {
   BrowserBookmark,
   BrowserDownload,
   BrowserHistoryEntry,
+  BrowserTaskRecord,
 } from '../database'
 import { getDatabase } from '../database'
 
@@ -94,5 +95,52 @@ export class BrowserRepository {
 
   clearDownloads(): void {
     getDatabase().clearDownloads()
+  }
+
+  createTask(task: {
+    id: string
+    kind: string
+    status: string
+    payload_json: string
+    checkpoint_json?: string | null
+    result_json?: string | null
+    progress_total?: number
+    progress_completed?: number
+    progress_failed?: number
+    current_label?: string | null
+    error?: string | null
+    created_at: string
+    started_at?: string | null
+    updated_at: string
+    finished_at?: string | null
+  }): void {
+    getDatabase().createBrowserTask(task)
+  }
+
+  updateTask(
+    id: string,
+    updates: {
+      status?: string
+      checkpoint_json?: string | null
+      result_json?: string | null
+      progress_total?: number
+      progress_completed?: number
+      progress_failed?: number
+      current_label?: string | null
+      error?: string | null
+      started_at?: string | null
+      updated_at?: string
+      finished_at?: string | null
+    },
+  ): void {
+    getDatabase().updateBrowserTask(id, updates)
+  }
+
+  getTask(id: string): BrowserTaskRecord | undefined {
+    return getDatabase().getBrowserTask(id)
+  }
+
+  listTasks(statuses?: string[]): BrowserTaskRecord[] {
+    return getDatabase().listBrowserTasks(statuses)
   }
 }

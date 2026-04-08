@@ -27,14 +27,17 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(browserMode, /shouldShowStartupPlaceholder.*&&.*<BrowserHeader/)
   assert.match(browserMode, /shouldShowStartupPlaceholder\s*&&\s*\(/)
 
-  // Verify startup mask covers the entire shell (header + content) via absolute positioning
+  // Verify startup mask only covers the content surface so the browser header remains clickable.
   assert.match(browserMode, /position:\s*'absolute'/)
-  assert.match(browserMode, /inset:\s*0/)
+  assert.match(browserMode, /top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
+  assert.match(browserMode, /left:\s*0/)
+  assert.match(browserMode, /right:\s*0/)
+  assert.match(browserMode, /bottom:\s*0/)
   assert.match(browserMode, /zIndex:\s*50/)
-  assert.match(browserMode, /borderRadius:\s*'var\(--workbench-canvas-radius\)'/)
+  assert.match(browserMode, /borderRadius:\s*'0 0 var\(--workbench-canvas-radius\) var\(--workbench-canvas-radius\)'/)
 
-  // Verify the startup mask has pointerEvents: 'auto' to absorb interactions during load
-  assert.match(browserMode, /pointerEvents:\s*'auto'/)
+  // Verify the startup mask keeps the header clickable and does not steal input while native content restores.
+  assert.match(browserMode, /pointerEvents:\s*'none'/)
 
   assert.match(runtimeHook, /const \[browserRuntimeReady, setBrowserRuntimeReady\] = useState\(!isElectron\)/)
   assert.match(runtimeHook, /const hasHydratedRuntimeRef = useRef\(!isElectron\)/)
@@ -42,14 +45,18 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(runtimeHook, /const ensureBrowserRuntime = useCallback\(async \(\{ allowNewTab \}: \{ allowNewTab: boolean \}\) => \{/)
   assert.match(runtimeHook, /void ensureBrowserRuntime\(\{ allowNewTab: false \}\)/)
   assert.match(runtimeHook, /const hasTabs = await ensureBrowserRuntime\(\{ allowNewTab: true \}\)/)
+  assert.match(runtimeHook, /isAddressEditingRef: RefObject<boolean>/)
+  assert.match(runtimeHook, /!isAddressEditingRef\.current/)
   assert.match(runtimeHook, /if \(!isActive\) \{[\s\S]*if \(!hasHydratedRuntimeRef\.current\) \{[\s\S]*setBrowserRuntimeReady\(false\)/)
   assert.match(runtimeHook, /setBrowserRuntimeReady\(true\)/)
   assert.match(browserMode, /const \{\s*browserRuntimeReady,\s*\} = useBrowserRuntimeEffects\(/)
+  assert.match(browserMode, /const isAddressEditingRef = useRef\(false\)/)
+  assert.match(browserMode, /const setAddressEditing = useCallback\(\(next: boolean\) => \{[\s\S]*isAddressEditingRef\.current = next/)
+  assert.doesNotMatch(browserMode, /setIsAddressEditing/)
   assert.match(browserMode, /const shouldPresentBrowserHost = isActive && isMotionSettled/)
-  assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*if \(!isElectron \|\| !shouldPresentBrowserHost\) return/)
+  assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*if \(!isElectron\) return[\s\S]*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return/)
   assert.match(browserMode, /if \(!browserRuntimeReady \|\| tabs\.length === 0\) \{[\s\S]*browser\?\.hideAll\?\.\(\)/)
-  assert.match(browserMode, /await sendBoundsImmediate\(\{ forceExact: true \}\)/)
-  assert.match(browserMode, /await window\.electronAPI\?\.browser\?\.showActive\?\.\(\)/)
+  assert.match(browserMode, /await syncBrowserVisibility\(\{ forceExact: true \}\)/)
   assert.match(browserMode, /const hostVisibleRef = useRef\(false\)/)
   assert.match(browserMode, /hostVisibleRef\.current = browserRuntimeReady && tabs\.length > 0/)
   assert.match(browserMode, /if \(!browserRuntimeReady \|\| tabs\.length === 0\)/)

@@ -8,7 +8,7 @@ export class AuthPopupManager {
   private readonly boundContents = new Set<number>()
   private readonly knownPopupContents = new Set<number>()
   private readonly pendingPopupFallbacks = new Map<number, { timer: NodeJS.Timeout; url: string }>()
-  private readonly mainWindow: BrowserWindow
+  private mainWindow: BrowserWindow
   private readonly openInTab: OpenInTabHandler
   private readonly logger: Logger
   private readonly browserUserAgent: string
@@ -23,6 +23,10 @@ export class AuthPopupManager {
     this.openInTab = openInTab
     this.logger = logger || (() => {})
     this.browserUserAgent = String(browserUserAgent || mainWindow.webContents.getUserAgent())
+  }
+
+  setMainWindow(mainWindow: BrowserWindow): void {
+    this.mainWindow = mainWindow
   }
 
   getPopupWindowOptions(): Electron.BrowserWindowConstructorOptions {

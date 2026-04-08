@@ -44,6 +44,16 @@ interface ClampDropMenuPositionInput {
   padding?: number
 }
 
+interface ShouldKeepBrowserTabDropHintOnLeaveInput {
+  clientX: number
+  clientY: number
+  rectLeft: number
+  rectTop: number
+  rectWidth: number
+  rectHeight: number
+  relatedTargetInside: boolean
+}
+
 export function parseBrowserTabDragPayload(raw: string | null | undefined): BrowserTabDragPayload | null {
   if (!raw) return null
   try {
@@ -127,4 +137,21 @@ export function clampDropMenuPositionToBoundary({
     x: Math.max(minX, Math.min(x, maxX)),
     y: Math.max(minY, Math.min(y, maxY)),
   }
+}
+
+export function shouldKeepBrowserTabDropHintOnLeave({
+  clientX,
+  clientY,
+  rectLeft,
+  rectTop,
+  rectWidth,
+  rectHeight,
+  relatedTargetInside,
+}: ShouldKeepBrowserTabDropHintOnLeaveInput): boolean {
+  if (relatedTargetInside) return true
+  if (rectWidth <= 0 || rectHeight <= 0) return false
+
+  const rectRight = rectLeft + rectWidth
+  const rectBottom = rectTop + rectHeight
+  return clientX >= rectLeft && clientX <= rectRight && clientY >= rectTop && clientY <= rectBottom
 }

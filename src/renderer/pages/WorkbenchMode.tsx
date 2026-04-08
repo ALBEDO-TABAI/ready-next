@@ -10,6 +10,7 @@ import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
+import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { readStorage } from '../utils/storage'
 
 function ResizeHandle({
@@ -82,6 +83,8 @@ export default function WorkbenchMode() {
     chatPanelVisible,
     sidePanelVariant,
     setSidePanelVariant,
+    renamingPath,
+    creatingType,
   } = useWorkspace()
   const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode } = useMode()
   const navigate = useNavigate()
@@ -232,6 +235,36 @@ export default function WorkbenchMode() {
       void window.electronAPI?.browser.hideAll()
     }
   }, [])
+
+  useEffect(() => {
+    const handlePanelShortcut = (event: KeyboardEvent) => {
+      const handledAction = resolveWorkbenchPanelShortcutAction({
+        key: event.key,
+        code: event.code,
+        shiftKey: event.shiftKey,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        target: event.target,
+        selectionText: window.getSelection()?.toString() ?? '',
+        renamingPath,
+        creatingType,
+      })
+      if (!handledAction) return
+
+      event.preventDefault()
+      if (handledAction === 'toggle-sidebar') {
+        toggleSidebar()
+        return
+      }
+      toggleChatPanel()
+    }
+
+    window.addEventListener('keydown', handlePanelShortcut)
+    return () => {
+      window.removeEventListener('keydown', handlePanelShortcut)
+    }
+  }, [creatingType, renamingPath, toggleChatPanel, toggleSidebar])
 
   return (
     <LiquidSceneProvider mouseContainer={sceneRef}>

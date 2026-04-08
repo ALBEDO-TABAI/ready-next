@@ -8,6 +8,10 @@ export interface BrowserTabMetaRecord {
   required: boolean
   activity: string
   lastAuditedAt: number | null
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
 }
 
 export interface BrowserTabMetaPayload {
@@ -21,6 +25,10 @@ export interface BrowserTabMetaPayload {
   activity: string
   lastAuditedAt: number | null
   active: boolean
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
 }
 
 interface BrowserTabMetaServiceDeps<TTab extends BrowserTabMetaRecord> {
@@ -44,6 +52,10 @@ export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {
       activity: tab.activity,
       lastAuditedAt: tab.lastAuditedAt,
       active: tab.id === this.deps.getActiveTabId(),
+      loading: tab.loading,
+      canGoBack: tab.canGoBack,
+      canGoForward: tab.canGoForward,
+      error: tab.error,
     }
   }
 

@@ -789,6 +789,34 @@ const migrations: Migration[] = [
       db.exec('UPDATE rss_items SET inbox_visible = 1 WHERE inbox_visible IS NULL')
       db.exec('UPDATE rss_sources SET draft_seeded = 0 WHERE draft_seeded IS NULL')
     }
+  },
+
+  // ------------------------------------------------------------------ 020
+  {
+    name: '020_create_browser_task_tables',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_tasks (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          checkpoint_json TEXT,
+          result_json TEXT,
+          progress_total INTEGER DEFAULT 0,
+          progress_completed INTEGER DEFAULT 0,
+          progress_failed INTEGER DEFAULT 0,
+          current_label TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_browser_tasks_status_updated ON browser_tasks(status, updated_at DESC)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_browser_tasks_kind_created ON browser_tasks(kind, created_at DESC)')
+    }
   }
 ]
 

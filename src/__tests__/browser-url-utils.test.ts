@@ -5,21 +5,14 @@ import {
   DEFAULT_BROWSER_URL,
   SEARCH_URL,
   extractBrowserDomain,
+  isSupportedBrowserNavigationUrl,
   isLikelyAbsolutePath,
   normalizeBrowserUrlInput,
 } from '../renderer/modules/browser/url-utils'
-import { getRegistrableDomain, getUrlHostname } from '../shared/url-utils'
 
 test('extractBrowserDomain handles regular urls and invalid input safely', () => {
   assert.equal(extractBrowserDomain('https://sub.example.com/path'), 'example.com')
   assert.equal(extractBrowserDomain('not-a-url'), '')
-})
-
-test('shared url helpers preserve hostname and registrable-domain semantics separately', () => {
-  assert.equal(getUrlHostname('https://sub.example.com/path'), 'sub.example.com')
-  assert.equal(getRegistrableDomain('https://sub.example.com/path'), 'example.com')
-  assert.equal(getUrlHostname('not-a-url'), '')
-  assert.equal(getRegistrableDomain('not-a-url'), '')
 })
 
 test('isLikelyAbsolutePath detects unix windows and UNC paths', () => {
@@ -37,4 +30,11 @@ test('normalizeBrowserUrlInput preserves urls, maps paths, and falls back to sea
   assert.equal(normalizeBrowserUrlInput('/tmp/demo.txt', toFileUrl), 'file:///tmp/demo.txt')
   assert.equal(normalizeBrowserUrlInput('example.com', toFileUrl), 'https://example.com')
   assert.equal(normalizeBrowserUrlInput('hello world', toFileUrl), `${SEARCH_URL}hello%20world`)
+})
+
+test('isSupportedBrowserNavigationUrl only allows web urls', () => {
+  assert.equal(isSupportedBrowserNavigationUrl('https://openai.com'), true)
+  assert.equal(isSupportedBrowserNavigationUrl('http://example.com'), true)
+  assert.equal(isSupportedBrowserNavigationUrl('file:///tmp/demo.txt'), false)
+  assert.equal(isSupportedBrowserNavigationUrl('local-file:///tmp/demo.txt'), false)
 })

@@ -7,7 +7,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser address editing uses a ref-backed guard so fast navigate events do not stomp the visible URL', () => {
+test('browser address editing uses a ref-backed guard so fast navigate events can still refresh the visible URL', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const runtimeHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserRuntimeEffects.ts')
 
@@ -18,18 +18,20 @@ test('browser address editing uses a ref-backed guard so fast navigate events do
   assert.match(browserMode, /isAddressEditingRef,\s*sendBoundsImmediate,/)
   assert.match(browserMode, /onEditStart=\{handleBrowserEditStart\}/)
   assert.match(browserMode, /onEditEnd=\{handleBrowserEditEnd\}/)
+  assert.doesNotMatch(browserMode, /if \(isAddressEditing\) \{[\s\S]*browser\?\.hideAll\?\.\(\)/)
+  assert.doesNotMatch(browserMode, /\[isAddressEditing, isElectron, shouldRevealBrowserHost, browserRuntimeReady, tabs\.length, syncBrowserVisibility\]/)
 
-  assert.match(runtimeHook, /type RefObject/)
-  assert.match(runtimeHook, /isAddressEditingRef: RefObject<boolean>/)
+  assert.match(runtimeHook, /import \{ useCallback, useEffect, useRef, useState, type RefObject \} from 'react'/)
+  assert.match(runtimeHook, /interface UseBrowserRuntimeEffectsParams \{[\s\S]*isAddressEditingRef: RefObject<boolean>/)
   assert.match(runtimeHook, /if \(store\.activeTabId === event\.tabId && event\.url && !isAddressEditingRef\.current\)/)
   assert.doesNotMatch(runtimeHook, /if \(store\.activeTabId === event\.tabId && event\.url && !isAddressEditing\)/)
 })
 
-test('browser header dismisses address editing before tab switches and background deactivation', () => {
+test('browser header dismisses address editing before external collapse or tab switch transitions', () => {
   const browserHeader = readWorkspaceFile('src/renderer/components/browser/BrowserHeader.tsx')
   const interactionHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserHeaderInteraction.ts')
 
-  assert.match(browserHeader, /const dismissAddressEditing = useCallback\(\(\) => \{[\s\S]*onBlur\(\)[\s\S]*onEditEnd\(\)[\s\S]*collapseActiveTabRef\.current\(\)/)
+  assert.match(browserHeader, /const dismissAddressEditing = useCallback\(\(\) => \{[\s\S]*onBlur\(\)[\s\S]*onEditEnd\(\)[\s\S]*collapseActiveTab\(\)/)
   assert.match(browserHeader, /useEffect\(\(\) => \{[\s\S]*if \(isActive\) return[\s\S]*dismissAddressEditing\(\)/)
   assert.match(browserHeader, /useBrowserHeaderInteraction\(isActive,\s*dismissAddressEditing\)/)
   assert.match(browserHeader, /onTabClick=\{\(tabId\) => \{[\s\S]*dismissAddressEditing\(\)[\s\S]*onTabClick\(tabId\)/)

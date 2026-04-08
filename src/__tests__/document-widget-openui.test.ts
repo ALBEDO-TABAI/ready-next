@@ -12,6 +12,15 @@ import {
 } from '../shared/document-widget-openui'
 
 describe('document widget OpenUI artifacts', () => {
+  it('keeps the shared widget catalog free from broken OpenUI runtime imports', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/shared/document-widget-openui.ts'),
+      'utf8',
+    )
+
+    assert.doesNotMatch(source, /@openuidev\/(?:react-lang|lang-core)/)
+  })
+
   it('publishes a prompt artifact that covers both common and personal widget families', () => {
     assert.match(documentWidgetOpenUIPrompt, /info_card/)
     assert.match(documentWidgetOpenUIPrompt, /data_table/)

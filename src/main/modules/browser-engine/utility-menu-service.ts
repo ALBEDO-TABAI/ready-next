@@ -31,6 +31,10 @@ interface BrowserUtilityMenuServiceHost {
 export class BrowserUtilityMenuService {
   constructor(private readonly host: BrowserUtilityMenuServiceHost) {}
 
+  setMainWindow(mainWindow: BrowserWindow): void {
+    this.host.mainWindow = mainWindow
+  }
+
   showMenu(request: BrowserUtilityMenuRequest): { success: boolean } {
     const state = this.resolveState(request)
     const model = buildBrowserUtilityMenuModel(request.kind, state)

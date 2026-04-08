@@ -1,8 +1,11 @@
-import { session } from 'electron'
+import { BrowserWindow, dialog, session, type MessageBoxOptions } from 'electron'
 
-import { getUrlHostname } from '../../../shared/url-utils'
 import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
-import { shouldAllowBrowserPermission } from './popup-policy'
+import {
+  requiresUserApprovalBrowserPermission,
+  shouldAllowBrowserPermission,
+  supportsBrowserPermissionRequest,
+} from './popup-policy'
 
 const READY_ADBLOCK_HOST_PATTERNS = [
   'doubleclick.net',
@@ -27,17 +30,27 @@ const READY_ADBLOCK_HOST_PATTERNS = [
   'taboola.com',
 ]
 
+function extractBrowserDomain(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 interface BrowserSessionPolicyDeps {
   dataService: BrowserDataService
   sendToRenderer: (channel: string, data: unknown) => void
   resolveOriginDomain: (webContentsId?: number) => string
   isPreviewWebContentsId: (webContentsId?: number) => boolean
+  getMainWindow: () => BrowserWindow | null
 }
 
 export class BrowserSessionPolicyService {
   private adblockState: BrowserAdblockState
   private adblockUpdateTimer: ReturnType<typeof setTimeout> | null = null
   private lastAdblockRendererUpdateAt = 0
+  private permissionDecisions = new Map<string, boolean>()
 
   constructor(private readonly deps: BrowserSessionPolicyDeps) {
     this.adblockState = deps.dataService.readAdblockState()
@@ -87,13 +100,40 @@ export class BrowserSessionPolicyService {
       marker.__readyBrowserPolicyApplied = true
 
       targetSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
-        return shouldAllowBrowserPermission(permission, requestingOrigin)
+        if (!supportsBrowserPermissionRequest(permission)) return false
+        if (shouldAllowBrowserPermission(permission, requestingOrigin)) return true
+        return this.permissionDecisions.get(this.getPermissionDecisionKey(permission, requestingOrigin)) === true
       })
 
       targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
         const requestingUrl = webContents.getURL()
-        const allowed = shouldAllowBrowserPermission(permission, requestingUrl)
-        callback(allowed)
+        if (!supportsBrowserPermissionRequest(permission)) {
+          callback(false)
+          return
+        }
+        if (shouldAllowBrowserPermission(permission, requestingUrl)) {
+          callback(true)
+          return
+        }
+        if (!requiresUserApprovalBrowserPermission(permission)) {
+          callback(false)
+          return
+        }
+
+        const decisionKey = this.getPermissionDecisionKey(permission, requestingUrl)
+        const existingDecision = this.permissionDecisions.get(decisionKey)
+        if (existingDecision !== undefined) {
+          callback(existingDecision)
+          return
+        }
+
+        void this.promptForPermission(permission, requestingUrl).then((allowed) => {
+          this.permissionDecisions.set(decisionKey, allowed)
+          callback(allowed)
+        }).catch(() => {
+          this.permissionDecisions.set(decisionKey, false)
+          callback(false)
+        })
       })
 
       if (!marker.__readyBrowserAdblockApplied) {
@@ -182,8 +222,72 @@ export class BrowserSessionPolicyService {
     if (isPreview && !this.adblockState.previewEnabled) return false
     if (resourceType === 'mainFrame') return false
     if (!/^https?:\/\//i.test(requestUrl)) return false
-    const host = getUrlHostname(requestUrl)
+    const host = extractBrowserDomain(requestUrl)
     if (!host || this.isWhitelistedDomain(host, originDomain)) return false
     return this.isKnownAdHost(host)
+  }
+
+  private getPermissionDecisionKey(permission: string, requestingUrl?: string): string {
+    try {
+      const parsed = new URL(String(requestingUrl || ''))
+      return `${parsed.origin}::${String(permission || '').toLowerCase()}`
+    } catch {
+      return `${String(requestingUrl || '')}::${String(permission || '').toLowerCase()}`
+    }
+  }
+
+  private async promptForPermission(permission: string, requestingUrl?: string): Promise<boolean> {
+    const mainWindow = this.deps.getMainWindow()
+    const dialogOptions: MessageBoxOptions = {
+      type: 'question',
+      buttons: ['允许', '拒绝'] as string[],
+      defaultId: 1,
+      cancelId: 1,
+      title: '站点权限请求',
+      message: `${this.formatRequestingHost(requestingUrl)} 想要使用${this.formatPermissionLabel(permission)}`,
+      detail: 'Ready 不会默认静默放行高风险站点权限。本次允许只对当前运行期生效。',
+      noLink: true,
+    }
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, dialogOptions)
+      : await dialog.showMessageBox(dialogOptions)
+    return result.response === 0
+  }
+
+  private formatPermissionLabel(permission: string): string {
+    switch (String(permission || '').toLowerCase()) {
+      case 'camera':
+        return '摄像头'
+      case 'microphone':
+      case 'media':
+        return '麦克风'
+      case 'geolocation':
+        return '定位'
+      case 'notifications':
+        return '通知'
+      case 'clipboard-read':
+        return '读取剪贴板'
+      case 'hid':
+        return 'HID 设备'
+      case 'serial':
+        return '串口设备'
+      case 'midi':
+        return 'MIDI 设备'
+      case 'window-management':
+        return '窗口管理能力'
+      case 'identity-credentials-get':
+        return '身份凭据'
+      default:
+        return String(permission || '该权限')
+    }
+  }
+
+  private formatRequestingHost(requestingUrl?: string): string {
+    try {
+      const parsed = new URL(String(requestingUrl || ''))
+      return parsed.hostname || parsed.origin || '当前站点'
+    } catch {
+      return '当前站点'
+    }
   }
 }

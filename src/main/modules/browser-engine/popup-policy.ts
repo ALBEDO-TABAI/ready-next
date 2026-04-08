@@ -110,7 +110,7 @@ export function shouldAllowBrowserPermission(
   requestingUrl?: string,
 ): boolean {
   const normalized = String(permission || '').toLowerCase()
-  const allowSet = new Set([
+  const supportedSet = new Set([
     'clipboard-read',
     'clipboard-sanitized-write',
     'notifications',
@@ -129,19 +129,61 @@ export function shouldAllowBrowserPermission(
     'media',
   ])
 
-  if (!allowSet.has(normalized)) return false
+  if (!supportedSet.has(normalized)) return false
+  if (!requestingUrl || !isAllowedBrowserURL(requestingUrl)) return false
 
-  if (!requestingUrl) return true
-  if (!isAllowedBrowserURL(requestingUrl)) return false
+  const autoGrantSet = new Set([
+    'clipboard-sanitized-write',
+    'storage-access',
+    'top-level-storage-access',
+    'fullscreen',
+    'pointerlock',
+  ])
+  if (!autoGrantSet.has(normalized)) return false
+
   try {
     const parsed = new URL(requestingUrl)
-    if (normalized === 'camera' || normalized === 'microphone' || normalized === 'media') {
-      return parsed.protocol === 'https:'
-    }
+    return parsed.protocol === 'https:' || normalized === 'fullscreen' || normalized === 'pointerlock'
   } catch {
     return false
   }
-  return true
+}
+
+export function supportsBrowserPermissionRequest(permission: string): boolean {
+  return new Set([
+    'clipboard-read',
+    'clipboard-sanitized-write',
+    'notifications',
+    'geolocation',
+    'storage-access',
+    'top-level-storage-access',
+    'identity-credentials-get',
+    'window-management',
+    'fullscreen',
+    'pointerlock',
+    'midi',
+    'hid',
+    'serial',
+    'camera',
+    'microphone',
+    'media',
+  ]).has(String(permission || '').toLowerCase())
+}
+
+export function requiresUserApprovalBrowserPermission(permission: string): boolean {
+  return new Set([
+    'clipboard-read',
+    'notifications',
+    'geolocation',
+    'identity-credentials-get',
+    'window-management',
+    'midi',
+    'hid',
+    'serial',
+    'camera',
+    'microphone',
+    'media',
+  ]).has(String(permission || '').toLowerCase())
 }
 
 export function toOAuthCompatibleUserAgent(rawUserAgent: string): string {

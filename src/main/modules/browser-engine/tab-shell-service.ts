@@ -31,6 +31,10 @@ export interface BrowserShellTabRecord {
   required: boolean
   activity: BrowserShellTabActivity
   lastAuditedAt: number | null
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
   view?: BrowserShellView
 }
 
@@ -168,8 +172,8 @@ export class BrowserTabShellService {
       required: nextTab.required,
       activity: nextTab.activity,
       lastAuditedAt: nextTab.lastAuditedAt,
-      canGoBack: nextTab.view.webContents.navigationHistory.canGoBack(),
-      canGoForward: nextTab.view.webContents.navigationHistory.canGoForward(),
+      canGoBack: nextTab.canGoBack ?? nextTab.view.webContents.navigationHistory.canGoBack(),
+      canGoForward: nextTab.canGoForward ?? nextTab.view.webContents.navigationHistory.canGoForward(),
     }
   }
 
@@ -189,11 +193,9 @@ export class BrowserTabShellService {
   }
 
   hideAllHosts(): { success: boolean } {
-    const activeTabId = this.host.getActiveTabId()
-    if (activeTabId) {
-      const activeTab = this.host.tabs.get(activeTabId)
-      if (activeTab?.view) {
-        this.host.hideHost(activeTab.view)
+    for (const tab of this.host.tabs.values()) {
+      if (tab.view) {
+        this.host.hideHost(tab.view)
       }
     }
     this.host.detachPreviewView()

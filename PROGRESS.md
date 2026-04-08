@@ -1,13 +1,21 @@
 # Ready 开发进展
 
-> 更新时间: 2026-03-31
+> 更新时间: 2026-04-08
 
 ## 当前真值摘要
 1. 当前基线是本地 `main`。
-- 本地相对 `origin/main` 为 `ahead 100`。
+- 本地相对 `origin/main` 为 `ahead 130`。
 - 这条基线已经吸收了 agent/runtime 拆分、browser service 化、repository 基线拆分、module handler 独立化、RSS runtime 与 browser-backed acquisition 的主要改动。
 
-2. **Browser 模式切换体验已进一步打磨（冻结帧机制）**
+2. Browser 主线已并回 `browser-4-3` 的新功能与新改进。
+- 浏览器主进程新增 capability / content-task / task-persistence 三层：支持结构化提取、滚动采集、研究任务、批量下载与任务续跑。
+- 浏览器工具链已补齐与这些能力对应的 agent 工具入口，主进程数据库也新增浏览器任务持久化表。
+- 浏览器标签切换现已加入顺序保护，快速连续切换时只会采纳最后一次完成结果。
+- 标签重排已打通 preload -> main -> renderer 的完整链路，不再只是前端假排序。
+- 浏览器标签栏、地址面、refresh dock、收藏入口、拖拽保护与宽度预留都已顺着现有 unified header 结构补齐。
+- 窗口重建后的 BrowserView host 可重新绑定到新窗口；站点权限也已收口为“低风险自动放行 + 高风险询问”。
+
+3. **Browser 模式切换体验已进一步打磨（冻结帧机制）**
 - 修复了切换时"标签栏先出、内容后加载"的分段闪现问题。
 - 关键修复：`captureSnapshot` 改用 `captureViewportSnapshot`（调用 BrowserView 的 `webContents.capturePage()`），而非 `captureWindowSnapshot`（只捕获主窗口，不含 BrowserView）。
 - 切换前（`!isMotionSettled`）先执行 `captureStableFrame()` 保存当前画面，再 `hideAll()` 隐藏 BrowserView。
@@ -16,21 +24,21 @@
 - 最新一轮继续收紧了回场体感：冻结帧淡出已从单纯透明度升级为 `opacity + blur + scale` 复合动画，Browser surface ready 延迟也从 24ms 再压到 16ms。
 - 顶栏模块切换器现已补上 hover 级预截图：鼠标悬停到 browser 图标时，会提前触发后台 `captureStableFrame()`，把"点击后才开始准备冻结帧"的迟滞再往前消掉半拍。
 
-2. Agent/runtime 底座已经落地到可继续迭代的状态。
+4. Agent/runtime 底座已经落地到可继续迭代的状态。
 - `useAgent` 不再独自承担整条执行链。
 - 运行态按 `runId + scopeId` 路由。
 - runtime routing、message composition、module execution、scope-run patching 已拆入独立模块。
 
-3. Browser 主干已经完成第一轮架构收口。
+5. Browser 主干已经完成第一轮架构收口。
 - main-process browser 逻辑已拆成 shell、lifecycle、preview、automation、data、diagnostics、download、session policy、layout 等 services。
 - renderer 侧 browser shell、layout、diagnostics entry 已从页面容器中拆出。
 - preview/context-menu/browser overlay 相关层级问题已处理过一轮。
 
-4. Repository 基线已经建立。
+6. Repository 基线已经建立。
 - browser/chat/rss/calendar/settings/agent 的主要访问路径已不再依赖旧式跨域 `getDatabase()` 直连。
 - 之前的 `database.ts` 静态/动态混合导入告警已清掉。
 
-5. Workbench 模块已进入统一执行模型。
+7. Workbench 模块已进入统一执行模型。
 - rss/calendar 的 agent handler 已从页面组件中拆出。
 - browser/RSS/calendar 都有基础 diagnostics panel。
 - browser/document/rss/calendar 的 tabs/chrome 已进入共享路径。
@@ -59,7 +67,7 @@
 - BrowserMode 的拖拽冻结方案已从“冻结内部网页视口”切到“冻结整块浏览器区域可见画面”：拖拽时直接覆盖当前浏览器区域截图，顶部、圆角和内容来自同一张画面，避免继续在边角上出现白块、缺角或反向咬口。
 - 文件管理顶部“筛选 / 更多”菜单已从左侧栏内部节点改为顶层弹层渲染：菜单仍贴着左栏按钮展开，但不再被 `SidePanel` 的 `overflow-hidden` 裁掉，也不再靠隐藏浏览器内容来制造层级。
 
-6. RSS 已经具备独立维护条件。
+8. RSS 已经具备独立维护条件。
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
 - route diagnostics 和 benchmark 结果会持久化。
 - browser-backed acquisition 已切到优先复用应用内浏览器路线。
@@ -72,7 +80,7 @@
 - RSS 设置页已补上底稿仓库管理入口，可查看每个源的底稿数量、收件箱数量、收藏数量，以及当前是“首次完整”还是“后续轻量”刷新方式。
 - 小红书刷新已开始按源状态分流：首次抓取仍负责补齐历史，后续刷新改成更轻的主页检查模式，并只把真正新增的内容重新送回界面列表。
 
-7. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
+9. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
 - 新增 `skill-execution-types.ts`、compiler / loader、execution state store、execution coordinator、prompt builder。
 - embedded skills 已拆分为 `workflow / advisory / direct` 兼容模式：
   - `video-copy-analyzer`：workflow
@@ -112,6 +120,9 @@
    - Diagnostics labs 完整化
 
 ## 最近一次有效校验
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-*.test.ts src/__tests__/document-widget-openui.test.ts` 通过
+- `npm test` 未通过：仍有与本次浏览器改动无关的 `workbench-liquid-shell-contract` 旧失败
 - `npm run typecheck` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/rss-browser-acquisition.test.ts src/__tests__/rss-draft-store-contract.test.ts src/__tests__/rss-draft-store-ui-contract.test.ts` 通过
 - `npm run typecheck` 通过

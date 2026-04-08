@@ -15,6 +15,7 @@ import { domainsLikelyMatch, findRecentBrowserAction, rememberBrowserAction } fr
 import { AgentRepository } from '../repositories/agent-repository'
 import { getLogPath } from '../../utils/platform'
 import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
+import type { BrowserStructuredFieldMapping } from '../browser-engine/capability-types'
 
 const LOG = getLogPath('ready-tools.log')
 function log(msg: string) {
@@ -280,6 +281,107 @@ const BROWSER_TOOLS: ToolDef[] = [
       { name: 'timeout_ms', type: 'number', description: '超时时间，默认 8000ms', required: false },
       { name: 'selector', type: 'string', description: '可选：等待该 selector 出现', required: false },
       { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
+    ]
+  },
+  {
+    name: 'browser_wait_for_condition',
+    description: '等待复杂条件满足，如页面可读、selector 出现、网络趋稳、内容稳定或自定义 JS 条件。',
+    params: [
+      { name: 'condition', type: 'string', description: '等待条件：page_readable/selector/network_idle/content_stable/custom_js', required: true, enum: ['page_readable', 'selector', 'network_idle', 'content_stable', 'custom_js'] },
+      { name: 'selector', type: 'string', description: 'condition=selector 时使用', required: false },
+      { name: 'custom_js', type: 'string', description: 'condition=custom_js 时返回 truthy 视为满足', required: false },
+      { name: 'timeout_ms', type: 'number', description: '超时时间，默认 8000ms', required: false },
+      { name: 'check_interval_ms', type: 'number', description: '轮询间隔，默认 250ms', required: false },
+      { name: 'stable_iterations', type: 'number', description: 'network_idle/content_stable 需要连续稳定次数', required: false },
+      { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
+    ]
+  },
+  {
+    name: 'browser_extract_structured',
+    description: '按模板提取当前页或目标页的结构化内容，适合文章列表、图片列表、链接列表和通用卡片。',
+    params: [
+      { name: 'template', type: 'string', description: '提取模板：article_list/image_gallery/link_list/card_list/custom', required: true, enum: ['article_list', 'image_gallery', 'link_list', 'card_list', 'custom'] },
+      { name: 'url', type: 'string', description: '可选：先打开或复用该 URL 再提取', required: false },
+      { name: 'tab_id', type: 'string', description: '当前标签页 ID，留空则使用当前活跃页', required: false },
+      { name: 'item_selector', type: 'string', description: '可选：限定提取项选择器', required: false },
+      { name: 'fields', type: 'array', description: 'template=custom 时的字段映射', required: false, items: { type: 'object', additionalProperties: true } },
+      { name: 'limit', type: 'number', description: '最多提取条数', required: false },
+      { name: 'min_width', type: 'number', description: '图片提取最小宽度', required: false },
+      { name: 'custom_script', type: 'string', description: '可选：直接执行自定义提取脚本', required: false },
+    ]
+  },
+  {
+    name: 'browser_scroll_collect',
+    description: '自动滚动页面并持续收集结构化内容，适合长列表、图集和无限滚动页面。',
+    params: [
+      { name: 'template', type: 'string', description: '提取模板：article_list/image_gallery/link_list/card_list/custom', required: true, enum: ['article_list', 'image_gallery', 'link_list', 'card_list', 'custom'] },
+      { name: 'url', type: 'string', description: '可选：先打开或复用该 URL 再滚动采集', required: false },
+      { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃页', required: false },
+      { name: 'item_selector', type: 'string', description: '可选：限定采集项选择器', required: false },
+      { name: 'limit', type: 'number', description: '最多采集条数', required: false },
+      { name: 'max_scrolls', type: 'number', description: '最大滚动次数', required: false },
+      { name: 'scroll_delay_ms', type: 'number', description: '每次滚动后的等待时间', required: false },
+      { name: 'custom_script', type: 'string', description: '可选：直接执行自定义提取脚本', required: false },
+    ]
+  },
+  {
+    name: 'browser_start_task',
+    description: '启动后台浏览器任务，适合批量下载、长页面采集和跨页研究。',
+    params: [
+      { name: 'kind', type: 'string', description: '任务类型：download_urls/scroll_collect/research', required: true, enum: ['download_urls', 'scroll_collect', 'research'] },
+      { name: 'payload', type: 'object', description: '任务参数对象', required: true, additionalProperties: true },
+    ]
+  },
+  {
+    name: 'browser_get_task',
+    description: '读取后台浏览器任务的当前进度、状态和结果摘要。',
+    params: [
+      { name: 'task_id', type: 'string', description: '任务 ID', required: true },
+    ]
+  },
+  {
+    name: 'browser_resume_task',
+    description: '继续一个已暂停或未完成的后台浏览器任务。',
+    params: [
+      { name: 'task_id', type: 'string', description: '任务 ID', required: true },
+    ]
+  },
+  {
+    name: 'browser_cancel_task',
+    description: '取消一个后台浏览器任务。',
+    params: [
+      { name: 'task_id', type: 'string', description: '任务 ID', required: true },
+    ]
+  },
+  {
+    name: 'browser_aggregate_results',
+    description: '对多页提取结果做拼接、去重和排序，便于后续总结。',
+    params: [
+      { name: 'items', type: 'array', description: '结构化结果数组', required: true, items: { type: 'object', additionalProperties: true } },
+      { name: 'merge_strategy', type: 'string', description: 'concat 或 dedupe，默认 dedupe', required: false, enum: ['concat', 'dedupe'] },
+      { name: 'sort_by', type: 'string', description: 'title/link/source', required: false, enum: ['title', 'link', 'source'] },
+    ]
+  },
+  {
+    name: 'browser_download_gallery',
+    description: '面向长图集或画板的薄适配：自动按图集模式启动后台采集与批量下载任务。',
+    params: [
+      { name: 'url', type: 'string', description: '图集或画板链接', required: true },
+      { name: 'directory', type: 'string', description: '下载目录', required: false },
+      { name: 'limit', type: 'number', description: '最多采集图片数量', required: false },
+      { name: 'max_scrolls', type: 'number', description: '最大滚动次数', required: false },
+      { name: 'retry_failed', type: 'boolean', description: '下载失败是否重试', required: false },
+    ]
+  },
+  {
+    name: 'browser_research_topic',
+    description: '面向跨页研究的薄适配：按主题启动后台研究任务，并返回任务句柄。',
+    params: [
+      { name: 'query', type: 'string', description: '研究主题或问题', required: true },
+      { name: 'urls', type: 'array', description: '可选：直接指定来源页列表', required: false, items: { type: 'string' } },
+      { name: 'max_pages', type: 'number', description: '最多访问页面数', required: false },
+      { name: 'limit_per_page', type: 'number', description: '每页最多提取条数', required: false },
+      { name: 'template', type: 'string', description: '提取模板，默认 article_list', required: false, enum: ['article_list', 'link_list', 'card_list', 'custom'] },
     ]
   },
   {
@@ -3996,6 +4098,139 @@ export async function executeBrowserTool(
         const tabId = (args.tab_id as string) || null
         const ready = await waitForReady(controller, tabId, Math.max(500, Math.min(timeoutMs, 30_000)), selector, abortSignal)
         return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
+      }
+
+      case 'browser_wait_for_condition': {
+        const tabId = (args.tab_id as string) || null
+        const result = await controller.waitForCondition(tabId, {
+          condition: String(args.condition || 'page_readable') as never,
+          selector: typeof args.selector === 'string' ? args.selector : undefined,
+          customJs: typeof args.custom_js === 'string' ? args.custom_js : undefined,
+          timeoutMs: Number(args.timeout_ms || 0) || undefined,
+          checkIntervalMs: Number(args.check_interval_ms || 0) || undefined,
+          stableIterations: Number(args.stable_iterations || 0) || undefined,
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_extract_structured': {
+        const template = String(args.template || 'article_list') as never
+        const url = String(args.url || '').trim()
+        const tabId = (args.tab_id as string) || null
+        const fields = Array.isArray(args.fields)
+          ? (args.fields
+              .filter((item) => item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string')
+              .map((item) => item as BrowserStructuredFieldMapping))
+          : undefined
+        const options = {
+          template,
+          itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+          fields,
+          limit: Number(args.limit || 0) || undefined,
+          minWidth: Number(args.min_width || 0) || undefined,
+          customScript: typeof args.custom_script === 'string' ? args.custom_script : undefined,
+        }
+        const result = url
+          ? await controller.extractStructuredFromUrl(url, options)
+          : await controller.extractStructured(tabId, options)
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_scroll_collect': {
+        const template = String(args.template || 'card_list') as never
+        const url = String(args.url || '').trim()
+        let tabId = (args.tab_id as string) || null
+        if (url) {
+          const opened = await controller.openForCaptureTarget(url)
+          if (!opened.success || !opened.tabId) {
+            return `Error: ${opened.error || 'failed to open target'}`
+          }
+          tabId = opened.tabId
+        }
+        const result = await controller.scrollCollect(tabId, {
+          template,
+          itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+          limit: Number(args.limit || 0) || undefined,
+          maxScrolls: Number(args.max_scrolls || 0) || undefined,
+          scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
+          customScript: typeof args.custom_script === 'string' ? args.custom_script : undefined,
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_start_task': {
+        const kind = String(args.kind || '').trim()
+        if (!kind) return 'Error: kind is required'
+        const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : {}
+        const result = await controller.startTask({
+          kind: kind as never,
+          payload,
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_get_task': {
+        const taskId = String(args.task_id || '').trim()
+        if (!taskId) return 'Error: task_id is required'
+        const result = await controller.getTask(taskId)
+        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+      }
+
+      case 'browser_resume_task': {
+        const taskId = String(args.task_id || '').trim()
+        if (!taskId) return 'Error: task_id is required'
+        const result = await controller.resumeTask(taskId)
+        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+      }
+
+      case 'browser_cancel_task': {
+        const taskId = String(args.task_id || '').trim()
+        if (!taskId) return 'Error: task_id is required'
+        const result = await controller.cancelTask(taskId)
+        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+      }
+
+      case 'browser_aggregate_results': {
+        const items = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : []
+        const result = controller.aggregateResults(items as never, {
+          mergeStrategy: typeof args.merge_strategy === 'string' ? args.merge_strategy as 'concat' | 'dedupe' : undefined,
+          sortBy: typeof args.sort_by === 'string' ? args.sort_by as 'title' | 'link' | 'source' : undefined,
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_download_gallery': {
+        const url = String(args.url || '').trim()
+        if (!url) return 'Error: url is required'
+        const result = await controller.startTask({
+          kind: 'scroll_collect',
+          payload: {
+            url,
+            template: 'image_gallery',
+            download: true,
+            directory: typeof args.directory === 'string' ? args.directory : undefined,
+            limit: Number(args.limit || 0) || undefined,
+            maxScrolls: Number(args.max_scrolls || 0) || undefined,
+            retryFailed: args.retry_failed === true,
+          },
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_research_topic': {
+        const query = String(args.query || '').trim()
+        if (!query) return 'Error: query is required'
+        const result = await controller.startTask({
+          kind: 'research',
+          payload: {
+            query,
+            urls: Array.isArray(args.urls) ? args.urls : undefined,
+            maxPages: Number(args.max_pages || 0) || undefined,
+            limitPerPage: Number(args.limit_per_page || 0) || undefined,
+            template: typeof args.template === 'string' ? args.template : undefined,
+          },
+        })
+        return JSON.stringify(result, null, 2)
       }
 
       case 'browser_run_workflow': {

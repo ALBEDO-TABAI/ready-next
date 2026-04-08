@@ -476,6 +476,14 @@ html[data-theme='dark'] .ready-app-bg {
   display: none;
 }
 
+.browser-tab-rail-scroll {
+  scrollbar-width: none;
+}
+
+.browser-tab-rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .rss-feed-scroll::-webkit-scrollbar {
   width: 6px;
   height: 6px;

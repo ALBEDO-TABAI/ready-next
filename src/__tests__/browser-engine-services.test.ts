@@ -231,6 +231,45 @@ describe('BrowserTabShellService', () => {
     assert.deepStrictEqual(detached, ['tab-1', 'tab-3'])
     assert.deepStrictEqual(shown, ['tab-2'])
   })
+
+  it('hides every attached tab host when browser surfaces are globally dismissed', () => {
+    const first = createMockView()
+    const second = createMockView()
+    const tabs = new Map([
+      ['tab-1', { id: 'tab-1', url: 'https://a.com', title: 'A', domain: 'a.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: first.view }],
+      ['tab-2', { id: 'tab-2', url: 'https://b.com', title: 'B', domain: 'b.com', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: second.view }],
+    ])
+    const hidden: string[] = []
+    let previewDetached = 0
+
+    const service = new BrowserTabShellService({
+      tabs: tabs as any,
+      getActiveTabId: () => 'tab-1',
+      setActiveTabId: () => undefined,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      createTab: async () => ({ success: true, tabId: 'tab-3' }),
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      applyBounds: () => undefined,
+      hideHost: (view) => {
+        if (view === first.view) hidden.push('tab-1')
+        if (view === second.view) hidden.push('tab-2')
+      },
+      detachPreviewView: () => {
+        previewDetached += 1
+      },
+      restoreActiveTabHost: () => undefined,
+    })
+
+    const result = service.hideAllHosts()
+
+    assert.deepStrictEqual(result, { success: true })
+    assert.deepStrictEqual(hidden, ['tab-1', 'tab-2'])
+    assert.strictEqual(previewDetached, 1)
+  })
 })
 
 describe('BrowserAutomationService', () => {
@@ -392,6 +431,36 @@ describe('BrowserTabLifecycleService', () => {
 })
 
 describe('BrowserPreviewService', () => {
+  it('registers the preview session for downloads before opening preview pages', async () => {
+    const mock = createMockView()
+    const downloadSessions: unknown[] = []
+    const service = new BrowserPreviewService({
+      useMock: false,
+      browserUserAgent: 'ready-test',
+      createHost: () => mock.view as any,
+      showHost: () => undefined,
+      hideHost: () => undefined,
+      detachHost: () => undefined,
+      applyPreviewBounds: () => undefined,
+      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setPreviewBounds: () => undefined,
+      sendToRenderer: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      hideActiveTab: () => false,
+      restoreActiveTab: () => undefined,
+      ensureDownloadSession: (targetSession: unknown) => {
+        downloadSessions.push(targetSession)
+      },
+    } as any)
+
+    await service.open('https://example.com')
+
+    assert.deepStrictEqual(downloadSessions, [mock.view.webContents.session])
+  })
+
   it('does not restore the active tab when preview did not hide a visible browser host', async () => {
     const mock = createMockView()
     const events: string[] = []
@@ -507,6 +576,10 @@ describe('BrowserTabMetaService', () => {
           required: true,
           activity: 'running',
           lastAuditedAt: 123,
+          loading: true,
+          canGoBack: true,
+          canGoForward: false,
+          error: 'temporary failure',
         },
       ],
     ])
@@ -534,6 +607,10 @@ describe('BrowserTabMetaService', () => {
         activity: 'running',
         lastAuditedAt: 123,
         active: true,
+        loading: true,
+        canGoBack: true,
+        canGoForward: false,
+        error: 'temporary failure',
       },
     ])
     assert.deepStrictEqual(emitted, [
@@ -552,6 +629,10 @@ describe('BrowserTabMetaService', () => {
           activity: 'running',
           lastAuditedAt: 123,
           active: true,
+          loading: true,
+          canGoBack: true,
+          canGoForward: false,
+          error: 'temporary failure',
         },
       },
     ])

@@ -18,6 +18,10 @@ export interface BrowserLifecycleTabRecord {
   required: boolean
   activity: BrowserLifecycleTabActivity
   lastAuditedAt: number | null
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error: string | null
   view?: BrowserHostView
 }
 
@@ -84,6 +88,10 @@ export class BrowserTabLifecycleService {
         required: false,
         activity: 'idle',
         lastAuditedAt: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
       }
       this.host.tabs.set(tabId, tab)
       this.host.setActiveTabId(tabId)
@@ -109,6 +117,10 @@ export class BrowserTabLifecycleService {
       required: false,
       activity: 'idle',
       lastAuditedAt: null,
+      loading: true,
+      canGoBack: false,
+      canGoForward: false,
+      error: null,
       view,
     }
     this.host.tabs.set(tabId, tab)
@@ -175,6 +187,9 @@ export class BrowserTabLifecycleService {
     view.webContents.on('did-navigate', (_event, newUrl) => {
       tab.url = newUrl
       tab.domain = this.host.extractDomain(newUrl)
+      tab.canGoBack = view.webContents.navigationHistory.canGoBack()
+      tab.canGoForward = view.webContents.navigationHistory.canGoForward()
+      tab.error = null
       try {
         this.host.addHistoryEntry(newUrl, tab.title, {
           favicon: tab.favicon,
@@ -190,26 +205,37 @@ export class BrowserTabLifecycleService {
     view.webContents.on('did-navigate-in-page', (_event, newUrl) => {
       tab.url = newUrl
       tab.domain = this.host.extractDomain(newUrl)
+      tab.canGoBack = view.webContents.navigationHistory.canGoBack()
+      tab.canGoForward = view.webContents.navigationHistory.canGoForward()
+      tab.error = null
       this.emitNavigationState(tabId, tab, view, newUrl)
     })
 
     view.webContents.on('did-start-loading', () => {
+      tab.loading = true
       this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: true })
     })
 
     view.webContents.on('did-stop-loading', () => {
       applyRoundedViewport(view)
+      tab.loading = false
+      tab.canGoBack = view.webContents.navigationHistory.canGoBack()
+      tab.canGoForward = view.webContents.navigationHistory.canGoForward()
       this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: false })
+      this.host.emitTabMeta(tabId)
     })
 
     view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
       if (!isMainFrame) return
       this.host.logBrowserDiag(`[browser-v3][fail-load][tab:${tabId}] code=${String(errorCode)} message=${errorDescription}`)
+      tab.loading = false
+      tab.error = `${errorDescription} (${errorCode})`
       this.host.sendToRenderer('browser:tabUpdate', {
         type: 'error',
         tabId,
         error: `${errorDescription} (${errorCode})`,
       })
+      this.host.emitTabMeta(tabId)
     })
   }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
+import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode } from '../../stores/useMode'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
@@ -166,6 +167,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         canGoBack: false,
         canGoForward: false,
       })
+      browserTabActivationSequencer.invalidate()
       useBrowserTabs.getState().setActiveTabId(result.tabId)
       useBrowserTabs.getState().setUrlInput(item.link)
       useMode.getState().setWorkbenchMode('browser')

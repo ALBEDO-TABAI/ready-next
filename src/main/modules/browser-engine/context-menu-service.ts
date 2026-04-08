@@ -19,6 +19,10 @@ interface BrowserContextMenuHost {
 export class BrowserContextMenuService {
   constructor(private readonly host: BrowserContextMenuHost) {}
 
+  setMainWindow(mainWindow: BrowserWindow): void {
+    this.host.mainWindow = mainWindow
+  }
+
   install(webContents: WebContents): void {
     webContents.on('context-menu', (_event, params) => {
       try {

@@ -13,9 +13,15 @@ export class BrowserHostLayoutService {
   private readonly offscreenBounds: BrowserRect = { x: -100000, y: -100000, width: 1, height: 1 }
 
   constructor(
-    private readonly mainWindow: BrowserWindow,
+    private mainWindow: BrowserWindow,
     private readonly browserHostKind: BrowserHostKind,
   ) {}
+
+  setMainWindow(mainWindow: BrowserWindow): void {
+    this.mainWindow = mainWindow
+    this.attachedHosts = new WeakSet<BrowserHostView>()
+    this.hiddenHosts = new WeakSet<BrowserHostView>()
+  }
 
   createHost(partition: string): BrowserHostView {
     const options = {

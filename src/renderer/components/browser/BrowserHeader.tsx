@@ -154,7 +154,10 @@ export default function BrowserHeader({
             } else {
               onEditEnd()
             }
-            requestAnimationFrame(() => stopEditing())
+            requestAnimationFrame(() => {
+              committingNavigationRef.current = false
+              stopEditing()
+            })
           }}
           onRefreshDockEnter={beginRefreshDockHover}
           onRefreshDockLeave={endRefreshDockHover}

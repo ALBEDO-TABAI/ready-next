@@ -1,5 +1,5 @@
-import { createLibrary, defineComponent } from '@openuidev/react-lang'
 import { z } from 'zod'
+import { createLibrary, defineComponent } from './openui-lite'
 
 export type DocumentWidgetComponentGroup = 'common-display' | 'personal-data'
 export type DocumentWidgetDataSourceType = 'manual' | 'calendar' | 'schedule'

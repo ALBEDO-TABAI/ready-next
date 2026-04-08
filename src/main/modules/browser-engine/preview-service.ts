@@ -20,6 +20,7 @@ interface BrowserPreviewServiceDeps {
   logBrowserDiag: (message: string) => void
   bindPopup: (webContents: WebContents) => void
   installContextMenu: (webContents: WebContents) => void
+  ensureDownloadSession?: (targetSession: Electron.Session) => void
   handleWindowOpen: (
     details: {
       url: string
@@ -129,6 +130,7 @@ export class BrowserPreviewService {
       this.deps.handleWindowOpen(details, 'preview', view.webContents.id),
     )
     this.deps.installContextMenu(view.webContents)
+    this.deps.ensureDownloadSession?.(view.webContents.session)
 
     this.previewView = view
     return view

@@ -34,6 +34,7 @@ interface BrowserShellIPCController {
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
   openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
+  reorderTabs(tabIds: string[]): { success: boolean; error?: string }
   closeTab(tabId: string): { success: boolean; error?: string }
   switchTab(tabId: string): {
     success: boolean
@@ -110,6 +111,14 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:navigate', async (_, { tabId, url }: { tabId: string; url: string }) => {
     try {
       return await controller.navigate(tabId, url)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:reorderTabs', (_, tabIds: string[]) => {
+    try {
+      return controller.reorderTabs(tabIds)
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

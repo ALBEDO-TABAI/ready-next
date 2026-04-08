@@ -4,6 +4,18 @@
 
 ### 新增
 
+#### 浏览器能力层与任务续跑
+- 主线并回 `browser-4-3` 的浏览器增强能力：新增结构化页面提取、滚动采集、研究型采集与后台任务续跑能力
+- 浏览器工具链补充 `browser_extract_structured / browser_scroll_collect / browser_start_task / browser_get_task / browser_resume_task / browser_cancel_task / browser_aggregate_results / browser_download_gallery / browser_research_topic`
+- 浏览器任务进度现已落库，应用重开后可恢复未完成的浏览器后台任务
+- 浏览器权限策略改为“低风险自动放行，高风险显式确认”，同时补上窗口重绑与 BrowserView host 重新附着能力
+
+#### 浏览器标签交互稳定性
+- 浏览器标签切换新增“只接受最新一次切换结果”的顺序保护，避免快速切换时旧结果回写覆盖当前标签
+- 标签重排现已真正打通 renderer 与 main：前端顺序变更会同步回写主进程标签顺序
+- 顶部激活标签与 tab rail 新增更稳的宽度预留、拖拽保护与显式收藏入口，减少展开地址栏、切换标签和拖拽时的错位
+- 浏览器运行态恢复继续以主进程真实 tabs 为准，并在 create / switch / close 后回拉后端真值，避免 renderer 本地状态漂移
+
 #### Agent 长任务摘要与聊天任务区
 - scope run 新增统一任务摘要字段：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
 - 主进程新增 `agent:listScopeRuns`，renderer 刷新后可恢复当前频道的最近任务
