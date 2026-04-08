@@ -681,14 +681,17 @@ function ChatPanelMotionLayer({
   header,
   body,
   children,
+  hideWhenExiting = false,
 }: {
   header?: React.ReactNode
   body?: React.ReactNode
   children?: React.ReactNode
+  hideWhenExiting?: boolean
 }) {
   const isPresent = useIsPresent()
   const layerZIndex = isPresent ? 1 : 2
   const reduceMotion = useReducedMotion()
+  const shouldSuppressExitFrame = !isPresent && hideWhenExiting
 
   if (!header || !body) {
     return (
@@ -697,6 +700,7 @@ function ChatPanelMotionLayer({
         style={{
           zIndex: layerZIndex,
           pointerEvents: isPresent ? 'auto' : 'none',
+          opacity: shouldSuppressExitFrame ? 0 : 1,
         }}
       >
         {children}
@@ -710,6 +714,7 @@ function ChatPanelMotionLayer({
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
+        opacity: shouldSuppressExitFrame ? 0 : 1,
       }}
     >
       <div
@@ -2279,9 +2284,10 @@ export default function ChatPanel() {
             key="expanded-chat-panel"
             header={expandedPanelHeader}
             body={expandedPanelBody}
+            hideWhenExiting={!chatPanelVisible}
           />
         ) : (
-          <ChatPanelMotionLayer key="collapsed-chat-panel">
+          <ChatPanelMotionLayer key="collapsed-chat-panel" hideWhenExiting={chatPanelVisible}>
             <CollapsedChatRail
               onTogglePanel={toggleChatPanel}
               onHistoryOpen={() => {

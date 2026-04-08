@@ -30,4 +30,6 @@ test('chat panel collapse reuses the waterfall motion structure instead of hard 
   assert.match(chatPanel, /transition:\s*'width 260ms cubic-bezier\(0\.22, 1, 0\.36, 1\), min-width 260ms cubic-bezier\(0\.22, 1, 0\.36, 1\)'/)
   assert.match(chatPanel, /key="expanded-chat-panel"/)
   assert.match(chatPanel, /key="collapsed-chat-panel"/)
+  assert.match(chatPanel, /const shouldSuppressExitFrame = !isPresent && hideWhenExiting/)
+  assert.match(chatPanel, /opacity:\s*shouldSuppressExitFrame \? 0 : 1/)
 })
