@@ -17,6 +17,10 @@ import { Markdown } from 'tiptap-markdown'
 import { createRoot } from 'react-dom/client'
 import DocumentWidgetBlockCard from './DocumentWidgetBlockCard'
 import { tryParseWidgetPayload } from './widget-fence-parser'
+import {
+  buildWidgetFenceSource,
+  exportWidgetCardSnapshot,
+} from './widget-card-helpers'
 
 export interface TiptapEditorProps {
   content: string
@@ -42,23 +46,6 @@ export interface TiptapEditorRef {
 const revealHighlightPluginKey = new PluginKey<{ from: number; to: number } | null>('ready-doc-reveal-highlight')
 const widgetBlockPluginKey = new PluginKey<Set<string>>('ready-doc-widget-block')
 const widgetSourceVisibilityMemory = new Set<string>()
-
-function buildWidgetFenceSource(title: string, widgetCode: string): string {
-  return [
-    '```show-widget',
-    JSON.stringify({
-      title,
-      widget_code: widgetCode,
-    }),
-    '```',
-  ].join('\n')
-}
-
-function getWidgetModeLabel(widgetCode: string): string {
-  if (/<script\b/i.test(widgetCode)) return '脚本交互'
-  if (/<svg\b/i.test(widgetCode)) return 'SVG widget'
-  return 'HTML widget'
-}
 
 function getWidgetMemoryKey(title: string, widgetCode: string): string {
   return `${title}::${widgetCode.slice(0, 160)}`
@@ -115,11 +102,24 @@ function createWidgetBlockExtension(
                 root.render(
                   <DocumentWidgetBlockCard
                     title={title}
-                    modeLabel={getWidgetModeLabel(widget.widgetCode)}
                     widgetCode={widget.widgetCode}
                     sourceVisible={sourceVisible}
                     onRequestPreview={onRequestPreview}
-                    onRequestAgentUpdate={onRequestAgentUpdate ? (nextTitle, nextCode) => onRequestAgentUpdate(nextTitle, nextCode) : undefined}
+                    onRenameTitle={(nextTitle) => {
+                      const currentEditor = getEditor()
+                      if (!currentEditor) return
+                      const nextPayload = JSON.stringify({
+                        title: nextTitle,
+                        widget_code: widget.widgetCode,
+                      })
+                      currentEditor.view.dispatch(
+                        currentEditor.state.tr.insertText(nextPayload, pos + 1, pos + node.nodeSize - 1),
+                      )
+                    }}
+                    onQuoteToAgent={onRequestAgentUpdate ? (nextTitle, nextCode) => onRequestAgentUpdate(nextTitle, nextCode) : undefined}
+                    onExport={(nextTitle, nextCode) => {
+                      void exportWidgetCardSnapshot(nextCode, nextTitle)
+                    }}
                     onToggleSource={() => {
                       const currentEditor = getEditor()
                       if (!currentEditor) return

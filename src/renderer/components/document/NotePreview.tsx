@@ -17,12 +17,20 @@ import {
   type PreviewProperty,
   type PreviewTag,
 } from './note-preview-parser'
+import DocumentWidgetCardShell from './DocumentWidgetCardShell'
+import type { DocumentWidgetPersistedState } from './widget-state-runtime'
+import { getWidgetPersistenceKey } from './widget-card-helpers'
 import WidgetRenderer from './WidgetRenderer'
 
 interface NotePreviewProps {
   content: string
   notePath?: string | null
   focusWidgetTitle?: string | null
+  onWidgetRename?: (currentTitle: string, widgetCode: string, nextTitle: string) => void
+  onWidgetQuote?: (title: string, widgetCode: string) => void
+  onWidgetExport?: (title: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => void
+  onWidgetStateChange?: (title: string, widgetCode: string, widgetState: DocumentWidgetPersistedState) => void
+  widgetStates?: Record<string, DocumentWidgetPersistedState>
 }
 
 function Chip({
@@ -234,7 +242,16 @@ function MediaEmbed({
   )
 }
 
-export default function NotePreview({ content, notePath, focusWidgetTitle }: NotePreviewProps) {
+export default function NotePreview({
+  content,
+  notePath,
+  focusWidgetTitle,
+  onWidgetRename,
+  onWidgetQuote,
+  onWidgetExport,
+  onWidgetStateChange,
+  widgetStates,
+}: NotePreviewProps) {
   const [copiedChipId, setCopiedChipId] = useState<string | null>(null)
   const preview = useMemo(() => buildStructuredNotePreview(content, notePath), [content, notePath])
   const embedsById = useMemo(
@@ -415,13 +432,24 @@ export default function NotePreview({ content, notePath, focusWidgetTitle }: Not
           if (block.type === 'widget') {
             const widget = widgetsById.get(block.widgetId)
             if (!widget) return null
+            const widgetState = widgetStates?.[getWidgetPersistenceKey(widget.title || 'widget', widget.widgetCode)] || widget.widgetState || null
             return (
-              <div key={block.id} data-ready-widget-title={widget.title || ''}>
+              <DocumentWidgetCardShell
+                key={block.id}
+                title={widget.title || 'widget'}
+                onRenameTitle={onWidgetRename ? (nextTitle) => onWidgetRename(widget.title || 'widget', widget.widgetCode, nextTitle) : undefined}
+                onQuote={onWidgetQuote ? () => onWidgetQuote(widget.title || 'widget', widget.widgetCode) : undefined}
+                onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', widget.widgetCode, widgetState) : undefined}
+                dataReadyWidgetTitle={widget.title || ''}
+                previewClassName="ready-doc-widget-card-preview ready-doc-widget-card-preview-static"
+              >
                 <WidgetRenderer
                   title={widget.title}
                   widgetCode={widget.widgetCode}
+                  widgetState={widgetState}
+                  onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}
                 />
-              </div>
+              </DocumentWidgetCardShell>
             )
           }
 

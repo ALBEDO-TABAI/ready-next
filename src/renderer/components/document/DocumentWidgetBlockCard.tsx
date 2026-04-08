@@ -1,28 +1,31 @@
-import { Code2, Copy, Eye, MessageSquareQuote, Trash2 } from 'lucide-react'
+import { Code2, Copy, Eye, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import WidgetRenderer from './WidgetRenderer'
 
 interface DocumentWidgetBlockCardProps {
   title: string
-  modeLabel: string
   widgetCode: string
   sourceVisible: boolean
   onToggleSource: () => void
   onCopySource: () => void
   onDelete: () => void
-  onRequestAgentUpdate?: (title: string, widgetCode: string) => void
+  onRenameTitle?: (nextTitle: string) => void
+  onQuoteToAgent?: (title: string, widgetCode: string) => void
+  onExport?: (title: string, widgetCode: string) => void
   onRequestPreview?: (title: string) => void
 }
 
 export default function DocumentWidgetBlockCard({
   title,
-  modeLabel,
   widgetCode,
   sourceVisible,
   onToggleSource,
   onCopySource,
   onDelete,
-  onRequestAgentUpdate,
+  onRenameTitle,
+  onQuoteToAgent,
+  onExport,
   onRequestPreview,
 }: DocumentWidgetBlockCardProps) {
   const [copied, setCopied] = useState(false)
@@ -41,33 +44,13 @@ export default function DocumentWidgetBlockCard({
   }, [confirmDelete])
 
   return (
-    <div className="ready-doc-widget-card" contentEditable={false}>
-      <div className="ready-doc-widget-card-header">
-        <div className="ready-doc-widget-card-meta">
-          <div className="ready-doc-widget-card-title">{title}</div>
-          <div className="ready-doc-widget-card-subline">
-            <span className="ready-doc-widget-card-badge">{modeLabel}</span>
-            <span className="ready-doc-widget-card-hint">
-              {sourceVisible ? '源码已展开，可直接在下方编辑' : '源码已折叠，保留文档整洁'}
-            </span>
-          </div>
-        </div>
-
-        <div className="ready-doc-widget-card-actions">
-          {onRequestAgentUpdate ? (
-            <button
-              type="button"
-              className="ready-doc-widget-card-action"
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onRequestAgentUpdate(title, widgetCode)
-              }}
-            >
-              <MessageSquareQuote size={13} strokeWidth={2} />
-              <span>让 agent 更新</span>
-            </button>
-          ) : null}
+    <DocumentWidgetCardShell
+      title={title}
+      onRenameTitle={onRenameTitle}
+      onQuote={() => onQuoteToAgent?.(title, widgetCode)}
+      onExport={() => onExport?.(title, widgetCode)}
+      extraActions={
+        <>
           {onRequestPreview ? (
             <button
               type="button"
@@ -112,12 +95,11 @@ export default function DocumentWidgetBlockCard({
             <Trash2 size={13} strokeWidth={2} />
             <span>{confirmDelete ? '确认删除' : '删除'}</span>
           </button>
-        </div>
-      </div>
-
-      <div className="ready-doc-widget-card-preview">
-        <WidgetRenderer widgetCode={widgetCode} />
-      </div>
-    </div>
+        </>
+      }
+      contentEditable={false}
+    >
+      <WidgetRenderer widgetCode={widgetCode} />
+    </DocumentWidgetCardShell>
   )
 }

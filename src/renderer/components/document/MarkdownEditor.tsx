@@ -2,7 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import EditorContextMenu from './EditorContextMenu'
 import NotePreview from './NotePreview'
-import { addDocumentQuoteReference } from '../../modules/agent/chat-input-bridge'
+import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
+import type { DocumentWidgetPersistedState } from './widget-state-runtime'
+import {
+  exportWidgetCardSnapshot,
+  extractWidgetStateMapFromContent,
+  getWidgetModeLabel,
+  getWidgetPersistenceKey,
+  mergeWidgetStateMapIntoContent,
+  renameWidgetFenceTitleInContent,
+} from './widget-card-helpers'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -179,6 +188,9 @@ export default function MarkdownEditor({
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
+    extractWidgetStateMapFromContent(tab.content)
+  ))
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
 
   // Context menu state
@@ -273,20 +285,31 @@ export default function MarkdownEditor({
     return () => { cancelled = true }
   }, [tab.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    setWidgetStates((prev) => ({
+      ...extractWidgetStateMapFromContent(tab.content),
+      ...prev,
+    }))
+  }, [tab.content])
+
   // ─── Save logic ─────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!tab.path || !canSave || !tab.isDirty) return
     if (typeof window === 'undefined' || !window.electronAPI) return
     setSaveState('saving')
     try {
-      const result = (await window.electronAPI.document.writeFile(tab.path, tab.content)) as ReadResult
+      const nextContent = mergeWidgetStateMapIntoContent(tab.content, widgetStates)
+      const result = (await window.electronAPI.document.writeFile(tab.path, nextContent)) as ReadResult
       if (!result.success) throw new Error(result.error || '保存失败')
+      if (nextContent !== tab.content) {
+        updateTabContent(tab.id, nextContent)
+      }
       setSaveState('saved')
       markTabSaved(tab.id)
     } catch {
       setSaveState('error')
     }
-  }, [tab.path, tab.content, canSave, tab.id, markTabSaved])
+  }, [tab.path, tab.content, canSave, markTabSaved, tab.id, updateTabContent, widgetStates])
 
   // Cmd+S keyboard shortcut
   useEffect(() => {
@@ -379,6 +402,44 @@ export default function MarkdownEditor({
       lineEnd: location.lineEnd,
     })
   }, [contextSelection, tab.content, tab.path, tab.title])
+
+  const handleWidgetRename = useCallback((currentTitle: string, widgetCode: string, nextTitle: string) => {
+    const nextContent = renameWidgetFenceTitleInContent(tab.content, currentTitle, widgetCode, nextTitle)
+    if (nextContent === tab.content) return
+    setWidgetStates((prev) => {
+      const next = { ...prev }
+      const currentKey = getWidgetPersistenceKey(currentTitle, widgetCode)
+      const nextKey = getWidgetPersistenceKey(nextTitle, widgetCode)
+      if (prev[currentKey]) {
+        next[nextKey] = prev[currentKey]
+        delete next[currentKey]
+      }
+      return next
+    })
+    updateTabContent(tab.id, nextContent)
+    setSaveState('idle')
+  }, [tab.content, tab.id, updateTabContent])
+
+  const handleWidgetQuoteToAgent = useCallback((widgetTitle: string, widgetCode: string) => {
+    addDocumentWidgetTargetReference({
+      documentTitle: tab.title,
+      documentPath: tab.path,
+      widgetTitle,
+      widgetCode,
+      widgetMode: getWidgetModeLabel(widgetCode),
+    })
+  }, [tab.path, tab.title])
+
+  const handleWidgetExport = useCallback((widgetTitle: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => {
+    void exportWidgetCardSnapshot(widgetCode, widgetTitle, widgetState, tab.path)
+  }, [tab.path])
+
+  const handleWidgetStateChange = useCallback((widgetTitle: string, widgetCode: string, widgetState: DocumentWidgetPersistedState) => {
+    setWidgetStates((prev) => ({
+      ...prev,
+      [getWidgetPersistenceKey(widgetTitle, widgetCode)]: widgetState,
+    }))
+  }, [])
 
   useEffect(() => {
     if (viewMode !== 'edit' || !activeRevealTarget) return
@@ -485,7 +546,16 @@ export default function MarkdownEditor({
                 {loadError ? (
                   renderLoadState()
                 ) : (
-                  <NotePreview content={tab.content} notePath={tab.path} focusWidgetTitle={previewFocusWidgetTitle} />
+                  <NotePreview
+                    content={tab.content}
+                    notePath={tab.path}
+                    focusWidgetTitle={previewFocusWidgetTitle}
+                    onWidgetRename={handleWidgetRename}
+                    onWidgetQuote={handleWidgetQuoteToAgent}
+                    onWidgetExport={handleWidgetExport}
+                    onWidgetStateChange={handleWidgetStateChange}
+                    widgetStates={widgetStates}
+                  />
                 )}
               </div>
             </div>

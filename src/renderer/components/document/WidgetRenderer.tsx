@@ -7,10 +7,13 @@ import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-c
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } from './widget-sanitizer'
 import WidgetDomRuntime from './WidgetDomRuntime'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
+import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 
 interface WidgetRendererProps {
   title?: string
   widgetCode: string
+  widgetState?: DocumentWidgetPersistedState | null
+  onWidgetStateChange?: (state: DocumentWidgetPersistedState) => void
 }
 
 const MAX_IFRAME_HEIGHT = 2000
@@ -20,7 +23,12 @@ function getCacheKey(code: string): string {
   return code.slice(0, 200)
 }
 
-export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProps) {
+export default function WidgetRenderer({
+  title,
+  widgetCode,
+  widgetState,
+  onWidgetStateChange,
+}: WidgetRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const widgetTokenRef = useRef(`widget-${Math.random().toString(36).slice(2, 10)}`)
   const [receiverReady, setReceiverReady] = useState(false)
@@ -105,12 +113,17 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
 
       if (event.data.type === 'widget:link' && typeof event.data.href === 'string') {
         void openHref(event.data.href)
+        return
+      }
+
+      if (event.data.type === 'widget:state' && event.data.state && typeof event.data.state === 'object') {
+        onWidgetStateChange?.(event.data.state as DocumentWidgetPersistedState)
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [openHref, postTheme, sanitizedWidgetCode.length, title, widgetCode.length])
+  }, [onWidgetStateChange, openHref, postTheme, sanitizedWidgetCode.length, title, widgetCode.length])
 
   useEffect(() => {
     setReceiverReady(false)
@@ -132,6 +145,16 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
 
     return () => observer.disconnect()
   }, [postTheme, receiverReady])
+
+  useEffect(() => {
+    if (!receiverReady) return
+    const iframe = iframeRef.current
+    if (!iframe?.contentWindow) return
+    iframe.contentWindow.postMessage(
+      { type: 'widget:hydrate', state: widgetState || null, token: widgetTokenRef.current },
+      '*',
+    )
+  }, [receiverReady, widgetState])
 
   useEffect(() => {
     if (receiverReady) return
@@ -172,6 +195,8 @@ export default function WidgetRenderer({ title, widgetCode }: WidgetRendererProp
           <WidgetDomRuntime
             title={title}
             widgetCode={sanitizedWidgetCode}
+            widgetState={widgetState}
+            onStateChange={onWidgetStateChange}
             onOpenHref={(href) => {
               void openHref(href)
             }}

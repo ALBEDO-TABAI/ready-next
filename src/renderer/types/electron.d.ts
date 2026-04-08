@@ -747,7 +747,7 @@ interface DocumentWatchDirectoriesResponse {
 interface ElectronDocumentAPI {
   readFile: (path: string) => Promise<DocumentReadResponse>
   writeFile: (path: string, content: string) => Promise<DocumentWriteResponse>
-  saveFileAs: (payload: { content: string; suggestedName?: string; defaultPath?: string | null }) => Promise<DocumentSaveAsResponse>
+  saveFileAs: (payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) => Promise<DocumentSaveAsResponse>
   listFiles: (dir: string) => Promise<DocumentListResponse>
   parseDocx: (path: string) => Promise<DocumentDocxResponse>
   parseXlsx: (path: string) => Promise<DocumentXlsxResponse>

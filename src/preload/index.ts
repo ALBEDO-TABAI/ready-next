@@ -235,7 +235,7 @@ const browserAPI = {
 const documentAPI = {
   readFile: (path: string) => ipcRenderer.invoke('document:read', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('document:write', { path, content }),
-  saveFileAs: (payload: { content: string; suggestedName?: string; defaultPath?: string | null }) =>
+  saveFileAs: (payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) =>
     ipcRenderer.invoke('document:saveAs', payload),
   listFiles: (dir: string) => ipcRenderer.invoke('document:list', dir),
   parseDocx: (path: string) => ipcRenderer.invoke('document:parseDocx', path),

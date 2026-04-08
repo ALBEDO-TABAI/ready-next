@@ -4,6 +4,14 @@
 
 ### 新增
 
+#### 文档卡片头部动作
+- 文档里的 widget 卡片现在统一拥有新的头部：左侧可直接点击重命名，右侧提供完整字样的 `引用` 与 `导出` 按钮
+- 预览里的 widget 卡片也复用了同一套头部语言，不再只有渲染内容没有卡片级操作
+- `引用` 会直接把当前卡片送进聊天输入区，方便继续让 agent 修改
+- `导出` 已改为按单张卡片直接生成 `.png` 图片，不再把卡片另存为文档格式
+- 卡片头部去掉了类型小胶囊，标题槽和右侧按钮改为同一水平线对齐，整体留白更紧致
+- 交互型 widget 的当前状态现在会回传给文档层：导出图片时按当时状态出图，保存文档时会把当前状态一起写回文档，重新打开后能回到上次保存的样子
+
 #### 浏览器能力层与任务续跑
 - 主线并回 `browser-4-3` 的浏览器增强能力：新增结构化页面提取、滚动采集、研究型采集与后台任务续跑能力
 - 浏览器工具链补充 `browser_extract_structured / browser_scroll_collect / browser_start_task / browser_get_task / browser_resume_task / browser_cancel_task / browser_aggregate_results / browser_download_gallery / browser_research_topic`

@@ -6,11 +6,14 @@ import {
   invokeInlineHandlerExpression,
 } from './widget-dom-script-runtime'
 import { clampNumericInputValue } from './widget-runtime-helpers'
+import { applyWidgetPersistedState, collectWidgetPersistedState, type DocumentWidgetPersistedState } from './widget-state-runtime'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 
 interface WidgetDomRuntimeProps {
   title?: string
   widgetCode: string
+  widgetState?: DocumentWidgetPersistedState | null
+  onStateChange?: (state: DocumentWidgetPersistedState) => void
   onOpenHref: (href: string) => void
   onRuntimeError?: (message: string) => void
 }
@@ -48,6 +51,8 @@ function executeScripts(container: HTMLElement): Promise<void> {
 export default function WidgetDomRuntime({
   title,
   widgetCode,
+  widgetState,
+  onStateChange,
   onOpenHref,
   onRuntimeError,
 }: WidgetDomRuntimeProps) {
@@ -81,6 +86,11 @@ export default function WidgetDomRuntime({
       executeScripts(container).catch((error) => {
         onRuntimeError?.(error instanceof Error ? error.message : String(error))
       })
+
+      applyWidgetPersistedState(container, widgetState)
+      window.setTimeout(() => {
+        onStateChange?.(collectWidgetPersistedState(container))
+      }, 0)
     }
 
     const handleClick = (event: Event) => {
@@ -97,6 +107,12 @@ export default function WidgetDomRuntime({
       if (/^\s*javascript\s*:/i.test(link.href)) return
       event.preventDefault()
       onOpenHref(link.href)
+      return
+    }
+
+    const container = host.querySelector('.widget-root')
+    if (container instanceof HTMLElement) {
+      window.setTimeout(() => onStateChange?.(collectWidgetPersistedState(container)), 0)
     }
 
     const invokeInlineHandler = (target: EventTarget | null, attr: string, event: Event) => {
@@ -121,11 +137,19 @@ export default function WidgetDomRuntime({
     const handleInput = (event: Event) => {
       handleNumericBounds(event)
       invokeInlineHandler(event.target, 'oninput', event)
+      const container = host.querySelector('.widget-root')
+      if (container instanceof HTMLElement) {
+        window.setTimeout(() => onStateChange?.(collectWidgetPersistedState(container)), 0)
+      }
     }
 
     const handleChange = (event: Event) => {
       handleNumericBounds(event)
       invokeInlineHandler(event.target, 'onchange', event)
+      const container = host.querySelector('.widget-root')
+      if (container instanceof HTMLElement) {
+        window.setTimeout(() => onStateChange?.(collectWidgetPersistedState(container)), 0)
+      }
     }
 
     const previousBridge = widgetWindow.__readyWidgetSendMessage
@@ -156,7 +180,7 @@ export default function WidgetDomRuntime({
         widgetWindow.__readyWidgetSendMessage = previousBridge
       }
     }
-  }, [onOpenHref, onRuntimeError, title, widgetCode])
+  }, [onOpenHref, onRuntimeError, onStateChange, title, widgetCode, widgetState])
 
   return <div ref={hostRef} className="document-widget-dom-runtime" />
 }

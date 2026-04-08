@@ -6,6 +6,19 @@ export interface WidgetExportSnapshot {
   titleHint?: string | null
 }
 
+export function resolveWidgetExportSuggestedName(
+  titleHint?: string | null,
+  fileExtension = '.png',
+): string {
+  const normalizedTitle = (titleHint || 'widget')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+
+  return `${normalizedTitle || 'widget'}${fileExtension}`
+}
+
 const DANGEROUS_BLOCK_TAGS = /<(iframe|object|embed|form|meta|link|base)[\s>][\s\S]*?<\/\1>/gi
 const DANGEROUS_VOID_TAGS = /<(iframe|object|embed|meta|link|base)\b[^>]*\/?>/gi
 const SCRIPT_TAG_REGEX = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi

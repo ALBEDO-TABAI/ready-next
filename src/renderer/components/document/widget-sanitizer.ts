@@ -85,6 +85,70 @@ try {
 var widgetToken='${safeToken}';
 var root=document.getElementById('__widget-root');
 var resizeTimer=null;
+var stateTimer=null;
+function collectWidgetState(){
+  var controls=Array.from(document.querySelectorAll('input, textarea, select')).map(function(element,index){
+    var tag=element.tagName.toLowerCase();
+    if(element instanceof HTMLInputElement){
+      return {index:index,tag:'input',type:element.type||'text',value:element.value,checked:element.checked};
+    }
+    if(element instanceof HTMLTextAreaElement){
+      return {index:index,tag:'textarea',value:element.value};
+    }
+    if(element instanceof HTMLSelectElement){
+      return {index:index,tag:'select',value:element.value};
+    }
+    return {index:index,tag:tag,value:''};
+  });
+  var activeTargets=Array.from(document.querySelectorAll('[data-tab-target].is-active, [data-focus-target].is-active')).map(function(element){
+    if(!(element instanceof HTMLElement)) return null;
+    var tabTarget=element.getAttribute('data-tab-target');
+    if(tabTarget) return {attr:'data-tab-target',value:tabTarget};
+    var focusTarget=element.getAttribute('data-focus-target');
+    if(focusTarget) return {attr:'data-focus-target',value:focusTarget};
+    return null;
+  }).filter(Boolean);
+  return {controls:controls,activeTargets:activeTargets};
+}
+function notifyState(){
+  if(stateTimer) clearTimeout(stateTimer);
+  stateTimer=setTimeout(function(){
+    parent.postMessage({type:'widget:state',state:collectWidgetState(),token:widgetToken},'*');
+  },20);
+}
+function applyWidgetState(state){
+  if(!state || typeof state !== 'object') return;
+  var controls=Array.from(document.querySelectorAll('input, textarea, select'));
+  Array.from(state.controls || []).forEach(function(controlState){
+    if(!controlState || typeof controlState.index !== 'number') return;
+    var element=controls[controlState.index];
+    if(!element) return;
+    if(element instanceof HTMLInputElement){
+      if(typeof controlState.checked === 'boolean' && (controlState.type === 'checkbox' || controlState.type === 'radio' || element.type === 'checkbox' || element.type === 'radio')){
+        element.checked=controlState.checked;
+      }
+      if(typeof controlState.value === 'string'){
+        element.value=controlState.value;
+      }
+      element.dispatchEvent(new Event('input',{bubbles:true}));
+      element.dispatchEvent(new Event('change',{bubbles:true}));
+      return;
+    }
+    if((element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) && typeof controlState.value === 'string'){
+      element.value=controlState.value;
+      element.dispatchEvent(new Event('input',{bubbles:true}));
+      element.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+  });
+  Array.from(state.activeTargets || []).forEach(function(activeTarget){
+    if(!activeTarget || !activeTarget.attr || !activeTarget.value) return;
+    var selector='[' + activeTarget.attr + '="' + String(activeTarget.value).replace(/"/g,'\\"') + '"]';
+    var element=document.querySelector(selector);
+    if(element instanceof HTMLElement && !element.classList.contains('is-active')){
+      element.click();
+    }
+  });
+}
 function invokeInlineHandler(target, attrName, event){
   if(!target || typeof target.getAttribute !== 'function') return false;
   var expr=String(target.getAttribute(attrName) || '').trim();
@@ -149,6 +213,9 @@ document.addEventListener('click',function(event){
   parent.postMessage({type:'widget:link',href:href,token:widgetToken},'*');
   return;
 });
+document.addEventListener('click',function(){
+  window.setTimeout(notifyState,0);
+});
 window.__readyWidgetSendMessage=function(text){
   if(typeof text !== 'string') return;
   var trimmed = text.trim();
@@ -158,14 +225,17 @@ window.__readyWidgetSendMessage=function(text){
 document.addEventListener('input',function(event){
   clampNumericInput(event.target);
   invokeInlineHandler(event.target, 'oninput', event);
+  window.setTimeout(notifyState,0);
 }, true);
 document.addEventListener('change',function(event){
   clampNumericInput(event.target);
   invokeInlineHandler(event.target, 'onchange', event);
+  window.setTimeout(notifyState,0);
 }, true);
 
 window.addEventListener('message',function(event){
   if(!event.data || typeof event.data.type!=='string') return;
+  if(event.data.token && event.data.token!==widgetToken) return;
   if(event.data.type==='widget:theme'){
     var vars=event.data.vars || {};
     Object.keys(vars).forEach(function(key){
@@ -173,12 +243,21 @@ window.addEventListener('message',function(event){
     });
     document.documentElement.className=event.data.isDark ? 'dark' : '';
     notifyResize();
+    return;
+  }
+  if(event.data.type==='widget:hydrate'){
+    applyWidgetState(event.data.state);
+    window.setTimeout(function(){
+      notifyResize();
+      notifyState();
+    },0);
   }
 });
 
 setTimeout(function(){
   parent.postMessage({type:'widget:ready',token:widgetToken},'*');
   notifyResize();
+  notifyState();
 }, 30);
 } catch (error) {
   parent.postMessage({type:'widget:error',message:String(error && error.message ? error.message : error),token:widgetToken},'*');

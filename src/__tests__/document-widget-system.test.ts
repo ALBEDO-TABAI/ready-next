@@ -236,5 +236,35 @@ describe('document widget renderer contract', () => {
     assert.match(receiverSource, /data-ready-agent-message/)
     assert.match(receiverSource, /__readyWidgetSendMessage/)
     assert.match(domRuntimeSource, /__readyWidgetSendMessage/)
+    assert.match(rendererSource, /widget:state/)
+    assert.match(receiverSource, /widget:hydrate/)
+  })
+
+  it('uses unified widget card header actions in edit and preview surfaces', () => {
+    const blockCardSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetBlockCard.tsx'),
+      'utf8',
+    )
+    const shellSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetCardShell.tsx'),
+      'utf8',
+    )
+    const notePreviewSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/NotePreview.tsx'),
+      'utf8',
+    )
+    const markdownEditorSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/MarkdownEditor.tsx'),
+      'utf8',
+    )
+
+    assert.match(blockCardSource, /DocumentWidgetCardShell/)
+    assert.match(shellSource, /label="引用"/)
+    assert.match(shellSource, /label="导出"/)
+    assert.doesNotMatch(blockCardSource, /modeLabel=\{modeLabel\}/)
+    assert.doesNotMatch(blockCardSource, /hint=\{/)
+    assert.match(notePreviewSource, /DocumentWidgetCardShell/)
+    assert.match(markdownEditorSource, /handleWidgetQuoteToAgent/)
+    assert.match(markdownEditorSource, /handleWidgetExport/)
   })
 })

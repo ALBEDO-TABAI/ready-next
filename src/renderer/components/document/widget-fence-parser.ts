@@ -1,8 +1,11 @@
+import type { DocumentWidgetPersistedState } from './widget-state-runtime'
+
 export interface DocumentWidgetData {
   id?: string
   title?: string
   widgetCode: string
   rawFence: string
+  widgetState?: DocumentWidgetPersistedState | null
 }
 
 export type DocumentWidgetSegment =
@@ -25,10 +28,14 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
     const title = typeof record.title === 'string' && record.title.trim().length > 0
       ? record.title.trim()
       : undefined
+    const widgetState = record.widget_state && typeof record.widget_state === 'object'
+      ? record.widget_state as DocumentWidgetPersistedState
+      : null
     return {
       title,
       widgetCode,
       rawFence,
+      widgetState,
     }
   } catch {
     return null

@@ -362,7 +362,8 @@ export async function writeDocumentEditableText(
 }
 
 async function saveDocumentWithDialog(payload: {
-  content: string
+  content?: string
+  contentBase64?: string
   suggestedName?: string
   defaultPath?: string | null
 }): Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }> {
@@ -373,30 +374,41 @@ async function saveDocumentWithDialog(payload: {
     const suggestedName = (payload.suggestedName || '新文档.md').trim() || '新文档.md'
     const safeSuggestedName = extname(suggestedName) ? suggestedName : `${suggestedName}.md`
     const defaultDir = payload.defaultPath ? dirname(payload.defaultPath) : homedir()
+    const suggestedExt = extname(safeSuggestedName).toLowerCase()
     const saveResult = await dialog.showSaveDialog(win, {
       title: '保存文档',
       defaultPath: join(defaultDir, safeSuggestedName),
-      filters: [
-        { name: 'Markdown 文档', extensions: ['md'] },
-        { name: '文本文件', extensions: ['txt'] },
-        { name: 'HTML 快照', extensions: ['html'] },
-        { name: 'Word 文档', extensions: ['docx'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
+      filters: suggestedExt === '.png'
+        ? [
+            { name: 'PNG 图片', extensions: ['png'] },
+            { name: '所有文件', extensions: ['*'] },
+          ]
+        : [
+            { name: 'Markdown 文档', extensions: ['md'] },
+            { name: '文本文件', extensions: ['txt'] },
+            { name: 'HTML 快照', extensions: ['html'] },
+            { name: 'Word 文档', extensions: ['docx'] },
+            { name: '所有文件', extensions: ['*'] },
+          ],
     })
 
     if (saveResult.canceled || !saveResult.filePath) {
       return { success: false, canceled: true, error: 'cancelled' }
     }
 
+    if (payload.contentBase64) {
+      writeFileSync(saveResult.filePath, Buffer.from(payload.contentBase64, 'base64'))
+      return { success: true, path: saveResult.filePath }
+    }
+
     if (extname(saveResult.filePath).toLowerCase() === '.html') {
       const title = basename(saveResult.filePath, '.html') || 'Document Snapshot'
-      const html = buildDocumentHtmlSnapshotExport(payload.content, title)
+      const html = buildDocumentHtmlSnapshotExport(payload.content || '', title)
       writeFileSync(saveResult.filePath, html, 'utf-8')
       return { success: true, path: saveResult.filePath }
     }
 
-    const writeResult = await writeDocumentEditableText(saveResult.filePath, payload.content)
+    const writeResult = await writeDocumentEditableText(saveResult.filePath, payload.content || '')
     if (!writeResult.success) {
       return { success: false, error: writeResult.error || '文档写入失败' }
     }
@@ -596,7 +608,7 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  ipcMain.handle('document:saveAs', async (_, payload: { content: string; suggestedName?: string; defaultPath?: string | null }) => {
+  ipcMain.handle('document:saveAs', async (_, payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) => {
     if (useMock) {
       return {
         success: true,

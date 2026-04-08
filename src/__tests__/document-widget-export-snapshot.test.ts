@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { buildWidgetExportSnapshot } from '../renderer/components/document/widget-export-snapshot'
 import { buildDocumentHtmlSnapshotExport } from '../shared/document-widget-html-export'
+import { getWidgetPersistenceKey, mergeWidgetStateMapIntoContent } from '../renderer/components/document/widget-card-helpers'
 
 describe('widget export snapshot helper', () => {
   it('keeps pure svg widgets as svg snapshots', () => {
@@ -56,5 +57,50 @@ describe('widget export snapshot helper', () => {
 
     assert.match(source, /HTML 快照/)
     assert.match(source, /buildDocumentHtmlSnapshotExport/)
+  })
+
+  it('defines a widget-level export file name helper for card exports', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/shared/widget-export-snapshot.ts'),
+      'utf8',
+    )
+
+    assert.match(source, /resolveWidgetExportSuggestedName/)
+    assert.match(source, /replace\(\s*\/\[\^a-z0-9_-]\+\/gi/)
+    assert.match(source, /\.png/)
+  })
+
+  it('supports binary save-as payloads for widget image exports', () => {
+    const preloadSource = readFileSync(
+      resolve(process.cwd(), 'src/preload/index.ts'),
+      'utf8',
+    )
+    const mainSource = readFileSync(
+      resolve(process.cwd(), 'src/main/modules/document-engine/ipc-handler.ts'),
+      'utf8',
+    )
+
+    assert.match(preloadSource, /contentBase64\?: string/)
+    assert.match(mainSource, /contentBase64\?: string/)
+    assert.match(mainSource, /Buffer\.from\(payload\.contentBase64, 'base64'\)/)
+  })
+
+  it('writes widget_state into the saved widget fence content', () => {
+    const source = [
+      '```show-widget',
+      '{"title":"chart","widget_code":"<div>hello</div>"}',
+      '```',
+    ].join('\n')
+
+    const next = mergeWidgetStateMapIntoContent(source, {
+      [getWidgetPersistenceKey('chart', '<div>hello</div>')]: {
+        controls: [{ index: 0, tag: 'input', type: 'number', value: '42' }],
+        activeTargets: [{ attr: 'data-focus-target', value: 'next' }],
+      },
+    })
+
+    assert.match(next, /"widget_state":/)
+    assert.match(next, /"value":"42"/)
+    assert.match(next, /"data-focus-target"/)
   })
 })
