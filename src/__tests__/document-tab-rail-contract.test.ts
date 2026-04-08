@@ -27,7 +27,7 @@ test('document mode uses a browser-style document tab rail with hover hints and 
   assert.match(documentTabRail, /borderColor: isDragOver/)
   assert.match(documentTabRail, /boxShadow: isHovered/)
   assert.match(documentTabRail, /contentClassName="relative z-\[1\] flex min-w-0 flex-1 items-center justify-center"/)
-  assert.match(documentTabRail, /const leftReserve = tab\.dotColor \? 28 : 0/)
+  assert.match(documentTabRail, /const leftReserve = tab\.dotColor \? 32 : 0/)
   assert.match(documentTabRail, /className="flex min-w-0 items-center justify-center gap-\[6px\]"/)
   assert.match(documentTabRail, /maxWidth: `calc\(100% - \$\{leftReserve \+ rightReserve\}px\)`/)
   assert.match(documentTabRail, /marginLeft: leftReserve/)
