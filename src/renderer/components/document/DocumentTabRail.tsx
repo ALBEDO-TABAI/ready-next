@@ -138,6 +138,7 @@ export default function DocumentTabRail({
                 const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
                 const isHovered = hoveredTabId === tab.id
                 const isDragOver = dragOverIndex === index
+                const leftReserve = tab.dotColor ? 28 : 0
                 const rightReserve = onTabClose ? 28 : 0
 
                 return (
@@ -191,7 +192,8 @@ export default function DocumentTabRail({
                         <span
                           className="flex min-w-0 items-center justify-center gap-[6px]"
                           style={{
-                            maxWidth: `calc(100% - ${rightReserve}px)`,
+                            maxWidth: `calc(100% - ${leftReserve + rightReserve}px)`,
+                            marginLeft: leftReserve,
                             marginRight: rightReserve,
                           }}
                         >
