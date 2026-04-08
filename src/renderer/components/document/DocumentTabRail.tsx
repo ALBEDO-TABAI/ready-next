@@ -138,7 +138,7 @@ export default function DocumentTabRail({
                 const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
                 const isHovered = hoveredTabId === tab.id
                 const isDragOver = dragOverIndex === index
-                const leftReserve = tab.dotColor ? 32 : 0
+                const leftReserve = tab.dotColor ? 20 : 0
                 const rightReserve = onTabClose ? 28 : 0
 
                 return (
