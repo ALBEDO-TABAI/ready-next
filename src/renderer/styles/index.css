@@ -1150,13 +1150,17 @@ html[data-theme='dark'] .ready-app-bg {
 .resize-handle::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 24%;
+  bottom: 24%;
   left: -0.5px;
   width: 1px;
-  background: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 28%, transparent);
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, rgba(255, 255, 255, 0.28) 65%, transparent),
+    inset -1px 0 0 color-mix(in srgb, rgba(15, 23, 42, 0.18) 65%, transparent);
   transition: background 0.15s, opacity 0.15s;
-  opacity: 0;
+  opacity: 0.72;
 }
 
 .resize-handle::after {
@@ -1170,8 +1174,8 @@ html[data-theme='dark'] .ready-app-bg {
 
 .resize-handle:hover::before,
 .resize-handle.active::before {
-  background: var(--color-blue);
-  opacity: 1;
+  background: color-mix(in srgb, var(--text-gray) 38%, transparent);
+  opacity: 0.94;
 }
 
 /* Disable all transitions during panel resize drag */
@@ -2250,7 +2254,7 @@ html[data-skin='liquid-glass'] .morph-pill-secondary {
 
 html[data-skin='liquid-glass'] .resize-handle:hover,
 html[data-skin='liquid-glass'] .resize-handle.active {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-blue) 40%, transparent);
+  box-shadow: none;
 }
 
 /* TLDraw theme integration */
