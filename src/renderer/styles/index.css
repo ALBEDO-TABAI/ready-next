@@ -1161,7 +1161,7 @@ html[data-theme='dark'] .ready-app-bg {
     inset 1px 0 0 color-mix(in srgb, rgba(255, 255, 255, 0.28) 65%, transparent),
     inset -1px 0 0 color-mix(in srgb, rgba(15, 23, 42, 0.18) 65%, transparent);
   transition: background 0.15s, opacity 0.15s;
-  opacity: 0.72;
+  opacity: 0;
 }
 
 .resize-handle::after {

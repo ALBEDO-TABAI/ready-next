@@ -455,7 +455,7 @@ export default function MarkdownEditor({
                       onChange={handleRawEditorChange}
                       spellCheck={false}
                       aria-label="Markdown source editor"
-                      className="w-full min-h-full resize-none border-0 bg-transparent outline-none"
+                      className="w-full min-h-full resize-none border-0 bg-transparent outline-none ready-input-slot-inner"
                       style={{
                         minHeight: 'calc(100vh - 220px)',
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace',
