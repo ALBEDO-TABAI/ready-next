@@ -10,9 +10,12 @@ function readWorkspaceFile(path: string): string {
 test('workbench resize handle uses a short recessed dark groove instead of a full-height blue line', () => {
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
+  assert.match(styles, /\.resize-handle\s*\{[\s\S]*width:\s*6px;/)
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*top:\s*24%;/)
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*bottom:\s*24%;/)
-  assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*width:\s*1px;/)
+  assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*left:\s*50%;/)
+  assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*transform:\s*translateX\(-50%\);/)
+  assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*width:\s*3px;/)
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--text-gray\) 28%, transparent\);/)
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*box-shadow:[\s\S]*inset 1px 0 0/)
   assert.match(styles, /\.resize-handle:hover::before,\s*\.resize-handle.active::before\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--text-gray\) 38%, transparent\);/)
