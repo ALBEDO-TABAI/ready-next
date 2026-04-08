@@ -138,7 +138,7 @@ export default function DocumentTabRail({
                 const isSecondaryActive = Boolean(tab.secondaryActive) && !isActive
                 const isHovered = hoveredTabId === tab.id
                 const isDragOver = dragOverIndex === index
-                const leftReserve = tab.dotColor ? 20 : 0
+                const leftReserve = tab.dotColor ? 28 : 0
                 const rightReserve = onTabClose ? 28 : 0
 
                 return (
@@ -190,20 +190,13 @@ export default function DocumentTabRail({
                     >
                       <>
                         <span
-                          className="flex min-w-0 items-center justify-center gap-[6px]"
+                          className="flex min-w-0 items-center justify-center"
                           style={{
                             maxWidth: `calc(100% - ${leftReserve + rightReserve}px)`,
                             marginLeft: leftReserve,
                             marginRight: rightReserve,
                           }}
                         >
-                          {tab.dotColor ? (
-                            <span
-                              className="flex-shrink-0 rounded-full"
-                              style={{ width: 8, height: 8, background: tab.dotColor }}
-                            />
-                          ) : null}
-
                           <span
                             className="truncate flex-1 min-w-0"
                             style={{ lineHeight: '28px', color: isActive ? 'var(--text-title)' : isSecondaryActive ? 'var(--text-body)' : 'var(--text-gray)' }}
@@ -225,6 +218,18 @@ export default function DocumentTabRail({
                             title="Close"
                           >
                             <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                          </span>
+                        ) : null}
+
+                        {tab.dotColor ? (
+                          <span
+                            className="absolute left-[8px] top-1/2 flex items-center justify-center"
+                            style={{ width: 18, height: 18, transform: 'translateY(-50%)' }}
+                          >
+                            <span
+                              className="flex-shrink-0 rounded-full"
+                              style={{ width: 8, height: 8, background: tab.dotColor }}
+                            />
                           </span>
                         ) : null}
                       </>
