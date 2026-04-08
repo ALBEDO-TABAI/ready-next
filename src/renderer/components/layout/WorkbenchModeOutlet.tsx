@@ -24,6 +24,7 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
 }
 
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
+const ALWAYS_PREPARED_WORKBENCH_MODES: WorkbenchMode[] = ['rss']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
 let hasPreloadedWorkbenchModes = false
 
@@ -81,6 +82,8 @@ export default function WorkbenchModeOutlet({
 
           // 相邻模式视为"即将激活"，提前准备
           const isAdjacent = Math.abs(index - activeIndex) <= 1
+          const shouldKeepPrepared = ALWAYS_PREPARED_WORKBENCH_MODES.includes(modeKey)
+          const shouldPrepare = isAdjacent || shouldKeepPrepared
 
           return (
             <div
@@ -88,10 +91,10 @@ export default function WorkbenchModeOutlet({
               className="h-full w-full flex-shrink-0 flex-grow-0 overflow-hidden"
               style={{
                 // 非当前模式降低渲染优先级
-                contentVisibility: isAdjacent ? 'auto' : 'hidden',
+                contentVisibility: shouldPrepare ? 'auto' : 'hidden',
                 contain: 'strict',
                 // 关键修复：非激活模式完全隐藏，防止视觉残留（如 document-path-bar）
-                visibility: isActive ? 'visible' : 'hidden',
+                visibility: shouldPrepare ? 'visible' : 'hidden',
                 pointerEvents: isActive ? 'auto' : 'none',
               }}
               data-workbench-mode-panel={modeKey}

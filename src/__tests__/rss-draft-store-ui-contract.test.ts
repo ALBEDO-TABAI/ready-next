@@ -9,10 +9,11 @@ function readWorkspaceFile(path: string): string {
 
 test('rss mode clears only inbox items while preserving starred entries and supports explicit single-item removal', () => {
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
+  const rssWarmLoader = readWorkspaceFile('src/renderer/modules/rss/rssWarmLoader.ts')
 
   assert.match(rssMode, /preserveStarred:\s*true/)
   assert.match(rssMode, /preserveStarred:\s*false/)
-  assert.match(rssMode, /inboxVisible:\s*item\.inboxVisible \?\? true/)
+  assert.match(rssWarmLoader, /inboxVisible:\s*item\.inboxVisible \?\? true/)
 })
 
 test('settings exposes an rss draft-store management section with reset controls', () => {

@@ -7,8 +7,12 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useTheme } from './stores/useTheme'
 import { initAgentListeners } from './stores/useAgent'
+import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
+import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
+
+void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function App() {
   useKeyboardShortcuts()
@@ -32,6 +36,10 @@ function App() {
   useEffect(() => {
     const cleanup = initAgentListeners()
     return cleanup
+  }, [])
+
+  useEffect(() => {
+    void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
   }, [])
 
   return (

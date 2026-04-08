@@ -6,6 +6,8 @@ import AddSourceModal from '../../components/rss/AddSourceModal'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
+import { fetchRSSWarmSnapshot } from '../../modules/rss/rssWarmLoader'
+import { getRSSWarmCache, primeRSSWarmCache, setRSSWarmCache } from '../../modules/rss/rssWarmCache'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
@@ -66,10 +68,18 @@ interface AddSourceDraftState {
   browserPresetLabel: string | null
 }
 
+interface RSSModeSnapshot {
+  items: RSSItem[]
+  sources: RSSSource[]
+  isMock: boolean
+  fetchedAt: number
+}
+
 export default function RSSMode({
   isActive = true,
   isMotionSettled = true,
 }: RSSModeProps) {
+  const initialWarmCache = useMemo(() => getRSSWarmCache(), [])
   const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
   const setSelection = useRSSSession((state) => state.setSelection)
@@ -77,13 +87,13 @@ export default function RSSMode({
   const browserTabs = useBrowserTabs((state) => state.tabs)
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
   const selectedSource = selectedSourceId
-  const [items, setItems] = useState<RSSItem[]>([])
-  const [sources, setSources] = useState<RSSSource[]>([])
+  const [items, setItems] = useState<RSSItem[]>(() => initialWarmCache?.items || [])
+  const [sources, setSources] = useState<RSSSource[]>(() => initialWarmCache?.sources || [])
   const [selectedItem, setSelectedItem] = useState<RSSItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'unread' | 'starred'>('all')
-  const [isMock, setIsMock] = useState(false)
+  const [isMock, setIsMock] = useState(() => initialWarmCache?.isMock || false)
   const [error, setError] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [addSourceDraft, setAddSourceDraft] = useState<AddSourceDraftState>({
@@ -97,8 +107,8 @@ export default function RSSMode({
   const [backgroundWarning, setBackgroundWarning] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
-  const [hasHydrated, setHasHydrated] = useState(false)
-  const previousItemIdsRef = useRef<Set<string>>(new Set())
+  const [hasHydrated, setHasHydrated] = useState(() => Boolean(initialWarmCache))
+  const previousItemIdsRef = useRef<Set<string>>(new Set(initialWarmCache?.items.map((item) => item.id) || []))
   const sourcesRef = useRef<RSSSource[]>([])
   const becameVisibleRef = useRef(false)
   const lastModalActionKeyRef = useRef<string | null>(null)
@@ -145,113 +155,78 @@ export default function RSSMode({
     sourcesRef.current = sources
   }, [sources])
 
-  const loadRSSData = useCallback(async () => {
-    setLoading(true)
+  const applyRSSSnapshot = useCallback((snapshot: RSSModeSnapshot) => {
+    setItems(snapshot.items)
+    setSources(snapshot.sources)
+    setIsMock(snapshot.isMock)
+    previousItemIdsRef.current = new Set(snapshot.items.map((item) => item.id))
+  }, [])
+
+  const loadRSSSnapshot = useCallback(async () => {
+    try {
+      return await fetchRSSWarmSnapshot()
+    } catch (err) {
+      throw (err instanceof Error ? err : new Error('加载 RSS 数据时发生错误'))
+    }
+  }, [])
+
+  const loadRSSData = useCallback(async (options?: { background?: boolean }) => {
+    if (!options?.background) {
+      setLoading(true)
+    }
     setError(null)
     try {
-      if (typeof window !== 'undefined' && window.electronAPI) {
-        const result = await window.electronAPI.rss.getItems()
-        if (result.success === false) {
-          setError(result.error || '获取 RSS 项目失败')
-          setItems([])
-        } else if (result.data) {
-          const newItems: RSSItem[] = result.data.map((item) => ({
-            id: item.id,
-            sourceId: item.sourceId,
-            title: item.title,
-            link: item.link,
-            summary: item.summary ?? '',
-            author: item.author ?? '',
-            source: item.source ?? '',
-            publishedAt: item.publishedAt ? new Date(item.publishedAt).toLocaleString() : '',
-            inboxVisible: item.inboxVisible ?? true,
-            read: item.read,
-            starred: item.starred,
-            coverImage: item.coverImage ?? undefined,
-          }))
+      const snapshot = await loadRSSSnapshot()
 
-          // Track newly arrived items
-          if (previousItemIdsRef.current.size > 0) {
-            const freshIds = new Set<string>()
-            for (const item of newItems) {
-              if (!previousItemIdsRef.current.has(item.id)) {
-                freshIds.add(item.id)
-              }
-            }
-            if (freshIds.size > 0) {
-              setNewItemIds(freshIds)
-              // Clear new indicator after 30 seconds
-              setTimeout(() => setNewItemIds(new Set()), 30000)
-            }
-          }
-          previousItemIdsRef.current = new Set(newItems.map(i => i.id))
-          setItems(newItems)
-          setIsMock(result.mock || false)
-
-          // Compute source counts from actual unread items
-          const sourcesResult = await window.electronAPI.rss.getSources()
-          if (sourcesResult.success === false) {
-            setError(prev => prev || sourcesResult.error || '获取 RSS 源失败')
-            setSources([])
-          } else if (sourcesResult.data) {
-            const unreadCounts = computeUnreadCounts(newItems)
-            setSources(sourcesResult.data.map((s) => ({
-              id: s.id,
-              name: s.name,
-              count: unreadCounts.get(s.id) ?? 0,
-              platform: s.platform,
-              url: s.url,
-            })))
-          }
-        } else {
-          // No data but success — load sources anyway
-          const sourcesResult = await window.electronAPI.rss.getSources()
-          if (sourcesResult.success !== false && sourcesResult.data) {
-            setSources(sourcesResult.data.map((s) => ({
-              id: s.id,
-              name: s.name,
-              count: 0,
-              platform: s.platform,
-              url: s.url,
-            })))
+      if (previousItemIdsRef.current.size > 0) {
+        const freshIds = new Set<string>()
+        for (const item of snapshot.items) {
+          if (!previousItemIdsRef.current.has(item.id)) {
+            freshIds.add(item.id)
           }
         }
-      } else {
-        setIsMock(true)
-        setItems([
-          {
-            id: '1', sourceId: '1', title: 'AI 创作工具的下一个十年',
-            link: 'https://36kr.com/p/123456', summary: '探讨 AI 如何改变内容创作行业...',
-            author: '',
-            source: '36氪', publishedAt: new Date(Date.now() - 3600000).toLocaleString(),
-            inboxVisible: true,
-            read: false, starred: false,
-          },
-          {
-            id: '2', sourceId: '2', title: '自媒体运营的核心方法论',
-            link: 'https://www.huxiu.com/article/789', summary: '从 0 到 1 打造个人 IP 的实战经验...',
-            author: '',
-            source: '虎嗅', publishedAt: new Date(Date.now() - 7200000).toLocaleString(),
-            inboxVisible: true,
-            read: false, starred: true,
-          },
-        ])
-        setSources([
-          { id: '1', name: '36氪', count: 15 },
-          { id: '2', name: '虎嗅', count: 12 },
-        ])
-        previousItemIdsRef.current = new Set(['1', '2'])
+        if (freshIds.size > 0) {
+          setNewItemIds(freshIds)
+          setTimeout(() => setNewItemIds(new Set()), 30000)
+        }
       }
+
+      applyRSSSnapshot(snapshot)
+      setRSSWarmCache(snapshot)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '加载 RSS 数据时发生错误'
       console.log('RSS data load error:', err)
       setError(errorMessage)
-      setItems([])
-      setSources([])
+      if (!options?.background) {
+        setItems([])
+        setSources([])
+      }
     } finally {
-      setLoading(false)
+      if (!options?.background) {
+        setLoading(false)
+      }
     }
-  }, [computeUnreadCounts])
+  }, [applyRSSSnapshot, loadRSSSnapshot])
+
+  const warmRefreshRSSData = useCallback(() => {
+    void loadRSSData({ background: true })
+  }, [loadRSSData])
+
+  useEffect(() => {
+    let cancelled = false
+    void primeRSSWarmCache(loadRSSSnapshot)
+      .then((snapshot) => {
+        if (cancelled) return
+        applyRSSSnapshot(snapshot)
+        if (!hasHydrated) {
+          setHasHydrated(true)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [applyRSSSnapshot, hasHydrated, loadRSSSnapshot])
 
   useEffect(() => {
     if (!isActive) {
@@ -264,6 +239,15 @@ export default function RSSMode({
     let cancelled = false
 
     const syncVisibleData = async () => {
+      const cachedSnapshot = getRSSWarmCache()
+      if (cachedSnapshot) {
+        applyRSSSnapshot(cachedSnapshot)
+        if (!cancelled && !hasHydrated) {
+          setHasHydrated(true)
+        }
+        warmRefreshRSSData()
+        return
+      }
       await loadRSSData()
       if (!cancelled && !hasHydrated) {
         setHasHydrated(true)
@@ -274,7 +258,7 @@ export default function RSSMode({
     return () => {
       cancelled = true
     }
-  }, [hasHydrated, isActive, loadRSSData])
+  }, [applyRSSSnapshot, hasHydrated, isActive, loadRSSData])
 
   const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
     if (!window.electronAPI?.rss?.getItemAnalysisProgress) return true
@@ -702,7 +686,9 @@ export default function RSSMode({
           <h3 className="text-[16px] font-semibold text-[var(--text-title)] mb-2">加载失败</h3>
           <p className="text-[13px] text-[var(--text-muted)] mb-4 max-w-[300px]">{error}</p>
           <button
-            onClick={loadRSSData}
+            onClick={() => {
+              void loadRSSData()
+            }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[13px] hover:brightness-95 transition-all"
           >
             <RefreshCw className="w-4 h-4" />

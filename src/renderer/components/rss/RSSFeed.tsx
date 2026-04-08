@@ -283,10 +283,11 @@ export default function RSSFeed({
     flexShrink: 0,
   } as const
   const taskCountLabel = activeJobsCount > 99 ? '99+' : String(activeJobsCount)
+  const shouldShowBootstrapSkeleton = loading && filteredItems.length === 0
 
   return (
     <div
-      className="rss-feed-surface rss-workbench-surface content-surface-panel flex flex-col h-full"
+      className="rss-feed-surface content-surface-panel rss-workbench-surface flex flex-col h-full"
       style={{ padding: '0', background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
     >
       {/* Header Bar */}
@@ -582,7 +583,52 @@ export default function RSSFeed({
         style={{ background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))' }}
       >
         <div className="divide-y divide-[var(--border-default)]">
-          {filteredItems.length === 0 ? (
+          {shouldShowBootstrapSkeleton ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={`rss-skeleton-${index}`}
+                style={{
+                  padding: `12px ${WORKBENCH_HEADER_EDGE_X}px`,
+                  display: 'grid',
+                  gap: 10,
+                  opacity: 0.92,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${72 + (index % 3) * 8}px`,
+                    height: 10,
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 42%, transparent)',
+                  }}
+                />
+                <div
+                  style={{
+                    width: `${58 + (index % 2) * 14}%`,
+                    height: 14,
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 58%, transparent)',
+                  }}
+                />
+                <div
+                  style={{
+                    width: `${82 + (index % 2) * 8}%`,
+                    height: 11,
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 36%, transparent)',
+                  }}
+                />
+                <div
+                  style={{
+                    width: `${65 + (index % 3) * 6}%`,
+                    height: 11,
+                    borderRadius: 999,
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 36%, transparent)',
+                  }}
+                />
+              </div>
+            ))
+          ) : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
               <Filter className="w-10 h-10 mb-3 opacity-50" />
               <p className="text-[13px]">暂无内容</p>

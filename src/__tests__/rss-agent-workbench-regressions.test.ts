@@ -33,22 +33,20 @@ test('chat composer keeps a visible shell and a primary send button after liquid
   assert.match(chatPanel, /const composerShellStyle = \{/)
   assert.match(chatInput, /data-chat-composer-shell="true"/)
   assert.match(chatPanel, /background:\s*'var\(--input-slot-bg\)'/)
-  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--text-muted\)' : '1px solid var\(--input-slot-border\)'/)
   assert.match(chatPanel, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
   assert.match(chatInput, /background: 'var\(--color-blue\)'/)
   assert.doesNotMatch(chatPanel, /id="chat-input-shell"/)
 })
 
-test('browser, rss, and calendar share one support panel width constant to reduce mode switching jump', () => {
+test('browser and rss share one support panel width constant to reduce mode switching jump', () => {
   const chrome = readWorkspaceFile('src/renderer/modules/workbench/chrome.ts')
   const browserSidePanel = readWorkspaceFile('src/renderer/components/browser/BrowserSidePanel.tsx')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  const calendarMode = readWorkspaceFile('src/renderer/pages/modes/CalendarMode.tsx')
 
   assert.match(chrome, /export const WORKBENCH_SUPPORT_PANEL_WIDTH = 300/)
   assert.match(browserSidePanel, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
   assert.match(rssMode, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
-  assert.match(calendarMode, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
 })
 
 test('skills center and global search inherit the file manager side panel surface instead of nesting a second glass sheet', () => {

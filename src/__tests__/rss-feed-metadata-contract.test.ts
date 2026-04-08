@@ -8,11 +8,11 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('rss feed and preview show optional author metadata between source and publish time', () => {
-  const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
+  const rssWarmLoader = readWorkspaceFile('src/renderer/modules/rss/rssWarmLoader.ts')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
   const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
 
-  assert.match(rssMode, /author:\s*item\.author \?\? ''/)
+  assert.match(rssWarmLoader, /author:\s*item\.author \?\? ''/)
   assert.match(rssFeed, /author:\s*string/)
   assert.match(rssFeed, /item\.author && item\.author !== item\.source/)
   assert.match(previewBrowser, /item\.author && item\.author !== item\.source/)
