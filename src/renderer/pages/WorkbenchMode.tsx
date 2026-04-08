@@ -95,7 +95,6 @@ export default function WorkbenchMode() {
   // D方案：仅用于控制 BrowserView 的显示时机
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const transitionTimerRef = useRef<number | null>(null)
-  const pendingWorkbenchModeRef = useRef<WorkbenchModeType | null>(null)
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
 
   useEffect(() => {
@@ -196,11 +195,7 @@ export default function WorkbenchMode() {
       setWorkbenchMode(nextMode)
       return
     }
-
-    if (!isMotionSettled) {
-      pendingWorkbenchModeRef.current = nextMode
-      return
-    }
+    const isRedirectingDuringMotion = !isMotionSettled
 
     // 清除之前的定时器
     if (transitionTimerRef.current) {
@@ -209,12 +204,14 @@ export default function WorkbenchMode() {
     }
 
     // 关键修复：如果当前是 browser 模式，先触发截图保存当前画面
-    if (transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
+    if (!isRedirectingDuringMotion && transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
       window.dispatchEvent(new CustomEvent('ready:browser-capture-freeze'))
     }
 
     // 开始过渡：先标记为未稳定（BrowserView 等需要暂停更新）
-    setIsMotionSettled(false)
+    if (!isRedirectingDuringMotion) {
+      setIsMotionSettled(false)
+    }
 
     // 执行模式切换
     transitionTargetModeRef.current = nextMode
@@ -222,14 +219,6 @@ export default function WorkbenchMode() {
 
     // 过渡结束后标记为稳定
     transitionTimerRef.current = window.setTimeout(() => {
-      const queuedMode = pendingWorkbenchModeRef.current
-      if (queuedMode && queuedMode !== transitionTargetModeRef.current) {
-        pendingWorkbenchModeRef.current = null
-        transitionTimerRef.current = null
-        handleWorkbenchModeChange(queuedMode)
-        return
-      }
-      pendingWorkbenchModeRef.current = null
       setIsMotionSettled(true)
       transitionTimerRef.current = null
     }, MODE_TRANSITION_DURATION_MS)
@@ -241,7 +230,6 @@ export default function WorkbenchMode() {
       if (transitionTimerRef.current) {
         window.clearTimeout(transitionTimerRef.current)
       }
-      pendingWorkbenchModeRef.current = null
     }
   }, [])
 
