@@ -10,6 +10,7 @@ import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
+import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { readStorage } from '../utils/storage'
 
@@ -235,6 +236,19 @@ export default function WorkbenchMode() {
       void window.electronAPI?.browser.hideAll()
     }
   }, [])
+
+  useEffect(() => {
+    const handleExternalWorkbenchModeChange = (event: Event) => {
+      const nextMode = (event as CustomEvent<{ mode?: WorkbenchModeType }>).detail?.mode
+      if (!nextMode) return
+      handleWorkbenchModeChange(nextMode)
+    }
+
+    window.addEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener)
+    return () => {
+      window.removeEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener)
+    }
+  }, [handleWorkbenchModeChange])
 
   useEffect(() => {
     const handlePanelShortcut = (event: KeyboardEvent) => {

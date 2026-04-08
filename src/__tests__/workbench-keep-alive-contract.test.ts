@@ -11,6 +11,8 @@ test('workbench outlet keeps all modes mounted in one horizontal strip and gates
   const outlet = readWorkspaceFile('src/renderer/components/layout/WorkbenchModeOutlet.tsx')
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+  const keyboardShortcuts = readWorkspaceFile('src/renderer/hooks/useKeyboardShortcuts.ts')
+  const modeTransition = readWorkspaceFile('src/renderer/modules/workbench/mode-transition.ts')
 
   assert.match(outlet, /const ALL_WORKBENCH_MODES: WorkbenchMode\[\] = \['browser', 'document', 'rss', 'calendar'\]/)
   assert.match(outlet, /const ALL_MODE_LOADERS = \[loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode\]/)
@@ -39,7 +41,13 @@ test('workbench outlet keeps all modes mounted in one horizontal strip and gates
   assert.match(workbenchMode, /setWorkbenchMode\(nextMode\)/)
   assert.match(workbenchMode, /transitionTimerRef\.current = window\.setTimeout\(\(\) => \{[\s\S]*setIsMotionSettled\(true\)/)
   assert.match(workbenchMode, /if \(transitionTimerRef\.current\) \{[\s\S]*window\.clearTimeout\(transitionTimerRef\.current\)/)
+  assert.match(workbenchMode, /READY_WORKBENCH_MODE_CHANGE_EVENT/)
+  assert.match(workbenchMode, /window\.addEventListener\(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener\)/)
   assert.match(workbenchMode, /<WorkbenchModeOutlet mode=\{workbenchMode\} isMotionSettled=\{isMotionSettled\} \/>/)
+  assert.match(modeTransition, /export const READY_WORKBENCH_MODE_CHANGE_EVENT = 'ready:workbench-mode-change-request'/)
+  assert.match(modeTransition, /requestWorkbenchModeChange/)
+  assert.match(keyboardShortcuts, /requestWorkbenchModeChange\(mode\)/)
+  assert.match(keyboardShortcuts, /if \(appMode === 'workbench'\)/)
 })
 
 test('workbench shell hides all browser hosts whenever browser is outside the visible mode set and on unmount', () => {

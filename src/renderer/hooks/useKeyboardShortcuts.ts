@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useDocTabs } from '../stores/useDocTabs'
+import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
 
 type ShortcutLikeEvent = {
   key: string
@@ -18,7 +19,7 @@ type ShortcutLikeEvent = {
  */
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
-  const { setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
+  const { appMode, setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
   const { toggleSidebar } = useWorkspace()
 
   const saveActiveDocument = useCallback(async () => {
@@ -47,11 +48,15 @@ export function useKeyboardShortcuts() {
   }, [])
 
   const activateWorkbenchMode = useCallback((mode: WorkbenchMode) => {
-    setWorkbenchMode(mode)
     setReadySubMode(mode)
     setAppMode('workbench')
     navigate('/workbench')
-  }, [navigate, setAppMode, setReadySubMode, setWorkbenchMode])
+    if (appMode === 'workbench') {
+      requestWorkbenchModeChange(mode)
+      return
+    }
+    setWorkbenchMode(mode)
+  }, [appMode, navigate, setAppMode, setReadySubMode, setWorkbenchMode])
 
   const handleShortcut = useCallback((e: ShortcutLikeEvent) => {
     const meta = Boolean(e.metaKey) || Boolean(e.ctrlKey)
