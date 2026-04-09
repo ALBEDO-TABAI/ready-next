@@ -91,6 +91,13 @@
 - skills center 已新增 Recent Executions 和 blocker 继续入口
 - direct-chat 已加入视频输入下的 skill/python tools 保留策略，以及 OpenAI tool history repair
 
+10. Browser-agent 主链已开始进入统一运行时阶段（2026-04-08）。
+- 新增 `browser-task-planner`，浏览器任务识别与连续性合流不再只从 `direct-chat.ts` 内部推进。
+- 新增 `agent-runtime-adapter / page-state-service / evidence-service`。
+- `BrowserAgentRunner` 已开始复用统一页面身份与统一证据判断。
+- 浏览器任务现在可输出结构化 task payload，并映射为 `scopeRunEvent` 的显式任务字段。
+- renderer 侧 `scopeRunState` 已支持优先消费浏览器结构化任务字段。
+
 ## 当前最高优先级
 1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
 

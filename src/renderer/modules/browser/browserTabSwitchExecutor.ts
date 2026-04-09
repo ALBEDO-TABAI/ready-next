@@ -34,19 +34,31 @@ export function createBrowserTabSwitchExecutor({
   sequencer,
 }: CreateBrowserTabSwitchExecutorParams) {
   return async (tabId: string): Promise<boolean> => {
-    const { activeTabId } = getState()
+    const { activeTabId, tabs } = getState()
     if (tabId === activeTabId) return false
+    const previousActiveTabId = activeTabId
+    const previousActiveTab = tabs.find((item) => item.id === previousActiveTabId) || null
+    const nextTab = tabs.find((item) => item.id === tabId) || null
+
+    setActiveTabId(tabId)
+    setUrlInput(nextTab?.url === DEFAULT_BROWSER_URL ? '' : nextTab?.url || '')
 
     const activationToken = sequencer.begin()
     const result = await switchTab(tabId)
-    if (!result?.success || !sequencer.isCurrent(activationToken)) {
+    if (!result?.success) {
+      if (sequencer.isCurrent(activationToken) && previousActiveTabId) {
+        setActiveTabId(previousActiveTabId)
+        setUrlInput(previousActiveTab?.url === DEFAULT_BROWSER_URL ? '' : previousActiveTab?.url || '')
+      }
       return false
     }
 
-    const { tabs } = getState()
-    const tab = tabs.find((item) => item.id === tabId)
+    if (!sequencer.isCurrent(activationToken)) {
+      return false
+    }
 
-    setActiveTabId(tabId)
+    const tab = getState().tabs.find((item) => item.id === tabId)
+
     setUrlInput(result.url === DEFAULT_BROWSER_URL ? '' : result.url || tab?.url || '')
     updateTab(tabId, {
       url: result.url || tab?.url || '',

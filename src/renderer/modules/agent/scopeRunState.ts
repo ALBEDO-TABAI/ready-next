@@ -607,6 +607,15 @@ export function deriveScopeRunStatePatch(
   event: {
     phase: ScopeRunState['phase']
     latestText?: string
+    taskTitle?: string | null
+    taskSummary?: string | null
+    steps?: Array<Record<string, unknown>>
+    currentStepId?: string | null
+    waitingFor?: ScopeRunWaitingFor
+    resumableActions?: ScopeRunResumableAction[]
+    recentArtifacts?: Array<Record<string, unknown>>
+    taskContinuation?: ScopeRunTaskContinuation | Record<string, unknown> | null
+    memoryCapture?: ScopeRunMemoryCapture | Record<string, unknown> | null
     memoryRefs?: AgentMemoryRef[]
     triggerHits?: AgentTriggerHit[]
     contextBudget?: AgentContextBudget | null
@@ -637,18 +646,37 @@ export function deriveScopeRunStatePatch(
     : []
   const structuredTriggerHits = triggerInputs.map(createTriggerHit).filter(Boolean) as AgentTriggerHit[]
   const structuredBudget = parseContextBudget(structuredPayload?.contextBudget)
-  const structuredTaskTitle = typeof structuredPayload?.taskTitle === 'string' ? structuredPayload.taskTitle : null
-  const structuredTaskSummary = typeof structuredPayload?.taskSummary === 'string' ? structuredPayload.taskSummary : null
-  const structuredSteps = normalizeTaskSteps(structuredPayload?.steps, event.timestamp)
-  const structuredWaitingFor = normalizeWaitingFor(structuredPayload?.waitingFor)
-  const structuredResumableActions = normalizeResumableActions(structuredPayload?.resumableActions)
+  const structuredTaskTitle = typeof structuredPayload?.taskTitle === 'string'
+    ? structuredPayload.taskTitle
+    : typeof event.taskTitle === 'string'
+      ? event.taskTitle
+      : null
+  const structuredTaskSummary = typeof structuredPayload?.taskSummary === 'string'
+    ? structuredPayload.taskSummary
+    : typeof event.taskSummary === 'string'
+      ? event.taskSummary
+      : null
+  const structuredSteps = normalizeTaskSteps(
+    Array.isArray(structuredPayload?.steps) ? structuredPayload.steps : event.steps,
+    event.timestamp,
+  )
+  const structuredWaitingFor = normalizeWaitingFor(
+    structuredPayload?.waitingFor !== undefined ? structuredPayload.waitingFor : event.waitingFor,
+  )
+  const structuredResumableActions = normalizeResumableActions(
+    Array.isArray(structuredPayload?.resumableActions) ? structuredPayload.resumableActions : event.resumableActions,
+  )
   const structuredRecentArtifacts = Array.isArray(structuredPayload?.recentArtifacts)
     ? (structuredPayload.recentArtifacts as Array<Record<string, unknown>>)
       .map((item) => createAgentArtifact(item, structuredModule || previous?.module || 'system', previous?.requestId || null))
       .filter(Boolean) as AgentArtifact[]
+    : Array.isArray(event.recentArtifacts)
+      ? event.recentArtifacts
+        .map((item) => createAgentArtifact(item as Record<string, unknown>, structuredModule || previous?.module || 'system', previous?.requestId || null))
+        .filter(Boolean) as AgentArtifact[]
     : []
-  const structuredContinuation = parseTaskContinuation(structuredPayload?.taskContinuation)
-  const structuredMemoryCapture = parseMemoryCapture(structuredPayload?.memoryCapture)
+  const structuredContinuation = parseTaskContinuation(structuredPayload?.taskContinuation || event.taskContinuation)
+  const structuredMemoryCapture = parseMemoryCapture(structuredPayload?.memoryCapture || event.memoryCapture)
   const browserTaskPatch = event.toolEvent?.kind === 'result' && event.toolEvent.text
     ? parseBrowserWorkflowTask(event.toolEvent.text, previous, event.timestamp)
     : null
@@ -728,7 +756,11 @@ export function deriveScopeRunStatePatch(
         ? structuredSteps
         : (skillTaskPatch?.steps || browserTaskPatch?.steps),
     ),
-    currentStepId: (typeof structuredPayload?.currentStepId === 'string' ? structuredPayload.currentStepId : null)
+    currentStepId: (typeof structuredPayload?.currentStepId === 'string'
+      ? structuredPayload.currentStepId
+      : typeof event.currentStepId === 'string'
+        ? event.currentStepId
+        : null)
       || skillTaskPatch?.currentStepId
       || browserTaskPatch?.currentStepId
       || previous?.currentStepId

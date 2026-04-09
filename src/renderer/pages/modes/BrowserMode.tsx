@@ -318,10 +318,10 @@ export default function BrowserMode({
       if (cancelled) return
       const hostHasVisibleFrame = await captureStableFrame()
       if (cancelled) return
-        if (hostHasVisibleFrame) {
-          setIsBrowserSurfaceReady(true)
-          return
-        }
+      if (hostHasVisibleFrame) {
+        setIsBrowserSurfaceReady(true)
+        return
+      }
       clearSurfaceReadyTimer()
       surfaceReadyTimerRef.current = window.setTimeout(() => {
         if (cancelled) return
@@ -330,13 +330,13 @@ export default function BrowserMode({
       }, 48)
     }
 
-        void syncVisibleHost().catch(() => undefined)
+    void syncVisibleHost().catch(() => undefined)
 
-        return () => {
-          cancelled = true
-          clearStartupHostResyncTimer()
-          clearSurfaceReadyTimer()
-        }
+    return () => {
+      cancelled = true
+      clearStartupHostResyncTimer()
+      clearSurfaceReadyTimer()
+    }
   }, [activeTabId, browserRuntimeReady, clearStartupHostResyncTimer, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {

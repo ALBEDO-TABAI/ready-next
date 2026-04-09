@@ -129,6 +129,20 @@ Ready 采用 Electron 三层架构：
 ### 6.4 连续性上下文
 系统会把近期浏览器动作、上次技能运行、当前页面状态、会话附件等注入到 planner / tool loop，目标是减少重复搜索、重复跳转、重复上传。
 
+### 6.5 浏览器运行时统一层
+- 浏览器主链现在开始收口为统一运行时合同，而不再只靠 `direct-chat`、`browser-agent-runner`、`browser-tools` 各自维护页面理解。
+- 当前新增的统一层包括：
+  - `agent-runtime-adapter`
+  - `page-state-service`
+  - `evidence-service`
+  - `browser-task-planner`
+- `BrowserAgentRunner` 仍保留 Browser Agent V7 的阶段式执行，但页面身份和证据判断已开始复用统一层。
+
+### 6.6 浏览器任务结构化投影
+- 浏览器 runner 现在支持输出结构化浏览器任务 payload。
+- 主进程会把结构化字段映射进 `scopeRunEvent.taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts`。
+- renderer 侧 `scopeRunState` 已优先消费这些显式字段，减少对阶段文本解析的依赖。
+
 ## 7. 会话 Scope 与远程 IM
 ### 7.1 Scope 粒度
 会话按“来源频道 + 线程/本地 conversation + agent”隔离。

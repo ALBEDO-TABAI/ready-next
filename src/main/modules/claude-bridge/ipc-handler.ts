@@ -772,23 +772,44 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   })
 
   // Forward Claude SDK orchestrator events to renderer
+  const parseStructuredScopeProjection = (text: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(String(text || ''))
+      if (!parsed || typeof parsed !== 'object') return null
+      if ((parsed as Record<string, unknown>).module !== 'browser') return null
+      return parsed as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+
   orchestrator.on('output', (data) => {
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:stream', data)
       if (data.sessionId) {
         const timestamp = new Date().toISOString()
         if (data.type === 'tool_use' || data.type === 'tool_result') {
+          const structured = data.type === 'tool_result' ? parseStructuredScopeProjection(data.chunk || '') : null
+          const toolText = typeof structured?.message === 'string' ? structured.message : (data.chunk || '')
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
             agent: data.agent,
             runId: data.runId,
             phase: 'tool_running',
-            latestText: data.chunk || '',
+            latestText: toolText,
+            module: structured?.module === 'browser' ? 'browser' : undefined,
+            taskTitle: typeof structured?.taskTitle === 'string' ? structured.taskTitle : undefined,
+            taskSummary: typeof structured?.taskSummary === 'string' ? structured.taskSummary : undefined,
+            steps: Array.isArray(structured?.steps) ? structured.steps : undefined,
+            currentStepId: typeof structured?.currentStepId === 'string' ? structured.currentStepId : undefined,
+            waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as any : undefined,
+            resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as any : undefined,
+            recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             toolEvent: {
               id: `${data.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               kind: data.type === 'tool_use' ? 'call' : 'result',
-              text: data.chunk || '',
+              text: toolText,
               timestamp,
             },
             timestamp,

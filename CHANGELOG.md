@@ -30,6 +30,12 @@
 - ChatPanel 新增 `当前任务 / 后台任务` 两块任务视图，tool trace 胶囊退居技术细节抽屉
 - workflow skill blocker 现在会映射成聊天里的等待态，并提供继续、确认、撤销、补充等入口
 
+#### Browser-Agent 统一运行时
+- 新增 `browser-task-planner`，统一浏览器任务识别、连续性合流和执行路径选择
+- 新增 `agent-runtime-adapter / page-state-service / evidence-service`，开始收口浏览器运行时、页面状态和证据判断
+- `BrowserAgentRunner` 已开始复用统一页面身份与证据服务，不再只靠内部私有判断
+- 浏览器 runner 现在会输出结构化 task payload；主进程会把这些字段映射进 `scopeRunEvent`，renderer 侧优先消费显式任务字段
+
 #### 保守自动记忆沉淀
 - ReflectionService 改为保守模式：只自动写入 `user_preference` 与 `summary`
 - 自动写入会先做重复检查，不再把 `global_fact` 当作默认沉淀目标

@@ -3,6 +3,10 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import { rememberBrowserWorkflowState } from '../agent-control/session-continuity'
 import { executeBrowserTool } from './browser-tools'
 import { getLogPath } from '../../utils/platform'
+import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
+import { BrowserPageStateService } from '../browser-engine/page-state-service'
+import { BrowserEvidenceService } from '../browser-engine/evidence-service'
+import type { BrowserTaskProjectionPayload } from '../../../shared/browser-agent-task'
 
 type BrowserAgentSessionState =
   | 'queued'
@@ -267,6 +271,9 @@ function uniqueEvidence(items: string[]): string[] {
 
 export class BrowserAgentRunner {
   private readonly controller: BrowserController
+  private readonly runtime: BrowserAgentRuntimeAdapter
+  private readonly pageStateService: BrowserPageStateService
+  private readonly evidenceService: BrowserEvidenceService
   private readonly abortSignal?: AbortSignal
   private readonly sessionId?: string
   private readonly decision?: BrowserTaskDecisionLike
@@ -284,6 +291,9 @@ export class BrowserAgentRunner {
 
   constructor(controller: BrowserController, options?: BrowserAgentRunnerOptions) {
     this.controller = controller
+    this.runtime = new BrowserAgentRuntimeAdapter(controller)
+    this.pageStateService = new BrowserPageStateService(this.runtime)
+    this.evidenceService = new BrowserEvidenceService()
     this.abortSignal = options?.abortSignal
     this.sessionId = options?.sessionId
     this.decision = options?.decision
@@ -314,6 +324,94 @@ export class BrowserAgentRunner {
     const stepPrefix = stepIndex >= 0 ? `步骤 ${stepIndex + 1}/${planSteps.length} ` : ''
     log(`[browser-v7][stage] ${stage} ${message}`)
     this.emitToolEvent?.('tool_result', `[阶段] ${stepPrefix}${labels[stage]}：${message}`)
+  }
+
+  private emitTaskProjectionPayload(payload: BrowserTaskProjectionPayload): void {
+    this.emitToolEvent?.('tool_result', JSON.stringify(payload))
+  }
+
+  private buildInitialTaskProjectionPayload(plan: BrowserTaskPlanLike, message: string): BrowserTaskProjectionPayload {
+    return {
+      module: 'browser',
+      taskTitle: plan.taskGoal || '浏览器任务',
+      taskSummary: '准备开始浏览器任务',
+      steps: (plan.steps || []).map((step) => ({
+        id: step.id,
+        title: this.browserStepLabel(step.id),
+        status: 'pending',
+        detail: null,
+        updatedAt: new Date().toISOString(),
+      })),
+      currentStepId: null,
+      waitingFor: 'none',
+      resumableActions: ['cancel'],
+      recentArtifacts: [],
+      message,
+    }
+  }
+
+  private buildStageProjectionPayload(
+    plan: BrowserTaskPlanLike,
+    result: StageExecutionResult,
+    stageResults: StageExecutionResult[],
+    message: string,
+  ): BrowserTaskProjectionPayload {
+    const nextStage = result.completed && result.nextStage && !['done', 'failed', 'clarify'].includes(result.nextStage)
+      ? result.nextStage
+      : null
+    const completedStages = new Set(
+      stageResults
+        .filter((item) => item.completed)
+        .map((item) => item.stage),
+    )
+    const failedStages = new Set(
+      stageResults
+        .filter((item) => !item.completed)
+        .map((item) => item.stage),
+    )
+    const currentStepId = nextStage || result.stage
+    const steps = (plan.steps || []).map((step) => {
+      let status: BrowserTaskProjectionPayload['steps'][number]['status'] = 'pending'
+      if (failedStages.has(step.id)) {
+        status = 'error'
+      } else if (completedStages.has(step.id)) {
+        status = 'done'
+      } else if (currentStepId === step.id) {
+        status = result.completed ? 'running' : 'error'
+      }
+      return {
+        id: step.id,
+        title: this.browserStepLabel(step.id),
+        status,
+        detail: currentStepId === step.id ? message : null,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    return {
+      module: 'browser',
+      taskTitle: plan.taskGoal || '浏览器任务',
+      taskSummary: message,
+      steps,
+      currentStepId,
+      waitingFor: 'none',
+      resumableActions: result.completed ? ['cancel'] : ['retry', 'cancel'],
+      recentArtifacts: [],
+      message,
+    }
+  }
+
+  private browserStepLabel(stage: string): string {
+    const labels: Record<string, string> = {
+      resolve_target_page: '确认目标页',
+      resolve_attachment: '确认附件',
+      navigate_target: '进入目标页',
+      ensure_upload: '上传附件',
+      ensure_prompt: '填写提示词',
+      submit: '提交执行',
+      final_reconcile: '结果复核',
+      recover: '恢复页面',
+    }
+    return labels[stage] || stage
   }
 
   private rememberContinuationState(
@@ -715,19 +813,11 @@ export class BrowserAgentRunner {
   }
 
   private async getPageIdentity(): Promise<PageIdentity> {
-    const result = await this.controller.executeJS(
-      null,
-      `(() => ({
-        url: String(window.location.href || ''),
-        title: String(document.title || ''),
-        activeElement: String(document.activeElement?.tagName || '').toLowerCase() + ':' + String(document.activeElement?.getAttribute?.('aria-label') || document.activeElement?.getAttribute?.('placeholder') || document.activeElement?.id || '')
-      }))()`,
-    ) as PageIdentity | null
-
+    const page = await this.pageStateService.getPageIdentity()
     return {
-      url: String(result?.url || ''),
-      title: String(result?.title || ''),
-      activeElement: String(result?.activeElement || ''),
+      url: page.url,
+      title: page.title,
+      activeElement: page.activeElement,
     }
   }
 
@@ -1037,52 +1127,41 @@ export class BrowserAgentRunner {
             : [],
       )[0] || null
 
-      const snapshot: WorkflowSnapshot = {
-        stage,
+      const pageState = this.pageStateService.composePageState({
         page: {
           url: String((probePayload.page as Record<string, unknown> | undefined)?.url || ''),
           title: String((probePayload.page as Record<string, unknown> | undefined)?.title || ''),
+          domain: String((probePayload.page as Record<string, unknown> | undefined)?.domain || ''),
           activeElement: String((probePayload.page as Record<string, unknown> | undefined)?.activeElement || ''),
         },
-        screenshotId: typeof screenshotPayload?.image_id === 'string' ? screenshotPayload.image_id : undefined,
-        uploadState: {
-          complete: Boolean((probePayload.uploadState as Record<string, unknown> | undefined)?.complete),
-          evidence: Array.isArray((probePayload.uploadState as Record<string, unknown> | undefined)?.evidence)
-            ? ((probePayload.uploadState as Record<string, unknown>).evidence as string[])
-            : [],
-          inputHasFiles: Boolean((probePayload.uploadState as Record<string, unknown> | undefined)?.inputHasFiles),
-          previewVisible: Boolean((probePayload.uploadState as Record<string, unknown> | undefined)?.previewVisible),
-          attachmentNameMatched: Boolean((probePayload.uploadState as Record<string, unknown> | undefined)?.attachmentNameMatched),
-          removeActionVisible: Boolean((probePayload.uploadState as Record<string, unknown> | undefined)?.removeActionVisible),
-        },
-        promptState: {
-          promptMatched: Boolean((probePayload.promptState as Record<string, unknown> | undefined)?.promptMatched),
-          promptFilled: Boolean((probePayload.promptState as Record<string, unknown> | undefined)?.promptFilled),
-          promptText: String((probePayload.promptState as Record<string, unknown> | undefined)?.promptText || ''),
-          generating: Boolean((probePayload.promptState as Record<string, unknown> | undefined)?.generating),
-          submitEvidence: Array.isArray((probePayload.promptState as Record<string, unknown> | undefined)?.submitEvidence)
-            ? ((probePayload.promptState as Record<string, unknown>).submitEvidence as string[])
-            : [],
-          sendButtonCount: Number((probePayload.promptState as Record<string, unknown> | undefined)?.sendButtonCount || 0),
-          sendButtonDisabled: Boolean((probePayload.promptState as Record<string, unknown> | undefined)?.sendButtonDisabled),
-          uploadChipVisible: Boolean((probePayload.promptState as Record<string, unknown> | undefined)?.uploadChipVisible),
-        },
-        domState: {
-          inputCandidateCount: Number((probePayload.domState as Record<string, unknown> | undefined)?.inputCandidateCount || 0),
-          sendCandidateCount: Number((probePayload.domState as Record<string, unknown> | undefined)?.sendCandidateCount || 0),
-          uploadCandidateCount: Number((probePayload.domState as Record<string, unknown> | undefined)?.uploadCandidateCount || 0),
-          modalVisible: Boolean((probePayload.domState as Record<string, unknown> | undefined)?.modalVisible),
-          bodyStateText: String((probePayload.domState as Record<string, unknown> | undefined)?.bodyStateText || ''),
-        },
+        promptCandidate,
+        attachmentName,
+        upload: probePayload.uploadState as Record<string, unknown> | undefined,
+        prompt: probePayload.promptState as Record<string, unknown> | undefined,
+        dom: probePayload.domState as Record<string, unknown> | undefined,
         candidates: candidatesPayload
           ? {
-              uploadTargets: this.normalizeActionTargets(candidatesPayload.uploadTargets),
-              inputTargets: this.normalizeActionTargets(candidatesPayload.inputTargets),
-              activeInputTarget,
-              nearbySendTargets: this.normalizeActionTargets(candidatesPayload.nearbySendTargets || candidatesPayload.nearby_send_targets),
-              sendTargets: this.normalizeActionTargets(candidatesPayload.sendTargets),
-            }
+            uploadTargets: this.normalizeActionTargets(candidatesPayload.uploadTargets),
+            inputTargets: this.normalizeActionTargets(candidatesPayload.inputTargets),
+            activeInputTarget,
+            nearbySendTargets: this.normalizeActionTargets(candidatesPayload.nearbySendTargets || candidatesPayload.nearby_send_targets),
+            sendTargets: this.normalizeActionTargets(candidatesPayload.sendTargets),
+          }
           : undefined,
+      })
+
+      const snapshot: WorkflowSnapshot = {
+        stage,
+        page: {
+          url: pageState.page.url,
+          title: pageState.page.title,
+          activeElement: pageState.page.activeElement,
+        },
+        screenshotId: typeof screenshotPayload?.image_id === 'string' ? screenshotPayload.image_id : undefined,
+        uploadState: pageState.upload,
+        promptState: pageState.prompt,
+        domState: pageState.dom,
+        candidates: pageState.candidates,
         evidenceIds: Array.isArray(probePayload.evidenceIds)
           ? (probePayload.evidenceIds as string[])
           : [],
@@ -1129,13 +1208,30 @@ export class BrowserAgentRunner {
     ])
 
     const screenshotPayload = parseJSONText(screenshotRaw)
+    const pageState = this.pageStateService.composePageState({
+      page: {
+        url: page.url,
+        title: page.title,
+        domain: '',
+        activeElement: page.activeElement,
+      },
+      promptCandidate,
+      attachmentName,
+      upload: uploadState,
+      prompt: promptState,
+      dom: domState,
+    })
     const snapshot: WorkflowSnapshot = {
       stage,
-      page,
+      page: {
+        url: pageState.page.url,
+        title: pageState.page.title,
+        activeElement: pageState.page.activeElement,
+      },
       screenshotId: typeof screenshotPayload?.image_id === 'string' ? screenshotPayload.image_id : undefined,
-      uploadState,
-      promptState,
-      domState,
+      uploadState: pageState.upload,
+      promptState: pageState.prompt,
+      domState: pageState.dom,
     }
 
     if (visionAction && this.needsVisionFallback(visionAction, snapshot)) {
@@ -1159,15 +1255,36 @@ export class BrowserAgentRunner {
   }
 
   private isUploadComplete(snapshot: WorkflowSnapshot): boolean {
-    return snapshot.uploadState.complete
+    return this.evidenceService.isUploadComplete(this.pageStateService.composePageState({
+      page: { ...snapshot.page, domain: '' },
+      promptCandidate: '',
+      upload: snapshot.uploadState,
+      prompt: snapshot.promptState,
+      dom: snapshot.domState,
+      candidates: snapshot.candidates,
+    }))
   }
 
   private isPromptComplete(snapshot: WorkflowSnapshot, promptCandidate: string): boolean {
-    return snapshot.promptState.promptMatched || this.promptLooksSatisfied(promptCandidate, snapshot.promptState.promptText)
+    return this.evidenceService.isPromptComplete(this.pageStateService.composePageState({
+      page: { ...snapshot.page, domain: '' },
+      promptCandidate,
+      upload: snapshot.uploadState,
+      prompt: snapshot.promptState,
+      dom: snapshot.domState,
+      candidates: snapshot.candidates,
+    }), promptCandidate)
   }
 
   private isRunningState(snapshot: WorkflowSnapshot): boolean {
-    return snapshot.promptState.generating
+    return this.evidenceService.isRunningState(this.pageStateService.composePageState({
+      page: { ...snapshot.page, domain: '' },
+      promptCandidate: '',
+      upload: snapshot.uploadState,
+      prompt: snapshot.promptState,
+      dom: snapshot.domState,
+      candidates: snapshot.candidates,
+    }))
   }
 
   private shouldNavigateToTarget(currentUrl: string, targetUrl?: string): boolean {
@@ -1946,6 +2063,12 @@ export class BrowserAgentRunner {
 
     this.state = 'planning'
     this.emitToolEvent?.('tool_result', `[计划] 目标：${plan.taskGoal || '浏览器任务执行'}\n[计划] 顺序：${(plan.steps || []).map((step) => step.id).join(' -> ')}`)
+    this.emitTaskProjectionPayload(
+      this.buildInitialTaskProjectionPayload(
+        plan,
+        `已生成浏览器计划：${(plan.steps || []).map((step) => this.browserStepLabel(step.id)).join(' -> ')}`,
+      ),
+    )
     let snapshot = await this.captureWorkflowSnapshot('resolve_target_page', promptCandidate, attachmentName)
     if (this.isRunningState(snapshot)) {
       this.rememberContinuationState('submit', snapshot, promptCandidate, attachmentName, 'done')
@@ -2013,6 +2136,14 @@ export class BrowserAgentRunner {
       }
       stageResults.push(result)
       snapshot = result.snapshot
+      this.emitTaskProjectionPayload(
+        this.buildStageProjectionPayload(
+          plan,
+          result,
+          stageResults,
+          `${this.browserStepLabel(step.id)}：${result.evidence.join('、') || (result.completed ? '已完成' : '未完成')}`,
+        ),
+      )
       this.rememberContinuationState(
         step.id,
         snapshot,

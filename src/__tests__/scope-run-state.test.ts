@@ -240,4 +240,43 @@ describe('scope run state helpers', () => {
       ],
     )
   })
+
+  it('prefers structured browser task fields from the scope run event over text parsing', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-08T12:00:00.000Z',
+        taskTitle: '使用当前附件完成网页任务',
+        taskSummary: '上传附件：页面已出现上传卡片',
+        currentStepId: 'ensure_prompt',
+        waitingFor: 'none',
+        resumableActions: ['cancel'],
+        steps: [
+          { id: 'resolve_target_page', title: '确认目标页', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
+          { id: 'resolve_attachment', title: '确认附件', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
+          { id: 'ensure_upload', title: '上传附件', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
+          { id: 'ensure_prompt', title: '填写提示词', status: 'running', updatedAt: '2026-04-08T12:00:00.000Z' },
+        ],
+        toolEvent: {
+          kind: 'result',
+          timestamp: '2026-04-08T12:00:00.000Z',
+          text: '上传附件阶段已完成',
+        },
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.taskTitle, '使用当前附件完成网页任务')
+    assert.strictEqual(patch.taskSummary, '上传附件：页面已出现上传卡片')
+    assert.strictEqual(patch.currentStepId, 'ensure_prompt')
+    assert.deepStrictEqual(
+      patch.steps?.map((item) => ({ id: item.id, status: item.status })),
+      [
+        { id: 'resolve_target_page', status: 'done' },
+        { id: 'resolve_attachment', status: 'done' },
+        { id: 'ensure_upload', status: 'done' },
+        { id: 'ensure_prompt', status: 'running' },
+      ],
+    )
+  })
 })

@@ -4,6 +4,9 @@
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
+import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
+import { BrowserPageStateService } from '../browser-engine/page-state-service'
+import { BrowserEvidenceService } from '../browser-engine/evidence-service'
 import { appendFileSync } from 'fs'
 import { access, mkdir, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
@@ -20,6 +23,13 @@ import type { BrowserStructuredFieldMapping } from '../browser-engine/capability
 const LOG = getLogPath('ready-tools.log')
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+}
+
+function createBrowserAgentHelpers(controller: BrowserController) {
+  const runtime = new BrowserAgentRuntimeAdapter(controller)
+  const pageStateService = new BrowserPageStateService(runtime)
+  const evidenceService = new BrowserEvidenceService()
+  return { runtime, pageStateService, evidenceService }
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -3456,6 +3466,7 @@ export async function executeBrowserTool(
         const includeCandidates = args.include_candidates !== false
         const visionAction = String(args.vision_action || '').trim() as '' | 'upload' | 'input' | 'send'
         const toolMeta = resolveToolContextMeta(controller, tabId)
+        const { pageStateService } = createBrowserAgentHelpers(controller)
         const [identity, uploadState, promptState, domState] = await Promise.all([
           getPageIdentity(controller, tabId),
           probeWorkflowUploadState(controller, tabId, attachmentName),
@@ -3526,6 +3537,29 @@ export async function executeBrowserTool(
             : []
         }
 
+        const pageState = pageStateService.composePageState({
+          page: {
+            url: identity.url,
+            title: identity.title,
+            domain: '',
+            activeElement: identity.activeElement,
+          },
+          promptCandidate: prompt,
+          attachmentName,
+          upload: uploadState,
+          prompt: promptState,
+          dom: domState,
+          candidates: includeCandidates
+            ? {
+              uploadTargets,
+              inputTargets,
+              activeInputTarget,
+              nearbySendTargets,
+              sendTargets,
+            }
+            : undefined,
+        })
+
         return JSON.stringify({
           ok: true,
           ...toolMeta,
@@ -3536,17 +3570,17 @@ export async function executeBrowserTool(
             height: Math.round(metrics.height),
             mode: 'viewport',
           },
-          page: identity,
-          uploadState,
-          promptState,
-          domState,
+          page: pageState.page,
+          uploadState: pageState.upload,
+          promptState: pageState.prompt,
+          domState: pageState.dom,
           candidates: includeCandidates
             ? {
-                uploadTargets: uploadTargets.slice(0, 6),
-                inputTargets: inputTargets.slice(0, 6),
-                activeInputTarget,
-                nearbySendTargets,
-                sendTargets: sendTargets.slice(0, 6),
+                uploadTargets: pageState.candidates.uploadTargets.slice(0, 6),
+                inputTargets: pageState.candidates.inputTargets.slice(0, 6),
+                activeInputTarget: pageState.candidates.activeInputTarget,
+                nearbySendTargets: pageState.candidates.nearbySendTargets,
+                sendTargets: pageState.candidates.sendTargets.slice(0, 6),
               }
             : undefined,
           visionCandidates,
