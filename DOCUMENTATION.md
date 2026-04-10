@@ -50,6 +50,66 @@ Ready 采用 Electron 三层架构：
 - 技能运行时：`src/main/modules/skills-runtime/*`
 - Python sidecar：`src/python/ready_sidecar/*`
 
+### 3.4b Agent 主控当前分层
+- `AgentControlRuntime` 当前已进一步回到 control plane 角色：
+  - scope / conversation / channel / cron 宿主
+  - runtime health / heartbeat
+  - summary store 宿主
+- `RunCoordinator` 负责单轮执行：
+  - prompt assembly 接入
+  - execution host 调用
+  - 成功 / 失败 / 记忆回写收口
+- `RunProjection` 负责把执行事件投影成 `ScopeRunSummary`
+- `BrowserDomainOrchestrator` 继续吸收浏览器域内 loop supervision：
+  - 任务决策与连续性准备
+  - tool loop 步骤推进
+  - 检查点提醒与上限总结
+  - tool loop 计划文案与迭代预算建议
+- `DocumentDomainOrchestrator + document-domain-helpers` 开始承接文档域 deterministic helper：
+  - 章节改写草稿生成
+  - 章节 / 整篇格式整理
+  - 章节定位与安全写回
+- `DocumentToolLoopOrchestrator` 开始承接文档工具循环监管：
+  - inspection 结果回显
+  - “已改未存 / 只定位未改 / widget 结果不合格” 这类补提醒
+  - 文档任务完成收口
+- `DesignToolLoopOrchestrator` 开始承接设计工具循环监管：
+  - 主版式去重
+  - 设计结果收口
+  - 完成文案生成
+- `provider-runtime-resolver` 开始承接 OpenAI 通道运行时判断：
+  - 走 `responses` 还是 `chat/completions`
+  - 当前推理强度
+  - 是否切到文字工具桥接、何时重试桥接
+- `execution-intent-resolver` 开始承接执行前意图判断：
+  - 这轮是否强制文档工具
+  - 这轮是否允许浏览器工具
+  - widget / 文档改写 / 格式整理这类规则该怎么选
+- `skill-context-orchestrator` 开始承接技能前置判断：
+  - 用户是否明确点名某个 skill
+  - 视频输入下是否仍应保留工具
+  - 当前会话应优先暴露哪些 skill 相关工具
+  - skill 参考上下文如何注入当前轮
+- `openai-execution-client` 开始承接 OpenAI 执行主链：
+  - simple 请求
+  - text tool bridge 请求
+  - tools 请求
+  - OpenAI Responses / Chat Completions 响应解析
+- 这层同时负责当前 OpenAI 通道里 Kimi Coding 带工具请求的兼容头收口。
+- `anthropic-execution-client` 开始承接 Anthropic 执行主链：
+  - simple 请求
+  - tools 请求
+  - Anthropc message 响应解析
+- `kimi-coding-client` 开始承接 Kimi Coding 专属链路：
+  - simple 请求
+  - 视频上传
+  - video -> ReadMediaFile 包装
+- `video-fallback-service` 开始承接视频提帧回退：
+  - ffmpeg 查找
+  - video block -> image frame fallback
+- `ClaudeSdkOrchestrator` 继续作为 direct-chat 的 transport/bridge 包装层
+- `DirectChatEngine` 继续作为第一阶段 execution host，但开始把 tool visibility / dispatch 之类通用策略抽出主文件
+
 ### 3.5 Shared / Renderer Utilities
 - 共享 URL 工具：`src/shared/url-utils.ts`
   - `getUrlHostname()` 供主进程策略判断使用
@@ -88,6 +148,14 @@ Ready 采用 Electron 三层架构：
 这些配置在切换 provider 时会自动按 provider 默认值播种，但允许手动覆盖。
 
 ## 5. Agent 工具调用链
+### 5.0 主控循环入口
+- 本地会话：`runtime.sendScoped -> RunCoordinator -> orchestrator.executeAndCollect -> DirectChatEngine`
+- 远程消息：channel coalesce / scope 建立仍在 runtime，真正执行改为 `RunCoordinator.runInboundChannel`
+- `RunCoordinator` 是当前单轮执行 owner；`runtime` 不再直接内联 prompt assembly + sendAndCollect + outcome writeback 这整段链路
+- 阶段 5 第一轮已开始：`RunCoordinator` 现在会为每轮执行创建统一 budget seed，并把 `budget / budgetState` 传给 execution host
+- execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，预算不再只停留在 planning 层字段
+- 浏览器 / 文档 / 设计三条子域当前给出的 budget hint 也已经会被主流程实际消费，而不是只停留在建议接口。
+
 ### 5.1 原生工具调用
 - Anthropic 协议走 `messages` + `tool_use/tool_result`
 - OpenAI 协议走 `chat/completions` 或 `responses` 的 function tools
@@ -106,6 +174,84 @@ Ready 采用 Electron 三层架构：
 - Document tools：打开、切换、写入、替换、格式化、改写、保存
 - Skill tools：把 embedded/custom skills 暴露为统一 `skill_*` 工具
 - System tools：系统命令与应用级操作
+
+### 5.4 工具可见性与传输决策
+- `DirectChatEngine` 当前已开始复用 `execution-tool-policy`：
+  - `buildToolVisibilityPlan()`
+  - `buildToolDispatchDecision()`
+- 这一层先解决“本轮能不能看到工具、优先走哪种工具传输”，还没有完整接管全量 tool dispatch。
+
+### 5.5 域内循环监督
+- 浏览器 tool loop 的步骤推进、检查点提醒和超限总结已通过 `BrowserDomainOrchestrator` 统一输出，不再在 `DirectChatEngine` 主循环里拼装文案。
+- 浏览器提示词细化和确定性执行也已开始通过 `BrowserDomainOrchestrator` 统一输出。
+- 浏览器连续性注入、澄清短路、deterministic/tool-loop 分发与 fallback 文案现在也通过 `BrowserDomainOrchestrator.resolveExecutionDispatch()` 统一返回，`DirectChatEngine` 只做固定分发。
+- 文档 deterministic flow 的章节识别、格式整理、改写草稿和文件写回 helper 已迁到 `document-domain-helpers`，`DirectChatEngine` 只保留调用与结果汇总。
+- 文档工具循环的过程监管已开始通过 `DocumentToolLoopOrchestrator` 统一输出。
+- 设计工具循环的主版式守门和完成收口已开始通过 `DesignToolLoopOrchestrator` 统一输出。
+- 浏览器 tool loop 的计划文案和预算建议也已通过 `BrowserDomainOrchestrator` 统一输出。
+
+### 5.5.1 结构化任务白名单
+- 主进程目前只接受 `browser / document / design / skill` 这四类结构化任务 payload。
+- 其他自由文本即使看起来像 JSON，也不会被当成正式任务状态写进前台运行态。
+
+### 5.6 Provider Runtime 判断
+- OpenAI 通道当前已开始通过 `provider-runtime-resolver` 统一判断：
+  - 当前该走哪种接口
+  - 当前推理强度取什么值
+  - 当前是否优先走文字工具桥接
+  - 原生 tools 没成功时是否要回退到文字桥接
+- 这一步还没有把整条 provider 调用链完全抽走，但已经把“怎么判断”先从 `DirectChatEngine` 主体拿出来。
+
+### 5.6a Shared Fallback
+- `execution-fallback-policy` 现已作为共享 fallback contract 存在。
+- 当前已覆盖：
+  - OpenAI native tools -> text bridge
+  - OpenAI responses -> chat/completions 回退
+  - tool loop 中的视频提帧回退
+  - Kimi Coding 的一次重试判定
+- Anthropic simple 请求里的视频提帧回退也已并回 client，不再由 `DirectChatEngine` 保留额外的私有判断。
+- Kimi simple path 的 `Kimi -> Anthropic-compatible` 回退链也已并回 execution client，不再继续留在 `DirectChatEngine` 的简单路径分支里。
+- 这些回退开始通过 execution client / execution loop 统一返回 fallback metadata，而不是继续散在主循环里。
+- `RunCoordinator` planning / done 两头当前都会保留同一套 fallback 诊断形状：`happened / kind / attempts`。
+
+### 5.6b 执行意图判断
+- `execution-intent-resolver` 当前已开始统一判断：
+  - 用户这轮是否在走文档任务
+  - 浏览器工具是否真的应该对模型可见
+  - widget / 文档格式 / 章节改写这类规则该怎么选
+- 这一步同时修正了浏览器工具可见性的判断时机，不再用浏览器决策尚未准备好的旧值去做过滤。
+
+### 5.6c Prompt 压缩
+- `context-compression` 当前先负责 prompt 侧压缩 helper。
+- 第一轮已正式接入超长历史摘要压缩，并会通过 `PromptAssemblyResult.compression` 回传压缩报告。
+- 这些压缩结果只影响发给模型的 prompt，不会覆盖前台任务卡的 `taskTitle / taskSummary / steps`。
+
+### 5.6d 安全并行工具
+- `tool-parallelism-policy` 当前使用显式 allowlist 判断哪些工具可以并行。
+- 第一轮只放开只读、无副作用、无顺序依赖的工具，例如：
+  - `document_list_widgets`
+  - `memory_search / memory_list_recent`
+  - `rss_capture_session`
+  - `skill_get_state / skill_rss_status / skill_rss_list / skill_rss_stats`
+- `ExecutionLoopOrchestrator.executeToolCalls()` 已开始按批并行执行这些工具，并保持结果回收顺序稳定。
+- 当本轮剩余工具预算不足时，执行层会在边界处停下，并把“预算已达上限”的状态留给主流程统一收尾。
+- 当某个工具批次已经把本轮预算打满时，主流程会在这一轮末尾直接停下，不再继续请求下一轮模型响应。
+
+### 5.7 Planning 投影
+- `RunCoordinator` 在 planning 阶段已开始直接输出正式 `taskTitle / taskSummary`。
+- 命中 trigger 的任务在前台会更早拿到结构化任务标题，不再只看到一条泛化准备态文本。
+- planning 事件现在也会携带次级诊断信息，例如：
+  - prompt compression 是否发生
+  - 本轮 budget seed 是多少
+  - 本轮 fallback 是否发生、是什么类型、已重试几次
+- 这些字段只用于诊断保留，不会顶掉前台任务卡的主标题和主摘要。
+- 一轮执行结束后，`RunCoordinator` 也会补一次 execution diagnostics 更新，把本轮真实的 budget usage 写回前台状态层。
+
+### 5.8 文档任务结构化投影
+- 文档 deterministic flow 在完成时已开始输出正式结构化任务字段。
+- 主进程 scope run 事件现在不只接受浏览器模块的结构化任务结果，也能接住文档与设计模块的结构化任务结果。
+- 文档与设计工具循环在“阻塞 / 完成”关键节点也已开始主动输出结构化任务字段，进一步减少前台只靠自然语言猜状态的比例。
+- renderer 侧已补上文档/设计任务卡的显式回归测试，确保任务卡不再默认“有步骤的任务主要是浏览器或 skill”。
 
 ## 6. Browser Agent V7
 ### 6.1 核心原则
@@ -128,6 +274,7 @@ Ready 采用 Electron 三层架构：
 
 ### 6.4 连续性上下文
 系统会把近期浏览器动作、上次技能运行、当前页面状态、会话附件等注入到 planner / tool loop，目标是减少重复搜索、重复跳转、重复上传。
+- 当前连续性仍以“短期收口”为主：最近工作流会额外记录可否继续、最近证据和上次失败原因，供任务恢复、重试和刷新后回看使用。
 
 ### 6.5 浏览器运行时统一层
 - 浏览器主链现在开始收口为统一运行时合同，而不再只靠 `direct-chat`、`browser-agent-runner`、`browser-tools` 各自维护页面理解。
@@ -137,11 +284,22 @@ Ready 采用 Electron 三层架构：
   - `evidence-service`
   - `browser-task-planner`
 - `BrowserAgentRunner` 仍保留 Browser Agent V7 的阶段式执行，但页面身份和证据判断已开始复用统一层。
+- `BrowserPageState` 现已补上统一 evidence / risks / continuity 三段摘要，浏览器执行器、诊断入口和恢复判断都从这套结构取真值。
 
 ### 6.6 浏览器任务结构化投影
 - 浏览器 runner 现在支持输出结构化浏览器任务 payload。
-- 主进程会把结构化字段映射进 `scopeRunEvent.taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts`。
+- 主进程会把结构化字段映射进 `scopeRunEvent.taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / blockedReason / taskContinuation`。
 - renderer 侧 `scopeRunState` 已优先消费这些显式字段，减少对阶段文本解析的依赖。
+
+### 6.7 浏览器诊断入口
+- 浏览器诊断不再只有 host / preview / recent log 这类底层状态。
+- 当前诊断数据会额外带出：
+  - 当前浏览器任务摘要
+  - 当前页面状态摘要
+  - 当前连续性摘要
+  - 最近失败原因
+  - 可直接执行的恢复动作
+- Browser 模式页内现已挂上轻量诊断卡，用户可以直接看到“现在在做什么、卡在哪、怎么继续”。
 
 ## 7. 会话 Scope 与远程 IM
 ### 7.1 Scope 粒度

@@ -76,4 +76,43 @@ export interface BrowserDiagnosticsData {
   diagnosticsLogPath: string
   recentLogs: string[]
   preview: BrowserPreviewDiagnosticsState
+  currentTask: {
+    sessionId?: string
+    taskTitle: string
+    taskSummary: string
+    currentStepId: string | null
+    blockedReason?: string | null
+    recentEvidence: string[]
+    resumableActions: string[]
+    targetUrl?: string | null
+    updatedAt: string
+  } | null
+  pageState: {
+    url: string
+    title: string
+    domain: string
+    targetMatched: boolean
+    uploadComplete: boolean
+    promptComplete: boolean
+    running: boolean
+    modeSelection: boolean
+    modalVisible: boolean
+    canReuseCurrentPage: boolean
+    updatedAt: string
+  } | null
+  continuity: {
+    sessionId?: string
+    workflowKind: string
+    stage: string
+    canResume: boolean
+    lastFailureReason?: string | null
+    lastEvidence: string[]
+    targetUrl?: string | null
+    updatedAt: string
+  } | null
+  lastFailure: {
+    reason: string
+    updatedAt: string
+  } | null
+  availableActions: string[]
 }

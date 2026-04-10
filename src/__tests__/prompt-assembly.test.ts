@@ -144,6 +144,35 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('reports prompt-side history compression without changing the bootstrap contract', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-compression-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [
+        { role: 'user', content: '用户消息 '.repeat(80) },
+        { role: 'assistant', content: '助手回复 '.repeat(80) },
+        { role: 'user', content: '继续补充 '.repeat(80) },
+        { role: 'assistant', content: '继续处理 '.repeat(80) },
+      ],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '继续整理',
+    })
+
+    assert.equal(result.compression?.historyCompressed, true)
+    assert.equal(result.compression?.toolTraceCompressed, false)
+    assert.equal(result.compression?.artifactSummaryUsed, false)
+    assert.ok(result.bootstrapMessages.some((item) => item.includes('L1 会话上下文')))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('ensures custom memory roots materialize daily memory files before emitting refs', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-custom-root-'))
 

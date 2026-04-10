@@ -32,6 +32,26 @@ export interface SendAndCollectResult {
   cancelled: boolean
   usedTools: string[]
   error?: string
+  executionDiagnostics?: {
+    compression?: {
+      historyCompressed: boolean
+      toolTraceCompressed: boolean
+      artifactSummaryUsed: boolean
+    } | null
+    budget?: {
+      maxIterations: number
+      maxToolCalls: number
+      maxParallelToolGroups: number
+      iterationsUsed?: number
+      toolCallsUsed?: number
+      parallelToolGroupsUsed?: number
+    } | null
+    fallback?: {
+      happened: boolean
+      kind: string
+      attempts: number
+    } | null
+  } | null
 }
 
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {

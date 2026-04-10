@@ -81,11 +81,24 @@ describe('BrowserPageStateService', () => {
     const state = await service.capturePageState({
       promptCandidate: '做一张温暖的美食海报',
       attachmentName: 'poster.png',
+      targetUrl: 'https://jimeng.example.com/workspace?mode=image',
+      continuity: {
+        canReuseCurrentPage: true,
+        source: 'remembered_workflow',
+        lastStableStage: 'ensure_prompt',
+        lastFailureReason: null,
+      },
     })
 
     assert.equal(state.page.domain, 'jimeng.example.com')
     assert.equal(state.upload.complete, true)
     assert.equal(state.prompt.promptMatched, true)
     assert.equal(state.dom.inputCandidateCount, 1)
+    assert.equal(state.evidence.targetMatched, true)
+    assert.equal(state.evidence.uploadComplete, true)
+    assert.equal(state.evidence.promptComplete, true)
+    assert.equal(state.risks.modeSelection, false)
+    assert.equal(state.continuity.canReuseCurrentPage, true)
+    assert.equal(state.continuity.source, 'remembered_workflow')
   })
 })

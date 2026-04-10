@@ -57,6 +57,9 @@ export interface BrowserTaskPlanContinuity {
     uploadMounted?: boolean
     promptFilled?: boolean
     running?: boolean
+    canResume?: boolean
+    lastFailureReason?: string | null
+    lastEvidence?: string[]
   } | null
   recentSkill?: {
     toolName: string
@@ -183,6 +186,31 @@ export interface BrowserPageState {
     nearbySendTargets: BrowserActionTarget[]
     sendTargets: BrowserActionTarget[]
   }
+  evidence: {
+    targetMatched: boolean
+    uploadComplete: boolean
+    promptComplete: boolean
+    running: boolean
+    recentEvidence: string[]
+  }
+  risks: {
+    modalVisible: boolean
+    modeSelection: boolean
+    offTarget: boolean
+  }
+  continuity: {
+    canReuseCurrentPage: boolean
+    source: 'active_tab' | 'remembered_workflow' | 'none'
+    lastStableStage?: string | null
+    lastFailureReason?: string | null
+  }
+}
+
+export interface BrowserTaskContinuationPayload {
+  executionId: string
+  stepId?: string | null
+  blockerType?: string | null
+  targetUrl?: string | null
 }
 
 export interface BrowserTaskProjectionPayload {
@@ -208,5 +236,8 @@ export interface BrowserTaskProjectionPayload {
     url?: string | null
     createdAt: string
   }>
+  blockedReason?: string | null
+  taskContinuation?: BrowserTaskContinuationPayload
+  recentEvidence?: string[]
   message: string
 }

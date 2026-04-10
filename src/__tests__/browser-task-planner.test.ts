@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+import { rememberBrowserWorkflowState } from '../main/modules/agent-control/session-continuity'
 
 function createPlanner() {
   return new BrowserTaskPlanner({
@@ -105,5 +106,41 @@ describe('BrowserTaskPlanner', () => {
 
     assert.match(planner.buildClarifyMessage({ mode: 'clarify_first', reason: 'missing_attachment', attachmentSelection: { count: 0 } }), /当前会话里还没有可用附件/)
     assert.strictEqual(planner.getRecommendedMaxToolIterations('继续在网页里生成图片', decision, 24), 24)
+  })
+
+  it('adds resume-oriented continuity guidance when recent browser workflow can continue', async () => {
+    rememberBrowserWorkflowState('scope-resume', {
+      url: 'https://jimeng.example.com/workspace',
+      title: '即梦工作台',
+      workflowKind: 'upload_generate',
+      stage: 'submit',
+      attachmentName: 'poster.png',
+      promptPreview: '做一张温暖的美食海报',
+      evidence: ['preview_visible', 'prompt_matched'],
+      running: false,
+      uploadMounted: true,
+      promptFilled: true,
+      status: 'failed',
+      canResume: true,
+      lastFailureReason: '页面未确认进入运行态',
+    })
+
+    const planner = createPlanner()
+    const decision = planner.decideTask({
+      userText: '继续刚才在即梦里的任务',
+      sessionMessages: [],
+      sessionId: 'scope-resume',
+    })
+    const continuity = await planner.buildContinuityContext({
+      userText: '继续刚才在即梦里的任务',
+      sessionId: 'scope-resume',
+      decision,
+    })
+
+    assert.equal(continuity?.canReuseCurrentPage, true)
+    assert.match(continuity?.reuseReason || '', /优先复用当前页/)
+    assert.ok((continuity?.forcedRules || []).some((rule) => rule.includes('页面未确认进入运行态')))
+    assert.equal(continuity?.rememberedWorkflow?.canResume, true)
+    assert.equal(continuity?.rememberedWorkflow?.lastFailureReason, '页面未确认进入运行态')
   })
 })

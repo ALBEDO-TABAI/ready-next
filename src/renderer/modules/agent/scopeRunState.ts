@@ -6,6 +6,7 @@ import type {
   AgentTriggerHit,
   ModuleExecutionKind,
   ScopeRunMemoryCapture,
+  ScopeRunExecutionDiagnostics,
   ScopeRunResumableAction,
   ScopeRunState,
   ScopeRunTaskContinuation,
@@ -63,6 +64,7 @@ export function toAgentModule(value: unknown): AgentModuleKind | null {
     normalized === 'browser' ||
     normalized === 'document' ||
     normalized === 'design' ||
+    normalized === 'skill' ||
     normalized === 'video' ||
     normalized === 'rss' ||
     normalized === 'calendar' ||
@@ -165,6 +167,40 @@ function parseContextBudget(input: unknown): AgentContextBudget | null {
     l2Chars: Number(record.l2Chars || 0),
     droppedRefs: Array.isArray(record.droppedRefs) ? record.droppedRefs.map((item) => String(item || '').trim()).filter(Boolean) : [],
   }
+}
+
+function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  const compression = record.compression && typeof record.compression === 'object'
+    ? {
+      historyCompressed: Boolean((record.compression as Record<string, unknown>).historyCompressed),
+      toolTraceCompressed: Boolean((record.compression as Record<string, unknown>).toolTraceCompressed),
+      artifactSummaryUsed: Boolean((record.compression as Record<string, unknown>).artifactSummaryUsed),
+    }
+    : null
+  const budget = record.budget && typeof record.budget === 'object'
+    ? {
+      maxIterations: Number((record.budget as Record<string, unknown>).maxIterations || 0) || undefined,
+      maxToolCalls: Number((record.budget as Record<string, unknown>).maxToolCalls || 0) || undefined,
+      maxParallelToolGroups: Number((record.budget as Record<string, unknown>).maxParallelToolGroups || 0) || undefined,
+      iterationsUsed: Number((record.budget as Record<string, unknown>).iterationsUsed || 0) || undefined,
+      toolCallsUsed: Number((record.budget as Record<string, unknown>).toolCallsUsed || 0) || undefined,
+      parallelToolGroupsUsed: Number((record.budget as Record<string, unknown>).parallelToolGroupsUsed || 0) || undefined,
+    }
+    : null
+  const fallback = record.fallback && typeof record.fallback === 'object'
+    ? {
+      happened: (record.fallback as Record<string, unknown>).happened === undefined
+        ? String((record.fallback as Record<string, unknown>).kind || '').trim().length > 0
+        : Boolean((record.fallback as Record<string, unknown>).happened),
+      kind: String((record.fallback as Record<string, unknown>).kind || '').trim(),
+      attempts: Number((record.fallback as Record<string, unknown>).attempts || 0),
+    }
+    : null
+
+  if (!compression && !budget && !fallback) return null
+  return { compression, budget, fallback }
 }
 
 export function mergeArtifacts(
@@ -600,6 +636,7 @@ export function createEmptyScopeRunState(params: {
     recentArtifacts: [],
     taskContinuation: null,
     memoryCapture: null,
+    executionDiagnostics: null,
   }
 }
 
@@ -616,11 +653,13 @@ export function deriveScopeRunStatePatch(
     recentArtifacts?: Array<Record<string, unknown>>
     taskContinuation?: ScopeRunTaskContinuation | Record<string, unknown> | null
     memoryCapture?: ScopeRunMemoryCapture | Record<string, unknown> | null
+    executionDiagnostics?: ScopeRunExecutionDiagnostics | Record<string, unknown> | null
     memoryRefs?: AgentMemoryRef[]
     triggerHits?: AgentTriggerHit[]
     contextBudget?: AgentContextBudget | null
     toolEvent?: { kind: ToolTraceEvent['kind']; text: string; timestamp: string }
     error?: string
+    blockedReason?: string | null
     timestamp: string
   },
   previous: ScopeRunState | null,
@@ -677,6 +716,7 @@ export function deriveScopeRunStatePatch(
     : []
   const structuredContinuation = parseTaskContinuation(structuredPayload?.taskContinuation || event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(structuredPayload?.memoryCapture || event.memoryCapture)
+  const structuredExecutionDiagnostics = parseExecutionDiagnostics(structuredPayload?.executionDiagnostics || event.executionDiagnostics)
   const browserTaskPatch = event.toolEvent?.kind === 'result' && event.toolEvent.text
     ? parseBrowserWorkflowTask(event.toolEvent.text, previous, event.timestamp)
     : null
@@ -702,7 +742,9 @@ export function deriveScopeRunStatePatch(
     lastEvidenceAt: structuredArtifacts.length > 0 || structuredPayload
       ? event.timestamp
       : previous?.lastEvidenceAt || null,
-    blockedReason: previous?.blockedReason ?? null,
+    blockedReason: typeof structuredPayload?.blockedReason === 'string'
+      ? structuredPayload.blockedReason
+      : event.blockedReason ?? previous?.blockedReason ?? null,
     controllerId: previous?.controllerId ?? null,
     ownerTabId: previous?.ownerTabId ?? null,
     checkpointExpiresAt: previous?.checkpointExpiresAt ?? null,
@@ -783,6 +825,7 @@ export function deriveScopeRunStatePatch(
     )),
     taskContinuation: structuredContinuation || skillTaskPatch?.taskContinuation || previous?.taskContinuation || null,
     memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,
+    executionDiagnostics: structuredExecutionDiagnostics || previous?.executionDiagnostics || null,
   }
 
   if (event.toolEvent) {

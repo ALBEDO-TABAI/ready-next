@@ -279,4 +279,96 @@ describe('scope run state helpers', () => {
       ],
     )
   })
+
+  it('prefers structured document task fields over text parsing', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-09T10:20:00.000Z',
+        toolEvent: {
+          kind: 'result',
+          timestamp: '2026-04-09T10:20:00.000Z',
+          text: JSON.stringify({
+            module: 'document',
+            message: '已完成：章节改写',
+            taskTitle: '章节改写',
+            taskSummary: '已完成：第一部分',
+            steps: [
+              { id: 'execute', title: '章节改写', status: 'done', updatedAt: '2026-04-09T10:20:00.000Z' },
+            ],
+            currentStepId: 'execute',
+            waitingFor: 'none',
+            resumableActions: ['cancel'],
+          }),
+        },
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.module, 'document')
+    assert.strictEqual(patch.taskTitle, '章节改写')
+    assert.strictEqual(patch.taskSummary, '已完成：第一部分')
+    assert.strictEqual(patch.currentStepId, 'execute')
+    assert.deepStrictEqual(patch.steps?.map((item) => item.status), ['done'])
+  })
+
+  it('prefers structured design task fields over text parsing', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-09T10:25:00.000Z',
+        toolEvent: {
+          kind: 'result',
+          timestamp: '2026-04-09T10:25:00.000Z',
+          text: JSON.stringify({
+            module: 'design',
+            message: '主版式已生成',
+            taskTitle: '设计任务',
+            taskSummary: '主版式已生成',
+            steps: [
+              { id: 'execute', title: '设计任务', status: 'done', updatedAt: '2026-04-09T10:25:00.000Z' },
+            ],
+            currentStepId: 'execute',
+            waitingFor: 'none',
+            resumableActions: ['cancel'],
+          }),
+        },
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.module, 'design')
+    assert.strictEqual(patch.taskTitle, '设计任务')
+    assert.strictEqual(patch.taskSummary, '主版式已生成')
+    assert.deepStrictEqual(patch.steps?.map((item) => item.status), ['done'])
+  })
+
+  it('preserves execution diagnostics without overriding structured task summary', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'planning',
+        latestText: '压缩后的 prompt 预览',
+        taskTitle: '浏览器上传流程',
+        taskSummary: '准备开始浏览器上传流程',
+        executionDiagnostics: {
+          compression: {
+            historyCompressed: true,
+            toolTraceCompressed: false,
+            artifactSummaryUsed: false,
+          },
+          budget: {
+            maxIterations: 24,
+            maxToolCalls: 24,
+            maxParallelToolGroups: 1,
+          },
+        },
+        timestamp: '2026-04-10T01:00:00.000Z',
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.taskSummary, '准备开始浏览器上传流程')
+    assert.strictEqual(patch.executionDiagnostics?.compression?.historyCompressed, true)
+    assert.strictEqual(patch.executionDiagnostics?.budget?.maxToolCalls, 24)
+  })
 })

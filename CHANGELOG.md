@@ -30,11 +30,58 @@
 - ChatPanel 新增 `当前任务 / 后台任务` 两块任务视图，tool trace 胶囊退居技术细节抽屉
 - workflow skill blocker 现在会映射成聊天里的等待态，并提供继续、确认、撤销、补充等入口
 
+#### Agent Core Loop Ownership 收口
+- 新增 `run-coordinator`，`runtime.sendScoped` 与 channel inbound 的单轮执行开始统一交给中间层处理
+- 新增 `run-projection`，`ScopeRunSummary` 聚合与浏览器/skill 任务摘要推断开始从 `runtime.ts` 中拆出
+- `ClaudeSdkOrchestrator` 新增 `executeAndCollect` 合同，开始作为 direct-chat 的 execution host bridge
+- `DirectChatEngine` 开始复用 `execution-tool-policy`，先把 tool visibility / dispatch 决策从主循环主体里抽出第一层
+- 文档域的章节改写 / 格式整理 helper 已迁到独立 `document-domain-helpers`，`DirectChatEngine` 不再内联持有这批文档解析与写回细节
+- 浏览器工具循环里的“步骤推进 / 检查点提醒 / 次数上限总结”已收进 `BrowserDomainOrchestrator`，主循环主体继续回到执行宿主角色
+- OpenAI 通道的接口选择、推理强度和文字工具桥接切换判断已迁到 `provider-runtime-resolver`，`DirectChatEngine` 继续缩回 execution host
+- 文档工具循环里的 inspection 结果回显、补提醒、保存判定和完成收口已迁到 `DocumentToolLoopOrchestrator`
+- 设计工具循环里的主版式去重、结果收口和完成判断已迁到 `DesignToolLoopOrchestrator`
+- `RunCoordinator` 在 planning 阶段已开始直接写入正式任务标题与摘要，前台任务卡不再只看到泛化的“Prompt assembly ready”
+- 浏览器 tool loop 的计划文案和迭代预算建议也已并回 `BrowserDomainOrchestrator`，`DirectChatEngine` 继续减少对 planner 细节的直连
+- 文档 deterministic flow 完成时已开始输出正式结构化任务字段，前台任务卡不再只能靠自然语言总结去猜文档任务状态
+- 文档与设计工具循环在“阻塞 / 完成”关键节点也已开始主动输出结构化任务字段，前台任务卡可更直接消费正式状态
+- `execution-intent-resolver` 已开始接管“这轮到底是什么任务、该开什么工具规则”的判断，并修正浏览器工具可见性的时序
+- 浏览器提示词细化与确定性执行也已继续并回 `BrowserDomainOrchestrator`，`DirectChatEngine` 进一步减少对浏览器细节的直连
+- `skill-context-orchestrator` 已开始接管显式 skill 命中、视频下保留工具、技能工具可见性和 skill 上下文注入，主循环不再内联持有这整块技能判断
+- OpenAI 请求主链已迁到 `openai-execution-client`，`DirectChatEngine` 不再内联持有这整段 OpenAI simple / text bridge / tools 调用与响应解析逻辑
+- 补上两处已确认回归风险：
+  - Kimi Coding 带工具请求重新补回 `User-Agent`
+  - 显式技能命中现已支持“用 xxx”这类常见中文说法
+- renderer 侧已补上文档/设计任务卡展示回归测试，确保前台继续优先消费正式任务字段
+- 新增 Stage 5 预备文档，先把共享 iteration budget、并发非交互工具、context compression、provider fallback 统一化的入口和边界讲清楚
+- Anthropic 请求主链已迁到 `anthropic-execution-client`，Kimi Coding 请求与视频上传已迁到 `kimi-coding-client`
+- 视频提帧回退已迁到 `video-fallback-service`，`DirectChatEngine` 不再内联持有 ffmpeg 查找与视频拆帧逻辑
+- tool 执行上下文现在统一通过 `tool-runtime-context-builder` 组装，主循环不再在多个分支里手写局部上下文对象
+- 浏览器连续性注入、澄清短路、deterministic/tool-loop 分发与 fallback 文案已通过 `BrowserDomainOrchestrator.resolveExecutionDispatch` 统一收口，`DirectChatEngine` 对浏览器只保留固定分发流程
+- 主进程结构化任务白名单现已接受 `skill`，skill 正式任务状态可以和 browser/document/design 一样走统一前台链路
+- 阶段 5 已开始落地：新增 `run-budget-policy`，`RunCoordinator` 现在会为单轮执行补上统一预算 seed，并把预算状态带进 execution host
+- 浏览器 / 文档 / 设计三条子域现已开始返回 budget hint，只负责建议 headroom，不再各自偷持预算
+- 新增 `context-compression`，prompt 侧已经能对超长历史做压缩并回传 compression report；前台任务状态链保持不受影响
+- 新增 `execution-fallback-policy`，OpenAI / Kimi / 视频提帧回退开始共用同一套 fallback contract，不再各自散着写判定
+- 新增 `tool-parallelism-policy`，安全的只读工具现在可以按批并行执行，结果仍按原顺序回收
+- `DirectChatEngine` 已开始把预算状态继续传入 execution host：单轮迭代数、工具调用数和并行批次会在执行过程中累积
+- 前台状态层现已开始保留 compression / budget / fallback 这类次级诊断信息，但不会覆盖任务标题和任务摘要
+- 一轮执行结束后，现在也会写回本轮实际消耗的 budget 使用结果，不再只有 planning 时的 seed
+- Anthropic simple 请求里的视频提帧回退也已经并回 client，不再留在主流程里额外判断
+- 浏览器 / 文档 / 设计三条子域给出的 budget hint 现在会真正被主流程消费，不再只是定义了接口但没人使用
+- 当本轮剩余工具额度不够时，主流程现在会在边界处停下并给出预算已达上限的收尾提示，不再继续半截执行
+- Kimi simple path 的 `Kimi -> Anthropic-compatible` 回退链也已并回 execution client；`DirectChatEngine` 不再私留这条简单路径特判
+- planning / done 两头现在都会保留同一套 fallback 诊断字段：`happened / kind / attempts`
+- 当当前工具批次已经把预算打满时，主流程会在这一轮末尾直接收尾，不再继续请求下一轮模型响应
+
 #### Browser-Agent 统一运行时
 - 新增 `browser-task-planner`，统一浏览器任务识别、连续性合流和执行路径选择
 - 新增 `agent-runtime-adapter / page-state-service / evidence-service`，开始收口浏览器运行时、页面状态和证据判断
 - `BrowserAgentRunner` 已开始复用统一页面身份与证据服务，不再只靠内部私有判断
 - 浏览器 runner 现在会输出结构化 task payload；主进程会把这些字段映射进 `scopeRunEvent`，renderer 侧优先消费显式任务字段
+- 浏览器短期连续性现已补上 `canResume / lastFailureReason / lastEvidence`，刷新后和继续任务时不再只剩零散阶段文本
+- `BrowserPageState` 现已补齐 evidence / risks / continuity 摘要，上传、prompt、运行态和页面复用判断开始共用同一套状态
+- 浏览器结构化任务 payload 现已补上 `blockedReason / taskContinuation / recentEvidence`
+- Browser 模式页内新增轻量 diagnostics dock，可直接看到当前任务、页面状态、最近失败和继续/重试/回到目标页入口
 
 #### 保守自动记忆沉淀
 - ReflectionService 改为保守模式：只自动写入 `user_preference` 与 `summary`
@@ -101,6 +148,7 @@
 - `direct-chat` 运行日志新增 `toolCallTransport` 维度，便于区分原生工具与文本桥接
 - AI 配置能力判断统一收口到共享层，减少在主进程、设置页、浏览器视觉和 RSS 子代理中的分散判断
 - AI 设置页的模型配置区域改为紧凑卡片网格，并增加当前兼容状态 chips，减少超长胶囊和横向空耗
+- 浏览器 diagnostics 返回值现在不只包含 host / preview / recent logs，也会带出当前任务、页面状态、连续性、最近失败和可恢复动作
 
 #### RSS 浏览器主链
 - 微博、抖音、小红书的更新链路进一步收口为应用内浏览器主链，不再把这三类来源视为 RSSHub 必需来源

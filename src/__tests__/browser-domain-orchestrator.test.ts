@@ -1,0 +1,180 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import type { BrowserTaskDecision } from '../shared/browser-agent-task'
+import { BrowserDomainOrchestrator } from '../main/modules/agent-control/browser-domain-orchestrator'
+import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+
+function createDecision(): BrowserTaskDecision {
+  return {
+    mode: 'browser_upload_workflow',
+    reason: 'needs_browser',
+    promptIntent: {
+      raw: '生成',
+      refined: '生成',
+      confidence: 'high',
+      source: 'quoted',
+    },
+    plan: {
+      taskKind: 'upload_generate',
+      taskGoal: '上传素材并提交',
+      expectedOutcome: '页面进入运行态',
+      resources: { attachments: [], links: [] },
+      attachmentIntent: { mode: 'none' },
+      promptIntent: { raw: '生成', refined: '生成', confidence: 'high' },
+      steps: [
+        {
+          id: 'resolve_target_page',
+          goal: '确认目标页',
+          action: '读页',
+          verify: ['页面匹配'],
+          skipIf: [],
+          failIf: [],
+          retryLimit: 1,
+          recoverWith: [],
+        },
+        {
+          id: 'ensure_upload',
+          goal: '上传附件',
+          action: '上传',
+          verify: ['附件已挂载'],
+          skipIf: [],
+          failIf: [],
+          retryLimit: 1,
+          recoverWith: [],
+        },
+      ],
+      requiredStages: ['resolve_target_page', 'ensure_upload'],
+      completionCriteria: [],
+      skipRules: [],
+      successCriteria: [],
+    },
+  }
+}
+
+test('BrowserDomainOrchestrator tracks tool-loop step advancement and checkpoint prompts', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const initialState = orchestrator.createToolLoopState(createDecision())
+
+  const progress = orchestrator.recordToolLoopProgress({
+    state: initialState,
+    responseText: '步骤 1 完成，继续下一步',
+    executedBrowserToolsThisIteration: 2,
+  })
+
+  assert.equal(progress.state.stepIndex, 1)
+  assert.equal(progress.advancedStepIndex, 1)
+  assert.match(progress.checkpointMessage || '', /当前步骤: 2\/2 — ensure_upload: 上传附件/)
+  assert.match(progress.checkpointMessage || '', /验证条件: 附件已挂载/)
+})
+
+test('BrowserDomainOrchestrator builds limit reminder from current browser step', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const state = orchestrator.createToolLoopState(createDecision())
+
+  const reminder = orchestrator.buildToolLoopLimitMessage(state)
+
+  assert.match(reminder || '', /工具调用次数已达上限/)
+  assert.match(reminder || '', /当前在步骤 1\/2/)
+})
+
+test('BrowserDomainOrchestrator delegates tool-loop plan text and iteration budget to planner', () => {
+  const planner = {
+    buildToolLoopInstruction: () => 'structured plan',
+    getRecommendedMaxToolIterations: () => 33,
+  } as unknown as BrowserTaskPlanner
+  const orchestrator = new BrowserDomainOrchestrator(planner)
+
+  const message = orchestrator.buildToolLoopMessage(createDecision())
+  const budget = orchestrator.getRecommendedToolLoopIterations('上传素材', createDecision(), 20)
+
+  assert.equal(message, 'structured plan')
+  assert.equal(budget, 33)
+})
+
+test('BrowserDomainOrchestrator exposes budget hints for upload workflows without owning counters', () => {
+  const planner = {
+    getRecommendedMaxToolIterations: () => 36,
+  } as unknown as BrowserTaskPlanner
+  const orchestrator = new BrowserDomainOrchestrator(planner)
+
+  const hint = orchestrator.getBudgetHint({
+    userText: '上传素材并生成',
+    decision: createDecision(),
+    baseMaxToolIterations: 24,
+  })
+
+  assert.deepEqual(hint, { maxIterations: 36 })
+})
+
+test('BrowserDomainOrchestrator refines upload decisions through planner callbacks', async () => {
+  const planner = {
+    rebuildPlan: (decision: BrowserTaskDecision) => ({ ...(decision.plan || {}), promptIntent: decision.promptIntent }),
+    promptNeedsRefinement: () => true,
+    buildPromptRefinementRequest: () => 'refine prompt',
+    parsePromptDraft: () => ({ prompt: '更具体的提示词', confidence: 'high' }),
+  } as unknown as BrowserTaskPlanner
+  const orchestrator = new BrowserDomainOrchestrator(planner)
+
+  const refined = await orchestrator.refineUploadDecision({
+    decision: createDecision(),
+    userText: '上传素材并生成',
+    explicitSkillRequested: false,
+    requestPromptDraft: async () => 'draft',
+  })
+
+  assert.equal(refined.promptIntent?.refined, '更具体的提示词')
+  assert.equal(refined.promptIntent?.source, 'model_refiner')
+})
+
+test('BrowserDomainOrchestrator runs deterministic browser execution through injected runner', async () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const events: Array<{ type: string; text: string }> = []
+
+  const result = await orchestrator.runDeterministicExecution({
+    browserController: {} as never,
+    abortSignal: new AbortController().signal,
+    sessionId: 'scope-1',
+    decision: createDecision(),
+    userText: '上传素材并提交',
+    emitToolEvent: (type, text) => {
+      events.push({ type, text })
+    },
+    createRunner: () => ({
+      run: async () => ({
+        handled: true,
+        message: '浏览器任务已完成',
+        state: 'done',
+      }),
+    }),
+  })
+
+  assert.equal(result.handled, true)
+  assert.equal(result.message, '浏览器任务已完成')
+  assert.equal(events.length, 0)
+})
+
+test('BrowserDomainOrchestrator resolves clarify and tool-loop dispatch actions', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+
+  const clarify = orchestrator.resolveExecutionDispatch({
+    hasTools: true,
+    browserControllerAvailable: true,
+    browserDecision: { mode: 'clarify_first', reason: 'need_clarify' } as BrowserTaskDecision,
+    clarifyText: '请先确认目标站点',
+    canUseDeterministicBrowserRunner: false,
+    shouldInspectAmbiguousModeEntry: false,
+  })
+  const toolLoop = orchestrator.resolveExecutionDispatch({
+    hasTools: true,
+    browserControllerAvailable: true,
+    browserDecision: createDecision(),
+    clarifyText: null,
+    canUseDeterministicBrowserRunner: false,
+    shouldInspectAmbiguousModeEntry: true,
+  })
+
+  assert.equal(clarify.kind, 'clarify')
+  assert.equal(toolLoop.kind, 'tool_loop')
+  assert.match(toolLoop.fallbackLog || '', /mode-selection entry/)
+})

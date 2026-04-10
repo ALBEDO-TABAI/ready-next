@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
+import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
+import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiagnosticsState'
 import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
@@ -124,6 +126,8 @@ export default function BrowserMode({
   const {
     toastVisible,
     adblockState,
+    browserDiagnostics,
+    refreshAdblockState,
   } = useBrowserDiagnosticsState({
     isElectron,
     tabs,
@@ -165,6 +169,27 @@ export default function BrowserMode({
     })
   }, [activeTab, adblockState.enabled, currentDomain, currentDomainAdblockWhitelisted, isElectron])
 
+  const handleContinueBrowserTask = useCallback(() => {
+    const draft = [
+      '继续刚才的浏览器任务。',
+      browserDiagnostics?.currentTask?.taskTitle ? `任务：${browserDiagnostics.currentTask.taskTitle}` : null,
+      browserDiagnostics?.currentTask?.taskSummary ? `当前状态：${browserDiagnostics.currentTask.taskSummary}` : null,
+      browserDiagnostics?.lastFailure?.reason ? `上次失败：${browserDiagnostics.lastFailure.reason}` : null,
+      '请先复核当前页面状态，再继续。',
+    ].filter(Boolean).join('\n')
+    appendToAgentInput(draft)
+  }, [browserDiagnostics])
+
+  const handleRetryBrowserTask = useCallback(() => {
+    const draft = [
+      '请重试刚才的浏览器任务。',
+      browserDiagnostics?.currentTask?.taskTitle ? `任务：${browserDiagnostics.currentTask.taskTitle}` : null,
+      browserDiagnostics?.lastFailure?.reason ? `优先修复：${browserDiagnostics.lastFailure.reason}` : null,
+      '开始前先说明你准备如何继续。',
+    ].filter(Boolean).join('\n')
+    appendToAgentInput(draft)
+  }, [browserDiagnostics])
+
   const {
     handleNewTab,
     handleCloseTab,
@@ -192,6 +217,12 @@ export default function BrowserMode({
     updateTab,
     reorderTabs,
   })
+
+  const handleOpenBrowserTarget = useCallback(() => {
+    const targetUrl = browserDiagnostics?.currentTask?.targetUrl || browserDiagnostics?.continuity?.targetUrl
+    if (!targetUrl) return
+    void handleNavigate(targetUrl)
+  }, [browserDiagnostics, handleNavigate])
 
   const {
     browserRuntimeReady,
@@ -485,6 +516,13 @@ export default function BrowserMode({
               onDragOver={handleContentDragOver}
               onDrop={handleContentDrop}
               onRetry={() => void handleRetry()}
+            />
+            <BrowserDiagnosticsDock
+              browserDiagnostics={browserDiagnostics}
+              onContinue={handleContinueBrowserTask}
+              onRetry={handleRetryBrowserTask}
+              onOpenTarget={handleOpenBrowserTarget}
+              onRefresh={() => void refreshAdblockState()}
             />
           </div>
 

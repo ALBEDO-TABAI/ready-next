@@ -3,6 +3,7 @@ import { join } from 'path'
 import { AgentRepository } from '../repositories/agent-repository'
 import { MemoryRepository } from '../repositories/memory-repository'
 import type { ConversationScope } from './types'
+import { buildCompressionReport, compressHistoryForPrompt, type PromptCompressionReport } from './context-compression'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2'
 
@@ -39,6 +40,7 @@ export interface PromptAssemblyResult {
   memoryRefs: PromptMemoryRef[]
   triggerHits: PromptTriggerHit[]
   contextBudget: PromptBudgetReport
+  compression?: PromptCompressionReport
 }
 
 export interface PromptAssemblyDeps {
@@ -424,12 +426,16 @@ export class PromptAssemblyService {
     return { text: clipped, refs, chars: clipped.length }
   }
 
-  private async loadL1(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
+  private async loadL1(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number; historyCompressed: boolean }> {
     // Load from file-based system (backward compatibility)
     const messages = (await this.getScopeMessages(scope.id)).slice(-4)
-    const transcript = messages
-      .map((item) => `${item.role === 'user' ? '用户' : item.role === 'assistant' ? '助手' : '系统'}: ${String(item.content || '').slice(0, 240)}`)
-      .join('\n')
+    const transcript = compressHistoryForPrompt(
+      messages.map((item) => ({
+        role: item.role,
+        content: String(item.content || '').slice(0, 400),
+      })),
+      { keepRecent: 2, maxChars: 600 },
+    )
     const now = this.now()
     const day = now.toISOString().slice(0, 10)
     const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
@@ -446,7 +452,7 @@ export class PromptAssemblyService {
 
     const sections: string[] = [
       formatMemorySection('当前 Scope', [`- 标题: ${scope.title}`, `- 来源: ${scope.sourceKind}`, `- 线程: ${scope.threadKey}`].join('\n')),
-      transcript ? formatMemorySection('最近会话摘要', transcript) : '',
+      transcript.text ? formatMemorySection('最近会话摘要', transcript.text) : '',
       dailySections,
     ].filter(Boolean)
 
@@ -482,7 +488,7 @@ export class PromptAssemblyService {
     }
 
     const text = clip(sections.join('\n\n'), MAX_L1_CHARS)
-    return { text, refs, chars: text.length }
+    return { text, refs, chars: text.length, historyCompressed: transcript.compressed }
   }
 
   private async loadMemoryContent(contentKey: string): Promise<string | null> {
@@ -601,6 +607,11 @@ export class PromptAssemblyService {
       memoryRefs,
       triggerHits,
       contextBudget: budget,
+      compression: buildCompressionReport({
+        historyCompressed: l1.historyCompressed,
+        toolTraceCompressed: false,
+        artifactSummaryUsed: false,
+      }),
     }
   }
 

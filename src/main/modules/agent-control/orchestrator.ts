@@ -3,6 +3,7 @@ import { DirectChatEngine, type MultimodalBlock } from '../claude-bridge/direct-
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
+import type { ExecutionHostRequest, ExecutionHostResult } from './run-contracts'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 
@@ -139,7 +140,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     sessionId?: string,
     requestId?: string,
     systemPrompt?: string,
-  ): Promise<{ success: boolean; error?: string }> {
+    budget?: ExecutionHostRequest['budget'],
+    budgetState?: ExecutionHostRequest['budgetState'],
+  ): Promise<{ success: boolean; error?: string; executionDiagnostics?: ExecutionHostResult['executionDiagnostics'] }> {
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
@@ -147,7 +150,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     if (systemPrompt) {
       this.engine.setSystemPrompt(internalKey, systemPrompt)
     }
-    const result = await this.engine.sendMessage(internalKey, message, requestId)
+    const result = await this.engine.sendMessage(internalKey, message, requestId, {
+      budget,
+      budgetState,
+    })
     if (!result.success) {
       this.sessions.setState(taskKey, 'failed', result.error)
     }
@@ -160,6 +166,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     sessionId?: string,
     requestId?: string,
     systemPrompt?: string,
+    budget?: ExecutionHostRequest['budget'],
+    budgetState?: ExecutionHostRequest['budgetState'],
   ): Promise<SendAndCollectResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -171,7 +179,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     cleanupFns.push(() => this.off('status', collector.handleStatus))
     cleanupFns.push(() => this.off('error', collector.handleError))
 
-    void this.send(agent, message, sessionId, requestId, systemPrompt).then((result) => {
+    let executionDiagnostics: ExecutionHostResult['executionDiagnostics'] | null = null
+    void this.send(agent, message, sessionId, requestId, systemPrompt, budget, budgetState).then((result) => {
+      executionDiagnostics = result.executionDiagnostics || null
       if (!result.success) {
         collector.handleError({
           agent,
@@ -189,11 +199,36 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     })
 
     try {
-      return await collector.result
+      const result = await collector.result
+      return {
+        ...result,
+        executionDiagnostics,
+      }
     } finally {
       while (cleanupFns.length > 0) {
         cleanupFns.pop()?.()
       }
+    }
+  }
+
+  async executeAndCollect(request: ExecutionHostRequest): Promise<ExecutionHostResult> {
+    const result = await this.sendAndCollect(
+      request.agent,
+      request.message as string | MultimodalBlock[],
+      request.sessionId,
+      request.requestId,
+      request.systemPrompt,
+      request.budget,
+      request.budgetState,
+    )
+    return {
+      success: result.success,
+      finalText: result.finalText,
+      cancelled: result.cancelled,
+      usedTools: result.usedTools,
+      error: result.error,
+      budgetState: request.budgetState,
+      executionDiagnostics: result.executionDiagnostics || null,
     }
   }
 

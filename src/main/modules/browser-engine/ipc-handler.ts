@@ -29,7 +29,13 @@ import { BrowserContextMenuService } from './context-menu-service'
 import { findReusableCaptureTabId, isReusableCaptureTabUrl } from './capture-url-utils'
 import { BrowserDataService, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService } from './download-service'
-import { BROWSER_DIAGNOSTICS_LOG_PATH, BrowserDiagnosticsService } from './diagnostics-service'
+import {
+  BROWSER_DIAGNOSTICS_LOG_PATH,
+  BrowserDiagnosticsService,
+  type BrowserContinuityDiagnosticsSnapshot,
+  type BrowserPageDiagnosticsSnapshot,
+  type BrowserTaskDiagnosticsSnapshot,
+} from './diagnostics-service'
 import { BrowserHostLayoutService } from './host-layout-service'
 import { type BrowserHostKind, type BrowserHostView, type BrowserRect, type PreviewTabState } from './host-types'
 import { setupBrowserDataIPC } from './ipc-data'
@@ -535,7 +541,13 @@ export class BrowserController {
     diagnosticsLogPath: string
     recentLogs: string[]
     preview: PreviewTabState
+    currentTask: BrowserTaskDiagnosticsSnapshot | null
+    pageState: BrowserPageDiagnosticsSnapshot | null
+    continuity: BrowserContinuityDiagnosticsSnapshot | null
+    lastFailure: { reason: string; updatedAt: string } | null
+    availableActions: string[]
   } {
+    const agentSnapshot = this.diagnosticsService.getAgentSnapshot()
     return {
       hostDriver: this.browserHostKind,
       tabCount: this.tabs.size,
@@ -543,7 +555,24 @@ export class BrowserController {
       diagnosticsLogPath: BROWSER_DIAGNOSTICS_LOG_PATH,
       recentLogs: this.diagnosticsService.getRecentEntries(16),
       preview: this.previewService.getState(),
+      currentTask: agentSnapshot.currentTask,
+      pageState: agentSnapshot.pageState,
+      continuity: agentSnapshot.continuity,
+      lastFailure: agentSnapshot.lastFailure,
+      availableActions: agentSnapshot.availableActions,
     }
+  }
+
+  reportAgentTaskDiagnostics(snapshot: BrowserTaskDiagnosticsSnapshot | null): void {
+    this.diagnosticsService.recordTask(snapshot)
+  }
+
+  reportAgentPageDiagnostics(snapshot: BrowserPageDiagnosticsSnapshot | null): void {
+    this.diagnosticsService.recordPageState(snapshot)
+  }
+
+  reportAgentContinuityDiagnostics(snapshot: BrowserContinuityDiagnosticsSnapshot | null): void {
+    this.diagnosticsService.recordContinuity(snapshot)
   }
 
   async getTabContext(tabId?: string | null): Promise<BrowserTabContextData> {

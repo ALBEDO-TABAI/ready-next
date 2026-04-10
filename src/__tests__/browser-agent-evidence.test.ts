@@ -46,6 +46,24 @@ function createState(overrides?: Partial<BrowserPageState>): BrowserPageState {
       nearbySendTargets: [],
       sendTargets: [],
     },
+    evidence: {
+      targetMatched: true,
+      uploadComplete: false,
+      promptComplete: false,
+      running: false,
+      recentEvidence: [],
+    },
+    risks: {
+      modalVisible: false,
+      modeSelection: false,
+      offTarget: false,
+    },
+    continuity: {
+      canReuseCurrentPage: false,
+      source: 'none',
+      lastStableStage: null,
+      lastFailureReason: null,
+    },
     ...overrides,
   }
 }
@@ -172,5 +190,61 @@ describe('BrowserEvidenceService', () => {
 
     assert.equal(service.looksLikeModeSelectionPage(modeSelection), true)
     assert.equal(service.looksLikeModeSelectionPage(normalWorkspace), false)
+  })
+
+  it('produces blocking reasons and reuse decisions from unified state', () => {
+    const service = new BrowserEvidenceService()
+    const blocked = createState({
+      evidence: {
+        targetMatched: false,
+        uploadComplete: false,
+        promptComplete: false,
+        running: false,
+        recentEvidence: ['input_has_files'],
+      },
+      risks: {
+        modalVisible: true,
+        modeSelection: true,
+        offTarget: true,
+      },
+      continuity: {
+        canReuseCurrentPage: false,
+        source: 'remembered_workflow',
+        lastStableStage: 'ensure_upload',
+        lastFailureReason: '页面未确认进入运行态',
+      },
+    })
+    const ready = createState({
+      evidence: {
+        targetMatched: true,
+        uploadComplete: true,
+        promptComplete: true,
+        running: true,
+        recentEvidence: ['preview_visible', 'prompt_matched', 'running_state'],
+      },
+      risks: {
+        modalVisible: false,
+        modeSelection: false,
+        offTarget: false,
+      },
+      continuity: {
+        canReuseCurrentPage: true,
+        source: 'active_tab',
+        lastStableStage: 'submit',
+        lastFailureReason: null,
+      },
+    })
+
+    assert.deepEqual(service.getBlockingReasons(blocked), [
+      '页面存在遮挡或弹层',
+      '当前仍停留在模式选择页',
+      '当前页面与目标页不一致',
+      '附件未挂载',
+      '提示词未确认写入',
+      '页面未进入运行态',
+      '上次失败原因：页面未确认进入运行态',
+    ])
+    assert.equal(service.canReuseCurrentPage(blocked), false)
+    assert.equal(service.canReuseCurrentPage(ready), true)
   })
 })

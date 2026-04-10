@@ -172,7 +172,7 @@ export interface ScopeRunMemoryRef {
 export interface ScopeRunTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -201,6 +201,7 @@ export interface ScopeRunTaskContinuation {
   executionId: string
   stepId?: string | null
   blockerType?: string | null
+  targetUrl?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -215,6 +216,27 @@ export interface ScopeRunMemoryCapture {
   createdAt: string
   note?: string | null
   items: ScopeRunMemoryCaptureItem[]
+}
+
+export interface ScopeRunExecutionDiagnostics {
+  compression?: {
+    historyCompressed: boolean
+    toolTraceCompressed: boolean
+    artifactSummaryUsed: boolean
+  } | null
+  budget?: {
+    maxIterations?: number
+    maxToolCalls?: number
+    maxParallelToolGroups?: number
+    iterationsUsed?: number
+    toolCallsUsed?: number
+    parallelToolGroupsUsed?: number
+  } | null
+  fallback?: {
+    happened: boolean
+    kind: string
+    attempts: number
+  } | null
 }
 
 export interface ScopeRunSummary {
@@ -235,6 +257,7 @@ export interface ScopeRunSummary {
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuation | null
   memoryCapture?: ScopeRunMemoryCapture | null
+  executionDiagnostics?: ScopeRunExecutionDiagnostics | null
   blockedReason?: string | null
   error?: string | null
   updatedAt: string
@@ -247,7 +270,7 @@ export interface ScopeRunEventPayload {
   runId?: string
   phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
   latestText?: string
-  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
   jobId?: string
@@ -294,6 +317,7 @@ export interface ScopeRunEventPayload {
   }>
   taskContinuation?: ScopeRunTaskContinuation | null
   memoryCapture?: ScopeRunMemoryCapture | null
+  executionDiagnostics?: ScopeRunExecutionDiagnostics | null
   stepMetrics?: {
     toolCalls: number
     toolResults: number

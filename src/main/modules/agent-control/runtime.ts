@@ -16,6 +16,8 @@ import {
 } from '../database'
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
+import { RunCoordinator } from './run-coordinator'
+import { RunProjection } from './run-projection'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
 import { MemoryLifecycleManager } from './memory-lifecycle'
@@ -38,8 +40,6 @@ import type {
   ScopeRunMemoryCapture,
   ScopeRunEventPayload,
   ScopeRunSummary,
-  ScopeRunTaskContinuation,
-  ScopeRunTaskStep,
 } from './types'
 
 export interface UpsertChannelPayload {
@@ -107,6 +107,8 @@ export class AgentControlRuntime extends EventEmitter {
     enableDatabaseMemory: true,
   })
   private readonly agentManager: AgentManager
+  private readonly runCoordinator: RunCoordinator
+  private readonly runProjection: RunProjection
   private readonly pendingInboundChannels = new Map<string, {
     channelId: string
     thread: string
@@ -139,6 +141,20 @@ export class AgentControlRuntime extends EventEmitter {
       sidecarManager: this.sidecar,
     })
     this.orchestrator.setRuntime(this)
+    this.runCoordinator = new RunCoordinator({
+      promptAssembly: this.promptAssembly,
+      executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
+      emitScopeRunEvent: (payload) => this.emitScopeRunEvent(payload),
+      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
+    })
+    this.runProjection = new RunProjection({
+      getScope: (scopeId) => this.getConversationScope(scopeId),
+      getPrevious: (scopeId) => this.scopeRunSummaries.get(scopeId),
+      setSummary: (scopeId, summary) => {
+        this.scopeRunSummaries.set(scopeId, summary)
+      },
+      toChannelKey: (scope) => this.toChannelKey(scope),
+    })
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
@@ -410,80 +426,23 @@ export class AgentControlRuntime extends EventEmitter {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }
     const scope = this.mapConversationRow(scopeRow)
-    const promptAssembly = await this.promptAssembly.buildForScopedRun({
-      scope,
-      message: payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    })
-    const messageWithBootstrap = this.promptAssembly.applyToMessage(
-      payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-      promptAssembly,
-    ) as string | MultimodalBlock[]
-    this.emitScopeRunEvent({
-      type: 'started',
-      scopeId: scope.id,
-      agent: scope.agent,
-      runId: payload.requestId,
-      phase: 'planning',
-      module: promptAssembly.triggerHits[0]?.module,
-      latestText: 'Prompt assembly ready',
-      memoryRefs: promptAssembly.memoryRefs,
-      triggerHits: promptAssembly.triggerHits,
-      contextBudget: promptAssembly.contextBudget,
-      timestamp: new Date().toISOString(),
-    })
-    const result = await this.orchestrator.sendAndCollect(
-      scope.agent,
-      messageWithBootstrap,
-      scope.id,
-      payload.requestId,
-      promptAssembly.systemPrompt,
-    )
-    if (!result.success) {
-      this.promptAssembly.recordRunOutcome({
+    return this.runCoordinator.runScoped(
+      {
         scope,
-        finalText: result.finalText,
-        usedTools: result.usedTools,
-        success: false,
-      })
-      return { success: false, error: result.error || 'Agent execution failed' }
-    }
-
-    this.promptAssembly.recordRunOutcome({
-      scope,
-      finalText: result.finalText,
-      usedTools: result.usedTools,
-      success: true,
-    })
-
-    // Automatic reflection: extract facts and update memories
-    // Run in background to avoid blocking the response
-    this.reflectOnConversation(scope, result.usedTools)
-      .then((memoryCapture) => {
-        if (!memoryCapture || memoryCapture.items.length === 0) return
-        this.emitScopeRunEvent({
-          type: 'updated',
-          scopeId: scope.id,
-          agent: scope.agent,
-          runId: payload.requestId,
-          phase: 'done',
-          taskSummary: `已记录 ${memoryCapture.items.length} 条长期记忆`,
-          memoryCapture,
-          timestamp: new Date().toISOString(),
-        })
-      })
-      .catch((error) => {
-        console.error('[Runtime] Reflection failed:', error)
-      })
-
-    if (scope.sourceKind === 'channel') {
-      const outboundText = result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-      const sendOk = await this.sendLongTextToChannel(scope.sourceId, scope.threadKey, outboundText)
-      if (!sendOk.success) {
-        return { success: false, error: sendOk.error || 'Failed to send channel reply' }
-      }
-    }
-
-    return { success: true }
+        message: payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+        requestId: payload.requestId,
+      },
+      {
+        onSuccess: async (result) => {
+          if (scope.sourceKind !== 'channel') return
+          const outboundText = result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+          const sendOk = await this.sendLongTextToChannel(scope.sourceId, scope.threadKey, outboundText)
+          if (!sendOk.success) {
+            throw new Error(sendOk.error || 'Failed to send channel reply')
+          }
+        },
+      },
+    )
   }
 
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
@@ -919,71 +878,62 @@ export class AgentControlRuntime extends EventEmitter {
 
     const promptPayload = this.buildInboundChannelPayload(inboundText, pending.attachments)
     const requestId = `channel-${pending.eventIds[pending.eventIds.length - 1]}`
-    const result = await this.orchestrator.sendAndCollect(agent, promptPayload, scope.id, requestId)
-    clearTimeout(statusTimer)
-    if (!result.success) {
-      const err = result.error || 'Agent execution failed'
-      this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', err)
-      const errorMessage = this.createConversationMessage(scope.id, {
-        role: 'system',
-        content: `处理失败：${err}`,
-        meta: {
-          source: 'channel',
-          channelId: pending.channelId,
-          threadKey: pending.thread,
-          direction: 'outbound',
-          error: true,
-        },
-      })
-      this.emitConversationEvent({
-        type: 'message_added',
-        scope: this.refreshScope(scope.id),
-        message: errorMessage,
-      })
-      await this.sendLongTextToChannel(pending.channelId, pending.thread, `处理失败：${err}`).catch(() => undefined)
-      return
-    }
-
-    const finalText = result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-    const assistantMessage = this.createConversationMessage(scope.id, {
-      role: 'assistant',
-      content: finalText,
-      meta: {
-        source: 'channel',
-        channelId: pending.channelId,
-        threadKey: pending.thread,
-        sender: agent,
-        direction: 'outbound',
-        delayedStatusSent: statusSent,
+    const result = await this.runCoordinator.runInboundChannel(
+      {
+        scope,
+        message: promptPayload as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+        requestId,
       },
-    })
-    this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
-    this.db.markAgentChannelSeen(pending.channelId)
-    this.emitConversationEvent({
-      type: 'message_added',
-      scope: this.refreshScope(scope.id),
-      message: assistantMessage,
-    })
-    await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(() => undefined)
-
-    // Automatic reflection: extract facts and update memories
-    this.reflectOnConversation(scope, result.usedTools)
-      .then((memoryCapture) => {
-        if (!memoryCapture || memoryCapture.items.length === 0) return
-        this.emitScopeRunEvent({
-          type: 'updated',
-          scopeId: scope.id,
-          agent: scope.agent,
-          runId: requestId,
-          phase: 'done',
-          taskSummary: `已记录 ${memoryCapture.items.length} 条长期记忆`,
-          memoryCapture,
-          timestamp: new Date().toISOString(),
-        })
-      })
-      .catch((error) => {
-        console.error('[Runtime] Channel reflection failed:', error)
-      })
+      {
+        onFailure: async (errorText) => {
+          clearTimeout(statusTimer)
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', errorText)
+          const errorMessage = this.createConversationMessage(scope.id, {
+            role: 'system',
+            content: `处理失败：${errorText}`,
+            meta: {
+              source: 'channel',
+              channelId: pending.channelId,
+              threadKey: pending.thread,
+              direction: 'outbound',
+              error: true,
+            },
+          })
+          this.emitConversationEvent({
+            type: 'message_added',
+            scope: this.refreshScope(scope.id),
+            message: errorMessage,
+          })
+          await this.sendLongTextToChannel(pending.channelId, pending.thread, `处理失败：${errorText}`).catch(() => undefined)
+        },
+        onSuccess: async (executionResult) => {
+          clearTimeout(statusTimer)
+          const finalText = executionResult.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+          const assistantMessage = this.createConversationMessage(scope.id, {
+            role: 'assistant',
+            content: finalText,
+            meta: {
+              source: 'channel',
+              channelId: pending.channelId,
+              threadKey: pending.thread,
+              sender: agent,
+              direction: 'outbound',
+              delayedStatusSent: statusSent,
+            },
+          })
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
+          this.db.markAgentChannelSeen(pending.channelId)
+          this.emitConversationEvent({
+            type: 'message_added',
+            scope: this.refreshScope(scope.id),
+            message: assistantMessage,
+          })
+          await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(() => undefined)
+        },
+      },
+    )
+    clearTimeout(statusTimer)
+    if (!result.success) return
   }
 
   private mapChannelRow(row: AgentChannelRecord): AgentChannelConfig {
@@ -1103,34 +1053,8 @@ export class AgentControlRuntime extends EventEmitter {
     this.emit('scopeRunEvent', payload)
   }
 
-  recordScopeRunEvent(payload: ScopeRunEventPayload): void {
-    const scope = this.getConversationScope(payload.scopeId)
-    if (!scope) return
-    const previous = this.scopeRunSummaries.get(payload.scopeId)
-    const derivedTask = this.deriveTaskSummaryPayload(previous, payload)
-    const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
-    this.scopeRunSummaries.set(payload.scopeId, {
-      scopeId: payload.scopeId,
-      agent: payload.agent,
-      title: scope.title,
-      sourceKind: scope.sourceKind,
-      sourceId: scope.sourceId,
-      channelKey: this.toChannelKey(scope),
-      threadKey: scope.threadKey,
-      phase: payload.phase,
-      taskTitle: payload.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
-      taskSummary: payload.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
-      steps: payload.steps ?? derivedTask.steps ?? previous?.steps ?? [],
-      currentStepId: payload.currentStepId ?? derivedTask.currentStepId ?? previous?.currentStepId ?? null,
-      waitingFor: payload.waitingFor ?? derivedTask.waitingFor ?? previous?.waitingFor ?? 'none',
-      resumableActions: payload.resumableActions ?? derivedTask.resumableActions ?? previous?.resumableActions ?? [],
-      recentArtifacts,
-      taskContinuation: payload.taskContinuation ?? derivedTask.taskContinuation ?? previous?.taskContinuation ?? null,
-      memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
-      blockedReason: payload.blockedReason ?? previous?.blockedReason ?? null,
-      error: payload.error ?? previous?.error ?? null,
-      updatedAt: payload.timestamp,
-    })
+  recordScopeRunEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
+    return this.runProjection.recordEvent(payload)
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {
@@ -1387,140 +1311,4 @@ export class AgentControlRuntime extends EventEmitter {
     return `${scope.sourceKind}:${sourceId}`
   }
 
-  private deriveTaskSummaryPayload(
-    previous: ScopeRunSummary | undefined,
-    payload: ScopeRunEventPayload,
-  ): Partial<ScopeRunSummary> {
-    const rawText = payload.toolEvent?.kind === 'result'
-      ? payload.toolEvent.text
-      : payload.latestText || ''
-    if (!rawText) return {}
-
-    const browserPlanTarget = rawText.match(/\[计划\]\s*目标：([^\n]+)/)?.[1]?.trim()
-    const browserPlanOrder = rawText.match(/\[计划\]\s*顺序：([^\n]+)/)?.[1]?.trim()
-    if (browserPlanTarget && browserPlanOrder) {
-      const steps = browserPlanOrder
-        .split('->')
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((id) => ({
-          id,
-          title: this.browserStepTitle(id),
-          status: 'pending' as const,
-          updatedAt: payload.timestamp,
-        }))
-      return {
-        taskTitle: browserPlanTarget,
-        taskSummary: '准备开始浏览器任务',
-        steps,
-        currentStepId: null,
-        waitingFor: 'none',
-        resumableActions: ['cancel'],
-      }
-    }
-
-    const browserStage = rawText.match(/\[阶段\]\s*步骤\s*(\d+)\/(\d+)\s*([^：:]+)[：:]\s*(.+)$/)
-    if (browserStage) {
-      const currentIndex = Math.max(0, Number(browserStage[1]) - 1)
-      const detail = browserStage[4].trim()
-      const steps = (previous?.steps || []).map((step, index) => ({
-        ...step,
-        status: (index < currentIndex ? 'done' : index === currentIndex ? 'running' : 'pending') as ScopeRunTaskStep['status'],
-        detail: index === currentIndex ? detail : step.detail || null,
-        updatedAt: index <= currentIndex ? payload.timestamp : step.updatedAt,
-      }))
-      return {
-        taskTitle: previous?.taskTitle || '浏览器任务',
-        taskSummary: `${browserStage[3].trim()}：${detail}`,
-        steps,
-        currentStepId: steps[currentIndex]?.id || previous?.currentStepId || null,
-        waitingFor: 'none',
-        resumableActions: ['cancel'],
-      }
-    }
-
-    const executionId = rawText.match(/^Execution ID:\s*(.+)$/m)?.[1]?.trim()
-    const skillId = rawText.match(/^Skill:\s*(.+)$/m)?.[1]?.trim()
-    if (executionId && skillId) {
-      const currentStepId = rawText.match(/^Current step:\s*(.+)$/m)?.[1]?.trim() || null
-      const blockerMatch = rawText.match(/^Blocker:\s*([^-\n]+)-\s*(.+)$/m)
-      const blockerType = blockerMatch?.[1]?.trim() || null
-      const blockerMessage = blockerMatch?.[2]?.trim() || null
-      const recentSteps = rawText.match(/^Recent steps:\s*(.+)$/m)?.[1]?.trim() || ''
-      const recentArtifactsLine = rawText.match(/^Recent artifacts:\s*(.+)$/m)?.[1]?.trim() || ''
-      const steps = recentSteps
-        ? recentSteps.split(',').map((item) => item.trim()).filter(Boolean).map((item) => {
-          const match = item.match(/^(.+)\((.+)\)$/)
-          const stepId = (match?.[1] || item).trim()
-          return {
-            id: stepId,
-            title: stepId,
-            status: this.skillStepStatus(match?.[2] || 'pending'),
-            updatedAt: payload.timestamp,
-          } satisfies ScopeRunTaskStep
-        })
-        : previous?.steps || []
-      const parsedArtifacts = recentArtifactsLine
-        ? recentArtifactsLine.split(',').map((item) => item.trim()).filter(Boolean).map((item, index) => ({
-          id: `artifact-${executionId}-${index}`,
-          module: 'system',
-          kind: 'artifact',
-          label: item,
-          path: item.startsWith('/') ? item : null,
-          createdAt: payload.timestamp,
-        }))
-        : previous?.recentArtifacts || []
-      return {
-        taskTitle: `技能执行 · ${skillId}`,
-        taskSummary: blockerMessage || `当前步骤：${currentStepId || '进行中'}`,
-        steps,
-        currentStepId,
-        waitingFor: blockerType === 'need_input'
-          ? 'input'
-          : blockerType === 'need_confirmation'
-            ? 'confirmation'
-            : blockerType === 'need_agent_result'
-              ? 'agent_result'
-              : blockerType
-                ? 'background'
-                : 'none',
-        resumableActions: [
-          ...(blockerType ? ['continue'] as const : []),
-          ...(parsedArtifacts.length > 0 ? ['open_artifact'] as const : []),
-          'cancel' as const,
-        ],
-        recentArtifacts: parsedArtifacts,
-        taskContinuation: {
-          executionId,
-          stepId: currentStepId,
-          blockerType,
-        } satisfies ScopeRunTaskContinuation,
-      }
-    }
-
-    return {}
-  }
-
-  private browserStepTitle(id: string): string {
-    const titles: Record<string, string> = {
-      resolve_target_page: '确认目标页',
-      resolve_attachment: '确认附件',
-      navigate_target: '进入目标页',
-      ensure_upload: '上传附件',
-      ensure_prompt: '填写提示词',
-      submit: '提交执行',
-      final_reconcile: '结果复核',
-      recover: '恢复页面',
-    }
-    return titles[id] || id
-  }
-
-  private skillStepStatus(value: string): ScopeRunTaskStep['status'] {
-    const normalized = String(value || '').trim().toLowerCase()
-    if (normalized === 'done' || normalized === 'success' || normalized === 'completed') return 'done'
-    if (normalized === 'running' || normalized === 'active') return 'running'
-    if (normalized === 'waiting' || normalized === 'blocked') return 'blocked'
-    if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'error') return 'error'
-    return 'pending'
-  }
 }

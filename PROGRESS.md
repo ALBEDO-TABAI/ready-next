@@ -97,6 +97,55 @@
 - `BrowserAgentRunner` 已开始复用统一页面身份与统一证据判断。
 - 浏览器任务现在可输出结构化 task payload，并映射为 `scopeRunEvent` 的显式任务字段。
 - renderer 侧 `scopeRunState` 已支持优先消费浏览器结构化任务字段。
+- 最新一轮继续补上了“短期连续性 + 诊断收口”：
+  - 最近浏览器工作流会记录 `canResume / lastFailureReason / lastEvidence`
+  - `BrowserPageState` 已补齐 evidence / risks / continuity 摘要
+  - 浏览器结构化任务现已补上 `blockedReason / taskContinuation / recentEvidence`
+  - Browser 模式页内新增轻量 diagnostics dock，可直接看到当前任务、页面状态、最近失败和继续/重试/回到目标页入口
+
+11. Agent 主控拆层已开始进入“Run Coordinator + Run Projection”阶段（2026-04-09）。
+- 新增 `run-coordinator`：`runtime.sendScoped` 与 channel inbound 执行开始统一走单轮执行 owner，而不再由 `runtime.ts` 直接内联 prompt assembly + orchestrator 调用 + outcome 写回。
+- 新增 `run-projection`：`ScopeRunSummary` 的聚合与浏览器/skill 文本推断已开始从 `runtime.ts` 抽离。
+- `ClaudeSdkOrchestrator` 已补上 `executeAndCollect` 合同，作为 direct-chat 的 execution host bridge。
+- `DirectChatEngine` 已开始复用 `execution-tool-policy`，把 tool visibility / dispatch 决策从主循环主体里抽出第一层。
+- 最新一轮继续把域内 loop helper 往外挪：
+  - 新增 `document-domain-helpers`，文档章节改写 / 格式整理 / 安全写回 helper 不再堆在 `DirectChatEngine`
+  - `document-tool-flow` 已接管文档 inspection / mutation / save 的结果判读 helper
+  - `BrowserDomainOrchestrator` 已接管浏览器 tool loop 的步骤推进、检查点提醒和超限总结
+  - 新增 `provider-runtime-resolver`，OpenAI 通道的接口选择、推理强度与文字工具桥接切换判断不再内联在 `DirectChatEngine`
+  - 新增 `DocumentToolLoopOrchestrator`，文档工具循环里的补提醒、inspection 回显和完成判定开始正式收口
+  - 新增 `DesignToolLoopOrchestrator`，设计工具循环里的主版式去重和结果收口开始正式收口
+  - `DocumentDomainOrchestrator` 已真正接入主链，文档模式下的格式整理 / 章节改写不再只是旁边放着的 helper
+  - `RunCoordinator` planning 阶段已开始直接输出正式任务标题和摘要
+  - `BrowserDomainOrchestrator` 已继续接管 browser tool loop 的计划文案与迭代预算建议
+  - 文档 deterministic flow 完成时已开始输出正式结构化任务字段，前台任务卡不再只能靠自然语言总结去猜
+  - 文档与设计工具循环在“阻塞 / 完成”关键节点也已开始主动输出结构化任务字段，第四阶段继续往正式 projection 靠拢
+  - 新增 `execution-intent-resolver`，执行前的任务判断与工具规则开始正式收口，并修正浏览器工具可见性的判断时序
+  - `BrowserDomainOrchestrator` 已继续接管浏览器提示词细化与确定性执行，主循环进一步减少对浏览器执行器的直连
+  - 新增 `skill-context-orchestrator`，显式 skill 命中、视频下保留工具、技能工具可见性和 skill 上下文注入开始正式收口
+  - OpenAI 请求主链已迁到 `openai-execution-client`，主循环不再内联持有这整段 OpenAI 请求与响应解析逻辑
+  - 已补回 Kimi Coding 带工具请求的 `User-Agent`，并补上“用 xxx”这类常见中文 skill 命中回归测试
+  - renderer 侧已补上文档/设计任务卡展示回归测试，正式 task projection 已不再只停留在主进程与状态层
+  - 已新增 Stage 5 预备文档，先把共享 iteration budget、并发非交互工具、context compression、provider fallback 统一化的入口和边界讲清楚
+  - Anthropic 请求主链已迁到 `anthropic-execution-client`，Kimi Coding 请求与视频上传已迁到 `kimi-coding-client`
+  - 视频提帧回退已迁到 `video-fallback-service`，`DirectChatEngine` 不再内联持有 ffmpeg 查找与视频拆帧逻辑
+  - tool 执行上下文现在统一通过 `tool-runtime-context-builder` 组装，主循环不再在多个分支里手写局部上下文对象
+  - 浏览器连续性注入、澄清短路、deterministic/tool-loop 分发与 fallback 文案现已通过 `BrowserDomainOrchestrator.resolveExecutionDispatch` 统一收口，浏览器域只剩固定分发挂在主循环上
+  - 主进程结构化任务白名单已补进 `skill`，skill 正式任务状态现在也能走和 browser/document/design 一样的前台通路
+  - 阶段 5 已开始落地：新增 `run-budget-policy`，`RunCoordinator` 现在会给单轮执行补上统一预算 seed，并把预算状态带进 execution host
+  - 浏览器 / 文档 / 设计三条子域已开始返回 budget hint，只建议多留预算，不再各自偷持预算
+  - 新增 `context-compression`，prompt 侧已开始对超长历史做压缩并回传 compression report；前台 structured task truth 维持不变
+  - 新增 `execution-fallback-policy`，OpenAI / Kimi / 视频提帧回退开始走共享 fallback contract，不再各自散着判断
+  - 新增 `tool-parallelism-policy`，安全的只读工具现在可以按批并行执行，结果仍按原顺序回收
+  - 预算状态已继续接进 execution host：单轮迭代数、工具调用数和并行批次会在执行过程中累积
+  - 前台状态层已开始保留 compression / budget / fallback 这类次级诊断信息，但不会覆盖任务标题和任务摘要
+  - 一轮执行结束后，现在也会写回本轮实际消耗的 budget 使用结果，不再只有 planning 时的 seed
+  - Anthropic simple 请求里的视频提帧回退也已并回 client，不再留在主流程里额外判断
+  - 浏览器 / 文档 / 设计三条子域给出的 budget hint 现在会真正被主流程消费，不再只是定义了接口但没人使用
+  - 当本轮剩余工具额度不够时，主流程现在会在边界处停下并给出预算已达上限的收尾提示，不再继续半截执行
+  - Kimi simple path 的 `Kimi -> Anthropic-compatible` 回退链也已并回 execution client，主流程不再私留这条简单路径小路
+  - planning / done 两头现在都会输出同一套 fallback 诊断字段：`happened / kind / attempts`
+  - 当当前工具批次已经把预算打满时，主流程会在本轮末尾直接停住，不再继续请求下一轮模型响应
 
 ## 当前最高优先级
 1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
@@ -110,10 +159,11 @@
 ## 当前未完成项
 - Weibo/Xiaohongshu/Douyin 的“浏览器主链 + 登录引导”已完成代码收口，但仍缺最后一轮实机签收。
 - Workbench 顶部三行在各模块下仍需最后一轮视觉对齐。
-- Browser diagnostics 仍是 panel，不是完整 lab。
-- Browser orchestration 仍有最后一层收口空间。
+- Browser diagnostics 已有页内 dock，但仍不是完整 lab。
+- Browser orchestration 已基本收口，剩余主要是尾部 helper 清理与阶段 5 前的边界复核。
 - Browser unified header 还需要一轮实机动效与窄宽度体验微调，但结构性切换已完成。
 - skill workflow 仍缺少更细的 execution UX 打磨与更多样例 skill 迁移。
+- Agent 主控 ownership 虽已开始收口，但 `DirectChatEngine` 仍然偏大，browser/document/design 的域策略还没有完全退出主循环主体。
 - **`PromptAssemblyService + L0/L1/L2 memory` 还未启动**（下一阶段主线）。
 - **Feishu capability replacement 还未启动**（下一阶段主线）。
 
@@ -123,11 +173,14 @@
 3. **接下来回到底座主线**：
    - **`PromptAssemblyService + L0/L1/L2 memory`**（Agent 记忆系统）
    - **`Feishu capability replacement`**（飞书能力替换）
+   - Agent core loop 继续把 browser/document/design 域策略从 `DirectChatEngine` 主体抽离
    - Browser orchestration 最后收口
-   - Diagnostics labs 完整化
+   - Diagnostics labs 从当前 dock 继续升级完整化
 
 ## 最近一次有效校验
 - `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-coordinator-budget.test.ts src/__tests__/execution-fallback-policy.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-projection.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-card-view-model-contract.test.ts src/__tests__/openai-execution-client-contract.test.ts src/__tests__/anthropic-execution-client-contract.test.ts src/__tests__/kimi-coding-client-contract.test.ts src/__tests__/video-fallback-service-contract.test.ts src/__tests__/simple-execution-fallbacks.test.ts` 通过
+- `npm test` 未通过：当前工作区仍有 `browser-tab-switch-executor`、多组 document contract、以及一批 liquid shell / workbench UI contract 旧失败；本轮主控与客户端相关重点测试已通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-*.test.ts src/__tests__/document-widget-openui.test.ts` 通过
 - `npm test` 未通过：仍有与本次浏览器改动无关的 `workbench-liquid-shell-contract` 旧失败
 - `npm run typecheck` 通过
@@ -138,6 +191,23 @@
 - `npm run typecheck:web` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/ui-browser-hook-split-contract.test.ts src/__tests__/browser-engine-services.test.ts src/__tests__/browser-unified-header-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-unified-header-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/ui-browser-hook-split-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-engine-services.test.ts src/__tests__/browser-tools.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-agent-evidence.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npm run verify` 未通过：仍被仓库内大量与本轮无关的历史 lint 问题拦住
+- `npx tsx@^4.19.2 --test src/__tests__/agent-control.test.ts src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-projection.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-projection.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-projection.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/provider-runtime-resolver.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-projection.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/document-tool-loop-orchestrator.test.ts src/__tests__/design-tool-loop-orchestrator.test.ts src/__tests__/provider-runtime-resolver.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/agent-runtime-host-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/browser-agent-runtime-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-projection.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/document-tool-loop-orchestrator.test.ts src/__tests__/design-tool-loop-orchestrator.test.ts src/__tests__/provider-runtime-resolver.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/agent-task-panel-contract.test.ts` 通过
+- `npm run typecheck` 通过
+- `npm test` 未通过：仍被仓库内既有 `browser-tab-switch-executor` / `workbench-liquid-shell-contract` 等旧失败拦住，本轮主控拆层相关用例已通过
+- `npm run verify` 未通过：仍被仓库内既有 lint 问题拦住，本轮新增主控拆层未引入新的 typecheck 失败
 - `npx tsx@^4.19.2 --test src/__tests__/browser-unified-header-contract.test.ts src/__tests__/browser-utility-menu-model.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/ui-browser-hook-split-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过

@@ -52,4 +52,25 @@ export class BrowserEvidenceService {
     if (state.dom.inputCandidateCount > 0) return false
     return /(图片生成|视频生成|选择模式|ai 创作|立即开始|创作模式|开始创作)/.test(body)
   }
+
+  canReuseCurrentPage(state: BrowserPageState): boolean {
+    return Boolean(
+      state.evidence.targetMatched &&
+      !state.risks.modalVisible &&
+      !state.risks.modeSelection &&
+      !state.risks.offTarget,
+    )
+  }
+
+  getBlockingReasons(state: BrowserPageState): string[] {
+    const reasons: string[] = []
+    if (state.risks.modalVisible) reasons.push('页面存在遮挡或弹层')
+    if (state.risks.modeSelection) reasons.push('当前仍停留在模式选择页')
+    if (state.risks.offTarget) reasons.push('当前页面与目标页不一致')
+    if (!state.evidence.uploadComplete) reasons.push('附件未挂载')
+    if (!state.evidence.promptComplete) reasons.push('提示词未确认写入')
+    if (!state.evidence.running) reasons.push('页面未进入运行态')
+    if (state.continuity.lastFailureReason) reasons.push(`上次失败原因：${state.continuity.lastFailureReason}`)
+    return reasons
+  }
 }

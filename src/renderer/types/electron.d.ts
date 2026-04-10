@@ -188,7 +188,7 @@ interface ScopeRunMemoryRefData {
 interface ScopeRunTriggerHitData {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -217,6 +217,7 @@ interface ScopeRunTaskContinuationData {
   executionId: string
   stepId?: string | null
   blockerType?: string | null
+  targetUrl?: string | null
 }
 
 interface ScopeRunMemoryCaptureItemData {
@@ -231,6 +232,27 @@ interface ScopeRunMemoryCaptureData {
   createdAt: string
   note?: string | null
   items: ScopeRunMemoryCaptureItemData[]
+}
+
+interface ScopeRunExecutionDiagnosticsData {
+  compression?: {
+    historyCompressed: boolean
+    toolTraceCompressed: boolean
+    artifactSummaryUsed: boolean
+  } | null
+  budget?: {
+    maxIterations?: number
+    maxToolCalls?: number
+    maxParallelToolGroups?: number
+    iterationsUsed?: number
+    toolCallsUsed?: number
+    parallelToolGroupsUsed?: number
+  } | null
+  fallback?: {
+    happened: boolean
+    kind: string
+    attempts: number
+  } | null
 }
 
 interface ScopeRunSummaryData {
@@ -251,6 +273,7 @@ interface ScopeRunSummaryData {
   recentArtifacts?: ScopeRunEventData['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuationData | null
   memoryCapture?: ScopeRunMemoryCaptureData | null
+  executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
   blockedReason?: string | null
   error?: string | null
   updatedAt: string
@@ -263,7 +286,7 @@ interface ScopeRunEventData {
   runId?: string
   phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
   latestText?: string
-  module?: 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
   jobId?: string
@@ -299,6 +322,7 @@ interface ScopeRunEventData {
   recentArtifacts?: ScopeRunEventData['artifactRefs']
   taskContinuation?: ScopeRunTaskContinuationData | null
   memoryCapture?: ScopeRunMemoryCaptureData | null
+  executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
   stepMetrics?: {
     toolCalls: number
     toolResults: number

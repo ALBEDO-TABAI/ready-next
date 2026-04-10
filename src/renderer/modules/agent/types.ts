@@ -88,7 +88,7 @@ export interface ToolTraceEvent {
   timestamp: Date
 }
 
-export type AgentModuleKind = 'browser' | 'document' | 'design' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+export type AgentModuleKind = 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
 export type ModuleExecutionKind = 'deterministic' | 'interactive' | 'job' | 'pipeline'
 export type AgentMemoryLayer = 'l0' | 'l1' | 'l2'
 
@@ -148,6 +148,7 @@ export interface ScopeRunTaskContinuation {
   executionId: string
   stepId?: string | null
   blockerType?: string | null
+  targetUrl?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -162,6 +163,27 @@ export interface ScopeRunMemoryCapture {
   createdAt: string
   note?: string | null
   items: ScopeRunMemoryCaptureItem[]
+}
+
+export interface ScopeRunExecutionDiagnostics {
+  compression?: {
+    historyCompressed: boolean
+    toolTraceCompressed: boolean
+    artifactSummaryUsed: boolean
+  } | null
+  budget?: {
+    maxIterations?: number
+    maxToolCalls?: number
+    maxParallelToolGroups?: number
+    iterationsUsed?: number
+    toolCallsUsed?: number
+    parallelToolGroupsUsed?: number
+  } | null
+  fallback?: {
+    happened: boolean
+    kind: string
+    attempts: number
+  } | null
 }
 
 export interface ScopeRunStepMetrics {
@@ -218,6 +240,7 @@ export interface ScopeRunState {
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunTaskContinuation | null
   memoryCapture?: ScopeRunMemoryCapture | null
+  executionDiagnostics?: ScopeRunExecutionDiagnostics | null
 }
 
 export interface AttachmentPreviewState {

@@ -25,11 +25,51 @@ export class BrowserPageStateService {
     page: BrowserPageState['page']
     promptCandidate: string
     attachmentName?: string
+    targetUrl?: string
     upload?: Partial<BrowserPageState['upload']>
     prompt?: Partial<BrowserPageState['prompt']>
     dom?: Partial<BrowserPageState['dom']>
     candidates?: Partial<BrowserPageState['candidates']>
+    evidence?: Partial<BrowserPageState['evidence']>
+    risks?: Partial<BrowserPageState['risks']>
+    continuity?: Partial<BrowserPageState['continuity']>
   }): BrowserPageState {
+    const normalizedTarget = String(params.targetUrl || '').trim()
+    const targetMatched = normalizedTarget
+      ? (params.page.url
+        ? (params.page.url === normalizedTarget || params.page.url.startsWith(normalizedTarget.split('?')[0] || normalizedTarget))
+        : false)
+      : Boolean(params.evidence?.targetMatched)
+    const uploadComplete = Boolean(
+      params.evidence?.uploadComplete ??
+      params.upload?.complete ??
+      params.upload?.previewVisible ??
+      params.upload?.attachmentNameMatched ??
+      params.upload?.removeActionVisible
+    )
+    const promptComplete = Boolean(
+      params.evidence?.promptComplete ??
+      params.prompt?.promptMatched ??
+      params.prompt?.promptFilled
+    )
+    const running = Boolean(
+      params.evidence?.running ??
+      params.prompt?.generating ??
+      params.prompt?.sendButtonDisabled
+    )
+    const recentEvidence = Array.from(new Set([
+      ...(Array.isArray(params.upload?.evidence) ? params.upload.evidence : []),
+      ...(Array.isArray(params.prompt?.submitEvidence) ? params.prompt.submitEvidence : []),
+      ...(Array.isArray(params.evidence?.recentEvidence) ? params.evidence.recentEvidence : []),
+    ].map((item) => String(item || '').trim()).filter(Boolean)))
+    const modeSelection = Boolean(
+      params.risks?.modeSelection ??
+      (!params.dom?.inputCandidateCount && /(图片生成|视频生成|选择模式|ai 创作|立即开始|创作模式|开始创作)/.test(String(params.dom?.bodyStateText || '').toLowerCase()))
+    )
+    const modalVisible = Boolean(params.risks?.modalVisible ?? params.dom?.modalVisible)
+    const offTarget = Boolean(params.risks?.offTarget ?? (normalizedTarget ? !targetMatched : false))
+    const canReuseCurrentPage = Boolean(params.continuity?.canReuseCurrentPage ?? (targetMatched && !modeSelection && !modalVisible && !offTarget))
+    const continuitySource = params.continuity?.source || 'none'
     return {
       page: params.page,
       promptCandidate: params.promptCandidate,
@@ -66,13 +106,33 @@ export class BrowserPageStateService {
         nearbySendTargets: asTargets(params.candidates?.nearbySendTargets),
         sendTargets: asTargets(params.candidates?.sendTargets),
       },
+      evidence: {
+        targetMatched,
+        uploadComplete,
+        promptComplete,
+        running,
+        recentEvidence,
+      },
+      risks: {
+        modalVisible,
+        modeSelection,
+        offTarget,
+      },
+      continuity: {
+        canReuseCurrentPage,
+        source: continuitySource,
+        lastStableStage: params.continuity?.lastStableStage || null,
+        lastFailureReason: params.continuity?.lastFailureReason || null,
+      },
     }
   }
 
   async capturePageState(params: {
     promptCandidate: string
     attachmentName?: string
+    targetUrl?: string
     candidates?: Partial<BrowserPageState['candidates']>
+    continuity?: Partial<BrowserPageState['continuity']>
   }): Promise<BrowserPageState> {
     const [page, upload, prompt, dom] = await Promise.all([
       this.getPageIdentity(),
@@ -89,10 +149,12 @@ export class BrowserPageStateService {
       page,
       promptCandidate: params.promptCandidate,
       attachmentName: params.attachmentName,
+      targetUrl: params.targetUrl,
       upload: uploadRecord,
       prompt: promptRecord,
       dom: domRecord,
       candidates: params.candidates,
+      continuity: params.continuity,
     })
   }
 }

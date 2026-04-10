@@ -27,6 +27,9 @@ export interface BrowserWorkflowState {
   uploadMounted: boolean
   promptFilled: boolean
   status: 'running' | 'done' | 'partial' | 'failed'
+  canResume: boolean
+  lastFailureReason?: string
+  lastEvidence: string[]
   updatedAt: number
 }
 
@@ -141,6 +144,9 @@ export function rememberBrowserWorkflowState(
     uploadMounted: Boolean(payload.uploadMounted),
     promptFilled: Boolean(payload.promptFilled),
     status: payload.status,
+    canResume: Boolean(payload.canResume),
+    lastFailureReason: normalizeWhitespace(payload.lastFailureReason || ''),
+    lastEvidence: Array.from(new Set((payload.lastEvidence || payload.evidence || []).map((item) => normalizeWhitespace(item)).filter(Boolean))).slice(0, 8),
     updatedAt,
   }
   browserWorkflowStates.set(sessionId, state)

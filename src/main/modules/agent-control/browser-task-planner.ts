@@ -458,9 +458,15 @@ export class BrowserTaskPlanner {
     const continuationIntent = /^(继续|接着|下一步|继续在)/i.test(params.userText)
     const canReuseCurrentPage = Boolean(
       activePage &&
-      (continuationIntent || rememberedWorkflow?.running || rememberedWorkflow?.uploadMounted || rememberedWorkflow?.promptFilled) &&
+      (continuationIntent || rememberedWorkflow?.running || rememberedWorkflow?.uploadMounted || rememberedWorkflow?.promptFilled || rememberedWorkflow?.canResume) &&
       (rememberedWorkflow ? domainsLikelyMatch(activePage.url, rememberedWorkflow.url) : true)
     )
+    const forcedRules = canReuseCurrentPage
+      ? ['当前活动页已匹配目标站点时，先读取并验证当前页，不要先搜索或重新打开站点。']
+      : []
+    if (rememberedWorkflow?.canResume && rememberedWorkflow.lastFailureReason) {
+      forcedRules.push(`继续任务前先核对上次失败原因：${rememberedWorkflow.lastFailureReason}`)
+    }
     return {
       canReuseCurrentPage,
       reuseReason: canReuseCurrentPage ? '当前活动页与最近浏览器任务上下文相符，优先复用当前页。' : '当前活动页与最近任务上下文关联不足。',
@@ -468,9 +474,7 @@ export class BrowserTaskPlanner {
       rememberedWorkflow,
       recentSkill,
       recentActions,
-      forcedRules: canReuseCurrentPage
-        ? ['当前活动页已匹配目标站点时，先读取并验证当前页，不要先搜索或重新打开站点。']
-        : [],
+      forcedRules,
     }
   }
 

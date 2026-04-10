@@ -776,7 +776,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     try {
       const parsed = JSON.parse(String(text || ''))
       if (!parsed || typeof parsed !== 'object') return null
-      if ((parsed as Record<string, unknown>).module !== 'browser') return null
+      const module = (parsed as Record<string, unknown>).module
+      if (module !== 'browser' && module !== 'document' && module !== 'design' && module !== 'skill') return null
       return parsed as Record<string, unknown>
     } catch {
       return null
@@ -798,13 +799,17 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             runId: data.runId,
             phase: 'tool_running',
             latestText: toolText,
-            module: structured?.module === 'browser' ? 'browser' : undefined,
+            module: structured?.module === 'browser' || structured?.module === 'document' || structured?.module === 'design' || structured?.module === 'skill'
+              ? structured.module as any
+              : undefined,
             taskTitle: typeof structured?.taskTitle === 'string' ? structured.taskTitle : undefined,
             taskSummary: typeof structured?.taskSummary === 'string' ? structured.taskSummary : undefined,
             steps: Array.isArray(structured?.steps) ? structured.steps : undefined,
             currentStepId: typeof structured?.currentStepId === 'string' ? structured.currentStepId : undefined,
             waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as any : undefined,
             resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as any : undefined,
+            blockedReason: typeof structured?.blockedReason === 'string' ? structured.blockedReason : undefined,
+            taskContinuation: structured?.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as any : undefined,
             recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             toolEvent: {
               id: `${data.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

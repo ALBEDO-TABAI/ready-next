@@ -22,6 +22,7 @@ export interface TaskCardRunLike {
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunState['taskContinuation']
   memoryCapture?: ScopeRunMemoryCapture | null
+  executionDiagnostics?: ScopeRunState['executionDiagnostics']
   blockedReason?: string | null
   error?: string | null
   updatedAt: string

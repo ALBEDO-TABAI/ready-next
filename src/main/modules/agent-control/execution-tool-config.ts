@@ -1,0 +1,302 @@
+import {
+  getAnthropicTools,
+  getDocumentAnthropicTools,
+  getDocumentOpenAITools,
+  getOpenAITools,
+} from '../tools'
+import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
+import { buildTextToolBridgePrompt } from '../claude-bridge/tool-bridge'
+import { type DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'
+import {
+  buildDocumentWidgetClarificationSnippet,
+  buildDocumentWidgetGuidanceSnippet,
+  buildDocumentWidgetOpenUIRulesSnippet,
+  type DocumentWidgetProfile,
+} from '../claude-bridge/widget-guidance'
+
+export interface ToolPolicy {
+  forceDocumentTool: boolean
+  forceDesignTool: boolean
+  preferredDesignTool: string | null
+  primaryDesignInstruction: string | null
+  allowMultipleDesignArtifacts: boolean
+  preferSectionRewrite: boolean
+  preferFormatOnly: boolean
+  documentWidgetTaskKind?: DocumentWidgetTaskKind
+  documentWidgetProfile?: DocumentWidgetProfile | null
+  documentWidgetSourceText?: string | null
+  allowBrowserTools: boolean
+  preferredSkillToolNames?: string[] | null
+}
+
+const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
+  'design_open_file',
+  'design_capture_session',
+  'design_get_editor_state',
+  'design_get_style_guide',
+  'design_snapshot_layout',
+  'design_find_empty_space_on_canvas',
+  'design_capture_canvas_screenshot',
+  'design_verify_layout',
+  'design_list_owned_nodes',
+  'design_batch_design',
+  'design_create_geo_shape',
+  'design_save_project',
+  'design_export_artifact',
+])
+
+const CONTENT_MUTATING_DOCUMENT_TOOL_NAMES = new Set([
+  'document_set_content',
+  'document_append_content',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
+  'document_replace_text',
+  'document_replace_exact',
+  'document_format_section',
+  'document_rewrite_section',
+])
+
+const FORCE_DOCUMENT_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_rename_tab',
+  'document_list_widgets',
+  ...CONTENT_MUTATING_DOCUMENT_TOOL_NAMES,
+  'document_save_tab',
+])
+
+const FORMAT_SECTION_DOCUMENT_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_set_content',
+  'document_append_content',
+  'document_replace_text',
+  'document_format_section',
+  'document_save_tab',
+])
+
+const SECTION_REWRITE_DOCUMENT_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_rewrite_section',
+  'document_save_tab',
+])
+
+const DOCUMENT_WIDGET_CREATE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_save_tab',
+])
+
+const DOCUMENT_WIDGET_INSPECT_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+])
+
+const DOCUMENT_WIDGET_UPDATE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_update_widget',
+  'document_save_tab',
+])
+
+const DOCUMENT_WIDGET_REMOVE_TOOL_NAMES = new Set([
+  'document_open_tab',
+  'document_switch_tab',
+  'document_list_widgets',
+  'document_remove_widget',
+  'document_save_tab',
+])
+
+function filterPreferredDesignAnthropicTools(
+  tools: Array<Record<string, unknown>>,
+  preferredDesignTool: string | null,
+): Array<Record<string, unknown>> {
+  if (!preferredDesignTool) return tools
+  return tools.filter((tool) => {
+    const name = typeof tool.name === 'string' ? tool.name : ''
+    return name === preferredDesignTool || PREFERRED_DESIGN_FALLBACK_TOOL_NAMES.has(name)
+  })
+}
+
+function filterPreferredDesignOpenAITools(
+  tools: Array<Record<string, unknown>>,
+  preferredDesignTool: string | null,
+): Array<Record<string, unknown>> {
+  if (!preferredDesignTool) return tools
+  return tools.filter((tool) => {
+    const fn = (tool.function as { name?: unknown } | undefined)?.name
+    return typeof fn === 'string'
+      ? fn === preferredDesignTool || PREFERRED_DESIGN_FALLBACK_TOOL_NAMES.has(fn)
+      : false
+  })
+}
+
+function filterAnthropicToolsByAllowedNames(
+  tools: Array<Record<string, unknown>>,
+  allowedNames: Set<string>,
+): Array<Record<string, unknown>> {
+  return tools.filter((tool) => {
+    const name = typeof tool.name === 'string' ? tool.name : ''
+    return allowedNames.has(name)
+  })
+}
+
+function filterOpenAIToolsByAllowedNames(
+  tools: Array<Record<string, unknown>>,
+  allowedNames: Set<string>,
+): Array<Record<string, unknown>> {
+  return tools.filter((tool) => {
+    const fn = (tool.function as { name?: unknown } | undefined)?.name
+    return typeof fn === 'string' ? allowedNames.has(fn) : false
+  })
+}
+
+export function buildToolGuidance(policy: ToolPolicy): string {
+  const guidance: string[] = []
+
+  if (policy.forceDocumentTool) {
+    guidance.push(`
+## 工具使用建议
+
+当前用户的请求可能涉及文档操作。如果用户明确要求编辑、修改或保存文档，请使用 document_* 工具。
+
+**判断标准**:
+- "修改第一段" → 使用 document_update_section
+- "把这段原文精准改掉" → 使用 document_replace_exact
+- "在文档里做一个交互图表/组件" → 使用 document_insert_widget
+- "看看文档里有哪些 widget" → 使用 document_list_widgets
+- "更新这个 widget / 改图表内容" → 使用 document_update_widget
+- "删掉这个 widget" → 使用 document_remove_widget
+- "保存文档" → 使用 document_save
+- "你是谁" → 直接回答，不使用工具
+- "这篇文章怎么样" → 直接回答，不使用工具
+`)
+
+    guidance.push(buildDocumentWidgetOpenUIRulesSnippet())
+
+    const widgetGuidance = buildDocumentWidgetGuidanceSnippet(policy.documentWidgetProfile || null)
+    if (widgetGuidance) {
+      guidance.push(widgetGuidance)
+    } else {
+      const widgetClarifier = buildDocumentWidgetClarificationSnippet(policy.documentWidgetSourceText || '')
+      if (widgetClarifier) {
+        guidance.push(widgetClarifier)
+      }
+    }
+  }
+
+  return guidance.join('\n\n')
+}
+
+export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
+  let tools = policy?.forceDocumentTool ? getDocumentAnthropicTools() : getAnthropicTools()
+  if (policy?.forceDocumentTool) {
+    const allowedNames = policy.documentWidgetTaskKind === 'create'
+      ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
+      : policy.documentWidgetTaskKind === 'inspect'
+        ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
+        : policy.documentWidgetTaskKind === 'update'
+          ? DOCUMENT_WIDGET_UPDATE_TOOL_NAMES
+          : policy.documentWidgetTaskKind === 'remove'
+            ? DOCUMENT_WIDGET_REMOVE_TOOL_NAMES
+            : policy.preferSectionRewrite
+              ? SECTION_REWRITE_DOCUMENT_TOOL_NAMES
+              : policy.preferFormatOnly
+                ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
+                : FORCE_DOCUMENT_TOOL_NAMES
+    tools = filterAnthropicToolsByAllowedNames(tools, allowedNames)
+  }
+  if (policy?.forceDesignTool) {
+    tools = filterPreferredDesignAnthropicTools(tools, policy.preferredDesignTool)
+  }
+  if (policy?.allowBrowserTools === false) {
+    tools = tools.filter((tool) => {
+      const name = typeof tool.name === 'string' ? tool.name : ''
+      return !name.startsWith('browser_')
+    })
+  }
+  if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
+    const allowed = new Set(policy.preferredSkillToolNames)
+    tools = tools.filter((tool) => {
+      const name = typeof tool.name === 'string' ? tool.name : ''
+      return allowed.has(name)
+    })
+  }
+  return tools
+}
+
+export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
+  let tools = policy?.forceDocumentTool ? getDocumentOpenAITools() : getOpenAITools()
+  if (policy?.forceDocumentTool) {
+    const allowedNames = policy.documentWidgetTaskKind === 'create'
+      ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
+      : policy.documentWidgetTaskKind === 'inspect'
+        ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
+        : policy.documentWidgetTaskKind === 'update'
+          ? DOCUMENT_WIDGET_UPDATE_TOOL_NAMES
+          : policy.documentWidgetTaskKind === 'remove'
+            ? DOCUMENT_WIDGET_REMOVE_TOOL_NAMES
+            : policy.preferSectionRewrite
+              ? SECTION_REWRITE_DOCUMENT_TOOL_NAMES
+              : policy.preferFormatOnly
+                ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
+                : FORCE_DOCUMENT_TOOL_NAMES
+    tools = filterOpenAIToolsByAllowedNames(tools, allowedNames)
+  }
+  if (policy?.forceDesignTool) {
+    tools = filterPreferredDesignOpenAITools(tools, policy.preferredDesignTool)
+  }
+  if (policy?.allowBrowserTools === false) {
+    tools = tools.filter((tool) => {
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? !fn.startsWith('browser_') : true
+    })
+  }
+  if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
+    const allowed = new Set(policy.preferredSkillToolNames)
+    tools = tools.filter((tool) => {
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? allowed.has(fn) : false
+    })
+  }
+  return tools.map((tool) => normalizeOpenAIToolSchema(tool))
+}
+
+export function collectToolNames(
+  tools: Array<Record<string, unknown>>,
+  format: 'anthropic' | 'openai',
+): string[] {
+  return tools
+    .map((tool) => {
+      if (format === 'anthropic') {
+        return typeof tool.name === 'string' ? tool.name : ''
+      }
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? fn : ''
+    })
+    .filter((name) => name.length > 0)
+}
+
+export function buildTextToolBridgeSystemPrompt(policy?: ToolPolicy): string {
+  return buildTextToolBridgePrompt(getPolicyOpenAITools(policy), {
+    forceDocumentTool: !!policy?.forceDocumentTool,
+  })
+}
+
+export function buildTextToolBridgeCorrectionMessage(policy?: ToolPolicy): string {
+  const toolNames = collectToolNames(getPolicyOpenAITools(policy), 'openai')
+  return [
+    '系统纠正：当前会话已经启用文本工具桥接，下面这些 Ready 工具都可以真实执行。',
+    `可用工具：${toolNames.join(', ') || '无'}`,
+    '如果你需要浏览器/技能/文档操作，请直接输出 :::tool_call JSON ::: 块，不要再回答“当前通道没有工具”。',
+    '如果你不确定该用哪个浏览器动作，优先先读页、定位输入框、定位按钮或读取 skill 说明，再继续。',
+    '如果信息确实不足，可以提一个澄清问题，但不要伪造工具不可用。',
+  ].join('\n')
+}

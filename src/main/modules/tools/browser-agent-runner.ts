@@ -6,7 +6,7 @@ import { getLogPath } from '../../utils/platform'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
-import type { BrowserTaskProjectionPayload } from '../../../shared/browser-agent-task'
+import type { BrowserPageState, BrowserTaskProjectionPayload } from '../../../shared/browser-agent-task'
 
 type BrowserAgentSessionState =
   | 'queued'
@@ -346,6 +346,8 @@ export class BrowserAgentRunner {
       waitingFor: 'none',
       resumableActions: ['cancel'],
       recentArtifacts: [],
+      recentEvidence: [],
+      taskContinuation: this.buildTaskContinuation(plan, null),
       message,
     }
   }
@@ -396,7 +398,19 @@ export class BrowserAgentRunner {
       waitingFor: 'none',
       resumableActions: result.completed ? ['cancel'] : ['retry', 'cancel'],
       recentArtifacts: [],
+      blockedReason: result.completed ? null : message,
+      recentEvidence: result.evidence,
+      taskContinuation: this.buildTaskContinuation(plan, currentStepId),
       message,
+    }
+  }
+
+  private buildTaskContinuation(plan: BrowserTaskPlanLike, stepId: string | null): BrowserTaskProjectionPayload['taskContinuation'] {
+    return {
+      executionId: this.sessionId || 'browser-session',
+      stepId,
+      blockerType: 'browser_workflow',
+      targetUrl: plan.targetUrl || null,
     }
   }
 
@@ -414,15 +428,100 @@ export class BrowserAgentRunner {
     return labels[stage] || stage
   }
 
+  private buildUnifiedPageState(
+    snapshot: WorkflowSnapshot,
+    promptCandidate: string,
+    attachmentName?: string,
+  ): BrowserPageState {
+    const remembered = this.sessionId ? this.controller.getDiagnostics().continuity : null
+    const continuitySource = remembered?.canResume ? 'remembered_workflow' : 'active_tab'
+    return this.pageStateService.composePageState({
+      page: { ...snapshot.page, domain: '' },
+      promptCandidate,
+      attachmentName,
+      targetUrl: this.activePlan?.targetUrl,
+      upload: snapshot.uploadState,
+      prompt: snapshot.promptState,
+      dom: snapshot.domState,
+      candidates: snapshot.candidates,
+      continuity: {
+        canReuseCurrentPage: Boolean(remembered?.canResume || (this.activePlan?.targetUrl && !this.shouldNavigateToTarget(snapshot.page.url, this.activePlan?.targetUrl))),
+        source: continuitySource,
+        lastStableStage: remembered?.stage || null,
+        lastFailureReason: remembered?.lastFailureReason || null,
+      },
+    })
+  }
+
+  private publishDiagnostics(
+    plan: BrowserTaskPlanLike,
+    snapshot: WorkflowSnapshot,
+    promptCandidate: string,
+    message: string,
+    options?: {
+      blockedReason?: string | null
+      resumableActions?: string[]
+      status?: 'running' | 'done' | 'partial' | 'failed'
+      stage?: string
+      attachmentName?: string
+    },
+  ): void {
+    const state = this.buildUnifiedPageState(snapshot, promptCandidate, options?.attachmentName)
+    const recentEvidence = state.evidence.recentEvidence
+    this.controller.reportAgentPageDiagnostics({
+      url: state.page.url,
+      title: state.page.title,
+      domain: state.page.domain,
+      targetMatched: state.evidence.targetMatched,
+      uploadComplete: state.evidence.uploadComplete,
+      promptComplete: state.evidence.promptComplete,
+      running: state.evidence.running,
+      modeSelection: state.risks.modeSelection,
+      modalVisible: state.risks.modalVisible,
+      canReuseCurrentPage: this.evidenceService.canReuseCurrentPage(state),
+      updatedAt: new Date().toISOString(),
+    })
+    this.controller.reportAgentTaskDiagnostics({
+      sessionId: this.sessionId,
+      taskTitle: plan.taskGoal || '浏览器任务',
+      taskSummary: message,
+      currentStepId: options?.stage || null,
+      blockedReason: options?.blockedReason || null,
+      recentEvidence,
+      resumableActions: options?.resumableActions || ['cancel'],
+      targetUrl: plan.targetUrl || null,
+      updatedAt: new Date().toISOString(),
+    })
+    this.controller.reportAgentContinuityDiagnostics({
+      sessionId: this.sessionId,
+      workflowKind: plan.taskKind,
+      stage: options?.stage || 'resolve_target_page',
+      canResume: Boolean(options?.status !== 'done'),
+      lastFailureReason: options?.blockedReason || state.continuity.lastFailureReason || null,
+      lastEvidence: recentEvidence,
+      targetUrl: plan.targetUrl || null,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
   private rememberContinuationState(
     stage: string,
     snapshot: WorkflowSnapshot,
     promptCandidate: string,
     attachmentName?: string,
     status?: 'running' | 'done' | 'partial' | 'failed',
+    lastFailureReason?: string | null,
   ): void {
     if (!this.sessionId) return
     const activeTab = this.controller.getActiveTab()
+    const recentEvidence = uniqueEvidence([
+      ...snapshot.uploadState.evidence,
+      ...snapshot.promptState.submitEvidence,
+      snapshot.promptState.promptMatched ? 'prompt_matched' : '',
+      snapshot.promptState.promptFilled ? 'prompt_filled' : '',
+      snapshot.promptState.uploadChipVisible ? 'upload_chip_visible' : '',
+      snapshot.domState.modalVisible ? 'modal_visible' : '',
+    ])
     rememberBrowserWorkflowState(this.sessionId, {
       tabId: activeTab?.id,
       url: snapshot.page.url,
@@ -431,18 +530,14 @@ export class BrowserAgentRunner {
       stage,
       attachmentName,
       promptPreview: promptCandidate.slice(0, 180),
-      evidence: uniqueEvidence([
-        ...snapshot.uploadState.evidence,
-        ...snapshot.promptState.submitEvidence,
-        snapshot.promptState.promptMatched ? 'prompt_matched' : '',
-        snapshot.promptState.promptFilled ? 'prompt_filled' : '',
-        snapshot.promptState.uploadChipVisible ? 'upload_chip_visible' : '',
-        snapshot.domState.modalVisible ? 'modal_visible' : '',
-      ]),
+      evidence: recentEvidence,
       running: this.isRunningState(snapshot),
       uploadMounted: this.isUploadComplete(snapshot),
       promptFilled: this.isPromptComplete(snapshot, promptCandidate),
       status: status || (this.isRunningState(snapshot) ? 'running' : 'partial'),
+      canResume: status !== 'done',
+      lastFailureReason: lastFailureReason || '',
+      lastEvidence: recentEvidence,
     })
   }
 
@@ -1255,36 +1350,15 @@ export class BrowserAgentRunner {
   }
 
   private isUploadComplete(snapshot: WorkflowSnapshot): boolean {
-    return this.evidenceService.isUploadComplete(this.pageStateService.composePageState({
-      page: { ...snapshot.page, domain: '' },
-      promptCandidate: '',
-      upload: snapshot.uploadState,
-      prompt: snapshot.promptState,
-      dom: snapshot.domState,
-      candidates: snapshot.candidates,
-    }))
+    return this.evidenceService.isUploadComplete(this.buildUnifiedPageState(snapshot, '', this.getPlannedAttachment(this.activePlan || this.buildDefaultPlan())?.name))
   }
 
   private isPromptComplete(snapshot: WorkflowSnapshot, promptCandidate: string): boolean {
-    return this.evidenceService.isPromptComplete(this.pageStateService.composePageState({
-      page: { ...snapshot.page, domain: '' },
-      promptCandidate,
-      upload: snapshot.uploadState,
-      prompt: snapshot.promptState,
-      dom: snapshot.domState,
-      candidates: snapshot.candidates,
-    }), promptCandidate)
+    return this.evidenceService.isPromptComplete(this.buildUnifiedPageState(snapshot, promptCandidate, this.getPlannedAttachment(this.activePlan || this.buildDefaultPlan())?.name), promptCandidate)
   }
 
   private isRunningState(snapshot: WorkflowSnapshot): boolean {
-    return this.evidenceService.isRunningState(this.pageStateService.composePageState({
-      page: { ...snapshot.page, domain: '' },
-      promptCandidate: '',
-      upload: snapshot.uploadState,
-      prompt: snapshot.promptState,
-      dom: snapshot.domState,
-      candidates: snapshot.candidates,
-    }))
+    return this.evidenceService.isRunningState(this.buildUnifiedPageState(snapshot, '', this.getPlannedAttachment(this.activePlan || this.buildDefaultPlan())?.name))
   }
 
   private shouldNavigateToTarget(currentUrl: string, targetUrl?: string): boolean {
@@ -2070,8 +2144,20 @@ export class BrowserAgentRunner {
       ),
     )
     let snapshot = await this.captureWorkflowSnapshot('resolve_target_page', promptCandidate, attachmentName)
+    this.publishDiagnostics(plan, snapshot, promptCandidate, '已生成浏览器计划，等待开始执行。', {
+      stage: 'resolve_target_page',
+      attachmentName,
+      status: 'running',
+      resumableActions: ['cancel'],
+    })
     if (this.isRunningState(snapshot)) {
       this.rememberContinuationState('submit', snapshot, promptCandidate, attachmentName, 'done')
+      this.publishDiagnostics(plan, snapshot, promptCandidate, '页面已经处于生成中或处理中状态，无需重复提交。', {
+        stage: 'submit',
+        attachmentName,
+        status: 'done',
+        resumableActions: ['cancel'],
+      })
       return {
         handled: true,
         state: 'done',
@@ -2103,6 +2189,15 @@ export class BrowserAgentRunner {
       // 检查 failIf 条件
       if (this.shouldFailStep(step, snapshot)) {
         log(`[browser-v7][workflow] fail step="${step.id}" reason="${step.failIf?.join(', ')}"`)
+        const blockedReason = `前置条件不满足：${step.failIf?.join('、')}`
+        this.rememberContinuationState(step.id, snapshot, promptCandidate, attachmentName, 'failed', blockedReason)
+        this.publishDiagnostics(plan, snapshot, promptCandidate, blockedReason, {
+          stage: step.id,
+          attachmentName,
+          status: 'failed',
+          blockedReason,
+          resumableActions: ['retry', 'cancel'],
+        })
         return {
           handled: true,
           state: 'failed',
@@ -2150,11 +2245,34 @@ export class BrowserAgentRunner {
         promptCandidate,
         attachmentName,
         result.completed ? (step.id === 'final_reconcile' ? 'done' : (this.isRunningState(snapshot) ? 'running' : 'partial')) : 'failed',
+        result.completed ? null : (result.evidence.join('、') || `${this.browserStepLabel(step.id)} 未完成`),
+      )
+      this.publishDiagnostics(
+        plan,
+        snapshot,
+        promptCandidate,
+        `${this.browserStepLabel(step.id)}：${result.evidence.join('、') || (result.completed ? '已完成' : '未完成')}`,
+        {
+          stage: step.id,
+          attachmentName,
+          status: result.completed ? (step.id === 'final_reconcile' ? 'done' : (this.isRunningState(snapshot) ? 'running' : 'partial')) : 'failed',
+          blockedReason: result.completed ? null : (result.evidence.join('、') || `${this.browserStepLabel(step.id)} 未完成`),
+          resumableActions: result.completed ? ['cancel'] : ['retry', 'cancel'],
+        },
       )
 
       // 验证完成条件
       if (!this.verifyStepCompletion(step, result)) {
         log(`[browser-v7][workflow] verify failed step="${step.id}" verify="${step.verify?.join(', ')}"`)
+        const blockedReason = `步骤未完成：${step.verify?.join('、')}`
+        this.rememberContinuationState(step.id, snapshot, promptCandidate, attachmentName, 'failed', blockedReason)
+        this.publishDiagnostics(plan, snapshot, promptCandidate, blockedReason, {
+          stage: step.id,
+          attachmentName,
+          status: 'failed',
+          blockedReason,
+          resumableActions: ['retry', 'cancel'],
+        })
         return {
           handled: true,
           state: 'failed',
@@ -2168,6 +2286,14 @@ export class BrowserAgentRunner {
         const message = partial
           ? `任务部分完成：已完成附件和提示词阶段，但最终复核未通过。缺少证据：${result.evidence.join('、') || '页面未确认进入运行态'}`
           : `任务失败：卡在“${step.goal}”。当前缺少的证据：${result.evidence.join('、') || '未拿到足够明确的页面证据'}。建议重试或检查页面是否需要额外确认。`
+        this.rememberContinuationState(step.id, snapshot, promptCandidate, attachmentName, partial ? 'partial' : 'failed', message)
+        this.publishDiagnostics(plan, snapshot, promptCandidate, message, {
+          stage: step.id,
+          attachmentName,
+          status: partial ? 'partial' : 'failed',
+          blockedReason: message,
+          resumableActions: ['continue', 'retry', 'cancel'],
+        })
         return {
           handled: true,
           state: partial ? 'partial' : 'failed',
@@ -2202,6 +2328,12 @@ export class BrowserAgentRunner {
     log(`[browser-v7][workflow] done verification=${JSON.stringify(verification)}`)
 
     this.rememberContinuationState('final_reconcile', snapshot, promptCandidate, attachmentName, 'done')
+    this.publishDiagnostics(plan, snapshot, promptCandidate, '任务已完成：目标页面已挂载附件、提示词已填写，并且页面已进入生成或处理阶段。', {
+      stage: 'final_reconcile',
+      attachmentName,
+      status: 'done',
+      resumableActions: verification.missingEvidence.length > 0 ? ['open_artifact', 'retry', 'cancel'] : ['open_artifact', 'cancel'],
+    })
     return {
       handled: true,
       state: 'done',
