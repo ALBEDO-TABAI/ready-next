@@ -244,7 +244,7 @@ export default function BrowserMode({
     isActive,
     browserRuntimeReady,
     activeTabId,
-    surfaceRef: shellRef,
+    surfaceRef: contentRef,
     sendBoundsImmediate,
   })
   const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
