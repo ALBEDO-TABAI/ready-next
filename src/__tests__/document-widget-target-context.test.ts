@@ -79,6 +79,38 @@ describe('document widget target context', () => {
     assert.match(String(composed), /```show-widget/)
   })
 
+  it('does not carry widget update context into unrelated plain questions', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const attachment = createDocumentWidgetTargetAttachment({
+      documentTitle: '新文档.md',
+      documentPath: '/Users/user/新文档.md',
+      widgetTitle: 'stock_price_chart',
+      widgetCode: '<div class="card">demo</div>',
+      widgetMode: 'scripted',
+    })
+
+    const composed = await buildComposedAgentInput({
+      content: '今天广州天气怎么样',
+      attachments: [attachment],
+      filePool: [],
+    })
+
+    assert.equal(typeof composed, 'string')
+    assert.match(String(composed), /今天广州天气怎么样/)
+    assert.doesNotMatch(String(composed), /### Widget 更新上下文/)
+    assert.doesNotMatch(String(composed), /```show-widget/)
+  })
+
   it('prefers active document content over generic environment text in document mode', async () => {
     useMode.getState().setWorkbenchMode('document')
     useDocTabs.setState({
@@ -109,15 +141,15 @@ describe('document widget target context', () => {
     assert.doesNotMatch(String(composed), /## 环境信息\n- 当前模式: 文档模式/)
   })
 
-  it('teaches direct-chat to force document widget updates when the marker is present', () => {
+  it('teaches the execution intent resolver to force document widget updates when the marker is present', () => {
     const source = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
+      resolve(process.cwd(), 'src/main/modules/agent-control/execution-intent-resolver.ts'),
       'utf8',
     )
 
-    assert.match(source, /hasWidgetTargetContext = userText\.includes\('### Widget 更新上下文'\)/)
-    assert.match(source, /forceDocumentTool: hasTools && \(\(hasWidgetTargetContext && !explicitWidgetCreateIntent\) \|\| this\.shouldForceDocumentToolCall/)
-    assert.match(source, /const explicitWidgetCreateIntent = /)
-    assert.match(source, /documentWidgetTaskKind = hasWidgetTargetContext && !explicitWidgetCreateIntent \? 'update'/)
+    assert.match(source, /const hasWidgetTargetContext = params\.userText\.includes\('### Widget 更新上下文'\)/)
+    assert.match(source, /const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent\(contextualUserInput\)/)
+    assert.match(source, /hasWidgetTargetContext && !explicitWidgetCreateIntent[\s\S]*\? 'update'/)
+    assert.match(source, /forceDocumentTool:\s*visibilityPlan\.hasTools && \([\s\S]*params\.hasWidgetTargetContext && !params\.explicitWidgetCreateIntent[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)
   })
 })

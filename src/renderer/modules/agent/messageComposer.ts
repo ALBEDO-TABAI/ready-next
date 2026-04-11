@@ -4,6 +4,38 @@ import { useMode } from '../../stores/useMode'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
+function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: ChatAttachment): boolean {
+  const normalized = content.trim()
+  if (!normalized) return false
+
+  const widgetTitle = String(attachment.widgetTitle || attachment.title || attachment.name || '').trim()
+  if (widgetTitle && normalized.toLowerCase().includes(widgetTitle.toLowerCase())) {
+    return true
+  }
+
+  if (/更新当前文档里的\s+.+widget[:：]?/i.test(normalized)) {
+    return true
+  }
+
+  const hasWidgetSubject = /(widget|show-widget|文档|卡片|图表|组件|章节|正文|段落)/i.test(normalized)
+  const hasEditVerb = /(更新|修改|调整|优化|替换|删除|新增|插入|改|去掉|拿掉|补上|统一|恢复|重写|保存)/i.test(normalized)
+  if (hasWidgetSubject && hasEditVerb) {
+    return true
+  }
+
+  if (/^(再|继续|把|让|统一|改|调整|优化|去掉|移除|淡一点|浅一点|更.*一点|收紧|拉开|简化)/.test(normalized)) {
+    return true
+  }
+
+  return false
+}
+
+export function filterAttachmentsForComposedAgentInput(content: string, attachments: ChatAttachment[]): ChatAttachment[] {
+  return attachments.filter((attachment) => (
+    attachment.source !== 'document-widget-target' || shouldKeepDocumentWidgetTargetAttachment(content, attachment)
+  ))
+}
+
 function normalizeAttachmentType(value: unknown): ChatAttachment['type'] {
   const normalized = String(value || '').toLowerCase()
   if (normalized === 'image') return 'image'
@@ -258,6 +290,7 @@ export async function buildComposedAgentInput(params: {
   filePool: ChatAttachment[]
 }): Promise<string | MultimodalBlock[]> {
   const { content, attachments, filePool } = params
+  const effectiveAttachments = filterAttachmentsForComposedAgentInput(content, attachments)
   const activeDocContext = buildActiveDocumentContext()
   const environmentContext = buildEnvironmentContext()
   const activeWorkbenchContext = activeDocContext || environmentContext
@@ -274,11 +307,11 @@ export async function buildComposedAgentInput(params: {
   const isKimiCoding = !!aiConfig && normalizedBaseUrl.includes('api.kimi.com/coding')
   const supportsNativeVideo = !!aiConfig && (isKimiCoding || (aiConfig.provider !== 'anthropic' && !normalizedBaseUrl.includes('/coding')))
 
-  if (attachments.length > 0) {
+  if (effectiveAttachments.length > 0) {
     const blocks: MultimodalBlock[] = []
     if (baseUserMessage) blocks.push({ type: 'text', text: baseUserMessage })
 
-    for (const att of attachments) {
+    for (const att of effectiveAttachments) {
       try {
         if (att.source === 'skill-folder') {
           const skillLines = [

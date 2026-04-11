@@ -21,6 +21,7 @@ export interface ToolContext {
   sidecarManager?: SidecarManager | null
   runtime?: AgentControlRuntime | null
   scope?: ConversationScope | null
+  allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
@@ -32,6 +33,15 @@ export async function executeToolCall(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<string> {
+  const allowedToolNames = context.allowedToolNames instanceof Set
+    ? context.allowedToolNames
+    : Array.isArray(context.allowedToolNames)
+      ? new Set(context.allowedToolNames)
+      : null
+  if (allowedToolNames && !allowedToolNames.has(toolName)) {
+    return `Tool not allowed in current context: ${toolName}`
+  }
+
   if (toolName.startsWith('browser_')) {
     if (!context.browserController) {
       return 'Browser controller is not available'

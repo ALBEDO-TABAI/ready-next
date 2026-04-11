@@ -10,6 +10,7 @@ import { runDocCommand as executeDocCommand } from '../modules/agent/documentAct
 import { runSkillCommand as executeSkillCommand } from '../modules/agent/commandHandlers'
 import {
   buildComposedAgentInput,
+  filterAttachmentsForComposedAgentInput,
   extractAttachmentsFromMeta as extractPersistedAttachments,
   persistMessage as persistChatMessage,
   serializePersistedAttachments as serializeAttachments,
@@ -765,7 +766,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const activeScope = scope
 
     // Capture attachments before clearing
-    const currentAttachments = [...attachments]
+    const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
     set((state) => ({
       attachments: [],
       filePool: state.filePool.filter((attachment) => attachment.source !== 'document-quote'),

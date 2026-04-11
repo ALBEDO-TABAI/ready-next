@@ -29,6 +29,9 @@ import {
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
+  collectToolNames,
+  getPolicyAnthropicTools,
+  getPolicyOpenAITools,
   type ToolPolicy,
 } from '../agent-control/execution-tool-config'
 import type { RunBudgetSeed, RunBudgetUsage } from '../agent-control/run-contracts'
@@ -854,12 +857,20 @@ export class DirectChatEngine extends EventEmitter {
         log(`Injected structured browser plan with ${browserDecision.plan?.steps?.length || 0} steps`)
       }
 
+      const allowedToolNamesForPolicy = new Set(
+        collectToolNames(
+          useAnthropicProtocol ? getPolicyAnthropicTools(toolPolicy) : getPolicyOpenAITools(toolPolicy),
+          useAnthropicProtocol ? 'anthropic' : 'openai',
+        ),
+      )
+
       const openclawCommand = this.extractOpenclawPairingCommand(userText)
       if (hasTools && openclawCommand) {
         const toolContext = buildToolRuntimeContext({
           browserController: this.browserController,
           sidecarManager: this.sidecarManager,
           runtime: this.runtime,
+          allowedToolNames: ['system_run_openclaw'],
           emitToolAction: (tool, args) => {
             emitToolAction(tool, args)
           },
@@ -887,6 +898,7 @@ export class DirectChatEngine extends EventEmitter {
           browserController: this.browserController,
           sidecarManager: this.sidecarManager,
           runtime: this.runtime,
+          allowedToolNames: allowedToolNamesForPolicy,
           emitToolAction: (tool, args) => {
             emitToolAction(tool, args)
           },
@@ -1068,6 +1080,7 @@ export class DirectChatEngine extends EventEmitter {
             sidecarManager: this.sidecarManager,
             runtime: this.runtime,
             scope,
+            allowedToolNames: allowedToolNamesForPolicy,
             emitToolAction: (tool, args) => {
               emitToolAction(tool, args)
             },
