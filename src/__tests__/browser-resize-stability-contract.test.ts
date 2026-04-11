@@ -53,6 +53,8 @@ test('browser mode can freeze the live page into a DOM snapshot during panel dra
   assert.match(workbenchMode, /new CustomEvent\(PANEL_RESIZE_STATE_EVENT, \{[\s\S]*resizing: false/)
   assert.match(browserMode, /useBrowserResizeFreeze/)
   assert.match(browserMode, /browser-resize-shell-freeze/)
+  assert.match(browserMode, /className="browser-resize-shell-freeze"[\s\S]*top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
+  assert.match(browserMode, /className="browser-resize-shell-freeze"[\s\S]*borderRadius:\s*'0 0 var\(--workbench-canvas-radius\) var\(--workbench-canvas-radius\)'/)
   assert.match(browserMode, /const visibleFreezeFrame = freezeFrame \?\? cachedFreezeFrame/)
   assert.match(browserMode, /const shouldUseNeutralFreezeFrameExit = !freezeFrame && Boolean\(cachedFreezeFrame\?\.src\)/)
   assert.match(browserMode, /const \[isBrowserSurfaceReady, setIsBrowserSurfaceReady\] = useState\(false\)/)

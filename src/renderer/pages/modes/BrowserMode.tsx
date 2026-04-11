@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
+import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
+import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiagnosticsState'
 import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
@@ -23,7 +25,6 @@ import {
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 
-const BROWSER_SURFACE_READY_DELAY_MS = 16
 const BROWSER_CAPTURE_FREEZE_EVENT = 'ready:browser-capture-freeze'
 
 // 冻结帧过渡动画配置
@@ -55,6 +56,7 @@ export default function BrowserMode({
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
+  const startupHostResyncTimerRef = useRef<number | null>(null)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -124,6 +126,8 @@ export default function BrowserMode({
   const {
     toastVisible,
     adblockState,
+    browserDiagnostics,
+    refreshAdblockState,
   } = useBrowserDiagnosticsState({
     isElectron,
     tabs,
@@ -165,6 +169,27 @@ export default function BrowserMode({
     })
   }, [activeTab, adblockState.enabled, currentDomain, currentDomainAdblockWhitelisted, isElectron])
 
+  const handleContinueBrowserTask = useCallback(() => {
+    const draft = [
+      '继续刚才的浏览器任务。',
+      browserDiagnostics?.currentTask?.taskTitle ? `任务：${browserDiagnostics.currentTask.taskTitle}` : null,
+      browserDiagnostics?.currentTask?.taskSummary ? `当前状态：${browserDiagnostics.currentTask.taskSummary}` : null,
+      browserDiagnostics?.lastFailure?.reason ? `上次失败：${browserDiagnostics.lastFailure.reason}` : null,
+      '请先复核当前页面状态，再继续。',
+    ].filter(Boolean).join('\n')
+    appendToAgentInput(draft)
+  }, [browserDiagnostics])
+
+  const handleRetryBrowserTask = useCallback(() => {
+    const draft = [
+      '请重试刚才的浏览器任务。',
+      browserDiagnostics?.currentTask?.taskTitle ? `任务：${browserDiagnostics.currentTask.taskTitle}` : null,
+      browserDiagnostics?.lastFailure?.reason ? `优先修复：${browserDiagnostics.lastFailure.reason}` : null,
+      '开始前先说明你准备如何继续。',
+    ].filter(Boolean).join('\n')
+    appendToAgentInput(draft)
+  }, [browserDiagnostics])
+
   const {
     handleNewTab,
     handleCloseTab,
@@ -192,6 +217,12 @@ export default function BrowserMode({
     updateTab,
     reorderTabs,
   })
+
+  const handleOpenBrowserTarget = useCallback(() => {
+    const targetUrl = browserDiagnostics?.currentTask?.targetUrl || browserDiagnostics?.continuity?.targetUrl
+    if (!targetUrl) return
+    void handleNavigate(targetUrl)
+  }, [browserDiagnostics, handleNavigate])
 
   const {
     browserRuntimeReady,
@@ -262,6 +293,13 @@ export default function BrowserMode({
     }
   }, [])
 
+  const clearStartupHostResyncTimer = useCallback(() => {
+    if (startupHostResyncTimerRef.current) {
+      window.clearTimeout(startupHostResyncTimerRef.current)
+      startupHostResyncTimerRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!isElectron || isMotionSettled) return
 
@@ -288,30 +326,56 @@ export default function BrowserMode({
         await window.electronAPI?.browser?.hideAll?.()
         return
       }
+      await window.electronAPI?.browser?.hideAll?.()
+      await sendBoundsImmediate({ forceExact: true })
+      if (activeTabId) {
+        await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
+      }
+      await sendBoundsImmediate({ forceExact: true })
       await syncBrowserVisibility({ forceExact: true })
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
+      clearStartupHostResyncTimer()
+      startupHostResyncTimerRef.current = window.setTimeout(() => {
+        startupHostResyncTimerRef.current = null
+        if (cancelled) return
+        void (async () => {
+          if (activeTabId) {
+            await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
+          }
+          await sendBoundsImmediate({ forceExact: true })
+          await syncBrowserVisibility({ forceExact: true })
+        })().catch(() => undefined)
+      }, 180)
       if (cancelled) return
+      const hostHasVisibleFrame = await captureStableFrame()
+      if (cancelled) return
+        if (hostHasVisibleFrame) {
+          setIsBrowserSurfaceReady(true)
+          return
+        }
       clearSurfaceReadyTimer()
       surfaceReadyTimerRef.current = window.setTimeout(() => {
         if (cancelled) return
         surfaceReadyTimerRef.current = null
         setIsBrowserSurfaceReady(true)
-      }, BROWSER_SURFACE_READY_DELAY_MS)
+      }, 48)
     }
 
-    void syncVisibleHost().catch(() => undefined)
+        void syncVisibleHost().catch(() => undefined)
 
-    return () => {
-      cancelled = true
-      clearSurfaceReadyTimer()
-    }
-  }, [browserRuntimeReady, clearSurfaceReadyTimer, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+        return () => {
+          cancelled = true
+          clearStartupHostResyncTimer()
+          clearSurfaceReadyTimer()
+        }
+  }, [activeTabId, browserRuntimeReady, clearStartupHostResyncTimer, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     return () => {
+      clearStartupHostResyncTimer()
       clearSurfaceReadyTimer()
     }
-  }, [clearSurfaceReadyTimer])
+  }, [clearStartupHostResyncTimer, clearSurfaceReadyTimer])
 
   // 冻结帧高级淡出动画状态（模糊 + 缩放 + 透明度）
   const [freezeFrameStyle, setFreezeFrameStyle] = useState({
@@ -390,7 +454,14 @@ export default function BrowserMode({
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
-    return <BrowserModeEmptyState onNewTab={handleNewTab} contentRef={contentRef} loading={!browserRuntimeReady} />
+    return (
+      <BrowserModeEmptyState
+        onNewTab={handleNewTab}
+        contentRef={contentRef}
+        loading={!browserRuntimeReady}
+        onShowUtilityMenu={handleShowUtilityMenu}
+      />
+    )
   }
 
   return (
@@ -446,6 +517,13 @@ export default function BrowserMode({
               onDrop={handleContentDrop}
               onRetry={() => void handleRetry()}
             />
+            <BrowserDiagnosticsDock
+              browserDiagnostics={browserDiagnostics}
+              onContinue={handleContinueBrowserTask}
+              onRetry={handleRetryBrowserTask}
+              onOpenTarget={handleOpenBrowserTarget}
+              onRefresh={() => void refreshAdblockState()}
+            />
           </div>
 
           {shouldRenderFreezeFrame && visibleFreezeFrame ? (
@@ -453,11 +531,14 @@ export default function BrowserMode({
               className="browser-resize-shell-freeze"
               style={{
                 position: 'absolute',
-                inset: 0,
+                top: WORKBENCH_TAB_ROW_HEIGHT,
+                left: 0,
+                right: 0,
+                bottom: 0,
                 zIndex: 40,
                 pointerEvents: 'none',
                 overflow: 'hidden',
-                borderRadius: 'var(--workbench-canvas-radius)',
+                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
                 opacity: freezeFrameStyle.opacity,
                 filter: freezeFrameStyle.filter,
                 transform: freezeFrameStyle.transform,
@@ -486,10 +567,13 @@ export default function BrowserMode({
               className="browser-transition-mask"
               style={{
                 position: 'absolute',
-                inset: 0,
+                top: WORKBENCH_TAB_ROW_HEIGHT,
+                left: 0,
+                right: 0,
+                bottom: 0,
                 zIndex: 45,
                 pointerEvents: 'none',
-                borderRadius: 'var(--workbench-canvas-radius)',
+                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
                 background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
                 overflow: 'hidden',
               }}
