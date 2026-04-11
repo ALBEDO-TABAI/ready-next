@@ -1,22 +1,24 @@
 import type { RefObject } from 'react'
 import { Globe, Plus } from 'lucide-react'
+import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
+import BrowserHeader from './BrowserHeader'
 
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
-  WORKBENCH_HEADER_EDGE_X,
-  WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 
 export default function BrowserModeEmptyState({
   onNewTab,
   contentRef,
   loading = false,
+  onShowUtilityMenu,
 }: {
   onNewTab: () => void | Promise<void>
   contentRef: RefObject<HTMLDivElement | null>
   loading?: boolean
+  onShowUtilityMenu: (kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => void
 }) {
   return (
     <div className="workbench-mode-root">
@@ -27,24 +29,33 @@ export default function BrowserModeEmptyState({
         }}
       >
         <div className="workbench-canvas-shell flex h-full min-h-0 flex-col">
-          <div
-            className="glass-surface-panel flex items-center no-drag"
-            style={{
-              height: WORKBENCH_TAB_ROW_HEIGHT,
-              padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-              background: 'var(--bg-content)',
-              borderBottom: '1px solid var(--border-default)',
-            }}
-          >
-            <button
-              onClick={() => void onNewTab()}
-              className="flex items-center justify-center hover:bg-[var(--bg-hover)] transition-colors"
-              style={{ width: 26, height: 26, borderRadius: 6 }}
-              title="新建标签页"
-            >
-              <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
-            </button>
-          </div>
+          <BrowserHeader
+            isActive
+            tabs={[]}
+            activeTabId={null}
+            urlInput=""
+            bookmarkedUrls={[]}
+            loading={loading}
+            canGoBack={false}
+            canGoForward={false}
+            isBookmarked={false}
+            onTabClick={() => undefined}
+            onTabClose={() => undefined}
+            onNewTab={onNewTab}
+            onReorder={() => undefined}
+            onUrlChange={() => undefined}
+            onNavigate={() => undefined}
+            onGoBack={() => undefined}
+            onGoForward={() => undefined}
+            onRefresh={() => undefined}
+            onFocus={() => undefined}
+            onBlur={() => undefined}
+            onEditStart={() => undefined}
+            onEditEnd={() => undefined}
+            onToggleBookmark={() => undefined}
+            onToggleBookmarkForTab={() => undefined}
+            onShowUtilityMenu={onShowUtilityMenu}
+          />
 
           <div
             ref={contentRef}

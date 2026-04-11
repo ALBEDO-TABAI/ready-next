@@ -46,6 +46,7 @@ import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
+import { BrowserVisibilityCommandState } from './visibility-command-state'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
 
 interface Tab extends BrowserTabMetaRecord {
@@ -91,7 +92,7 @@ export class BrowserController {
   tabCounter = 0
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
-  private browserHostsPresented = true
+  private readonly browserVisibilityState = new BrowserVisibilityCommandState()
   private readonly browserHostKind: BrowserHostKind
   private mainWindow: BrowserWindow
   private useMock: boolean
@@ -207,7 +208,7 @@ export class BrowserController {
       },
       getNextTabId: () => `tab-${++this.tabCounter}`,
       getViewBounds: () => this.viewBounds,
-      shouldPresentHosts: () => this.browserHostsPresented,
+      shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
@@ -236,7 +237,7 @@ export class BrowserController {
       setViewBounds: (bounds) => {
         this.viewBounds = bounds
       },
-      shouldPresentHosts: () => this.browserHostsPresented,
+      shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url) => this.createTab(url),
       detachHost: (view) => this.detachHost(view),
@@ -1180,18 +1181,27 @@ export class BrowserController {
     return this.tabShellService.updateViewBounds(bounds)
   }
 
-  hideAllHosts(): { success: boolean } {
-    this.browserHostsPresented = false
+  hideAllHosts(payload?: { requestId?: number }): { success: boolean } {
+    if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
+      return { success: true }
+    }
+    this.logBrowserDiag(`[browser-host][visibility] hideAll request=${String(payload?.requestId || 'none')}`)
     return this.tabShellService.hideAllHosts()
   }
 
-  hideActiveHost(): { success: boolean } {
-    this.browserHostsPresented = false
+  hideActiveHost(payload?: { requestId?: number }): { success: boolean } {
+    if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
+      return { success: true }
+    }
+    this.logBrowserDiag(`[browser-host][visibility] hideActive request=${String(payload?.requestId || 'none')}`)
     return this.tabShellService.hideActiveHostOnly()
   }
 
-  showActiveHost(): { success: boolean } {
-    this.browserHostsPresented = true
+  showActiveHost(payload?: { requestId?: number }): { success: boolean } {
+    if (!this.browserVisibilityState.applyShow(payload?.requestId)) {
+      return { success: true }
+    }
+    this.logBrowserDiag(`[browser-host][visibility] showActive request=${String(payload?.requestId || 'none')}`)
     return this.tabShellService.showActiveHost()
   }
 

@@ -63,22 +63,20 @@ export function useBrowserRuntimeEffects({
   const ensureBrowserRuntime = useCallback(async ({ allowNewTab }: { allowNewTab: boolean }) => {
     if (!isElectron) return true
 
-    if (!hasHydratedRuntimeRef.current) {
-      if (!hydrationPromiseRef.current) {
-        hydrationPromiseRef.current = restoreExistingTabs()
-      }
+    if (!hydrationPromiseRef.current) {
+      hydrationPromiseRef.current = restoreExistingTabs()
+    }
 
-      const hydrationTask = hydrationPromiseRef.current
-      try {
-        const hasTabs = await hydrationTask
-        if (hasTabs) {
-          hasHydratedRuntimeRef.current = true
-          return true
-        }
-      } finally {
-        if (hydrationPromiseRef.current === hydrationTask) {
-          hydrationPromiseRef.current = null
-        }
+    const hydrationTask = hydrationPromiseRef.current
+    try {
+      const hasTabs = await hydrationTask
+      hasHydratedRuntimeRef.current = hasTabs
+      if (hasTabs) {
+        return true
+      }
+    } finally {
+      if (hydrationPromiseRef.current === hydrationTask) {
+        hydrationPromiseRef.current = null
       }
     }
 
@@ -170,8 +168,8 @@ export function useBrowserRuntimeEffects({
     let cancelled = false
 
     void ensureBrowserRuntime({ allowNewTab: false }).then((hasTabs) => {
-      if (cancelled || !hasTabs) return
-      setBrowserRuntimeReady(true)
+      if (cancelled) return
+      setBrowserRuntimeReady(hasTabs)
     }).catch(() => undefined)
 
     return () => {
@@ -186,9 +184,7 @@ export function useBrowserRuntimeEffects({
       activationFrameRef.current = null
     }
     if (!isActive) {
-      if (!hasHydratedRuntimeRef.current) {
-        setBrowserRuntimeReady(false)
-      }
+      setBrowserRuntimeReady(Boolean(hasHydratedRuntimeRef.current))
       return
     }
 

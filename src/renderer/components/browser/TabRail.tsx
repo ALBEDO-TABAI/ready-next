@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { ChevronLeft, ChevronRight, Globe, Loader2, Lock, Plus, Star, X } from 'lucide-react'
 import { MorphTabButton, MorphTabStrip } from '../motion/MorphTabStrip'
 import RefreshDock from './RefreshDock'
@@ -85,16 +85,32 @@ export default function TabRail({
   onToggleBookmark,
   onToggleBookmarkForTab,
 }: TabRailProps) {
+  const hasStarterTab = tabs.length === 0
+  const displayTabs = useMemo<BrowserTab[]>(() => (
+    hasStarterTab
+      ? [{
+        id: '__browser-starter__',
+        url: '',
+        title: loading ? '浏览器启动中…' : '新标签页',
+        loading,
+        canGoBack: false,
+        canGoForward: false,
+        domain: '',
+        required: false,
+        activity: 'idle',
+      }]
+      : tabs
+  ), [hasStarterTab, loading, tabs])
   const scrollRef = useRef<HTMLDivElement>(null)
   const tabSlotRefs = useRef(new Map<string, HTMLDivElement>())
-  const previousTabCountRef = useRef(tabs.length)
+  const previousTabCountRef = useRef(displayTabs.length)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
   const [showRightArrow, setShowRightArrow] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null)
   const dragIndexRef = useRef<number | null>(null)
-  const layoutMetrics = getTabRailLayoutMetrics(tabs.length)
+  const layoutMetrics = getTabRailLayoutMetrics(displayTabs.length)
   const activeSurfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
   const activeSlotMetrics = getActiveTabSlotMetrics(layoutMetrics, activeTabMode, refreshDockMode)
 
@@ -166,17 +182,17 @@ export default function TabRail({
       element.removeEventListener('scroll', checkOverflow)
       observer.disconnect()
     }
-  }, [checkOverflow, tabs.length])
+  }, [checkOverflow, displayTabs.length])
 
   useEffect(() => {
     const element = scrollRef.current
     if (!element) return
 
-    const lastTab = tabs[tabs.length - 1]
+    const lastTab = displayTabs[displayTabs.length - 1]
     if (!lastTab) return
 
-    const tabCountChanged = previousTabCountRef.current !== tabs.length
-    previousTabCountRef.current = tabs.length
+    const tabCountChanged = previousTabCountRef.current !== displayTabs.length
+    previousTabCountRef.current = displayTabs.length
     const shouldBiasToEnd = tabCountChanged || activeTabId === lastTab.id
     if (!shouldBiasToEnd) return
 
@@ -187,7 +203,7 @@ export default function TabRail({
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [activeTabId, checkOverflow, isActive, tabs])
+  }, [activeTabId, checkOverflow, displayTabs, isActive])
 
   useEffect(() => {
     if (!activeTabId) return
@@ -198,7 +214,7 @@ export default function TabRail({
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [activeTabId, checkOverflow, isActive, keepTabSlotVisible, activeTabMode, refreshDockMode, tabs.length])
+  }, [activeTabId, checkOverflow, isActive, keepTabSlotVisible, activeTabMode, refreshDockMode, displayTabs.length])
 
   const clearGlobalDragState = useCallback(() => {
     dragIndexRef.current = null
@@ -241,16 +257,16 @@ export default function TabRail({
 
   useEffect(() => {
     if (!draggingTabId) return
-    if (!isActive || !tabs.some((tab) => tab.id === draggingTabId)) {
+    if (!isActive || !displayTabs.some((tab) => tab.id === draggingTabId)) {
       clearGlobalDragState()
     }
-  }, [clearGlobalDragState, draggingTabId, isActive, tabs])
+  }, [clearGlobalDragState, draggingTabId, displayTabs, isActive])
 
   const handleDragStart = (event: React.DragEvent, index: number) => {
     dragIndexRef.current = index
     event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData('text/plain', String(index))
-    const tab = tabs[index]
+    const tab = displayTabs[index]
     if (tab) {
       setDraggingTabId(tab.id)
       setBrowserTabDragPayload(event, tab)
@@ -304,18 +320,19 @@ export default function TabRail({
         style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X / 2, paddingRight: WORKBENCH_HEADER_EDGE_X / 2 }}
       >
         <MorphTabStrip layoutId="browser-unified-header" className="flex min-w-full w-max items-center gap-[6px]">
-          {tabs.map((tab, index) => {
+          {displayTabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
             const isDragOver = dragOverIndex === index
             const isDragging = draggingTabId === tab.id
             const isHovered = hoveredTabId === tab.id
+            const isStarterTab = hasStarterTab && tab.id === '__browser-starter__'
 
             const utilityCount =
-              1 +
+              (isStarterTab ? 0 : 1) +
               (tab.owner === 'agent' ? 1 : 0) +
               (tab.required ? 1 : 0) +
               (tab.activity && tab.activity !== 'idle' ? 1 : 0)
-            const rightReserve = 34 + utilityCount * 18
+            const rightReserve = isStarterTab ? 0 : 34 + utilityCount * 18
 
             const tabIsBookmarked = bookmarkedUrls.includes(tab.url)
             const slotWidth = isActive ? activeSlotMetrics.width : layoutMetrics.inactiveWidth
@@ -375,15 +392,21 @@ export default function TabRail({
                   <MorphTabButton
                     layoutId="browser-unified-header"
                     active={false}
-                    draggable
-                    onDragStart={(event) => handleDragStart(event, index)}
+                    draggable={!isStarterTab}
+                    onDragStart={isStarterTab ? undefined : (event) => handleDragStart(event, index)}
                     onDragEnd={handleDragEnd}
-                    onDragOver={(event) => handleDragOver(event, index)}
-                    onDrop={(event) => handleDrop(event, index)}
+                    onDragOver={isStarterTab ? undefined : (event) => handleDragOver(event, index)}
+                    onDrop={isStarterTab ? undefined : (event) => handleDrop(event, index)}
                     onMouseEnter={() => setHoveredTabId(tab.id)}
                     onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                    onClick={() => void onTabClick(tab.id)}
-                    onAuxClick={(event) => handleAuxClick(event, tab.id)}
+                    onClick={() => {
+                      if (isStarterTab) {
+                        void onNewTab()
+                        return
+                      }
+                      void onTabClick(tab.id)
+                    }}
+                    onAuxClick={isStarterTab ? undefined : (event) => handleAuxClick(event, tab.id)}
                     className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-all duration-150"
                     style={{
                       gap: 6,
@@ -410,7 +433,7 @@ export default function TabRail({
                     <span
                       className="flex min-w-0 items-center justify-center gap-[6px]"
                       style={{
-                        maxWidth: `calc(100% - ${rightReserve}px)`,
+                        maxWidth: rightReserve > 0 ? `calc(100% - ${rightReserve}px)` : '100%',
                         marginRight: rightReserve,
                       }}
                     >
@@ -440,81 +463,83 @@ export default function TabRail({
                       </span>
                     </span>
 
-                    <span
-                      className="absolute right-[8px] top-1/2 flex items-center gap-[4px]"
-                      style={{ transform: 'translateY(-50%)' }}
-                    >
-                      {tab.owner === 'agent' && (
-                        <span
-                          className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
-                          style={{
-                            background: 'var(--color-blue-light)',
-                            color: 'var(--color-blue)',
-                          }}
-                        >
-                          Agent
-                        </span>
-                      )}
-
-                      {tab.required && (
-                        <Lock
-                          style={{ width: 10, height: 10 }}
-                          className="flex-shrink-0 text-[var(--text-light)]"
-                          strokeWidth={2}
-                        />
-                      )}
-
-                      {tab.activity && tab.activity !== 'idle' && (
-                        <span
-                          className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
-                          style={{
-                            background: tab.activity === 'attention'
-                              ? 'var(--color-orange)'
-                              : 'var(--color-blue)',
-                          }}
-                        />
-                      )}
-
+                    {!isStarterTab && (
                       <span
-                        role="button"
-                        tabIndex={0}
-                        onMouseDown={(event) => {
-                          event.stopPropagation()
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onToggleBookmarkForTab(tab)
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
+                        className="absolute right-[8px] top-1/2 flex items-center gap-[4px]"
+                        style={{ transform: 'translateY(-50%)' }}
+                      >
+                        {tab.owner === 'agent' && (
+                          <span
+                            className="flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
+                            style={{
+                              background: 'var(--color-blue-light)',
+                              color: 'var(--color-blue)',
+                            }}
+                          >
+                            Agent
+                          </span>
+                        )}
+
+                        {tab.required && (
+                          <Lock
+                            style={{ width: 10, height: 10 }}
+                            className="flex-shrink-0 text-[var(--text-light)]"
+                            strokeWidth={2}
+                          />
+                        )}
+
+                        {tab.activity && tab.activity !== 'idle' && (
+                          <span
+                            className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
+                            style={{
+                              background: tab.activity === 'attention'
+                                ? 'var(--color-orange)'
+                                : 'var(--color-blue)',
+                            }}
+                          />
+                        )}
+
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onMouseDown={(event) => {
+                            event.stopPropagation()
+                          }}
+                          onClick={(event) => {
                             event.stopPropagation()
                             onToggleBookmarkForTab(tab)
-                          }
-                        }}
-                        className="flex h-[18px] w-[18px] items-center justify-center rounded opacity-70 transition-colors hover:bg-[var(--bg-hover)] hover:opacity-100"
-                        title={tabIsBookmarked ? '取消收藏' : '收藏此页面'}
-                      >
-                        <Star
-                          style={{ width: 10, height: 10 }}
-                          strokeWidth={2}
-                          className={tabIsBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-light)]'}
-                          fill={tabIsBookmarked ? 'var(--color-orange)' : 'none'}
-                        />
-                      </span>
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              onToggleBookmarkForTab(tab)
+                            }
+                          }}
+                          className="flex h-[18px] w-[18px] items-center justify-center rounded opacity-70 transition-colors hover:bg-[var(--bg-hover)] hover:opacity-100"
+                          title={tabIsBookmarked ? '取消收藏' : '收藏此页面'}
+                        >
+                          <Star
+                            style={{ width: 10, height: 10 }}
+                            strokeWidth={2}
+                            className={tabIsBookmarked ? 'text-[var(--color-orange)]' : 'text-[var(--text-light)]'}
+                            fill={tabIsBookmarked ? 'var(--color-orange)' : 'none'}
+                          />
+                        </span>
 
-                      <span
-                        role="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void onTabClose(tab.id)
-                        }}
-                        className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-all hover:bg-[var(--bg-hover)] hover:opacity-100"
-                        title="Close tab"
-                      >
-                        <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                        <span
+                          role="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void onTabClose(tab.id)
+                          }}
+                          className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-all hover:bg-[var(--bg-hover)] hover:opacity-100"
+                          title="Close tab"
+                        >
+                          <X style={{ width: 10, height: 10 }} strokeWidth={2} />
+                        </span>
                       </span>
-                    </span>
+                    )}
                   </MorphTabButton>
                 )}
               </div>

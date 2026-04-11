@@ -38,6 +38,13 @@ export function useBrowserViewBounds({
   const boundsTrackingTimeoutRef = useRef<number | null>(null)
   const lastBoundsKeyRef = useRef('')
   const overlayLockCountRef = useRef(0)
+  const visibilitySyncTokenRef = useRef(0)
+  const isActiveRef = useRef(isActive)
+  const isVisibleAllowedRef = useRef(isVisibleAllowed)
+  const hasErrorRef = useRef(hasError)
+  isActiveRef.current = isActive
+  isVisibleAllowedRef.current = isVisibleAllowed
+  hasErrorRef.current = hasError
 
   const sendBoundsImmediate = useCallback(async (_options?: { forceExact?: boolean }) => {
     if (!isElectron || !contentRef.current) return
@@ -115,16 +122,17 @@ export function useBrowserViewBounds({
 
   const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean }) => {
     if (!isElectron) return
-    if (!isActive) return
+    const requestToken = ++visibilitySyncTokenRef.current
+    if (!isActiveRef.current) return
 
     // D方案关键：水平滚动动画期间不允许显示 BrowserView
-    if (!isVisibleAllowed) {
+    if (!isVisibleAllowedRef.current) {
       window.electronAPI?.browser?.hideAll()
       return
     }
 
     const shouldShowBrowserView =
-      !hasError && overlayLockCountRef.current === 0
+      !hasErrorRef.current && overlayLockCountRef.current === 0
 
     if (!hostVisibleRef.current || !shouldShowBrowserView) {
       window.electronAPI?.browser?.hideAll()
@@ -132,8 +140,17 @@ export function useBrowserViewBounds({
     }
 
     await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
+    if (requestToken !== visibilitySyncTokenRef.current) return
+
+    const shouldStillShowBrowserView =
+      !hasErrorRef.current && overlayLockCountRef.current === 0
+    if (!isActiveRef.current || !isVisibleAllowedRef.current || !hostVisibleRef.current || !shouldStillShowBrowserView) {
+      window.electronAPI?.browser?.hideAll()
+      return
+    }
+
     await window.electronAPI?.browser?.showActive()
-  }, [hasError, hostVisibleRef, isActive, isElectron, isVisibleAllowed, sendBoundsImmediate])
+  }, [hostVisibleRef, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     const element = contentRef.current

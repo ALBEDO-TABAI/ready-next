@@ -17,7 +17,9 @@ test('browser mode delegates top-level browser chrome to BrowserHeader', () => {
   assert.doesNotMatch(browserMode, /import BrowserAddressBar from/)
   assert.doesNotMatch(browserMode, /<BrowserTabBar/)
   assert.doesNotMatch(browserMode, /<BrowserAddressBar/)
-  assert.match(browserMode, /<BrowserModeEmptyState onNewTab=\{handleNewTab\} contentRef=\{contentRef\}/)
+  assert.match(browserMode, /<BrowserModeEmptyState[\s\S]*onNewTab=\{handleNewTab\}[\s\S]*contentRef=\{contentRef\}[\s\S]*onShowUtilityMenu=\{handleShowUtilityMenu\}/)
+  assert.match(emptyState, /import BrowserHeader from ['"].\/BrowserHeader['"]/)
+  assert.match(emptyState, /<BrowserHeader/)
   assert.match(emptyState, /contentRef: RefObject<HTMLDivElement \| null>/)
   assert.match(emptyState, /ref=\{contentRef\}/)
 })
@@ -129,4 +131,11 @@ test('browser shell layout adds corner fillers so the header chrome visually mee
   assert.match(browserShellLayout, /browser-shell-corner-fill-left/)
   assert.match(browserShellLayout, /browser-shell-corner-fill-right/)
   assert.doesNotMatch(browserShellLayout, /marginRight:\s*WORKBENCH_HEADER_EDGE_X/)
+})
+
+test('tab rail renders a visible starter tab when the browser has no hydrated tabs yet', () => {
+  const tabRail = readWorkspaceFile('src/renderer/components/browser/TabRail.tsx')
+
+  assert.match(tabRail, /tabs\.length === 0/)
+  assert.match(tabRail, /浏览器启动中…|新标签页/)
 })

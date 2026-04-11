@@ -137,6 +137,8 @@ const memoryLifecycleAPI = {
 }
 
 // Browser API
+let browserVisibilityCommandId = 0
+
 const browserAPI = {
   createTab: (url: string) => ipcRenderer.invoke('browser:createTab', url),
   openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
@@ -151,9 +153,9 @@ const browserAPI = {
     ipcRenderer.send('browser:updateBounds', bounds)
     return Promise.resolve({ success: true })
   },
-  hideAll: () => ipcRenderer.invoke('browser:hideAll'),
-  hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost'),
-  showActive: () => ipcRenderer.invoke('browser:showActive'),
+  hideAll: () => ipcRenderer.invoke('browser:hideAll', { requestId: ++browserVisibilityCommandId }),
+  hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost', { requestId: ++browserVisibilityCommandId }),
+  showActive: () => ipcRenderer.invoke('browser:showActive', { requestId: ++browserVisibilityCommandId }),
   fitActiveTabToBounds: (tabId?: string | null) => ipcRenderer.invoke('browser:fitActiveTabToBounds', tabId),
   captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),

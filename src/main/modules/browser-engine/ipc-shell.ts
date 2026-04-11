@@ -54,9 +54,9 @@ interface BrowserShellIPCController {
   goForward(tabId: string | null): { success: boolean; error?: string }
   reload(tabId: string | null): { success: boolean; error?: string }
   updateViewBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean }
-  hideAllHosts(): { success: boolean }
-  hideActiveHost(): { success: boolean }
-  showActiveHost(): { success: boolean }
+  hideAllHosts(payload?: { requestId?: number }): { success: boolean }
+  hideActiveHost(payload?: { requestId?: number }): { success: boolean }
+  showActiveHost(payload?: { requestId?: number }): { success: boolean }
   fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }>
   captureWindowSnapshot(bounds: { x: number; y: number; width: number; height: number }): Promise<{ success: boolean; data?: string; error?: string }>
   captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }>
@@ -155,10 +155,10 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
     controller.updateViewBounds(bounds)
   })
 
-  ipcMain.handle('browser:hideAll', () => controller.hideAllHosts())
-  ipcMain.handle('browser:hideActiveHost', () => controller.hideActiveHost())
+  ipcMain.handle('browser:hideAll', (_, payload?: { requestId?: number }) => controller.hideAllHosts(payload))
+  ipcMain.handle('browser:hideActiveHost', (_, payload?: { requestId?: number }) => controller.hideActiveHost(payload))
 
-  ipcMain.handle('browser:showActive', () => controller.showActiveHost())
+  ipcMain.handle('browser:showActive', (_, payload?: { requestId?: number }) => controller.showActiveHost(payload))
   ipcMain.handle('browser:fitActiveTabToBounds', async (_, tabId?: string | null) => {
     try {
       return await controller.fitActiveTabToBounds(tabId)
