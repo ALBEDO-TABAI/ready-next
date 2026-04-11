@@ -150,6 +150,7 @@ describe('document widget target context', () => {
     assert.match(source, /const hasWidgetTargetContext = params\.userText\.includes\('### Widget 更新上下文'\)/)
     assert.match(source, /const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent\(contextualUserInput\)/)
     assert.match(source, /hasWidgetTargetContext && !explicitWidgetCreateIntent[\s\S]*\? 'update'/)
-    assert.match(source, /forceDocumentTool:\s*visibilityPlan\.hasTools && \([\s\S]*params\.hasWidgetTargetContext && !params\.explicitWidgetCreateIntent[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)
+    assert.match(source, /const allowDocumentTools = visibilityPlan\.hasTools && \([\s\S]*params\.hasWidgetTargetContext[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)
+    assert.match(source, /forceDocumentTool:\s*allowDocumentTools && \([\s\S]*params\.hasWidgetTargetContext && !params\.explicitWidgetCreateIntent[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)
   })
 })

@@ -63,6 +63,7 @@ export function buildExecutionToolState(params: {
   preferredSkillToolNames?: string[] | null
   contextualUserInput: string
   userInstructionText: string
+  hasDocumentEnvironment: boolean
   hasWidgetTargetContext: boolean
   explicitWidgetCreateIntent: boolean
   documentWidgetTaskKind: DocumentWidgetTaskKind
@@ -78,14 +79,24 @@ export function buildExecutionToolState(params: {
       params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
     preferredSkillToolNames: params.preferredSkillToolNames,
   })
-
+  const hasDocumentKeyword =
+    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
+      .test(params.userInstructionText)
+  const allowDocumentTools = visibilityPlan.hasTools && (
+    params.hasDocumentEnvironment ||
+    params.hasWidgetTargetContext ||
+    Boolean(params.documentWidgetTaskKind) ||
+    shouldForceDocumentToolCall(params.contextualUserInput) ||
+    hasDocumentKeyword
+  )
   return {
     visibilityPlan,
     toolPolicy: {
-      forceDocumentTool: visibilityPlan.hasTools && (
+      forceDocumentTool: allowDocumentTools && (
         (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
         shouldForceDocumentToolCall(params.contextualUserInput)
       ),
+      allowDocumentTools,
       forceDesignTool: false,
       preferredDesignTool: null,
       primaryDesignInstruction: null,

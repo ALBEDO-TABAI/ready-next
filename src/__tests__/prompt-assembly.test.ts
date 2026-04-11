@@ -188,7 +188,7 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('ensures custom memory roots materialize daily memory files for future use without injecting them into local scope refs', async () => {
+  it('ensures custom memory roots materialize daily memory files and expose them as local scope refs', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-custom-root-'))
 
     const service = new PromptAssemblyService({
@@ -202,17 +202,17 @@ describe('PromptAssemblyService', () => {
       message: '帮我继续整理今天的设计思路',
     })
 
-    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-08.md'))
-    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-07.md'))
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-07.md'))
     assert.equal(existsSync(join(root, 'docs')), true)
     assert.equal(existsSync(join(root, 'memory')), true)
-    assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), false)
-    assert.equal(existsSync(join(root, 'memory', '2026-03-07.md')), false)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), true)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-07.md')), true)
 
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('does not inject same-day global logs into fresh local scopes', async () => {
+  it('keeps same-day global logs available for fresh local scopes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-local-isolation-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
     mkdirSync(join(root, 'memory'), { recursive: true })
@@ -230,8 +230,8 @@ describe('PromptAssemblyService', () => {
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n')
-    assert.doesNotMatch(joinedBootstrap, /广州天气/)
-    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-08.md'))
+    assert.match(joinedBootstrap, /广州天气/)
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
 
     rmSync(root, { recursive: true, force: true })
   })

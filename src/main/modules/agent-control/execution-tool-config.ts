@@ -16,6 +16,7 @@ import {
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
+  allowDocumentTools: boolean
   forceDesignTool: boolean
   preferredDesignTool: string | null
   primaryDesignInstruction: string | null
@@ -213,6 +214,12 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
                 : FORCE_DOCUMENT_TOOL_NAMES
     tools = filterAnthropicToolsByAllowedNames(tools, allowedNames)
   }
+  if (policy?.allowDocumentTools === false) {
+    tools = tools.filter((tool) => {
+      const name = typeof tool.name === 'string' ? tool.name : ''
+      return !name.startsWith('document_')
+    })
+  }
   if (policy?.forceDesignTool) {
     tools = filterPreferredDesignAnthropicTools(tools, policy.preferredDesignTool)
   }
@@ -249,6 +256,12 @@ export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, 
                 ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
                 : FORCE_DOCUMENT_TOOL_NAMES
     tools = filterOpenAIToolsByAllowedNames(tools, allowedNames)
+  }
+  if (policy?.allowDocumentTools === false) {
+    tools = tools.filter((tool) => {
+      const fn = (tool.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? !fn.startsWith('document_') : true
+    })
   }
   if (policy?.forceDesignTool) {
     tools = filterPreferredDesignOpenAITools(tools, policy.preferredDesignTool)
