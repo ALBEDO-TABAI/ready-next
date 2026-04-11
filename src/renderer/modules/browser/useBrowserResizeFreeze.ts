@@ -112,12 +112,15 @@ export function useBrowserResizeFreeze({
   }, [browserRuntimeReady, captureSnapshot, isActive, isElectron, setCachedFreezeFrameForTab, setFreezeFrame, surfaceRef])
 
   const captureStableFrame = useCallback(async () => {
-    if (!isElectron || !surfaceRef.current) return
+    if (!isElectron || !surfaceRef.current) return false
+    const tabId = activeTabIdRef.current
+    if (!tabId) return false
 
     const nextFrame = await captureSnapshot()
-    if (!nextFrame) return
+    if (!nextFrame) return false
 
-    setCachedFreezeFrameForTab(activeTabIdRef.current, nextFrame)
+    setCachedFreezeFrameForTab(tabId, nextFrame)
+    return true
   }, [captureSnapshot, isElectron, setCachedFreezeFrameForTab, surfaceRef])
 
   const handleResizeStart = useCallback(() => {

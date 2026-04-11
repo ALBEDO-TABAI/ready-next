@@ -12,5 +12,5 @@ test('active tab visibility recalculates when the active surface expands or the 
 
   assert.match(source, /const activeSurfaceMetrics = getActiveTabSurfaceMetrics\(layoutMetrics, activeTabMode\)/)
   assert.match(source, /const activeSlotMetrics = getActiveTabSlotMetrics\(layoutMetrics, activeTabMode, refreshDockMode\)/)
-  assert.match(source, /\[activeTabId, checkOverflow, isActive, keepTabSlotVisible, activeTabMode, refreshDockMode, tabs\.length\]/)
+  assert.match(source, /\[activeTabId, checkOverflow, isActive, keepTabSlotVisible, activeTabMode, refreshDockMode, displayTabs\.length\]/)
 })
