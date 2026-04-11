@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   accumulateDocumentToolProgress,
   buildDocumentToolCompletionText,
+  inspectDocumentToolCall,
 } from '../main/modules/claude-bridge/document-tool-flow'
 
 describe('document tool flow completion', () => {
@@ -71,5 +72,15 @@ describe('document tool flow completion', () => {
 
     assert.match(textAfterSave || '', /已插入 widget/)
     assert.match(textAfterSave || '', /已保存文档/)
+  })
+
+  it('does not count skipped widget updates as real content mutation', () => {
+    const inspection = inspectDocumentToolCall(
+      'document_update_widget',
+      'widget 内容未变化，已跳过：新文档.md',
+    )
+
+    assert.equal(inspection.executedMutatingDocActionCount, 0)
+    assert.equal(inspection.executedSaveDocActionCount, 0)
   })
 })

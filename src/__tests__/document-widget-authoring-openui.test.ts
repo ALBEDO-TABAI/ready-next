@@ -87,4 +87,34 @@ describe('document widget authoring with OpenUI component specs', () => {
       ;(globalThis as { window?: unknown }).window = previousWindow
     }
   })
+
+  it('accepts kimi-style info card component specs with flat fields', async () => {
+    const store = useDocTabs.getState()
+    const tab = store.tabs[0]
+    store.setTabContent(tab.id, '# Intro\n\nhello\n')
+
+    const result = await performDocAction({
+      type: 'insert_widget',
+      title: 'learning_summary_card',
+      componentSpec: {
+        componentType: 'info_card',
+        title: '📚 学习重点总结',
+        content: '本文档核心知识点与关键要点汇总',
+        items: [
+          { label: '核心概念', value: '掌握基础理论与关键定义' },
+          { label: '实践要点', value: '注重实际操作与应用场景' },
+        ],
+        footer: '建议定期复习巩固',
+      },
+      position: 'append_end',
+      tabId: tab.id,
+    })
+
+    const updated = useDocTabs.getState().tabs.find((item) => item.id === tab.id)
+    assert.match(result, /插入 widget/)
+    assert.match(updated?.content || '', /学习重点总结/)
+    assert.match(updated?.content || '', /本文档核心知识点与关键要点汇总/)
+    assert.match(updated?.content || '', /核心概念/)
+    assert.match(updated?.content || '', /建议定期复习巩固/)
+  })
 })

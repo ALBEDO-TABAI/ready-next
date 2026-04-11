@@ -246,7 +246,9 @@ export class OpenAIExecutionClient {
       provider: params.provider,
       baseUrl: openAIBase,
     })
-    const timeoutMs = resolveApiRequestTimeoutMs(params.policy)
+    const timeoutMs = resolveApiRequestTimeoutMs(params.policy, {
+      baseUrl: params.baseUrl,
+    })
     const tools = getPolicyOpenAITools(params.policy)
     const repairedMessages = this.repairOpenAIToolMessageHistory(params.session.messages) as unknown as OpenAIChatMessage[]
     if (params.policy?.forceDocumentTool) {

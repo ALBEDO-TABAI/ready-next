@@ -148,49 +148,6 @@ export class DocumentToolLoopOrchestrator {
       return { state: params.state }
     }
 
-    if (
-      params.documentWidgetTaskKind &&
-      params.state.lastWidgetValidationError &&
-      params.state.forceDocWidgetRecoveryNudges < 1
-    ) {
-      return {
-        state: {
-          ...params.state,
-          forceDocWidgetRecoveryNudges: params.state.forceDocWidgetRecoveryNudges + 1,
-        },
-        nextUserMessage: `系统检查：你刚生成的 widget 结果不合格：${params.state.lastWidgetValidationError}。请不要结束，改用更稳妥的实现方式重新生成并再次调用正确的 widget 工具。优先保留简洁结构，避免继续使用 document_append_content。`,
-      }
-    }
-
-    if (
-      params.executedDocActionCount > 0 &&
-      params.executedMutatingDocActionCount === 0 &&
-      params.executedInspectionDocActionCount === 0 &&
-      params.state.forceDocMutationNudges < 2
-    ) {
-      return {
-        state: {
-          ...params.state,
-          forceDocMutationNudges: params.state.forceDocMutationNudges + 1,
-        },
-        nextUserMessage: '系统检查：你目前只完成了文档定位/切换，还没有执行内容修改。请继续调用合适的 document_* 编辑工具落实你的方案。',
-      }
-    }
-
-    if (
-      params.executedMutatingDocActionCount > 0 &&
-      params.executedSaveDocActionCount === 0 &&
-      params.state.forceDocSaveNudges < 2
-    ) {
-      return {
-        state: {
-          ...params.state,
-          forceDocSaveNudges: params.state.forceDocSaveNudges + 1,
-        },
-        nextUserMessage: '系统检查：你已执行内容修改但尚未保存。请调用 document_save_tab 完成保存，再给出最终结论。',
-      }
-    }
-
     const nextState: DocumentToolLoopState = {
       ...params.state,
       documentToolTaskCompleted:
@@ -204,10 +161,59 @@ export class DocumentToolLoopOrchestrator {
       }),
     }
 
+    const cumulativeMutatingDocActionCount = nextState.documentToolProgress?.executedMutatingDocActionCount || 0
+    const cumulativeSaveDocActionCount = nextState.documentToolProgress?.executedSaveDocActionCount || 0
+
+    if (
+      params.documentWidgetTaskKind &&
+      nextState.lastWidgetValidationError &&
+      nextState.forceDocWidgetRecoveryNudges < 1
+    ) {
+      return {
+        state: {
+          ...nextState,
+          forceDocWidgetRecoveryNudges: nextState.forceDocWidgetRecoveryNudges + 1,
+        },
+        nextUserMessage: `系统检查：你刚生成的 widget 结果不合格：${nextState.lastWidgetValidationError}。请不要结束，改用更稳妥的实现方式重新生成并再次调用正确的 widget 工具。优先保留简洁结构，避免继续使用 document_append_content。`,
+      }
+    }
+
+    if (
+      params.executedDocActionCount > 0 &&
+      params.executedMutatingDocActionCount === 0 &&
+      params.executedInspectionDocActionCount === 0 &&
+      params.executedSaveDocActionCount === 0 &&
+      cumulativeMutatingDocActionCount === 0 &&
+      nextState.forceDocMutationNudges < 2
+    ) {
+      return {
+        state: {
+          ...nextState,
+          forceDocMutationNudges: nextState.forceDocMutationNudges + 1,
+        },
+        nextUserMessage: '系统检查：你目前只完成了文档定位/切换，还没有执行内容修改。请继续调用合适的 document_* 编辑工具落实你的方案。',
+      }
+    }
+
+    if (
+      cumulativeMutatingDocActionCount > 0 &&
+      cumulativeSaveDocActionCount === 0 &&
+      params.executedSaveDocActionCount === 0 &&
+      nextState.forceDocSaveNudges < 2
+    ) {
+      return {
+        state: {
+          ...nextState,
+          forceDocSaveNudges: nextState.forceDocSaveNudges + 1,
+        },
+        nextUserMessage: '系统检查：你已执行内容修改但尚未保存。请调用 document_save_tab 完成保存，再给出最终结论。',
+      }
+    }
+
     const completionText = buildDocumentToolCompletionText({
       forceDocumentTool: params.forceDocumentTool,
-      executedMutatingDocActionCount: nextState.documentToolProgress?.executedMutatingDocActionCount || 0,
-      executedSaveDocActionCount: nextState.documentToolProgress?.executedSaveDocActionCount || 0,
+      executedMutatingDocActionCount: cumulativeMutatingDocActionCount,
+      executedSaveDocActionCount: cumulativeSaveDocActionCount,
       lastWidgetValidationError: nextState.lastWidgetValidationError,
       toolResults: nextState.documentToolProgress?.toolResults || [],
     })

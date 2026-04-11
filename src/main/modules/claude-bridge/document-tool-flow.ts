@@ -39,6 +39,21 @@ const DOCUMENT_INSPECTION_TOOL_NAMES = new Set([
   'document_list_widgets',
 ])
 
+function isNoChangeDocumentMutationResult(result: string): boolean {
+  const trimmed = result.trim()
+  if (!trimmed) return false
+  return [
+    /内容未变化.*已跳过/i,
+    /无变化.*已跳过/i,
+    /未做改动/i,
+    /已是目标格式.*未做改动/i,
+    /内容无变化.*未做改动/i,
+    /追加内容为空.*已跳过/i,
+    /^未匹配到/i,
+    /^未找到/i,
+  ].some((pattern) => pattern.test(trimmed))
+}
+
 function isQueuedPlaceholder(result: string): boolean {
   return /^Document (navigation|inspection|content mutation|save) queued:/i.test(result.trim())
 }
@@ -64,7 +79,12 @@ export function inspectDocumentToolCall(
   result: string,
 ): DocumentToolInspection {
   const isDocumentTool = toolName.startsWith('document_')
-  const executedMutatingDocActionCount = CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(toolName) ? 1 : 0
+  const executedMutatingDocActionCount =
+    CONTENT_MUTATING_DOCUMENT_TOOL_NAMES.has(toolName) &&
+    !isQueuedPlaceholder(result) &&
+    !isNoChangeDocumentMutationResult(result)
+      ? 1
+      : 0
   const executedInspectionDocActionCount = DOCUMENT_INSPECTION_TOOL_NAMES.has(toolName) ? 1 : 0
   return {
     isDocumentTool,

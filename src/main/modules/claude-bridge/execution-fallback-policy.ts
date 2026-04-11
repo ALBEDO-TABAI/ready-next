@@ -132,7 +132,7 @@ function shouldRetryWithWireApi(error: unknown): boolean {
 
 function shouldRetryWithKimiCoding(error: unknown): boolean {
   const message = stringifyError(error)
-  return /(HTTP 408|HTTP 409|HTTP 429|HTTP 500|HTTP 502|HTTP 503|HTTP 504)/i.test(message)
+  return /(HTTP 408|HTTP 409|HTTP 429|HTTP 500|HTTP 502|HTTP 503|HTTP 504|timeout|timed out|请求超时)/i.test(message)
 }
 
 function stringifyError(error: unknown): string {

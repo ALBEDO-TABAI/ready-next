@@ -116,9 +116,36 @@ export class AnthropicExecutionClient {
     signal: AbortSignal
     policy?: ToolPolicy
   }): Promise<AnthropicExecutionResponse> {
+    try {
+      return await this.requestWithToolsOnce(params)
+    } catch (error) {
+      const fallbackPlan = resolveFallbackPlan({
+        mode: 'kimi_coding',
+        error,
+      })
+      if (!this.shouldUseKimiCodingDefaults(params.baseUrl) || !fallbackPlan.shouldRetry) {
+        throw error
+      }
+      this.deps.log('Anthropic tool request on kimi coding timed out or failed transiently, retrying once with shared fallback policy')
+      return annotateFallbackResult(await this.requestWithToolsOnce(params), {
+        kind: 'kimi_coding_retry',
+        attempts: 1,
+      })
+    }
+  }
+
+  private async requestWithToolsOnce(params: {
+    session: AnthropicSessionLike
+    config: AIModelConfig
+    baseUrl: string
+    signal: AbortSignal
+    policy?: ToolPolicy
+  }): Promise<AnthropicExecutionResponse> {
     const headers = this.buildHeaders(params.config, params.baseUrl)
     const model = this.resolveModel(params.config, params.baseUrl)
-    const timeoutMs = resolveApiRequestTimeoutMs(params.policy)
+    const timeoutMs = resolveApiRequestTimeoutMs(params.policy, {
+      baseUrl: params.baseUrl,
+    })
     const tools = getPolicyAnthropicTools(params.policy)
     if (params.policy?.forceDocumentTool) {
       this.deps.log(`forceDocumentTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`)

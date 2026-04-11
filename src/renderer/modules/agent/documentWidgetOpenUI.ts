@@ -12,6 +12,76 @@ import {
   type WeekScheduleSnapshot,
 } from '../../../shared/document-widget-openui'
 
+function toPointText(item: unknown): string | null {
+  if (typeof item === 'string') {
+    const normalized = item.trim()
+    return normalized || null
+  }
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+  const label = typeof record.label === 'string' ? record.label.trim() : ''
+  const value = typeof record.value === 'string' ? record.value.trim() : ''
+  const text = [label, value].filter(Boolean).join('：')
+  return text || null
+}
+
+function normalizeFlatComponentProps(
+  component: string,
+  props: Record<string, unknown>,
+): Record<string, unknown> {
+  if (component === 'info_card' || component === 'callout_block') {
+    const points = Array.isArray(props.points)
+      ? props.points
+      : Array.isArray(props.items)
+        ? (props.items as unknown[]).map(toPointText).filter(Boolean)
+        : undefined
+    const footer = typeof props.footer === 'string' && props.footer.trim()
+      ? props.footer.trim()
+      : null
+    return {
+      ...props,
+      heading: typeof props.heading === 'string' ? props.heading : typeof props.title === 'string' ? props.title : undefined,
+      body: typeof props.body === 'string' ? props.body : typeof props.content === 'string' ? props.content : undefined,
+      points: footer && Array.isArray(points) ? [...points, footer] : points,
+    }
+  }
+
+  if (component === 'stats_card' && !Array.isArray(props.metrics) && Array.isArray(props.items)) {
+    return {
+      ...props,
+      heading: typeof props.heading === 'string' ? props.heading : typeof props.title === 'string' ? props.title : undefined,
+      metrics: props.items,
+    }
+  }
+
+  return props
+}
+
+function normalizeIncomingComponentSpec(spec: DocumentWidgetComponentSpec): DocumentWidgetComponentSpec {
+  const record = spec as unknown as Record<string, unknown>
+  const component =
+    typeof record.component === 'string'
+      ? record.component
+      : typeof record.componentType === 'string'
+        ? record.componentType
+        : ''
+
+  const rawProps = record.props && typeof record.props === 'object'
+    ? { ...(record.props as Record<string, unknown>) }
+    : Object.fromEntries(
+      Object.entries(record).filter(([key]) => !['component', 'componentType', 'props', 'dataSource'].includes(key)),
+    )
+  const normalizedProps = normalizeFlatComponentProps(component, rawProps)
+
+  return {
+    component,
+    props: Object.keys(normalizedProps).length > 0 ? normalizedProps : undefined,
+    dataSource: record.dataSource && typeof record.dataSource === 'object'
+      ? record.dataSource as DocumentWidgetComponentSpec['dataSource']
+      : undefined,
+  }
+}
+
 interface CalendarEventLike {
   id?: string
   title?: string
@@ -213,6 +283,7 @@ export async function compileDocumentWidgetComponentSpec(spec: DocumentWidgetCom
   component: string
   widgetCode: string
 }> {
-  const context = spec.dataSource ? await buildCompileContext(spec) : undefined
-  return compileDocumentWidgetSpec(spec, context)
+  const normalizedSpec = normalizeIncomingComponentSpec(spec)
+  const context = normalizedSpec.dataSource ? await buildCompileContext(normalizedSpec) : undefined
+  return compileDocumentWidgetSpec(normalizedSpec, context)
 }

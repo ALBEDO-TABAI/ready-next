@@ -73,3 +73,33 @@ test('DocumentToolLoopOrchestrator exposes tool-call headroom hints without owni
 
   assert.deepEqual(hint, { reserveToolCalls: 2 })
 })
+
+test('DocumentToolLoopOrchestrator does not regress to "no mutation" after a save-only follow-up iteration', () => {
+  const orchestrator = new DocumentToolLoopOrchestrator()
+  const state = orchestrator.createState({
+    documentToolProgress: {
+      executedMutatingDocActionCount: 1,
+      executedSaveDocActionCount: 0,
+      toolResults: ['已更新 widget：basketball_scoreboard_red（新文档.md）'],
+    },
+    documentToolTaskCompleted: true,
+  })
+
+  const result = orchestrator.handleIterationResult({
+    state,
+    forceDocumentTool: true,
+    documentWidgetTaskKind: null,
+    executedDocActionCount: 1,
+    executedMutatingDocActionCount: 0,
+    executedInspectionDocActionCount: 0,
+    executedSaveDocActionCount: 1,
+    documentToolResultsThisIteration: ['已保存文档：/Users/user/新文档.md'],
+  })
+
+  assert.equal(result.nextUserMessage, undefined)
+  assert.equal(
+    result.completionText,
+    '已更新 widget：basketball_scoreboard_red（新文档.md）\n已保存文档：/Users/user/新文档.md',
+  )
+  assert.equal(result.finish, true)
+})

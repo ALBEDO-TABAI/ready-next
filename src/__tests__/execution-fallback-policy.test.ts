@@ -31,6 +31,10 @@ test('execution fallback policy resolves text bridge, video frame, wire-api, and
     mode: 'kimi_coding',
     error: new Error('HTTP 429: rate limited'),
   })
+  const kimiTimeoutPlan = resolveFallbackPlan({
+    mode: 'kimi_coding',
+    error: new Error('anthropic tools 请求超时（>90s）'),
+  })
 
   assert.equal(textBridgePlan.kind, 'text_bridge')
   assert.equal(textBridgePlan.shouldRetry, true)
@@ -40,6 +44,8 @@ test('execution fallback policy resolves text bridge, video frame, wire-api, and
   assert.equal(wireApiPlan.shouldRetry, true)
   assert.equal(kimiPlan.kind, 'kimi_coding_retry')
   assert.equal(kimiPlan.shouldRetry, true)
+  assert.equal(kimiTimeoutPlan.kind, 'kimi_coding_retry')
+  assert.equal(kimiTimeoutPlan.shouldRetry, true)
 })
 
 test('execution fallback policy annotates result metadata only when fallback happened', () => {
