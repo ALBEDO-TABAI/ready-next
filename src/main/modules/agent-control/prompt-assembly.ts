@@ -440,15 +440,18 @@ export class PromptAssemblyService {
     const day = now.toISOString().slice(0, 10)
     const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
     const memoryRoot = this.getMemoryRoot()
-    const dayFiles = [`memory/${day}.md`, `memory/${yesterday}.md`]
+    const shouldIncludeSharedDailyLogs = scope.sourceKind === 'channel'
+    const dayFiles = shouldIncludeSharedDailyLogs ? [`memory/${day}.md`, `memory/${yesterday}.md`] : []
     dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
-    const dailySections = dayFiles
-      .map((path) => {
-        const content = this.readMemoryFile(path, memoryRoot).trim()
-        return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
-      })
-      .filter(Boolean)
-      .join('\n\n')
+    const dailySections = shouldIncludeSharedDailyLogs
+      ? dayFiles
+        .map((path) => {
+          const content = this.readMemoryFile(path, memoryRoot).trim()
+          return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
+        })
+        .filter(Boolean)
+        .join('\n\n')
+      : ''
 
     const sections: string[] = [
       formatMemorySection('当前 Scope', [`- 标题: ${scope.title}`, `- 来源: ${scope.sourceKind}`, `- 线程: ${scope.threadKey}`].join('\n')),

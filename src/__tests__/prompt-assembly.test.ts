@@ -21,6 +21,21 @@ function createScope(): ConversationScope {
   }
 }
 
+function createChannelScope(): ConversationScope {
+  return {
+    id: 'scope-channel-1',
+    agent: 'butler',
+    title: '飞书线程',
+    sourceKind: 'channel',
+    sourceId: 'feishu',
+    threadKey: 'thread-channel-1',
+    meta: {},
+    createdAt: '2026-03-08T10:00:00.000Z',
+    updatedAt: '2026-03-08T10:00:00.000Z',
+    lastMessageAt: '2026-03-08T10:00:00.000Z',
+  }
+}
+
 describe('PromptAssemblyService', () => {
   it('builds l0/l1 context and keeps generic runs free of l2 trigger payloads', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-assembly-'))
@@ -173,7 +188,7 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('ensures custom memory roots materialize daily memory files before emitting refs', async () => {
+  it('ensures custom memory roots materialize daily memory files for future use without injecting them into local scope refs', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-custom-root-'))
 
     const service = new PromptAssemblyService({
@@ -187,12 +202,60 @@ describe('PromptAssemblyService', () => {
       message: '帮我继续整理今天的设计思路',
     })
 
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-07.md'))
+    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-08.md'))
+    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-07.md'))
     assert.equal(existsSync(join(root, 'docs')), true)
     assert.equal(existsSync(join(root, 'memory')), true)
-    assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), true)
-    assert.equal(existsSync(join(root, 'memory', '2026-03-07.md')), true)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), false)
+    assert.equal(existsSync(join(root, 'memory', '2026-03-07.md')), false)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('does not inject same-day global logs into fresh local scopes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-local-isolation-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'memory', '2026-03-08.md'), '## daily\n- 上一轮对话在讨论广州天气', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '新开会话，帮我写标题',
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n')
+    assert.doesNotMatch(joinedBootstrap, /广州天气/)
+    assert.ok(result.memoryRefs.every((item) => item.path !== 'memory/2026-03-08.md'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('keeps same-day global logs available for channel scopes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-channel-memory-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'memory', '2026-03-08.md'), '## daily\n- 渠道线程的上下文摘要', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createChannelScope(),
+      message: '继续处理渠道消息',
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n')
+    assert.match(joinedBootstrap, /渠道线程的上下文摘要/)
+    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
 
     rmSync(root, { recursive: true, force: true })
   })
