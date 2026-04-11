@@ -65,6 +65,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
+  const composingRef = useRef(false)
 
   const resizeTextarea = useCallback(() => {
     if (!textareaRef.current) return
@@ -157,6 +158,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const nativeEvent = e.nativeEvent as KeyboardEvent
+    const nativeKeyCode = Number(nativeEvent.keyCode || 0)
+    const nativeWhich = Number(nativeEvent.which || 0)
+    const isImeConfirmKey = nativeKeyCode === 229 || nativeWhich === 229
+    if (composingRef.current || e.nativeEvent.isComposing || isImeConfirmKey) {
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (inputValue.trim() || attachmentsCount > 0) {
@@ -214,6 +222,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false
+            }}
             disabled={isStreaming}
             placeholder="Hi～今天有什么可以帮到你"
             className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none resize-none"

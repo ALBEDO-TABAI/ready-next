@@ -4,12 +4,17 @@ import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useDocTabs } from '../stores/useDocTabs'
 import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
+import { shouldIgnoreGlobalKeyboardShortcut } from '../modules/keyboard/shortcut-guard'
 
 type ShortcutLikeEvent = {
   key: string
   metaKey?: boolean
   ctrlKey?: boolean
   shiftKey?: boolean
+  altKey?: boolean
+  isComposing?: boolean
+  keyCode?: number
+  target?: EventTarget | null
   preventDefault?: () => void
 }
 
@@ -59,6 +64,15 @@ export function useKeyboardShortcuts() {
   }, [appMode, navigate, setAppMode, setReadySubMode, setWorkbenchMode])
 
   const handleShortcut = useCallback((e: ShortcutLikeEvent) => {
+    if (shouldIgnoreGlobalKeyboardShortcut({
+      target: e.target,
+      activeElement: typeof document !== 'undefined' ? document.activeElement : null,
+      isComposing: e.isComposing,
+      keyCode: e.keyCode,
+    })) {
+      return false
+    }
+
     const meta = Boolean(e.metaKey) || Boolean(e.ctrlKey)
     const shift = Boolean(e.shiftKey)
     const preventDefault = () => e.preventDefault?.()
@@ -151,7 +165,10 @@ export function useKeyboardShortcuts() {
     window.addEventListener('keydown', keydownHandler)
     const unsubscribeShortcut = window.electronAPI?.app?.onShortcut
       ? window.electronAPI.app.onShortcut((event) => {
-        void handleShortcut(event)
+        void handleShortcut({
+          ...event,
+          target: typeof document !== 'undefined' ? document.activeElement : null,
+        })
       })
       : undefined
 

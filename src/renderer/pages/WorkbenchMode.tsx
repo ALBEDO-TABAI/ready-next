@@ -265,10 +265,12 @@ export default function WorkbenchMode() {
       const handledAction = resolveWorkbenchPanelShortcutAction({
         key: event.key,
         code: event.code,
+        keyCode: event.keyCode,
         shiftKey: event.shiftKey,
         metaKey: event.metaKey,
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
+        isComposing: event.isComposing,
         target: event.target,
         selectionText: window.getSelection()?.toString() ?? '',
         renamingPath,

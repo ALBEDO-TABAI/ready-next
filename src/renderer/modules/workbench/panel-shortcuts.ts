@@ -10,10 +10,12 @@ interface ShortcutTargetLike {
 interface ResolveWorkbenchPanelShortcutActionOptions {
   key: string
   code?: string
+  keyCode?: number
   shiftKey?: boolean
   metaKey?: boolean
   ctrlKey?: boolean
   altKey?: boolean
+  isComposing?: boolean
   target?: EventTarget | null
   selectionText?: string | null
   renamingPath?: string | null
@@ -50,10 +52,12 @@ function isEditableTarget(target: EventTarget | null | undefined): boolean {
 export function resolveWorkbenchPanelShortcutAction({
   key,
   code,
+  keyCode,
   shiftKey,
   metaKey,
   ctrlKey,
   altKey,
+  isComposing,
   target,
   selectionText: rawSelectionText,
   renamingPath,
@@ -61,6 +65,7 @@ export function resolveWorkbenchPanelShortcutAction({
 }: ResolveWorkbenchPanelShortcutActionOptions): WorkbenchPanelShortcutAction | null {
   const selectionText = String(rawSelectionText || '')
   if (metaKey || ctrlKey || altKey) return null
+  if (isComposing || keyCode === 229) return null
   if (renamingPath || creatingType) return null
   if (selectionText.trim()) return null
   if (isEditableTarget(target)) return null

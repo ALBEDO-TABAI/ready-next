@@ -78,3 +78,20 @@ test('modifier keys and Shift+Tab do not trigger panel shortcuts', () => {
     target: { tagName: 'DIV' } as unknown as EventTarget,
   }), null)
 })
+
+test('shortcuts stay disabled during input method composition', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    isComposing: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: '`',
+    code: 'Backquote',
+    keyCode: 229,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+})
