@@ -92,6 +92,11 @@ const EXECUTION_TOOL_DEFS: SkillToolDef[] = [
   },
 ]
 
+export const STATIC_SKILL_TOOL_NAMES: string[] = [
+  ...Object.values(STATIC_TOOL_NAMES),
+  ...EXECUTION_TOOL_DEFS.map((tool) => tool.name),
+]
+
 function sanitizeToolToken(value: string): string {
   return value
     .trim()

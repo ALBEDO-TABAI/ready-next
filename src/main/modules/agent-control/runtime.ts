@@ -18,6 +18,7 @@ import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
 import { RunProjection } from './run-projection'
+import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
 import { MemoryLifecycleManager } from './memory-lifecycle'
@@ -41,6 +42,7 @@ import type {
   ScopeRunEventPayload,
   ScopeRunSummary,
 } from './types'
+import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 
 export interface UpsertChannelPayload {
   id?: string
@@ -69,6 +71,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
   private readonly userProfileRepository = new UserProfileRepository()
   private readonly agentPersonalityRepository = new AgentPersonalityRepository()
+  private readonly sessionRecallService = new SessionRecallService(this.db)
   private readonly reflectionService = new ReflectionService({
     memoryRepository: this.memoryRepository,
     userProfileRepository: this.userProfileRepository,
@@ -104,6 +107,15 @@ export class AgentControlRuntime extends EventEmitter {
     memoryRepository: this.memoryRepository,
     userProfileRepository: this.userProfileRepository,
     agentPersonalityRepository: this.agentPersonalityRepository,
+    getScopeSessionRecallCapsules: (scope) => this.sessionRecallService.listAttachedSessionRecallContexts(scope.id),
+    getAutoSessionRecallCapsules: ({ scope, userText }) => this.sessionRecallService.getAutomaticRecallCapsules({
+      query: userText,
+      currentScopeId: scope.id,
+      channelKey: this.toChannelKey(scope),
+      sourceKind: scope.sourceKind,
+      userId: scope.userId,
+      limit: 2,
+    }),
     enableDatabaseMemory: true,
   })
   private readonly agentManager: AgentManager
@@ -152,6 +164,7 @@ export class AgentControlRuntime extends EventEmitter {
       getPrevious: (scopeId) => this.scopeRunSummaries.get(scopeId),
       setSummary: (scopeId, summary) => {
         this.scopeRunSummaries.set(scopeId, summary)
+        this.db.updateConversationRecallTaskState(scopeId, summary.taskTitle, summary.taskSummary)
       },
       toChannelKey: (scope) => this.toChannelKey(scope),
     })
@@ -272,6 +285,15 @@ export class AgentControlRuntime extends EventEmitter {
     return rows.map((row) => this.mapChannelRow(row))
   }
 
+  isChannelTypeAvailable(type: AgentChannelType): boolean {
+    const hasEnabledChannel = this.listChannels().some((channel) => channel.type === type && channel.enabled)
+    if (!hasEnabledChannel) return false
+
+    const heartbeatAdapter = this.heartbeat.adapters.find((adapter) => adapter.type === type)
+    if (!heartbeatAdapter) return true
+    return heartbeatAdapter.healthy && heartbeatAdapter.status !== 'error' && heartbeatAdapter.status !== 'stopped'
+  }
+
   listConversationScopes(agent?: string): ConversationScope[] {
     return this.db.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
   }
@@ -289,6 +311,61 @@ export class AgentControlRuntime extends EventEmitter {
       .filter((item) => (statuses ? statuses.has(item.phase) : true))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, limit)
+  }
+
+  searchSessionRecall(payload?: {
+    query?: string
+    channelKey?: string
+    sourceKind?: ConversationSourceKind
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }): SessionRecallHit[] {
+    return this.sessionRecallService.searchSessionRecall(payload || {})
+  }
+
+  listRecentSessions(payload?: {
+    channelKey?: string
+    sourceKind?: ConversationSourceKind
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }): SessionRecallHit[] {
+    return this.sessionRecallService.listRecentSessions(payload || {})
+  }
+
+  getSessionRecallCapsule(conversationId: string): SessionRecallCapsule | null {
+    return this.sessionRecallService.getSessionRecallCapsule({ conversationId })
+  }
+
+  listAttachedSessionRecallContexts(scopeId: string): SessionRecallCapsule[] {
+    return this.sessionRecallService.listAttachedSessionRecallContexts(scopeId)
+  }
+
+  attachSessionRecallContext(currentScopeId: string, conversationId: string): { scope: ConversationScope; capsule: SessionRecallCapsule } {
+    const result = this.sessionRecallService.attachSessionRecallContext({ currentScopeId, conversationId })
+    const scope = this.mapConversationRow(result.scope)
+    this.emitConversationEvent({
+      type: 'scope_updated',
+      scope,
+    })
+    return { scope, capsule: result.capsule }
+  }
+
+  detachSessionRecallContext(currentScopeId: string, conversationId: string): { scope: ConversationScope } {
+    const result = this.sessionRecallService.detachSessionRecallContext({ currentScopeId, conversationId })
+    const scope = this.mapConversationRow(result.scope)
+    this.emitConversationEvent({
+      type: 'scope_updated',
+      scope,
+    })
+    return { scope }
+  }
+
+  resumeSessionCandidate(payload: { conversationId?: string; resumeTitle?: string }): SessionRecallHit | null {
+    return this.sessionRecallService.resumeSessionCandidate(payload)
   }
 
   getConversationScope(scopeId: string): ConversationScope | null {
@@ -972,6 +1049,9 @@ export class AgentControlRuntime extends EventEmitter {
       agent: row.agent,
       userId: row.user_id || undefined,
       title: row.title,
+      parentConversationId: row.parent_conversation_id ?? null,
+      lineageRootId: row.lineage_root_id || row.id,
+      resumeTitle: row.resume_title || row.title,
       sourceKind: row.source_kind,
       sourceId: row.source_id,
       threadKey: row.thread_key,

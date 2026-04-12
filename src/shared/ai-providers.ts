@@ -3,6 +3,9 @@
  * Shared between main process and renderer.
  */
 
+import type { CapabilityModeMap } from './ai-capability-groups'
+import { normalizeCapabilityModeMap } from './ai-capability-groups'
+
 // ---------------------------------------------------------------------------
 // Core Types
 // ---------------------------------------------------------------------------
@@ -63,6 +66,8 @@ export interface AIModelConfig {
   endpointId?: string
   /** 配置命名槽 - 在前台显示的名称 */
   displayName?: string
+  /** 业务能力分组开关 */
+  capabilityModes?: CapabilityModeMap
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +292,7 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
     provider: providerId,
     wireApi: config.wireApi || provider?.wireApi || config.wireApi,
     reasoningEffort: config.reasoningEffort || provider?.defaultReasoningEffort || config.reasoningEffort,
+    capabilityModes: normalizeCapabilityModeMap(config.capabilityModes),
   }
   return nextConfig as T
 }

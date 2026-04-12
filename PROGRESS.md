@@ -28,6 +28,11 @@
 - `useAgent` 不再独自承担整条执行链。
 - 运行态按 `runId + scopeId` 路由。
 - runtime routing、message composition、module execution、scope-run patching 已拆入独立模块。
+- AI 能力控制现已开始从“provider 兼容开关 + 主循环内零散特判”过渡到“正式能力分组 + 运行前解析”：
+  - 新增 capability group 真相层，固定收口 `browser_interaction / browser_content_tasks / document / rss / calendar / skills / memory / session_recall / channel_feishu / system_host / design_reserved`
+  - `ToolGateway` 已升级为正式分组注册表，不再只是元数据目录
+  - `buildExecutionToolState` 已开始消费 capability resolution，把浏览器分组暴露、飞书环境可用性和宿主内部能力边界显式化
+  - AI 设置页已补上第一版“能力分组”开关和状态说明，可直接看到哪些组处于自动、开启、关闭，以及哪些因为环境或协议能力暂时不可用
 
 5. Browser 主干已经完成第一轮架构收口。
 - main-process browser 逻辑已拆成 shell、lifecycle、preview、automation、data、diagnostics、download、session policy、layout 等 services。
@@ -147,6 +152,18 @@
   - planning / done 两头现在都会输出同一套 fallback 诊断字段：`happened / kind / attempts`
   - 当当前工具批次已经把预算打满时，主流程会在本轮末尾直接停住，不再继续请求下一轮模型响应
 
+12. 跨会话搜索 / 回看主链第一版已落地（2026-04-12）。
+- 会话原始真相继续使用 `chat_conversations / chat_messages`，没有新造第二份 transcript 存储。
+- 会话层已补上 `parentConversationId / lineageRootId / resumeTitle`，为后续 continuation / recall 归并立好骨架。
+- 新增 `chat_messages_fts / session_recall_metadata / session_recall_attachment_index` 三层索引，历史会话现在可按消息正文、标题、任务摘要、附件名检索。
+- 新增 `session_recall_vectors`，历史会话现在会为会话胶囊生成本地持久化向量，`session_search` 会在关键词命中之外追加向量相似度补召回。
+- 主进程新增 `searchSessionRecall / listRecentSessions / getSessionRecallCapsule / attachSessionRecallContext / detachSessionRecallContext / resumeSessionCandidate`。
+- 新增模型工具 `session_search`，无 query 返回最近会话，有 query 走历史会话搜索；默认排除当前 scope 所在 lineage，并把 `semantic` 命中并回结果。
+- `RunProjection` 写出的新任务摘要现在会同步持久化到 session recall metadata，不再只留在运行时内存 Map。
+- `PromptAssemblyService` 已补上独立的“跨会话回看”注入段，当前 scope 显式挂入的旧会话胶囊会在当前轮进入 prompt。
+- `PromptAssemblyService` 现已开始做保守自动跨会话召回：默认只在当前频道内挑 1 到 2 条高相关旧会话，自动注入到当前轮 prompt，但不写回会话引用列表。
+- ChatPanel 已补上聊天内轻量入口：可搜索旧会话、引用到当前轮、显示已引用胶囊并支持移除。
+
 ## 当前最高优先级
 1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
 
@@ -164,6 +181,10 @@
 - Browser unified header 还需要一轮实机动效与窄宽度体验微调，但结构性切换已完成。
 - skill workflow 仍缺少更细的 execution UX 打磨与更多样例 skill 迁移。
 - Agent 主控 ownership 虽已开始收口，但 `DirectChatEngine` 仍然偏大，browser/document/design 的域策略还没有完全退出主循环主体。
+- 跨会话回看第一版已能搜索和回灌，但仍缺：
+  - 老会话任务摘要的完整历史回填
+  - 独立搜索面板入口
+  - resume title 的正式用户入口与 continuation 策略
 - **`PromptAssemblyService + L0/L1/L2 memory` 还未启动**（下一阶段主线）。
 - **Feishu capability replacement 还未启动**（下一阶段主线）。
 
@@ -208,6 +229,9 @@
 - `npm run typecheck` 通过
 - `npm test` 未通过：仍被仓库内既有 `browser-tab-switch-executor` / `workbench-liquid-shell-contract` 等旧失败拦住，本轮主控拆层相关用例已通过
 - `npm run verify` 未通过：仍被仓库内既有 lint 问题拦住，本轮新增主控拆层未引入新的 typecheck 失败
+- `npx tsx@^4.19.2 --test src/__tests__/session-recall-service.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/chat-session-recall-contract.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/database.test.ts` 通过
+- `npm run typecheck` 通过
+- `npm test` 未通过：总计 `559` 项测试里 `538` 通过、`21` 失败；失败仍是仓库内既有 `browser-active-tab-visibility-contract` / `workbench-liquid-shell-contract` 等旧问题，本轮新增会话回看链路未引入新的全量失败
 - `npx tsx@^4.19.2 --test src/__tests__/browser-unified-header-contract.test.ts src/__tests__/browser-utility-menu-model.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/ui-browser-hook-split-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/workbench-shell-alignment-contract.test.ts src/__tests__/topbar-gooey-segmented-control.test.ts src/__tests__/workbench-icon-alignment-contract.test.ts` 通过

@@ -6,6 +6,7 @@ import type {
   ScopeRunTaskStep,
 } from './types'
 import type { PromptAssemblyResult } from './prompt-assembly'
+import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 
 export interface RunMessageBlock {
   type: string
@@ -84,6 +85,10 @@ export interface ToolVisibilityPlan {
   keepToolsWithVideo: boolean
   allowBrowserTools: boolean
   preferredSkillToolNames?: string[] | null
+  visibleCapabilityGroupIds?: CapabilityGroupId[]
+  hostOnlyCapabilityIds?: CapabilityGroupId[]
+  suppressedCapabilityGroupIds?: CapabilityGroupId[]
+  capabilityReasons?: Partial<Record<CapabilityGroupId, string>>
 }
 
 export interface ToolDispatchDecision {

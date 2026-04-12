@@ -9,6 +9,7 @@ import {
   AI_PROVIDERS,
   normalizeAIConfig,
 } from '../../shared/ai-providers'
+import type { CapabilityGroupId, CapabilityMode } from '../../shared/ai-capability-groups'
 
 const SETTINGS_SAVE_DEBOUNCE_MS = 300
 
@@ -41,6 +42,7 @@ interface AISettingsState {
   loadConfig: () => Promise<void>
   saveConfig: (config: AIModelConfig) => Promise<void>
   updateField: <K extends keyof AIModelConfig>(key: K, value: AIModelConfig[K]) => void
+  updateCapabilityMode: (groupId: CapabilityGroupId, mode: CapabilityMode) => void
   switchProvider: (provider: AIProviderType) => void
   testConnection: () => Promise<void>
 
@@ -134,6 +136,30 @@ export const useSettings = create<AISettingsState>((set, get) => ({
     }, SETTINGS_SAVE_DEBOUNCE_MS)
   },
 
+  updateCapabilityMode: (groupId, mode) => {
+    const prev = get().config
+    const nextCapabilityModes = {
+      ...(prev.capabilityModes || {}),
+      [groupId]: mode,
+    }
+    const newConfig = {
+      ...prev,
+      capabilityModes: nextCapabilityModes,
+    }
+    const savedConfigs = { ...get().savedConfigs, [prev.provider]: newConfig }
+    set({ config: newConfig, savedConfigs, testStatus: 'idle', testMessage: '' })
+    pendingConfigSave = normalizeAIConfig(newConfig)
+    if (pendingSaveTimer) {
+      clearTimeout(pendingSaveTimer)
+    }
+    pendingSaveTimer = setTimeout(() => {
+      const configToPersist = pendingConfigSave
+      clearPendingConfigSave()
+      if (!configToPersist) return
+      void get().saveConfig(configToPersist)
+    }, SETTINGS_SAVE_DEBOUNCE_MS)
+  },
+
   switchProvider: (provider: AIProviderType) => {
     const providerDef = getProviderDef(provider)
     if (!providerDef) return
@@ -160,6 +186,7 @@ export const useSettings = create<AISettingsState>((set, get) => ({
       toolUseMode: 'auto',
       visionMode: 'auto',
       nativeVideoMode: 'auto',
+      capabilityModes: {},
     }
 
     set({ config: newConfig, savedConfigs, testStatus: 'idle', testMessage: '', remoteModels: [] })

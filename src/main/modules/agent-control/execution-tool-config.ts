@@ -1,9 +1,6 @@
 import {
-  getAnthropicTools,
-  getDocumentAnthropicTools,
-  getDocumentOpenAITools,
-  getOpenAITools,
-} from '../tools'
+  defaultToolGateway,
+} from './tool-gateway'
 import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
 import { buildTextToolBridgePrompt } from '../claude-bridge/tool-bridge'
 import { type DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'
@@ -13,6 +10,7 @@ import {
   buildDocumentWidgetOpenUIRulesSnippet,
   type DocumentWidgetProfile,
 } from '../claude-bridge/widget-guidance'
+import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
@@ -28,6 +26,9 @@ export interface ToolPolicy {
   documentWidgetSourceText?: string | null
   allowBrowserTools: boolean
   preferredSkillToolNames?: string[] | null
+  visibleCapabilityGroupIds?: CapabilityGroupId[]
+  hostOnlyCapabilityGroupIds?: CapabilityGroupId[]
+  capabilityReasons?: Partial<Record<CapabilityGroupId, string>>
 }
 
 const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
@@ -197,7 +198,15 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 }
 
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-  let tools = policy?.forceDocumentTool ? getDocumentAnthropicTools() : getAnthropicTools()
+  const visibleGroupIds = policy?.visibleCapabilityGroupIds
+    && policy.visibleCapabilityGroupIds.length > 0
+    ? policy.visibleCapabilityGroupIds
+    : defaultToolGateway
+      .listCapabilityGroups()
+      .filter((group) => group.exposure === 'model_visible' && group.availability === 'active')
+      .map((group) => group.id)
+
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds)
   if (policy?.forceDocumentTool) {
     const allowedNames = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -240,7 +249,15 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
 }
 
 export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-  let tools = policy?.forceDocumentTool ? getDocumentOpenAITools() : getOpenAITools()
+  const visibleGroupIds = policy?.visibleCapabilityGroupIds
+    && policy.visibleCapabilityGroupIds.length > 0
+    ? policy.visibleCapabilityGroupIds
+    : defaultToolGateway
+      .listCapabilityGroups()
+      .filter((group) => group.exposure === 'model_visible' && group.availability === 'active')
+      .map((group) => group.id)
+
+  let tools = defaultToolGateway.getOpenAIToolsForGroups(visibleGroupIds)
   if (policy?.forceDocumentTool) {
     const allowedNames = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES

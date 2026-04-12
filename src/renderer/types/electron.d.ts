@@ -115,6 +115,9 @@ interface ConversationScopeData {
   id: string
   agent: string
   title: string
+  parentConversationId?: string | null
+  lineageRootId?: string | null
+  resumeTitle?: string | null
   sourceKind: ConversationSourceKind
   sourceId: string
   threadKey: string
@@ -176,7 +179,7 @@ interface ScopeRunTraceItemData {
 
 interface ScopeRunMemoryRefData {
   id: string
-  layer: 'l0' | 'l1' | 'l2'
+  layer: 'l0' | 'l1' | 'l2' | 'recall'
   title: string
   summary?: string | null
   path?: string | null
@@ -279,6 +282,40 @@ interface ScopeRunSummaryData {
   updatedAt: string
 }
 
+type SessionRecallMatchKindData = 'message' | 'title' | 'task' | 'attachment' | 'recent' | 'semantic'
+
+interface SessionRecallHitData {
+  conversationId: string
+  lineageRootId: string
+  resumeTitle: string
+  title: string
+  sourceKind: ConversationSourceKind
+  sourceId: string
+  threadKey: string
+  matchedBy: SessionRecallMatchKindData[]
+  score: number
+  hitExcerpt?: string | null
+  latestTaskTitle?: string | null
+  latestTaskSummary?: string | null
+  attachmentNames: string[]
+  updatedAt: string
+}
+
+interface SessionRecallCapsuleData {
+  conversationId: string
+  lineageRootId: string
+  resumeTitle: string
+  title: string
+  sourceKind: ConversationSourceKind
+  sourceId: string
+  threadKey: string
+  summary: string
+  latestTaskTitle?: string | null
+  latestTaskSummary?: string | null
+  attachmentNames: string[]
+  updatedAt: string
+}
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -348,6 +385,33 @@ interface ElectronAgentAPI {
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
+  searchSessionRecall: (payload?: {
+    query?: string
+    channelKey?: string
+    sourceKind?: ConversationSourceKind
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }) => Promise<IPCResponse<SessionRecallHitData[]>>
+  listRecentSessions: (payload?: {
+    channelKey?: string
+    sourceKind?: ConversationSourceKind
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }) => Promise<IPCResponse<SessionRecallHitData[]>>
+  getSessionRecallCapsule: (conversationId: string) => Promise<IPCResponse<SessionRecallCapsuleData>>
+  listAttachedSessionRecallContexts: (scopeId: string) => Promise<IPCResponse<SessionRecallCapsuleData[]>>
+  attachSessionRecallContext: (currentScopeId: string, conversationId: string) => Promise<IPCResponse<{
+    scope: ConversationScopeData
+    capsule: SessionRecallCapsuleData
+  }>>
+  detachSessionRecallContext: (currentScopeId: string, conversationId: string) => Promise<IPCResponse<{
+    scope: ConversationScopeData
+  }>>
+  resumeSessionCandidate: (payload: { conversationId?: string; resumeTitle?: string }) => Promise<IPCResponse<SessionRecallHitData | null>>
   getConversationScopeMessages: (scopeId: string) => Promise<IPCResponse<ConversationScopeMessageData[]>>
   createLocalScope: (agent: string) => Promise<IPCResponse<ConversationScopeData>>
   listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>
@@ -1281,6 +1345,7 @@ interface AIModelConfigData {
   toolUseMode?: 'auto' | 'on' | 'off'
   visionMode?: 'auto' | 'on' | 'off'
   nativeVideoMode?: 'auto' | 'on' | 'off'
+  capabilityModes?: Record<string, 'auto' | 'on' | 'off'>
   endpointId?: string
 }
 

@@ -7,6 +7,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
 import { resolveAIConfigCapabilities } from '../../shared/ai-providers'
+import { getCapabilityGroup, listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, AI_PROVIDERS, getProviderDef } from '../stores/useSettings'
 import type { AIProviderType } from '../stores/useSettings'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
@@ -292,7 +293,7 @@ function AISettingsInfoChip({
 function AISettingsPanel() {
   const {
     config, loaded, testStatus, testMessage, testLatency,
-    loadConfig, updateField, switchProvider, testConnection,
+    loadConfig, updateField, updateCapabilityMode, switchProvider, testConnection,
     savedConfigs,
   } = useSettings()
 
@@ -310,6 +311,7 @@ function AISettingsPanel() {
     channelCount?: number
     scheduleCount?: number
     activeTasks?: number
+    feishuConnected?: boolean
   } | null>(null)
 
   const persistBridgeSetting = useCallback((key: string, value: string) => {
@@ -327,6 +329,9 @@ function AISettingsPanel() {
       channelCount: result.data.channels.total,
       scheduleCount: result.data.schedules.total,
       activeTasks: result.data.heartbeat.orchestrator.activeTasks,
+      feishuConnected: Array.isArray(result.data.heartbeat.adapters)
+        ? result.data.heartbeat.adapters.some((adapter) => adapter.type === 'feishu-app' && adapter.healthy)
+        : false,
     })
   }, [])
 
@@ -395,6 +400,34 @@ function AISettingsPanel() {
     : capabilities?.toolCallTransport === 'native'
       ? '原生'
       : '关闭'
+  const capabilityGroups = listSettingsCapabilityGroups()
+
+  const getCapabilityModeValue = useCallback((groupId: CapabilityGroupId): 'auto' | 'on' | 'off' => {
+    const current = config.capabilityModes?.[groupId]
+    return current === 'on' || current === 'off' || current === 'auto' ? current : 'auto'
+  }, [config.capabilityModes])
+
+  const getCapabilityStatus = useCallback((groupId: CapabilityGroupId) => {
+    const mode = getCapabilityModeValue(groupId)
+    const group = getCapabilityGroup(groupId)
+
+    if (group?.availability === 'inactive') {
+      return { label: '保留占位', tone: 'muted' as const }
+    }
+    if (group?.exposure === 'model_visible' && capabilities && !capabilities.supportsToolCalls) {
+      return { label: '因接口能力关闭', tone: 'muted' as const }
+    }
+    if (mode === 'off') {
+      return { label: '已关闭', tone: 'muted' as const }
+    }
+    if (groupId === 'channel_feishu' && !runtimeSummary?.feishuConnected) {
+      return { label: '因环境不可用而关闭', tone: 'muted' as const }
+    }
+    return {
+      label: mode === 'on' ? '已启用' : '自动启用',
+      tone: 'positive' as const,
+    }
+  }, [capabilities, getCapabilityModeValue, runtimeSummary?.feishuConnected])
 
   return (
     <div className="flex flex-col gap-6">
@@ -464,6 +497,67 @@ function AISettingsPanel() {
           <AISettingsCapabilityChip label="工具传输" value={toolTransportLabel} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
           <AISettingsCapabilityChip label="工具调用" value={capabilities?.supportsToolCalls ? '开启' : '关闭'} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
           <AISettingsCapabilityChip label="网页视觉" value={capabilities?.supportsVision ? '开启' : '关闭'} tone={capabilities?.supportsVision ? 'positive' : 'muted'} />
+        </div>
+      </div>
+
+      <div
+        className="glass-surface-card rounded-2xl border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          padding: '14px 16px',
+        }}
+      >
+        <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+          能力分组
+        </div>
+        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+          控制哪些业务能力默认暴露给模型；当前状态会显示是已启用，还是因环境不可用而关闭。
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {capabilityGroups.map((group) => {
+            const status = getCapabilityStatus(group.id)
+            return (
+              <div
+                key={group.id}
+                className="glass-surface-card rounded-xl border"
+                style={{
+                  ...SETTINGS_SUBTLE_CARD_STYLE,
+                  padding: '12px 14px',
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{group.label}</div>
+                    <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>{group.description}</div>
+                  </div>
+                  <select
+                    value={getCapabilityModeValue(group.id)}
+                    onChange={(e) => updateCapabilityMode(group.id, e.target.value as 'auto' | 'on' | 'off')}
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                    style={{
+                      ...compactSelectStyle,
+                      width: 112,
+                    }}
+                  >
+                    <option value="auto">自动</option>
+                    <option value="on">开启</option>
+                    <option value="off">关闭</option>
+                  </select>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>当前状态</span>
+                  <span
+                    className="text-[11px] font-semibold"
+                    style={{
+                      color: status.tone === 'positive' ? 'var(--color-green)' : 'var(--text-muted)',
+                    }}
+                  >
+                    {status.label}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
 

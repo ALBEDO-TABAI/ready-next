@@ -30,6 +30,24 @@
 - ChatPanel 新增 `当前任务 / 后台任务` 两块任务视图，tool trace 胶囊退居技术细节抽屉
 - workflow skill blocker 现在会映射成聊天里的等待态，并提供继续、确认、撤销、补充等入口
 
+#### 跨会话搜索 / 回看主链
+- 会话原始真相继续保留在 `chat_conversations / chat_messages`，同时补上 `parentConversationId / lineageRootId / resumeTitle`，为后续 continuation / recall 归并立好骨架
+- 新增 `chat_messages_fts`、`session_recall_metadata`、`session_recall_attachment_index` 三层索引，历史会话现在可按消息正文、标题、任务摘要、附件名检索
+- 新增 `session_recall_vectors`，旧会话回看现在会为会话胶囊生成本地持久化向量，并在关键词检索之外追加余弦相似度补召回
+- 主进程新增：
+  - `searchSessionRecall`
+  - `listRecentSessions`
+  - `getSessionRecallCapsule`
+  - `listAttachedSessionRecallContexts`
+  - `attachSessionRecallContext`
+  - `detachSessionRecallContext`
+  - `resumeSessionCandidate`
+- 新增模型工具 `session_search`：无 query 返回最近会话，有 query 走历史会话搜索；默认排除当前 scope 所在 lineage，并把 `semantic` 命中并回结果
+- `RunProjection` 产出的新任务摘要现在会同步持久化到 session recall metadata，不再只留在运行时内存里
+- `PromptAssemblyService` 已补上独立的“跨会话回看”注入段，当前轮显式挂入的旧会话胶囊会进入 prompt
+- `PromptAssemblyService` 现已开始做保守自动跨会话召回：只在当前频道内挑 1 到 2 条高相关旧会话自动注入，不写回会话引用列表
+- ChatPanel 已补上聊天内轻量入口：可搜索旧会话、引用到当前轮、展示已引用胶囊并支持移除
+
 #### Agent Core Loop Ownership 收口
 - 新增 `run-coordinator`，`runtime.sendScoped` 与 channel inbound 的单轮执行开始统一交给中间层处理
 - 新增 `run-projection`，`ScopeRunSummary` 聚合与浏览器/skill 任务摘要推断开始从 `runtime.ts` 中拆出
@@ -60,6 +78,13 @@
 - 主进程结构化任务白名单现已接受 `skill`，skill 正式任务状态可以和 browser/document/design 一样走统一前台链路
 - 阶段 5 已开始落地：新增 `run-budget-policy`，`RunCoordinator` 现在会为单轮执行补上统一预算 seed，并把预算状态带进 execution host
 - 浏览器 / 文档 / 设计三条子域现已开始返回 budget hint，只负责建议 headroom，不再各自偷持预算
+
+#### AI 能力分组与运行时开关
+- AI 配置新增正式 capability group 概念，开始把“provider 兼容能力”和“业务能力分组”拆开处理
+- 新增固定能力组：`browser_interaction / browser_content_tasks / document / rss / calendar / skills / memory / session_recall / channel_feishu / system_host / design_reserved`
+- `ToolGateway` 已从工具目录升级为分组注册表，可按能力组产出模型可见工具集合
+- `buildExecutionToolState` 已接入 capability resolution：浏览器交互与内容任务开始分组判断，飞书组会受渠道环境可用性约束，`system_host` 作为宿主内部能力保留在模型工具面之外
+- AI 设置页补上第一版“能力分组”开关和状态显示
 - 新增 `context-compression`，prompt 侧已经能对超长历史做压缩并回传 compression report；前台任务状态链保持不受影响
 - 新增 `execution-fallback-policy`，OpenAI / Kimi / 视频提帧回退开始共用同一套 fallback contract，不再各自散着写判定
 - 新增 `tool-parallelism-policy`，安全的只读工具现在可以按批并行执行，结果仍按原顺序回收

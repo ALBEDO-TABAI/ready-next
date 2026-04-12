@@ -180,6 +180,7 @@ show-widget 规则：
 不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用真实 skill_* 工具或 execution 管理工具。
 如果用户只提到站点名（例如“即梦”）但没有给 URL，且当前页也不能明确复用，先搜索该站点的官方入口并确认，再继续；若搜索结果仍不唯一，先向用户澄清，不要在无关页面反复进出。
 当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似”openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
+当用户提到“上次那轮对话 / 之前讨论过 / 历史会话 / 旧会话里怎么说的 / 找找以前那次”时，优先使用 session_search 检索历史会话，再基于返回的会话摘要继续回答或引用，不要把 memory_search 当成历史聊天检索。
 
 如果系统当前未启用工具，请不要伪造工具调用，直接给出文本回答。
 `
@@ -695,6 +696,8 @@ export class DirectChatEngine extends EventEmitter {
         ? this.skillContextOrchestrator.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null
       let { visibilityPlan: resolvedToolVisibilityPlan, toolPolicy } = buildExecutionToolState({
+        config,
+        capabilityProfile: 'local_chat',
         supportsToolCalls: capabilities?.supportsToolCalls ?? true,
         hasVideoInputs,
         hasIncomingVideo: hasRawVideoInIncoming,
@@ -708,12 +711,14 @@ export class DirectChatEngine extends EventEmitter {
         documentWidgetTaskKind: executionIntentContext.documentWidgetTaskKind,
         documentWidgetProfile: executionIntentContext.documentWidgetProfile,
         browserDecisionMode: browserDecision.mode,
+        browserHostAvailable: Boolean(this.browserController),
+        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
       })
       if (toolPolicy.forceDocumentTool) {
         session.lastDocumentContextInput = contextualUserInput
       }
 
-      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${resolvedToolVisibilityPlan.hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, documentWidgetTaskKind=${toolPolicy.documentWidgetTaskKind || 'none'}, allowBrowserTools=${toolPolicy.allowBrowserTools}, preferredSkillTools=${toolPolicy.preferredSkillToolNames?.join('|') || 'all'}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, keepToolsWithVideo=${resolvedToolVisibilityPlan.keepToolsWithVideo}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${resolvedToolVisibilityPlan.hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, documentWidgetTaskKind=${toolPolicy.documentWidgetTaskKind || 'none'}, allowBrowserTools=${toolPolicy.allowBrowserTools}, preferredSkillTools=${toolPolicy.preferredSkillToolNames?.join('|') || 'all'}, visibleCapabilityGroups=${resolvedToolVisibilityPlan.visibleCapabilityGroupIds?.join('|') || 'none'}, suppressedCapabilityGroups=${resolvedToolVisibilityPlan.suppressedCapabilityGroupIds?.join('|') || 'none'}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, keepToolsWithVideo=${resolvedToolVisibilityPlan.keepToolsWithVideo}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
 
       if (hasTools) {
         await this.skillContextOrchestrator.maybeInjectExplicitSkillContext({
@@ -783,6 +788,8 @@ export class DirectChatEngine extends EventEmitter {
       })
       browserDecision = preparedBrowserExecution.browserDecision
       ;({ visibilityPlan: resolvedToolVisibilityPlan, toolPolicy } = buildExecutionToolState({
+        config,
+        capabilityProfile: 'local_chat',
         supportsToolCalls: capabilities?.supportsToolCalls ?? true,
         hasVideoInputs,
         hasIncomingVideo: hasRawVideoInIncoming,
@@ -796,6 +803,8 @@ export class DirectChatEngine extends EventEmitter {
         documentWidgetTaskKind: executionIntentContext.documentWidgetTaskKind,
         documentWidgetProfile: executionIntentContext.documentWidgetProfile,
         browserDecisionMode: browserDecision.mode,
+        browserHostAvailable: Boolean(this.browserController),
+        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
       }))
       log(
         `browserDecision mode=${browserDecision.mode} reason=${browserDecision.reason} ` +

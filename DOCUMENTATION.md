@@ -108,6 +108,7 @@ Ready 采用 Electron 三层架构：
   - ffmpeg 查找
   - video block -> image frame fallback
 - `ClaudeSdkOrchestrator` 继续作为 direct-chat 的 transport/bridge 包装层
+- agent 工具暴露开始从“全量工具拼接后再局部裁剪”过渡到“先按 capability group resolve，再下发工具面”
 - `DirectChatEngine` 继续作为第一阶段 execution host，但开始把 tool visibility / dispatch 之类通用策略抽出主文件
 
 ### 3.5 Shared / Renderer Utilities
@@ -172,6 +173,7 @@ Ready 采用 Electron 三层架构：
 ### 5.3 工具分类
 - Browser tools：网页导航、搜索、读页、点击、输入、上传、批量下载等
 - Document tools：打开、切换、写入、替换、格式化、改写、保存
+- Session recall tools：历史会话搜索、最近会话列举、旧会话胶囊引用
 - Skill tools：把 embedded/custom skills 暴露为统一 `skill_*` 工具
 - System tools：系统命令与应用级操作
 
@@ -231,6 +233,7 @@ Ready 采用 Electron 三层架构：
 - 第一轮只放开只读、无副作用、无顺序依赖的工具，例如：
   - `document_list_widgets`
   - `memory_search / memory_list_recent`
+  - `session_search`
   - `rss_capture_session`
   - `skill_get_state / skill_rss_status / skill_rss_list / skill_rss_stats`
 - `ExecutionLoopOrchestrator.executeToolCalls()` 已开始按批并行执行这些工具，并保持结果回收顺序稳定。
@@ -278,6 +281,7 @@ Ready 采用 Electron 三层架构：
 
 ### 6.5 浏览器运行时统一层
 - 浏览器主链现在开始收口为统一运行时合同，而不再只靠 `direct-chat`、`browser-agent-runner`、`browser-tools` 各自维护页面理解。
+- 浏览器能力现在已被正式拆成 `browser_interaction` 与 `browser_content_tasks` 两组：前者偏页面即时交互，后者偏提取、下载、研究与后台任务。
 - 当前新增的统一层包括：
   - `agent-runtime-adapter`
   - `page-state-service`
@@ -309,6 +313,28 @@ Ready 采用 Electron 三层架构：
 - 主进程会为最近 scope run 维护任务摘要，供聊天面板刷新后恢复最近任务。
 - 统一任务字段包括：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
 - Browser Agent V7 阶段会直接投影成步骤；workflow skill blocker 会映射成 `input / confirmation / agent_result` 等等待态。
+
+### 7.1c 会话回看主链
+- 当前已补上独立的 session recall 主链，和 memory 系统分开。
+- 历史会话仍以 `chat_conversations / chat_messages` 为原始真相，不额外复制 transcript。
+- 会话层现已补上 `parentConversationId / lineageRootId / resumeTitle` 三个谱系字段，用于后续 continuation / recall 归并。
+- SQLite 现在会维护：
+  - `chat_messages_fts`：历史消息全文索引
+  - `session_recall_metadata`：会话标题、恢复标题、最近任务摘要、附件名、preview
+  - `session_recall_attachment_index`：可检索的附件索引
+- 历史会话现在还会维护 `session_recall_vectors`：为会话胶囊生成本地持久化向量，供余弦相似度检索使用。
+- `session_search` 是当前历史会话回看的正式工具：
+  - 无 query：返回最近会话
+  - 有 query：按消息正文、会话标题、任务摘要、附件名搜索，并追加本地向量相似度补召回
+  - 默认排除当前 scope 所在 lineage，避免把当前会话自己搜回来
+- 搜索结果会按 `lineageRootId` 归并，返回的是会话级 hit / capsule，而不是原始 transcript；`matchedBy` 当前可能包含 `message / title / task / attachment / semantic / recent`。
+- 当前 scope 现在可以显式挂入旧会话 capsule；Prompt Assembly 会把这些 capsule 作为独立的“跨会话回看”段注入到当前轮。
+- Prompt Assembly 现在还会做一层保守的**自动跨会话召回**：
+  - 只在当前频道范围内检索
+  - 默认只挑 1 到 2 条高相关旧会话
+  - 当前主要依赖 `session_search` 结果中的高分 hit，再过滤为自动 recall capsule
+  - 自动召回结果不会写回会话引用列表，也不会替代手动引用
+- 聊天面板当前已补上轻量入口：可搜索旧会话、引用到当前轮、查看已引用 capsule，并支持移除。
 
 ### 7.2 附件安全边界
 - 图片/文件消息先进入会话资源层
@@ -360,6 +386,7 @@ Ready 采用 Electron 三层架构：
 
 ### 8.5 Claude / OpenAI 兼容修复
 - `direct-chat` 现在会在视频输入场景下，为显式 `/skill`、手动阶段控制、embedded python 请求、活跃 execution 保留 tools
+- `direct-chat` 现已开始消费 capability resolution：provider tool 开关、浏览器任务模式、文档意图与飞书可用性会先收口成可见能力组，再生成本轮 allowlist。
 - OpenAI `chat/completions` / `responses` 发请求前都会修复缺失的 tool response history，避免 `tool_call_id` 400
 - `need_agent_result` blocker 会自动注入文本类 source materials 正文，而不是只告诉模型文件路径
 
