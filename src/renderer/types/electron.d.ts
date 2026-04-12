@@ -1,5 +1,6 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
+import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type {
   RSSBenchmarkResultData,
   RSSDiagnosticsData,
@@ -109,6 +110,8 @@ interface AgentRuntimeStatusData {
   heartbeat: AgentHeartbeatSnapshot
 }
 
+type CapabilityRuntimeSnapshotData = CapabilityRuntimeSnapshot
+
 type ConversationSourceKind = 'local' | 'channel'
 
 interface ConversationScopeData {
@@ -180,6 +183,7 @@ interface ScopeRunTraceItemData {
 interface ScopeRunMemoryRefData {
   id: string
   layer: 'l0' | 'l1' | 'l2' | 'recall'
+  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule' | 'session_recall'
   title: string
   summary?: string | null
   path?: string | null
@@ -226,6 +230,7 @@ interface ScopeRunTaskContinuationData {
 interface ScopeRunMemoryCaptureItemData {
   memoryId: string
   category: 'user_preference' | 'summary'
+  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule'
   title: string
   summary?: string | null
 }
@@ -382,6 +387,7 @@ interface ElectronAgentAPI {
   kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
   getDiagnostics: () => Promise<{ success: boolean; data: unknown }>
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
+  getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
@@ -1481,12 +1487,15 @@ interface ElectronAgentPersonalityAPI {
 // =============================================================================
 
 type MemoryLayer = 'l0' | 'l1' | 'l2'
-type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule'
+type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule' | 'user_preference' | 'global_fact' | 'personality_trait'
+type MemorySourceType = 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule'
 
 interface MemoryEntry {
   id: string
   layer: MemoryLayer
   scopeId: string | null
+  userId?: string | null
+  sourceType: MemorySourceType
   category: MemoryCategory
   title: string
   summary: string | null
@@ -1521,6 +1530,8 @@ interface TriggerDefinition {
 interface MemoryQueryFilters {
   layer?: MemoryLayer
   scopeId?: string | null
+  userId?: string
+  sourceType?: MemorySourceType
   category?: MemoryCategory
   includeArchived?: boolean
   limit?: number
@@ -1537,6 +1548,7 @@ interface MemoryStats {
   totalMemories: number
   byLayer: Record<MemoryLayer, number>
   byCategory: Record<MemoryCategory, number>
+  bySourceType: Record<MemorySourceType, number>
   archivedCount: number
   avgAccessCount: number
 }

@@ -17,6 +17,7 @@ const agentAPI = {
   kill: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:kill', { agent, sessionId }),
   getDiagnostics: () => ipcRenderer.invoke('agent:getDiagnostics'),
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
+  getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>

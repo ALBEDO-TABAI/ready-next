@@ -7,7 +7,8 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
 import { resolveAIConfigCapabilities } from '../../shared/ai-providers'
-import { getCapabilityGroup, listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
+import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
+import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, AI_PROVIDERS, getProviderDef } from '../stores/useSettings'
 import type { AIProviderType } from '../stores/useSettings'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
@@ -313,6 +314,7 @@ function AISettingsPanel() {
     activeTasks?: number
     feishuConnected?: boolean
   } | null>(null)
+  const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
 
   const persistBridgeSetting = useCallback((key: string, value: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.settings) return
@@ -334,6 +336,13 @@ function AISettingsPanel() {
         : false,
     })
   }, [])
+
+  const refreshCapabilityRuntimeSnapshot = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.electronAPI?.agent) return
+    const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(config)
+    if (!result.success || !result.data) return
+    setCapabilityRuntimeSnapshot(result.data)
+  }, [config])
 
   useEffect(() => {
     if (!loaded) loadConfig()
@@ -363,10 +372,15 @@ function AISettingsPanel() {
       if (coalesceEnabledRes.success && coalesceEnabledRes.data) setMessageCoalesceEnabled(coalesceEnabledRes.data !== 'false')
       if (coalesceWindowRes.success && coalesceWindowRes.data) setMessageCoalesceWindowMs(coalesceWindowRes.data)
       await refreshRuntimeSummary()
+      await refreshCapabilityRuntimeSnapshot()
     })()
 
     return () => { cancelled = true }
-  }, [refreshRuntimeSummary])
+  }, [refreshCapabilityRuntimeSnapshot, refreshRuntimeSummary])
+
+  useEffect(() => {
+    void refreshCapabilityRuntimeSnapshot()
+  }, [refreshCapabilityRuntimeSnapshot])
 
   const currentProvider = getProviderDef(config.provider)
   const capabilities = resolveAIConfigCapabilities(config)
@@ -407,27 +421,37 @@ function AISettingsPanel() {
     return current === 'on' || current === 'off' || current === 'auto' ? current : 'auto'
   }, [config.capabilityModes])
 
-  const getCapabilityStatus = useCallback((groupId: CapabilityGroupId) => {
-    const mode = getCapabilityModeValue(groupId)
-    const group = getCapabilityGroup(groupId)
-
-    if (group?.availability === 'inactive') {
+  const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
+    const snapshot = capabilityRuntimeSnapshot?.groups[groupId]
+    if (!snapshot) {
+      return { label: '读取中', tone: 'muted' as const }
+    }
+    if (snapshot.status === 'inactive') {
       return { label: '保留占位', tone: 'muted' as const }
     }
-    if (group?.exposure === 'model_visible' && capabilities && !capabilities.supportsToolCalls) {
-      return { label: '因接口能力关闭', tone: 'muted' as const }
+    if (snapshot.status === 'host_only') {
+      return { label: '宿主内部', tone: 'muted' as const }
     }
-    if (mode === 'off') {
-      return { label: '已关闭', tone: 'muted' as const }
-    }
-    if (groupId === 'channel_feishu' && !runtimeSummary?.feishuConnected) {
+    if (snapshot.status === 'environment_unavailable') {
       return { label: '因环境不可用而关闭', tone: 'muted' as const }
     }
+    if (snapshot.status === 'run_intent_suppressed') {
+      return { label: '因本轮任务抑制', tone: 'muted' as const }
+    }
+    if (snapshot.status === 'closed') {
+      if (snapshot.reason === 'provider_disabled_tools') {
+        return { label: '因接口能力关闭', tone: 'muted' as const }
+      }
+      if (snapshot.reason === 'disabled_by_config') {
+        return { label: '已关闭', tone: 'muted' as const }
+      }
+      return { label: '当前场景未启用', tone: 'muted' as const }
+    }
     return {
-      label: mode === 'on' ? '已启用' : '自动启用',
+      label: snapshot.mode === 'on' ? '已启用' : '自动启用',
       tone: 'positive' as const,
     }
-  }, [capabilities, getCapabilityModeValue, runtimeSummary?.feishuConnected])
+  }, [capabilityRuntimeSnapshot])
 
   return (
     <div className="flex flex-col gap-6">
@@ -515,7 +539,7 @@ function AISettingsPanel() {
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           {capabilityGroups.map((group) => {
-            const status = getCapabilityStatus(group.id)
+            const runtimeDisplay = resolveCapabilityRuntimeDisplay(group.id)
             return (
               <div
                 key={group.id}
@@ -549,10 +573,10 @@ function AISettingsPanel() {
                   <span
                     className="text-[11px] font-semibold"
                     style={{
-                      color: status.tone === 'positive' ? 'var(--color-green)' : 'var(--text-muted)',
+                      color: runtimeDisplay.tone === 'positive' ? 'var(--color-green)' : 'var(--text-muted)',
                     }}
                   >
-                    {status.label}
+                    {runtimeDisplay.label}
                   </span>
                 </div>
               </div>

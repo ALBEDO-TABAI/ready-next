@@ -320,6 +320,10 @@ export function buildTextToolBridgeSystemPrompt(policy?: ToolPolicy): string {
   })
 }
 
+export function collectAllowedToolNames(policy?: ToolPolicy): string[] {
+  return collectToolNames(getPolicyOpenAITools(policy), 'openai')
+}
+
 export function buildTextToolBridgeCorrectionMessage(policy?: ToolPolicy): string {
   const toolNames = collectToolNames(getPolicyOpenAITools(policy), 'openai')
   return [

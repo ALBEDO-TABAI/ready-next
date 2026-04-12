@@ -3,6 +3,7 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { extname, isAbsolute, join } from 'path'
+import { getDefaultConfig, normalizeAIConfig, type AIModelConfig } from '../../../shared/ai-providers'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { AgentManager } from '../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../claude-bridge/direct-chat'
@@ -25,8 +26,11 @@ import { MemoryLifecycleManager } from './memory-lifecycle'
 import { ReflectionService } from './reflection-service'
 import { UserProfileRepository } from '../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../repositories/agent-personality-repository'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
+import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -64,6 +68,7 @@ export interface UpsertSchedulePayload {
 
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
+  private readonly settingsRepository = new AppSettingsRepository()
   private readonly sidecar = new SidecarManager()
   private readonly orchestrator: ClaudeSdkOrchestrator
   private readonly toolGateway = new ToolGateway()
@@ -278,6 +283,35 @@ export class AgentControlRuntime extends EventEmitter {
       },
       heartbeat: this.heartbeat,
     }
+  }
+
+  async getCapabilityRuntimeSnapshot(configOverride?: AIModelConfig): Promise<CapabilityRuntimeSnapshot> {
+    await this.getRuntimeStatus()
+
+    const config = normalizeAIConfig(configOverride || this.settingsRepository.getAIConfig() || getDefaultConfig())
+    const enabledChannelTypes = Array.from(new Set(
+      this.listChannels()
+        .filter((channel) => channel.enabled)
+        .map((channel) => channel.type),
+    ))
+    const connectedChannelTypes = Array.from(new Set(
+      this.heartbeat.adapters
+        .filter((adapter) => adapter.healthy && adapter.status !== 'error' && adapter.status !== 'stopped')
+        .map((adapter) => adapter.type),
+    ))
+    const feishuConnected = connectedChannelTypes.includes('feishu-app') || this.isChannelTypeAvailable('feishu-app')
+
+    return buildCapabilityRuntimeSnapshot({
+      config,
+      profile: 'local_chat',
+      browserDecisionMode: 'free_tool_loop',
+      runtimeAvailability: {
+        browserHostAvailable: this.orchestrator.hasBrowserController(),
+        feishuConnected,
+      },
+      enabledChannelTypes,
+      connectedChannelTypes,
+    })
   }
 
   listChannels(): AgentChannelConfig[] {

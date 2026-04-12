@@ -17,6 +17,8 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   const browserContentTools = gateway.collectToolNamesForGroups(['browser_content_tasks'])
   const systemTools = gateway.collectToolNamesForGroups(['system_host'])
   const skillTools = gateway.collectToolNamesForGroups(['skills'])
+  const skillsGroup = gateway.getCapabilityGroup('skills')
+  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai')
 
   assert.ok(browserInteractionTools.includes('browser_navigate'))
   assert.ok(browserInteractionTools.includes('browser_click'))
@@ -30,4 +32,6 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.ok(systemTools.includes('system_run_openclaw'))
   assert.ok(skillTools.includes('skill_get_state'))
   assert.ok(skillTools.includes('skill_video_expert_pipeline'))
+  assert.equal(skillsGroup?.hasDynamicSource, true)
+  assert.ok(systemOpenAISchemas.some((tool) => (tool.function as { name?: string } | undefined)?.name === 'system_run_openclaw'))
 })

@@ -16,6 +16,7 @@ export interface ToolDescriptor {
 
 export interface CapabilityGroupRegistryEntry extends CapabilityGroupDefinition {
   toolNames: string[]
+  hasDynamicSource: boolean
 }
 
 const BROWSER_INTERACTION_TOOL_NAMES = [
@@ -125,6 +126,13 @@ const MEMORY_TOOL_NAMES = [
 const SESSION_RECALL_TOOL_NAMES = ['session_search']
 const SYSTEM_TOOL_NAMES = ['system_run_embedded_python', 'system_run_openclaw']
 
+interface CapabilityGroupToolProvider {
+  staticToolNames: string[]
+  hasDynamicSource?: boolean
+  getAnthropicTools?: () => Array<Record<string, unknown>>
+  getOpenAITools?: () => Array<Record<string, unknown>>
+}
+
 function getOpenAIToolName(tool: Record<string, unknown>): string | null {
   const fn = tool.function && typeof tool.function === 'object'
     ? tool.function as { name?: unknown }
@@ -143,30 +151,239 @@ function collectToolNames(tools: Array<Record<string, unknown>>, format: ToolSch
   return Array.from(new Set(names))
 }
 
-function filterToolsByNames(
+function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat): Record<string, unknown> {
+  if (format === 'anthropic') {
+    return {
+      name: toolName,
+      description: `${toolName} fallback schema`,
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    }
+  }
+
+  return {
+    type: 'function',
+    function: {
+      name: toolName,
+      description: `${toolName} fallback schema`,
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  }
+}
+
+function mergeSchemasWithFallback(
   tools: Array<Record<string, unknown>>,
-  names: Set<string>,
+  staticToolNames: string[],
   format: ToolSchemaFormat,
 ): Array<Record<string, unknown>> {
-  return tools.filter((tool) => {
-    const toolName = format === 'anthropic' ? getAnthropicToolName(tool) : getOpenAIToolName(tool)
-    return typeof toolName === 'string' ? names.has(toolName) : false
-  })
+  const merged = new Map<string, Record<string, unknown>>()
+  for (const tool of tools) {
+    const name = format === 'anthropic' ? getAnthropicToolName(tool) : getOpenAIToolName(tool)
+    if (name && !merged.has(name)) {
+      merged.set(name, tool)
+    }
+  }
+  for (const toolName of staticToolNames) {
+    if (!merged.has(toolName)) {
+      merged.set(toolName, createStaticFallbackSchema(toolName, format))
+    }
+  }
+  return Array.from(merged.values())
+}
+
+function resolveStaticSkillToolNames(): string[] {
+  try {
+    const { STATIC_SKILL_TOOL_NAMES } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+    return Array.from(new Set(STATIC_SKILL_TOOL_NAMES))
+  } catch {
+    return [
+      'skill_get_state',
+      'skill_submit_input',
+      'skill_submit_confirmation',
+      'skill_submit_agent_result',
+      'skill_restart_from_step',
+      'skill_cancel_execution',
+    ]
+  }
+}
+
+const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, CapabilityGroupToolProvider> = {
+  browser_interaction: {
+    staticToolNames: BROWSER_INTERACTION_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getAnthropicTools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
+      return getAnthropicTools().filter((tool) => {
+        const name = getAnthropicToolName(tool)
+        return typeof name === 'string' ? BROWSER_INTERACTION_TOOL_NAMES.includes(name) : false
+      })
+    },
+    getOpenAITools: () => {
+      const { getOpenAITools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
+      return getOpenAITools().filter((tool) => {
+        const name = getOpenAIToolName(tool)
+        return typeof name === 'string' ? BROWSER_INTERACTION_TOOL_NAMES.includes(name) : false
+      })
+    },
+  },
+  browser_content_tasks: {
+    staticToolNames: BROWSER_CONTENT_TASK_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getAnthropicTools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
+      return getAnthropicTools().filter((tool) => {
+        const name = getAnthropicToolName(tool)
+        return typeof name === 'string' ? BROWSER_CONTENT_TASK_TOOL_NAMES.includes(name) : false
+      })
+    },
+    getOpenAITools: () => {
+      const { getOpenAITools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
+      return getOpenAITools().filter((tool) => {
+        const name = getOpenAIToolName(tool)
+        return typeof name === 'string' ? BROWSER_CONTENT_TASK_TOOL_NAMES.includes(name) : false
+      })
+    },
+  },
+  document: {
+    staticToolNames: DOCUMENT_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getDocumentAnthropicTools } = require('../tools/document-tools') as typeof import('../tools/document-tools')
+      return getDocumentAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getDocumentOpenAITools } = require('../tools/document-tools') as typeof import('../tools/document-tools')
+      return getDocumentOpenAITools()
+    },
+  },
+  rss: {
+    staticToolNames: RSS_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getRSSAnthropicTools } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
+      return getRSSAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getRSSOpenAITools } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
+      return getRSSOpenAITools()
+    },
+  },
+  calendar: {
+    staticToolNames: CALENDAR_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getCalendarAnthropicTools } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
+      return getCalendarAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getCalendarOpenAITools } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
+      return getCalendarOpenAITools()
+    },
+  },
+  skills: {
+    staticToolNames: resolveStaticSkillToolNames(),
+    hasDynamicSource: true,
+    getAnthropicTools: () => {
+      const { getSkillAnthropicTools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+      return getSkillAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getSkillOpenAITools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+      return getSkillOpenAITools()
+    },
+  },
+  memory: {
+    staticToolNames: MEMORY_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getMemoryAnthropicTools } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
+      return getMemoryAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getMemoryOpenAITools } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
+      return getMemoryOpenAITools()
+    },
+  },
+  session_recall: {
+    staticToolNames: SESSION_RECALL_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getSessionRecallAnthropicTools } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
+      return getSessionRecallAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getSessionRecallOpenAITools } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
+      return getSessionRecallOpenAITools()
+    },
+  },
+  channel_feishu: {
+    staticToolNames: FEISHU_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getFeishuAnthropicTools } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
+      return getFeishuAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getFeishuOpenAITools } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
+      return getFeishuOpenAITools()
+    },
+  },
+  system_host: {
+    staticToolNames: SYSTEM_TOOL_NAMES,
+    getAnthropicTools: () => {
+      const { getSystemAnthropicTools } = require('../tools/system-tools') as typeof import('../tools/system-tools')
+      return getSystemAnthropicTools()
+    },
+    getOpenAITools: () => {
+      const { getSystemOpenAITools } = require('../tools/system-tools') as typeof import('../tools/system-tools')
+      return getSystemOpenAITools()
+    },
+  },
+  design_reserved: {
+    staticToolNames: [],
+  },
 }
 
 export class ToolGateway {
-  private readonly capabilityGroups: CapabilityGroupRegistryEntry[]
-  private readonly capabilityGroupIndex = new Map<CapabilityGroupId, CapabilityGroupRegistryEntry>()
-  private readonly toolDescriptors: ToolDescriptor[]
-  private readonly toolDescriptorIndex = new Map<string, ToolDescriptor>()
+  private readonly capabilityGroupMeta = new Map<CapabilityGroupId, CapabilityGroupDefinition>(
+    CAPABILITY_GROUPS.map((group) => [group.id, group]),
+  )
 
-  constructor() {
-    this.capabilityGroups = this.buildCapabilityGroups()
-    for (const group of this.capabilityGroups) {
-      this.capabilityGroupIndex.set(group.id, group)
+  private resolveGroupToolSchemas(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
+    const provider = GROUP_TOOL_PROVIDERS[groupId]
+    const staticToolNames = provider?.staticToolNames || []
+    try {
+      const resolved = format === 'anthropic'
+        ? provider?.getAnthropicTools?.() || []
+        : provider?.getOpenAITools?.() || []
+      return mergeSchemasWithFallback(resolved, staticToolNames, format)
+    } catch {
+      return staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
     }
+  }
 
-    this.toolDescriptors = this.capabilityGroups.flatMap((group) =>
+  private resolveGroupToolNames(groupId: CapabilityGroupId): string[] {
+    const provider = GROUP_TOOL_PROVIDERS[groupId]
+    const names = new Set(provider?.staticToolNames || [])
+    for (const toolName of collectToolNames(this.resolveGroupToolSchemas(groupId, 'openai'), 'openai')) {
+      names.add(toolName)
+    }
+    return Array.from(names)
+  }
+
+  private buildCapabilityGroupEntry(groupId: CapabilityGroupId): CapabilityGroupRegistryEntry {
+    const group = this.capabilityGroupMeta.get(groupId)
+    if (!group) {
+      throw new Error(`Unknown capability group: ${groupId}`)
+    }
+    return {
+      ...group,
+      toolNames: this.resolveGroupToolNames(groupId),
+      hasDynamicSource: Boolean(GROUP_TOOL_PROVIDERS[groupId]?.hasDynamicSource),
+    }
+  }
+
+  private listResolvedToolDescriptors(): ToolDescriptor[] {
+    return this.listCapabilityGroups().flatMap((group) =>
       group.toolNames.map((toolName) => ({
         id: toolName,
         group: group.id,
@@ -182,184 +399,78 @@ export class ToolGateway {
         family: `${group.id}_*`,
       })),
     )
-
-    for (const tool of this.toolDescriptors) {
-      this.toolDescriptorIndex.set(tool.id, tool)
-    }
-  }
-
-  private buildCapabilityGroups(): CapabilityGroupRegistryEntry[] {
-    const groupToolNames: Record<CapabilityGroupId, string[]> = {
-      browser_interaction: BROWSER_INTERACTION_TOOL_NAMES,
-      browser_content_tasks: BROWSER_CONTENT_TASK_TOOL_NAMES,
-      document: DOCUMENT_TOOL_NAMES,
-      rss: RSS_TOOL_NAMES,
-      calendar: CALENDAR_TOOL_NAMES,
-      skills: this.resolveStaticSkillToolNames(),
-      memory: MEMORY_TOOL_NAMES,
-      session_recall: SESSION_RECALL_TOOL_NAMES,
-      channel_feishu: FEISHU_TOOL_NAMES,
-      system_host: SYSTEM_TOOL_NAMES,
-      design_reserved: [],
-    }
-
-    return CAPABILITY_GROUPS.map((group) => ({
-      ...group,
-      toolNames: groupToolNames[group.id] || [],
-    }))
-  }
-
-  private resolveStaticSkillToolNames(): string[] {
-    try {
-      const { STATIC_SKILL_TOOL_NAMES } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-      return Array.from(new Set(STATIC_SKILL_TOOL_NAMES))
-    } catch {
-      return [
-        'skill_get_state',
-        'skill_submit_input',
-        'skill_submit_confirmation',
-        'skill_submit_agent_result',
-        'skill_restart_from_step',
-        'skill_cancel_execution',
-      ]
-    }
   }
 
   listCapabilityGroups(): CapabilityGroupRegistryEntry[] {
-    return this.capabilityGroups.map((group) => ({ ...group, toolNames: [...group.toolNames] }))
+    return CAPABILITY_GROUPS.map((group) => this.buildCapabilityGroupEntry(group.id))
   }
 
   getCapabilityGroup(id: CapabilityGroupId): CapabilityGroupRegistryEntry | null {
-    const group = this.capabilityGroupIndex.get(id)
-    return group ? { ...group, toolNames: [...group.toolNames] } : null
+    return this.capabilityGroupMeta.has(id) ? this.buildCapabilityGroupEntry(id) : null
   }
 
   collectToolNamesForGroups(groupIds: CapabilityGroupId[]): string[] {
     const names = new Set<string>()
     for (const groupId of groupIds) {
-      const group = this.capabilityGroupIndex.get(groupId)
-      if (!group) continue
-      for (const toolName of group.toolNames) names.add(toolName)
+      for (const toolName of this.resolveGroupToolNames(groupId)) {
+        names.add(toolName)
+      }
     }
     return Array.from(names)
   }
 
-  private getAllAnthropicTools(): Array<Record<string, unknown>> {
-    const {
-      getAnthropicTools: getBrowserAnthropicTools,
-    } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
-    const {
-      getDocumentAnthropicTools,
-    } = require('../tools/document-tools') as typeof import('../tools/document-tools')
-    const {
-      getRSSAnthropicTools,
-    } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
-    const {
-      getCalendarAnthropicTools,
-    } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
-    const {
-      getSkillAnthropicTools,
-    } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-    const {
-      getFeishuAnthropicTools,
-    } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
-    const {
-      getMemoryAnthropicTools,
-    } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
-    const {
-      getSessionRecallAnthropicTools,
-    } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
-    const {
-      getSystemAnthropicTools,
-    } = require('../tools/system-tools') as typeof import('../tools/system-tools')
-
-    return [
-      ...getBrowserAnthropicTools(),
-      ...getDocumentAnthropicTools(),
-      ...getRSSAnthropicTools(),
-      ...getCalendarAnthropicTools(),
-      ...getSkillAnthropicTools(),
-      ...getFeishuAnthropicTools(),
-      ...getMemoryAnthropicTools(),
-      ...getSessionRecallAnthropicTools(),
-      ...getSystemAnthropicTools(),
-    ]
-  }
-
-  private getAllOpenAITools(): Array<Record<string, unknown>> {
-    const {
-      getOpenAITools: getBrowserOpenAITools,
-    } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
-    const {
-      getDocumentOpenAITools,
-    } = require('../tools/document-tools') as typeof import('../tools/document-tools')
-    const {
-      getRSSOpenAITools,
-    } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
-    const {
-      getCalendarOpenAITools,
-    } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
-    const {
-      getSkillOpenAITools,
-    } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-    const {
-      getFeishuOpenAITools,
-    } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
-    const {
-      getMemoryOpenAITools,
-    } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
-    const {
-      getSessionRecallOpenAITools,
-    } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
-    const {
-      getSystemOpenAITools,
-    } = require('../tools/system-tools') as typeof import('../tools/system-tools')
-
-    return [
-      ...getBrowserOpenAITools(),
-      ...getDocumentOpenAITools(),
-      ...getRSSOpenAITools(),
-      ...getCalendarOpenAITools(),
-      ...getSkillOpenAITools(),
-      ...getFeishuOpenAITools(),
-      ...getMemoryOpenAITools(),
-      ...getSessionRecallOpenAITools(),
-      ...getSystemOpenAITools(),
-    ]
+  getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
+    return this.resolveGroupToolSchemas(groupId, format)
   }
 
   getAnthropicToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
-    const allowed = new Set(this.collectToolNamesForGroups(groupIds))
-    return filterToolsByNames(this.getAllAnthropicTools(), allowed, 'anthropic')
+    const tools = new Map<string, Record<string, unknown>>()
+    for (const groupId of groupIds) {
+      for (const tool of this.resolveGroupToolSchemas(groupId, 'anthropic')) {
+        const name = getAnthropicToolName(tool)
+        if (name && !tools.has(name)) {
+          tools.set(name, tool)
+        }
+      }
+    }
+    return Array.from(tools.values())
   }
 
   getOpenAIToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
-    const allowed = new Set(this.collectToolNamesForGroups(groupIds))
-    return filterToolsByNames(this.getAllOpenAITools(), allowed, 'openai')
+    const tools = new Map<string, Record<string, unknown>>()
+    for (const groupId of groupIds) {
+      for (const tool of this.resolveGroupToolSchemas(groupId, 'openai')) {
+        const name = getOpenAIToolName(tool)
+        if (name && !tools.has(name)) {
+          tools.set(name, tool)
+        }
+      }
+    }
+    return Array.from(tools.values())
   }
 
   listTools(): ToolDescriptor[] {
-    return [...this.toolDescriptors]
+    return this.listResolvedToolDescriptors()
   }
 
   count(): number {
-    return this.toolDescriptors.length
+    return this.listResolvedToolDescriptors().length
   }
 
   listToolGroups(): string[] {
-    return this.capabilityGroups.map((group) => group.id)
+    return CAPABILITY_GROUPS.map((group) => group.id)
   }
 
   getTool(id: string): ToolDescriptor | null {
-    return this.toolDescriptorIndex.get(id) || null
+    return this.listResolvedToolDescriptors().find((tool) => tool.id === id) || null
   }
 
   hasTool(id: string): boolean {
-    return this.toolDescriptorIndex.has(id)
+    return this.getTool(id) !== null
   }
 
   listByModule(module: string): ToolDescriptor[] {
-    return this.toolDescriptors.filter((tool) => tool.module === module)
+    return this.listResolvedToolDescriptors().filter((tool) => tool.module === module)
   }
 }
 

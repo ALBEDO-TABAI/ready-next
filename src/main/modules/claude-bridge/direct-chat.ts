@@ -16,6 +16,8 @@ import { DesignToolLoopOrchestrator } from '../agent-control/design-tool-loop-or
 import { DocumentDomainOrchestrator } from '../agent-control/document-domain-orchestrator'
 import { DocumentToolLoopOrchestrator } from '../agent-control/document-tool-loop-orchestrator'
 import { ExecutionLoopOrchestrator } from '../agent-control/execution-loop-orchestrator'
+import { HostCapabilityDispatcher } from '../agent-control/host-capability-dispatcher'
+import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
 import {
@@ -29,10 +31,6 @@ import {
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
-  collectToolNames,
-  getPolicyAnthropicTools,
-  getPolicyOpenAITools,
-  type ToolPolicy,
 } from '../agent-control/execution-tool-config'
 import type { RunBudgetSeed, RunBudgetUsage } from '../agent-control/run-contracts'
 import type {
@@ -69,8 +67,7 @@ import { compactToolPolicyHistory } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
-import { buildToolVisibilityPlan } from '../agent-control/execution-tool-policy'
-import { buildExecutionToolState, resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
+import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
@@ -198,6 +195,7 @@ export class DirectChatEngine extends EventEmitter {
   private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator
   private readonly documentDomainOrchestrator: DocumentDomainOrchestrator
   private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator
+  private readonly hostCapabilityDispatcher: HostCapabilityDispatcher
   private sidecarManager: SidecarManager | null = null
   private runtime: import('../agent-control/runtime').AgentControlRuntime | null = null
   private rendererToolActionRequester: ((payload: {
@@ -294,6 +292,11 @@ export class DirectChatEngine extends EventEmitter {
         }).then((result) => result.text),
     })
     this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log })
+    this.hostCapabilityDispatcher = new HostCapabilityDispatcher({
+      executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
+      tryDeterministicSectionFormatFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionFormatFlow(params),
+      tryDeterministicSectionRewriteFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionRewriteFlow(params),
+    })
   }
 
   private async fetchWithTimeout(
@@ -334,6 +337,10 @@ export class DirectChatEngine extends EventEmitter {
   setBrowserController(controller: BrowserController): void {
     this.browserController = controller
     log('BrowserController set on DirectChatEngine')
+  }
+
+  hasBrowserController(): boolean {
+    return Boolean(this.browserController)
   }
 
   setSidecarManager(manager: SidecarManager): void {
@@ -657,19 +664,8 @@ export class DirectChatEngine extends EventEmitter {
       if (contextualUserInput !== pureUserInput) {
         log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
       }
-      const userInstructionText = executionIntentContext.userInstructionText
       const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
       const keepToolsWithVideo = this.skillContextOrchestrator.shouldKeepToolsWithVideo(contextualUserInput, sessionId)
-      const baseToolVisibilityPlan = buildToolVisibilityPlan({
-        supportsToolCalls: capabilities?.supportsToolCalls ?? true,
-        hasVideoInputs,
-        hasIncomingVideo: hasRawVideoInIncoming,
-        keepToolsWithVideo,
-        allowBrowserTools: false,
-      })
-      // Avoid tools when video exists, so simple media tasks don't get routed into skill/tool loops.
-      // Keep tools enabled when the user is explicitly controlling skill execution or embedded Python.
-      const hasTools = baseToolVisibilityPlan.hasTools
       const publicAgentName = name.includes('::') ? name.slice(0, name.indexOf('::')) : name
       const requestModuleToolAction = this.rendererToolActionRequester
         ? (tool: string, args: Record<string, unknown>) => this.rendererToolActionRequester!({
@@ -686,16 +682,18 @@ export class DirectChatEngine extends EventEmitter {
       const incomingAttachmentHints = this.getIncomingAttachmentHints(content)
       let browserDecision = ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
 
-      const hasDocumentEnvironment = executionIntentContext.hasDocumentEnvironment
-
       // Judge intent based on pure input (not polluted by environment context)
-      const preferredSkillToolNames = hasTools && (
+      const preferredSkillToolNames = (
         this.skillContextOrchestrator.findExplicitlyRequestedSkills(contextualUserInput).length > 0
         || this.skillContextOrchestrator.hasActiveSkillExecution(sessionId)
       )
         ? this.skillContextOrchestrator.buildPreferredSkillToolNames(contextualUserInput, sessionId)
         : null
-      let { visibilityPlan: resolvedToolVisibilityPlan, toolPolicy } = buildExecutionToolState({
+      const runtimeAvailability = {
+        browserHostAvailable: Boolean(this.browserController),
+        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
+      }
+      const preparedRunCapabilities = prepareInitialRun({
         config,
         capabilityProfile: 'local_chat',
         supportsToolCalls: capabilities?.supportsToolCalls ?? true,
@@ -703,22 +701,32 @@ export class DirectChatEngine extends EventEmitter {
         hasIncomingVideo: hasRawVideoInIncoming,
         keepToolsWithVideo,
         preferredSkillToolNames,
-        contextualUserInput,
-        userInstructionText,
-        hasDocumentEnvironment,
-        hasWidgetTargetContext: executionIntentContext.hasWidgetTargetContext,
-        explicitWidgetCreateIntent: executionIntentContext.explicitWidgetCreateIntent,
-        documentWidgetTaskKind: executionIntentContext.documentWidgetTaskKind,
-        documentWidgetProfile: executionIntentContext.documentWidgetProfile,
+        executionIntentContext,
         browserDecisionMode: browserDecision.mode,
-        browserHostAvailable: Boolean(this.browserController),
-        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
+        runtimeAvailability,
+        hostContext: {
+          userText,
+        },
       })
+      const preparedToolContext = buildToolRuntimeContext({
+        browserController: this.browserController,
+        sidecarManager: this.sidecarManager,
+        runtime: this.runtime,
+        allowedToolNames: preparedRunCapabilities.allowedToolNames,
+        emitToolAction: (tool, args) => {
+          emitToolAction(tool, args)
+        },
+        requestModuleToolAction,
+        abortSignal: abortController.signal,
+        sessionId,
+      })
+      const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
+      let toolPolicy = preparedRunCapabilities.toolPolicy
       if (toolPolicy.forceDocumentTool) {
         session.lastDocumentContextInput = contextualUserInput
       }
 
-      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, hasTools=${resolvedToolVisibilityPlan.hasTools}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, forceDocumentTool=${toolPolicy.forceDocumentTool}, forceDesignTool=${toolPolicy.forceDesignTool}, preferredDesignTool=${toolPolicy.preferredDesignTool || 'none'}, allowMultipleDesignArtifacts=${toolPolicy.allowMultipleDesignArtifacts}, preferSectionRewrite=${toolPolicy.preferSectionRewrite}, preferFormatOnly=${toolPolicy.preferFormatOnly}, documentWidgetTaskKind=${toolPolicy.documentWidgetTaskKind || 'none'}, allowBrowserTools=${toolPolicy.allowBrowserTools}, preferredSkillTools=${toolPolicy.preferredSkillToolNames?.join('|') || 'all'}, visibleCapabilityGroups=${resolvedToolVisibilityPlan.visibleCapabilityGroupIds?.join('|') || 'none'}, suppressedCapabilityGroups=${resolvedToolVisibilityPlan.suppressedCapabilityGroupIds?.join('|') || 'none'}, hasVideoInputs=${hasVideoInputs}, incomingVideo=${hasRawVideoInIncoming}, keepToolsWithVideo=${resolvedToolVisibilityPlan.keepToolsWithVideo}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, ${preparedRunCapabilities.capabilityLogLine}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
 
       if (hasTools) {
         await this.skillContextOrchestrator.maybeInjectExplicitSkillContext({
@@ -727,14 +735,7 @@ export class DirectChatEngine extends EventEmitter {
           sessionId,
           emitOutput,
           emitToolAction,
-          executeTool: async (tool, args) => executeToolCall(tool, args, {
-            browserController: this.browserController,
-            sidecarManager: this.sidecarManager,
-            emitToolAction,
-            requestModuleToolAction,
-            abortSignal: abortController.signal,
-            sessionId,
-          }),
+          executeTool: async (tool, args) => executeToolCall(tool, args, preparedToolContext),
         })
       }
 
@@ -787,25 +788,12 @@ export class DirectChatEngine extends EventEmitter {
         }),
       })
       browserDecision = preparedBrowserExecution.browserDecision
-      ;({ visibilityPlan: resolvedToolVisibilityPlan, toolPolicy } = buildExecutionToolState({
-        config,
-        capabilityProfile: 'local_chat',
-        supportsToolCalls: capabilities?.supportsToolCalls ?? true,
-        hasVideoInputs,
-        hasIncomingVideo: hasRawVideoInIncoming,
-        keepToolsWithVideo,
-        preferredSkillToolNames,
-        contextualUserInput,
-        userInstructionText,
-        hasDocumentEnvironment,
-        hasWidgetTargetContext: executionIntentContext.hasWidgetTargetContext,
-        explicitWidgetCreateIntent: executionIntentContext.explicitWidgetCreateIntent,
-        documentWidgetTaskKind: executionIntentContext.documentWidgetTaskKind,
-        documentWidgetProfile: executionIntentContext.documentWidgetProfile,
+      const reconciledRunCapabilities = reconcileAfterBrowserDecision({
+        prepared: preparedRunCapabilities,
         browserDecisionMode: browserDecision.mode,
-        browserHostAvailable: Boolean(this.browserController),
-        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
-      }))
+      })
+      toolPolicy = reconciledRunCapabilities.toolPolicy
+      log(`capabilityReconciled ${reconciledRunCapabilities.capabilityLogLine}`)
       log(
         `browserDecision mode=${browserDecision.mode} reason=${browserDecision.reason} ` +
         `sessionId=${sessionId || 'none'} attachmentCount=${browserDecision.attachmentSelection?.count || 0} ` +
@@ -868,87 +856,49 @@ export class DirectChatEngine extends EventEmitter {
         log(`Injected structured browser plan with ${browserDecision.plan?.steps?.length || 0} steps`)
       }
 
-      const allowedToolNamesForPolicy = new Set(
-        collectToolNames(
-          useAnthropicProtocol ? getPolicyAnthropicTools(toolPolicy) : getPolicyOpenAITools(toolPolicy),
-          useAnthropicProtocol ? 'anthropic' : 'openai',
-        ),
-      )
+      const hostToolContext = buildToolRuntimeContext({
+        browserController: this.browserController,
+        sidecarManager: this.sidecarManager,
+        runtime: this.runtime,
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        emitToolAction: (tool, args) => {
+          emitToolAction(tool, args)
+        },
+        requestModuleToolAction,
+        abortSignal: abortController.signal,
+        sessionId,
+      })
 
-      const openclawCommand = this.extractOpenclawPairingCommand(userText)
-      if (hasTools && openclawCommand) {
-        const toolContext = buildToolRuntimeContext({
-          browserController: this.browserController,
-          sidecarManager: this.sidecarManager,
-          runtime: this.runtime,
-          allowedToolNames: ['system_run_openclaw'],
-          emitToolAction: (tool, args) => {
-            emitToolAction(tool, args)
-          },
-          requestModuleToolAction,
-          abortSignal: abortController.signal,
-          sessionId,
-        })
-        emitOutput(`system_run_openclaw(${JSON.stringify({ command: openclawCommand }).slice(0, 120)})`, 'tool_use')
-        const result = await executeToolCall('system_run_openclaw', { command: openclawCommand }, toolContext)
-        emitOutput(result.slice(0, 300), 'tool_result')
-        emitOutput(result, 'text')
-        session.messages.push({ role: 'assistant', content: result })
+      const hostShortcutResult = await this.hostCapabilityDispatcher.dispatch({
+        decision: reconciledRunCapabilities.hostShortcutDecision,
+        toolContext: hostToolContext,
+        agentName: name,
+        userText,
+        session,
+        config,
+        baseUrl,
+        provider,
+        signal: abortController.signal,
+        isKimi,
+        isKimiCoding,
+        useAnthropicProtocol,
+        onAssistantSummary: (summary) => {
+          session.messages.push({ role: 'assistant', content: summary })
+        },
+      })
+
+      if (hostShortcutResult.handled) {
+        if (hostShortcutResult.toolUseText) {
+          emitOutput(hostShortcutResult.toolUseText, 'tool_use')
+        }
+        if (hostShortcutResult.outputText) {
+          emitOutput(hostShortcutResult.outputText.slice(0, 300), 'tool_result')
+          emitOutput(hostShortcutResult.outputText, 'text')
+          session.messages.push({ role: 'assistant', content: hostShortcutResult.outputText })
+        }
         emitOutput('', 'done')
         emitStatus('done')
         return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
-      }
-
-      if (
-        hasTools &&
-        hasDocumentEnvironment &&
-        toolPolicy.forceDocumentTool &&
-        (toolPolicy.preferFormatOnly || toolPolicy.preferSectionRewrite)
-      ) {
-        const deterministicDocumentToolContext = buildToolRuntimeContext({
-          browserController: this.browserController,
-          sidecarManager: this.sidecarManager,
-          runtime: this.runtime,
-          allowedToolNames: allowedToolNamesForPolicy,
-          emitToolAction: (tool, args) => {
-            emitToolAction(tool, args)
-          },
-          requestModuleToolAction,
-          abortSignal: abortController.signal,
-          sessionId,
-        })
-
-        const deterministicHandled = toolPolicy.preferFormatOnly
-          ? await this.documentDomainOrchestrator.tryDeterministicSectionFormatFlow({
-            agentName: name,
-            userText,
-            toolContext: deterministicDocumentToolContext,
-            onAssistantSummary: (summary) => {
-              session.messages.push({ role: 'assistant', content: summary })
-            },
-          })
-          : await this.documentDomainOrchestrator.tryDeterministicSectionRewriteFlow({
-            agentName: name,
-            session,
-            config,
-            baseUrl,
-            provider,
-            signal: abortController.signal,
-            isKimi,
-            isKimiCoding,
-            useAnthropicProtocol,
-            userText,
-            toolContext: deterministicDocumentToolContext,
-            onAssistantSummary: (summary) => {
-              session.messages.push({ role: 'assistant', content: summary })
-            },
-          })
-
-        if (deterministicHandled) {
-          emitOutput('', 'done')
-          emitStatus('done')
-          return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
-        }
       }
 
       if (!hasTools) {
@@ -1091,7 +1041,7 @@ export class DirectChatEngine extends EventEmitter {
             sidecarManager: this.sidecarManager,
             runtime: this.runtime,
             scope,
-            allowedToolNames: allowedToolNamesForPolicy,
+            allowedToolNames: reconciledRunCapabilities.allowedToolNames,
             emitToolAction: (tool, args) => {
               emitToolAction(tool, args)
             },
@@ -1633,16 +1583,6 @@ export class DirectChatEngine extends EventEmitter {
 
   private extractPrimaryUserInstruction(raw: string): string {
     return extractPrimaryUserInstructionFromText(raw)
-  }
-
-  private extractOpenclawPairingCommand(userText: string): string | null {
-    const text = String(userText || '').trim()
-    if (!text) return null
-    const direct = text.match(/^\s*(openclaw\s+pairing\s+[^\n\r]+)\s*$/i)
-    if (direct) return direct[1].trim()
-    const embedded = text.match(/\b(openclaw\s+pairing\s+approve\s+\S+\s+\S+)\b/i)
-    if (embedded) return embedded[1].trim()
-    return null
   }
 
   private extractSectionTitleFromUserText(raw: string): string | null {

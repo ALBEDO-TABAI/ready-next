@@ -84,7 +84,11 @@
 - 新增固定能力组：`browser_interaction / browser_content_tasks / document / rss / calendar / skills / memory / session_recall / channel_feishu / system_host / design_reserved`
 - `ToolGateway` 已从工具目录升级为分组注册表，可按能力组产出模型可见工具集合
 - `buildExecutionToolState` 已接入 capability resolution：浏览器交互与内容任务开始分组判断，飞书组会受渠道环境可用性约束，`system_host` 作为宿主内部能力保留在模型工具面之外
+- 新增 `run-capability-controller` 作为运行前能力总控：`direct-chat` 现在先拿 initial/reconciled capability 结果，不再自己重复拼 `hasTools`、allowlist、环境摘要和 capability 日志
+- 新增 `host-capability-dispatcher`：`system_run_openclaw` 与文档 format/rewrite 的 deterministic 直通已迁出主循环，`system_host` 现在在执行路径上也保持 host-only
+- `ToolGateway` 新增 group schema/query 与 dynamic source 能力；`skills` 组现在会把静态 execution control 和运行期可枚举 skill action 一起纳入正式真相
 - AI 设置页补上第一版“能力分组”开关和状态显示
+- AI 设置页“当前状态”现在来自主进程 capability runtime snapshot，不再由 renderer 自行猜测飞书/浏览器环境和组状态
 - 新增 `context-compression`，prompt 侧已经能对超长历史做压缩并回传 compression report；前台任务状态链保持不受影响
 - 新增 `execution-fallback-policy`，OpenAI / Kimi / 视频提帧回退开始共用同一套 fallback contract，不再各自散着写判定
 - 新增 `tool-parallelism-policy`，安全的只读工具现在可以按批并行执行，结果仍按原顺序回收

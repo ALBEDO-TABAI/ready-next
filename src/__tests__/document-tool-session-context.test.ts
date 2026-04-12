@@ -11,7 +11,7 @@ describe('document tool session context', () => {
     )
 
     assert.match(source, /lastDocumentContextInput\?: string \| null/)
-    assert.match(source, /session\.lastDocumentContextInput \? \[session\.lastDocumentContextInput,/)
+    assert.match(source, /lastDocumentContextInput:\s*session\.lastDocumentContextInput/)
     assert.match(source, /session\.lastDocumentContextInput = contextualUserInput/)
   })
 })

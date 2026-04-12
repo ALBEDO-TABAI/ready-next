@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { randomUUID } from 'crypto'
 import { AgentManager } from './agent-manager'
 import type { MultimodalBlock } from './direct-chat'
+import type { AIModelConfig } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { appendFileSync, readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
@@ -240,6 +241,16 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     try {
       const status = await runtime!.getRuntimeStatus()
       return { success: true, data: status }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      return { success: false, error: errorMessage }
+    }
+  })
+
+  ipcMain.handle('agent:getCapabilityRuntimeSnapshot', async (_, config?: AIModelConfig): Promise<IPCResponse> => {
+    try {
+      const snapshot = await runtime!.getCapabilityRuntimeSnapshot(config)
+      return { success: true, data: snapshot }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage }

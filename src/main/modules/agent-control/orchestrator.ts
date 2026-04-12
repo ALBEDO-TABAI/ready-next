@@ -114,6 +114,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     this.engine.setBrowserController(controller)
   }
 
+  hasBrowserController(): boolean {
+    return this.engine.hasBrowserController()
+  }
+
   setSidecarManager(manager: SidecarManager): void {
     this.engine.setSidecarManager(manager)
   }

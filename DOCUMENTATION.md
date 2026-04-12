@@ -387,6 +387,10 @@ Ready 采用 Electron 三层架构：
 ### 8.5 Claude / OpenAI 兼容修复
 - `direct-chat` 现在会在视频输入场景下，为显式 `/skill`、手动阶段控制、embedded python 请求、活跃 execution 保留 tools
 - `direct-chat` 现已开始消费 capability resolution：provider tool 开关、浏览器任务模式、文档意图与飞书可用性会先收口成可见能力组，再生成本轮 allowlist。
+- `direct-chat` 的运行前能力判断现在统一走 `run-capability-controller`：initial run 和 browser decision 后的 reconcile 都在这一层完成，主循环只消费结果
+- `system_run_openclaw` 与文档 format/rewrite 的 deterministic 直通现在统一走 `host-capability-dispatcher`，不再在 `direct-chat.ts` 里各自手写 host-only 分支
+- `ToolGateway` 继续只负责 registry 真相：已补上 group 级 schema/query 与 dynamic source 标记，`skills` 组会把静态 execution control 和运行期 skill action 一起输出
+- AI 设置页“能力分组”的当前状态改为读取 agent runtime 返回的 capability runtime snapshot；renderer 只负责展示，不再自己猜飞书/浏览器可用性
 - OpenAI `chat/completions` / `responses` 发请求前都会修复缺失的 tool response history，避免 `tool_call_id` 400
 - `need_agent_result` blocker 会自动注入文本类 source materials 正文，而不是只告诉模型文件路径
 

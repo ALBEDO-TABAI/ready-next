@@ -5,7 +5,7 @@ import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
 import type { ToolVisibilityPlan } from './run-contracts'
 import { buildToolVisibilityPlan } from './execution-tool-policy'
 import type { ToolPolicy } from './execution-tool-config'
-import { resolveCapabilityResolution } from './capability-resolver'
+import { resolveCapabilityResolution, type CapabilityResolution } from './capability-resolver'
 import {
   extractPrimaryUserInstruction,
   hasExplicitDocumentWidgetCreateIntent,
@@ -77,7 +77,7 @@ export function buildExecutionToolState(params: {
   browserDecisionMode: BrowserTaskDecisionMode
   browserHostAvailable?: boolean
   feishuConnected?: boolean
-}): { visibilityPlan: ToolVisibilityPlan; toolPolicy: ToolPolicy } {
+}): { visibilityPlan: ToolVisibilityPlan; toolPolicy: ToolPolicy; capabilityResolution: CapabilityResolution } {
   const baseVisibilityPlan = buildToolVisibilityPlan({
     supportsToolCalls: params.supportsToolCalls,
     hasVideoInputs: params.hasVideoInputs,
@@ -123,6 +123,7 @@ export function buildExecutionToolState(params: {
 
   return {
     visibilityPlan,
+    capabilityResolution,
     toolPolicy: {
       forceDocumentTool: allowDocumentTools && (
         (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
