@@ -1,0 +1,19 @@
+import { copyFileSync, existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const root = resolve(__dirname, '..')
+
+if (process.platform !== 'darwin') {
+  process.exit(0)
+}
+
+const sourceIcon = join(root, 'build', 'icon.icns')
+const targetIcon = resolve(root, 'node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns')
+
+if (!existsSync(sourceIcon) || !existsSync(targetIcon)) {
+  process.exit(0)
+}
+
+copyFileSync(sourceIcon, targetIcon)
