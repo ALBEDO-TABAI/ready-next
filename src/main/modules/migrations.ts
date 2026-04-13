@@ -172,7 +172,9 @@ const migrations: Migration[] = [
           visited_at INTEGER DEFAULT (unixepoch())
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_history_visited_at ON browser_history(visited_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_history_visited_at ON browser_history(visited_at DESC)'
+      )
       db.exec('CREATE INDEX IF NOT EXISTS idx_history_url ON browser_history(url)')
 
       db.exec(`
@@ -222,7 +224,7 @@ const migrations: Migration[] = [
     up: (db) => {
       // Add platform column to rss_sources if it doesn't exist
       // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
-      const cols = db.prepare("PRAGMA table_info(rss_sources)").all<{ name: string }>()
+      const cols = db.prepare('PRAGMA table_info(rss_sources)').all<{ name: string }>()
       const hasColumn = cols.some((c) => c.name === 'platform')
       if (!hasColumn) {
         db.exec("ALTER TABLE rss_sources ADD COLUMN platform TEXT DEFAULT 'rss'")
@@ -254,9 +256,15 @@ const migrations: Migration[] = [
           command_json TEXT
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skills_jobs_created_at ON skills_jobs(created_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skills_jobs_skill ON skills_jobs(skill_id, created_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skills_jobs_status ON skills_jobs(status, created_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skills_jobs_created_at ON skills_jobs(created_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skills_jobs_skill ON skills_jobs(skill_id, created_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skills_jobs_status ON skills_jobs(status, created_at DESC)'
+      )
 
       db.exec(`
         CREATE TABLE IF NOT EXISTS skills_schedules (
@@ -272,7 +280,9 @@ const migrations: Migration[] = [
           updated_at TEXT NOT NULL
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skills_schedules_next_run ON skills_schedules(enabled, next_run_at)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skills_schedules_next_run ON skills_schedules(enabled, next_run_at)'
+      )
     }
   },
 
@@ -396,8 +406,11 @@ const migrations: Migration[] = [
   {
     name: '013_expand_chat_scopes_for_remote_channels',
     up: (db) => {
-      const conversationColumns = db.prepare('PRAGMA table_info(chat_conversations)').all<{ name: string }>()
-      const hasConversationColumn = (name: string) => conversationColumns.some((column) => column.name === name)
+      const conversationColumns = db
+        .prepare('PRAGMA table_info(chat_conversations)')
+        .all<{ name: string }>()
+      const hasConversationColumn = (name: string) =>
+        conversationColumns.some((column) => column.name === name)
       if (!hasConversationColumn('source_kind')) {
         db.exec("ALTER TABLE chat_conversations ADD COLUMN source_kind TEXT DEFAULT 'local'")
       }
@@ -422,13 +435,16 @@ const migrations: Migration[] = [
       )
 
       const messageColumns = db.prepare('PRAGMA table_info(chat_messages)').all<{ name: string }>()
-      const hasMessageColumn = (name: string) => messageColumns.some((column) => column.name === name)
+      const hasMessageColumn = (name: string) =>
+        messageColumns.some((column) => column.name === name)
       if (!hasMessageColumn('meta_json')) {
         db.exec("ALTER TABLE chat_messages ADD COLUMN meta_json TEXT DEFAULT '{}'")
       }
       db.exec("UPDATE chat_messages SET meta_json = COALESCE(NULLIF(meta_json, ''), '{}')")
 
-      const threadColumns = db.prepare('PRAGMA table_info(agent_channel_threads)').all<{ name: string }>()
+      const threadColumns = db
+        .prepare('PRAGMA table_info(agent_channel_threads)')
+        .all<{ name: string }>()
       const hasThreadColumn = (name: string) => threadColumns.some((column) => column.name === name)
       if (!hasThreadColumn('conversation_id')) {
         db.exec('ALTER TABLE agent_channel_threads ADD COLUMN conversation_id TEXT')
@@ -443,8 +459,11 @@ const migrations: Migration[] = [
   {
     name: '014_expand_browser_entities_and_adblock_state',
     up: (db) => {
-      const bookmarkColumns = db.prepare('PRAGMA table_info(browser_bookmarks)').all<{ name: string }>()
-      const hasBookmarkColumn = (name: string) => bookmarkColumns.some((column) => column.name === name)
+      const bookmarkColumns = db
+        .prepare('PRAGMA table_info(browser_bookmarks)')
+        .all<{ name: string }>()
+      const hasBookmarkColumn = (name: string) =>
+        bookmarkColumns.some((column) => column.name === name)
       if (!hasBookmarkColumn('type')) {
         db.exec("ALTER TABLE browser_bookmarks ADD COLUMN type TEXT DEFAULT 'url'")
       }
@@ -464,8 +483,11 @@ const migrations: Migration[] = [
         db.exec("ALTER TABLE browser_bookmarks ADD COLUMN source TEXT DEFAULT 'manual'")
       }
 
-      const historyColumns = db.prepare('PRAGMA table_info(browser_history)').all<{ name: string }>()
-      const hasHistoryColumn = (name: string) => historyColumns.some((column) => column.name === name)
+      const historyColumns = db
+        .prepare('PRAGMA table_info(browser_history)')
+        .all<{ name: string }>()
+      const hasHistoryColumn = (name: string) =>
+        historyColumns.some((column) => column.name === name)
       if (!hasHistoryColumn('favicon')) {
         db.exec('ALTER TABLE browser_history ADD COLUMN favicon TEXT')
       }
@@ -492,10 +514,15 @@ const migrations: Migration[] = [
             domain = COALESCE(domain, '')
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_history_domain ON browser_history(domain)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_history_last_visit_time ON browser_history(last_visit_time DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_history_last_visit_time ON browser_history(last_visit_time DESC)'
+      )
 
-      const downloadColumns = db.prepare('PRAGMA table_info(browser_downloads)').all<{ name: string }>()
-      const hasDownloadColumn = (name: string) => downloadColumns.some((column) => column.name === name)
+      const downloadColumns = db
+        .prepare('PRAGMA table_info(browser_downloads)')
+        .all<{ name: string }>()
+      const hasDownloadColumn = (name: string) =>
+        downloadColumns.some((column) => column.name === name)
       if (!hasDownloadColumn('mime_type')) {
         db.exec('ALTER TABLE browser_downloads ADD COLUMN mime_type TEXT')
       }
@@ -516,7 +543,9 @@ const migrations: Migration[] = [
         SET can_resume = COALESCE(can_resume, 0),
             updated_at = COALESCE(updated_at, created_at)
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_downloads_end_time ON browser_downloads(end_time DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_downloads_end_time ON browser_downloads(end_time DESC)'
+      )
 
       db.exec(`
         INSERT INTO settings (key, value, updated_at)
@@ -557,10 +586,18 @@ const migrations: Migration[] = [
           meta_json TEXT DEFAULT '{}'
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_layer_scope ON agent_memory_metadata(layer, scope_id, archived_at)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_category_priority ON agent_memory_metadata(category, priority DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_expires ON agent_memory_metadata(expires_at) WHERE expires_at IS NOT NULL')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access ON agent_memory_metadata(last_accessed_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_layer_scope ON agent_memory_metadata(layer, scope_id, archived_at)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_category_priority ON agent_memory_metadata(category, priority DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_expires ON agent_memory_metadata(expires_at) WHERE expires_at IS NOT NULL'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_access ON agent_memory_metadata(last_accessed_at DESC)'
+      )
 
       // Dynamic trigger definitions
       db.exec(`
@@ -580,7 +617,9 @@ const migrations: Migration[] = [
           meta_json TEXT DEFAULT '{}'
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_triggers_enabled_priority ON agent_triggers(enabled, priority DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_triggers_enabled_priority ON agent_triggers(enabled, priority DESC)'
+      )
       db.exec('CREATE INDEX IF NOT EXISTS idx_triggers_module ON agent_triggers(module)')
 
       // Trigger-to-memory associations
@@ -595,7 +634,9 @@ const migrations: Migration[] = [
           FOREIGN KEY (memory_id) REFERENCES agent_memory_metadata(id) ON DELETE CASCADE
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_trigger_refs_priority ON agent_trigger_refs(trigger_id, priority DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_trigger_refs_priority ON agent_trigger_refs(trigger_id, priority DESC)'
+      )
 
       // Memory access log for analytics
       db.exec(`
@@ -609,8 +650,12 @@ const migrations: Migration[] = [
           FOREIGN KEY (memory_id) REFERENCES agent_memory_metadata(id) ON DELETE CASCADE
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access_log_time ON agent_memory_access_log(accessed_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memory_access_log_memory ON agent_memory_access_log(memory_id, accessed_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_access_log_time ON agent_memory_access_log(accessed_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_access_log_memory ON agent_memory_access_log(memory_id, accessed_at DESC)'
+      )
 
       // Seed with existing hardcoded triggers
       db.exec(`
@@ -660,16 +705,24 @@ const migrations: Migration[] = [
       `)
 
       // Extend agent_memory_metadata with user_id for per-user memories
-      const memoryColumns = db.prepare('PRAGMA table_info(agent_memory_metadata)').all<{ name: string }>()
+      const memoryColumns = db
+        .prepare('PRAGMA table_info(agent_memory_metadata)')
+        .all<{ name: string }>()
       const hasMemoryUserColumn = memoryColumns.some((column) => column.name === 'user_id')
       if (!hasMemoryUserColumn) {
         db.exec(`ALTER TABLE agent_memory_metadata ADD COLUMN user_id TEXT`)
-        db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_user ON agent_memory_metadata(user_id, category)`)
+        db.exec(
+          `CREATE INDEX IF NOT EXISTS idx_memory_user ON agent_memory_metadata(user_id, category)`
+        )
       }
 
       // Extend chat_conversations with user_id for per-user conversations
-      const conversationColumns = db.prepare('PRAGMA table_info(chat_conversations)').all<{ name: string }>()
-      const hasConversationUserColumn = conversationColumns.some((column) => column.name === 'user_id')
+      const conversationColumns = db
+        .prepare('PRAGMA table_info(chat_conversations)')
+        .all<{ name: string }>()
+      const hasConversationUserColumn = conversationColumns.some(
+        (column) => column.name === 'user_id'
+      )
       if (!hasConversationUserColumn) {
         db.exec(`ALTER TABLE chat_conversations ADD COLUMN user_id TEXT`)
         db.exec(`CREATE INDEX IF NOT EXISTS idx_conversations_user ON chat_conversations(user_id)`)
@@ -677,10 +730,12 @@ const migrations: Migration[] = [
 
       // Create default user profile
       const now = Date.now()
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO user_profiles (id, name, preferred_language, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
-      `).run('default-user', 'Default User', 'zh', now, now)
+      `
+      ).run('default-user', 'Default User', 'zh', now, now)
     }
   },
   {
@@ -730,8 +785,12 @@ const migrations: Migration[] = [
           inputs_json TEXT
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_executions_updated_at ON skill_executions(updated_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_executions_session_status ON skill_executions(session_id, status, updated_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_executions_updated_at ON skill_executions(updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_executions_session_status ON skill_executions(session_id, status, updated_at DESC)'
+      )
 
       db.exec(`
         CREATE TABLE IF NOT EXISTS skill_execution_steps (
@@ -747,7 +806,9 @@ const migrations: Migration[] = [
           FOREIGN KEY (execution_id) REFERENCES skill_executions(id) ON DELETE CASCADE
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_steps_execution_step ON skill_execution_steps(execution_id, step_id, attempt)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_execution_steps_execution_step ON skill_execution_steps(execution_id, step_id, attempt)'
+      )
 
       db.exec(`
         CREATE TABLE IF NOT EXISTS skill_execution_artifacts (
@@ -764,8 +825,12 @@ const migrations: Migration[] = [
           FOREIGN KEY (execution_id) REFERENCES skill_executions(id) ON DELETE CASCADE
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_execution_step ON skill_execution_artifacts(execution_id, step_id, created_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_artifact_id ON skill_execution_artifacts(artifact_id)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_execution_step ON skill_execution_artifacts(execution_id, step_id, created_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_execution_artifacts_artifact_id ON skill_execution_artifacts(artifact_id)'
+      )
     }
   },
 
@@ -773,19 +838,21 @@ const migrations: Migration[] = [
   {
     name: '019_add_rss_draft_store_fields',
     up: (db) => {
-      const rssItemColumns = db.prepare("PRAGMA table_info(rss_items)").all<{ name: string }>()
+      const rssItemColumns = db.prepare('PRAGMA table_info(rss_items)').all<{ name: string }>()
       const hasInboxVisible = rssItemColumns.some((column) => column.name === 'inbox_visible')
       if (!hasInboxVisible) {
         db.exec('ALTER TABLE rss_items ADD COLUMN inbox_visible INTEGER DEFAULT 1')
       }
 
-      const rssSourceColumns = db.prepare("PRAGMA table_info(rss_sources)").all<{ name: string }>()
+      const rssSourceColumns = db.prepare('PRAGMA table_info(rss_sources)').all<{ name: string }>()
       const hasDraftSeeded = rssSourceColumns.some((column) => column.name === 'draft_seeded')
       if (!hasDraftSeeded) {
         db.exec('ALTER TABLE rss_sources ADD COLUMN draft_seeded INTEGER DEFAULT 0')
       }
 
-      db.exec('CREATE INDEX IF NOT EXISTS idx_rss_items_inbox_visible ON rss_items(inbox_visible, starred, published_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_rss_items_inbox_visible ON rss_items(inbox_visible, starred, published_at DESC)'
+      )
       db.exec('UPDATE rss_items SET inbox_visible = 1 WHERE inbox_visible IS NULL')
       db.exec('UPDATE rss_sources SET draft_seeded = 0 WHERE draft_seeded IS NULL')
     }
@@ -814,8 +881,305 @@ const migrations: Migration[] = [
           finished_at TEXT
         )
       `)
-      db.exec('CREATE INDEX IF NOT EXISTS idx_browser_tasks_status_updated ON browser_tasks(status, updated_at DESC)')
-      db.exec('CREATE INDEX IF NOT EXISTS idx_browser_tasks_kind_created ON browser_tasks(kind, created_at DESC)')
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_browser_tasks_status_updated ON browser_tasks(status, updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_browser_tasks_kind_created ON browser_tasks(kind, created_at DESC)'
+      )
+    }
+  },
+
+  // ------------------------------------------------------------------ 021
+  {
+    name: '021_create_session_recall_tables',
+    up: (db) => {
+      const conversationColumns = db
+        .prepare('PRAGMA table_info(chat_conversations)')
+        .all<{ name: string }>()
+      const hasParentConversationId = conversationColumns.some(
+        (column) => column.name === 'parent_conversation_id'
+      )
+      const hasLineageRootId = conversationColumns.some(
+        (column) => column.name === 'lineage_root_id'
+      )
+      const hasResumeTitle = conversationColumns.some((column) => column.name === 'resume_title')
+
+      if (!hasParentConversationId) {
+        db.exec(`ALTER TABLE chat_conversations ADD COLUMN parent_conversation_id TEXT`)
+      }
+      if (!hasLineageRootId) {
+        db.exec(`ALTER TABLE chat_conversations ADD COLUMN lineage_root_id TEXT`)
+      }
+      if (!hasResumeTitle) {
+        db.exec(`ALTER TABLE chat_conversations ADD COLUMN resume_title TEXT`)
+      }
+
+      db.exec(`UPDATE chat_conversations SET lineage_root_id = COALESCE(lineage_root_id, id)`)
+      db.exec(`UPDATE chat_conversations SET resume_title = COALESCE(resume_title, title)`)
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_chat_conversations_lineage_root ON chat_conversations(lineage_root_id, updated_at DESC)`
+      )
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_chat_conversations_resume_title ON chat_conversations(resume_title, updated_at DESC)`
+      )
+
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(
+          message_id UNINDEXED,
+          conversation_id UNINDEXED,
+          content
+        )
+      `)
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_recall_metadata (
+          conversation_id TEXT PRIMARY KEY,
+          lineage_root_id TEXT NOT NULL,
+          resume_title TEXT NOT NULL,
+          title TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          thread_key TEXT NOT NULL,
+          user_id TEXT,
+          channel_key TEXT NOT NULL,
+          preview_text TEXT,
+          latest_task_title TEXT,
+          latest_task_summary TEXT,
+          attachment_names_json TEXT NOT NULL DEFAULT '[]',
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_updated ON session_recall_metadata(updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_channel ON session_recall_metadata(channel_key, updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_resume_title ON session_recall_metadata(resume_title, updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_lineage_root ON session_recall_metadata(lineage_root_id, updated_at DESC)'
+      )
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_recall_attachment_index (
+          attachment_key TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          attachment_id TEXT NOT NULL,
+          source_message_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT,
+          ext TEXT,
+          path TEXT,
+          created_at TEXT NOT NULL
+        )
+      `)
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_attachment_conversation ON session_recall_attachment_index(conversation_id, created_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_attachment_name ON session_recall_attachment_index(name)'
+      )
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_recall_vectors (
+          conversation_id TEXT PRIMARY KEY,
+          content_hash TEXT NOT NULL,
+          vector_version TEXT NOT NULL,
+          vector_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_session_recall_vectors_updated ON session_recall_vectors(updated_at DESC)'
+      )
+
+      const existingFtsRows =
+        db.prepare('SELECT COUNT(1) as count FROM chat_messages_fts').all<{ count: number }>()?.[0]
+          ?.count || 0
+      if (existingFtsRows === 0) {
+        const messages = db
+          .prepare(
+            `
+          SELECT id, conversation_id, content
+          FROM chat_messages
+          ORDER BY timestamp ASC
+        `
+          )
+          .all<{ id: string; conversation_id: string; content: string }>()
+        const insertFts = db.prepare(
+          'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
+        )
+        for (const message of messages) {
+          insertFts.run(message.id, message.conversation_id, message.content || '')
+        }
+      }
+
+      db.exec('DELETE FROM session_recall_attachment_index')
+      db.exec('DELETE FROM session_recall_metadata')
+
+      const conversations = db
+        .prepare(
+          `
+        SELECT id, title, parent_conversation_id, lineage_root_id, resume_title, source_kind, source_id, thread_key, user_id, updated_at
+        FROM chat_conversations
+      `
+        )
+        .all<{
+          id: string
+          title: string
+          parent_conversation_id: string | null
+          lineage_root_id: string | null
+          resume_title: string | null
+          source_kind: string
+          source_id: string
+          thread_key: string
+          user_id: string | null
+          updated_at: string
+        }>()
+      const messages = db
+        .prepare(
+          `
+        SELECT id, conversation_id, content, timestamp, meta_json
+        FROM chat_messages
+        ORDER BY timestamp ASC
+      `
+        )
+        .all<{
+          id: string
+          conversation_id: string
+          content: string
+          timestamp: string
+          meta_json: string | null
+        }>()
+
+      const messagesByConversation = new Map<
+        string,
+        Array<{
+          id: string
+          content: string
+          timestamp: string
+          meta_json: string | null
+        }>
+      >()
+      for (const message of messages) {
+        const list = messagesByConversation.get(message.conversation_id) || []
+        list.push(message)
+        messagesByConversation.set(message.conversation_id, list)
+      }
+
+      const insertAttachment = db.prepare(`
+        INSERT OR REPLACE INTO session_recall_attachment_index (
+          attachment_key, conversation_id, attachment_id, source_message_id, name, type, ext, path, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      const insertMetadata = db.prepare(`
+        INSERT INTO session_recall_metadata (
+          conversation_id, lineage_root_id, resume_title, title, source_kind, source_id, thread_key,
+          user_id, channel_key, preview_text, latest_task_title, latest_task_summary, attachment_names_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      for (const conversation of conversations) {
+        const conversationMessages = messagesByConversation.get(conversation.id) || []
+        let previewText: string | null = null
+        const attachmentNames: string[] = []
+        const seenAttachmentKeys = new Set<string>()
+
+        for (const message of conversationMessages) {
+          if (!previewText && String(message.content || '').trim()) {
+            previewText = String(message.content || '')
+              .trim()
+              .slice(0, 280)
+          }
+          let meta: Record<string, unknown> = {}
+          try {
+            meta = message.meta_json
+              ? (JSON.parse(message.meta_json) as Record<string, unknown>)
+              : {}
+          } catch {
+            meta = {}
+          }
+          const rawAttachments = meta.attachments
+          if (!Array.isArray(rawAttachments)) continue
+          for (let index = 0; index < rawAttachments.length; index += 1) {
+            const item = rawAttachments[index]
+            if (!item || typeof item !== 'object') continue
+            const record = item as Record<string, unknown>
+            const attachmentId = String(record.id || `${message.id}-${index}`).trim()
+            const path = String(record.path || '').trim()
+            const name = String(record.name || '').trim()
+            if (!attachmentId || !name) continue
+            const attachmentKey = `${conversation.id}::${attachmentId}::${path || name}`
+            if (seenAttachmentKeys.has(attachmentKey)) continue
+            seenAttachmentKeys.add(attachmentKey)
+            attachmentNames.push(name)
+            insertAttachment.run(
+              attachmentKey,
+              conversation.id,
+              attachmentId,
+              message.id,
+              name,
+              String(record.type || '').trim() || null,
+              String(record.ext || '').trim() || null,
+              path || null,
+              message.timestamp
+            )
+          }
+        }
+
+        const channelKey = `${conversation.source_kind}:${conversation.source_kind === 'local' ? 'app' : conversation.source_id}`
+        insertMetadata.run(
+          conversation.id,
+          conversation.lineage_root_id || conversation.id,
+          conversation.resume_title || conversation.title,
+          conversation.title,
+          conversation.source_kind,
+          conversation.source_id,
+          conversation.thread_key,
+          conversation.user_id || null,
+          channelKey,
+          previewText,
+          null,
+          null,
+          JSON.stringify(Array.from(new Set(attachmentNames)).slice(0, 12)),
+          conversation.updated_at
+        )
+      }
+    }
+  },
+  {
+    name: '022_add_memory_source_types',
+    up: (db) => {
+      const memoryColumns = db
+        .prepare('PRAGMA table_info(agent_memory_metadata)')
+        .all<{ name: string }>()
+      const hasSourceTypeColumn = memoryColumns.some((column) => column.name === 'source_type')
+      if (!hasSourceTypeColumn) {
+        db.exec(
+          `ALTER TABLE agent_memory_metadata ADD COLUMN source_type TEXT DEFAULT 'scope_memory'`
+        )
+      }
+
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_memory_source_type ON agent_memory_metadata(source_type, archived_at)'
+      )
+
+      db.exec(`
+        UPDATE agent_memory_metadata
+        SET source_type = CASE
+          WHEN category = 'user_preference' THEN 'resident_user'
+          WHEN category IN ('trigger', 'rule') THEN 'trigger_rule'
+          WHEN id IN (SELECT memory_id FROM agent_trigger_refs) THEN 'trigger_rule'
+          WHEN category = 'summary' OR scope_id IS NOT NULL THEN 'scope_memory'
+          ELSE 'resident_agent'
+        END
+        WHERE source_type IS NULL
+           OR TRIM(source_type) = ''
+           OR source_type NOT IN ('resident_agent', 'resident_user', 'scope_memory', 'trigger_rule')
+      `)
     }
   }
 ]

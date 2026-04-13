@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import type { ConversationScope } from '../main/modules/agent-control/types'
+import type { SessionRecallCapsule } from '../shared/session-recall'
 
 function createScope(): ConversationScope {
   return {
@@ -17,7 +18,7 @@ function createScope(): ConversationScope {
     meta: {},
     createdAt: '2026-03-08T10:00:00.000Z',
     updatedAt: '2026-03-08T10:00:00.000Z',
-    lastMessageAt: '2026-03-08T10:00:00.000Z',
+    lastMessageAt: '2026-03-08T10:00:00.000Z'
   }
 }
 
@@ -32,7 +33,7 @@ function createChannelScope(): ConversationScope {
     meta: {},
     createdAt: '2026-03-08T10:00:00.000Z',
     updatedAt: '2026-03-08T10:00:00.000Z',
-    lastMessageAt: '2026-03-08T10:00:00.000Z',
+    lastMessageAt: '2026-03-08T10:00:00.000Z'
   }
 }
 
@@ -47,20 +48,24 @@ describe('PromptAssemblyService', () => {
       getMemoryRoot: () => root,
       getScopeMessages: () => [
         { role: 'user', content: '请帮我整理今天的选题' },
-        { role: 'assistant', content: '我先给你一版提纲。' },
+        { role: 'assistant', content: '我先给你一版提纲。' }
       ],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '帮我整理一版内容提纲',
+      message: '帮我整理一版内容提纲'
     })
 
-    assert.match(result.systemPrompt, /L0 常驻记忆/)
+    assert.match(result.systemPrompt, /L0 常驻上下文/)
     assert.strictEqual(result.triggerHits.length, 0)
-    assert.ok(result.memoryRefs.some((item) => item.layer === 'l0'))
-    assert.ok(result.memoryRefs.some((item) => item.layer === 'l1'))
+    assert.ok(result.memoryRefs.some((item) => item.sourceType === 'resident_agent'))
+    assert.ok(result.memoryRefs.some((item) => item.sourceType === 'resident_user'))
+    assert.ok(result.memoryRefs.some((item) => item.sourceType === 'scope_memory'))
+    assert.ok(!result.memoryRefs.some((item) => item.title === '运行指令'))
+    assert.ok(!result.memoryRefs.some((item) => item.title === '工具索引'))
+    assert.ok(!result.memoryRefs.some((item) => item.title === '人格定义'))
     assert.ok(result.bootstrapMessages.some((item) => item.includes('L1 会话上下文')))
 
     rmSync(root, { recursive: true, force: true })
@@ -76,17 +81,21 @@ describe('PromptAssemblyService', () => {
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '请创建飞书文档并插入一张图片',
+      message: '请创建飞书文档并插入一张图片'
     })
 
     assert.ok(result.triggerHits.some((item) => item.id === 'feishu-doc' && item.blocking))
     assert.ok(result.triggerHits.some((item) => item.id === 'feishu-image' && item.blocking))
-    assert.ok(result.memoryRefs.some((item) => item.layer === 'l2' && item.title.includes('飞书')))
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.sourceType === 'trigger_rule' && item.title.includes('飞书')
+      )
+    )
     assert.ok(result.bootstrapMessages.some((item) => item.includes('L2 按需规则')))
 
     rmSync(root, { recursive: true, force: true })
@@ -109,12 +118,13 @@ describe('PromptAssemblyService', () => {
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程',
+      message:
+        '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程'
     })
 
     assert.ok(result.contextBudget.totalChars <= 16000)
@@ -124,7 +134,7 @@ describe('PromptAssemblyService', () => {
       scope: createScope(),
       finalText: '完成了跨模块动作，保留诊断信息。',
       usedTools: ['feishu.doc', 'browser.upload', 'calendar.create'],
-      success: true,
+      success: true
     })
 
     const outcomePath = join(root, 'memory', '2026-03-08.md')
@@ -142,14 +152,14 @@ describe('PromptAssemblyService', () => {
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     service.recordRunOutcome({
       scope: createScope(),
       finalText: '第一次写回仍应成功。',
       usedTools: ['design.composeSocialCover'],
-      success: true,
+      success: true
     })
 
     const outcomePath = join(root, 'memory', '2026-03-08.md')
@@ -170,14 +180,14 @@ describe('PromptAssemblyService', () => {
         { role: 'user', content: '用户消息 '.repeat(80) },
         { role: 'assistant', content: '助手回复 '.repeat(80) },
         { role: 'user', content: '继续补充 '.repeat(80) },
-        { role: 'assistant', content: '继续处理 '.repeat(80) },
+        { role: 'assistant', content: '继续处理 '.repeat(80) }
       ],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '继续整理',
+      message: '继续整理'
     })
 
     assert.equal(result.compression?.historyCompressed, true)
@@ -194,16 +204,24 @@ describe('PromptAssemblyService', () => {
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '帮我继续整理今天的设计思路',
+      message: '帮我继续整理今天的设计思路'
     })
 
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-07.md'))
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.path === 'memory/2026-03-08.md' && item.sourceType === 'scope_memory'
+      )
+    )
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.path === 'memory/2026-03-07.md' && item.sourceType === 'scope_memory'
+      )
+    )
     assert.equal(existsSync(join(root, 'docs')), true)
     assert.equal(existsSync(join(root, 'memory')), true)
     assert.equal(existsSync(join(root, 'memory', '2026-03-08.md')), true)
@@ -216,22 +234,30 @@ describe('PromptAssemblyService', () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-local-isolation-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
     mkdirSync(join(root, 'memory'), { recursive: true })
-    writeFileSync(join(root, 'memory', '2026-03-08.md'), '## daily\n- 上一轮对话在讨论广州天气', 'utf8')
+    writeFileSync(
+      join(root, 'memory', '2026-03-08.md'),
+      '## daily\n- 上一轮对话在讨论广州天气',
+      'utf8'
+    )
 
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '新开会话，帮我写标题',
+      message: '新开会话，帮我写标题'
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n')
     assert.match(joinedBootstrap, /广州天气/)
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.path === 'memory/2026-03-08.md' && item.sourceType === 'scope_memory'
+      )
+    )
 
     rmSync(root, { recursive: true, force: true })
   })
@@ -245,17 +271,112 @@ describe('PromptAssemblyService', () => {
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
       getScopeMessages: () => [],
-      now: () => new Date('2026-03-08T10:00:00.000Z'),
+      now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
     const result = await service.buildForScopedRun({
       scope: createChannelScope(),
-      message: '继续处理渠道消息',
+      message: '继续处理渠道消息'
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n')
     assert.match(joinedBootstrap, /渠道线程的上下文摘要/)
-    assert.ok(result.memoryRefs.some((item) => item.path === 'memory/2026-03-08.md'))
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.path === 'memory/2026-03-08.md' && item.sourceType === 'scope_memory'
+      )
+    )
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('injects explicitly attached cross-session recall capsules as a separate prompt section', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-session-recall-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const attachedCapsules: SessionRecallCapsule[] = [
+      {
+        conversationId: 'conv-old-1',
+        lineageRootId: 'conv-old-1',
+        resumeTitle: '品牌复盘',
+        title: '品牌复盘',
+        sourceKind: 'local',
+        sourceId: 'app',
+        threadKey: 'conv-old-1',
+        summary: '上次已经确定品牌方向要更克制，并保留 logo 线索。',
+        latestTaskTitle: '品牌提案',
+        latestTaskSummary: '已完成品牌方向和 logo 风格提案',
+        attachmentNames: ['brand-board.pdf'],
+        updatedAt: '2026-04-12T10:00:00.000Z'
+      }
+    ]
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [{ role: 'user', content: '帮我继续做这一轮' }],
+      getScopeSessionRecallCapsules: async () => attachedCapsules,
+      now: () => new Date('2026-04-12T12:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '继续做品牌方案'
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.match(joinedBootstrap, /跨会话回看/)
+    assert.match(joinedBootstrap, /品牌复盘/)
+    assert.match(joinedBootstrap, /brand-board\.pdf/)
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.sourceType === 'session_recall' && item.title === '品牌复盘'
+      )
+    )
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('injects automatic cross-session recall capsules separately from explicitly attached ones', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-auto-session-recall-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [{ role: 'user', content: '帮我继续做品牌方案' }],
+      getAutoSessionRecallCapsules: async () => [
+        {
+          conversationId: 'conv-auto-1',
+          lineageRootId: 'conv-auto-1',
+          resumeTitle: '品牌复盘',
+          title: '品牌复盘',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: 'conv-auto-1',
+          summary: '上次已经明确品牌方向应该更克制，并保留 logo 线索。',
+          latestTaskTitle: '品牌提案',
+          latestTaskSummary: '已完成品牌方向和 logo 风格提案',
+          attachmentNames: ['brand-board.pdf'],
+          updatedAt: '2026-04-12T10:00:00.000Z'
+        }
+      ],
+      now: () => new Date('2026-04-12T12:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '继续做品牌方向和 logo 风格'
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.match(joinedBootstrap, /自动跨会话回看/)
+    assert.match(joinedBootstrap, /品牌复盘/)
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.sourceType === 'session_recall' && item.title === '品牌复盘'
+      )
+    )
 
     rmSync(root, { recursive: true, force: true })
   })

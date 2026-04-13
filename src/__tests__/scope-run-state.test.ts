@@ -5,7 +5,7 @@ import {
   deriveScopeRunStatePatch,
   isActiveScopePhase,
   mergeArtifacts,
-  phaseToToolTraceStatus,
+  phaseToToolTraceStatus
 } from '../renderer/modules/agent/scopeRunState'
 
 describe('scope run state helpers', () => {
@@ -18,8 +18,8 @@ describe('scope run state helpers', () => {
           kind: 'document-save',
           label: 'draft.md',
           path: '/tmp/draft.md',
-          createdAt: '2026-03-07T00:00:00.000Z',
-        },
+          createdAt: '2026-03-07T00:00:00.000Z'
+        }
       ],
       [
         {
@@ -28,7 +28,7 @@ describe('scope run state helpers', () => {
           kind: 'document-save',
           label: 'draft copy',
           path: '/tmp/draft.md',
-          createdAt: '2026-03-07T00:00:01.000Z',
+          createdAt: '2026-03-07T00:00:01.000Z'
         },
         {
           id: 'a3',
@@ -36,15 +36,15 @@ describe('scope run state helpers', () => {
           kind: 'rss-report',
           label: 'report.md',
           path: '/tmp/report.md',
-          createdAt: '2026-03-07T00:00:02.000Z',
-        },
-      ],
+          createdAt: '2026-03-07T00:00:02.000Z'
+        }
+      ]
     )
 
     assert.strictEqual(merged.length, 2)
     assert.deepStrictEqual(
       merged.map((item) => item.path),
-      ['/tmp/draft.md', '/tmp/report.md'],
+      ['/tmp/draft.md', '/tmp/report.md']
     )
   })
 
@@ -68,9 +68,9 @@ describe('scope run state helpers', () => {
               details: '页面出现验证码',
               timeout_sec: 30,
               controllerId: 'controller-1',
-              ownerTabId: 'tab-9',
-            }),
-          },
+              ownerTabId: 'tab-9'
+            })
+          }
         },
         {
           scopeId: 'scope-1',
@@ -83,8 +83,8 @@ describe('scope run state helpers', () => {
           artifactRefs: [],
           checkpointExpiresAt: null,
           responseBuffer: '',
-          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
-        },
+          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+        }
       )
 
       assert.strictEqual(patch.phase, 'takeover')
@@ -115,10 +115,10 @@ describe('scope run state helpers', () => {
         toolEvent: {
           kind: 'result',
           timestamp: '2026-03-30T10:00:00.000Z',
-          text: '[计划] 目标：在目标页面上传素材并提交任务\n[计划] 顺序：resolve_target_page -> resolve_attachment -> ensure_upload -> final_reconcile',
-        },
+          text: '[计划] 目标：在目标页面上传素材并提交任务\n[计划] 顺序：resolve_target_page -> resolve_attachment -> ensure_upload -> final_reconcile'
+        }
       },
-      null,
+      null
     )
 
     assert.strictEqual(planningPatch.taskTitle, '在目标页面上传素材并提交任务')
@@ -128,8 +128,8 @@ describe('scope run state helpers', () => {
         { id: 'resolve_target_page', status: 'pending' },
         { id: 'resolve_attachment', status: 'pending' },
         { id: 'ensure_upload', status: 'pending' },
-        { id: 'final_reconcile', status: 'pending' },
-      ],
+        { id: 'final_reconcile', status: 'pending' }
+      ]
     )
 
     const stagePatch = deriveScopeRunStatePatch(
@@ -139,8 +139,8 @@ describe('scope run state helpers', () => {
         toolEvent: {
           kind: 'result',
           timestamp: '2026-03-30T10:00:05.000Z',
-          text: '[阶段] 步骤 3/4 上传附件：页面已出现上传卡片',
-        },
+          text: '[阶段] 步骤 3/4 上传附件：页面已出现上传卡片'
+        }
       },
       {
         scopeId: 'scope-browser-1',
@@ -182,17 +182,37 @@ describe('scope run state helpers', () => {
         taskTitle: '在目标页面上传素材并提交任务',
         taskSummary: '准备开始浏览器任务',
         steps: [
-          { id: 'resolve_target_page', title: '确认目标页', status: 'pending', updatedAt: '2026-03-30T10:00:00.000Z' },
-          { id: 'resolve_attachment', title: '确认附件', status: 'pending', updatedAt: '2026-03-30T10:00:00.000Z' },
-          { id: 'ensure_upload', title: '上传附件', status: 'pending', updatedAt: '2026-03-30T10:00:00.000Z' },
-          { id: 'final_reconcile', title: '结果复核', status: 'pending', updatedAt: '2026-03-30T10:00:00.000Z' },
+          {
+            id: 'resolve_target_page',
+            title: '确认目标页',
+            status: 'pending',
+            updatedAt: '2026-03-30T10:00:00.000Z'
+          },
+          {
+            id: 'resolve_attachment',
+            title: '确认附件',
+            status: 'pending',
+            updatedAt: '2026-03-30T10:00:00.000Z'
+          },
+          {
+            id: 'ensure_upload',
+            title: '上传附件',
+            status: 'pending',
+            updatedAt: '2026-03-30T10:00:00.000Z'
+          },
+          {
+            id: 'final_reconcile',
+            title: '结果复核',
+            status: 'pending',
+            updatedAt: '2026-03-30T10:00:00.000Z'
+          }
         ],
         currentStepId: null,
         waitingFor: 'none',
         resumableActions: ['cancel'],
         recentArtifacts: [],
-        memoryCapture: null,
-      },
+        memoryCapture: null
+      }
     )
 
     assert.strictEqual(stagePatch.currentStepId, 'ensure_upload')
@@ -203,8 +223,8 @@ describe('scope run state helpers', () => {
         { id: 'resolve_target_page', status: 'done' },
         { id: 'resolve_attachment', status: 'done' },
         { id: 'ensure_upload', status: 'running' },
-        { id: 'final_reconcile', status: 'pending' },
-      ],
+        { id: 'final_reconcile', status: 'pending' }
+      ]
     )
   })
 
@@ -219,11 +239,11 @@ describe('scope run state helpers', () => {
           'Current step: collect_input',
           'Blocker: need_input - 请选择视频风格',
           'Recent steps: prepare(done), collect_input(waiting)',
-          'Recent artifacts: /tmp/storyboard.md',
+          'Recent artifacts: /tmp/storyboard.md'
         ].join('\n'),
-        timestamp: '2026-03-30T10:10:00.000Z',
+        timestamp: '2026-03-30T10:10:00.000Z'
       },
-      null,
+      null
     )
 
     assert.strictEqual(patch.taskTitle, '技能执行 · video-copy-analyzer')
@@ -236,8 +256,8 @@ describe('scope run state helpers', () => {
       patch.steps?.map((item) => ({ id: item.id, status: item.status })),
       [
         { id: 'prepare', status: 'done' },
-        { id: 'collect_input', status: 'blocked' },
-      ],
+        { id: 'collect_input', status: 'blocked' }
+      ]
     )
   })
 
@@ -252,18 +272,38 @@ describe('scope run state helpers', () => {
         waitingFor: 'none',
         resumableActions: ['cancel'],
         steps: [
-          { id: 'resolve_target_page', title: '确认目标页', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
-          { id: 'resolve_attachment', title: '确认附件', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
-          { id: 'ensure_upload', title: '上传附件', status: 'done', updatedAt: '2026-04-08T12:00:00.000Z' },
-          { id: 'ensure_prompt', title: '填写提示词', status: 'running', updatedAt: '2026-04-08T12:00:00.000Z' },
+          {
+            id: 'resolve_target_page',
+            title: '确认目标页',
+            status: 'done',
+            updatedAt: '2026-04-08T12:00:00.000Z'
+          },
+          {
+            id: 'resolve_attachment',
+            title: '确认附件',
+            status: 'done',
+            updatedAt: '2026-04-08T12:00:00.000Z'
+          },
+          {
+            id: 'ensure_upload',
+            title: '上传附件',
+            status: 'done',
+            updatedAt: '2026-04-08T12:00:00.000Z'
+          },
+          {
+            id: 'ensure_prompt',
+            title: '填写提示词',
+            status: 'running',
+            updatedAt: '2026-04-08T12:00:00.000Z'
+          }
         ],
         toolEvent: {
           kind: 'result',
           timestamp: '2026-04-08T12:00:00.000Z',
-          text: '上传附件阶段已完成',
-        },
+          text: '上传附件阶段已完成'
+        }
       },
-      null,
+      null
     )
 
     assert.strictEqual(patch.taskTitle, '使用当前附件完成网页任务')
@@ -275,8 +315,8 @@ describe('scope run state helpers', () => {
         { id: 'resolve_target_page', status: 'done' },
         { id: 'resolve_attachment', status: 'done' },
         { id: 'ensure_upload', status: 'done' },
-        { id: 'ensure_prompt', status: 'running' },
-      ],
+        { id: 'ensure_prompt', status: 'running' }
+      ]
     )
   })
 
@@ -294,22 +334,30 @@ describe('scope run state helpers', () => {
             taskTitle: '章节改写',
             taskSummary: '已完成：第一部分',
             steps: [
-              { id: 'execute', title: '章节改写', status: 'done', updatedAt: '2026-04-09T10:20:00.000Z' },
+              {
+                id: 'execute',
+                title: '章节改写',
+                status: 'done',
+                updatedAt: '2026-04-09T10:20:00.000Z'
+              }
             ],
             currentStepId: 'execute',
             waitingFor: 'none',
-            resumableActions: ['cancel'],
-          }),
-        },
+            resumableActions: ['cancel']
+          })
+        }
       },
-      null,
+      null
     )
 
     assert.strictEqual(patch.module, 'document')
     assert.strictEqual(patch.taskTitle, '章节改写')
     assert.strictEqual(patch.taskSummary, '已完成：第一部分')
     assert.strictEqual(patch.currentStepId, 'execute')
-    assert.deepStrictEqual(patch.steps?.map((item) => item.status), ['done'])
+    assert.deepStrictEqual(
+      patch.steps?.map((item) => item.status),
+      ['done']
+    )
   })
 
   it('prefers structured design task fields over text parsing', () => {
@@ -326,21 +374,29 @@ describe('scope run state helpers', () => {
             taskTitle: '设计任务',
             taskSummary: '主版式已生成',
             steps: [
-              { id: 'execute', title: '设计任务', status: 'done', updatedAt: '2026-04-09T10:25:00.000Z' },
+              {
+                id: 'execute',
+                title: '设计任务',
+                status: 'done',
+                updatedAt: '2026-04-09T10:25:00.000Z'
+              }
             ],
             currentStepId: 'execute',
             waitingFor: 'none',
-            resumableActions: ['cancel'],
-          }),
-        },
+            resumableActions: ['cancel']
+          })
+        }
       },
-      null,
+      null
     )
 
     assert.strictEqual(patch.module, 'design')
     assert.strictEqual(patch.taskTitle, '设计任务')
     assert.strictEqual(patch.taskSummary, '主版式已生成')
-    assert.deepStrictEqual(patch.steps?.map((item) => item.status), ['done'])
+    assert.deepStrictEqual(
+      patch.steps?.map((item) => item.status),
+      ['done']
+    )
   })
 
   it('preserves execution diagnostics without overriding structured task summary', () => {
@@ -354,21 +410,60 @@ describe('scope run state helpers', () => {
           compression: {
             historyCompressed: true,
             toolTraceCompressed: false,
-            artifactSummaryUsed: false,
+            artifactSummaryUsed: false
           },
           budget: {
             maxIterations: 24,
             maxToolCalls: 24,
-            maxParallelToolGroups: 1,
-          },
+            maxParallelToolGroups: 1
+          }
         },
-        timestamp: '2026-04-10T01:00:00.000Z',
+        timestamp: '2026-04-10T01:00:00.000Z'
       },
-      null,
+      null
     )
 
     assert.strictEqual(patch.taskSummary, '准备开始浏览器上传流程')
     assert.strictEqual(patch.executionDiagnostics?.compression?.historyCompressed, true)
     assert.strictEqual(patch.executionDiagnostics?.budget?.maxToolCalls, 24)
+  })
+
+  it('accepts typed memory refs and keeps session recall separate from resident memory', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-13T10:00:00.000Z',
+        memoryRefs: [
+          {
+            id: 'resident-1',
+            layer: 'l0',
+            sourceType: 'resident_agent',
+            title: '项目约定',
+            loadedAt: '2026-04-13T10:00:00.000Z'
+          },
+          {
+            id: 'recall-1',
+            layer: 'recall',
+            sourceType: 'session_recall',
+            title: '旧会话品牌复盘',
+            loadedAt: '2026-04-13T10:00:00.000Z'
+          }
+        ],
+        latestText: '继续执行'
+      },
+      null
+    )
+
+    assert.deepStrictEqual(
+      patch.memoryRefs?.map((item) => ({
+        id: item.id,
+        layer: item.layer,
+        sourceType: item.sourceType
+      })),
+      [
+        { id: 'resident-1', layer: 'l0', sourceType: 'resident_agent' },
+        { id: 'recall-1', layer: 'recall', sourceType: 'session_recall' }
+      ]
+    )
   })
 })

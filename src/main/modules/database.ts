@@ -246,6 +246,9 @@ export interface ChatConversationRecord {
   agent: string
   user_id?: string | null
   title: string
+  parent_conversation_id?: string | null
+  lineage_root_id?: string | null
+  resume_title?: string | null
   source_kind: ConversationSourceKind
   source_id: string
   thread_key: string
@@ -1291,9 +1294,11 @@ export class DatabaseManager {
 
   updateConversationTitle(id: string, title: string): void {
     if (!this.db) return
+    const existing = this.getConversationScope(id)
     this.db.prepare(
-      'UPDATE chat_conversations SET title = ?, updated_at = ? WHERE id = ?'
-    ).run(title, new Date().toISOString(), id)
+      'UPDATE chat_conversations SET title = ?, resume_title = ?, updated_at = ? WHERE id = ?'
+    ).run(title, title, new Date().toISOString(), id)
+    if (existing) this.syncConversationRecallMetadata(id)
   }
 
   getConversations(agent: string, limit = 50): Array<{ id: string; agent: string; title: string; created_at: string; updated_at: string }> {
@@ -1334,6 +1339,9 @@ export class DatabaseManager {
     agent: string
     userId?: string
     title: string
+    parentConversationId?: string | null
+    lineageRootId?: string | null
+    resumeTitle?: string | null
     sourceKind: ConversationSourceKind
     sourceId: string
     threadKey: string
@@ -1348,12 +1356,16 @@ export class DatabaseManager {
     const metaJson = JSON.stringify(payload.meta || {})
     this.db.prepare(
       `INSERT INTO chat_conversations (
-         id, agent, user_id, title, source_kind, source_id, thread_key, meta_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, agent, user_id, title, parent_conversation_id, lineage_root_id, resume_title,
+         source_kind, source_id, thread_key, meta_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          agent = excluded.agent,
          user_id = excluded.user_id,
          title = excluded.title,
+         parent_conversation_id = excluded.parent_conversation_id,
+         lineage_root_id = excluded.lineage_root_id,
+         resume_title = excluded.resume_title,
          source_kind = excluded.source_kind,
          source_id = excluded.source_id,
          thread_key = excluded.thread_key,
@@ -1364,6 +1376,9 @@ export class DatabaseManager {
       payload.agent,
       payload.userId || null,
       payload.title,
+      payload.parentConversationId ?? existing?.parent_conversation_id ?? null,
+      payload.lineageRootId || existing?.lineage_root_id || id,
+      payload.resumeTitle || existing?.resume_title || payload.title,
       payload.sourceKind,
       payload.sourceId,
       payload.threadKey,
@@ -1371,6 +1386,7 @@ export class DatabaseManager {
       existing?.created_at ?? now,
       now,
     )
+    this.syncConversationRecallMetadata(id)
     return this.getConversationScope(id)!
   }
 
@@ -1401,6 +1417,9 @@ export class DatabaseManager {
   deleteConversation(id: string): void {
     if (!this.db) throw new Error('Database not available')
     this.db.prepare('DELETE FROM chat_messages WHERE conversation_id = ?').run(id)
+    this.db.prepare('DELETE FROM chat_messages_fts WHERE conversation_id = ?').run(id)
+    this.db.prepare('DELETE FROM session_recall_attachment_index WHERE conversation_id = ?').run(id)
+    this.db.prepare('DELETE FROM session_recall_metadata WHERE conversation_id = ?').run(id)
     this.db.prepare('DELETE FROM chat_conversations WHERE id = ?').run(id)
   }
 
@@ -1413,11 +1432,37 @@ export class DatabaseManager {
     meta?: Record<string, unknown>,
   ): void {
     if (!this.db) throw new Error('Database not available')
+    const metaJson = JSON.stringify(meta || {})
     this.db.prepare(
       'INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, conversationId, role, content, timestamp, JSON.stringify(meta || {}))
+    ).run(id, conversationId, role, content, timestamp, metaJson)
+    this.db.prepare(
+      'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
+    ).run(id, conversationId, content || '')
+    this.syncConversationRecallAttachments(conversationId, id, timestamp, meta)
+    this.syncConversationRecallMetadata(conversationId, {
+      previewText: content,
+      updatedAt: timestamp,
+    })
     // Touch conversation updated_at
     this.db.prepare('UPDATE chat_conversations SET updated_at = ? WHERE id = ?').run(timestamp, conversationId)
+  }
+
+  updateConversationScopeMeta(id: string, meta: Record<string, unknown>): ChatConversationRecord | null {
+    if (!this.db) return null
+    const existing = this.getConversationScope(id)
+    if (!existing) return null
+    this.db.prepare('UPDATE chat_conversations SET meta_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(meta || {}), new Date().toISOString(), id)
+    return this.getConversationScope(id)
+  }
+
+  updateConversationRecallTaskState(conversationId: string, taskTitle?: string | null, taskSummary?: string | null): void {
+    if (!this.db) return
+    this.syncConversationRecallMetadata(conversationId, {
+      latestTaskTitle: taskTitle ?? null,
+      latestTaskSummary: taskSummary ?? null,
+    })
   }
 
   getChatMessages(conversationId: string): ChatMessageRecord[] {
@@ -1473,6 +1518,119 @@ export class DatabaseManager {
       }
     }
     return attachments
+  }
+
+  private syncConversationRecallAttachments(
+    conversationId: string,
+    sourceMessageId: string,
+    createdAt: string,
+    meta?: Record<string, unknown>,
+  ): void {
+    if (!this.db) return
+    const raw = meta?.attachments
+    if (!Array.isArray(raw)) return
+    for (let index = 0; index < raw.length; index += 1) {
+      const item = raw[index]
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      const attachmentId = String(record.id || `${sourceMessageId}-${index}`).trim()
+      const path = String(record.path || '').trim()
+      const name = String(record.name || '').trim()
+      if (!attachmentId || !name) continue
+      const attachmentKey = `${conversationId}::${attachmentId}::${path || name}`
+      this.db.prepare(`
+        INSERT OR REPLACE INTO session_recall_attachment_index (
+          attachment_key, conversation_id, attachment_id, source_message_id, name, type, ext, path, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        attachmentKey,
+        conversationId,
+        attachmentId,
+        sourceMessageId,
+        name,
+        String(record.type || '').trim() || null,
+        String(record.ext || '').trim() || null,
+        path || null,
+        createdAt,
+      )
+    }
+  }
+
+  private syncConversationRecallMetadata(
+    conversationId: string,
+    overrides?: {
+      previewText?: string | null
+      latestTaskTitle?: string | null
+      latestTaskSummary?: string | null
+      updatedAt?: string
+    },
+  ): void {
+    if (!this.db) return
+    const conversation = this.getConversationScope(conversationId)
+    if (!conversation) return
+    const existing = this.db.prepare(`
+      SELECT preview_text, latest_task_title, latest_task_summary
+      FROM session_recall_metadata
+      WHERE conversation_id = ?
+      LIMIT 1
+    `).get<{
+      preview_text?: string | null
+      latest_task_title?: string | null
+      latest_task_summary?: string | null
+    }>(conversationId)
+    const attachmentRows = this.db.prepare(`
+      SELECT DISTINCT name
+      FROM session_recall_attachment_index
+      WHERE conversation_id = ?
+      ORDER BY created_at DESC, name COLLATE NOCASE ASC
+    `).all<{ name: string }>(conversationId)
+    const attachmentNames = attachmentRows
+      .map((row) => String(row.name || '').trim())
+      .filter(Boolean)
+      .slice(0, 12)
+    const previewText = String(overrides?.previewText ?? existing?.preview_text ?? '').trim()
+    const latestTaskTitle = overrides?.latestTaskTitle !== undefined
+      ? overrides.latestTaskTitle
+      : existing?.latest_task_title ?? null
+    const latestTaskSummary = overrides?.latestTaskSummary !== undefined
+      ? overrides.latestTaskSummary
+      : existing?.latest_task_summary ?? null
+    const channelKey = `${conversation.source_kind}:${conversation.source_kind === 'local' ? 'app' : conversation.source_id}`
+    this.db.prepare(`
+      INSERT INTO session_recall_metadata (
+        conversation_id, lineage_root_id, resume_title, title, source_kind, source_id, thread_key,
+        user_id, channel_key, preview_text, latest_task_title, latest_task_summary, attachment_names_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(conversation_id) DO UPDATE SET
+        lineage_root_id = excluded.lineage_root_id,
+        resume_title = excluded.resume_title,
+        title = excluded.title,
+        source_kind = excluded.source_kind,
+        source_id = excluded.source_id,
+        thread_key = excluded.thread_key,
+        user_id = excluded.user_id,
+        channel_key = excluded.channel_key,
+        preview_text = excluded.preview_text,
+        latest_task_title = excluded.latest_task_title,
+        latest_task_summary = excluded.latest_task_summary,
+        attachment_names_json = excluded.attachment_names_json,
+        updated_at = excluded.updated_at
+    `).run(
+      conversationId,
+      conversation.lineage_root_id || conversationId,
+      conversation.resume_title || conversation.title,
+      conversation.title,
+      conversation.source_kind,
+      conversation.source_id,
+      conversation.thread_key,
+      conversation.user_id || null,
+      channelKey,
+      previewText ? previewText.slice(0, 280) : null,
+      latestTaskTitle || null,
+      latestTaskSummary || null,
+      JSON.stringify(attachmentNames),
+      overrides?.updatedAt || conversation.updated_at,
+    )
   }
 
   // ===================== Settings (key-value) =====================

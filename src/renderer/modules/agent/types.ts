@@ -31,7 +31,14 @@ export interface ChatAttachment {
   isDirectory?: boolean
   size: number
   ext: string
-  source?: 'file' | 'browser-tab' | 'skill-folder' | 'design-project' | 'document-quote' | 'document-widget-target' | 'channel'
+  source?:
+    | 'file'
+    | 'browser-tab'
+    | 'skill-folder'
+    | 'design-project'
+    | 'document-quote'
+    | 'document-widget-target'
+    | 'channel'
   browserTabId?: string
   url?: string
   title?: string
@@ -72,6 +79,9 @@ export interface ConversationScope {
   id: string
   agent: string
   title: string
+  parentConversationId?: string | null
+  lineageRootId?: string | null
+  resumeTitle?: string | null
   sourceKind: 'local' | 'channel'
   sourceId: string
   threadKey: string
@@ -88,13 +98,29 @@ export interface ToolTraceEvent {
   timestamp: Date
 }
 
-export type AgentModuleKind = 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+export type AgentModuleKind =
+  | 'browser'
+  | 'document'
+  | 'design'
+  | 'skill'
+  | 'video'
+  | 'rss'
+  | 'calendar'
+  | 'feishu'
+  | 'system'
 export type ModuleExecutionKind = 'deterministic' | 'interactive' | 'job' | 'pipeline'
-export type AgentMemoryLayer = 'l0' | 'l1' | 'l2'
+export type AgentMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
+export type AgentMemorySourceType =
+  | 'resident_agent'
+  | 'resident_user'
+  | 'scope_memory'
+  | 'trigger_rule'
+  | 'session_recall'
 
 export interface AgentMemoryRef {
   id: string
   layer: AgentMemoryLayer
+  sourceType: AgentMemorySourceType
   title: string
   summary?: string | null
   path?: string | null
@@ -154,6 +180,7 @@ export interface ScopeRunTaskContinuation {
 export interface ScopeRunMemoryCaptureItem {
   memoryId: string
   category: 'user_preference' | 'summary'
+  sourceType: Exclude<AgentMemorySourceType, 'session_recall'>
   title: string
   summary?: string | null
 }
@@ -196,7 +223,18 @@ export interface ScopeRunState {
   scopeId: string
   agent: string
   requestId: string | null
-  phase: 'idle' | 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
+  phase:
+    | 'idle'
+    | 'queued'
+    | 'planning'
+    | 'tool_running'
+    | 'checkpoint'
+    | 'takeover'
+    | 'resuming'
+    | 'responding'
+    | 'done'
+    | 'error'
+    | 'cancelled'
   toolTrace: ToolTraceEvent[]
   startedAt: string | null
   updatedAt: string | null
@@ -222,7 +260,11 @@ export interface ScopeRunState {
   stepMetrics?: ScopeRunStepMetrics
   error?: string | null
   designPhase?: DesignControllerPhase | null
-  designTodo?: Array<{ id: string; title: string; status: 'pending' | 'running' | 'done' | 'error' }>
+  designTodo?: Array<{
+    id: string
+    title: string
+    status: 'pending' | 'running' | 'done' | 'error'
+  }>
   designReviewSummary?: string | null
   ownedNodeIds?: string[]
   repairScope?: DesignRepairScope | null

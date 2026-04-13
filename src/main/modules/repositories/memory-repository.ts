@@ -1,13 +1,22 @@
 import { randomUUID } from 'crypto'
 
 export type MemoryLayer = 'l0' | 'l1' | 'l2'
-export type MemoryCategory = 'summary' | 'learning' | 'trigger' | 'rule' | 'user_preference' | 'global_fact' | 'personality_trait'
+export type MemoryCategory =
+  | 'summary'
+  | 'learning'
+  | 'trigger'
+  | 'rule'
+  | 'user_preference'
+  | 'global_fact'
+  | 'personality_trait'
+export type MemorySourceType = 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule'
 
 export interface MemoryEntry {
   id: string
   layer: MemoryLayer
   scopeId: string | null
   userId?: string | null
+  sourceType: MemorySourceType
   category: MemoryCategory
   title: string
   summary: string | null
@@ -43,6 +52,7 @@ export interface MemoryQueryFilters {
   layer?: MemoryLayer
   scopeId?: string | null
   userId?: string
+  sourceType?: MemorySourceType
   category?: MemoryCategory
   includeArchived?: boolean
   limit?: number
@@ -59,8 +69,30 @@ export interface MemoryStats {
   totalMemories: number
   byLayer: Record<MemoryLayer, number>
   byCategory: Record<MemoryCategory, number>
+  bySourceType: Record<MemorySourceType, number>
   archivedCount: number
   avgAccessCount: number
+}
+
+interface MemoryRow {
+  id: string
+  layer: MemoryLayer
+  scope_id: string | null
+  user_id: string | null
+  source_type: MemorySourceType | null
+  category: MemoryCategory
+  title: string
+  summary: string | null
+  content_key: string
+  priority: number
+  access_count: number
+  last_accessed_at: number | null
+  created_at: number
+  updated_at: number
+  expires_at: number | null
+  archived_at: number | null
+  tags: string | null
+  meta_json: string
 }
 
 export interface TriggerStats {
@@ -89,17 +121,20 @@ export class MemoryRepository {
     const id = entry.id || `mem-${randomUUID()}`
     const now = Math.floor(Date.now() / 1000)
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO agent_memory_metadata (
-        id, layer, scope_id, user_id, category, title, summary, content_key,
+        id, layer, scope_id, user_id, source_type, category, title, summary, content_key,
         priority, access_count, last_accessed_at, created_at, updated_at,
         expires_at, archived_at, tags, meta_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    ).run(
       id,
       entry.layer || 'l1',
       entry.scopeId ?? null,
       entry.userId ?? null,
+      entry.sourceType || 'scope_memory',
       entry.category || 'summary',
       entry.title || 'Untitled',
       entry.summary ?? null,
@@ -122,26 +157,13 @@ export class MemoryRepository {
 
   async getMemory(id: string): Promise<MemoryEntry | null> {
     const db = await this.getDatabase()
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT * FROM agent_memory_metadata WHERE id = ?
-    `).get<{
-      id: string
-      layer: MemoryLayer
-      scope_id: string | null
-      category: MemoryCategory
-      title: string
-      summary: string | null
-      content_key: string
-      priority: number
-      access_count: number
-      last_accessed_at: number | null
-      created_at: number
-      updated_at: number
-      expires_at: number | null
-      archived_at: number | null
-      tags: string | null
-      meta_json: string
-    }>(id)
+    `
+      )
+      .get<MemoryRow>(id)
 
     if (!row) return null
     return this.mapMemoryRow(row)
@@ -157,6 +179,10 @@ export class MemoryRepository {
     if (updates.title !== undefined) {
       fields.push('title = ?')
       values.push(updates.title)
+    }
+    if (updates.sourceType !== undefined) {
+      fields.push('source_type = ?')
+      values.push(updates.sourceType)
     }
     if (updates.summary !== undefined) {
       fields.push('summary = ?')
@@ -189,9 +215,11 @@ export class MemoryRepository {
     values.push(now)
     values.push(id)
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE agent_memory_metadata SET ${fields.join(', ')} WHERE id = ?
-    `).run(...values)
+    `
+    ).run(...values)
   }
 
   async deleteMemory(id: string): Promise<void> {
@@ -202,9 +230,11 @@ export class MemoryRepository {
   async archiveMemory(id: string): Promise<void> {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE agent_memory_metadata SET archived_at = ?, updated_at = ? WHERE id = ?
-    `).run(now, now, id)
+    `
+    ).run(now, now, id)
   }
 
   // ============================================================
@@ -235,6 +265,11 @@ export class MemoryRepository {
       values.push(filters.userId)
     }
 
+    if (filters.sourceType) {
+      conditions.push('source_type = ?')
+      values.push(filters.sourceType)
+    }
+
     if (filters.category) {
       conditions.push('category = ?')
       values.push(filters.category)
@@ -248,29 +283,16 @@ export class MemoryRepository {
     const limitClause = filters.limit ? `LIMIT ${filters.limit}` : ''
     const offsetClause = filters.offset ? `OFFSET ${filters.offset}` : ''
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT * FROM agent_memory_metadata
       ${whereClause}
       ORDER BY priority DESC, last_accessed_at DESC, created_at DESC
       ${limitClause} ${offsetClause}
-    `).all<{
-      id: string
-      layer: MemoryLayer
-      scope_id: string | null
-      category: MemoryCategory
-      title: string
-      summary: string | null
-      content_key: string
-      priority: number
-      access_count: number
-      last_accessed_at: number | null
-      created_at: number
-      updated_at: number
-      expires_at: number | null
-      archived_at: number | null
-      tags: string | null
-      meta_json: string
-    }>(...values)
+    `
+      )
+      .all<MemoryRow>(...values)
 
     return rows.map((row) => this.mapMemoryRow(row))
   }
@@ -299,35 +321,27 @@ export class MemoryRepository {
       values.push(filters.category)
     }
 
+    if (filters?.sourceType) {
+      conditions.push('source_type = ?')
+      values.push(filters.sourceType)
+    }
+
     if (!filters?.includeArchived) {
       conditions.push('archived_at IS NULL')
     }
 
     const limitClause = filters?.limit ? `LIMIT ${filters.limit}` : 'LIMIT 50'
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT * FROM agent_memory_metadata
       WHERE ${conditions.join(' AND ')}
       ORDER BY priority DESC, last_accessed_at DESC
       ${limitClause}
-    `).all<{
-      id: string
-      layer: MemoryLayer
-      scope_id: string | null
-      category: MemoryCategory
-      title: string
-      summary: string | null
-      content_key: string
-      priority: number
-      access_count: number
-      last_accessed_at: number | null
-      created_at: number
-      updated_at: number
-      expires_at: number | null
-      archived_at: number | null
-      tags: string | null
-      meta_json: string
-    }>(...values)
+    `
+      )
+      .all<MemoryRow>(...values)
 
     return rows.map((row) => this.mapMemoryRow(row))
   }
@@ -341,12 +355,14 @@ export class MemoryRepository {
     const id = trigger.id || `trigger-${randomUUID()}`
     const now = Math.floor(Date.now() / 1000)
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO agent_triggers (
         id, label, module, pattern, pattern_flags, blocking, priority,
         enabled, hit_count, last_hit_at, created_at, updated_at, meta_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `
+    ).run(
       id,
       trigger.label || 'Untitled Trigger',
       trigger.module ?? null,
@@ -369,23 +385,27 @@ export class MemoryRepository {
 
   async getTrigger(id: string): Promise<TriggerDefinition | null> {
     const db = await this.getDatabase()
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT * FROM agent_triggers WHERE id = ?
-    `).get<{
-      id: string
-      label: string
-      module: string | null
-      pattern: string
-      pattern_flags: string
-      blocking: number
-      priority: number
-      enabled: number
-      hit_count: number
-      last_hit_at: number | null
-      created_at: number
-      updated_at: number
-      meta_json: string
-    }>(id)
+    `
+      )
+      .get<{
+        id: string
+        label: string
+        module: string | null
+        pattern: string
+        pattern_flags: string
+        blocking: number
+        priority: number
+        enabled: number
+        hit_count: number
+        last_hit_at: number | null
+        created_at: number
+        updated_at: number
+        meta_json: string
+      }>(id)
 
     if (!row) return null
     return this.mapTriggerRow(row)
@@ -437,9 +457,11 @@ export class MemoryRepository {
     values.push(now)
     values.push(id)
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE agent_triggers SET ${fields.join(', ')} WHERE id = ?
-    `).run(...values)
+    `
+    ).run(...values)
   }
 
   async deleteTrigger(id: string): Promise<void> {
@@ -465,26 +487,30 @@ export class MemoryRepository {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
     const limitClause = filters?.limit ? `LIMIT ${filters.limit}` : ''
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT * FROM agent_triggers
       ${whereClause}
       ORDER BY priority DESC, hit_count DESC
       ${limitClause}
-    `).all<{
-      id: string
-      label: string
-      module: string | null
-      pattern: string
-      pattern_flags: string
-      blocking: number
-      priority: number
-      enabled: number
-      hit_count: number
-      last_hit_at: number | null
-      created_at: number
-      updated_at: number
-      meta_json: string
-    }>(...values)
+    `
+      )
+      .all<{
+        id: string
+        label: string
+        module: string | null
+        pattern: string
+        pattern_flags: string
+        blocking: number
+        priority: number
+        enabled: number
+        hit_count: number
+        last_hit_at: number | null
+        created_at: number
+        updated_at: number
+        meta_json: string
+      }>(...values)
 
     return rows.map((row) => this.mapTriggerRow(row))
   }
@@ -497,45 +523,36 @@ export class MemoryRepository {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO agent_trigger_refs (trigger_id, memory_id, priority, created_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(trigger_id, memory_id) DO UPDATE SET priority = excluded.priority
-    `).run(triggerId, memoryId, priority, now)
+    `
+    ).run(triggerId, memoryId, priority, now)
   }
 
   async removeTriggerRef(triggerId: string, memoryId: string): Promise<void> {
     const db = await this.getDatabase()
-    db.prepare(`
+    db.prepare(
+      `
       DELETE FROM agent_trigger_refs WHERE trigger_id = ? AND memory_id = ?
-    `).run(triggerId, memoryId)
+    `
+    ).run(triggerId, memoryId)
   }
 
   async getTriggerRefs(triggerId: string): Promise<MemoryEntry[]> {
     const db = await this.getDatabase()
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT m.* FROM agent_memory_metadata m
       INNER JOIN agent_trigger_refs r ON m.id = r.memory_id
       WHERE r.trigger_id = ?
       ORDER BY r.priority DESC, m.priority DESC
-    `).all<{
-      id: string
-      layer: MemoryLayer
-      scope_id: string | null
-      category: MemoryCategory
-      title: string
-      summary: string | null
-      content_key: string
-      priority: number
-      access_count: number
-      last_accessed_at: number | null
-      created_at: number
-      updated_at: number
-      expires_at: number | null
-      archived_at: number | null
-      tags: string | null
-      meta_json: string
-    }>(triggerId)
+    `
+      )
+      .all<MemoryRow>(triggerId)
 
     return rows.map((row) => this.mapMemoryRow(row))
   }
@@ -549,32 +566,38 @@ export class MemoryRepository {
     const now = Math.floor(Date.now() / 1000)
     const id = `access-${randomUUID()}`
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO agent_memory_access_log (id, memory_id, scope_id, accessed_at, context_chars, was_useful)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, memoryId, scopeId ?? null, now, contextChars ?? null, 0)
+    `
+    ).run(id, memoryId, scopeId ?? null, now, contextChars ?? null, 0)
   }
 
   async incrementAccessCount(memoryId: string): Promise<void> {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE agent_memory_metadata
       SET access_count = access_count + 1, last_accessed_at = ?, updated_at = ?
       WHERE id = ?
-    `).run(now, now, memoryId)
+    `
+    ).run(now, now, memoryId)
   }
 
   async incrementTriggerHitCount(triggerId: string): Promise<void> {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE agent_triggers
       SET hit_count = hit_count + 1, last_hit_at = ?, updated_at = ?
       WHERE id = ?
-    `).run(now, now, triggerId)
+    `
+    ).run(now, now, triggerId)
   }
 
   // ============================================================
@@ -585,27 +608,14 @@ export class MemoryRepository {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT * FROM agent_memory_metadata
       WHERE expires_at IS NOT NULL AND expires_at <= ? AND archived_at IS NULL
-    `).all<{
-      id: string
-      layer: MemoryLayer
-      scope_id: string | null
-      category: MemoryCategory
-      title: string
-      summary: string | null
-      content_key: string
-      priority: number
-      access_count: number
-      last_accessed_at: number | null
-      created_at: number
-      updated_at: number
-      expires_at: number | null
-      archived_at: number | null
-      tags: string | null
-      meta_json: string
-    }>(now)
+    `
+      )
+      .all<MemoryRow>(now)
 
     return rows.map((row) => this.mapMemoryRow(row))
   }
@@ -614,23 +624,31 @@ export class MemoryRepository {
     const db = await this.getDatabase()
     const now = Math.floor(Date.now() / 1000)
 
-    const result = db.prepare(`
+    const result = db
+      .prepare(
+        `
       UPDATE agent_memory_metadata
       SET archived_at = ?, updated_at = ?
       WHERE expires_at IS NOT NULL AND expires_at <= ? AND archived_at IS NULL
-    `).run(now, now, now)
+    `
+      )
+      .run(now, now, now)
 
     return (result as { changes?: number }).changes || 0
   }
 
   async pruneArchivedMemories(olderThanDays: number): Promise<number> {
     const db = await this.getDatabase()
-    const cutoffTime = Math.floor(Date.now() / 1000) - (olderThanDays * 86400)
+    const cutoffTime = Math.floor(Date.now() / 1000) - olderThanDays * 86400
 
-    const result = db.prepare(`
+    const result = db
+      .prepare(
+        `
       DELETE FROM agent_memory_metadata
       WHERE archived_at IS NOT NULL AND archived_at <= ?
-    `).run(cutoffTime)
+    `
+      )
+      .run(cutoffTime)
 
     return (result as { changes?: number }).changes || 0
   }
@@ -642,34 +660,63 @@ export class MemoryRepository {
   async getMemoryStats(): Promise<MemoryStats> {
     const db = await this.getDatabase()
 
-    const total = db.prepare(`
+    const total = db
+      .prepare(
+        `
       SELECT COUNT(*) as count FROM agent_memory_metadata WHERE archived_at IS NULL
-    `).get<{ count: number }>()
+    `
+      )
+      .get<{ count: number }>()
 
-    const byLayer = db.prepare(`
+    const byLayer = db
+      .prepare(
+        `
       SELECT layer, COUNT(*) as count FROM agent_memory_metadata
       WHERE archived_at IS NULL GROUP BY layer
-    `).all<{ layer: MemoryLayer; count: number }>()
+    `
+      )
+      .all<{ layer: MemoryLayer; count: number }>()
 
-    const byCategory = db.prepare(`
+    const byCategory = db
+      .prepare(
+        `
       SELECT category, COUNT(*) as count FROM agent_memory_metadata
       WHERE archived_at IS NULL GROUP BY category
-    `).all<{ category: MemoryCategory; count: number }>()
+    `
+      )
+      .all<{ category: MemoryCategory; count: number }>()
 
-    const archived = db.prepare(`
+    const bySourceType = db
+      .prepare(
+        `
+      SELECT source_type, COUNT(*) as count FROM agent_memory_metadata
+      WHERE archived_at IS NULL GROUP BY source_type
+    `
+      )
+      .all<{ source_type: MemorySourceType; count: number }>()
+
+    const archived = db
+      .prepare(
+        `
       SELECT COUNT(*) as count FROM agent_memory_metadata WHERE archived_at IS NOT NULL
-    `).get<{ count: number }>()
+    `
+      )
+      .get<{ count: number }>()
 
-    const avgAccess = db.prepare(`
+    const avgAccess = db
+      .prepare(
+        `
       SELECT AVG(access_count) as avg FROM agent_memory_metadata WHERE archived_at IS NULL
-    `).get<{ avg: number }>()
+    `
+      )
+      .get<{ avg: number }>()
 
     return {
       totalMemories: total?.count || 0,
       byLayer: {
         l0: byLayer.find((r) => r.layer === 'l0')?.count || 0,
         l1: byLayer.find((r) => r.layer === 'l1')?.count || 0,
-        l2: byLayer.find((r) => r.layer === 'l2')?.count || 0,
+        l2: byLayer.find((r) => r.layer === 'l2')?.count || 0
       },
       byCategory: {
         summary: byCategory.find((r) => r.category === 'summary')?.count || 0,
@@ -678,17 +725,25 @@ export class MemoryRepository {
         rule: byCategory.find((r) => r.category === 'rule')?.count || 0,
         user_preference: byCategory.find((r) => r.category === 'user_preference')?.count || 0,
         global_fact: byCategory.find((r) => r.category === 'global_fact')?.count || 0,
-        personality_trait: byCategory.find((r) => r.category === 'personality_trait')?.count || 0,
+        personality_trait: byCategory.find((r) => r.category === 'personality_trait')?.count || 0
+      },
+      bySourceType: {
+        resident_agent: bySourceType.find((r) => r.source_type === 'resident_agent')?.count || 0,
+        resident_user: bySourceType.find((r) => r.source_type === 'resident_user')?.count || 0,
+        scope_memory: bySourceType.find((r) => r.source_type === 'scope_memory')?.count || 0,
+        trigger_rule: bySourceType.find((r) => r.source_type === 'trigger_rule')?.count || 0
       },
       archivedCount: archived?.count || 0,
-      avgAccessCount: avgAccess?.avg || 0,
+      avgAccessCount: avgAccess?.avg || 0
     }
   }
 
   async getTriggerStats(): Promise<TriggerStats[]> {
     const db = await this.getDatabase()
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT
         t.id,
         t.label,
@@ -700,7 +755,9 @@ export class MemoryRepository {
       WHERE t.enabled = 1
       GROUP BY t.id
       ORDER BY t.hit_count DESC
-    `).all<TriggerStats>()
+    `
+      )
+      .all<TriggerStats>()
 
     return rows
   }
@@ -709,28 +766,22 @@ export class MemoryRepository {
   // Private Helpers
   // ============================================================
 
-  private mapMemoryRow(row: {
-    id: string
-    layer: MemoryLayer
-    scope_id: string | null
-    category: MemoryCategory
-    title: string
-    summary: string | null
-    content_key: string
-    priority: number
-    access_count: number
-    last_accessed_at: number | null
-    created_at: number
-    updated_at: number
-    expires_at: number | null
-    archived_at: number | null
-    tags: string | null
-    meta_json: string
-  }): MemoryEntry {
+  private mapMemoryRow(row: MemoryRow): MemoryEntry {
+    const sourceType =
+      row.source_type ||
+      (row.category === 'user_preference'
+        ? 'resident_user'
+        : row.category === 'trigger' || row.category === 'rule'
+          ? 'trigger_rule'
+          : row.category === 'summary' || row.scope_id
+            ? 'scope_memory'
+            : 'resident_agent')
     return {
       id: row.id,
       layer: row.layer,
       scopeId: row.scope_id,
+      userId: row.user_id,
+      sourceType,
       category: row.category,
       title: row.title,
       summary: row.summary,
@@ -743,7 +794,7 @@ export class MemoryRepository {
       expiresAt: row.expires_at,
       archivedAt: row.archived_at,
       tags: row.tags ? JSON.parse(row.tags) : null,
-      meta: JSON.parse(row.meta_json),
+      meta: JSON.parse(row.meta_json)
     }
   }
 
@@ -775,7 +826,7 @@ export class MemoryRepository {
       lastHitAt: row.last_hit_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      meta: JSON.parse(row.meta_json),
+      meta: JSON.parse(row.meta_json)
     }
   }
 }

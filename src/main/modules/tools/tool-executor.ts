@@ -15,6 +15,7 @@ import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
+import { executeSessionRecallTool } from './session-recall-tools'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -78,6 +79,10 @@ export async function executeToolCall(
 
   if (toolName.startsWith('memory_')) {
     return executeMemoryTool(toolName, args, context)
+  }
+
+  if (toolName.startsWith('session_')) {
+    return executeSessionRecallTool(toolName, args, context)
   }
 
   return `Unknown tool: ${toolName}`

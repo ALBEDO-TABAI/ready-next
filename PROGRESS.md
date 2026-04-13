@@ -1,13 +1,16 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-08
+> 更新时间: 2026-04-12
 
 ## 当前真值摘要
+
 1. 当前基线是本地 `main`。
+
 - 本地相对 `origin/main` 为 `ahead 130`。
 - 这条基线已经吸收了 agent/runtime 拆分、browser service 化、repository 基线拆分、module handler 独立化、RSS runtime 与 browser-backed acquisition 的主要改动。
 
 2. Browser 主线已并回 `browser-4-3` 的新功能与新改进。
+
 - 浏览器主进程新增 capability / content-task / task-persistence 三层：支持结构化提取、滚动采集、研究任务、批量下载与任务续跑。
 - 浏览器工具链已补齐与这些能力对应的 agent 工具入口，主进程数据库也新增浏览器任务持久化表。
 - 浏览器标签切换现已加入顺序保护，快速连续切换时只会采纳最后一次完成结果。
@@ -16,6 +19,7 @@
 - 窗口重建后的 BrowserView host 可重新绑定到新窗口；站点权限也已收口为“低风险自动放行 + 高风险询问”。
 
 3. **Browser 模式切换体验已进一步打磨（冻结帧机制）**
+
 - 修复了切换时"标签栏先出、内容后加载"的分段闪现问题。
 - 关键修复：`captureSnapshot` 改用 `captureViewportSnapshot`（调用 BrowserView 的 `webContents.capturePage()`），而非 `captureWindowSnapshot`（只捕获主窗口，不含 BrowserView）。
 - 切换前（`!isMotionSettled`）先执行 `captureStableFrame()` 保存当前画面，再 `hideAll()` 隐藏 BrowserView。
@@ -25,6 +29,7 @@
 - 顶栏模块切换器现已补上 hover 级预截图：鼠标悬停到 browser 图标时，会提前触发后台 `captureStableFrame()`，把"点击后才开始准备冻结帧"的迟滞再往前消掉半拍。
 
 4. Agent/runtime 底座已经落地到可继续迭代的状态。
+
 - `useAgent` 不再独自承担整条执行链。
 - 运行态按 `runId + scopeId` 路由。
 - runtime routing、message composition、module execution、scope-run patching 已拆入独立模块。
@@ -32,18 +37,24 @@
   - 新增 capability group 真相层，固定收口 `browser_interaction / browser_content_tasks / document / rss / calendar / skills / memory / session_recall / channel_feishu / system_host / design_reserved`
   - `ToolGateway` 已升级为正式分组注册表，不再只是元数据目录
   - `buildExecutionToolState` 已开始消费 capability resolution，把浏览器分组暴露、飞书环境可用性和宿主内部能力边界显式化
-  - AI 设置页已补上第一版“能力分组”开关和状态说明，可直接看到哪些组处于自动、开启、关闭，以及哪些因为环境或协议能力暂时不可用
+  - 新增 `run-capability-controller`：`direct-chat` 现在改为消费运行前 capability 结果，不再自己重复拼 allowlist、环境判断和宿主捷径前置分支
+  - 新增 `host-capability-dispatcher`：openclaw 与文档 deterministic 直通已迁出主循环，`system_host` 正式只走宿主快捷执行
+  - `ToolGateway` 已补上 dynamic source / group schema 查询；`skills` 组现在同时覆盖 execution control 和运行期可枚举 skill action
+  - AI 设置页已接上主进程 capability runtime snapshot，当前状态不再靠 renderer 轻量推断
 
 5. Browser 主干已经完成第一轮架构收口。
+
 - main-process browser 逻辑已拆成 shell、lifecycle、preview、automation、data、diagnostics、download、session policy、layout 等 services。
 - renderer 侧 browser shell、layout、diagnostics entry 已从页面容器中拆出。
 - preview/context-menu/browser overlay 相关层级问题已处理过一轮。
 
 6. Repository 基线已经建立。
+
 - browser/chat/rss/calendar/settings/agent 的主要访问路径已不再依赖旧式跨域 `getDatabase()` 直连。
 - 之前的 `database.ts` 静态/动态混合导入告警已清掉。
 
 7. Workbench 模块已进入统一执行模型。
+
 - rss/calendar 的 agent handler 已从页面组件中拆出。
 - browser/RSS/calendar 都有基础 diagnostics panel。
 - browser/document/rss/calendar 的 tabs/chrome 已进入共享路径。
@@ -73,6 +84,7 @@
 - 文件管理顶部“筛选 / 更多”菜单已从左侧栏内部节点改为顶层弹层渲染：菜单仍贴着左栏按钮展开，但不再被 `SidePanel` 的 `overflow-hidden` 裁掉，也不再靠隐藏浏览器内容来制造层级。
 
 8. RSS 已经具备独立维护条件。
+
 - packaged/runtime RSSHub 可观察、可修复、可诊断。
 - route diagnostics 和 benchmark 结果会持久化。
 - browser-backed acquisition 已切到优先复用应用内浏览器路线。
@@ -86,6 +98,7 @@
 - 小红书刷新已开始按源状态分流：首次抓取仍负责补齐历史，后续刷新改成更轻的主页检查模式，并只把真正新增的内容重新送回界面列表。
 
 9. Skill runtime 已完成 Claude workflow 执行底座升级（2026-03-15）。
+
 - 新增 `skill-execution-types.ts`、compiler / loader、execution state store、execution coordinator、prompt builder。
 - embedded skills 已拆分为 `workflow / advisory / direct` 兼容模式：
   - `video-copy-analyzer`：workflow
@@ -97,6 +110,7 @@
 - direct-chat 已加入视频输入下的 skill/python tools 保留策略，以及 OpenAI tool history repair
 
 10. Browser-agent 主链已开始进入统一运行时阶段（2026-04-08）。
+
 - 新增 `browser-task-planner`，浏览器任务识别与连续性合流不再只从 `direct-chat.ts` 内部推进。
 - 新增 `agent-runtime-adapter / page-state-service / evidence-service`。
 - `BrowserAgentRunner` 已开始复用统一页面身份与统一证据判断。
@@ -109,6 +123,7 @@
   - Browser 模式页内新增轻量 diagnostics dock，可直接看到当前任务、页面状态、最近失败和继续/重试/回到目标页入口
 
 11. Agent 主控拆层已开始进入“Run Coordinator + Run Projection”阶段（2026-04-09）。
+
 - 新增 `run-coordinator`：`runtime.sendScoped` 与 channel inbound 执行开始统一走单轮执行 owner，而不再由 `runtime.ts` 直接内联 prompt assembly + orchestrator 调用 + outcome 写回。
 - 新增 `run-projection`：`ScopeRunSummary` 的聚合与浏览器/skill 文本推断已开始从 `runtime.ts` 抽离。
 - `ClaudeSdkOrchestrator` 已补上 `executeAndCollect` 合同，作为 direct-chat 的 execution host bridge。
@@ -153,6 +168,7 @@
   - 当当前工具批次已经把预算打满时，主流程会在本轮末尾直接停住，不再继续请求下一轮模型响应
 
 12. 跨会话搜索 / 回看主链第一版已落地（2026-04-12）。
+
 - 会话原始真相继续使用 `chat_conversations / chat_messages`，没有新造第二份 transcript 存储。
 - 会话层已补上 `parentConversationId / lineageRootId / resumeTitle`，为后续 continuation / recall 归并立好骨架。
 - 新增 `chat_messages_fts / session_recall_metadata / session_recall_attachment_index` 三层索引，历史会话现在可按消息正文、标题、任务摘要、附件名检索。
@@ -165,15 +181,18 @@
 - ChatPanel 已补上聊天内轻量入口：可搜索旧会话、引用到当前轮、显示已引用胶囊并支持移除。
 
 ## 当前最高优先级
+
 1. ~~小红书 / 抖音 / 微博的 RSS 获取链路收尾~~（已完成）。
 
 2. ~~工作台顶部三行视觉对齐~~（已完成）。
 
 3. **下一阶段主线**：
+
 - `PromptAssemblyService + L0/L1/L2 memory`（Agent 记忆系统）
 - `Feishu capability replacement`（飞书能力替换）
 
 ## 当前未完成项
+
 - Weibo/Xiaohongshu/Douyin 的“浏览器主链 + 登录引导”已完成代码收口，但仍缺最后一轮实机签收。
 - Workbench 顶部三行在各模块下仍需最后一轮视觉对齐。
 - Browser diagnostics 已有页内 dock，但仍不是完整 lab。
@@ -189,6 +208,7 @@
 - **Feishu capability replacement 还未启动**（下一阶段主线）。
 
 ## 建议的继续顺序
+
 1. ~~先做 RSS 三条源的最终签收~~（已完成）。
 2. ~~再做顶部三行和 tabs 的视觉基线收口~~（已完成）。
 3. **接下来回到底座主线**：
@@ -199,6 +219,7 @@
    - Diagnostics labs 从当前 dock 继续升级完整化
 
 ## 最近一次有效校验
+
 - `npm run typecheck` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-coordinator-budget.test.ts src/__tests__/execution-fallback-policy.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-projection.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-card-view-model-contract.test.ts src/__tests__/openai-execution-client-contract.test.ts src/__tests__/anthropic-execution-client-contract.test.ts src/__tests__/kimi-coding-client-contract.test.ts src/__tests__/video-fallback-service-contract.test.ts src/__tests__/simple-execution-fallbacks.test.ts` 通过
 - `npm test` 未通过：当前工作区仍有 `browser-tab-switch-executor`、多组 document contract、以及一批 liquid shell / workbench UI contract 旧失败；本轮主控与客户端相关重点测试已通过
@@ -244,7 +265,16 @@
 - `npm test` 通过，最近一次全量通过为 `173` 个测试
 - `npm run build` 通过
 
+## 最新研究
+
+- 2026-04-12：已补齐 Hermes memory 路线第一轮研究文档。
+- 新增 `docs/superpowers/specs/2026-04-12-hermes-persistent-memory-design.md`，单独梳理 Hermes 的 built-in memory、`memory` 工具、provider 扩展和 session recall 边界。
+- 新增 `docs/superpowers/specs/2026-04-12-hermes-vs-ready-memory-cross-comparison.md`，逐项对照 Ready 当前 `memory / reflection / trigger / session_recall` 主链与 Hermes 的真实差异。
+- 新增 `docs/superpowers/plans/2026-04-12-ready-memory-alignment-roadmap.md`，把后续路线收敛为“先拆边界，再做 resident core，最后接 provider”的阶段计划。
+- 当前已明确：Ready 记忆路线的首要问题不是功能不足，而是 resident memory、session recall、task memory、trigger rule、external provider 这些层还没有被正式拆开。
+
 ## 体积基线
+
 - 仓库总大小：`2.7G`
 - `logs`：`1.0M`
 - `out`：`24M`

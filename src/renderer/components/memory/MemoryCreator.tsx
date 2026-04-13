@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { Plus, Save } from 'lucide-react'
-import { SETTINGS_INPUT_STYLE, SETTINGS_PRIMARY_BUTTON_STYLE, SETTINGS_TEXTAREA_STYLE } from '../settings/settings-theme'
+import {
+  SETTINGS_INPUT_STYLE,
+  SETTINGS_PRIMARY_BUTTON_STYLE,
+  SETTINGS_TEXTAREA_STYLE
+} from '../settings/settings-theme'
 
 const fieldStyle = {
-  ...SETTINGS_INPUT_STYLE,
+  ...SETTINGS_INPUT_STYLE
 }
 
 const primaryButtonStyle = {
-  ...SETTINGS_PRIMARY_BUTTON_STYLE,
+  ...SETTINGS_PRIMARY_BUTTON_STYLE
 }
 
 export default function MemoryCreator() {
@@ -36,7 +40,7 @@ export default function MemoryCreator() {
         title,
         content,
         tags: tags ? tags.split(',').map((t) => t.trim()) : undefined,
-        priority,
+        priority
       })
 
       if (result.success && result.data) {
@@ -60,7 +64,7 @@ export default function MemoryCreator() {
     <div
       className="flex flex-col"
       style={{
-        gap: 18,
+        gap: 18
       }}
     >
       <div className="flex items-center gap-2 mb-6">
@@ -83,7 +87,7 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...fieldStyle,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           />
         </div>
@@ -98,11 +102,11 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...fieldStyle,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           >
-            <option value="summary">摘要 (会话级)</option>
-            <option value="learning">学习 (全局)</option>
+            <option value="summary">当前任务摘要</option>
+            <option value="learning">常驻记忆</option>
           </select>
         </div>
 
@@ -118,7 +122,7 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...fieldStyle,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           />
         </div>
@@ -135,7 +139,7 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...SETTINGS_TEXTAREA_STYLE,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           />
         </div>
@@ -152,7 +156,7 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...fieldStyle,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           />
         </div>
@@ -168,7 +172,7 @@ export default function MemoryCreator() {
             className="w-full border rounded-lg text-[13px]"
             style={{
               ...fieldStyle,
-              padding: '10px 14px',
+              padding: '10px 14px'
             }}
           />
         </div>
@@ -177,8 +181,10 @@ export default function MemoryCreator() {
           <div
             className="text-[12px] p-3 rounded-lg"
             style={{
-              background: message.startsWith('✓') ? 'var(--color-green-light)' : 'var(--color-red-light)',
-              color: message.startsWith('✓') ? 'var(--color-green)' : 'var(--color-red)',
+              background: message.startsWith('✓')
+                ? 'var(--color-green-light)'
+                : 'var(--color-red-light)',
+              color: message.startsWith('✓') ? 'var(--color-green)' : 'var(--color-red)'
             }}
           >
             {message}
@@ -192,7 +198,7 @@ export default function MemoryCreator() {
           style={{
             ...primaryButtonStyle,
             padding: '12px 16px',
-            fontSize: '13px',
+            fontSize: '13px'
           }}
         >
           <Save className="w-4 h-4" />

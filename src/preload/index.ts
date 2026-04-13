@@ -22,6 +22,33 @@ const agentAPI = {
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
+  searchSessionRecall: (payload?: {
+    query?: string
+    channelKey?: string
+    sourceKind?: 'local' | 'channel'
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }) => ipcRenderer.invoke('agent:searchSessionRecall', payload || {}),
+  listRecentSessions: (payload?: {
+    channelKey?: string
+    sourceKind?: 'local' | 'channel'
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }) => ipcRenderer.invoke('agent:listRecentSessions', payload || {}),
+  getSessionRecallCapsule: (conversationId: string) =>
+    ipcRenderer.invoke('agent:getSessionRecallCapsule', { conversationId }),
+  listAttachedSessionRecallContexts: (scopeId: string) =>
+    ipcRenderer.invoke('agent:listAttachedSessionRecallContexts', { scopeId }),
+  attachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
+    ipcRenderer.invoke('agent:attachSessionRecallContext', { currentScopeId, conversationId }),
+  detachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
+    ipcRenderer.invoke('agent:detachSessionRecallContext', { currentScopeId, conversationId }),
+  resumeSessionCandidate: (payload: { conversationId?: string; resumeTitle?: string }) =>
+    ipcRenderer.invoke('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
     ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
   createLocalScope: (agent: string) => ipcRenderer.invoke('agent:createLocalScope', { agent }),

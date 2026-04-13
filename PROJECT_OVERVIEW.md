@@ -15,8 +15,8 @@ Ready 当前主线是一个桌面创作工作台，稳定承载以下能力：
 - 文稿：多标签、多格式读写，支持 `document_*` 工具链做真实编辑
 - RSS：订阅、更新、分析、统计与子代理链路可用
 - 日程：日/周/月视图与事件 CRUD 可用
-- Agent：统一会话 scope、工具调用、任务投影、技能 blocker 继续与记忆反馈链路已接入
-- 技能中心：支持系统级 embedded skills 与用户 custom skills 并行管理
+- Agent：统一会话 scope、工具调用、技能运行时、远程 IM 基础链路已接入；聊天面板新增 `当前任务 / 后台任务` 任务区，长任务会持续投影为步骤、等待态、可继续动作与最近产物；跨会话回看第一版已落地，支持历史会话搜索、旧会话胶囊引用和本地向量召回
+- 技能中心：支持系统级 embedded skills 与用户导入 custom skills 并行管理，并新增 workflow execution 视图与 blocker 继续控制
 - 设置页：支持多供应商、多协议、多工具模式配置
 
 ## 3. AI / Agent 当前能力
@@ -42,9 +42,10 @@ AI 配置统一解析为：
 ### 3.3 工具兼容策略
 - 原生支持 function tools 的通道优先走原生工具调用
 - 不稳定或不暴露原生 tools 的 OpenAI 兼容通道，回退到文本工具桥接
-- Browser、Document、System、Skill、Memory 工具从同一套工具注册中心暴露
-- workflow skill 由宿主状态机自动推进
-- scope run 会额外记录任务摘要、最近产物和记忆反馈
+- Browser、Document、System、Skill、Memory 与会话回看工具从同一套工具注册中心暴露
+- 会话回看现已作为独立工具族接入，`session_search` 会同时使用关键词命中和本地向量相似度补召回
+- Claude skill 执行改为 `advisory / workflow / legacy direct` 三态兼容，workflow 由宿主状态机自动推进
+- scope run 会额外记录任务摘要、最近产物与记忆反馈，用于聊天内任务恢复、技能 blocker 继续和自动记忆反馈
 
 ## 4. 技术栈
 - Electron 34

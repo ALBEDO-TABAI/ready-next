@@ -13,6 +13,7 @@ const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'document_list_widgets',
   'memory_search',
   'memory_list_recent',
+  'session_search',
   'rss_capture_session',
   'skill_get_state',
   'skill_rss_status',

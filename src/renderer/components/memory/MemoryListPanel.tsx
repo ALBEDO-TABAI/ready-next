@@ -2,18 +2,37 @@ import { useState } from 'react'
 import { useMemories } from '../../hooks/useMemory'
 import type { MemoryQueryFilters, MemoryEntry } from '../../types/electron'
 import { Trash2, Layers, Tag, Clock, Eye } from 'lucide-react'
-import { SETTINGS_CARD_STYLE, SETTINGS_INPUT_STYLE, SETTINGS_SECONDARY_BUTTON_STYLE } from '../settings/settings-theme'
+import {
+  SETTINGS_CARD_STYLE,
+  SETTINGS_INPUT_STYLE,
+  SETTINGS_SECONDARY_BUTTON_STYLE
+} from '../settings/settings-theme'
 
 const panelCardStyle = {
-  ...SETTINGS_CARD_STYLE,
+  ...SETTINGS_CARD_STYLE
 }
 
 const fieldStyle = {
-  ...SETTINGS_INPUT_STYLE,
+  ...SETTINGS_INPUT_STYLE
 }
 
 const secondaryButtonStyle = {
-  ...SETTINGS_SECONDARY_BUTTON_STYLE,
+  ...SETTINGS_SECONDARY_BUTTON_STYLE
+}
+
+function memorySourceLabel(sourceType: MemoryEntry['sourceType'] | undefined): string {
+  switch (sourceType) {
+    case 'resident_agent':
+      return '常驻记忆'
+    case 'resident_user':
+      return '用户偏好'
+    case 'scope_memory':
+      return '当前任务'
+    case 'trigger_rule':
+      return '触发规则'
+    default:
+      return '未分类'
+  }
 }
 
 export default function MemoryListPanel() {
@@ -58,17 +77,34 @@ export default function MemoryListPanel() {
         className="border-b flex items-center gap-3"
         style={{
           borderColor: 'var(--border-default)',
-          padding: '16px 20px',
+          padding: '16px 20px'
         }}
       >
         <select
           className="text-[13px] border rounded-lg transition-all"
           style={{
             ...fieldStyle,
-            padding: '8px 12px',
+            padding: '8px 12px'
+          }}
+          value={filters.sourceType || ''}
+          onChange={(e) =>
+            setFilters({ ...filters, sourceType: (e.target.value as any) || undefined })
+          }
+        >
+          <option value="">所有来源</option>
+          <option value="resident_agent">常驻记忆</option>
+          <option value="resident_user">用户偏好</option>
+          <option value="scope_memory">当前任务</option>
+          <option value="trigger_rule">触发规则</option>
+        </select>
+        <select
+          className="text-[13px] border rounded-lg transition-all"
+          style={{
+            ...fieldStyle,
+            padding: '8px 12px'
           }}
           value={filters.layer || ''}
-          onChange={(e) => setFilters({ ...filters, layer: e.target.value as any || undefined })}
+          onChange={(e) => setFilters({ ...filters, layer: (e.target.value as any) || undefined })}
         >
           <option value="">所有层级</option>
           <option value="l0">L0 - 常量</option>
@@ -79,18 +115,26 @@ export default function MemoryListPanel() {
           className="text-[13px] border rounded-lg transition-all"
           style={{
             ...fieldStyle,
-            padding: '8px 12px',
+            padding: '8px 12px'
           }}
           value={filters.category || ''}
-          onChange={(e) => setFilters({ ...filters, category: e.target.value as any || undefined })}
+          onChange={(e) =>
+            setFilters({ ...filters, category: (e.target.value as any) || undefined })
+          }
         >
           <option value="">所有类别</option>
           <option value="summary">摘要</option>
           <option value="learning">学习</option>
           <option value="trigger">触发器</option>
           <option value="rule">规则</option>
+          <option value="user_preference">用户偏好</option>
+          <option value="global_fact">全局事实</option>
+          <option value="personality_trait">人格特征</option>
         </select>
-        <label className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--text-body)' }}>
+        <label
+          className="flex items-center gap-2 text-[13px]"
+          style={{ color: 'var(--text-body)' }}
+        >
           <input
             type="checkbox"
             checked={filters.includeArchived || false}
@@ -121,9 +165,11 @@ export default function MemoryListPanel() {
                   borderRadius: 16,
                   padding: '16px 18px',
                   ...(selectedMemory?.id === memory.id && {
-                    borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
-                    background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
-                  }),
+                    borderColor:
+                      'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
+                    background:
+                      'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)'
+                  })
                 }}
                 onClick={() => setSelectedMemory(memory)}
               >
@@ -134,7 +180,7 @@ export default function MemoryListPanel() {
                         className="text-[11px] font-medium px-2 py-0.5 rounded"
                         style={{
                           background: 'var(--color-blue-light)',
-                          color: 'var(--color-blue)',
+                          color: 'var(--color-blue)'
                         }}
                       >
                         {memory.layer}
@@ -142,8 +188,17 @@ export default function MemoryListPanel() {
                       <span
                         className="text-[11px] font-medium px-2 py-0.5 rounded"
                         style={{
+                          background: 'var(--color-orange-light)',
+                          color: 'var(--color-orange)'
+                        }}
+                      >
+                        {memorySourceLabel(memory.sourceType)}
+                      </span>
+                      <span
+                        className="text-[11px] font-medium px-2 py-0.5 rounded"
+                        style={{
                           background: 'var(--color-green-light)',
-                          color: 'var(--color-green)',
+                          color: 'var(--color-green)'
                         }}
                       >
                         {memory.category}
@@ -152,8 +207,9 @@ export default function MemoryListPanel() {
                         <span
                           className="text-[11px] font-medium px-2 py-0.5 rounded"
                           style={{
-                            background: 'color-mix(in srgb, var(--surface-panel-bg) 62%, transparent)',
-                            color: 'var(--text-muted)',
+                            background:
+                              'color-mix(in srgb, var(--surface-panel-bg) 62%, transparent)',
+                            color: 'var(--text-muted)'
                           }}
                         >
                           已归档
@@ -174,7 +230,10 @@ export default function MemoryListPanel() {
                         {memory.summary}
                       </div>
                     )}
-                    <div className="flex items-center gap-4 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    <div
+                      className="flex items-center gap-4 text-[11px]"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
                       <span className="flex items-center gap-1">
                         <Layers className="w-3 h-3" />
                         优先级 {memory.priority}
@@ -199,7 +258,7 @@ export default function MemoryListPanel() {
                     className="border rounded-lg transition-all hover:opacity-70"
                     style={{
                       ...secondaryButtonStyle,
-                      padding: '6px 10px',
+                      padding: '6px 10px'
                     }}
                   >
                     <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--color-red)' }} />
@@ -218,14 +277,18 @@ export default function MemoryListPanel() {
           style={{
             borderColor: 'var(--border-default)',
             padding: '16px 20px',
-            background: 'color-mix(in srgb, var(--surface-panel-bg) 48%, transparent)',
+            background: 'color-mix(in srgb, var(--surface-panel-bg) 48%, transparent)'
           }}
         >
-          <div className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-light)' }}>
+          <div
+            className="text-[11px] font-semibold uppercase tracking-wider mb-3"
+            style={{ color: 'var(--text-light)' }}
+          >
             记忆详情
           </div>
           <div className="space-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
             <div>ID: {selectedMemory.id}</div>
+            <div>来源: {memorySourceLabel(selectedMemory.sourceType)}</div>
             <div>内容键: {selectedMemory.contentKey}</div>
             <div>作用域: {selectedMemory.scopeId || '全局'}</div>
             <div>创建时间: {new Date(selectedMemory.createdAt * 1000).toLocaleString()}</div>

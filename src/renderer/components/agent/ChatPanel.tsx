@@ -1,13 +1,39 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'framer-motion'
-import { X, FileText, Image, Film, Table, Globe, Puzzle, Pen, MessageSquareQuote, Folder, ChevronDown, PanelLeftClose, History, Plus, Wrench } from 'lucide-react'
-import { useAgent, initAgentListeners, ChatAttachment, ConversationScope, ScopeRunState } from '../../stores/useAgent'
+import {
+  X,
+  FileText,
+  Image,
+  Film,
+  Table,
+  Globe,
+  Puzzle,
+  Pen,
+  MessageSquareQuote,
+  Folder,
+  ChevronDown,
+  PanelLeftClose,
+  History,
+  Plus,
+  Wrench
+} from 'lucide-react'
+import {
+  useAgent,
+  initAgentListeners,
+  ChatAttachment,
+  ConversationScope,
+  ScopeRunState
+} from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings } from '../../stores/useSettings'
 import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import { toLocalFileUrl } from '../../utils/dragDrop'
-import { WORKBENCH_EDGE_RAIL_SIZE, WORKBENCH_TOPBAR_HEIGHT, WORKBENCH_TOPBAR_PADDING_RIGHT } from '../../modules/workbench/chrome'
+import {
+  WORKBENCH_EDGE_RAIL_SIZE,
+  WORKBENCH_TOPBAR_HEIGHT,
+  WORKBENCH_TOPBAR_PADDING_RIGHT
+} from '../../modules/workbench/chrome'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
 import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
@@ -15,8 +41,9 @@ import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
   type TaskCardRunLike,
-  type TaskSectionKey,
+  type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
+import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -32,7 +59,7 @@ interface MarkdownNode {
   type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'numbered' | 'br'
   content: string
   level?: number // header level 1-3
-  lang?: string  // code block language
+  lang?: string // code block language
 }
 
 interface PersistedScopeRunSummary {
@@ -94,6 +121,33 @@ interface SerializedToolTraceSnapshotItem {
   kind: 'call' | 'result'
   text: string
   timestamp: string
+}
+
+function memoryCaptureSourceLabel(
+  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule' | undefined
+): string {
+  switch (sourceType) {
+    case 'resident_agent':
+      return '常驻记忆'
+    case 'resident_user':
+      return '用户偏好'
+    case 'scope_memory':
+      return '当前任务摘要'
+    case 'trigger_rule':
+      return '规则沉淀'
+    default:
+      return '记忆'
+  }
+}
+
+function mapScopeToConversation(scope: ConversationScope) {
+  return {
+    id: scope.id,
+    agent: scope.agent,
+    title: scope.title,
+    created_at: scope.createdAt,
+    updated_at: scope.updatedAt
+  }
 }
 
 function parseMarkdown(raw: string): MarkdownNode[] {
@@ -248,7 +302,14 @@ function MarkdownContent({ content }: { content: string }) {
           case 'numbered':
             return (
               <div key={idx} style={{ display: 'flex', gap: 6, paddingLeft: 4 }}>
-                <span style={{ flexShrink: 0, color: 'var(--text-gray)', minWidth: 14, textAlign: 'right' }}>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    color: 'var(--text-gray)',
+                    minWidth: 14,
+                    textAlign: 'right'
+                  }}
+                >
                   {idx + 1}.
                 </span>
                 <span>{renderInline(node.content)}</span>
@@ -280,7 +341,7 @@ function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
     run.taskTitle ||
     run.taskSummary ||
     (run.steps && run.steps.length > 0) ||
-    (run.memoryCapture && run.memoryCapture.status !== 'dismissed'),
+    (run.memoryCapture && run.memoryCapture.status !== 'dismissed')
   )
 }
 
@@ -300,7 +361,7 @@ function TaskCard({
   onContinueInput,
   onSubmitConfirmation,
   onSubmitAgentResult,
-  onRetry,
+  onRetry
 }: {
   run: TaskCardRun
   taskKey: string
@@ -323,7 +384,8 @@ function TaskCard({
   const primaryTitle = vm.title
   const steps = run.steps || []
   const recentArtifacts = run.recentArtifacts || []
-  const visibleMemoryCapture = run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
+  const visibleMemoryCapture =
+    run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const collapsedSummary = vm.summary
   const renderSectionButton = (sectionKey: TaskSectionKey) => {
     const section = vm.sections[sectionKey]
@@ -339,13 +401,24 @@ function TaskCard({
           border: 'none',
           background: 'transparent',
           padding: '6px 0',
-          cursor: 'pointer',
+          cursor: 'pointer'
         }}
       >
         <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>{section.title}</div>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+            {section.title}
+          </div>
           {section.summary && (
-            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div
+              style={{
+                fontSize: 10.5,
+                color: 'var(--text-light)',
+                marginTop: 2,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}
+            >
               {section.summary}
             </div>
           )}
@@ -358,7 +431,7 @@ function TaskCard({
               height: 12,
               color: 'var(--text-light)',
               transform: section.expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 160ms ease',
+              transition: 'transform 160ms ease'
             }}
           />
         </div>
@@ -375,7 +448,7 @@ function TaskCard({
         padding: compact ? '10px 12px' : '12px 12px 10px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 8
       }}
     >
       <button
@@ -387,11 +460,13 @@ function TaskCard({
           background: 'transparent',
           padding: 0,
           cursor: 'pointer',
-          textAlign: 'left',
+          textAlign: 'left'
         }}
       >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>{primaryTitle}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>
+            {primaryTitle}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
             {expanded ? vm.summary : collapsedSummary}
           </div>
@@ -402,16 +477,14 @@ function TaskCard({
           )}
         </div>
         <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-light)' }}>
-            {vm.statusLabel}
-          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-light)' }}>{vm.statusLabel}</div>
           <ChevronDown
             style={{
               width: 12,
               height: 12,
               color: 'var(--text-light)',
               transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 160ms ease',
+              transition: 'transform 160ms ease'
             }}
           />
         </div>
@@ -440,13 +513,15 @@ function TaskCard({
                               : step.status === 'error'
                                 ? 'var(--color-red)'
                                 : 'var(--border-default)',
-                      flexShrink: 0,
+                      flexShrink: 0
                     }}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>{step.title}</div>
                     {step.detail && (
-                      <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>{step.detail}</div>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>
+                        {step.detail}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -458,12 +533,26 @@ function TaskCard({
           {vm.sections.details.expanded && vm.detailGroups.length > 0 && (
             <div className="flex flex-col" style={{ gap: 8, paddingBottom: 6 }}>
               {vm.detailGroups.map((group) => (
-                <div key={group.id} style={{ borderRadius: 8, background: 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)', padding: '7px 8px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>{group.title}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2 }}>{group.summary}</div>
+                <div
+                  key={group.id}
+                  style={{
+                    borderRadius: 8,
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)',
+                    padding: '7px 8px'
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>
+                    {group.title}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2 }}>
+                    {group.summary}
+                  </div>
                   <div className="flex flex-col" style={{ gap: 3, marginTop: 6 }}>
                     {group.events.map((event) => (
-                      <div key={event.id} style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}>
+                      <div
+                        key={event.id}
+                        style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
+                      >
                         {event.text}
                       </div>
                     ))}
@@ -488,7 +577,7 @@ function TaskCard({
                     background: 'transparent',
                     fontSize: 10.5,
                     color: 'var(--text-gray)',
-                    cursor: artifact.path ? 'pointer' : 'default',
+                    cursor: artifact.path ? 'pointer' : 'default'
                   }}
                   title={artifact.path || artifact.label}
                 >
@@ -510,67 +599,105 @@ function TaskCard({
             padding: '8px 9px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: 6
           }}
         >
           <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
-            已记录的长期偏好 / 本次摘要
+            已记录的常驻偏好 / 当前上下文
           </div>
           <div className="flex flex-col" style={{ gap: 4 }}>
             {visibleMemoryCapture.items.map((item) => (
               <div key={item.memoryId} style={{ fontSize: 10.5, color: 'var(--text-body)' }}>
-                {item.title}{item.summary ? `：${item.summary}` : ''}
+                {memoryCaptureSourceLabel(item.sourceType)} · {item.title}
+                {item.summary ? `：${item.summary}` : ''}
               </div>
             ))}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => onDismissMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+            <button
+              type="button"
+              onClick={() => onDismissMemoryCapture?.(run.scopeId)}
+              style={{ ...TASK_ACTION_BUTTON_STYLE }}
+            >
               确认
             </button>
-            <button type="button" onClick={() => onUndoMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+            <button
+              type="button"
+              onClick={() => onUndoMemoryCapture?.(run.scopeId)}
+              style={{ ...TASK_ACTION_BUTTON_STYLE }}
+            >
               撤销
             </button>
-            <button type="button" onClick={() => onSupplementMemoryCapture?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
+            <button
+              type="button"
+              onClick={() => onSupplementMemoryCapture?.(run.scopeId)}
+              style={{ ...TASK_ACTION_BUTTON_STYLE }}
+            >
               补充
             </button>
           </div>
         </div>
       )}
 
-      {expanded && (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
-        <div className="flex flex-wrap gap-1.5">
-          {run.waitingFor === 'input' && (
-            <button type="button" onClick={() => onContinueInput?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-              补充后继续
-            </button>
-          )}
-          {run.waitingFor === 'confirmation' && (
-            <>
-              <button type="button" onClick={() => onSubmitConfirmation?.(run.scopeId, true)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-                确认继续
+      {expanded &&
+        (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
+          <div className="flex flex-wrap gap-1.5">
+            {run.waitingFor === 'input' && (
+              <button
+                type="button"
+                onClick={() => onContinueInput?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                补充后继续
               </button>
-              <button type="button" onClick={() => onSubmitConfirmation?.(run.scopeId, false)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-                暂不继续
+            )}
+            {run.waitingFor === 'confirmation' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onSubmitConfirmation?.(run.scopeId, true)}
+                  style={{ ...TASK_ACTION_BUTTON_STYLE }}
+                >
+                  确认继续
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSubmitConfirmation?.(run.scopeId, false)}
+                  style={{ ...TASK_ACTION_BUTTON_STYLE }}
+                >
+                  暂不继续
+                </button>
+              </>
+            )}
+            {run.waitingFor === 'agent_result' && (
+              <button
+                type="button"
+                onClick={() => onSubmitAgentResult?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                补交结果
               </button>
-            </>
-          )}
-          {run.waitingFor === 'agent_result' && (
-            <button type="button" onClick={() => onSubmitAgentResult?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-              补交结果
-            </button>
-          )}
-          {(run.resumableActions || []).includes('retry') && (
-            <button type="button" onClick={() => onRetry?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-              重试
-            </button>
-          )}
-          {compact && (
-            <button type="button" onClick={() => onOpenScope?.(run.scopeId)} style={{ ...TASK_ACTION_BUTTON_STYLE }}>
-              打开会话
-            </button>
-          )}
-        </div>
-      )}
+            )}
+            {(run.resumableActions || []).includes('retry') && (
+              <button
+                type="button"
+                onClick={() => onRetry?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                重试
+              </button>
+            )}
+            {compact && (
+              <button
+                type="button"
+                onClick={() => onOpenScope?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                打开会话
+              </button>
+            )}
+          </div>
+        )}
     </div>
   )
 }
@@ -579,7 +706,7 @@ function ToolTraceCard({
   events,
   pending = false,
   expanded = false,
-  onToggleExpanded,
+  onToggleExpanded
 }: {
   events: Array<{ id: string; kind: 'call' | 'result'; text: string; timestamp: Date }>
   pending?: boolean
@@ -598,24 +725,33 @@ function ToolTraceCard({
         padding: '9px 10px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 6,
+        gap: 6
       }}
     >
       <button
         type="button"
         onClick={onToggleExpanded}
         className="flex items-center justify-between gap-2"
-        style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+        style={{
+          border: 'none',
+          background: 'transparent',
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left'
+        }}
       >
         <div className="flex items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
-          <Wrench style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }} strokeWidth={2} />
+          <Wrench
+            style={{ width: 12, height: 12, color: 'var(--text-light)', flexShrink: 0 }}
+            strokeWidth={2}
+          />
           <div
             style={{
               fontSize: 11.5,
               fontWeight: 600,
               color: 'var(--text-body)',
               whiteSpace: 'nowrap',
-              flexShrink: 0,
+              flexShrink: 0
             }}
           >
             {pending ? '进行中的工具调用' : '工具调用'}
@@ -629,7 +765,7 @@ function ToolTraceCard({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 minWidth: 0,
-                flex: 1,
+                flex: 1
               }}
             >
               {latestEvent.text}
@@ -642,14 +778,23 @@ function ToolTraceCard({
             height: 12,
             color: 'var(--text-light)',
             transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 160ms ease',
+            transition: 'transform 160ms ease'
           }}
         />
       </button>
       <div className="flex flex-col" style={{ gap: 4 }}>
         {visibleEvents.map((event) => (
-          <div key={event.id} className="flex items-start gap-2" style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}>
-            <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
+          <div
+            key={event.id}
+            className="flex items-start gap-2"
+            style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
+          >
+            <span
+              style={{
+                color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
+                marginTop: 1
+              }}
+            >
               {event.kind === 'call' ? '•' : '✓'}
             </span>
             <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
@@ -667,7 +812,7 @@ const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   background: 'transparent',
   fontSize: 10.5,
   color: 'var(--text-body)',
-  cursor: 'pointer',
+  cursor: 'pointer'
 }
 
 const STREAM_EASE = [0.22, 1, 0.36, 1] as const
@@ -681,7 +826,7 @@ function ChatPanelMotionLayer({
   header,
   body,
   children,
-  hideWhenExiting = false,
+  hideWhenExiting = false
 }: {
   header?: React.ReactNode
   body?: React.ReactNode
@@ -700,7 +845,7 @@ function ChatPanelMotionLayer({
         style={{
           zIndex: layerZIndex,
           pointerEvents: isPresent ? 'auto' : 'none',
-          opacity: shouldSuppressExitFrame ? 0 : 1,
+          opacity: shouldSuppressExitFrame ? 0 : 1
         }}
       >
         {children}
@@ -714,13 +859,13 @@ function ChatPanelMotionLayer({
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
-        opacity: shouldSuppressExitFrame ? 0 : 1,
+        opacity: shouldSuppressExitFrame ? 0 : 1
       }}
     >
       <div
         className="grid h-full min-h-0"
         style={{
-          gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`,
+          gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`
         }}
       >
         <div className="relative overflow-visible" style={{ zIndex: 4 }}>
@@ -729,16 +874,20 @@ function ChatPanelMotionLayer({
             style={{
               willChange: 'transform',
               backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)',
+              transform: 'translateZ(0)'
             }}
-            initial={reduceMotion ? false : { y: HEADER_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(12% 0 0 0)' }}
+            initial={
+              reduceMotion
+                ? false
+                : { y: HEADER_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(12% 0 0 0)' }
+            }
             animate={{
               y: 0,
               opacity: 1,
               clipPath: 'inset(0% 0 0 0)',
               transition: reduceMotion
                 ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
             }}
             exit={
               reduceMotion
@@ -747,7 +896,7 @@ function ChatPanelMotionLayer({
                     y: -HEADER_STREAM_OFFSET,
                     opacity: 0.01,
                     clipPath: 'inset(28% 0 0 0)',
-                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
+                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
                   }
             }
           >
@@ -761,16 +910,20 @@ function ChatPanelMotionLayer({
             style={{
               willChange: 'transform',
               backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)',
+              transform: 'translateZ(0)'
             }}
-            initial={reduceMotion ? false : { y: CONTENT_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(10% 0 0 0)' }}
+            initial={
+              reduceMotion
+                ? false
+                : { y: CONTENT_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(10% 0 0 0)' }
+            }
             animate={{
               y: 0,
               opacity: 1,
               clipPath: 'inset(0% 0 0 0)',
               transition: reduceMotion
                 ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
             }}
             exit={
               reduceMotion
@@ -779,7 +932,7 @@ function ChatPanelMotionLayer({
                     y: -CONTENT_STREAM_OFFSET,
                     opacity: 0.01,
                     clipPath: 'inset(22% 0 0 0)',
-                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
+                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
                   }
             }
           >
@@ -794,7 +947,7 @@ function ChatPanelMotionLayer({
 function CollapsedChatRail({
   onTogglePanel,
   onHistoryOpen,
-  onNewSession,
+  onNewSession
 }: {
   onTogglePanel: () => void
   onHistoryOpen: () => void
@@ -809,14 +962,14 @@ function CollapsedChatRail({
         background: 'transparent',
         alignItems: 'flex-end',
         paddingRight: WORKBENCH_TOPBAR_PADDING_RIGHT,
-        boxSizing: 'border-box',
+        boxSizing: 'border-box'
       }}
     >
       <div
         className="flex w-full items-center justify-end"
         style={{
           height: WORKBENCH_TOPBAR_HEIGHT,
-          borderBottom: '1px solid transparent',
+          borderBottom: '1px solid transparent'
         }}
       >
         <IconButton
@@ -880,7 +1033,7 @@ function ModelSelector() {
           borderRadius: 8,
           border: '1px solid transparent',
           background: 'transparent',
-          gap: 4,
+          gap: 4
         }}
       >
         <span
@@ -890,7 +1043,8 @@ function ModelSelector() {
         <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{label}</span>
         <ChevronDown
           style={{
-            width: 10, height: 10,
+            width: 10,
+            height: 10,
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 200ms ease'
           }}
@@ -914,14 +1068,21 @@ function ModelSelector() {
             zIndex: 100
           }}
         >
-          <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 4 }}>
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--text-light)',
+              padding: '2px 8px',
+              marginBottom: 4
+            }}
+          >
             当前模型
           </div>
           <div
             style={{
               padding: '6px 10px',
               borderRadius: 6,
-              background: 'var(--bg-hover)',
+              background: 'var(--bg-hover)'
             }}
           >
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
@@ -932,7 +1093,9 @@ function ModelSelector() {
             </div>
           </div>
           {!hasKey && (
-            <div style={{ fontSize: 10, color: 'var(--color-red)', padding: '4px 8px', marginTop: 4 }}>
+            <div
+              style={{ fontSize: 10, color: 'var(--color-red)', padding: '4px 8px', marginTop: 4 }}
+            >
               未配置 API Key，请前往设置页配置
             </div>
           )}
@@ -948,7 +1111,7 @@ function ModelSelector() {
 
 function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
   const style = { width: size, height: size }
-  const cls = "text-[var(--text-gray)]"
+  const cls = 'text-[var(--text-gray)]'
   if (attachment.isDirectory) {
     return <Folder style={style} className={cls} strokeWidth={2} />
   }
@@ -965,10 +1128,14 @@ function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment;
     return <Puzzle style={style} className={cls} strokeWidth={2} />
   }
   switch (attachment.type) {
-    case 'image': return <Image style={style} className={cls} strokeWidth={2} />
-    case 'video': return <Film style={style} className={cls} strokeWidth={2} />
-    case 'spreadsheet': return <Table style={style} className={cls} strokeWidth={2} />
-    default: return <FileText style={style} className={cls} strokeWidth={2} />
+    case 'image':
+      return <Image style={style} className={cls} strokeWidth={2} />
+    case 'video':
+      return <Film style={style} className={cls} strokeWidth={2} />
+    case 'spreadsheet':
+      return <Table style={style} className={cls} strokeWidth={2} />
+    default:
+      return <FileText style={style} className={cls} strokeWidth={2} />
   }
 }
 
@@ -982,20 +1149,29 @@ function formatDesignAttachmentSummary(attachment: ChatAttachment): string {
   return [
     '### 设计项目引用',
     `- 项目: ${attachment.name}`,
-    attachment.path && attachment.path.startsWith('/') ? `- 文件: ${attachment.path}` : '- 文件: (未保存草稿)',
-    attachment.dirty ? '- 状态: 有未保存更改' : attachment.saveStatus ? `- 状态: ${attachment.saveStatus}` : null,
+    attachment.path && attachment.path.startsWith('/')
+      ? `- 文件: ${attachment.path}`
+      : '- 文件: (未保存草稿)',
+    attachment.dirty
+      ? '- 状态: 有未保存更改'
+      : attachment.saveStatus
+        ? `- 状态: ${attachment.saveStatus}`
+        : null,
     attachment.selectionSummary ? `- 选择状态: ${attachment.selectionSummary}` : null,
     attachment.currentToolContext ? `- 当前工具: ${attachment.currentToolContext}` : null,
-    attachment.snapshotHash ? `- 快照哈希: ${attachment.snapshotHash}` : null,
-  ].filter(Boolean).join('\n')
+    attachment.snapshotHash ? `- 快照哈希: ${attachment.snapshotHash}` : null
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function formatDocumentQuoteAttachmentSummary(attachment: ChatAttachment): string {
-  const lineLabel = attachment.lineStart && attachment.lineEnd
-    ? attachment.lineStart === attachment.lineEnd
-      ? `第 ${attachment.lineStart} 行`
-      : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
-    : null
+  const lineLabel =
+    attachment.lineStart && attachment.lineEnd
+      ? attachment.lineStart === attachment.lineEnd
+        ? `第 ${attachment.lineStart} 行`
+        : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
+      : null
 
   return [
     '### 文档引用',
@@ -1006,8 +1182,10 @@ function formatDocumentQuoteAttachmentSummary(attachment: ChatAttachment): strin
     attachment.selection ? '' : null,
     attachment.selection ? '```quote' : null,
     attachment.selection || null,
-    attachment.selection ? '```' : null,
-  ].filter(Boolean).join('\n')
+    attachment.selection ? '```' : null
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function formatDocumentWidgetTargetSummary(attachment: ChatAttachment): string {
@@ -1021,10 +1199,12 @@ function formatDocumentWidgetTargetSummary(attachment: ChatAttachment): string {
     '```show-widget',
     JSON.stringify({
       title: attachment.widgetTitle || attachment.title || attachment.name,
-      widget_code: attachment.widgetCode || '',
+      widget_code: attachment.widgetCode || ''
     }),
-    '```',
-  ].filter(Boolean).join('\n')
+    '```'
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function getDocumentQuoteTooltip(attachment: ChatAttachment): string {
@@ -1036,8 +1216,10 @@ function getDocumentQuoteTooltip(attachment: ChatAttachment): string {
         ? `第 ${attachment.lineStart} 行`
         : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
       : null,
-    attachment.selection ? attachment.selection.slice(0, 200) : null,
-  ].filter(Boolean).join('\n')
+    attachment.selection ? attachment.selection.slice(0, 200) : null
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
@@ -1046,11 +1228,12 @@ function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
   }
 
   if (attachment.source === 'document-quote') {
-    const lineLabel = attachment.lineStart && attachment.lineEnd
-      ? attachment.lineStart === attachment.lineEnd
-        ? `L${attachment.lineStart}`
-        : `L${attachment.lineStart}-${attachment.lineEnd}`
-      : null
+    const lineLabel =
+      attachment.lineStart && attachment.lineEnd
+        ? attachment.lineStart === attachment.lineEnd
+          ? `L${attachment.lineStart}`
+          : `L${attachment.lineStart}-${attachment.lineEnd}`
+        : null
     return [attachment.sectionTitle, lineLabel].filter(Boolean).join(' · ') || '文档引用'
   }
 
@@ -1066,8 +1249,10 @@ function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
     return [
       attachment.widgetTitle || attachment.title || attachment.name,
       attachment.documentTitle ? `文档: ${attachment.documentTitle}` : null,
-      attachment.widgetMode || 'widget 更新',
-    ].filter(Boolean).join('\n')
+      attachment.widgetMode || 'widget 更新'
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
 
   return null
@@ -1083,12 +1268,25 @@ interface ConversationChannelOption {
 
 const IMAGE_ATTACHMENT_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'tiff'])
 const VIDEO_ATTACHMENT_EXTS = new Set(['mp4', 'mov', 'mkv', 'webm', 'avi'])
-const TEXT_ATTACHMENT_EXTS = new Set(['txt', 'md', 'csv', 'pdf', 'json', 'html', 'docx', 'doc', 'rtf', 'odt'])
+const TEXT_ATTACHMENT_EXTS = new Set([
+  'txt',
+  'md',
+  'csv',
+  'pdf',
+  'json',
+  'html',
+  'docx',
+  'doc',
+  'rtf',
+  'odt'
+])
 const SPREADSHEET_ATTACHMENT_EXTS = new Set(['xlsx', 'xls', 'tsv'])
 
 function getAttachmentTypeFromExt(ext?: string, isDirectory = false): ChatAttachment['type'] {
   if (isDirectory) return 'other'
-  const normalizedExt = String(ext || '').toLowerCase().replace(/^\./, '')
+  const normalizedExt = String(ext || '')
+    .toLowerCase()
+    .replace(/^\./, '')
   if (IMAGE_ATTACHMENT_EXTS.has(normalizedExt)) return 'image'
   if (VIDEO_ATTACHMENT_EXTS.has(normalizedExt)) return 'video'
   if (TEXT_ATTACHMENT_EXTS.has(normalizedExt)) return 'text'
@@ -1111,8 +1309,8 @@ function createLocalPathAttachment(params: {
   const normalizedExt = isDirectory
     ? ''
     : String(params.ext || getPathBasename(params.path).split('.').pop() || '')
-      .toLowerCase()
-      .replace(/^\./, '')
+        .toLowerCase()
+        .replace(/^\./, '')
 
   return {
     id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1122,7 +1320,7 @@ function createLocalPathAttachment(params: {
     isDirectory,
     size: params.size || 0,
     ext: normalizedExt ? `.${normalizedExt}` : '',
-    source: 'file',
+    source: 'file'
   }
 }
 
@@ -1131,7 +1329,7 @@ function formatFolderAttachmentSummary(attachment: ChatAttachment): string {
     '### 文件夹引用',
     `- 名称: ${attachment.name}`,
     `- 路径: ${attachment.path}`,
-    '- 用途: 可让 agent 直接基于这个目录继续定位文件、生成结果或说明目标落点。',
+    '- 用途: 可让 agent 直接基于这个目录继续定位文件、生成结果或说明目标落点。'
   ].join('\n')
 }
 
@@ -1176,7 +1374,7 @@ export default function ChatPanel() {
     pendingSendFlushAt,
     loadSendPreferences,
     taskDisclosureState,
-    setTaskSectionExpanded,
+    setTaskSectionExpanded
   } = useAgent()
 
   const { chatPanelVisible, chatPanelWidth, toggleChatPanel } = useWorkspace()
@@ -1187,13 +1385,20 @@ export default function ChatPanel() {
   const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
   const [persistedScopeRuns, setPersistedScopeRuns] = useState<PersistedScopeRunSummary[]>([])
+  const [sessionRecallQuery, setSessionRecallQuery] = useState('')
+  const [sessionRecallResults, setSessionRecallResults] = useState<SessionRecallHit[]>([])
+  const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
+    SessionRecallCapsule[]
+  >([])
+  const [sessionRecallSearching, setSessionRecallSearching] = useState(false)
+  const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chatInputRef = useRef<ChatInputHandle | null>(null)
   const focusInputWithResize = useCallback(() => {
     chatInputRef.current?.focusWithResize()
   }, [])
 
-  const currentAgentData = agents.find(a => a.name === currentAgent)
+  const currentAgentData = agents.find((a) => a.name === currentAgent)
   const getScopeChannelKey = useCallback((scope: ConversationScope) => {
     const sourceId = scope.sourceKind === 'local' ? 'app' : scope.sourceId
     return `${scope.sourceKind}:${sourceId}`
@@ -1205,7 +1410,7 @@ export default function ChatPanel() {
       sourceKind: 'local',
       sourceId: 'app',
       label: '应用内',
-      caption: '本地会话',
+      caption: '本地会话'
     })
 
     for (const scope of scopes) {
@@ -1217,7 +1422,11 @@ export default function ChatPanel() {
       let label = sourceLabel || '远程会话'
       let caption = sourceLabel || '频道会话'
 
-      if (channelType === 'feishu-app' || channelType === 'feishu-bot' || /飞书/.test(sourceLabel)) {
+      if (
+        channelType === 'feishu-app' ||
+        channelType === 'feishu-bot' ||
+        /飞书/.test(sourceLabel)
+      ) {
         label = '飞书会话'
         caption = sourceLabel || '飞书频道'
       } else if (channelType === 'telegram-bot' || /telegram/i.test(sourceLabel)) {
@@ -1230,20 +1439,23 @@ export default function ChatPanel() {
         sourceKind: scope.sourceKind,
         sourceId: scope.sourceId,
         label,
-        caption,
+        caption
       })
     }
 
     return Array.from(options.values())
   }, [getScopeChannelKey, scopes])
   const currentChannel = useMemo<ConversationChannelOption>(() => {
-    return channelOptions.find((option) => option.key === selectedChannelKey) || channelOptions[0] || {
-      key: 'local:app',
-      sourceKind: 'local',
-      sourceId: 'app',
-      label: '应用内',
-      caption: '本地会话',
-    }
+    return (
+      channelOptions.find((option) => option.key === selectedChannelKey) ||
+      channelOptions[0] || {
+        key: 'local:app',
+        sourceKind: 'local',
+        sourceId: 'app',
+        label: '应用内',
+        caption: '本地会话'
+      }
+    )
   }, [channelOptions, selectedChannelKey])
   const filteredScopes = useMemo(() => {
     return scopes
@@ -1254,23 +1466,157 @@ export default function ChatPanel() {
         return bTime - aTime
       })
   }, [getScopeChannelKey, scopes, selectedChannelKey])
+  const visibleSessionRecallResults = useMemo(() => {
+    return sessionRecallResults.filter((item) => {
+      return item.sourceKind === currentChannel.sourceKind && item.sourceId === currentChannel.sourceId
+    })
+  }, [currentChannel.sourceId, currentChannel.sourceKind, sessionRecallResults])
+  const attachedSessionRecallConversationIds = useMemo(
+    () => attachedSessionRecallCapsules.map((capsule) => capsule.conversationId),
+    [attachedSessionRecallCapsules]
+  )
 
   const refreshPersistedScopeRuns = useCallback(async () => {
     if (!window.electronAPI?.agent?.listScopeRuns) return
-    const result = await window.electronAPI.agent.listScopeRuns({
-      channelKey: selectedChannelKey,
-      statuses: ['planning', 'tool_running', 'checkpoint', 'takeover', 'resuming', 'responding', 'done', 'error', 'cancelled'],
-      limit: 12,
-    }).catch(() => null)
+    const result = await window.electronAPI.agent
+      .listScopeRuns({
+        channelKey: selectedChannelKey,
+        statuses: [
+          'planning',
+          'tool_running',
+          'checkpoint',
+          'takeover',
+          'resuming',
+          'responding',
+          'done',
+          'error',
+          'cancelled'
+        ],
+        limit: 12
+      })
+      .catch(() => null)
     if (!result?.success || !Array.isArray(result.data)) return
     setPersistedScopeRuns(result.data as PersistedScopeRunSummary[])
   }, [selectedChannelKey])
+
+  const refreshAttachedSessionRecall = useCallback(async (scopeId?: string | null) => {
+    if (!scopeId || !window.electronAPI?.agent?.listAttachedSessionRecallContexts) {
+      setAttachedSessionRecallCapsules([])
+      return
+    }
+    const result = await window.electronAPI.agent
+      .listAttachedSessionRecallContexts(scopeId)
+      .catch(() => null)
+    if (!result?.success || !Array.isArray(result.data)) {
+      setAttachedSessionRecallCapsules([])
+      return
+    }
+    setAttachedSessionRecallCapsules(result.data as SessionRecallCapsule[])
+  }, [])
+
+  const runSessionRecallSearch = useCallback(
+    async (query: string) => {
+      if (!window.electronAPI?.agent?.searchSessionRecall) return
+      const normalized = query.trim()
+      setSessionRecallSearching(true)
+      setSessionRecallError(null)
+      try {
+        const result = await window.electronAPI.agent
+          .searchSessionRecall({
+            query: normalized || undefined,
+            currentScopeId: currentScopeId || undefined,
+            limit: 12
+          })
+          .catch(() => null)
+        if (!result?.success || !Array.isArray(result.data)) {
+          setSessionRecallResults([])
+          setSessionRecallError(result?.error || '旧会话搜索失败')
+          return
+        }
+        setSessionRecallResults(result.data as SessionRecallHit[])
+      } finally {
+        setSessionRecallSearching(false)
+      }
+    },
+    [currentScopeId]
+  )
+
+  const handleAttachSessionRecall = useCallback(
+    async (conversationId: string) => {
+      if (!currentScopeId || !window.electronAPI?.agent?.attachSessionRecallContext) return
+      setSessionRecallError(null)
+      const result = await window.electronAPI.agent
+        .attachSessionRecallContext(currentScopeId, conversationId)
+        .catch(() => null)
+      if (!result?.success || !result.data) {
+        setSessionRecallError(result?.error || '引用旧会话失败')
+        return
+      }
+      const payload = result.data as { scope: ConversationScope; capsule: SessionRecallCapsule }
+      useAgent.setState((state) => {
+        const nextScopes = state.scopes.map((scope) =>
+          scope.id === payload.scope.id ? payload.scope : scope
+        )
+        return {
+          scopes: nextScopes,
+          currentScope:
+            state.currentScope?.id === payload.scope.id ? payload.scope : state.currentScope,
+          conversations: nextScopes.map(mapScopeToConversation)
+        }
+      })
+      setAttachedSessionRecallCapsules((current) => {
+        const filtered = current.filter(
+          (item) => item.conversationId !== payload.capsule.conversationId
+        )
+        return [...filtered, payload.capsule]
+      })
+    },
+    [currentScopeId]
+  )
+
+  const handleDetachSessionRecall = useCallback(
+    async (conversationId: string) => {
+      if (!currentScopeId || !window.electronAPI?.agent?.detachSessionRecallContext) return
+      setSessionRecallError(null)
+      const result = await window.electronAPI.agent
+        .detachSessionRecallContext(currentScopeId, conversationId)
+        .catch(() => null)
+      if (!result?.success || !result.data) {
+        setSessionRecallError(result?.error || '移除旧会话引用失败')
+        return
+      }
+      const payload = result.data as { scope: ConversationScope }
+      useAgent.setState((state) => {
+        const nextScopes = state.scopes.map((scope) =>
+          scope.id === payload.scope.id ? payload.scope : scope
+        )
+        return {
+          scopes: nextScopes,
+          currentScope:
+            state.currentScope?.id === payload.scope.id ? payload.scope : state.currentScope,
+          conversations: nextScopes.map(mapScopeToConversation)
+        }
+      })
+      setAttachedSessionRecallCapsules((current) =>
+        current.filter((item) => item.conversationId !== conversationId)
+      )
+    },
+    [currentScopeId]
+  )
 
   const inMemoryTaskRuns = useMemo<TaskCardRun[]>(() => {
     return filteredScopes
       .map((scope) => {
         const run = scopeRunStates[scope.id]
-        if (!run || !isTaskVisible({ ...run, scopeId: scope.id, title: scope.title, updatedAt: run.updatedAt || scope.updatedAt })) {
+        if (
+          !run ||
+          !isTaskVisible({
+            ...run,
+            scopeId: scope.id,
+            title: scope.title,
+            updatedAt: run.updatedAt || scope.updatedAt
+          })
+        ) {
           return null
         }
         return {
@@ -1291,7 +1637,7 @@ export default function ChatPanel() {
           updatedAt: run.updatedAt || scope.updatedAt,
           toolTrace: run.toolTrace,
           responseMessageId: run.responseMessageId || null,
-          responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0,
+          responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0
         } satisfies TaskCardRun
       })
       .filter(Boolean) as TaskCardRun[]
@@ -1314,12 +1660,14 @@ export default function ChatPanel() {
       blockedReason: run.blockedReason,
       error: run.error,
       updatedAt: run.updatedAt,
-      toolTrace: [],
+      toolTrace: []
     }))
     const merged = new Map<string, TaskCardRun>()
     for (const run of mappedPersisted) merged.set(run.scopeId, run)
     for (const run of inMemoryTaskRuns) merged.set(run.scopeId, run)
-    return Array.from(merged.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    return Array.from(merged.values()).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    )
   }, [inMemoryTaskRuns, persistedScopeRuns])
 
   const currentTaskRun = useMemo(() => {
@@ -1329,7 +1677,12 @@ export default function ChatPanel() {
     return currentRun && isTaskVisible(currentRun) ? currentRun : null
   }, [currentScopeId, mergedTaskRuns])
 
-  const showToolTraceCapsule = !currentTaskRun && (toolTrace.length > 0 || isStreaming || toolTraceStatus === 'error' || toolTraceStatus === 'cancelled')
+  const showToolTraceCapsule =
+    !currentTaskRun &&
+    (toolTrace.length > 0 ||
+      isStreaming ||
+      toolTraceStatus === 'error' ||
+      toolTraceStatus === 'cancelled')
   const shouldRenderGlobalToolTraceCapsule = !currentTaskRun
 
   const parseSerializedTaskSnapshot = useCallback((raw: unknown): TaskCardRun | null => {
@@ -1356,9 +1709,9 @@ export default function ChatPanel() {
         id: event.id,
         kind: event.kind,
         text: event.text,
-        timestamp: new Date(event.timestamp),
+        timestamp: new Date(event.timestamp)
       })),
-      responseMessageId: snapshot.responseMessageId || null,
+      responseMessageId: snapshot.responseMessageId || null
     } as TaskCardRun
   }, [])
 
@@ -1373,10 +1726,15 @@ export default function ChatPanel() {
           id: event.id,
           kind: event.kind,
           text: event.text,
-          timestamp: new Date(event.timestamp),
+          timestamp: new Date(event.timestamp)
         }
       })
-      .filter(Boolean) as Array<{ id: string; kind: 'call' | 'result'; text: string; timestamp: Date }>
+      .filter(Boolean) as Array<{
+      id: string
+      kind: 'call' | 'result'
+      text: string
+      timestamp: Date
+    }>
   }, [])
 
   useEffect(() => {
@@ -1424,72 +1782,75 @@ export default function ChatPanel() {
     }
   }, [])
 
-  const handleAttachmentPreview = useCallback(async (attachment: ChatAttachment) => {
-    if (!attachment.path) return
-    if (attachment.source === 'document-quote') {
-      setActiveAttachmentPreview({
-        attachment,
-        mode: 'text',
-        content: formatDocumentQuoteAttachmentSummary(attachment),
-      })
-      return
-    }
-    if (attachment.source === 'document-widget-target') {
-      setActiveAttachmentPreview({
-        attachment,
-        mode: 'text',
-        content: formatDocumentWidgetTargetSummary(attachment),
-      })
-      return
-    }
-    if (attachment.source === 'design-project') {
-      setActiveAttachmentPreview({
-        attachment,
-        mode: 'text',
-        content: formatDesignAttachmentSummary(attachment),
-      })
-      return
-    }
-    if (attachment.isDirectory) {
-      setActiveAttachmentPreview({
-        attachment,
-        mode: 'text',
-        content: formatFolderAttachmentSummary(attachment),
-      })
-      return
-    }
-    if (attachment.type === 'image') {
-      setActiveAttachmentPreview({ attachment, mode: 'image' })
-      return
-    }
-    if (attachment.type === 'video') {
-      setActiveAttachmentPreview({ attachment, mode: 'video' })
-      return
-    }
-    if (attachment.type === 'text') {
-      setAttachmentPreviewLoading(true)
-      try {
-        const result = await window.electronAPI.chat.readFileForAI(attachment.path)
-        if (result.success && result.data?.type === 'text') {
-          setActiveAttachmentPreview({
-            attachment,
-            mode: 'text',
-            content: result.data.content || '',
-          })
-        } else {
-          setActiveAttachmentPreview({
-            attachment,
-            mode: 'file',
-            error: result.error || '无法读取附件内容',
-          })
-        }
-      } finally {
-        setAttachmentPreviewLoading(false)
+  const handleAttachmentPreview = useCallback(
+    async (attachment: ChatAttachment) => {
+      if (!attachment.path) return
+      if (attachment.source === 'document-quote') {
+        setActiveAttachmentPreview({
+          attachment,
+          mode: 'text',
+          content: formatDocumentQuoteAttachmentSummary(attachment)
+        })
+        return
       }
-      return
-    }
-    setActiveAttachmentPreview({ attachment, mode: 'file' })
-  }, [setActiveAttachmentPreview])
+      if (attachment.source === 'document-widget-target') {
+        setActiveAttachmentPreview({
+          attachment,
+          mode: 'text',
+          content: formatDocumentWidgetTargetSummary(attachment)
+        })
+        return
+      }
+      if (attachment.source === 'design-project') {
+        setActiveAttachmentPreview({
+          attachment,
+          mode: 'text',
+          content: formatDesignAttachmentSummary(attachment)
+        })
+        return
+      }
+      if (attachment.isDirectory) {
+        setActiveAttachmentPreview({
+          attachment,
+          mode: 'text',
+          content: formatFolderAttachmentSummary(attachment)
+        })
+        return
+      }
+      if (attachment.type === 'image') {
+        setActiveAttachmentPreview({ attachment, mode: 'image' })
+        return
+      }
+      if (attachment.type === 'video') {
+        setActiveAttachmentPreview({ attachment, mode: 'video' })
+        return
+      }
+      if (attachment.type === 'text') {
+        setAttachmentPreviewLoading(true)
+        try {
+          const result = await window.electronAPI.chat.readFileForAI(attachment.path)
+          if (result.success && result.data?.type === 'text') {
+            setActiveAttachmentPreview({
+              attachment,
+              mode: 'text',
+              content: result.data.content || ''
+            })
+          } else {
+            setActiveAttachmentPreview({
+              attachment,
+              mode: 'file',
+              error: result.error || '无法读取附件内容'
+            })
+          }
+        } finally {
+          setAttachmentPreviewLoading(false)
+        }
+        return
+      }
+      setActiveAttachmentPreview({ attachment, mode: 'file' })
+    },
+    [setActiveAttachmentPreview]
+  )
 
   const handleOpenAttachment = useCallback(async (attachment: ChatAttachment) => {
     if (attachment.source === 'document-quote') {
@@ -1525,6 +1886,10 @@ export default function ChatPanel() {
   }, [currentScope, getScopeChannelKey])
 
   useEffect(() => {
+    void refreshAttachedSessionRecall(currentScopeId)
+  }, [currentScopeId, refreshAttachedSessionRecall])
+
+  useEffect(() => {
     void refreshPersistedScopeRuns()
   }, [refreshPersistedScopeRuns, currentScopeId, scopes.length])
 
@@ -1549,245 +1914,333 @@ export default function ChatPanel() {
     }
   }, [attachments.length, inputValue, setInputValue, sendMessage])
 
-  const handleAgentSelect = useCallback((name: string) => {
-    if (currentScope?.sourceKind === 'channel') return
-    selectAgent(name)
-    void loadScopes()
-  }, [currentScope?.sourceKind, loadScopes, selectAgent])
+  const handleAgentSelect = useCallback(
+    (name: string) => {
+      if (currentScope?.sourceKind === 'channel') return
+      selectAgent(name)
+      void loadScopes()
+    },
+    [currentScope?.sourceKind, loadScopes, selectAgent]
+  )
 
   const handleNewSession = useCallback(() => {
     newSession()
   }, [newSession])
 
-  const handleLoadConversation = useCallback((convId: string) => {
-    loadConversation(convId)
-  }, [loadConversation])
+  const handleLoadConversation = useCallback(
+    (convId: string) => {
+      loadConversation(convId)
+    },
+    [loadConversation]
+  )
 
-  const handleChannelSelect = useCallback((channel: ConversationChannelOption) => {
-    setSelectedChannelKey(channel.key)
+  const handleChannelSelect = useCallback(
+    (channel: ConversationChannelOption) => {
+      setSelectedChannelKey(channel.key)
 
-    const latestScope = scopes
-      .filter((scope) => getScopeChannelKey(scope) === channel.key)
-      .sort((a, b) => {
-        const aTime = new Date(a.lastMessageAt || a.updatedAt).getTime()
-        const bTime = new Date(b.lastMessageAt || b.updatedAt).getTime()
-        return bTime - aTime
-      })[0]
+      const latestScope = scopes
+        .filter((scope) => getScopeChannelKey(scope) === channel.key)
+        .sort((a, b) => {
+          const aTime = new Date(a.lastMessageAt || a.updatedAt).getTime()
+          const bTime = new Date(b.lastMessageAt || b.updatedAt).getTime()
+          return bTime - aTime
+        })[0]
 
-    if (latestScope) {
-      loadConversation(latestScope.id)
-      return
-    }
-
-    if (channel.sourceKind === 'local') {
-      newSession()
-    }
-  }, [getScopeChannelKey, loadConversation, newSession, scopes])
-
-  const handleDeleteConversation = useCallback((convId: string) => {
-    deleteConversation(convId)
-  }, [deleteConversation])
-
-  const patchScopeRun = useCallback((scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState | null) => {
-    useAgent.setState((state) => {
-      const previous = state.scopeRunStates[scopeId] || null
-      const next = updater(previous)
-      if (!next) return state
-      return {
-        scopeRunStates: {
-          ...state.scopeRunStates,
-          [scopeId]: next,
-        },
-      }
-    })
-  }, [])
-
-  const applySkillExecutionDetailToScope = useCallback((scopeId: string, detail: {
-    id: string
-    skillId: string
-    status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-    startedAt: string
-    updatedAt: string
-    currentStepId?: string | null
-    blocker?: { type: string; message: string } | null
-    steps: Array<{ stepId: string; status: string }>
-    artifacts: Array<{ id?: string; label?: string; path?: string }>
-  }) => {
-    const patch = createTaskPatchFromSkillExecutionDetail(detail)
-    const nextPhase: ScopeRunState['phase'] =
-      detail.status === 'completed'
-        ? 'done'
-        : detail.status === 'failed'
-          ? 'error'
-          : detail.status === 'cancelled'
-            ? 'cancelled'
-            : detail.status === 'blocked'
-              ? 'checkpoint'
-              : 'tool_running'
-
-    patchScopeRun(scopeId, (previous) => ({
-      ...(previous || useAgent.getState().scopeRunStates[scopeId] || {
-        ...useAgent.getState().scopeRunStates[scopeId],
-      }),
-      ...patch,
-      scopeId,
-      agent: previous?.agent || currentAgent,
-      phase: nextPhase,
-      updatedAt: detail.updatedAt,
-      taskSummary: patch.taskSummary || previous?.taskSummary || null,
-      recentArtifacts: patch.recentArtifacts || previous?.recentArtifacts || [],
-      resumableActions: patch.resumableActions || previous?.resumableActions || [],
-      waitingFor: patch.waitingFor || previous?.waitingFor || 'none',
-      memoryCapture: previous?.memoryCapture || null,
-      toolTrace: previous?.toolTrace || [],
-      startedAt: previous?.startedAt || detail.startedAt,
-      responseBuffer: previous?.responseBuffer || '',
-      stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
-    }) as ScopeRunState)
-  }, [currentAgent, patchScopeRun])
-
-  const handleContinueTaskInput = useCallback((scopeId: string) => {
-    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
-    const continuation = run?.taskContinuation
-    const draft = [
-      '继续当前任务。',
-      continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
-      run?.taskSummary ? `需要补充：${run.taskSummary}` : null,
-      '我的补充是：',
-    ].filter(Boolean).join('\n')
-    setInputValue(draft)
-    focusInputWithResize()
-  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
-
-  const handleSubmitTaskConfirmation = useCallback(async (scopeId: string, confirmed: boolean) => {
-    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
-    const continuation = run?.taskContinuation
-    if (!continuation?.executionId || !continuation.stepId) return
-    const result = await window.electronAPI.skills.submitConfirmation({
-      executionId: continuation.executionId,
-      stepId: continuation.stepId,
-      confirmed,
-    }).catch(() => null)
-    if (result?.success && result.data) {
-      applySkillExecutionDetailToScope(scopeId, result.data)
-    }
-  }, [applySkillExecutionDetailToScope, mergedTaskRuns])
-
-  const handleSubmitTaskAgentResult = useCallback((scopeId: string) => {
-    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
-    const continuation = run?.taskContinuation
-    const draft = [
-      '继续当前任务。',
-      continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
-      continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
-      run?.taskSummary ? `需要补交结果：${run.taskSummary}` : null,
-      '我的结果是：',
-    ].filter(Boolean).join('\n')
-    setInputValue(draft)
-    focusInputWithResize()
-  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
-
-  const handleRetryTask = useCallback(async (scopeId: string) => {
-    const run = useAgent.getState().scopeRunStates[scopeId] || mergedTaskRuns.find((item) => item.scopeId === scopeId)
-    const continuation = run?.taskContinuation
-    if (continuation?.executionId && continuation.stepId) {
-      const result = await window.electronAPI.skills.restartFromStep({
-        executionId: continuation.executionId,
-        stepId: continuation.stepId,
-      }).catch(() => null)
-      if (result?.success && result.data) {
-        applySkillExecutionDetailToScope(scopeId, result.data)
+      if (latestScope) {
+        loadConversation(latestScope.id)
         return
       }
-    }
-    setInputValue('请重试刚才的任务，并在开始前先说明你准备怎么继续。')
-    focusInputWithResize()
-  }, [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue])
+
+      if (channel.sourceKind === 'local') {
+        newSession()
+      }
+    },
+    [getScopeChannelKey, loadConversation, newSession, scopes]
+  )
+
+  const handleDeleteConversation = useCallback(
+    (convId: string) => {
+      deleteConversation(convId)
+    },
+    [deleteConversation]
+  )
+
+  const patchScopeRun = useCallback(
+    (scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState | null) => {
+      useAgent.setState((state) => {
+        const previous = state.scopeRunStates[scopeId] || null
+        const next = updater(previous)
+        if (!next) return state
+        return {
+          scopeRunStates: {
+            ...state.scopeRunStates,
+            [scopeId]: next
+          }
+        }
+      })
+    },
+    []
+  )
+
+  const applySkillExecutionDetailToScope = useCallback(
+    (
+      scopeId: string,
+      detail: {
+        id: string
+        skillId: string
+        status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
+        startedAt: string
+        updatedAt: string
+        currentStepId?: string | null
+        blocker?: { type: string; message: string } | null
+        steps: Array<{ stepId: string; status: string }>
+        artifacts: Array<{ id?: string; label?: string; path?: string }>
+      }
+    ) => {
+      const patch = createTaskPatchFromSkillExecutionDetail(detail)
+      const nextPhase: ScopeRunState['phase'] =
+        detail.status === 'completed'
+          ? 'done'
+          : detail.status === 'failed'
+            ? 'error'
+            : detail.status === 'cancelled'
+              ? 'cancelled'
+              : detail.status === 'blocked'
+                ? 'checkpoint'
+                : 'tool_running'
+
+      patchScopeRun(
+        scopeId,
+        (previous) =>
+          ({
+            ...(previous ||
+              useAgent.getState().scopeRunStates[scopeId] || {
+                ...useAgent.getState().scopeRunStates[scopeId]
+              }),
+            ...patch,
+            scopeId,
+            agent: previous?.agent || currentAgent,
+            phase: nextPhase,
+            updatedAt: detail.updatedAt,
+            taskSummary: patch.taskSummary || previous?.taskSummary || null,
+            recentArtifacts: patch.recentArtifacts || previous?.recentArtifacts || [],
+            resumableActions: patch.resumableActions || previous?.resumableActions || [],
+            waitingFor: patch.waitingFor || previous?.waitingFor || 'none',
+            memoryCapture: previous?.memoryCapture || null,
+            toolTrace: previous?.toolTrace || [],
+            startedAt: previous?.startedAt || detail.startedAt,
+            responseBuffer: previous?.responseBuffer || '',
+            stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null }
+          }) as ScopeRunState
+      )
+    },
+    [currentAgent, patchScopeRun]
+  )
+
+  const handleContinueTaskInput = useCallback(
+    (scopeId: string) => {
+      const run =
+        useAgent.getState().scopeRunStates[scopeId] ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      const continuation = run?.taskContinuation
+      const draft = [
+        '继续当前任务。',
+        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
+        run?.taskSummary ? `需要补充：${run.taskSummary}` : null,
+        '我的补充是：'
+      ]
+        .filter(Boolean)
+        .join('\n')
+      setInputValue(draft)
+      focusInputWithResize()
+    },
+    [focusInputWithResize, mergedTaskRuns, setInputValue]
+  )
+
+  const handleSubmitTaskConfirmation = useCallback(
+    async (scopeId: string, confirmed: boolean) => {
+      const run =
+        useAgent.getState().scopeRunStates[scopeId] ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      const continuation = run?.taskContinuation
+      if (!continuation?.executionId || !continuation.stepId) return
+      const result = await window.electronAPI.skills
+        .submitConfirmation({
+          executionId: continuation.executionId,
+          stepId: continuation.stepId,
+          confirmed
+        })
+        .catch(() => null)
+      if (result?.success && result.data) {
+        applySkillExecutionDetailToScope(scopeId, result.data)
+      }
+    },
+    [applySkillExecutionDetailToScope, mergedTaskRuns]
+  )
+
+  const handleSubmitTaskAgentResult = useCallback(
+    (scopeId: string) => {
+      const run =
+        useAgent.getState().scopeRunStates[scopeId] ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      const continuation = run?.taskContinuation
+      const draft = [
+        '继续当前任务。',
+        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
+        continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
+        run?.taskSummary ? `需要补交结果：${run.taskSummary}` : null,
+        '我的结果是：'
+      ]
+        .filter(Boolean)
+        .join('\n')
+      setInputValue(draft)
+      focusInputWithResize()
+    },
+    [focusInputWithResize, mergedTaskRuns, setInputValue]
+  )
+
+  const handleRetryTask = useCallback(
+    async (scopeId: string) => {
+      const run =
+        useAgent.getState().scopeRunStates[scopeId] ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      const continuation = run?.taskContinuation
+      if (continuation?.executionId && continuation.stepId) {
+        const result = await window.electronAPI.skills
+          .restartFromStep({
+            executionId: continuation.executionId,
+            stepId: continuation.stepId
+          })
+          .catch(() => null)
+        if (result?.success && result.data) {
+          applySkillExecutionDetailToScope(scopeId, result.data)
+          return
+        }
+      }
+      setInputValue('请重试刚才的任务，并在开始前先说明你准备怎么继续。')
+      focusInputWithResize()
+    },
+    [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue]
+  )
 
   const handleOpenTaskArtifact = useCallback(async (path: string) => {
     await window.electronAPI.document.openPath(path).catch(() => undefined)
   }, [])
 
-  const handleDismissMemoryCapture = useCallback((scopeId: string) => {
-    patchScopeRun(scopeId, (previous) => previous ? {
-      ...previous,
-      memoryCapture: previous.memoryCapture ? { ...previous.memoryCapture, status: 'dismissed' } : null,
-    } : null)
-    setPersistedScopeRuns((current) => current.map((item) =>
-      item.scopeId === scopeId && item.memoryCapture
-        ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'dismissed' } }
-        : item,
-    ))
-  }, [patchScopeRun])
+  const handleDismissMemoryCapture = useCallback(
+    (scopeId: string) => {
+      patchScopeRun(scopeId, (previous) =>
+        previous
+          ? {
+              ...previous,
+              memoryCapture: previous.memoryCapture
+                ? { ...previous.memoryCapture, status: 'dismissed' }
+                : null
+            }
+          : null
+      )
+      setPersistedScopeRuns((current) =>
+        current.map((item) =>
+          item.scopeId === scopeId && item.memoryCapture
+            ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'dismissed' } }
+            : item
+        )
+      )
+    },
+    [patchScopeRun]
+  )
 
-  const handleUndoMemoryCapture = useCallback(async (scopeId: string) => {
-    const capture = useAgent.getState().scopeRunStates[scopeId]?.memoryCapture
-      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
-    if (!capture) return
-    await Promise.all(
-      capture.items.map((item) => window.electronAPI.memory.delete(item.memoryId).catch(() => undefined)),
-    )
-    patchScopeRun(scopeId, (previous) => previous ? {
-      ...previous,
-      memoryCapture: previous.memoryCapture ? { ...previous.memoryCapture, status: 'reverted' } : null,
-    } : null)
-    setPersistedScopeRuns((current) => current.map((item) =>
-      item.scopeId === scopeId && item.memoryCapture
-        ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'reverted' } }
-        : item,
-    ))
-  }, [mergedTaskRuns, patchScopeRun])
+  const handleUndoMemoryCapture = useCallback(
+    async (scopeId: string) => {
+      const capture =
+        useAgent.getState().scopeRunStates[scopeId]?.memoryCapture ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
+      if (!capture) return
+      await Promise.all(
+        capture.items.map((item) =>
+          window.electronAPI.memory.delete(item.memoryId).catch(() => undefined)
+        )
+      )
+      patchScopeRun(scopeId, (previous) =>
+        previous
+          ? {
+              ...previous,
+              memoryCapture: previous.memoryCapture
+                ? { ...previous.memoryCapture, status: 'reverted' }
+                : null
+            }
+          : null
+      )
+      setPersistedScopeRuns((current) =>
+        current.map((item) =>
+          item.scopeId === scopeId && item.memoryCapture
+            ? { ...item, memoryCapture: { ...item.memoryCapture, status: 'reverted' } }
+            : item
+        )
+      )
+    },
+    [mergedTaskRuns, patchScopeRun]
+  )
 
-  const handleSupplementMemoryCapture = useCallback((scopeId: string) => {
-    const capture = useAgent.getState().scopeRunStates[scopeId]?.memoryCapture
-      || mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
-    const draft = [
-      '请记住以下长期偏好或经验：',
-      ...(capture?.items.map((item) => `- ${item.title}${item.summary ? `：${item.summary}` : ''}`) || []),
-      '',
-      '我还想补充：',
-    ].join('\n')
-    setInputValue(draft)
-    focusInputWithResize()
-  }, [focusInputWithResize, mergedTaskRuns, setInputValue])
+  const handleSupplementMemoryCapture = useCallback(
+    (scopeId: string) => {
+      const capture =
+        useAgent.getState().scopeRunStates[scopeId]?.memoryCapture ||
+        mergedTaskRuns.find((item) => item.scopeId === scopeId)?.memoryCapture
+      const draft = [
+        '请记住以下长期偏好或经验：',
+        ...(capture?.items.map(
+          (item) => `- ${item.title}${item.summary ? `：${item.summary}` : ''}`
+        ) || []),
+        '',
+        '我还想补充：'
+      ].join('\n')
+      setInputValue(draft)
+      focusInputWithResize()
+    },
+    [focusInputWithResize, mergedTaskRuns, setInputValue]
+  )
 
-  const renderTaskSnapshotCard = useCallback((run: TaskCardRun, key: string, compact = false) => {
-    const expanded = Boolean(taskDisclosureState[key]?.overview)
-    return (
-      <TaskCard
-        key={key}
-        run={run}
-        taskKey={key}
-        compact={compact}
-        expanded={expanded}
-        disclosureState={{
-          ...createDefaultTaskDisclosureState(run),
-          ...(taskDisclosureState[key] || {}),
-        }}
-        onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
-        onToggleSection={setTaskSectionExpanded}
-        onOpenArtifact={handleOpenTaskArtifact}
-        onDismissMemoryCapture={handleDismissMemoryCapture}
-        onUndoMemoryCapture={handleUndoMemoryCapture}
-        onSupplementMemoryCapture={handleSupplementMemoryCapture}
-        onContinueInput={handleContinueTaskInput}
-        onSubmitConfirmation={handleSubmitTaskConfirmation}
-        onSubmitAgentResult={handleSubmitTaskAgentResult}
-        onRetry={handleRetryTask}
-      />
-    )
-  }, [
-    handleContinueTaskInput,
-    handleDismissMemoryCapture,
-    handleOpenTaskArtifact,
-    handleRetryTask,
-    handleSubmitTaskAgentResult,
-    handleSubmitTaskConfirmation,
-    handleSupplementMemoryCapture,
-    handleUndoMemoryCapture,
-    setTaskSectionExpanded,
-    taskDisclosureState,
-  ])
+  const renderTaskSnapshotCard = useCallback(
+    (run: TaskCardRun, key: string, compact = false) => {
+      const expanded = Boolean(taskDisclosureState[key]?.overview)
+      return (
+        <TaskCard
+          key={key}
+          run={run}
+          taskKey={key}
+          compact={compact}
+          expanded={expanded}
+          disclosureState={{
+            ...createDefaultTaskDisclosureState(run),
+            ...(taskDisclosureState[key] || {})
+          }}
+          onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
+          onToggleSection={setTaskSectionExpanded}
+          onOpenArtifact={handleOpenTaskArtifact}
+          onDismissMemoryCapture={handleDismissMemoryCapture}
+          onUndoMemoryCapture={handleUndoMemoryCapture}
+          onSupplementMemoryCapture={handleSupplementMemoryCapture}
+          onContinueInput={handleContinueTaskInput}
+          onSubmitConfirmation={handleSubmitTaskConfirmation}
+          onSubmitAgentResult={handleSubmitTaskAgentResult}
+          onRetry={handleRetryTask}
+        />
+      )
+    },
+    [
+      handleContinueTaskInput,
+      handleDismissMemoryCapture,
+      handleOpenTaskArtifact,
+      handleRetryTask,
+      handleSubmitTaskAgentResult,
+      handleSubmitTaskConfirmation,
+      handleSupplementMemoryCapture,
+      handleUndoMemoryCapture,
+      setTaskSectionExpanded,
+      taskDisclosureState
+    ]
+  )
 
   const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
     const nextSnapshots: Record<string, React.ReactNode> = {}
@@ -1807,7 +2260,7 @@ export default function ChatPanel() {
     ) {
       nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
         currentTaskRun,
-        `live-snapshot-${currentTaskRun.responseMessageId}`,
+        `live-snapshot-${currentTaskRun.responseMessageId}`
       )
     }
 
@@ -1858,7 +2311,14 @@ export default function ChatPanel() {
     }
 
     return nextSnapshots
-  }, [currentTaskRun, currentToolTraceSegment, messages, parseSerializedToolTraceSnapshot, setTaskSectionExpanded, taskDisclosureState])
+  }, [
+    currentTaskRun,
+    currentToolTraceSegment,
+    messages,
+    parseSerializedToolTraceSnapshot,
+    setTaskSectionExpanded,
+    taskDisclosureState
+  ])
 
   const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
@@ -1883,7 +2343,15 @@ export default function ChatPanel() {
         onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
       />
     )
-  }, [currentTaskRun, currentToolTraceSegment, isStreaming, messages, setTaskSectionExpanded, streamingMessageId, taskDisclosureState])
+  }, [
+    currentTaskRun,
+    currentToolTraceSegment,
+    isStreaming,
+    messages,
+    setTaskSectionExpanded,
+    streamingMessageId,
+    taskDisclosureState
+  ])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -1896,237 +2364,271 @@ export default function ChatPanel() {
     return () => window.removeEventListener(READY_FOCUS_CHAT_INPUT_EVENT, handler as EventListener)
   }, [focusInputWithResize])
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDragOver(false)
 
-    // 1. Check for app-internal ready-drag data first
-    const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
-    if (readyRaw) {
-      try {
-        const data = JSON.parse(readyRaw) as {
-          type:
-            | 'file'
-            | 'folder'
-            | 'browser-tab'
-            | 'doc-tab'
-            | 'design-project'
-            | 'video-project'
-            | 'calendar-event'
-            | 'skill-folder'
-          path?: string
-          name: string
-          url?: string
-          tabId?: string
-          ext?: string
-          size?: number
-          title?: string
-          heading?: string
-          selection?: string
-          excerpt?: string
-          eventId?: string
-          startTime?: string
-          endTime?: string
-          calendarId?: string
-          description?: string
-          projectId?: string
-          duration?: number
-          videoClipCount?: number
-          subtitleClipCount?: number
-          audioClipCount?: number
-          dirty?: boolean
-          saveStatus?: string
-          snapshotHash?: string
-          selectionSummary?: string
-          currentToolContext?: string
-          layoutDigest?: unknown
-          source?: 'system' | 'imported'
-          skillId?: string
-          defaultCommand?: string
-        }
-
-        if (data.type === 'skill-folder' && data.path) {
-          const inferredSkillId = data.skillId
-
-          addAttachments([{
-            id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: data.name,
-            path: data.path,
-            type: 'text',
-            size: 0,
-            ext: '.skill',
-            source: 'skill-folder',
-            skillId: inferredSkillId,
-            skillFolderPath: data.path,
-          }])
-
-          const command = data.defaultCommand || (inferredSkillId ? `/skill ${inferredSkillId}` : '')
-          const currentInput = useAgent.getState().inputValue.trim()
-          if (command) {
-            setInputValue(currentInput ? `${currentInput}\n${command}` : command)
-          } else {
-            const snippet = `### 技能目录引用\n- 名称: ${data.name}\n- 路径: ${data.path}`
-            setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
+      // 1. Check for app-internal ready-drag data first
+      const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
+      if (readyRaw) {
+        try {
+          const data = JSON.parse(readyRaw) as {
+            type:
+              | 'file'
+              | 'folder'
+              | 'browser-tab'
+              | 'doc-tab'
+              | 'design-project'
+              | 'video-project'
+              | 'calendar-event'
+              | 'skill-folder'
+            path?: string
+            name: string
+            url?: string
+            tabId?: string
+            ext?: string
+            size?: number
+            title?: string
+            heading?: string
+            selection?: string
+            excerpt?: string
+            eventId?: string
+            startTime?: string
+            endTime?: string
+            calendarId?: string
+            description?: string
+            projectId?: string
+            duration?: number
+            videoClipCount?: number
+            subtitleClipCount?: number
+            audioClipCount?: number
+            dirty?: boolean
+            saveStatus?: string
+            snapshotHash?: string
+            selectionSummary?: string
+            currentToolContext?: string
+            layoutDigest?: unknown
+            source?: 'system' | 'imported'
+            skillId?: string
+            defaultCommand?: string
           }
-          focusInputWithResize()
-        } else if (data.type === 'browser-tab' && data.url) {
-          void (async () => {
-            const fallbackTitle = data.title || data.name || '网页标签'
-            let snapshot = {
-              title: fallbackTitle,
-              url: data.url,
-              heading: data.heading || '',
-              selection: data.selection || '',
-              excerpt: data.excerpt || '',
-              capturedAt: Date.now(),
+
+          if (data.type === 'skill-folder' && data.path) {
+            const inferredSkillId = data.skillId
+
+            addAttachments([
+              {
+                id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name: data.name,
+                path: data.path,
+                type: 'text',
+                size: 0,
+                ext: '.skill',
+                source: 'skill-folder',
+                skillId: inferredSkillId,
+                skillFolderPath: data.path
+              }
+            ])
+
+            const command =
+              data.defaultCommand || (inferredSkillId ? `/skill ${inferredSkillId}` : '')
+            const currentInput = useAgent.getState().inputValue.trim()
+            if (command) {
+              setInputValue(currentInput ? `${currentInput}\n${command}` : command)
+            } else {
+              const snippet = `### 技能目录引用\n- 名称: ${data.name}\n- 路径: ${data.path}`
+              setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
             }
-            try {
-              if (window.electronAPI?.browser?.getTabContext && data.tabId) {
-                const ctx = await window.electronAPI.browser.getTabContext(data.tabId)
-                if (ctx.success && ctx.data) {
-                  snapshot = {
-                    title: ctx.data.title || snapshot.title,
-                    url: ctx.data.url || snapshot.url,
-                    heading: ctx.data.heading || snapshot.heading,
-                    selection: ctx.data.selection || snapshot.selection,
-                    excerpt: ctx.data.excerpt || snapshot.excerpt,
-                    capturedAt: ctx.data.capturedAt || snapshot.capturedAt,
+            focusInputWithResize()
+          } else if (data.type === 'browser-tab' && data.url) {
+            void (async () => {
+              const fallbackTitle = data.title || data.name || '网页标签'
+              let snapshot = {
+                title: fallbackTitle,
+                url: data.url,
+                heading: data.heading || '',
+                selection: data.selection || '',
+                excerpt: data.excerpt || '',
+                capturedAt: Date.now()
+              }
+              try {
+                if (window.electronAPI?.browser?.getTabContext && data.tabId) {
+                  const ctx = await window.electronAPI.browser.getTabContext(data.tabId)
+                  if (ctx.success && ctx.data) {
+                    snapshot = {
+                      title: ctx.data.title || snapshot.title,
+                      url: ctx.data.url || snapshot.url,
+                      heading: ctx.data.heading || snapshot.heading,
+                      selection: ctx.data.selection || snapshot.selection,
+                      excerpt: ctx.data.excerpt || snapshot.excerpt,
+                      capturedAt: ctx.data.capturedAt || snapshot.capturedAt
+                    }
                   }
                 }
+              } catch {
+                // keep fallback snapshot
               }
-            } catch {
-              // keep fallback snapshot
+
+              const fallbackPath = data.tabId
+                ? `browser-tab://${data.tabId}`
+                : `browser-tab://${Date.now()}`
+              addAttachments([
+                {
+                  id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  name: snapshot.title || fallbackTitle,
+                  path: snapshot.url || fallbackPath,
+                  type: 'text',
+                  size: snapshot.excerpt.length,
+                  ext: '.url',
+                  source: 'browser-tab',
+                  browserTabId: data.tabId,
+                  url: snapshot.url || data.url,
+                  title: snapshot.title || fallbackTitle,
+                  heading: snapshot.heading,
+                  selection: snapshot.selection,
+                  excerpt: snapshot.excerpt,
+                  capturedAt: snapshot.capturedAt
+                }
+              ])
+              focusInputWithResize()
+            })()
+          } else if (data.type === 'design-project') {
+            const designData = data as typeof data & {
+              selectedElementCount?: number
+              selectionBounds?: { x: number; y: number; w: number; h: number }
+              latestReviewSummary?: string
+              repairScope?: string
             }
-
-            const fallbackPath = data.tabId ? `browser-tab://${data.tabId}` : `browser-tab://${Date.now()}`
-            addAttachments([{
-              id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              name: snapshot.title || fallbackTitle,
-              path: snapshot.url || fallbackPath,
-              type: 'text',
-              size: snapshot.excerpt.length,
-              ext: '.url',
-              source: 'browser-tab',
-              browserTabId: data.tabId,
-              url: snapshot.url || data.url,
-              title: snapshot.title || fallbackTitle,
-              heading: snapshot.heading,
-              selection: snapshot.selection,
-              excerpt: snapshot.excerpt,
-              capturedAt: snapshot.capturedAt,
-            }])
+            const fallbackPath =
+              data.path && data.path.startsWith('/')
+                ? data.path
+                : `design-project://${encodeURIComponent(data.name || 'draft')}#${encodeURIComponent(String(data.snapshotHash || Date.now()))}`
+            addAttachments([
+              {
+                id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name: data.name || '设计草稿',
+                path: fallbackPath,
+                type: 'text',
+                size: 0,
+                ext: '.tldr',
+                source: 'design-project',
+                dirty: typeof data.dirty === 'boolean' ? data.dirty : undefined,
+                saveStatus: typeof data.saveStatus === 'string' ? data.saveStatus : undefined,
+                snapshotHash: typeof data.snapshotHash === 'string' ? data.snapshotHash : undefined,
+                selectionSummary:
+                  typeof data.selectionSummary === 'string' ? data.selectionSummary : undefined,
+                selectedElementCount:
+                  typeof designData.selectedElementCount === 'number'
+                    ? designData.selectedElementCount
+                    : undefined,
+                selectionBounds:
+                  designData.selectionBounds && typeof designData.selectionBounds === 'object'
+                    ? (designData.selectionBounds as { x: number; y: number; w: number; h: number })
+                    : undefined,
+                currentToolContext:
+                  typeof data.currentToolContext === 'string' ? data.currentToolContext : undefined,
+                latestReviewSummary:
+                  typeof designData.latestReviewSummary === 'string'
+                    ? designData.latestReviewSummary
+                    : undefined,
+                repairScope:
+                  designData.repairScope === 'run-owned' || designData.repairScope === 'selected'
+                    ? designData.repairScope
+                    : undefined
+              }
+            ])
             focusInputWithResize()
-          })()
-        } else if (data.type === 'design-project') {
-          const designData = data as typeof data & {
-            selectedElementCount?: number
-            selectionBounds?: { x: number; y: number; w: number; h: number }
-            latestReviewSummary?: string
-            repairScope?: string
+          } else if (data.type === 'video-project') {
+            const lines = [
+              '### 剪辑项目引用',
+              `- 项目: ${data.name}`,
+              data.path ? `- 关联文件: ${data.path}` : null,
+              typeof data.duration === 'number' ? `- 时长: ${data.duration.toFixed(1)} 秒` : null,
+              typeof data.videoClipCount === 'number'
+                ? `- 视频轨片段: ${data.videoClipCount}`
+                : null,
+              typeof data.subtitleClipCount === 'number'
+                ? `- 字幕轨片段: ${data.subtitleClipCount}`
+                : null,
+              typeof data.audioClipCount === 'number'
+                ? `- 音频轨片段: ${data.audioClipCount}`
+                : null
+            ].filter(Boolean)
+            const currentInput = useAgent.getState().inputValue
+            const snippet = lines.join('\n')
+            setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
+            focusInputWithResize()
+          } else if (data.type === 'calendar-event') {
+            const start = data.startTime ? new Date(data.startTime) : null
+            const end = data.endTime ? new Date(data.endTime) : null
+            const hasValidTime =
+              !!start && !!end && !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())
+            const lines = [
+              '### 日程事件引用',
+              `- 标题: ${data.title || data.name}`,
+              hasValidTime ? `- 时间: ${start.toLocaleString()} - ${end.toLocaleString()}` : null,
+              data.calendarId ? `- 日历: ${data.calendarId}` : null,
+              data.description ? `- 备注: ${data.description.slice(0, 600)}` : null
+            ].filter(Boolean)
+            const currentInput = useAgent.getState().inputValue
+            const snippet = lines.join('\n')
+            setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
+            focusInputWithResize()
+          } else if (
+            (data.type === 'file' || data.type === 'doc-tab' || data.type === 'folder') &&
+            data.path
+          ) {
+            addAttachments([
+              createLocalPathAttachment({
+                name: data.name,
+                path: data.path,
+                ext: data.ext,
+                size: data.size,
+                isDirectory: data.type === 'folder'
+              })
+            ])
+            focusInputWithResize()
           }
-          const fallbackPath = data.path && data.path.startsWith('/')
-            ? data.path
-            : `design-project://${encodeURIComponent(data.name || 'draft')}#${encodeURIComponent(String(data.snapshotHash || Date.now()))}`
-          addAttachments([{
-            id: `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: data.name || '设计草稿',
-            path: fallbackPath,
-            type: 'text',
-            size: 0,
-            ext: '.tldr',
-            source: 'design-project',
-            dirty: typeof data.dirty === 'boolean' ? data.dirty : undefined,
-            saveStatus: typeof data.saveStatus === 'string' ? data.saveStatus : undefined,
-            snapshotHash: typeof data.snapshotHash === 'string' ? data.snapshotHash : undefined,
-            selectionSummary: typeof data.selectionSummary === 'string' ? data.selectionSummary : undefined,
-            selectedElementCount: typeof designData.selectedElementCount === 'number' ? designData.selectedElementCount : undefined,
-            selectionBounds: designData.selectionBounds && typeof designData.selectionBounds === 'object'
-              ? designData.selectionBounds as { x: number; y: number; w: number; h: number }
-              : undefined,
-            currentToolContext: typeof data.currentToolContext === 'string' ? data.currentToolContext : undefined,
-            latestReviewSummary: typeof designData.latestReviewSummary === 'string' ? designData.latestReviewSummary : undefined,
-            repairScope: designData.repairScope === 'run-owned' || designData.repairScope === 'selected'
-              ? designData.repairScope
-              : undefined,
-          }])
-          focusInputWithResize()
-        } else if (data.type === 'video-project') {
-          const lines = [
-            '### 剪辑项目引用',
-            `- 项目: ${data.name}`,
-            data.path ? `- 关联文件: ${data.path}` : null,
-            typeof data.duration === 'number' ? `- 时长: ${data.duration.toFixed(1)} 秒` : null,
-            typeof data.videoClipCount === 'number' ? `- 视频轨片段: ${data.videoClipCount}` : null,
-            typeof data.subtitleClipCount === 'number' ? `- 字幕轨片段: ${data.subtitleClipCount}` : null,
-            typeof data.audioClipCount === 'number' ? `- 音频轨片段: ${data.audioClipCount}` : null,
-          ].filter(Boolean)
-          const currentInput = useAgent.getState().inputValue
-          const snippet = lines.join('\n')
-          setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
-          focusInputWithResize()
-        } else if (data.type === 'calendar-event') {
-          const start = data.startTime ? new Date(data.startTime) : null
-          const end = data.endTime ? new Date(data.endTime) : null
-          const hasValidTime =
-            !!start &&
-            !!end &&
-            !Number.isNaN(start.getTime()) &&
-            !Number.isNaN(end.getTime())
-          const lines = [
-            '### 日程事件引用',
-            `- 标题: ${data.title || data.name}`,
-            hasValidTime
-              ? `- 时间: ${start.toLocaleString()} - ${end.toLocaleString()}`
-              : null,
-            data.calendarId ? `- 日历: ${data.calendarId}` : null,
-            data.description ? `- 备注: ${data.description.slice(0, 600)}` : null,
-          ].filter(Boolean)
-          const currentInput = useAgent.getState().inputValue
-          const snippet = lines.join('\n')
-          setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
-          focusInputWithResize()
-        } else if ((data.type === 'file' || data.type === 'doc-tab' || data.type === 'folder') && data.path) {
-          addAttachments([createLocalPathAttachment({
-            name: data.name,
-            path: data.path,
-            ext: data.ext,
-            size: data.size,
-            isDirectory: data.type === 'folder',
-          })])
-          focusInputWithResize()
+        } catch {
+          /* ignore malformed data */
         }
-      } catch { /* ignore malformed data */ }
-      return
-    }
-
-    // 2. Fallback: OS file drop
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length === 0) return
-
-    const newAttachments = await Promise.all(files.map(async (file) => {
-      const path = (typeof window !== 'undefined' && window.electronAPI)
-        ? window.electronAPI.getFilePathFromDrop(file)
-        : file.name
-      if (!path) return null
-
-      let isDirectory = false
-      if (window.electronAPI?.document?.stat) {
-        const statResult = await window.electronAPI.document.stat(path).catch(() => null)
-        isDirectory = statResult?.data?.isDirectory ?? statResult?.stat?.isDirectory ?? false
+        return
       }
 
-      return createLocalPathAttachment({
-        name: file.name || getPathBasename(path),
-        path,
-        ext: file.name.split('.').pop(),
-        size: file.size,
-        isDirectory,
-      })
-    }))
-    addAttachments(newAttachments.filter(Boolean) as ChatAttachment[])
-    focusInputWithResize()
-  }, [addAttachments, focusInputWithResize, setInputValue])
+      // 2. Fallback: OS file drop
+      const files = Array.from(e.dataTransfer.files)
+      if (files.length === 0) return
+
+      const newAttachments = await Promise.all(
+        files.map(async (file) => {
+          const path =
+            typeof window !== 'undefined' && window.electronAPI
+              ? window.electronAPI.getFilePathFromDrop(file)
+              : file.name
+          if (!path) return null
+
+          let isDirectory = false
+          if (window.electronAPI?.document?.stat) {
+            const statResult = await window.electronAPI.document.stat(path).catch(() => null)
+            isDirectory = statResult?.data?.isDirectory ?? statResult?.stat?.isDirectory ?? false
+          }
+
+          return createLocalPathAttachment({
+            name: file.name || getPathBasename(path),
+            path,
+            ext: file.name.split('.').pop(),
+            size: file.size,
+            isDirectory
+          })
+        })
+      )
+      addAttachments(newAttachments.filter(Boolean) as ChatAttachment[])
+      focusInputWithResize()
+    },
+    [addAttachments, focusInputWithResize, setInputValue]
+  )
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -2167,13 +2669,28 @@ export default function ChatPanel() {
     <ChatHeader
       currentChannel={currentChannel}
       channelOptions={channelOptions}
-      filteredScopes={filteredScopes}
       onChannelSelect={handleChannelSelect}
       onTogglePanel={toggleChatPanel}
       onNewSession={handleNewSession}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
-      onHistoryOpen={() => { void loadScopes() }}
+      sessionRecallQuery={sessionRecallQuery}
+      sessionRecallResults={visibleSessionRecallResults}
+      sessionRecallSearching={sessionRecallSearching}
+      sessionRecallError={sessionRecallError}
+      attachedSessionRecallCount={attachedSessionRecallCapsules.length}
+      attachedSessionRecallConversationIds={attachedSessionRecallConversationIds}
+      onSessionRecallQueryChange={setSessionRecallQuery}
+      onSessionRecallSearch={() => {
+        void runSessionRecallSearch(sessionRecallQuery)
+      }}
+      onAttachSessionRecall={(conversationId) => {
+        void handleAttachSessionRecall(conversationId)
+      }}
+      onHistoryOpen={() => {
+        void loadScopes()
+        void runSessionRecallSearch(sessionRecallQuery)
+      }}
       formatTime={formatTime}
     />
   )
@@ -2201,7 +2718,9 @@ export default function ChatPanel() {
         getDocumentQuoteTooltip={getDocumentQuoteTooltip}
         getAttachmentMetaSummary={getAttachmentMetaSummary}
         getAttachmentPreviewSrc={getAttachmentPreviewSrc}
-        renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+        renderAttachmentIcon={(attachment, size = 16) => (
+          <AttachmentIcon attachment={attachment} size={size} />
+        )}
         renderMarkdown={(content) => <MarkdownContent content={content} />}
       />
 
@@ -2215,9 +2734,94 @@ export default function ChatPanel() {
           background: 'transparent',
           backdropFilter: 'none',
           WebkitBackdropFilter: 'none',
-          boxShadow: 'none',
+          boxShadow: 'none'
         }}
       >
+        {attachedSessionRecallCapsules.length > 0 && (
+          <div
+            className="glass-surface-card"
+            style={{
+              borderRadius: 12,
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--surface-panel-bg) 46%, transparent)',
+              padding: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--text-light)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase'
+              }}
+            >
+              当前轮已引用的旧会话
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {attachedSessionRecallCapsules.map((capsule) => (
+                <div
+                  key={capsule.conversationId}
+                  className="rounded-[10px] border"
+                  style={{
+                    borderColor: 'var(--border-default)',
+                    padding: '8px 10px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: 10
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>
+                      {capsule.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 2 }}>
+                      {capsule.sourceKind}:{capsule.sourceId} · {formatTime(capsule.updatedAt)}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: 'var(--text-muted)',
+                        marginTop: 4,
+                        whiteSpace: 'pre-wrap'
+                      }}
+                    >
+                      {capsule.summary}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDetachSessionRecall(capsule.conversationId)
+                    }}
+                    className="rounded-[10px] border transition-all"
+                    style={{
+                      flexShrink: 0,
+                      width: 28,
+                      height: 28,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderColor: 'var(--border-default)',
+                      background: 'transparent'
+                    }}
+                    title="移除旧会话引用"
+                  >
+                    <X
+                      style={{ width: 12, height: 12, color: 'var(--text-light)' }}
+                      strokeWidth={2}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <ChatAttachments
           attachments={attachments}
           onRemove={removeAttachment}
@@ -2225,7 +2829,9 @@ export default function ChatPanel() {
           onRevealDocumentQuote={revealDocumentQuoteAttachment}
           getDocumentQuoteTooltip={getDocumentQuoteTooltip}
           getAttachmentMetaSummary={getAttachmentMetaSummary}
-          renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+          renderAttachmentIcon={(attachment, size = 16) => (
+            <AttachmentIcon attachment={attachment} size={size} />
+          )}
           toLocalFileUrl={toLocalFileUrl}
         />
 
@@ -2247,12 +2853,16 @@ export default function ChatPanel() {
           agents={agents}
           isChannelScope={currentScope?.sourceKind === 'channel'}
           onInputChange={setInputValue}
-          onSend={() => { void handleSend() }}
+          onSend={() => {
+            void handleSend()
+          }}
           onStop={stopStreaming}
           onUndo={undoLastMessage}
           onPickFiles={pickFiles}
           onAgentSelect={handleAgentSelect}
-          renderAttachmentIcon={(attachment, size = 16) => <AttachmentIcon attachment={attachment} size={size} />}
+          renderAttachmentIcon={(attachment, size = 16) => (
+            <AttachmentIcon attachment={attachment} size={size} />
+          )}
           ModelSelector={ModelSelector}
         />
       </div>
@@ -2269,10 +2879,9 @@ export default function ChatPanel() {
         minWidth: chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE,
         background: 'transparent',
         boxShadow: 'none',
-        border: chatPanelVisible
-          ? '1px solid transparent'
-          : '1px solid transparent',
-        transition: 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), min-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+        border: chatPanelVisible ? '1px solid transparent' : '1px solid transparent',
+        transition:
+          'width 260ms cubic-bezier(0.22, 1, 0.36, 1), min-width 260ms cubic-bezier(0.22, 1, 0.36, 1)'
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
@@ -2313,7 +2922,7 @@ export default function ChatPanel() {
             alignItems: 'center',
             justifyContent: 'center',
             padding: 20,
-            zIndex: 40,
+            zIndex: 40
           }}
           onClick={() => setActiveAttachmentPreview(null)}
         >
@@ -2327,7 +2936,7 @@ export default function ChatPanel() {
               border: '1px solid var(--border-default)',
               background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'column'
             }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -2338,7 +2947,7 @@ export default function ChatPanel() {
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: '14px 16px',
-                borderBottom: '1px solid var(--border-default)',
+                borderBottom: '1px solid var(--border-default)'
               }}
             >
               <div style={{ minWidth: 0 }}>
@@ -2352,26 +2961,30 @@ export default function ChatPanel() {
               <div className="flex items-center" style={{ gap: 8 }}>
                 <button
                   type="button"
-                  onClick={() => { void handleRevealAttachment(activeAttachmentPreview.attachment) }}
+                  onClick={() => {
+                    void handleRevealAttachment(activeAttachmentPreview.attachment)
+                  }}
                   style={{
                     padding: '8px 10px',
                     borderRadius: 10,
                     border: '1px solid var(--border-default)',
                     fontSize: 12,
-                    color: 'var(--text-body)',
+                    color: 'var(--text-body)'
                   }}
                 >
                   在 Finder 中显示
                 </button>
                 <button
                   type="button"
-                  onClick={() => { void handleOpenAttachment(activeAttachmentPreview.attachment) }}
+                  onClick={() => {
+                    void handleOpenAttachment(activeAttachmentPreview.attachment)
+                  }}
                   style={{
                     padding: '8px 10px',
                     borderRadius: 10,
                     border: '1px solid var(--border-default)',
                     fontSize: 12,
-                    color: 'var(--text-body)',
+                    color: 'var(--text-body)'
                   }}
                 >
                   系统打开
@@ -2386,7 +2999,7 @@ export default function ChatPanel() {
                     border: '1px solid var(--border-default)',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    justifyContent: 'center'
                   }}
                 >
                   <X style={{ width: 14, height: 14 }} strokeWidth={2} />
@@ -2403,7 +3016,12 @@ export default function ChatPanel() {
                 <img
                   src={toLocalFileUrl(activeAttachmentPreview.attachment.path)}
                   alt={activeAttachmentPreview.attachment.name}
-                  style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 12 }}
+                  style={{
+                    width: '100%',
+                    maxHeight: '70vh',
+                    objectFit: 'contain',
+                    borderRadius: 12
+                  }}
                 />
               )}
 
@@ -2427,7 +3045,7 @@ export default function ChatPanel() {
                     background: 'var(--bg-secondary)',
                     border: '1px solid var(--border-default)',
                     borderRadius: 12,
-                    padding: 14,
+                    padding: 14
                   }}
                 >
                   {activeAttachmentPreview.content || '(空文本附件)'}
@@ -2443,7 +3061,7 @@ export default function ChatPanel() {
                     padding: 14,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 8,
+                    gap: 8
                   }}
                 >
                   <div style={{ fontSize: 12, color: 'var(--text-body)' }}>

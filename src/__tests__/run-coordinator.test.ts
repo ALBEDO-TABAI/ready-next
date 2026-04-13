@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
-import type { ConversationScope, ScopeRunEventPayload, ScopeRunMemoryCapture } from '../main/modules/agent-control/types'
+import type {
+  ConversationScope,
+  ScopeRunEventPayload,
+  ScopeRunMemoryCapture
+} from '../main/modules/agent-control/types'
 
 function createScope(): ConversationScope {
   return {
@@ -15,7 +19,7 @@ function createScope(): ConversationScope {
     meta: {},
     createdAt: '2026-04-09T10:00:00.000Z',
     updatedAt: '2026-04-09T10:00:00.000Z',
-    lastMessageAt: '2026-04-09T10:00:00.000Z',
+    lastMessageAt: '2026-04-09T10:00:00.000Z'
   }
 }
 
@@ -39,18 +43,34 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
       buildForScopedRun: async () => ({
         systemPrompt: 'system prompt',
         bootstrapMessages: ['boot'],
-        memoryRefs: [{ id: 'mem-1', layer: 'l1', title: 'recent', loadedAt: '2026-04-09T10:00:00.000Z' }],
-        triggerHits: [{ id: 'browser-upload', label: '浏览器上传流程', module: 'browser', blocking: false, refs: [] }],
-        contextBudget: { totalChars: 100, l0Chars: 20, l1Chars: 40, l2Chars: 40, droppedRefs: [] },
+        memoryRefs: [
+          {
+            id: 'mem-1',
+            layer: 'l1',
+            sourceType: 'scope_memory',
+            title: 'recent',
+            loadedAt: '2026-04-09T10:00:00.000Z'
+          }
+        ],
+        triggerHits: [
+          {
+            id: 'browser-upload',
+            label: '浏览器上传流程',
+            module: 'browser',
+            blocking: false,
+            refs: []
+          }
+        ],
+        contextBudget: { totalChars: 100, l0Chars: 20, l1Chars: 40, l2Chars: 40, droppedRefs: [] }
       }),
       applyToMessage: () => 'boot\n\nhello',
       recordRunOutcome: (payload) => {
         recordedOutcome = {
           success: payload.success,
           finalText: payload.finalText,
-          usedTools: payload.usedTools,
+          usedTools: payload.usedTools
         }
-      },
+      }
     },
     executeAndCollect: async (request) => {
       executionBudget = request.budget || null
@@ -69,9 +89,9 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
         executionDiagnostics: {
           fallback: {
             kind: 'text_bridge',
-            attempts: 1,
-          },
-        },
+            attempts: 1
+          }
+        }
       }
     },
     emitScopeRunEvent: (payload) => {
@@ -80,13 +100,13 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
     reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => {
       reflected = true
       return null
-    },
+    }
   })
 
   const result = await coordinator.runScoped({
     scope: createScope(),
     message: 'hello',
-    requestId: 'req-1',
+    requestId: 'req-1'
   })
 
   assert.deepEqual(result, { success: true })
@@ -94,7 +114,10 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.equal(events[0]?.module, 'browser')
   assert.equal(events[0]?.taskTitle, '浏览器上传流程')
   assert.match(events[0]?.taskSummary || '', /准备开始/)
-  assert.equal(events[0]?.executionDiagnostics?.budget?.maxIterations, executionBudget?.maxIterations)
+  assert.equal(
+    events[0]?.executionDiagnostics?.budget?.maxIterations,
+    executionBudget?.maxIterations
+  )
   assert.equal(events[0]?.executionDiagnostics?.fallback?.happened, false)
   assert.equal(events[0]?.executionDiagnostics?.fallback?.kind, 'none')
   assert.equal(events[0]?.executionDiagnostics?.fallback?.attempts, 0)
@@ -104,7 +127,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.deepEqual(executionBudgetState, {
     iterationsUsed: 3,
     toolCallsUsed: 4,
-    parallelToolGroupsUsed: 1,
+    parallelToolGroupsUsed: 1
   })
   assert.equal(events[1]?.phase, 'done')
   assert.equal(events[1]?.executionDiagnostics?.budget?.iterationsUsed, 3)

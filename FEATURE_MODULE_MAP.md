@@ -1,6 +1,6 @@
 # Feature Module Map
 
-> Updated: 2026-03-07
+> Updated: 2026-04-12
 
 ## 模块清单
 | 模块 | 前端入口 | 主进程模块 | 状态 |
@@ -32,5 +32,6 @@
 ## 重要现状
 - 旧 `image` 模式已下线，统一为 `design`
 - Browser Agent 主线是 V7 任务图执行与证据复核
+- Agent Control 现在额外承载 session recall 主链：历史会话索引、旧会话胶囊引用、本地向量召回
 - AI 配置已从“按 provider 写死”过渡到“按能力层解析”
 - `fox` 这类 OpenAI 兼容通道在工具调用上默认走文本桥接降级

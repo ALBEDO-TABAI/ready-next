@@ -3,7 +3,11 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { extname, isAbsolute, join } from 'path'
-import { getDefaultConfig, normalizeAIConfig, type AIModelConfig } from '../../../shared/ai-providers'
+import {
+  getDefaultConfig,
+  normalizeAIConfig,
+  type AIModelConfig
+} from '../../../shared/ai-providers'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { AgentManager } from '../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../claude-bridge/direct-chat'
@@ -14,6 +18,7 @@ import {
   type AgentScheduleRecord,
   type ChatConversationRecord,
   type ChatMessageRecord,
+  type ConversationSourceKind,
 } from '../database'
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
@@ -28,6 +33,7 @@ import { UserProfileRepository } from '../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
+import { ExternalMemoryProviderSlot } from './external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
@@ -44,7 +50,7 @@ import type {
   HeartbeatSnapshot,
   ScopeRunMemoryCapture,
   ScopeRunEventPayload,
-  ScopeRunSummary,
+  ScopeRunSummary
 } from './types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 
@@ -76,6 +82,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
   private readonly userProfileRepository = new UserProfileRepository()
   private readonly agentPersonalityRepository = new AgentPersonalityRepository()
+  private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
   private readonly sessionRecallService = new SessionRecallService(this.db)
   private readonly reflectionService = new ReflectionService({
     memoryRepository: this.memoryRepository,
@@ -84,57 +91,70 @@ export class AgentControlRuntime extends EventEmitter {
       set: async (key: string, value: string) => {
         const rawDb = this.db.getRawDb()
         if (!rawDb) throw new Error('Database not available')
-        rawDb.prepare(`
+        rawDb
+          .prepare(
+            `
           INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-        `).run(
-          `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          'system',
-          key,
-          value,
-          new Date().toISOString(),
-          new Date().toISOString()
-        )
+        `
+          )
+          .run(
+            `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            'system',
+            key,
+            value,
+            new Date().toISOString(),
+            new Date().toISOString()
+          )
       },
       get: async (key: string) => {
         const rawDb = this.db.getRawDb()
         if (!rawDb) return null
-        const row = rawDb.prepare(`
+        const row = rawDb
+          .prepare(
+            `
           SELECT value FROM agent_knowledge WHERE agent_name = 'system' AND key = ?
-        `).get(key) as { value: string } | undefined
+        `
+          )
+          .get(key) as { value: string } | undefined
         return row?.value || null
-      },
-    },
+      }
+    }
   })
   private readonly promptAssembly = new PromptAssemblyService({
     getMemoryRoot: () => join(app.getPath('userData'), 'agent-memory'),
     memoryRepository: this.memoryRepository,
     userProfileRepository: this.userProfileRepository,
     agentPersonalityRepository: this.agentPersonalityRepository,
-    getScopeSessionRecallCapsules: (scope) => this.sessionRecallService.listAttachedSessionRecallContexts(scope.id),
-    getAutoSessionRecallCapsules: ({ scope, userText }) => this.sessionRecallService.getAutomaticRecallCapsules({
-      query: userText,
-      currentScopeId: scope.id,
-      channelKey: this.toChannelKey(scope),
-      sourceKind: scope.sourceKind,
-      userId: scope.userId,
-      limit: 2,
-    }),
-    enableDatabaseMemory: true,
+    getScopeSessionRecallCapsules: (scope) =>
+      this.sessionRecallService.listAttachedSessionRecallContexts(scope.id),
+    getAutoSessionRecallCapsules: ({ scope, userText }) =>
+      this.sessionRecallService.getAutomaticRecallCapsules({
+        query: userText,
+        currentScopeId: scope.id,
+        channelKey: this.toChannelKey(scope),
+        sourceKind: scope.sourceKind,
+        userId: scope.userId,
+        limit: 2
+      }),
+    enableDatabaseMemory: true
   })
   private readonly agentManager: AgentManager
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
-  private readonly pendingInboundChannels = new Map<string, {
-    channelId: string
-    thread: string
-    sender: string
-    eventIds: string[]
-    texts: string[]
-    attachments: ChannelAttachment[]
-    timer: NodeJS.Timeout | null
-  }>()
+  private readonly pendingInboundChannels = new Map<
+    string,
+    {
+      channelId: string
+      thread: string
+      sender: string
+      eventIds: string[]
+      texts: string[]
+      attachments: ChannelAttachment[]
+      timer: NodeJS.Timeout | null
+    }
+  >()
   private pollTimer: NodeJS.Timeout | null = null
   private readonly scopeRunSummaries = new Map<string, ScopeRunSummary>()
   private lastSidecarRestartAttemptAt = 0
@@ -146,8 +166,8 @@ export class AgentControlRuntime extends EventEmitter {
     toolGateway: {
       healthy: true,
       availableTools: this.toolGateway.count(),
-      lastBeatAt: new Date().toISOString(),
-    },
+      lastBeatAt: new Date().toISOString()
+    }
   }
 
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
@@ -155,14 +175,14 @@ export class AgentControlRuntime extends EventEmitter {
     this.agentManager = agentManager
     this.orchestrator = new ClaudeSdkOrchestrator({
       browserController,
-      sidecarManager: this.sidecar,
+      sidecarManager: this.sidecar
     })
     this.orchestrator.setRuntime(this)
     this.runCoordinator = new RunCoordinator({
       promptAssembly: this.promptAssembly,
       executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
       emitScopeRunEvent: (payload) => this.emitScopeRunEvent(payload),
-      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
+      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools)
     })
     this.runProjection = new RunProjection({
       getScope: (scopeId) => this.getConversationScope(scopeId),
@@ -171,7 +191,7 @@ export class AgentControlRuntime extends EventEmitter {
         this.scopeRunSummaries.set(scopeId, summary)
         this.db.updateConversationRecallTaskState(scopeId, summary.taskTitle, summary.taskSummary)
       },
-      toChannelKey: (scope) => this.toChannelKey(scope),
+      toChannelKey: (scope) => this.toChannelKey(scope)
     })
   }
 
@@ -189,6 +209,10 @@ export class AgentControlRuntime extends EventEmitter {
 
   getPromptAssembly(): PromptAssemblyService {
     return this.promptAssembly
+  }
+
+  getExternalMemoryProviderSlot(): ExternalMemoryProviderSlot {
+    return this.externalMemoryProviderSlot
   }
 
   async start(): Promise<void> {
@@ -214,6 +238,7 @@ export class AgentControlRuntime extends EventEmitter {
 
     // Stop memory lifecycle manager
     this.memoryLifecycle.stop()
+    await this.externalMemoryProviderSlot.shutdown()
 
     await this.sidecar.stop()
   }
@@ -225,7 +250,7 @@ export class AgentControlRuntime extends EventEmitter {
       pid: status.pid || undefined,
       port: status.port || undefined,
       lastBeatAt: status.lastHeartbeatAt || undefined,
-      error: status.error || undefined,
+      error: status.error || undefined
     }
     if (status.state === 'running') {
       await this.syncDatabaseToSidecar()
@@ -247,17 +272,17 @@ export class AgentControlRuntime extends EventEmitter {
       pid: sidecarStatus.pid || undefined,
       port: sidecarStatus.port || undefined,
       lastBeatAt: sidecarStatus.lastHeartbeatAt || undefined,
-      error: sidecarStatus.error || undefined,
+      error: sidecarStatus.error || undefined
     }
     this.heartbeat.orchestrator = {
       healthy: true,
       activeTasks: this.orchestrator.getSessionManager().getActiveCount(),
-      lastBeatAt: new Date().toISOString(),
+      lastBeatAt: new Date().toISOString()
     }
     this.heartbeat.toolGateway = {
       healthy: true,
       availableTools: this.toolGateway.count(),
-      lastBeatAt: new Date().toISOString(),
+      lastBeatAt: new Date().toISOString()
     }
 
     const channelState = this.sidecar.isRunning()
@@ -275,31 +300,43 @@ export class AgentControlRuntime extends EventEmitter {
         enabled: channels.filter((item) => item.enabled).length,
         connected,
         errors,
-        byType,
+        byType
       },
       schedules: {
         total: schedules.length,
-        enabled: schedules.filter((item) => item.enabled).length,
+        enabled: schedules.filter((item) => item.enabled).length
       },
-      heartbeat: this.heartbeat,
+      heartbeat: this.heartbeat
     }
   }
 
-  async getCapabilityRuntimeSnapshot(configOverride?: AIModelConfig): Promise<CapabilityRuntimeSnapshot> {
+  async getCapabilityRuntimeSnapshot(
+    configOverride?: AIModelConfig
+  ): Promise<CapabilityRuntimeSnapshot> {
     await this.getRuntimeStatus()
 
-    const config = normalizeAIConfig(configOverride || this.settingsRepository.getAIConfig() || getDefaultConfig())
-    const enabledChannelTypes = Array.from(new Set(
-      this.listChannels()
-        .filter((channel) => channel.enabled)
-        .map((channel) => channel.type),
-    ))
-    const connectedChannelTypes = Array.from(new Set(
-      this.heartbeat.adapters
-        .filter((adapter) => adapter.healthy && adapter.status !== 'error' && adapter.status !== 'stopped')
-        .map((adapter) => adapter.type),
-    ))
-    const feishuConnected = connectedChannelTypes.includes('feishu-app') || this.isChannelTypeAvailable('feishu-app')
+    const config = normalizeAIConfig(
+      configOverride || this.settingsRepository.getAIConfig() || getDefaultConfig()
+    )
+    const enabledChannelTypes = Array.from(
+      new Set(
+        this.listChannels()
+          .filter((channel) => channel.enabled)
+          .map((channel) => channel.type)
+      )
+    )
+    const connectedChannelTypes = Array.from(
+      new Set(
+        this.heartbeat.adapters
+          .filter(
+            (adapter) =>
+              adapter.healthy && adapter.status !== 'error' && adapter.status !== 'stopped'
+          )
+          .map((adapter) => adapter.type)
+      )
+    )
+    const feishuConnected =
+      connectedChannelTypes.includes('feishu-app') || this.isChannelTypeAvailable('feishu-app')
 
     return buildCapabilityRuntimeSnapshot({
       config,
@@ -307,10 +344,10 @@ export class AgentControlRuntime extends EventEmitter {
       browserDecisionMode: 'free_tool_loop',
       runtimeAvailability: {
         browserHostAvailable: this.orchestrator.hasBrowserController(),
-        feishuConnected,
+        feishuConnected
       },
       enabledChannelTypes,
-      connectedChannelTypes,
+      connectedChannelTypes
     })
   }
 
@@ -320,12 +357,18 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   isChannelTypeAvailable(type: AgentChannelType): boolean {
-    const hasEnabledChannel = this.listChannels().some((channel) => channel.type === type && channel.enabled)
+    const hasEnabledChannel = this.listChannels().some(
+      (channel) => channel.type === type && channel.enabled
+    )
     if (!hasEnabledChannel) return false
 
     const heartbeatAdapter = this.heartbeat.adapters.find((adapter) => adapter.type === type)
     if (!heartbeatAdapter) return true
-    return heartbeatAdapter.healthy && heartbeatAdapter.status !== 'error' && heartbeatAdapter.status !== 'stopped'
+    return (
+      heartbeatAdapter.healthy &&
+      heartbeatAdapter.status !== 'error' &&
+      heartbeatAdapter.status !== 'stopped'
+    )
   }
 
   listConversationScopes(agent?: string): ConversationScope[] {
@@ -339,7 +382,9 @@ export class AgentControlRuntime extends EventEmitter {
   }): ScopeRunSummary[] {
     const channelKey = String(payload?.channelKey || '').trim()
     const statuses = Array.isArray(payload?.statuses) ? new Set(payload?.statuses) : null
-    const limit = Number.isFinite(Number(payload?.limit)) ? Math.max(1, Math.min(100, Number(payload?.limit))) : 20
+    const limit = Number.isFinite(Number(payload?.limit))
+      ? Math.max(1, Math.min(100, Number(payload?.limit)))
+      : 20
     return Array.from(this.scopeRunSummaries.values())
       .filter((item) => (channelKey ? item.channelKey === channelKey : true))
       .filter((item) => (statuses ? statuses.has(item.phase) : true))
@@ -378,27 +423,42 @@ export class AgentControlRuntime extends EventEmitter {
     return this.sessionRecallService.listAttachedSessionRecallContexts(scopeId)
   }
 
-  attachSessionRecallContext(currentScopeId: string, conversationId: string): { scope: ConversationScope; capsule: SessionRecallCapsule } {
-    const result = this.sessionRecallService.attachSessionRecallContext({ currentScopeId, conversationId })
+  attachSessionRecallContext(
+    currentScopeId: string,
+    conversationId: string
+  ): { scope: ConversationScope; capsule: SessionRecallCapsule } {
+    const result = this.sessionRecallService.attachSessionRecallContext({
+      currentScopeId,
+      conversationId
+    })
     const scope = this.mapConversationRow(result.scope)
     this.emitConversationEvent({
       type: 'scope_updated',
-      scope,
+      scope
     })
     return { scope, capsule: result.capsule }
   }
 
-  detachSessionRecallContext(currentScopeId: string, conversationId: string): { scope: ConversationScope } {
-    const result = this.sessionRecallService.detachSessionRecallContext({ currentScopeId, conversationId })
+  detachSessionRecallContext(
+    currentScopeId: string,
+    conversationId: string
+  ): { scope: ConversationScope } {
+    const result = this.sessionRecallService.detachSessionRecallContext({
+      currentScopeId,
+      conversationId
+    })
     const scope = this.mapConversationRow(result.scope)
     this.emitConversationEvent({
       type: 'scope_updated',
-      scope,
+      scope
     })
     return { scope }
   }
 
-  resumeSessionCandidate(payload: { conversationId?: string; resumeTitle?: string }): SessionRecallHit | null {
+  resumeSessionCandidate(payload: {
+    conversationId?: string
+    resumeTitle?: string
+  }): SessionRecallHit | null {
     return this.sessionRecallService.resumeSessionCandidate(payload)
   }
 
@@ -412,7 +472,8 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
-    return this.db.listConversationAttachments(scopeId)
+    return this.db
+      .listConversationAttachments(scopeId)
       .filter((item) => item.path && existsSync(item.path))
       .map((item) => ({
         attachmentId: item.attachment_id,
@@ -421,7 +482,7 @@ export class AgentControlRuntime extends EventEmitter {
         name: item.name,
         path: item.path,
         type: ['image', 'video', 'text', 'spreadsheet', 'other'].includes(String(item.type))
-          ? item.type as ConversationAttachment['type']
+          ? (item.type as ConversationAttachment['type'])
           : 'other',
         size: item.size,
         ext: item.ext,
@@ -430,12 +491,14 @@ export class AgentControlRuntime extends EventEmitter {
         remoteId: item.remote_id,
         channelId: item.channel_id,
         threadKey: item.thread_key,
-        createdAt: item.created_at,
+        createdAt: item.created_at
       }))
   }
 
   getScopeAttachment(scopeId: string, attachmentId: string): ConversationAttachment | null {
-    return this.listScopeAttachments(scopeId).find((item) => item.attachmentId === attachmentId) || null
+    return (
+      this.listScopeAttachments(scopeId).find((item) => item.attachmentId === attachmentId) || null
+    )
   }
 
   getRemoteAttachmentCacheStats(channelId?: string): {
@@ -467,7 +530,8 @@ export class AgentControlRuntime extends EventEmitter {
       if (!stat.isDirectory()) return
       for (const entry of readdirSync(currentPath)) {
         const nextPath = join(currentPath, entry)
-        const nextChannelId = currentChannelId || (!channelId && currentPath === basePath ? entry : currentChannelId)
+        const nextChannelId =
+          currentChannelId || (!channelId && currentPath === basePath ? entry : currentChannelId)
         walk(nextPath, nextChannelId)
       }
     }
@@ -481,12 +545,16 @@ export class AgentControlRuntime extends EventEmitter {
       channels: Array.from(byChannel.entries()).map(([itemChannelId, value]) => ({
         channelId: itemChannelId,
         files: value.files,
-        bytes: value.bytes,
-      })),
+        bytes: value.bytes
+      }))
     }
   }
 
-  clearRemoteAttachmentCache(channelId?: string): { removedFiles: number; removedBytes: number; targetPath: string } {
+  clearRemoteAttachmentCache(channelId?: string): {
+    removedFiles: number
+    removedBytes: number
+    targetPath: string
+  } {
     const basePath = join(app.getPath('userData'), 'agent-sidecar-runtime', 'channel-attachments')
     const targetPath = channelId ? join(basePath, channelId) : basePath
     let removedFiles = 0
@@ -520,7 +588,7 @@ export class AgentControlRuntime extends EventEmitter {
       sourceKind: 'local',
       sourceId: 'app',
       threadKey: id,
-      meta: { sourceLabel: '应用内', createdBy: 'app' },
+      meta: { sourceLabel: '应用内', createdBy: 'app' }
     })
     const scope = this.mapConversationRow(row)
     this.emitConversationEvent({ type: 'scope_created', scope })
@@ -540,19 +608,26 @@ export class AgentControlRuntime extends EventEmitter {
     return this.runCoordinator.runScoped(
       {
         scope,
-        message: payload.message as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId: payload.requestId,
+        message: payload.message as
+          | string
+          | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+        requestId: payload.requestId
       },
       {
         onSuccess: async (result) => {
           if (scope.sourceKind !== 'channel') return
-          const outboundText = result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-          const sendOk = await this.sendLongTextToChannel(scope.sourceId, scope.threadKey, outboundText)
+          const outboundText =
+            result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+          const sendOk = await this.sendLongTextToChannel(
+            scope.sourceId,
+            scope.threadKey,
+            outboundText
+          )
           if (!sendOk.success) {
             throw new Error(sendOk.error || 'Failed to send channel reply')
           }
-        },
-      },
+        }
+      }
     )
   }
 
@@ -564,7 +639,7 @@ export class AgentControlRuntime extends EventEmitter {
       type: payload.type as AgentChannelType,
       name: payload.name.trim() || id,
       enabled: payload.enabled ?? true,
-      configJson: JSON.stringify(encryptedConfig),
+      configJson: JSON.stringify(encryptedConfig)
     })
 
     if (this.sidecar.isRunning()) {
@@ -573,7 +648,7 @@ export class AgentControlRuntime extends EventEmitter {
         type: row.type,
         name: row.name,
         enabled: Boolean(row.enabled),
-        config: decryptChannelConfig(encryptedConfig),
+        config: decryptChannelConfig(encryptedConfig)
       })
       if (row.enabled) {
         await this.sidecar.startChannel(id).catch(() => undefined)
@@ -601,7 +676,9 @@ export class AgentControlRuntime extends EventEmitter {
         type: row.type,
         name: row.name,
         enabled: Boolean(row.enabled),
-        config: decryptChannelConfig(this.tryParseJson<Record<string, unknown>>(row.config_json, {})),
+        config: decryptChannelConfig(
+          this.tryParseJson<Record<string, unknown>>(row.config_json, {})
+        )
       })
       if (enabled) {
         await this.sidecar.startChannel(id).catch(() => undefined)
@@ -621,7 +698,7 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       await this.sidecar.sendChannel({
         id,
-        text: text.trim() || 'Ready 连接测试成功',
+        text: text.trim() || 'Ready 连接测试成功'
       })
       return { success: true }
     } catch (error) {
@@ -639,7 +716,7 @@ export class AgentControlRuntime extends EventEmitter {
         type: payload.type,
         name: payload.name,
         enabled: payload.enabled ?? true,
-        config: payload.config || {},
+        config: payload.config || {}
       })
       if (response.success === false) {
         return { success: false, error: String(response.error || 'channel test failed') }
@@ -664,7 +741,7 @@ export class AgentControlRuntime extends EventEmitter {
       prompt: payload.prompt,
       channelId: payload.channelId ?? null,
       enabled: payload.enabled ?? true,
-      payloadJson: payload.payload ? JSON.stringify(payload.payload) : null,
+      payloadJson: payload.payload ? JSON.stringify(payload.payload) : null
     })
 
     if (this.sidecar.isRunning()) {
@@ -675,7 +752,7 @@ export class AgentControlRuntime extends EventEmitter {
         prompt: row.prompt,
         channelId: row.channel_id,
         enabled: Boolean(row.enabled),
-        payload: payload.payload || {},
+        payload: payload.payload || {}
       })
     }
     return this.mapScheduleRow(row)
@@ -722,7 +799,7 @@ export class AgentControlRuntime extends EventEmitter {
         type: channel.type,
         name: channel.name,
         enabled: channel.enabled,
-        config: channel.config,
+        config: channel.config
       })
       if (channel.enabled) {
         await this.sidecar.startChannel(channel.id).catch(() => undefined)
@@ -739,7 +816,7 @@ export class AgentControlRuntime extends EventEmitter {
         prompt: schedule.prompt,
         channelId: schedule.channelId,
         enabled: schedule.enabled,
-        payload: schedule.payload || {},
+        payload: schedule.payload || {}
       })
     }
   }
@@ -767,17 +844,18 @@ export class AgentControlRuntime extends EventEmitter {
       this.heartbeat.sidecar.lastBeatAt = new Date().toISOString()
       this.heartbeat.sidecar.status = 'running'
       const adapters = Array.isArray((heart as { adapters?: unknown[] }).adapters)
-        ? (heart as { adapters?: unknown[] }).adapters as Array<Record<string, unknown>>
+        ? ((heart as { adapters?: unknown[] }).adapters as Array<Record<string, unknown>>)
         : []
       this.heartbeat.adapters = adapters.map((item) => ({
         id: String(item.id || ''),
         type: String(item.type || 'local-debug') as ChannelAdapterType,
         healthy: Boolean(item.healthy),
-        status: typeof item.status === 'string'
-          ? item.status as 'starting' | 'running' | 'stopped' | 'error'
-          : undefined,
+        status:
+          typeof item.status === 'string'
+            ? (item.status as 'starting' | 'running' | 'stopped' | 'error')
+            : undefined,
         lastBeatAt: typeof item.lastBeatAt === 'string' ? item.lastBeatAt : undefined,
-        error: typeof item.error === 'string' ? item.error : undefined,
+        error: typeof item.error === 'string' ? item.error : undefined
       }))
       await this.reviveErroredAdapters()
 
@@ -808,7 +886,7 @@ export class AgentControlRuntime extends EventEmitter {
     const enabledChannelIds = new Set(
       this.listChannels()
         .filter((item) => item.enabled)
-        .map((item) => item.id),
+        .map((item) => item.id)
     )
     const now = Date.now()
     for (const adapter of this.heartbeat.adapters) {
@@ -826,7 +904,9 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  private async executeSchedule(schedule: AgentScheduleRecord): Promise<{ success: boolean; error?: string }> {
+  private async executeSchedule(
+    schedule: AgentScheduleRecord
+  ): Promise<{ success: boolean; error?: string }> {
     const prompt = schedule.prompt.trim()
     if (!prompt) return { success: false, error: 'Schedule prompt is empty' }
     const wrapped = `[cron:${schedule.name}] ${prompt}`
@@ -853,7 +933,7 @@ export class AgentControlRuntime extends EventEmitter {
       thread: thread || 'default',
       sender,
       text,
-      attachments,
+      attachments
     })
   }
 
@@ -879,7 +959,7 @@ export class AgentControlRuntime extends EventEmitter {
       eventIds: [],
       texts: [],
       attachments: [],
-      timer: null as NodeJS.Timeout | null,
+      timer: null as NodeJS.Timeout | null
     }
 
     if (!pending.eventIds.includes(payload.eventId)) {
@@ -887,12 +967,14 @@ export class AgentControlRuntime extends EventEmitter {
       this.db.upsertAgentChannelEvent({
         eventId: payload.eventId,
         channelId: payload.channelId,
-        status: 'running',
+        status: 'running'
       })
     }
     if (payload.text) pending.texts.push(payload.text)
     if (payload.attachments.length > 0) {
-      const seen = new Set(pending.attachments.map((item) => `${item.remoteId || item.path}::${item.name}`))
+      const seen = new Set(
+        pending.attachments.map((item) => `${item.remoteId || item.path}::${item.name}`)
+      )
       for (const attachment of payload.attachments) {
         const dedupeKey = `${attachment.remoteId || attachment.path}::${attachment.name}`
         if (seen.has(dedupeKey)) continue
@@ -912,14 +994,14 @@ export class AgentControlRuntime extends EventEmitter {
     eventIds: string[],
     channelId: string,
     status: 'running' | 'done' | 'failed',
-    error?: string | null,
+    error?: string | null
   ): void {
     for (const eventId of eventIds) {
       this.db.upsertAgentChannelEvent({
         eventId,
         channelId,
         status,
-        error: error || null,
+        error: error || null
       })
     }
   }
@@ -950,7 +1032,7 @@ export class AgentControlRuntime extends EventEmitter {
       channelId: pending.channelId,
       remoteThread: pending.thread,
       sessionId: scope.id,
-      conversationId: scope.id,
+      conversationId: scope.id
     })
 
     const inboundMessage = this.createConversationMessage(scope.id, {
@@ -962,13 +1044,13 @@ export class AgentControlRuntime extends EventEmitter {
         threadKey: pending.thread,
         sender: pending.sender,
         direction: 'inbound',
-        attachments: pending.attachments,
-      },
+        attachments: pending.attachments
+      }
     })
     this.emitConversationEvent({
       type: 'message_added',
       scope: this.refreshScope(scope.id),
-      message: inboundMessage,
+      message: inboundMessage
     })
 
     if (!mergedText) {
@@ -978,13 +1060,16 @@ export class AgentControlRuntime extends EventEmitter {
 
     let statusSent = false
     const statusTimer = setTimeout(() => {
-      void this.sidecar.sendChannel({
-        id: pending.channelId,
-        thread: pending.thread,
-        text: '处理中…',
-      }).then(() => {
-        statusSent = true
-      }).catch(() => undefined)
+      void this.sidecar
+        .sendChannel({
+          id: pending.channelId,
+          thread: pending.thread,
+          text: '处理中…'
+        })
+        .then(() => {
+          statusSent = true
+        })
+        .catch(() => undefined)
     }, 2500)
 
     const promptPayload = this.buildInboundChannelPayload(inboundText, pending.attachments)
@@ -992,8 +1077,10 @@ export class AgentControlRuntime extends EventEmitter {
     const result = await this.runCoordinator.runInboundChannel(
       {
         scope,
-        message: promptPayload as string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId,
+        message: promptPayload as
+          | string
+          | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+        requestId
       },
       {
         onFailure: async (errorText) => {
@@ -1007,19 +1094,24 @@ export class AgentControlRuntime extends EventEmitter {
               channelId: pending.channelId,
               threadKey: pending.thread,
               direction: 'outbound',
-              error: true,
-            },
+              error: true
+            }
           })
           this.emitConversationEvent({
             type: 'message_added',
             scope: this.refreshScope(scope.id),
-            message: errorMessage,
+            message: errorMessage
           })
-          await this.sendLongTextToChannel(pending.channelId, pending.thread, `处理失败：${errorText}`).catch(() => undefined)
+          await this.sendLongTextToChannel(
+            pending.channelId,
+            pending.thread,
+            `处理失败：${errorText}`
+          ).catch(() => undefined)
         },
         onSuccess: async (executionResult) => {
           clearTimeout(statusTimer)
-          const finalText = executionResult.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+          const finalText =
+            executionResult.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
           const assistantMessage = this.createConversationMessage(scope.id, {
             role: 'assistant',
             content: finalText,
@@ -1029,19 +1121,21 @@ export class AgentControlRuntime extends EventEmitter {
               threadKey: pending.thread,
               sender: agent,
               direction: 'outbound',
-              delayedStatusSent: statusSent,
-            },
+              delayedStatusSent: statusSent
+            }
           })
           this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
           this.db.markAgentChannelSeen(pending.channelId)
           this.emitConversationEvent({
             type: 'message_added',
             scope: this.refreshScope(scope.id),
-            message: assistantMessage,
+            message: assistantMessage
           })
-          await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(() => undefined)
-        },
-      },
+          await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(
+            () => undefined
+          )
+        }
+      }
     )
     clearTimeout(statusTimer)
     if (!result.success) return
@@ -1057,7 +1151,7 @@ export class AgentControlRuntime extends EventEmitter {
       lastError: row.last_error,
       lastSeenAt: row.last_seen_at,
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      updatedAt: row.updated_at
     }
   }
 
@@ -1073,11 +1167,13 @@ export class AgentControlRuntime extends EventEmitter {
       lastRunAt: row.last_run_at,
       nextRunAt: row.next_run_at,
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      updatedAt: row.updated_at
     }
   }
 
-  private mapConversationRow(row: ChatConversationRecord & { last_message_at?: string | null }): ConversationScope {
+  private mapConversationRow(
+    row: ChatConversationRecord & { last_message_at?: string | null }
+  ): ConversationScope {
     return {
       id: row.id,
       agent: row.agent,
@@ -1092,7 +1188,7 @@ export class AgentControlRuntime extends EventEmitter {
       meta: this.tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      lastMessageAt: row.last_message_at ?? null,
+      lastMessageAt: row.last_message_at ?? null
     }
   }
 
@@ -1103,7 +1199,7 @@ export class AgentControlRuntime extends EventEmitter {
       role: row.role,
       content: row.content,
       timestamp: row.timestamp,
-      meta: this.tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {}),
+      meta: this.tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {})
     }
   }
 
@@ -1111,7 +1207,7 @@ export class AgentControlRuntime extends EventEmitter {
     channelId: string,
     remoteThread: string,
     agent: string,
-    sender: string,
+    sender: string
   ): ConversationScope {
     const channel = this.db.getAgentChannel(channelId)
     const channelMeta = channel ? this.mapChannelRow(channel) : null
@@ -1124,16 +1220,18 @@ export class AgentControlRuntime extends EventEmitter {
       sourceId: channelId,
       threadKey: remoteThread,
       meta: {
-        ...(existing ? this.tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {}) : {}),
+        ...(existing
+          ? this.tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
+          : {}),
         sourceLabel: channelMeta?.name || '远程 IM',
         channelType: channelMeta?.type || 'generic-webhook',
-        sender,
-      },
+        sender
+      }
     })
     const scope = this.mapConversationRow(row)
     this.emitConversationEvent({
       type: existing ? 'scope_updated' : 'scope_created',
-      scope,
+      scope
     })
     return scope
   }
@@ -1150,11 +1248,18 @@ export class AgentControlRuntime extends EventEmitter {
       role: string
       content: string
       meta?: Record<string, unknown>
-    },
+    }
   ): ConversationScopeMessage {
     const messageId = `msg-${randomUUID()}`
     const timestamp = new Date().toISOString()
-    this.db.addChatMessage(messageId, scopeId, payload.role, payload.content, timestamp, payload.meta)
+    this.db.addChatMessage(
+      messageId,
+      scopeId,
+      payload.role,
+      payload.content,
+      timestamp,
+      payload.meta
+    )
     return this.mapMessageRow(this.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
   }
 
@@ -1186,11 +1291,13 @@ export class AgentControlRuntime extends EventEmitter {
           url: typeof record.url === 'string' ? record.url : undefined,
           mimeType: typeof record.mimeType === 'string' ? record.mimeType : undefined,
           size: Number(record.size || 0),
-          type: ['image', 'video', 'text', 'spreadsheet', 'other'].includes(String(record.type || ''))
-            ? String(record.type) as ChannelAttachment['type']
+          type: ['image', 'video', 'text', 'spreadsheet', 'other'].includes(
+            String(record.type || '')
+          )
+            ? (String(record.type) as ChannelAttachment['type'])
             : 'other',
           ext: typeof record.ext === 'string' ? record.ext : undefined,
-          remoteId: typeof record.remoteId === 'string' ? record.remoteId : undefined,
+          remoteId: typeof record.remoteId === 'string' ? record.remoteId : undefined
         }
       })
       .filter(Boolean) as ChannelAttachment[]
@@ -1200,13 +1307,14 @@ export class AgentControlRuntime extends EventEmitter {
     if (attachments.length === 0) return ''
     if (attachments.length === 1) {
       const item = attachments[0]
-      const kind = item.type === 'image'
-        ? '图片'
-        : item.type === 'video'
-          ? '视频'
-          : item.type === 'text'
-            ? '文件'
-            : '附件'
+      const kind =
+        item.type === 'image'
+          ? '图片'
+          : item.type === 'video'
+            ? '视频'
+            : item.type === 'text'
+              ? '文件'
+              : '附件'
       return `[收到${kind}] ${item.name}`
     }
     return `[收到 ${attachments.length} 个附件]`
@@ -1215,13 +1323,14 @@ export class AgentControlRuntime extends EventEmitter {
   private formatChannelAttachmentSummary(attachments: ChannelAttachment[]): string {
     if (attachments.length === 0) return ''
     const lines = attachments.map((attachment) => {
-      const kind = attachment.type === 'image'
-        ? '图片'
-        : attachment.type === 'video'
-          ? '视频'
-          : attachment.type === 'text'
-            ? '文件'
-            : '附件'
+      const kind =
+        attachment.type === 'image'
+          ? '图片'
+          : attachment.type === 'video'
+            ? '视频'
+            : attachment.type === 'text'
+              ? '文件'
+              : '附件'
       return `- ${kind}: ${attachment.name}`
     })
     return ['[附件]', ...lines].join('\n')
@@ -1229,7 +1338,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   private buildInboundChannelPayload(
     inboundText: string,
-    attachments: ChannelAttachment[],
+    attachments: ChannelAttachment[]
   ): string | MultimodalBlock[] {
     if (attachments.length === 0) return inboundText
 
@@ -1255,7 +1364,9 @@ export class AgentControlRuntime extends EventEmitter {
 
     const hasMediaBlocks = blocks.some((item) => item.type === 'image' || item.type === 'video')
     if (hasMediaBlocks) return blocks
-    return [inboundText, this.formatChannelAttachmentSummary(attachments)].filter(Boolean).join('\n\n')
+    return [inboundText, this.formatChannelAttachmentSummary(attachments)]
+      .filter(Boolean)
+      .join('\n\n')
   }
 
   private tryInlineChannelAttachment(attachment: ChannelAttachment): MultimodalBlock | null {
@@ -1268,20 +1379,38 @@ export class AgentControlRuntime extends EventEmitter {
     const declaredType = String(attachment.type || '').toLowerCase()
     const stat = statSync(filePath)
 
-    if (declaredType === 'video' || ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'].includes(ext)) {
+    if (
+      declaredType === 'video' ||
+      ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'].includes(ext)
+    ) {
       if (stat.size > 40 * 1024 * 1024) return null
       return {
         type: 'video',
         base64: readFileSync(filePath).toString('base64'),
-        mimeType: attachment.mimeType || this.mimeTypeFromExt(ext, 'video/mp4'),
+        mimeType: attachment.mimeType || this.mimeTypeFromExt(ext, 'video/mp4')
       }
     }
 
-    if (declaredType === 'image' || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tiff', '.tif', '.ico', '.avif'].includes(ext)) {
+    if (
+      declaredType === 'image' ||
+      [
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.gif',
+        '.webp',
+        '.bmp',
+        '.svg',
+        '.tiff',
+        '.tif',
+        '.ico',
+        '.avif'
+      ].includes(ext)
+    ) {
       return {
         type: 'image',
         base64: readFileSync(filePath).toString('base64'),
-        mimeType: attachment.mimeType || this.mimeTypeFromExt(ext, 'image/png'),
+        mimeType: attachment.mimeType || this.mimeTypeFromExt(ext, 'image/png')
       }
     }
 
@@ -1306,7 +1435,7 @@ export class AgentControlRuntime extends EventEmitter {
       '.webm': 'video/webm',
       '.mkv': 'video/x-matroska',
       '.avi': 'video/x-msvideo',
-      '.m4v': 'video/x-m4v',
+      '.m4v': 'video/x-m4v'
     }
     return table[ext] || fallback
   }
@@ -1327,17 +1456,20 @@ export class AgentControlRuntime extends EventEmitter {
   private async sendLongTextToChannel(
     channelId: string,
     thread: string,
-    text: string,
+    text: string
   ): Promise<{ success: boolean; error?: string }> {
     for (const chunk of this.splitLongText(text)) {
-      const result = await this.sidecar.sendChannel({
-        id: channelId,
-        thread,
-        text: chunk,
-      }).then(() => ({ success: true as const })).catch((error) => ({
-        success: false as const,
-        error: error instanceof Error ? error.message : String(error),
-      }))
+      const result = await this.sidecar
+        .sendChannel({
+          id: channelId,
+          thread,
+          text: chunk
+        })
+        .then(() => ({ success: true as const }))
+        .catch((error) => ({
+          success: false as const,
+          error: error instanceof Error ? error.message : String(error)
+        }))
       if (!result.success) {
         return result
       }
@@ -1379,7 +1511,7 @@ export class AgentControlRuntime extends EventEmitter {
       'copaw_base_url',
       'copaw_api_token',
       'copaw_user_id',
-      'copaw_channel',
+      'copaw_channel'
     ]
     for (const key of keys) {
       try {
@@ -1393,12 +1525,15 @@ export class AgentControlRuntime extends EventEmitter {
   /**
    * Reflect on a completed conversation and extract learnings
    */
-  private async reflectOnConversation(scope: ConversationScope, usedTools: string[]): Promise<ScopeRunMemoryCapture | null> {
+  private async reflectOnConversation(
+    scope: ConversationScope,
+    usedTools: string[]
+  ): Promise<ScopeRunMemoryCapture | null> {
     try {
       // Get conversation messages
       const messages = this.db.getChatMessages(scope.id).map((msg) => ({
         role: msg.role,
-        content: msg.content,
+        content: msg.content
       }))
 
       // Skip reflection for very short conversations
@@ -1411,7 +1546,7 @@ export class AgentControlRuntime extends EventEmitter {
         scope,
         messages,
         usedTools,
-        success: true,
+        success: true
       })
       return result.memoryCapture || null
     } catch (error) {
@@ -1424,5 +1559,4 @@ export class AgentControlRuntime extends EventEmitter {
     const sourceId = scope.sourceKind === 'local' ? 'app' : scope.sourceId
     return `${scope.sourceKind}:${sourceId}`
   }
-
 }

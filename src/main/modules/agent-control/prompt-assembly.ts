@@ -1,15 +1,22 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { AgentRepository } from '../repositories/agent-repository'
-import { MemoryRepository } from '../repositories/memory-repository'
+import { MemoryRepository, type MemorySourceType } from '../repositories/memory-repository'
 import type { ConversationScope } from './types'
-import { buildCompressionReport, compressHistoryForPrompt, type PromptCompressionReport } from './context-compression'
+import {
+  buildCompressionReport,
+  compressHistoryForPrompt,
+  type PromptCompressionReport
+} from './context-compression'
+import type { SessionRecallCapsule } from '../../../shared/session-recall'
 
-export type PromptMemoryLayer = 'l0' | 'l1' | 'l2'
+export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
+export type PromptMemorySourceType = MemorySourceType | 'session_recall'
 
 export interface PromptMemoryRef {
   id: string
   layer: PromptMemoryLayer
+  sourceType: PromptMemorySourceType
   title: string
   summary?: string | null
   path?: string | null
@@ -45,7 +52,16 @@ export interface PromptAssemblyResult {
 
 export interface PromptAssemblyDeps {
   getMemoryRoot?: () => string
-  getScopeMessages?: (scopeId: string) => Promise<Array<{ role: string; content: string }>> | Array<{ role: string; content: string }>
+  getScopeMessages?: (
+    scopeId: string
+  ) => Promise<Array<{ role: string; content: string }>> | Array<{ role: string; content: string }>
+  getScopeSessionRecallCapsules?: (
+    scope: ConversationScope
+  ) => Promise<SessionRecallCapsule[]> | SessionRecallCapsule[]
+  getAutoSessionRecallCapsules?: (params: {
+    scope: ConversationScope
+    userText: string
+  }) => Promise<SessionRecallCapsule[]> | SessionRecallCapsule[]
   now?: () => Date
   memoryRepository?: MemoryRepository
   enableDatabaseMemory?: boolean
@@ -72,54 +88,33 @@ const DEFAULT_FILES: Record<string, string> = {
     '# MEMORY.md',
     '- 当前是 Ready 的统一 agent runtime。',
     '- 保持结构化 run state、artifact、checkpoint、scope 隔离。',
-    '- 敏感账号信息不进入常驻注入。',
+    '- 敏感账号信息不进入常驻注入。'
   ].join('\n'),
   'AGENTS.md': [
     '# AGENTS.md',
     '- 优先使用真实工具，不要伪造结果。',
     '- 命中 Pre-Action Trigger 时，先读取规则，再执行动作。',
-    '- 保存结构化 evidence、artifact、checkpoint。',
+    '- 保存结构化 evidence、artifact、checkpoint。'
   ].join('\n'),
-  'USER.md': [
-    '# USER.md',
-    '- 用户偏好：简洁直接，不要废话。',
-    '- 默认使用中文。',
-  ].join('\n'),
+  'USER.md': ['# USER.md', '- 用户偏好：简洁直接，不要废话。', '- 默认使用中文。'].join('\n'),
   'TOOLS.md': [
     '# TOOLS.md',
-    '- browser/document/rss/calendar/skill/system/feishu/memory 工具族可用。',
+    '- browser/document/rss/calendar/skill/system/feishu/memory 工具族可用。'
   ].join('\n'),
-  'SOUL.md': [
-    '# SOUL.md',
-    '- 直接、清晰、务实。',
-    '- 优先可执行结果。',
-  ].join('\n'),
+  'SOUL.md': ['# SOUL.md', '- 直接、清晰、务实。', '- 优先可执行结果。'].join('\n'),
   'docs/feishu-rules.md': [
     '# 飞书规则',
     '- 创建或改写飞书文档前先确认目标实体和权限。',
     '- 插图前先确认图片来源与上传方式。',
-    '- 多账号场景先核对 account mapping。',
+    '- 多账号场景先核对 account mapping。'
   ].join('\n'),
-  'docs/accounts.md': [
-    '# 账号索引',
-    '- 这里存放账号映射索引，不在 L0 暴露敏感值。',
-  ].join('\n'),
-  'docs/document-rules.md': [
-    '# 文档规则',
-    '- 写入前保留原意，保存前确认目标路径和格式。',
-  ].join('\n'),
-  'docs/browser-rules.md': [
-    '# 浏览器规则',
-    '- 上传/输入/提交按阶段执行并逐步验证。',
-  ].join('\n'),
-  'docs/rss-rules.md': [
-    '# RSS 规则',
-    '- 先确认源和条目，再运行分析 pipeline。',
-  ].join('\n'),
-  'docs/calendar-rules.md': [
-    '# 日程规则',
-    '- 写入前先检查时间歧义和冲突。',
-  ].join('\n'),
+  'docs/accounts.md': ['# 账号索引', '- 这里存放账号映射索引，不在 L0 暴露敏感值。'].join('\n'),
+  'docs/document-rules.md': ['# 文档规则', '- 写入前保留原意，保存前确认目标路径和格式。'].join(
+    '\n'
+  ),
+  'docs/browser-rules.md': ['# 浏览器规则', '- 上传/输入/提交按阶段执行并逐步验证。'].join('\n'),
+  'docs/rss-rules.md': ['# RSS 规则', '- 先确认源和条目，再运行分析 pipeline。'].join('\n'),
+  'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }
 
 const TRIGGERS: TriggerDefinition[] = [
@@ -131,8 +126,13 @@ const TRIGGERS: TriggerDefinition[] = [
     blocking: true,
     refs: [
       { path: 'docs/feishu-rules.md', title: '飞书文档规则', summary: '飞书文档创建与改写规则' },
-      { path: 'docs/accounts.md', title: '飞书账号索引', summary: '飞书账号和租户索引', sensitive: true },
-    ],
+      {
+        path: 'docs/accounts.md',
+        title: '飞书账号索引',
+        summary: '飞书账号和租户索引',
+        sensitive: true
+      }
+    ]
   },
   {
     id: 'feishu-image',
@@ -142,8 +142,13 @@ const TRIGGERS: TriggerDefinition[] = [
     blocking: true,
     refs: [
       { path: 'docs/feishu-rules.md', title: '飞书插图规则', summary: '飞书图片上传和插入规则' },
-      { path: 'docs/accounts.md', title: '飞书账号索引', summary: '飞书账号和租户索引', sensitive: true },
-    ],
+      {
+        path: 'docs/accounts.md',
+        title: '飞书账号索引',
+        summary: '飞书账号和租户索引',
+        sensitive: true
+      }
+    ]
   },
   {
     id: 'browser-upload',
@@ -152,8 +157,12 @@ const TRIGGERS: TriggerDefinition[] = [
     pattern: /(上传|发送|提交|浏览器|网页)/i,
     blocking: false,
     refs: [
-      { path: 'docs/browser-rules.md', title: '浏览器工作流规则', summary: '浏览器上传、输入、发送的阶段规则' },
-    ],
+      {
+        path: 'docs/browser-rules.md',
+        title: '浏览器工作流规则',
+        summary: '浏览器上传、输入、发送的阶段规则'
+      }
+    ]
   },
   {
     id: 'document-write',
@@ -161,9 +170,7 @@ const TRIGGERS: TriggerDefinition[] = [
     module: 'document',
     pattern: /(文档|文件).*(写|改|保存|格式)/i,
     blocking: false,
-    refs: [
-      { path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' },
-    ],
+    refs: [{ path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' }]
   },
   {
     id: 'rss-analysis',
@@ -171,9 +178,7 @@ const TRIGGERS: TriggerDefinition[] = [
     module: 'rss',
     pattern: /(rss|订阅|抓取|分析)/i,
     blocking: false,
-    refs: [
-      { path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' },
-    ],
+    refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }]
   },
   {
     id: 'calendar-write',
@@ -182,9 +187,9 @@ const TRIGGERS: TriggerDefinition[] = [
     pattern: /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i,
     blocking: true,
     refs: [
-      { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' },
-    ],
-  },
+      { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' }
+    ]
+  }
 ]
 
 function clip(text: string, maxChars: number): string {
@@ -195,7 +200,10 @@ function formatMemorySection(title: string, body: string): string {
   return `## ${title}\n${body.trim()}`.trim()
 }
 
-function prependBootstrap(message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>, bootstrapMessages: string[]) {
+function prependBootstrap(
+  message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+  bootstrapMessages: string[]
+) {
   if (bootstrapMessages.length === 0) return message
   const bootstrapText = bootstrapMessages.filter(Boolean).join('\n\n')
   if (typeof message === 'string') {
@@ -212,11 +220,11 @@ function extractTextFromMessage(message: string | Array<{ type: string; text?: s
     .join('\n')
 }
 
-function applyBudget(parts: {
-  l0Text: string
+function applyBudget(parts: { l0Text: string; l1Text: string; l2Sections: string[] }): {
   l1Text: string
-  l2Sections: string[]
-}): { l1Text: string; l2Text: string; budget: PromptBudgetReport } {
+  l2Text: string
+  budget: PromptBudgetReport
+} {
   const droppedRefs: string[] = []
   const l0Chars = Math.min(parts.l0Text.length, MAX_L0_CHARS)
   const l1Text = clip(parts.l1Text, MAX_L1_CHARS)
@@ -227,8 +235,15 @@ function applyBudget(parts: {
 
   for (const section of parts.l2Sections) {
     const clippedSection = clip(section, MAX_L2_CHARS)
-    if ((l2Chars + clippedSection.length) > MAX_L2_CHARS || (totalChars + clippedSection.length) > MAX_TOTAL_CHARS) {
-      const title = clippedSection.split('\n')[0]?.replace(/^##\s*/, '').trim() || 'L2 ref'
+    if (
+      l2Chars + clippedSection.length > MAX_L2_CHARS ||
+      totalChars + clippedSection.length > MAX_TOTAL_CHARS
+    ) {
+      const title =
+        clippedSection
+          .split('\n')[0]
+          ?.replace(/^##\s*/, '')
+          .trim() || 'L2 ref'
       droppedRefs.push(title)
       continue
     }
@@ -240,7 +255,7 @@ function applyBudget(parts: {
   return {
     l1Text,
     l2Text,
-    budget: { totalChars, l0Chars, l1Chars, l2Chars, droppedRefs },
+    budget: { totalChars, l0Chars, l1Chars, l2Chars, droppedRefs }
   }
 }
 
@@ -256,11 +271,13 @@ function ensureMemoryRootStructure(root: string): string {
   return root
 }
 
-async function defaultGetScopeMessages(scopeId: string): Promise<Array<{ role: string; content: string }>> {
+async function defaultGetScopeMessages(
+  scopeId: string
+): Promise<Array<{ role: string; content: string }>> {
   const repository = new AgentRepository()
   return (await repository.getChatMessages(scopeId)).map((item) => ({
     role: item.role,
-    content: String(item.content || ''),
+    content: String(item.content || '')
   }))
 }
 
@@ -275,7 +292,9 @@ export class PromptAssemblyService {
     return ensureMemoryRootStructure(this.deps.getMemoryRoot?.() ?? defaultGetMemoryRoot())
   }
 
-  private async getScopeMessages(scopeId: string): Promise<Array<{ role: string; content: string }>> {
+  private async getScopeMessages(
+    scopeId: string
+  ): Promise<Array<{ role: string; content: string }>> {
     if (this.deps.getScopeMessages) {
       return await this.deps.getScopeMessages(scopeId)
     }
@@ -301,21 +320,23 @@ export class PromptAssemblyService {
 
   private makeMemoryRef(
     layer: PromptMemoryLayer,
+    sourceType: PromptMemorySourceType,
     title: string,
     path: string | null,
     summary: string,
     triggerId?: string,
-    sensitive = false,
+    sensitive = false
   ): PromptMemoryRef {
     return {
       id: `${layer}-${title}-${path || 'inline'}`.replace(/\s+/g, '-').toLowerCase(),
       layer,
+      sourceType,
       title,
       summary,
       path,
       triggerId: triggerId || null,
       sensitive,
-      loadedAt: this.now().toISOString(),
+      loadedAt: this.now().toISOString()
     }
   }
 
@@ -359,16 +380,16 @@ export class PromptAssemblyService {
       const sections = [
         `# User Profile: ${profile.name || userId}`,
         `Language: ${profile.preferredLanguage}`,
-        profile.communicationStyle ? `Communication Style: ${profile.communicationStyle}` : '',
+        profile.communicationStyle ? `Communication Style: ${profile.communicationStyle}` : ''
       ]
 
       // Load user-specific memories
       if (this.deps.memoryRepository) {
         const userMemories = await this.deps.memoryRepository.queryMemories({
           userId,
-          category: 'user_preference',
+          sourceType: 'resident_user',
           includeArchived: false,
-          limit: 10,
+          limit: 10
         })
 
         if (userMemories.length > 0) {
@@ -396,7 +417,43 @@ export class PromptAssemblyService {
     return this.readMemoryFile('MEMORY.md')
   }
 
-  private async loadL0(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
+  private async loadL0(
+    scope: ConversationScope
+  ): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
+    const residentAgentSections: string[] = []
+    const residentRefs: PromptMemoryRef[] = []
+
+    if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
+      try {
+        const residentMemories = await this.deps.memoryRepository.queryMemories({
+          sourceType: 'resident_agent',
+          includeArchived: false,
+          limit: 10
+        })
+
+        for (const memory of residentMemories) {
+          const content = await this.loadMemoryContent(memory.contentKey)
+          if (!content) continue
+          residentAgentSections.push(`- ${memory.title}: ${content}`)
+          residentRefs.push(
+            this.makeMemoryRef(
+              'l0',
+              'resident_agent',
+              memory.title,
+              null,
+              memory.summary || memory.title
+            )
+          )
+          await this.deps.memoryRepository.incrementAccessCount(memory.id)
+        }
+      } catch (error) {
+        console.error(
+          '[PromptAssembly] Failed to load resident agent memories from database:',
+          error
+        )
+      }
+    }
+
     // Load dynamic L0 files
     const soul = await this.loadSOUL(scope.agent)
     const memory = await this.loadMEMORY()
@@ -405,36 +462,39 @@ export class PromptAssemblyService {
     const tools = this.readMemoryFile('TOOLS.md')
 
     const sections = [
-      formatMemorySection('长期记忆', memory),
+      formatMemorySection(
+        '常驻记忆',
+        [memory, ...residentAgentSections].filter(Boolean).join('\n')
+      ),
       formatMemorySection('运行指令', agents),
-      formatMemorySection('用户偏好', user),
+      formatMemorySection('用户画像', user),
       formatMemorySection('工具索引', tools),
-      formatMemorySection('人格定义', soul),
+      formatMemorySection('人格定义', soul)
     ]
 
     const rendered = sections.join('\n\n')
     const clipped = clip(rendered, MAX_L0_CHARS)
 
     const refs = [
-      this.makeMemoryRef('l0', '长期记忆', 'MEMORY.md', 'L0 常驻：长期记忆'),
-      this.makeMemoryRef('l0', '运行指令', 'AGENTS.md', 'L0 常驻：运行指令'),
-      this.makeMemoryRef('l0', '用户偏好', 'USER.md', 'L0 常驻：用户偏好'),
-      this.makeMemoryRef('l0', '工具索引', 'TOOLS.md', 'L0 常驻：工具索引'),
-      this.makeMemoryRef('l0', '人格定义', 'SOUL.md', 'L0 常驻：人格定义'),
+      this.makeMemoryRef('l0', 'resident_agent', '常驻记忆', 'MEMORY.md', '常驻 agent 记忆'),
+      this.makeMemoryRef('l0', 'resident_user', '用户画像', 'USER.md', '常驻用户偏好'),
+      ...residentRefs
     ]
 
     return { text: clipped, refs, chars: clipped.length }
   }
 
-  private async loadL1(scope: ConversationScope): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number; historyCompressed: boolean }> {
+  private async loadL1(
+    scope: ConversationScope
+  ): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number; historyCompressed: boolean }> {
     // Load from file-based system (backward compatibility)
     const messages = (await this.getScopeMessages(scope.id)).slice(-4)
     const transcript = compressHistoryForPrompt(
       messages.map((item) => ({
         role: item.role,
-        content: String(item.content || '').slice(0, 400),
+        content: String(item.content || '').slice(0, 400)
       })),
-      { keepRecent: 2, maxChars: 600 },
+      { keepRecent: 2, maxChars: 600 }
     )
     const now = this.now()
     const day = now.toISOString().slice(0, 10)
@@ -451,14 +511,35 @@ export class PromptAssemblyService {
       .join('\n\n')
 
     const sections: string[] = [
-      formatMemorySection('当前 Scope', [`- 标题: ${scope.title}`, `- 来源: ${scope.sourceKind}`, `- 线程: ${scope.threadKey}`].join('\n')),
+      formatMemorySection(
+        '当前 Scope',
+        [
+          `- 标题: ${scope.title}`,
+          `- 来源: ${scope.sourceKind}`,
+          `- 线程: ${scope.threadKey}`
+        ].join('\n')
+      ),
       transcript.text ? formatMemorySection('最近会话摘要', transcript.text) : '',
-      dailySections,
+      dailySections
     ].filter(Boolean)
 
     const refs: PromptMemoryRef[] = [
-      this.makeMemoryRef('l1', 'Scope 会话摘要', null, `Scope ${scope.title} 的最近会话摘要`),
-      ...dayFiles.map((path) => this.makeMemoryRef('l1', path.split('/').pop() || path, path, '当日操作日志')),
+      this.makeMemoryRef(
+        'l1',
+        'scope_memory',
+        'Scope 会话摘要',
+        null,
+        `Scope ${scope.title} 的最近会话摘要`
+      ),
+      ...dayFiles.map((path) =>
+        this.makeMemoryRef(
+          'l1',
+          'scope_memory',
+          path.split('/').pop() || path,
+          path,
+          '当日操作日志'
+        )
+      )
     ]
 
     // Load from database if enabled
@@ -468,20 +549,27 @@ export class PromptAssemblyService {
         const scopeMemories = await this.deps.memoryRepository.queryMemories({
           layer: 'l1',
           scopeId: scope.id,
-          category: 'summary',
+          sourceType: 'scope_memory',
           includeArchived: false,
-          limit: 3,
+          limit: 3
         })
 
         for (const memory of scopeMemories) {
           const content = await this.loadMemoryContent(memory.contentKey)
           if (content) {
             sections.push(formatMemorySection(memory.title, content))
-            refs.push(this.makeMemoryRef('l1', memory.title, null, memory.summary || memory.title))
+            refs.push(
+              this.makeMemoryRef(
+                'l1',
+                'scope_memory',
+                memory.title,
+                null,
+                memory.summary || memory.title
+              )
+            )
             await this.deps.memoryRepository.incrementAccessCount(memory.id)
           }
         }
-
       } catch (error) {
         console.error('[PromptAssembly] Failed to load database memories:', error)
       }
@@ -498,15 +586,20 @@ export class PromptAssemblyService {
       const dbManager = getDatabase()
       const db = dbManager.getRawDb()
       if (!db) return null
-      const row = db.prepare('SELECT value FROM agent_knowledge WHERE key = ?').get<{ value: string }>(contentKey)
+      const row = db
+        .prepare('SELECT value FROM agent_knowledge WHERE key = ?')
+        .get<{ value: string }>(contentKey)
       return row?.value || null
     } catch {
       return null
     }
   }
 
-  private async resolveTriggers(text: string): Promise<Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }>> {
-    const hits: Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> = []
+  private async resolveTriggers(
+    text: string
+  ): Promise<Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }>> {
+    const hits: Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> =
+      []
 
     // Load dynamic triggers from database if enabled
     if (this.deps.enableDatabaseMemory && this.deps.memoryRepository) {
@@ -529,7 +622,16 @@ export class PromptAssemblyService {
             const content = await this.loadMemoryContent(memory.contentKey)
             if (!content) continue
             sections.push(formatMemorySection(memory.title, content))
-            refs.push(this.makeMemoryRef('l2', memory.title, null, memory.summary || memory.title, dbTrigger.id))
+            refs.push(
+              this.makeMemoryRef(
+                'l2',
+                'trigger_rule',
+                memory.title,
+                null,
+                memory.summary || memory.title,
+                dbTrigger.id
+              )
+            )
             await this.deps.memoryRepository.incrementAccessCount(memory.id)
           }
 
@@ -540,10 +642,14 @@ export class PromptAssemblyService {
               module: dbTrigger.module as TriggerDefinition['module'],
               pattern,
               blocking: dbTrigger.blocking,
-              refs: memories.map((m) => ({ path: m.contentKey, title: m.title, summary: m.summary || '' })),
+              refs: memories.map((m) => ({
+                path: m.contentKey,
+                title: m.title,
+                summary: m.summary || ''
+              }))
             },
             sections,
-            refs,
+            refs
           })
         }
       } catch (error) {
@@ -561,12 +667,118 @@ export class PromptAssemblyService {
         const body = this.readMemoryFile(ref.path).trim()
         if (!body) continue
         sections.push(formatMemorySection(ref.title, body))
-        refs.push(this.makeMemoryRef('l2', ref.title, ref.path, ref.summary, trigger.id, Boolean(ref.sensitive)))
+        refs.push(
+          this.makeMemoryRef(
+            'l2',
+            'trigger_rule',
+            ref.title,
+            ref.path,
+            ref.summary,
+            trigger.id,
+            Boolean(ref.sensitive)
+          )
+        )
       }
       hits.push({ trigger, sections, refs })
     }
 
     return hits
+  }
+
+  private async loadSessionRecall(
+    scope: ConversationScope
+  ): Promise<{ text: string; refs: PromptMemoryRef[] }> {
+    if (!this.deps.getScopeSessionRecallCapsules) {
+      return { text: '', refs: [] }
+    }
+    const capsules = await this.deps.getScopeSessionRecallCapsules(scope)
+    if (!Array.isArray(capsules) || capsules.length === 0) {
+      return { text: '', refs: [] }
+    }
+
+    const sections = capsules.slice(0, 4).map((capsule) => {
+      const attachmentLine =
+        capsule.attachmentNames.length > 0
+          ? `- 相关附件: ${capsule.attachmentNames.join('、')}`
+          : null
+      const taskLine = capsule.latestTaskSummary ? `- 最近任务: ${capsule.latestTaskSummary}` : null
+      return [
+        `### ${capsule.title}`,
+        `- 会话 ID: ${capsule.conversationId}`,
+        `- 来源: ${capsule.sourceKind}:${capsule.sourceId}`,
+        `- 线程: ${capsule.threadKey}`,
+        taskLine,
+        attachmentLine,
+        '',
+        capsule.summary
+      ]
+        .filter(Boolean)
+        .join('\n')
+    })
+    const refs = capsules
+      .slice(0, 4)
+      .map((capsule) =>
+        this.makeMemoryRef(
+          'recall',
+          'session_recall',
+          capsule.title,
+          null,
+          capsule.summary.slice(0, 140),
+          capsule.conversationId
+        )
+      )
+    return {
+      text: clip(sections.join('\n\n'), 3200),
+      refs
+    }
+  }
+
+  private async loadAutomaticSessionRecall(
+    scope: ConversationScope,
+    userText: string
+  ): Promise<{ text: string; refs: PromptMemoryRef[] }> {
+    if (!this.deps.getAutoSessionRecallCapsules) {
+      return { text: '', refs: [] }
+    }
+    const capsules = await this.deps.getAutoSessionRecallCapsules({ scope, userText })
+    if (!Array.isArray(capsules) || capsules.length === 0) {
+      return { text: '', refs: [] }
+    }
+    const sections = capsules.slice(0, 2).map((capsule) => {
+      const attachmentLine =
+        capsule.attachmentNames.length > 0
+          ? `- 相关附件: ${capsule.attachmentNames.join('、')}`
+          : null
+      const taskLine = capsule.latestTaskSummary ? `- 最近任务: ${capsule.latestTaskSummary}` : null
+      return [
+        `### ${capsule.title}`,
+        `- 会话 ID: ${capsule.conversationId}`,
+        `- 来源: ${capsule.sourceKind}:${capsule.sourceId}`,
+        `- 线程: ${capsule.threadKey}`,
+        taskLine,
+        attachmentLine,
+        '',
+        capsule.summary
+      ]
+        .filter(Boolean)
+        .join('\n')
+    })
+    const refs = capsules
+      .slice(0, 2)
+      .map((capsule) =>
+        this.makeMemoryRef(
+          'recall',
+          'session_recall',
+          capsule.title,
+          null,
+          capsule.summary.slice(0, 140),
+          capsule.conversationId
+        )
+      )
+    return {
+      text: clip(sections.join('\n\n'), 2000),
+      refs
+    }
   }
 
   async buildForScopedRun(params: {
@@ -576,32 +788,40 @@ export class PromptAssemblyService {
     const l0 = await this.loadL0(params.scope)
     const l1 = await this.loadL1(params.scope)
     const userText = extractTextFromMessage(params.message)
+    const recall = await this.loadSessionRecall(params.scope)
+    const autoRecall = await this.loadAutomaticSessionRecall(params.scope, userText)
     const triggerMatches = await this.resolveTriggers(userText)
     const l2Sections = triggerMatches.flatMap((item) => item.sections)
     const { l1Text, l2Text, budget } = applyBudget({ l0Text: l0.text, l1Text: l1.text, l2Sections })
 
     const bootstrapMessages = [
       l1Text ? formatMemorySection('L1 会话上下文', l1Text) : '',
-      l2Text ? formatMemorySection('L2 按需规则', l2Text) : '',
+      recall.text ? formatMemorySection('跨会话回看', recall.text) : '',
+      autoRecall.text ? formatMemorySection('自动跨会话回看', autoRecall.text) : '',
+      l2Text ? formatMemorySection('L2 按需规则', l2Text) : ''
     ].filter(Boolean)
     const memoryRefs = [
       ...l0.refs,
       ...l1.refs,
-      ...triggerMatches.flatMap((item) => item.refs),
+      ...recall.refs,
+      ...autoRecall.refs.filter(
+        (item) => !recall.refs.some((existing) => existing.triggerId === item.triggerId)
+      ),
+      ...triggerMatches.flatMap((item) => item.refs)
     ]
     const triggerHits = triggerMatches.map(({ trigger, refs }) => ({
       id: trigger.id,
       label: trigger.label,
       module: trigger.module,
       blocking: trigger.blocking,
-      refs: refs.map((ref) => ref.id),
+      refs: refs.map((ref) => ref.id)
     }))
 
     return {
       systemPrompt: [
         '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。',
-        formatMemorySection('L0 常驻记忆', l0.text),
-        '若命中 Pre-Action Trigger，必须先吸收对应规则再执行动作。',
+        formatMemorySection('L0 常驻上下文', l0.text),
+        '若命中 Pre-Action Trigger，必须先吸收对应规则再执行动作。'
       ].join('\n\n'),
       bootstrapMessages,
       memoryRefs,
@@ -610,19 +830,24 @@ export class PromptAssemblyService {
       compression: buildCompressionReport({
         historyCompressed: l1.historyCompressed,
         toolTraceCompressed: false,
-        artifactSummaryUsed: false,
-      }),
+        artifactSummaryUsed: false
+      })
     }
   }
 
   applyToMessage(
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    assembly: PromptAssemblyResult,
+    assembly: PromptAssemblyResult
   ) {
     return prependBootstrap(message, assembly.bootstrapMessages)
   }
 
-  recordRunOutcome(params: { scope: ConversationScope; finalText: string; usedTools: string[]; success: boolean }): void {
+  recordRunOutcome(params: {
+    scope: ConversationScope
+    finalText: string
+    usedTools: string[]
+    success: boolean
+  }): void {
     const day = this.now().toISOString().slice(0, 10)
     const memoryDir = join(this.getMemoryRoot(), 'memory')
     const path = join(memoryDir, `${day}.md`)
@@ -631,8 +856,10 @@ export class PromptAssemblyService {
       `- scope: ${params.scope.title}`,
       `- success: ${params.success ? 'yes' : 'no'}`,
       params.usedTools.length > 0 ? `- tools: ${params.usedTools.join(', ')}` : null,
-      params.finalText.trim() ? `- summary: ${clip(params.finalText.trim(), 600).replace(/\n+/g, ' ')}` : null,
-      '',
+      params.finalText.trim()
+        ? `- summary: ${clip(params.finalText.trim(), 600).replace(/\n+/g, ' ')}`
+        : null,
+      ''
     ].filter(Boolean)
     try {
       mkdirSync(memoryDir, { recursive: true })
@@ -681,15 +908,19 @@ export class PromptAssemblyService {
 
       // Create memory metadata
       const memory = await this.deps.memoryRepository.createMemory({
-        layer: 'l1',
+        layer: params.category === 'learning' ? 'l0' : 'l1',
         scopeId: params.category === 'learning' ? null : params.scope.id, // Global for learnings
+        userId: params.scope.userId || null,
+        sourceType: params.category === 'learning' ? 'resident_agent' : 'scope_memory',
         category: params.category,
         title: params.title,
+        summary: params.content.slice(0, 100),
         contentKey,
         priority: params.priority ?? 0,
         tags: params.tags,
         // Summaries expire after 30 days, learnings never expire
-        expiresAt: params.category === 'summary' ? Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60 : null,
+        expiresAt:
+          params.category === 'summary' ? Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60 : null
       })
 
       return memory.id
@@ -731,7 +962,7 @@ export class PromptAssemblyService {
         module: params.module ?? null,
         blocking: params.blocking ?? false,
         priority: params.priority ?? 0,
-        enabled: true,
+        enabled: true
       })
 
       // Associate memories with trigger

@@ -3,11 +3,11 @@ import { Database, Layers, Tag, Archive, Activity, Play, CheckCircle2, Loader2 }
 import { SETTINGS_CARD_STYLE, SETTINGS_PRIMARY_BUTTON_STYLE } from '../settings/settings-theme'
 
 const panelCardStyle = {
-  ...SETTINGS_CARD_STYLE,
+  ...SETTINGS_CARD_STYLE
 }
 
 const primaryButtonStyle = {
-  ...SETTINGS_PRIMARY_BUTTON_STYLE,
+  ...SETTINGS_PRIMARY_BUTTON_STYLE
 }
 
 export default function MemoryStatsCard() {
@@ -17,15 +17,13 @@ export default function MemoryStatsCard() {
     loading: lifecycleLoading,
     error: lifecycleError,
     maintenanceRunning,
-    runMaintenance,
+    runMaintenance
   } = useMemoryLifecycle()
 
   const handleRunMaintenance = async () => {
     try {
       const result = await runMaintenance()
-      alert(
-        `维护完成:\n- 已归档: ${result.archivedCount}\n- 已清理: ${result.prunedCount}`
-      )
+      alert(`维护完成:\n- 已归档: ${result.archivedCount}\n- 已清理: ${result.prunedCount}`)
     } catch (err) {
       alert(`维护失败: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -39,7 +37,7 @@ export default function MemoryStatsCard() {
           ...panelCardStyle,
           borderRadius: 24,
           padding: 24,
-          minHeight: 400,
+          minHeight: 400
         }}
       >
         <div className="text-[13px]" style={{ color: 'var(--text-muted)' }}>
@@ -57,7 +55,7 @@ export default function MemoryStatsCard() {
           ...panelCardStyle,
           borderRadius: 24,
           padding: 24,
-          minHeight: 400,
+          minHeight: 400
         }}
       >
         <div className="text-[13px]" style={{ color: 'var(--color-red)' }}>
@@ -73,7 +71,7 @@ export default function MemoryStatsCard() {
       style={{
         ...panelCardStyle,
         borderRadius: 24,
-        padding: 24,
+        padding: 24
       }}
     >
       <div className="flex items-center gap-2 mb-6">
@@ -86,7 +84,10 @@ export default function MemoryStatsCard() {
       {stats && (
         <div className="space-y-6">
           <div>
-            <div className="text-[11px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-light)' }}>
+            <div
+              className="text-[11px] uppercase tracking-wider mb-2"
+              style={{ color: 'var(--text-light)' }}
+            >
               总记忆数
             </div>
             <div className="text-[32px] font-bold" style={{ color: 'var(--text-title)' }}>
@@ -95,7 +96,10 @@ export default function MemoryStatsCard() {
           </div>
 
           <div>
-            <div className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-light)' }}>
+            <div
+              className="text-[11px] uppercase tracking-wider mb-3"
+              style={{ color: 'var(--text-light)' }}
+            >
               <Layers className="w-3 h-3 inline mr-1" />
               按层级分布
             </div>
@@ -122,7 +126,45 @@ export default function MemoryStatsCard() {
           </div>
 
           <div>
-            <div className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-light)' }}>
+            <div
+              className="text-[11px] uppercase tracking-wider mb-3"
+              style={{ color: 'var(--text-light)' }}
+            >
+              来源分类
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-[13px]">
+                <span style={{ color: 'var(--text-body)' }}>常驻记忆</span>
+                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
+                  {stats.bySourceType.resident_agent}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-[13px]">
+                <span style={{ color: 'var(--text-body)' }}>用户偏好</span>
+                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
+                  {stats.bySourceType.resident_user}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-[13px]">
+                <span style={{ color: 'var(--text-body)' }}>当前任务</span>
+                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
+                  {stats.bySourceType.scope_memory}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-[13px]">
+                <span style={{ color: 'var(--text-body)' }}>触发规则</span>
+                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
+                  {stats.bySourceType.trigger_rule}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div
+              className="text-[11px] uppercase tracking-wider mb-3"
+              style={{ color: 'var(--text-light)' }}
+            >
               <Tag className="w-3 h-3 inline mr-1" />
               按类别分布
             </div>
@@ -154,10 +196,7 @@ export default function MemoryStatsCard() {
             </div>
           </div>
 
-          <div
-            className="pt-4 border-t space-y-2"
-            style={{ borderColor: 'var(--border-default)' }}
-          >
+          <div className="pt-4 border-t space-y-2" style={{ borderColor: 'var(--border-default)' }}>
             <div className="flex justify-between items-center text-[13px]">
               <span className="flex items-center gap-1" style={{ color: 'var(--text-body)' }}>
                 <Archive className="w-3 h-3" />
@@ -181,11 +220,11 @@ export default function MemoryStatsCard() {
       )}
 
       {status && (
-        <div
-          className="mt-6 pt-6 border-t"
-          style={{ borderColor: 'var(--border-default)' }}
-        >
-          <div className="text-[11px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-light)' }}>
+        <div className="mt-6 pt-6 border-t" style={{ borderColor: 'var(--border-default)' }}>
+          <div
+            className="text-[11px] uppercase tracking-wider mb-3"
+            style={{ color: 'var(--text-light)' }}
+          >
             生命周期状态
           </div>
           <div className="space-y-3">
@@ -193,7 +232,7 @@ export default function MemoryStatsCard() {
               <div
                 className="w-2 h-2 rounded-full"
                 style={{
-                  background: status.running ? 'var(--color-green)' : 'var(--text-muted)',
+                  background: status.running ? 'var(--color-green)' : 'var(--text-muted)'
                 }}
               />
               <span className="text-[13px]" style={{ color: 'var(--text-body)' }}>
@@ -212,7 +251,7 @@ export default function MemoryStatsCard() {
               style={{
                 ...primaryButtonStyle,
                 padding: '10px 16px',
-                fontSize: '13px',
+                fontSize: '13px'
               }}
             >
               {maintenanceRunning ? (

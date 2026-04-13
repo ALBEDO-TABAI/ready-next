@@ -39,7 +39,12 @@ export class ReflectionService {
   }): Promise<ReflectionResult> {
     // Skip reflection for very short conversations
     if (params.messages.length < 2) {
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
+      return {
+        globalFacts: [],
+        userPreferences: [],
+        sessionSummary: undefined,
+        memoryCapture: null
+      }
     }
 
     try {
@@ -64,18 +69,24 @@ export class ReflectionService {
       return {
         ...reflection,
         globalFacts: [],
-        memoryCapture: captureItems.length > 0
-          ? {
-            status: 'ready',
-            createdAt: new Date().toISOString(),
-            note: '已保守记录本次稳定偏好和摘要，可直接撤销或补充。',
-            items: captureItems,
-          }
-          : null,
+        memoryCapture:
+          captureItems.length > 0
+            ? {
+                status: 'ready',
+                createdAt: new Date().toISOString(),
+                note: '已保守记录本次稳定偏好和当前上下文摘要，可直接撤销或补充。',
+                items: captureItems
+              }
+            : null
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to reflect on conversation:', error)
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
+      return {
+        globalFacts: [],
+        userPreferences: [],
+        sessionSummary: undefined,
+        memoryCapture: null
+      }
     }
   }
 
@@ -88,9 +99,7 @@ export class ReflectionService {
     success: boolean
   }): Promise<ReflectionResult> {
     // Build reflection prompt
-    const conversationText = params.messages
-      .map((m) => `${m.role}: ${m.content}`)
-      .join('\n')
+    const conversationText = params.messages.map((m) => `${m.role}: ${m.content}`).join('\n')
 
     const prompt = `
 Analyze the following conversation and extract important information.
@@ -159,12 +168,18 @@ Rules:
       return {
         globalFacts: [],
         userPreferences: Array.isArray(parsed.userPreferences) ? parsed.userPreferences : [],
-        sessionSummary: typeof parsed.sessionSummary === 'string' ? parsed.sessionSummary : undefined,
-        memoryCapture: null,
+        sessionSummary:
+          typeof parsed.sessionSummary === 'string' ? parsed.sessionSummary : undefined,
+        memoryCapture: null
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to parse reflection response:', error)
-      return { globalFacts: [], userPreferences: [], sessionSummary: undefined, memoryCapture: null }
+      return {
+        globalFacts: [],
+        userPreferences: [],
+        sessionSummary: undefined,
+        memoryCapture: null
+      }
     }
   }
 
@@ -187,7 +202,7 @@ Rules:
       if (content.includes('中文') || content.includes('chinese')) {
         userPreferences.push({
           title: 'Language Preference',
-          content: 'User prefers Chinese language',
+          content: 'User prefers Chinese language'
         })
       }
 
@@ -195,7 +210,7 @@ Rules:
       if (content.includes('简洁') || content.includes('concise') || content.includes('brief')) {
         userPreferences.push({
           title: 'Communication Style',
-          content: 'User prefers concise answers',
+          content: 'User prefers concise answers'
         })
       }
     }
@@ -206,12 +221,15 @@ Rules:
       sessionSummary: params.success
         ? `Completed task using ${params.usedTools.length} tools`
         : 'Task incomplete',
-      memoryCapture: null,
+      memoryCapture: null
     }
   }
 
   private normalizeValue(value: string): string {
-    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
   }
 
   private async isDuplicateMemory(params: {
@@ -226,7 +244,7 @@ Rules:
       scopeId: params.scopeId === undefined ? undefined : params.scopeId,
       userId: params.userId || undefined,
       includeArchived: false,
-      limit: 20,
+      limit: 20
     })
     const normalizedTitle = this.normalizeValue(params.title)
     const normalizedContent = this.normalizeValue(params.content)
@@ -257,13 +275,15 @@ Rules:
     pref: { title: string; content: string }
   ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
     try {
-      if (await this.isDuplicateMemory({
-        category: 'user_preference',
-        scopeId: null,
-        userId,
-        title: pref.title,
-        content: pref.content,
-      })) {
+      if (
+        await this.isDuplicateMemory({
+          category: 'user_preference',
+          scopeId: null,
+          userId,
+          title: pref.title,
+          content: pref.content
+        })
+      ) {
         return null
       }
 
@@ -280,20 +300,22 @@ Rules:
         layer: 'l0',
         scopeId: null,
         userId,
+        sourceType: 'resident_user',
         category: 'user_preference',
         title: pref.title,
         summary: pref.content.slice(0, 100),
         contentKey,
         priority: 5,
-        tags: ['auto-learned'],
+        tags: ['auto-learned']
       })
 
       console.log(`[ReflectionService] Stored user preference for ${userId}: ${pref.title}`)
       return {
         memoryId: created.id,
         category: 'user_preference',
+        sourceType: 'resident_user',
         title: pref.title,
-        summary: pref.content.slice(0, 100),
+        summary: pref.content.slice(0, 100)
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to store user preference:', error)
@@ -309,13 +331,15 @@ Rules:
     summary: string
   ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
     try {
-      if (await this.isDuplicateMemory({
-        category: 'summary',
-        scopeId: scope.id,
-        userId: scope.userId || null,
-        title: `Session ${new Date().toISOString().split('T')[0]}`,
-        content: summary,
-      })) {
+      if (
+        await this.isDuplicateMemory({
+          category: 'summary',
+          scopeId: scope.id,
+          userId: scope.userId || null,
+          title: `Session ${new Date().toISOString().split('T')[0]}`,
+          content: summary
+        })
+      ) {
         return null
       }
 
@@ -334,21 +358,23 @@ Rules:
         layer: 'l1',
         scopeId: scope.id,
         userId: scope.userId || null,
+        sourceType: 'scope_memory',
         category: 'summary',
         title: `Session ${new Date().toISOString().split('T')[0]}`,
         summary: summary.slice(0, 100),
         contentKey,
         priority: 0,
         expiresAt,
-        tags: ['auto-summary'],
+        tags: ['auto-summary']
       })
 
       console.log(`[ReflectionService] Stored session summary for scope ${scope.id}`)
       return {
         memoryId: created.id,
         category: 'summary',
+        sourceType: 'scope_memory',
         title: `Session ${new Date().toISOString().split('T')[0]}`,
-        summary: summary.slice(0, 100),
+        summary: summary.slice(0, 100)
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to store session summary:', error)

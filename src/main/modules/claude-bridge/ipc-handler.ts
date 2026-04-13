@@ -299,6 +299,79 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:searchSessionRecall', (_, payload?: {
+    query?: string
+    channelKey?: string
+    sourceKind?: 'local' | 'channel'
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.searchSessionRecall(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:listRecentSessions', (_, payload?: {
+    channelKey?: string
+    sourceKind?: 'local' | 'channel'
+    userId?: string
+    hasAttachments?: boolean
+    currentScopeId?: string
+    limit?: number
+  }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.listRecentSessions(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:getSessionRecallCapsule', (_, payload: { conversationId: string }): IPCResponse => {
+    try {
+      const capsule = runtime!.getSessionRecallCapsule(payload.conversationId)
+      if (!capsule) return { success: false, error: `Session recall capsule not found: ${payload.conversationId}` }
+      return { success: true, data: capsule }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:listAttachedSessionRecallContexts', (_, payload: { scopeId: string }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.listAttachedSessionRecallContexts(payload.scopeId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.attachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:detachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.detachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:resumeSessionCandidate', (_, payload: { conversationId?: string; resumeTitle?: string }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.resumeSessionCandidate(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('agent:getConversationScopeMessages', (_, payload: { scopeId: string }): IPCResponse => {
     try {
       return { success: true, data: runtime!.getConversationScopeMessages(payload.scopeId) }

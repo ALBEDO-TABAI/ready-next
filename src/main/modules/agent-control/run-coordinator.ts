@@ -132,7 +132,7 @@ export class RunCoordinator {
           agent: request.scope.agent,
           runId: request.requestId,
           phase: 'done',
-          taskSummary: `已记录 ${memoryCapture.items.length} 条长期记忆`,
+          taskSummary: `已记录 ${memoryCapture.items.length} 条常驻偏好/上下文`,
           memoryCapture,
           timestamp: new Date().toISOString(),
         })

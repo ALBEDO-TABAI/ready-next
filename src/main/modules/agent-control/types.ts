@@ -78,11 +78,13 @@ export interface HeartbeatSnapshot {
     lastBeatAt?: string
     error?: string
   }
-  adapters: Array<HeartbeatComponentSnapshot & {
-    id: string
-    type: ChannelAdapterType
-    status?: 'starting' | 'running' | 'stopped' | 'error'
-  }>
+  adapters: Array<
+    HeartbeatComponentSnapshot & {
+      id: string
+      type: ChannelAdapterType
+      status?: 'starting' | 'running' | 'stopped' | 'error'
+    }
+  >
   orchestrator: HeartbeatComponentSnapshot & { activeTasks: number }
   toolGateway: HeartbeatComponentSnapshot & { availableTools: number }
 }
@@ -110,6 +112,9 @@ export interface ConversationScope {
   agent: string
   userId?: string
   title: string
+  parentConversationId?: string | null
+  lineageRootId?: string | null
+  resumeTitle?: string | null
   sourceKind: ConversationSourceKind
   sourceId: string
   threadKey: string
@@ -158,9 +163,17 @@ export interface ScopeRunTraceItem {
   timestamp: string
 }
 
+export type ScopeRunMemorySourceType =
+  | 'resident_agent'
+  | 'resident_user'
+  | 'scope_memory'
+  | 'trigger_rule'
+  | 'session_recall'
+
 export interface ScopeRunMemoryRef {
   id: string
-  layer: 'l0' | 'l1' | 'l2'
+  layer: 'l0' | 'l1' | 'l2' | 'recall'
+  sourceType: ScopeRunMemorySourceType
   title: string
   summary?: string | null
   path?: string | null
@@ -172,7 +185,16 @@ export interface ScopeRunMemoryRef {
 export interface ScopeRunTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?:
+    | 'browser'
+    | 'document'
+    | 'design'
+    | 'skill'
+    | 'video'
+    | 'rss'
+    | 'calendar'
+    | 'feishu'
+    | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -207,6 +229,7 @@ export interface ScopeRunTaskContinuation {
 export interface ScopeRunMemoryCaptureItem {
   memoryId: string
   category: 'user_preference' | 'summary'
+  sourceType: Exclude<ScopeRunMemorySourceType, 'session_recall'>
   title: string
   summary?: string | null
 }
@@ -268,9 +291,28 @@ export interface ScopeRunEventPayload {
   scopeId: string
   agent: string
   runId?: string
-  phase: 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled'
+  phase:
+    | 'queued'
+    | 'planning'
+    | 'tool_running'
+    | 'checkpoint'
+    | 'takeover'
+    | 'resuming'
+    | 'responding'
+    | 'done'
+    | 'error'
+    | 'cancelled'
   latestText?: string
-  module?: 'browser' | 'document' | 'design' | 'skill' | 'video' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?:
+    | 'browser'
+    | 'document'
+    | 'design'
+    | 'skill'
+    | 'video'
+    | 'rss'
+    | 'calendar'
+    | 'feishu'
+    | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
   jobId?: string
