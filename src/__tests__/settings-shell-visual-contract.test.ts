@@ -22,5 +22,6 @@ test('settings content header drops the english eyebrow and icon, keeps the head
   assert.doesNotMatch(settingsPage, /Ready Preferences/)
   assert.doesNotMatch(settingsPage, /<currentSection\.icon/)
   assert.match(settingsPage, /className="mb-7"/)
-  assert.match(settingsPage, /display:\s*'flex',\s*flexDirection:\s*'column',\s*gap:\s*4/)
+  assert.match(settingsPage, /text-\[22px\] font-semibold leading-7 tracking-\[-0\.01em\]/)
+  assert.match(settingsPage, /className="mt-1 text-\[13px\] leading-6"/)
 })

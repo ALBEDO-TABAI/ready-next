@@ -1308,20 +1308,12 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                   <>
                     {/* Section Header */}
                     <div className="mb-7" style={{ padding: '4px 0 0' }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 4,
-                        }}
-                      >
-                        <h2 className="text-[22px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text-title)' }}>
-                          {currentSection.title}
-                        </h2>
-                        <p className="text-[13px] leading-6" style={{ color: 'var(--text-muted)', maxWidth: 720 }}>
-                          {currentSection.description}
-                        </p>
-                      </div>
+                      <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em]" style={{ color: 'var(--text-title)' }}>
+                        {currentSection.title}
+                      </h2>
+                      <p className="mt-1 text-[13px] leading-6" style={{ color: 'var(--text-muted)', maxWidth: 720 }}>
+                        {currentSection.description}
+                      </p>
                     </div>
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
