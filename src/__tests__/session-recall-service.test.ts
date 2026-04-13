@@ -37,13 +37,13 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
   ) {}
 
   getRawDb() {
-    const self = this
     const metadataRows = this.metadataRows
     const messageRows = this.messageRows
     const attachmentRows = this.attachmentRows
+    const vectorRows = this.vectorRows
 
     return {
-      prepare(sql: string) {
+      prepare: (sql: string) => {
         return {
           all<T = unknown>(...params: unknown[]): T[] {
             if (sql.includes('FROM chat_messages_fts')) {
@@ -86,7 +86,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
                 .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] as T | undefined
             }
             if (sql.includes('FROM session_recall_vectors') && sql.includes('WHERE conversation_id = ?')) {
-              const row = self.vectorRows.get(String(params[0] || ''))
+              const row = vectorRows.get(String(params[0] || ''))
               if (!row) return undefined
               return {
                 conversation_id: String(params[0] || ''),
@@ -98,7 +98,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
           run(...params: unknown[]) {
             if (sql.includes('INTO session_recall_vectors')) {
               const conversationId = String(params[0] || '')
-              self.vectorRows.set(conversationId, {
+              vectorRows.set(conversationId, {
                 content_hash: String(params[1] || ''),
                 vector_version: String(params[2] || ''),
                 vector_json: String(params[3] || ''),

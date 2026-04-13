@@ -306,7 +306,7 @@ export async function buildSectionRewriteDraft(params: {
 function normalizeSectionKey(value: string): string {
   return value
     .toLowerCase()
-    .replace(/[`*_~#>\-:：,.，。!?！？;；、()\[\]{}'"“”‘’\s]+/g, '')
+    .replace(/[`*_~#>:：,.，。!?！？;；、()[\]{}'"“”‘’\s-]+/g, '')
     .trim()
 }
 
@@ -329,7 +329,7 @@ function inferPlainSectionAnchor(
     !/[。！？；，,:：]/.test(line) &&
     !/[0-9]/.test(line) &&
     /[\u4e00-\u9fa5]{4,}/.test(line) &&
-    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+/.test(nextLine)
+    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+/.test(nextLine)
   ) {
     return { level: 2, title: line }
   }
@@ -371,7 +371,7 @@ function parseSectionAnchor(rawLine: string): { level: number; title: string } |
   }
 
   const numericHeading = line.match(
-    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+(.+)$/,
+    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+(.+)$/,
   )
   if (numericHeading && line.length <= 100) {
     const numericCore = numericHeading[1].replace(/[、.]$/, '')

@@ -429,9 +429,7 @@ interface ElectronAgentAPI {
   kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
   getDiagnostics: () => Promise<{ success: boolean; data: unknown }>
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
-  getCapabilityRuntimeSnapshot: (
-    config?: unknown
-  ) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
+  getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: {
@@ -822,9 +820,7 @@ interface ElectronBrowserAPI {
   getDownloads: () => Promise<{ success: boolean; data?: BrowserDownloadData[]; error?: string }>
   clearDownloads: () => Promise<{ success: boolean; error?: string }>
   onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
-  showUtilityMenu: (
-    payload: BrowserUtilityMenuRequest
-  ) => Promise<{ success: boolean; error?: string }>
+  showUtilityMenu: (payload: BrowserUtilityMenuRequest) => Promise<{ success: boolean; error?: string }>
 
   // Print
   print: (tabId: string) => Promise<{ success: boolean; error?: string }>
@@ -1537,11 +1533,7 @@ interface ElectronWindowAPI {
 
 interface ElectronThemeAPI {
   set: (theme: string) => Promise<void>
-  get: () => Promise<{
-    success: boolean
-    data?: { option: ThemeOption; resolved: ResolvedTheme }
-    error?: string
-  }>
+  get: () => Promise<{ success: boolean; data?: { option: ThemeOption; resolved: ResolvedTheme }; error?: string }>
 }
 
 // =============================================================================

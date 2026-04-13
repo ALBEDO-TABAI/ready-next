@@ -54,6 +54,11 @@ export function createBrowserTabSwitchExecutor({
     }
 
     if (!sequencer.isCurrent(activationToken)) {
+      const currentState = getState()
+      if (currentState.activeTabId === tabId && previousActiveTabId) {
+        setActiveTabId(previousActiveTabId)
+        setUrlInput(previousActiveTab?.url === DEFAULT_BROWSER_URL ? '' : previousActiveTab?.url || '')
+      }
       return false
     }
 

@@ -310,9 +310,7 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  async getCapabilityRuntimeSnapshot(
-    configOverride?: AIModelConfig
-  ): Promise<CapabilityRuntimeSnapshot> {
+  async getCapabilityRuntimeSnapshot(configOverride?: AIModelConfig): Promise<CapabilityRuntimeSnapshot> {
     await this.getRuntimeStatus()
 
     const config = normalizeAIConfig(
