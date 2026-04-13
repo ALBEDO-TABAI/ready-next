@@ -1307,11 +1307,17 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection && (
                   <>
                     {/* Section Header */}
-                    <div className="mb-7" style={{ padding: '4px 0 0' }}>
-                      <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em]" style={{ color: 'var(--text-title)' }}>
+                        <div style={{ padding: '4px 0 0', marginBottom: 20 }}>
+                      <h2
+                        className="text-[22px] font-semibold leading-7 tracking-[-0.01em]"
+                        style={{ color: 'var(--text-title)', margin: 0 }}
+                      >
                         {currentSection.title}
                       </h2>
-                      <p className="mt-1 text-[13px] leading-6" style={{ color: 'var(--text-muted)', maxWidth: 720 }}>
+                      <p
+                        className="text-[13px] leading-6"
+                        style={{ color: 'var(--text-muted)', maxWidth: 720, margin: '4px 0 0 0' }}
+                      >
                         {currentSection.description}
                       </p>
                     </div>
