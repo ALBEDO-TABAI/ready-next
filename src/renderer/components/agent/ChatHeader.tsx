@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { History, Plus, ChevronDown, X, PanelRightClose } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
-import type { ConversationScope } from '../../stores/useAgent'
+import type { SessionRecallHit } from '../../../shared/session-recall'
 import {
   CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
   CHAT_HEADER_MENU_META_STYLE,
@@ -22,12 +22,20 @@ interface ConversationChannelOption {
 interface ChatHeaderProps {
   currentChannel: ConversationChannelOption
   channelOptions: ConversationChannelOption[]
-  filteredScopes: ConversationScope[]
   onChannelSelect: (channel: ConversationChannelOption) => void
   onTogglePanel: () => void
   onNewSession: () => void
   onLoadConversation: (convId: string) => void
   onDeleteConversation: (convId: string) => void
+  sessionRecallQuery: string
+  sessionRecallResults: SessionRecallHit[]
+  sessionRecallSearching: boolean
+  sessionRecallError?: string | null
+  attachedSessionRecallCount: number
+  attachedSessionRecallConversationIds: string[]
+  onSessionRecallQueryChange: (value: string) => void
+  onSessionRecallSearch: () => void
+  onAttachSessionRecall: (conversationId: string) => void
   onHistoryOpen?: () => void
   formatTime: (time: string) => string
 }
@@ -40,12 +48,20 @@ interface FloatingMenuPosition {
 export default function ChatHeader({
   currentChannel,
   channelOptions,
-  filteredScopes,
   onChannelSelect,
   onTogglePanel,
   onNewSession,
   onLoadConversation,
   onDeleteConversation,
+  sessionRecallQuery,
+  sessionRecallResults,
+  sessionRecallSearching,
+  sessionRecallError,
+  attachedSessionRecallCount,
+  attachedSessionRecallConversationIds,
+  onSessionRecallQueryChange,
+  onSessionRecallSearch,
+  onAttachSessionRecall,
   onHistoryOpen,
   formatTime,
 }: ChatHeaderProps) {
@@ -58,6 +74,8 @@ export default function ChatHeader({
   const scopeMenuRef = useRef<HTMLDivElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
   const portalRoot = typeof document !== 'undefined' ? document.body : null
+  const historyMenuWidth = 340
+  const recallActionRailWidth = 72
 
   const computeMenuPosition = useCallback((
     trigger: HTMLButtonElement | null,
@@ -106,10 +124,10 @@ export default function ChatHeader({
   const handleHistoryToggle = useCallback(() => {
     setShowHistory((prev) => {
       const next = !prev
-      setHistoryMenuPosition(next ? computeMenuPosition(historyTriggerRef.current, 286, 'right') : null)
+      setHistoryMenuPosition(next ? computeMenuPosition(historyTriggerRef.current, historyMenuWidth, 'right') : null)
       return next
     })
-  }, [computeMenuPosition])
+  }, [computeMenuPosition, historyMenuWidth])
 
   const handleScopeToggle = useCallback(() => {
     setShowScopeSelect((prev) => {
@@ -127,7 +145,7 @@ export default function ChatHeader({
         setScopeMenuPosition(computeMenuPosition(scopeTriggerRef.current, 300, 'left'))
       }
       if (showHistory) {
-        setHistoryMenuPosition(computeMenuPosition(historyTriggerRef.current, 286, 'right'))
+        setHistoryMenuPosition(computeMenuPosition(historyTriggerRef.current, historyMenuWidth, 'right'))
       }
     }
 
@@ -138,7 +156,7 @@ export default function ChatHeader({
       window.removeEventListener('resize', syncMenuPositions)
       window.removeEventListener('scroll', syncMenuPositions, true)
     }
-  }, [computeMenuPosition, showHistory, showScopeSelect])
+  }, [computeMenuPosition, historyMenuWidth, showHistory, showScopeSelect])
 
   const channelMenuStyle = {
     ...buildChatHeaderFloatingMenuStyle(300),
@@ -148,11 +166,12 @@ export default function ChatHeader({
   }
 
   const historyMenuStyle = {
-    ...buildChatHeaderFloatingMenuStyle(286),
+    ...buildChatHeaderFloatingMenuStyle(historyMenuWidth),
     position: 'fixed' as const,
     top: historyMenuPosition?.top ?? 0,
     left: historyMenuPosition?.left ?? 0,
-    maxHeight: 332,
+    maxHeight: 420,
+    overflow: 'hidden',
   }
 
   return (
@@ -309,66 +328,231 @@ export default function ChatHeader({
           style={historyMenuStyle}
         >
           <div style={CHAT_HEADER_MENU_SECTION_LABEL_STYLE}>{currentChannel.label}历史</div>
-          {filteredScopes.length === 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              alignItems: 'start',
+              gap: 12,
+              padding: '2px 12px 0'
+            }}
+          >
+            <input
+              value={sessionRecallQuery}
+              onChange={(event) => onSessionRecallQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  onSessionRecallSearch()
+                }
+              }}
+              placeholder="搜旧会话标题、消息、任务摘要或附件名"
+              className="rounded-[10px] border"
+              style={{
+                minWidth: 0,
+                width: '100%',
+                maxWidth: '100%',
+                padding: '8px 10px',
+                borderColor: 'var(--border-default)',
+                background: 'var(--bg-input)',
+                color: 'var(--text-body)',
+                fontSize: 12.5
+              }}
+            />
+            <div
+              style={{
+                width: recallActionRailWidth,
+                flexShrink: 0,
+                display: 'flex',
+                justifyContent: 'flex-start',
+                alignItems: 'flex-start',
+                paddingTop: 2
+              }}
+            >
+              <button
+                type="button"
+                onClick={onSessionRecallSearch}
+                className="rounded-[10px] border transition-all"
+                style={{
+                  width: 44,
+                  height: 32,
+                  borderColor: 'var(--border-default)',
+                  background: 'transparent',
+                  color: 'var(--text-body)',
+                  fontSize: 12,
+                  fontWeight: 600
+                }}
+              >
+                {sessionRecallSearching ? '搜索中…' : '搜索'}
+              </button>
+            </div>
+          </div>
+
+          {attachedSessionRecallCount > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-light)', padding: '2px 12px 0' }}>
+              当前轮已引用 {attachedSessionRecallCount} 条旧会话
+            </div>
+          )}
+
+          {sessionRecallError && (
+            <div style={{ fontSize: 11, color: 'var(--color-red)', padding: '0 12px' }}>
+              {sessionRecallError}
+            </div>
+          )}
+
+          {sessionRecallResults.length === 0 && !sessionRecallSearching ? (
             <div style={{ fontSize: 12, color: 'var(--text-gray)', padding: '12px 8px 10px', textAlign: 'center' }}>
-              当前频道暂无会话历史
+              {sessionRecallQuery.trim() ? '当前频道没有找到匹配的旧会话' : '这里会先显示当前频道最近会话'}
             </div>
           ) : (
-            <div className="flex flex-col" style={{ gap: 4 }}>
-              {filteredScopes.map((conv) => (
-                <div
-                  key={conv.id}
-                  className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 group"
-                  style={{ ...buildChatHeaderMenuItemStyle(), display: 'flex', alignItems: 'center', gap: 12 }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onLoadConversation(conv.id)
-                      setShowHistory(false)
-                      setHistoryMenuPosition(null)
-                    }}
+            <div
+              className="panel-hover-scrollbar flex flex-col"
+              style={{ gap: 8, maxHeight: 300, overflow: 'auto', scrollbarGutter: 'stable' }}
+            >
+              {sessionRecallResults.map((conv) => {
+                const attached = attachedSessionRecallConversationIds.includes(conv.conversationId)
+                const conversationSummary =
+                  conv.hitExcerpt?.trim() ||
+                  conv.latestTaskSummary?.trim() ||
+                  conv.resumeTitle?.trim() ||
+                  ''
+                return (
+                  <div
+                    key={conv.conversationId}
+                    className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-start gap-3 active:scale-[0.98] transition-all duration-150 group"
                     style={{
-                      flex: 1,
-                      minWidth: 0,
-                      border: 'none',
-                      background: 'transparent',
-                      padding: 0,
-                      cursor: 'pointer',
-                      textAlign: 'left',
+                      ...buildChatHeaderMenuItemStyle(),
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1fr) auto',
+                      alignItems: 'stretch',
+                      gap: 12,
+                      minHeight: 84,
+                      padding: '12px 12px 11px',
+                      overflow: 'hidden',
                     }}
                   >
-                    <div
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onLoadConversation(conv.conversationId)
+                        setShowHistory(false)
+                        setHistoryMenuPosition(null)
+                      }}
                       style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: 'var(--text-body)',
+                        flex: 1,
+                        minWidth: 0,
+                        border: 'none',
+                        background: 'transparent',
+                        padding: 0,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        width: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'flex-start',
                         overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
                       }}
                     >
-                      {conv.title || '新对话'}
+                      <div style={{ minWidth: 0, width: '100%', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            lineHeight: 1.3,
+                            color: 'var(--text-body)',
+                            paddingRight: 4,
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {conv.title || '新对话'}
+                        </div>
+                        {conversationSummary && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--text-light)',
+                              marginTop: 4,
+                              lineHeight: 1.45,
+                              paddingRight: 4,
+                              maxWidth: '100%',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxHeight: '3.1em',
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-word',
+                              overflowWrap: 'anywhere'
+                            }}
+                          >
+                            {conversationSummary}
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            ...CHAT_HEADER_MENU_META_STYLE,
+                            marginTop: conversationSummary ? 6 : 4,
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {formatTime(conv.updatedAt)}
+                        </div>
+                      </div>
+                    </button>
+                    <div
+                      className="flex items-center"
+                      style={{
+                        width: recallActionRailWidth,
+                        flexShrink: 0,
+                        alignSelf: 'flex-start',
+                        gap: 6,
+                        paddingTop: 2
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onAttachSessionRecall(conv.conversationId)
+                        }}
+                        disabled={attached}
+                        className="rounded-[10px] border transition-all"
+                        style={{
+                          width: 44,
+                          height: 32,
+                          borderColor: 'var(--border-default)',
+                          background: attached ? 'var(--bg-hover)' : 'transparent',
+                          color: attached ? 'var(--text-light)' : 'var(--text-body)',
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          opacity: attached ? 0.8 : 1
+                        }}
+                      >
+                        {attached ? '已引用' : '引用'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onDeleteConversation(conv.conversationId)
+                        }}
+                        className="chat-header-menu-delete-button group-hover:opacity-100 transition-all"
+                        style={CHAT_HEADER_MENU_DELETE_BUTTON_STYLE}
+                        title="删除对话"
+                      >
+                        <X style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+                      </button>
                     </div>
-                    <div style={{ ...CHAT_HEADER_MENU_META_STYLE, display: 'flex', gap: 6 }}>
-                      <span>{conv.agent}</span>
-                      <span>{formatTime(conv.updatedAt)}</span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeleteConversation(conv.id)
-                    }}
-                    className="chat-header-menu-delete-button group-hover:opacity-100 transition-all"
-                    style={CHAT_HEADER_MENU_DELETE_BUTTON_STYLE}
-                    title="删除对话"
-                  >
-                    <X style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-                  </button>
-                </div>
-              ))}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>,

@@ -13,7 +13,8 @@ test('settings page uses dedicated liquid shell surfaces across header, navigati
   assert.match(settingsPage, /data-liquid-shell="settings-header"/)
   assert.match(settingsPage, /data-liquid-shell="settings-sidebar"/)
   assert.match(settingsPage, /data-liquid-shell="settings-content"/)
-  assert.match(settingsPage, /glass-surface-panel/)
+  assert.doesNotMatch(settingsPage, /data-liquid-shell="settings-header"[\s\S]*glass-surface-panel/)
+  assert.match(settingsPage, /panel-hover-scrollbar flex-shrink-0 overflow-auto/)
   assert.match(settingsPage, /glass-surface-card/)
 })
 

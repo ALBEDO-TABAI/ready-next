@@ -1204,7 +1204,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       {/* Header — macOS traffic light clearance with paddingLeft: 72 */}
       <div
         data-liquid-shell="settings-header"
-        className="glass-surface-panel mx-3 mt-3 flex h-[46px] items-center rounded-[18px] drag-region"
+        className="mx-3 mt-3 flex h-[46px] items-center rounded-[18px] drag-region"
         style={{
           background: 'transparent',
           paddingLeft: 72,
@@ -1234,11 +1234,12 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
         {/* Sidebar Navigation */}
         <div
           data-liquid-shell="settings-sidebar"
-          className="flex-shrink-0 overflow-auto"
+          className="panel-hover-scrollbar flex-shrink-0 overflow-auto"
           style={{
             width: 252,
             background: 'transparent',
             padding: '10px 8px',
+            scrollbarGutter: 'stable',
           }}
         >
           <div className="flex flex-col gap-1">
@@ -1258,7 +1259,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                     <Icon
                       className="w-3.5 h-3.5"
                       strokeWidth={2}
-                      style={{ color: isActive ? '#FFFFFF' : 'var(--text-muted)' }}
+                      style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-muted)' }}
                     />
                   </div>
                   <div className="flex-1 min-w-0">
