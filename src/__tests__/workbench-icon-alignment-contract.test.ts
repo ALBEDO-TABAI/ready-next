@@ -47,5 +47,6 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
 
   assert.doesNotMatch(iconRail, /glass-surface-card w-\[34px\] h-\[34px\]/)
   assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
-  assert.match(modeSlider, /Ready/)
+  assert.match(modeSlider, /readyWordmark/)
+  assert.match(modeSlider, /<img[\s\S]*src=\{readyWordmark\}/)
 })

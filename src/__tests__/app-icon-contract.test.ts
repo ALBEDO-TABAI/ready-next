@@ -15,3 +15,13 @@ test('electron packaging includes project-owned app icon assets instead of falli
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.png')))
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.ico')))
 })
+
+test('main process applies the project-owned icon during development instead of default electron branding', () => {
+  const mainIndex = readWorkspaceFile('src/main/index.ts')
+
+  assert.match(mainIndex, /nativeImage/)
+  assert.match(mainIndex, /function resolveAppIconPath\(\)/)
+  assert.match(mainIndex, /build\/icon\.png/)
+  assert.match(mainIndex, /app\.dock\.setIcon\(/)
+  assert.match(mainIndex, /icon:\s*resolveAppIconPath\(\)/)
+})

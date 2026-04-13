@@ -4,7 +4,7 @@ import { resolve } from 'path'
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
 
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
 import { join, extname, normalize } from 'path'
 import { createReadStream, statSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -55,6 +55,21 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
     // ignore persisted theme read failures
   }
   return 'light'
+}
+
+function resolveAppIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.icns')
+    : resolve(__dirname, '../../build/icon.png')
+}
+
+function applyAppIcon(): void {
+  const icon = nativeImage.createFromPath(resolveAppIconPath())
+  if (icon.isEmpty()) return
+
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(icon)
+  }
 }
 
 function applyNativeWindowMaterial(window: BrowserWindow): void {
@@ -144,6 +159,7 @@ async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
+    icon: resolveAppIconPath(),
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
@@ -400,6 +416,7 @@ function isPathAllowed(filePath: string): boolean {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.ready.app')
+  applyAppIcon()
   setupApplicationMenu()
 
   console.log('[Main] App ready, registering protocol handler...')

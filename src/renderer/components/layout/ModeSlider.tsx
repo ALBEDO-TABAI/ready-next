@@ -1,5 +1,6 @@
 import { useMode } from '../../stores/useMode'
 import { motion } from 'framer-motion'
+import readyWordmark from '../../assets/ready-wordmark.png'
 
 export default function ModeSlider() {
   const { appMode } = useMode()
@@ -23,13 +24,13 @@ export default function ModeSlider() {
       <motion.span
         className="pointer-events-none absolute"
         animate={{
-          x: isReady ? 0 : 38,
+          x: isReady ? 0 : 36,
           opacity: 0.6,
         }}
         transition={{ duration: 0 }}
         style={{
           left: 10,
-          top: 9,
+          top: 8,
           zIndex: 2,
           fontSize: 11,
           lineHeight: 1,
@@ -38,7 +39,20 @@ export default function ModeSlider() {
           whiteSpace: 'nowrap',
         }}
       >
-        {isReady ? '工作台' : 'Ready'}
+        {isReady ? (
+          '工作台'
+        ) : (
+          <img
+            src={readyWordmark}
+            alt="Ready"
+            draggable={false}
+            style={{
+              display: 'block',
+              width: 34,
+              height: 'auto',
+            }}
+          />
+        )}
       </motion.span>
 
       {/* Knob - frozen in current position */}
