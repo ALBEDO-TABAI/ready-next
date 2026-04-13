@@ -20,4 +20,6 @@ test('frozen mode slider uses the provided ready wordmark asset instead of plain
   assert.doesNotMatch(modeSlider, /const handleToggle =/)
   assert.doesNotMatch(modeSlider, /工作台/)
   assert.doesNotMatch(modeSlider, /\{isReady \? '工作台' : 'Ready'\}/)
+  assert.match(modeSlider, /paddingLeft:\s*19/)
+  assert.match(modeSlider, /width:\s*69/)
 })

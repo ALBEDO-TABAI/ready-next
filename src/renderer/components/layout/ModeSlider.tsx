@@ -5,7 +5,7 @@ export default function ModeSlider() {
     <div
       className="flex h-[28px] w-[90px] items-center"
       style={{
-        paddingLeft: 4,
+        paddingLeft: 19,
       }}
     >
       <img
@@ -14,7 +14,7 @@ export default function ModeSlider() {
         draggable={false}
         style={{
           display: 'block',
-          width: 46,
+          width: 69,
           height: 'auto',
         }}
       />
