@@ -1304,40 +1304,25 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             style={{ background: 'transparent' }}
           >
           <div className="w-full max-w-[1040px] mx-auto" style={{ padding: '30px 34px 64px' }}>
-            {currentSection && (
-              <>
-                {/* Section Header */}
-                <div
-                  className="mb-8"
-                  style={{ padding: '4px 0 0' }}
-                >
-                  <div
-                    className="text-[11px] font-semibold uppercase tracking-[0.18em]"
-                    style={{ color: 'var(--text-light)' }}
-                  >
-                    Ready Preferences
-                  </div>
-                  <div className="flex items-center gap-4 mt-3">
-                    <div
-                      className="flex items-center justify-center"
-                      style={{ flexShrink: 0, width: 24, height: 24 }}
-                    >
-                      <currentSection.icon
-                        className="w-4.5 h-4.5"
-                        style={{ width: 20, height: 20, color: 'var(--color-blue)' }}
-                        strokeWidth={2}
-                      />
+                {currentSection && (
+                  <>
+                    {/* Section Header */}
+                    <div className="mb-7" style={{ padding: '4px 0 0' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                        }}
+                      >
+                        <h2 className="text-[22px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text-title)' }}>
+                          {currentSection.title}
+                        </h2>
+                        <p className="text-[13px] leading-6" style={{ color: 'var(--text-muted)', maxWidth: 720 }}>
+                          {currentSection.description}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-[22px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text-title)' }}>
-                        {currentSection.title}
-                      </h2>
-                      <p className="text-[13px] mt-1 leading-6" style={{ color: 'var(--text-muted)', maxWidth: 720 }}>
-                        {currentSection.description}
-                      </p>
-                    </div>
-                  </div>
-                </div>
 
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
