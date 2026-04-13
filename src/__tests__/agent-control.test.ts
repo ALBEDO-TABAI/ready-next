@@ -55,7 +55,7 @@ describe('createScopedRunCollector', () => {
             sessionId: 'scope-feishu-2',
             runId: 'req-2',
             type: 'tool_use',
-            chunk: 'browser_query_gemini(text=\"今晚吃什么\")',
+            chunk: 'browser_query_gemini(text="今晚吃什么")',
         })
         collector.handleError({
             agent: 'butler',

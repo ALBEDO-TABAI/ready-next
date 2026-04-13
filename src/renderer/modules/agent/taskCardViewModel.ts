@@ -7,7 +7,7 @@ import type {
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
 
-export interface TaskDisclosureState extends Partial<Record<TaskSectionKey, boolean>> {}
+export type TaskDisclosureState = Partial<Record<TaskSectionKey, boolean>>
 
 export interface TaskCardRunLike {
   scopeId: string

@@ -37,6 +37,7 @@ yarn-error.log*
 
 # Testing
 coverage/
+test-results/
 
 # Exports
 exports/
@@ -44,3 +45,9 @@ exports/
 # Electron
 *.asar
 build/runtime-seeds/
+
+# Local scratch / generated artifacts
+.superpowers/
+index-*.css
+index-*.js
+index-*.html

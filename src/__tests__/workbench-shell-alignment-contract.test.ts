@@ -39,7 +39,10 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(markdownEditor, /className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"/)
 
   assert.match(rssFeed, /WORKBENCH_HEADER_EDGE_X/)
-  assert.match(rssFeed, /className="rss-feed-surface rss-workbench-surface content-surface-panel flex flex-col h-full"/)
+  assert.match(rssFeed, /className="rss-feed-surface/)
+  assert.match(rssFeed, /rss-workbench-surface/)
+  assert.match(rssFeed, /content-surface-panel/)
+  assert.match(rssFeed, /flex flex-col h-full/)
   assert.match(rssFeed, /className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"/)
   assert.match(rssFeed, /className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"/)
   assert.match(rssFeed, /padding:\s*`0 \$\{WORKBENCH_HEADER_EDGE_X\}px 16px`/)

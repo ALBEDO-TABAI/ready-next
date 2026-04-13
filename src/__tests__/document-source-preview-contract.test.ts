@@ -15,5 +15,5 @@ test('document edit mode uses raw text editing while preview mode keeps rendered
   assert.match(markdownEditor, /value=\{tab\.content\}/)
   assert.match(markdownEditor, /onChange=\{handleRawEditorChange\}/)
   assert.match(markdownEditor, /viewMode === 'preview'/)
-  assert.match(markdownEditor, /<NotePreview content=\{tab\.content\}/)
+  assert.match(markdownEditor, /<NotePreview[\s\S]*content=\{tab\.content\}/)
 })

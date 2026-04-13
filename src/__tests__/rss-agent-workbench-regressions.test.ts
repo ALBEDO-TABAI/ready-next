@@ -33,7 +33,7 @@ test('chat composer keeps a visible shell and a primary send button after liquid
   assert.match(chatPanel, /const composerShellStyle = \{/)
   assert.match(chatInput, /data-chat-composer-shell="true"/)
   assert.match(chatPanel, /background:\s*'var\(--input-slot-bg\)'/)
-  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--text-muted\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
   assert.match(chatPanel, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
   assert.match(chatInput, /background: 'var\(--color-blue\)'/)
   assert.doesNotMatch(chatPanel, /id="chat-input-shell"/)

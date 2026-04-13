@@ -446,9 +446,10 @@ interface SectionAnchor {
 }
 
 function normalizeSectionKey(value: string): string {
+  const punctuationPattern = new RegExp("[`*_~#>:：,.，。!?！？;；、()\\[\\]{}'\"“”‘’\\s]+", 'g')
   return value
     .toLowerCase()
-    .replace(/[`*_~#>\-:：,.，。!?！？;；、()\[\]{}'"“”‘’\s]+/g, '')
+    .replace(punctuationPattern, '')
     .trim()
 }
 
@@ -471,7 +472,7 @@ function inferPlainSectionAnchor(
     !/[。！？；，,:：]/.test(line) &&
     !/[0-9]/.test(line) &&
     /[\u4e00-\u9fa5]{4,}/.test(line) &&
-    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+/.test(nextLine)
+    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+/.test(nextLine)
   ) {
     return { level: 2, title: line }
   }
@@ -515,7 +516,7 @@ function parseSectionAnchor(rawLine: string): { level: number; title: string } |
   }
 
   const numericHeading = line.match(
-    /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+(.+)$/,
+      /^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+(.+)$/,
   )
   if (numericHeading && line.length <= 100) {
     const numericCore = numericHeading[1].replace(/[、.]$/, '')
@@ -2576,8 +2577,6 @@ export class DirectChatEngine extends EventEmitter {
         ? this.decideBrowserTask(pureUserInput, session, sessionId, incomingAttachmentHints)
         : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
 
-      const hasDocumentEnvironment = userText.includes('## 环境信息') && userText.includes('当前模式: 文档模式')
-
       // Judge intent based on pure input (not polluted by environment context)
       const preferredSkillToolNames = hasTools && (this.findExplicitlyRequestedSkills(contextualUserInput).length > 0 || this.hasActiveSkillExecution(sessionId))
         ? this.buildPreferredSkillToolNames(contextualUserInput, sessionId)
@@ -2884,13 +2883,11 @@ export class DirectChatEngine extends EventEmitter {
         let iterations = 0
         let finishedBeforeLimit = false
         let forceDocNudges = 0
-        let forceDesignNudges = 0
         let forceDocMutationNudges = 0
         let forceDocSaveNudges = 0
         let forceDocInspectionResultNudges = 0
         let forceDocWidgetRecoveryNudges = 0
         let textToolBridgeNudges = 0
-        let documentMutationCompleted = false
         let documentToolTaskCompleted = false
         let documentToolProgress: {
           executedMutatingDocActionCount: number
@@ -3318,10 +3315,6 @@ export class DirectChatEngine extends EventEmitter {
             })
             log(`forceDocumentTool mutating tools without save, nudge=${forceDocSaveNudges}`)
             continue
-          }
-
-          if (toolPolicy.forceDocumentTool && executedMutatingDocActionCount > 0) {
-            documentMutationCompleted = true
           }
 
           if (toolPolicy.forceDocumentTool && (executedMutatingDocActionCount > 0 || executedInspectionDocActionCount > 0)) {

@@ -1,13 +1,13 @@
 # Module Dependency Map
 
-> Updated: 2026-03-07
+> Updated: 2026-04-13
 
 ## 总体依赖链
 ```text
 Renderer (React / Zustand)
   -> Preload (window.electronAPI)
   -> Main IPC handlers
-  -> DB / FS / BrowserView / skills runtime / sidecar / external AI providers
+  -> DB / FS / BrowserView / skills runtime / external AI providers
 ```
 
 ## 聚合入口
@@ -34,17 +34,17 @@ Renderer (React / Zustand)
 -> `src/main/modules/document-engine/ipc-handler.ts`
 -> 文本抽取 / 文档读写 / autosave
 
-### 3. Design
-`DesignMode`
--> `electronAPI.design.*`
--> `src/main/modules/design-engine/*`
--> TLDraw 文件与会话能力
+### 3. RSS
+`RSSMode / rss components`
+-> `electronAPI.rss.*`
+-> `src/main/modules/rss-engine/ipc-handler.ts`
+-> 订阅源更新 / 分析 / 诊断 / browser handoff
 
-### 4. Video
-`VideoMode`
--> `electronAPI.video.*`
--> `src/main/modules/video-engine/*`
--> Remotion 预览 / 轨道 / 导出
+### 4. Calendar
+`CalendarMode / calendar components`
+-> `electronAPI.calendar.*`
+-> `src/main/modules/calendar-engine/ipc-handler.ts`
+-> 事件 CRUD / 来源管理 / quick create
 
 ### 5. Settings / AI Provider
 `Settings.tsx`
@@ -59,29 +59,24 @@ Renderer (React / Zustand)
 - wire API（chat/responses）
 - tools / vision / native video 能力
 
-### 6. Agent
+### 6. Agent / Memory
 `ChatPanel / useAgent`
 -> `electronAPI.agent.*`
 -> `src/main/modules/claude-bridge/*`
+-> `src/main/modules/agent-control/*`
 -> `src/main/modules/tools/*`
--> Browser / Document / Skill / System tool executor
+-> Browser / Document / Skill / System / Memory executor
 
-Agent 主链路中额外依赖：
+附加依赖：
 - `src/main/modules/openai-responses.ts`：SSE / JSON 兼容解析
 - `src/main/modules/claude-bridge/tool-bridge.ts`：文本工具桥接
-- `src/main/modules/agent-control/session-continuity.ts`：浏览器连续性上下文
+- `src/main/modules/repositories/memory-repository.ts`：长期记忆存取
 
 ### 7. Skills
 `SkillsCenterPanel`
 -> `electronAPI.skills.*`
 -> `src/main/modules/skills-runtime/runtime-manager.ts`
 -> Embedded skill assets / managed custom skills / jobs / schedules
-
-### 8. Remote IM / Sidecar
-`agent-control runtime`
--> `sidecar manager`
--> `src/python/ready_sidecar/*`
--> 远程通道事件、心跳、附件落盘、主进程会话写入
 
 ## Renderer 侧状态依赖
 - `useMode`：工作台模式
@@ -90,8 +85,9 @@ Agent 主链路中额外依赖：
 - `useAgent`：会话、消息、工具胶囊、运行状态
 - `useSettings`：AI 供应商与模型配置
 - `useBrowserTabs`：浏览器 tab 与导航状态
+- `useCalendarSession`：日程会话状态
 - `useDocTabs`：文档标签状态
-- `useDesignSession`：设计会话状态
+- `useRSSSession`：RSS 会话状态
 
 ## 关键排障文件
 - `src/shared/ai-providers.ts`

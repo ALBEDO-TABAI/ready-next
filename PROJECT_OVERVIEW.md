@@ -1,26 +1,22 @@
 # Ready 项目说明
 
-> 更新时间: 2026-03-24
+> 更新时间: 2026-04-13
 
 ## 1. 产品目标
-Ready 是一个桌面创作工作台，目标是把以下工作流统一到一个应用内：
+Ready 当前主线是一个桌面创作工作台，稳定承载以下能力：
 - 浏览与检索（Browser）
 - 文稿编辑（Document）
-- 设计编辑（Design）
-- 视频剪辑（Video）
 - RSS 信息流处理（RSS）
 - 日程管理（Calendar）
 - AI Agent、技能与远程协作（Agent / Skills / Remote IM）
 
-## 2. 当前模块状态
-- 浏览器：多标签 BrowserView、书签/历史/下载/打印、右键菜单、Browser Agent V7 任务图执行框架；Renderer 头部已收口为单层 `BrowserHeader`，激活标签可展开为地址输入面，刷新区 hover 可揭示前进/后退；右上收藏/下载/更多已改走主进程 native utility menu，不再复用会挤压布局的 renderer 侧栏；冷启动与 renderer 重载时会先恢复主进程 tabs，再等待正确 bounds 后显示/创建 host
+## 2. 当前工作台状态
+- 浏览器：多标签 BrowserView、书签/历史/下载/打印、右键菜单、Browser Agent V7 执行链路已接入；头部 chrome 已收口为单层 `BrowserHeader`
 - 文稿：多标签、多格式读写，支持 `document_*` 工具链做真实编辑
-- 设计：`DesignMode` 已替代旧 `ImageMode`，TLDraw 画布与设计侧组件链路已接入
-- 剪辑：Remotion 预览、时间轴与 Inspector 结构已形成
 - RSS：订阅、更新、分析、统计与子代理链路可用
 - 日程：日/周/月视图与事件 CRUD 可用
-- Agent：统一会话 scope、工具调用、技能运行时、远程 IM 基础链路已接入；聊天面板新增 `当前任务 / 后台任务` 任务区，长任务会持续投影为步骤、等待态、可继续动作与最近产物
-- 技能中心：支持系统级 embedded skills 与用户导入 custom skills 并行管理，并新增 workflow execution 视图与 blocker 继续控制
+- Agent：统一会话 scope、工具调用、任务投影、技能 blocker 继续与记忆反馈链路已接入
+- 技能中心：支持系统级 embedded skills 与用户 custom skills 并行管理
 - 设置页：支持多供应商、多协议、多工具模式配置
 
 ## 3. AI / Agent 当前能力
@@ -34,7 +30,7 @@ Ready 是一个桌面创作工作台，目标是把以下工作流统一到一�
 - `openai-compatible`
 
 ### 3.2 共享能力层
-AI 配置不再只按 provider 名称分支，而是统一解析为：
+AI 配置统一解析为：
 - `agentProtocol`
 - `wireApi`
 - `supportsToolCalls`
@@ -45,10 +41,10 @@ AI 配置不再只按 provider 名称分支，而是统一解析为：
 
 ### 3.3 工具兼容策略
 - 原生支持 function tools 的通道优先走原生工具调用
-- 对不稳定或不暴露原生 tools 的 OpenAI 兼容通道，回退到文本工具桥接
-- Browser、Document、System、Skill 工具都从同一套工具注册中心暴露
-- Claude skill 执行改为 `advisory / workflow / legacy direct` 三态兼容，workflow 由宿主状态机自动推进
-- scope run 会额外记录任务摘要，用于聊天内任务恢复、技能 blocker 继续和自动记忆反馈
+- 不稳定或不暴露原生 tools 的 OpenAI 兼容通道，回退到文本工具桥接
+- Browser、Document、System、Skill、Memory 工具从同一套工具注册中心暴露
+- workflow skill 由宿主状态机自动推进
+- scope run 会额外记录任务摘要、最近产物和记忆反馈
 
 ## 4. 技术栈
 - Electron 34
@@ -57,8 +53,6 @@ AI 配置不再只按 provider 名称分支，而是统一解析为：
 - Zustand
 - Tailwind CSS v4 + CSS Variables
 - SQLite（better-sqlite3）
-- TLDraw
-- Remotion
 - Tiptap / Univer / Mammoth / XLSX / react-pdf
 
 ## 5. 目录入口
@@ -77,7 +71,7 @@ AI 配置不再只按 provider 名称分支，而是统一解析为：
 
 ## 7. 当前重点方向
 1. 继续提升 Browser Agent 在上传、输入、提交阶段的泛化能力与证据判定
-2. 稳定聊天面板里的当前任务 / 后台任务体验，包括刷新恢复与 blocker 继续
+2. 稳定聊天面板里的当前任务 / 后台任务体验，包括刷新恢复、blocker 继续和记忆回流
 3. 稳定远程 IM 会话、附件消费与断线恢复体验
 4. 继续完善 Design / Video 的编辑细节与导出链路
 5. 继续收紧 AI 供应商切换时的协议、工具、视觉能力兼容

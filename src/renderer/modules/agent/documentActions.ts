@@ -64,9 +64,10 @@ function normalizeText(input: string): string {
 }
 
 function normalizeSectionKey(value: string): string {
+  const punctuationPattern = new RegExp("[`*_~#>:：,.，。!?！？;；、()\\[\\]{}'\"“”‘’\\s]+", 'g')
   return value
     .toLowerCase()
-    .replace(/[`*_~#>\-:：,.，。!?！？;；、()\[\]{}'"“”‘’\s]+/g, '')
+    .replace(punctuationPattern, '')
     .trim()
 }
 
@@ -92,7 +93,7 @@ function inferPlainSectionAnchor(lines: string[], index: number): { level: numbe
   if (nextIndex >= lines.length) return null
 
   const nextLine = lines[nextIndex].trim()
-  if (!/^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+/.test(nextLine)) {
+  if (!/^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+/.test(nextLine)) {
     return null
   }
 
@@ -114,7 +115,7 @@ function parseSectionAnchor(rawLine: string): { level: number; title: string } |
     }
   }
 
-  const numericHeading = line.match(/^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[\.、]))\s+(.+)$/)
+  const numericHeading = line.match(/^((?:\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)|(?:\d{1,2}[.、]))\s+(.+)$/)
   if (numericHeading && line.length <= 100) {
     const numericCore = numericHeading[1].replace(/[、.]$/, '')
     const depth = numericCore.split('.').filter(Boolean).length

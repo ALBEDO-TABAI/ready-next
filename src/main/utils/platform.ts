@@ -9,13 +9,6 @@ export function getLogPath(filename: string): string {
 }
 
 /**
- * Get platform-appropriate title bar style
- */
-export function getTitleBarStyle(): 'default' | 'hidden' | 'hiddenInset' {
-  return process.platform === 'darwin' ? 'hiddenInset' : 'hidden'
-}
-
-/**
  * Get platform-appropriate 'which' command
  * - macOS/Linux: 'which'
  * - Windows: 'where'

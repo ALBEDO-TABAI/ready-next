@@ -1,4 +1,4 @@
-import type { AgentArtifact, ChatAttachment, ConversationScope } from './types'
+import type { ChatAttachment, ConversationScope } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
 
@@ -175,14 +175,6 @@ export function buildEnvironmentContext(): string | null {
   }
 
   return contexts.length > 0 ? contexts.join('\n\n') : null
-}
-
-/**
- * Legacy function for backward compatibility
- * @deprecated Use buildEnvironmentContext for lightweight context
- */
-export function buildActiveDesignContext(): string | null {
-  return buildEnvironmentContext()
 }
 
 export async function persistMessage(
@@ -511,8 +503,4 @@ export async function buildComposedAgentInput(params: {
   }
 
   return finalMessage
-}
-
-export function createArtifactReference(path: string, artifact?: AgentArtifact | null): AgentArtifact[] {
-  return artifact ? [artifact] : []
 }

@@ -13,7 +13,6 @@ import {
   type AgentScheduleRecord,
   type ChatConversationRecord,
   type ChatMessageRecord,
-  type ConversationSourceKind,
 } from '../database'
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
@@ -506,7 +505,7 @@ export class AgentControlRuntime extends EventEmitter {
         enabled: Boolean(row.enabled),
         config: decryptChannelConfig(encryptedConfig),
       })
-      if (Boolean(row.enabled)) {
+      if (row.enabled) {
         await this.sidecar.startChannel(id).catch(() => undefined)
       } else {
         await this.sidecar.stopChannel(id).catch(() => undefined)

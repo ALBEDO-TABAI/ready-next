@@ -18,28 +18,6 @@ export interface DocumentQuoteContext {
   lineEnd?: number | null
 }
 
-export function buildDocumentQuoteSnippet(context: DocumentQuoteContext): string {
-  const lines = [
-    '### 文档内容引用',
-    `- 文档: ${context.title}`,
-    `- 路径: ${context.path || '(未保存草稿)'}`,
-    context.sectionTitle ? `- 章节: ${context.sectionTitle}` : null,
-    context.lineStart && context.lineEnd
-      ? `- 位置: 第 ${context.lineStart} - ${context.lineEnd} 行`
-      : context.lineStart
-        ? `- 位置: 第 ${context.lineStart} 行附近`
-        : null,
-    '',
-    '```quote',
-    context.selection.trim(),
-    '```',
-    '',
-    '请基于这段原文的位置和内容继续处理。',
-  ].filter(Boolean)
-
-  return lines.join('\n')
-}
-
 export function appendToAgentInput(snippet: string): void {
   const trimmed = snippet.trim()
   if (!trimmed) return

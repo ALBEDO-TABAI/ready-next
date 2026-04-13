@@ -1,8 +1,4 @@
-import type { SkillActionDefinition, SkillDefinition, SkillStep } from '../../../shared/skill-execution-types'
-
-export function getVisibleSkillActions(definition: SkillDefinition): SkillActionDefinition[] {
-  return definition.actions.filter((action) => action.visibility !== 'internal')
-}
+import type { SkillDefinition, SkillStep } from '../../../shared/skill-execution-types'
 
 export function getSkillStep(definition: SkillDefinition, stepId: string): SkillStep | null {
   return definition.workflow?.steps.find((step) => step.id === stepId) || null

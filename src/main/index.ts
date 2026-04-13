@@ -4,9 +4,8 @@ import { resolve } from 'path'
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
 
-import { app, shell, BrowserWindow, ipcMain, protocol, net, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
 import { join, extname, normalize } from 'path'
-import { homedir } from 'os'
 import { createReadStream, statSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -358,10 +357,6 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 // --- local-file:// path validation ---
-
-/** Sensitive directories that should never be served via local-file:// */
-const SENSITIVE_DIRS = ['.ssh', '.gnupg', '.gnome-keyring', '.pki']
-const SENSITIVE_FILES = ['.env', '.npmrc', '.pypirc', 'credentials.json']
 
 function isPathAllowed(filePath: string): boolean {
   // Canonicalize the path to resolve any .. or symlink tricks

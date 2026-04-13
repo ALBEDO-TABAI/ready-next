@@ -29,21 +29,11 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
 
   assert.match(styles, /--lg-noise-opacity:/)
   assert.match(styles, /--lg-lens-violet:/)
-  assert.match(styles, /\.glass-surface-panel::after/)
-  assert.match(styles, /mix-blend-mode:\s*soft-light/)
+  assert.match(styles, /--workbench-liquid-chrome-bg:/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-workbench-surface \{/)
   assert.match(styles, /ready-app-bg/)
   assert.match(scene, /data-scene=\{scene\}/)
   assert.match(scene, /export type LiquidGlassTone = 'button' \| 'card' \| 'panel'/)
-})
-
-test('workbench liquid shell uses shared liquid glass primitives on interactive chrome', () => {
-  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
-  const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-
-  assert.match(sidePanel, /LiquidGlassPrimitive/)
-  assert.match(tabs, /LiquidGlassPrimitive/)
-  assert.match(chatPanel, /LiquidGlassPrimitive/)
 })
 
 test('theme and settings are single-track liquid glass by default', () => {
@@ -56,7 +46,7 @@ test('theme and settings are single-track liquid glass by default', () => {
   assert.match(previewMocks, /searchParams\.get\('skin'\) \|\| 'liquid-glass'/)
 })
 
-test('workbench and liquid test share the same liquid scene primitives', () => {
+test('workbench and liquid test share the same scene foundation', () => {
   const liquidTest = readWorkspaceFile('src/renderer/LiquidTest.tsx')
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
@@ -68,10 +58,10 @@ test('workbench and liquid test share the same liquid scene primitives', () => {
   assert.match(liquidTest, /LiquidBackdropScene/)
   assert.match(workbenchMode, /LiquidSceneProvider/)
   assert.doesNotMatch(workbenchMode, /LiquidBackdropScene/)
-  assert.match(topBar, /LiquidGlassPrimitive/)
-  assert.match(sidePanel, /LiquidGlassPrimitive/)
-  assert.match(tabs, /LiquidGlassPrimitive/)
-  assert.match(chatPanel, /LiquidGlassPrimitive/)
+  assert.match(topBar, /data-liquid-shell="topbar"/)
+  assert.match(sidePanel, /data-liquid-shell="side-panel"/)
+  assert.match(tabs, /data-liquid-shell="workbench-tabs"/)
+  assert.match(chatPanel, /data-liquid-shell="chat-panel"/)
 })
 
 test('main window uses native material instead of renderer fake backdrops', () => {

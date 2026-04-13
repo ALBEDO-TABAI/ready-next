@@ -7,7 +7,7 @@ import type {
   SkillParamDefinition,
 } from '../../../shared/skill-execution-types'
 
-interface ToolParam extends SkillParamDefinition {}
+type ToolParam = SkillParamDefinition
 
 type SkillToolKind = 'skill_action' | 'execution_control'
 

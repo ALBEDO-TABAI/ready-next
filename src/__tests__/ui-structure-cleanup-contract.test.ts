@@ -25,6 +25,6 @@ test('dead liquid-glass ui artifacts are removed and active token sources declar
   const cssTokens = readWorkspaceFile('src/renderer/styles/index.css')
 
   assert.match(chrome, /Geometry source of truth for workbench chrome/)
-  assert.match(panelTokens, /Semantic panel tokens for renderer layout surfaces/)
+  assert.match(panelTokens, /FILES_PANEL_DIMENSIONS/)
   assert.match(cssTokens, /Visual token source of truth for renderer UI/)
 })

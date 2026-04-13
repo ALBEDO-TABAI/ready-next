@@ -113,7 +113,7 @@ interface RecordedRouteAttempt {
   lastRouteError: RSSRouteErrorInfo | null
 }
 
-export interface RouteAttemptSnapshotEntry extends RecordedRouteAttempt {}
+export type RouteAttemptSnapshotEntry = RecordedRouteAttempt
 
 interface RouteAttemptInput {
   sourceId: string
@@ -132,7 +132,7 @@ interface RouteAttemptInput {
 
 const routeAttemptStore = new Map<string, RecordedRouteAttempt>()
 
-export function allowsRSSHubFallbackAfterBrowser(platform: PlatformType): boolean {
+export function allowsRSSHubFallbackAfterBrowser(_platform: PlatformType): boolean {
   return false
 }
 

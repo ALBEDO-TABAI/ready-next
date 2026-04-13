@@ -737,7 +737,7 @@ export class BrowserAgentRunner {
     const result = await this.controller.executeJS(
       null,
       `(() => {
-        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
         const visible = (el) => {
           if (!(el instanceof HTMLElement)) return false
           const rect = el.getBoundingClientRect()
@@ -810,7 +810,7 @@ export class BrowserAgentRunner {
     const result = await this.controller.executeJS(
       null,
       `(() => {
-        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
         const visible = (el) => {
           if (!(el instanceof HTMLElement)) return false
           const rect = el.getBoundingClientRect()
@@ -858,7 +858,7 @@ export class BrowserAgentRunner {
       null,
       `(() => {
         const expected = ${JSON.stringify(String(expectedPrompt || '').trim().toLowerCase())}
-        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
         const visible = (el) => {
           if (!(el instanceof HTMLElement)) return false
           const rect = el.getBoundingClientRect()

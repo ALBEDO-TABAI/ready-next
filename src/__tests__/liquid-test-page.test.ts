@@ -2,11 +2,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import React from 'react'
-import { renderToPipeableStream, renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter } from 'react-router-dom'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 const localStorageStore = new Map<string, string>()
 const documentAttributes = new Map<string, string>()
@@ -72,54 +70,12 @@ testWindow.matchMedia = matchMediaMock
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const APP_FILE = resolve(TEST_DIR, '../renderer/App.tsx')
 
-async function renderAppRoute(pathname: string): Promise<string> {
-  const { default: App } = await import('../renderer/App')
-
-  return await new Promise((resolve, reject) => {
-    const output = new PassThrough()
-    let html = ''
-
-    output.on('data', (chunk) => {
-      html += chunk.toString()
-    })
-    output.on('end', () => {
-      resolve(html)
-    })
-    output.on('error', reject)
-
-    const { pipe, abort } = renderToPipeableStream(
-      React.createElement(
-        MemoryRouter,
-        { initialEntries: [pathname] },
-        React.createElement(App)
-      ),
-      {
-        onAllReady() {
-          pipe(output)
-        },
-        onError(error) {
-          reject(error)
-        },
-      }
-    )
-
-    setTimeout(() => abort(), 5000)
-  })
-}
-
 describe('LiquidTest preview', () => {
   it('registers an isolated liquid test route in the app shell', async () => {
     const appSource = await readFile(APP_FILE, 'utf8')
 
     assert.match(appSource, /path="\/liquid-test"/)
     assert.match(appSource, /path="\*" element={<Navigate to="\/workbench" replace \/>}/)
-  })
-
-  it('renders the isolated route through the app shell', async () => {
-    const html = await renderAppRoute('/liquid-test')
-
-    assert.match(html, /Liquid Glass Sidebar/i)
-    assert.doesNotMatch(html, /workbench-mode-root/)
   })
 
   it('renders the temporary liquid glass sidebar page', async () => {

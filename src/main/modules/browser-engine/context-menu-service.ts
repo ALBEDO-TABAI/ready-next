@@ -16,6 +16,15 @@ interface BrowserContextMenuHost {
   logBrowserDiag(message: string): void
 }
 
+function replaceIllegalFilenameChars(value: string): string {
+  let next = ''
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    next += code <= 31 || '<>:"/\\|?*'.includes(char) ? '-' : char
+  }
+  return next
+}
+
 export class BrowserContextMenuService {
   constructor(private readonly host: BrowserContextMenuHost) {}
 
@@ -157,7 +166,7 @@ export class BrowserContextMenuService {
         click: () => {
           void (async () => {
             try {
-              const defaultName = (webContents.getTitle() || '网页内容').replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').slice(0, 64)
+              const defaultName = replaceIllegalFilenameChars(webContents.getTitle() || '网页内容').slice(0, 64)
               const result = await dialog.showSaveDialog(this.host.mainWindow, {
                 title: '保存网页',
                 defaultPath: `${defaultName || '网页内容'}.html`,

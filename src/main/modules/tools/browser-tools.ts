@@ -7,7 +7,7 @@ import { BrowserController } from '../browser-engine/ipc-handler'
 import { appendFileSync } from 'fs'
 import { access, mkdir, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import { constants as fsConstants, existsSync, statSync } from 'fs'
+import { constants as fsConstants, existsSync } from 'fs'
 import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
@@ -503,8 +503,12 @@ function expandHomePath(input: string): string {
 }
 
 function sanitizeFilename(input: string, fallback = 'download'): string {
-  const cleaned = String(input || '')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+  let sanitized = ''
+  for (const char of String(input || '')) {
+    const code = char.charCodeAt(0)
+    sanitized += code <= 31 || '<>:"/\\|?*'.includes(char) ? '-' : char
+  }
+  const cleaned = sanitized
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+/, '')
@@ -1038,7 +1042,7 @@ async function probeGeminiSubmissionState(
           if (tag === 'textarea' || tag === 'input') return String(el.value || '')
           return String(el.innerText || el.textContent || '')
         }
-        const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable=\"true\"],[contenteditable=\"\"],[role=\"textbox\"],[role=\"combobox\"]'))
+        const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[contenteditable=""],[role="textbox"],[role="combobox"]'))
         let best = ''
         const active = document.activeElement
         if (active instanceof HTMLElement) {
@@ -1075,27 +1079,27 @@ async function probeGeminiSubmissionState(
           if (value.length > best.length) best = value
         }
         const sendSelectors = [
-          'button[aria-label*=\"send\" i]',
-          'button[aria-label*=\"发送\" i]',
-          'button[aria-label*=\"提交\" i]',
-          'button[aria-label*=\"发布\" i]',
-          'button[aria-label*=\"继续\" i]',
-          'button[aria-label*=\"search\" i]',
-          'button[aria-label*=\"回车\" i]',
-          'button[aria-label*=\"ask\" i]',
-          'button[aria-label*=\"发送消息\" i]',
-          'button[data-testid*=\"send\" i]',
-          'button[data-testid*=\"submit\" i]',
-          'button[data-testid*=\"publish\" i]',
-          'button[data-testid*=\"continue\" i]',
-          '[role=\"button\"][aria-label*=\"send\" i]',
-          '[role=\"button\"][aria-label*=\"发送\" i]',
-          'button[title*=\"send\" i]',
-          'button[title*=\"发送\" i]',
-          'button[title*=\"提交\" i]',
-          'button[title*=\"发布\" i]',
-          'button[title*=\"继续\" i]',
-          'button[mattooltip*=\"send\" i]',
+          'button[aria-label*="send" i]',
+          'button[aria-label*="发送" i]',
+          'button[aria-label*="提交" i]',
+          'button[aria-label*="发布" i]',
+          'button[aria-label*="继续" i]',
+          'button[aria-label*="search" i]',
+          'button[aria-label*="回车" i]',
+          'button[aria-label*="ask" i]',
+          'button[aria-label*="发送消息" i]',
+          'button[data-testid*="send" i]',
+          'button[data-testid*="submit" i]',
+          'button[data-testid*="publish" i]',
+          'button[data-testid*="continue" i]',
+          '[role="button"][aria-label*="send" i]',
+          '[role="button"][aria-label*="发送" i]',
+          'button[title*="send" i]',
+          'button[title*="发送" i]',
+          'button[title*="提交" i]',
+          'button[title*="发布" i]',
+          'button[title*="继续" i]',
+          'button[mattooltip*="send" i]',
         ]
         const sendButtons = sendSelectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)))
         const sendButtonEnabled = sendButtons.some((node) => {
@@ -1109,13 +1113,13 @@ async function probeGeminiSubmissionState(
           return visible && !ariaDisabled && !disabled
         })
         const userSelectors = [
-          '[data-message-author-role=\"user\"]',
-          '[data-author-role=\"user\"]',
-          '[data-role=\"user\"]',
+          '[data-message-author-role="user"]',
+          '[data-author-role="user"]',
+          '[data-role="user"]',
           '.message-user',
           '.user-message',
-          '[class*=\"userMessage\"]',
-          '[class*=\"chat-user\"]',
+          '[class*="userMessage"]',
+          '[class*="chat-user"]',
           '.user-query',
         ]
         const userNodes = userSelectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)))
@@ -1160,30 +1164,30 @@ async function clickGeminiSendButton(
     `
       (() => {
         const selectors = [
-          'button[aria-label*=\"send\" i]',
-          'button[aria-label*=\"发送\" i]',
-          'button[aria-label*=\"提交\" i]',
-          'button[aria-label*=\"发布\" i]',
-          'button[aria-label*=\"继续\" i]',
-          'button[aria-label*=\"search\" i]',
-          'button[data-testid*=\"send\" i]',
-          'button[data-testid*=\"submit\" i]',
-          'button[data-testid*=\"publish\" i]',
-          'button[data-testid*=\"continue\" i]',
-          '[role=\"button\"][aria-label*=\"send\" i]',
-          '[role=\"button\"][aria-label*=\"发送\" i]',
-          '[role=\"button\"][aria-label*=\"提交\" i]',
-          '[role=\"button\"][aria-label*=\"发布\" i]',
-          '[role=\"button\"][aria-label*=\"继续\" i]',
-          'button[mattooltip*=\"send\" i]',
-          'button[title*=\"send\" i]',
-          'button[title*=\"发送\" i]',
-          'button[title*=\"提交\" i]',
-          'button[title*=\"发布\" i]',
-          'button[title*=\"继续\" i]',
-          'input[type=\"submit\"]',
+          'button[aria-label*="send" i]',
+          'button[aria-label*="发送" i]',
+          'button[aria-label*="提交" i]',
+          'button[aria-label*="发布" i]',
+          'button[aria-label*="继续" i]',
+          'button[aria-label*="search" i]',
+          'button[data-testid*="send" i]',
+          'button[data-testid*="submit" i]',
+          'button[data-testid*="publish" i]',
+          'button[data-testid*="continue" i]',
+          '[role="button"][aria-label*="send" i]',
+          '[role="button"][aria-label*="发送" i]',
+          '[role="button"][aria-label*="提交" i]',
+          '[role="button"][aria-label*="发布" i]',
+          '[role="button"][aria-label*="继续" i]',
+          'button[mattooltip*="send" i]',
+          'button[title*="send" i]',
+          'button[title*="发送" i]',
+          'button[title*="提交" i]',
+          'button[title*="发布" i]',
+          'button[title*="继续" i]',
+          'input[type="submit"]',
           'button',
-          '[role=\"button\"]',
+          '[role="button"]',
           '[tabindex]',
         ]
         const visible = (el) => {
@@ -1197,7 +1201,7 @@ async function clickGeminiSendButton(
           return true
         }
         const getActiveEditable = () => {
-          const nodes = Array.from(document.querySelectorAll('textarea,input,[contenteditable=\"true\"],[contenteditable=\"\"],[role=\"textbox\"],[role=\"combobox\"],[role=\"searchbox\"]'))
+          const nodes = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[contenteditable=""],[role="textbox"],[role="combobox"],[role="searchbox"]'))
           const active = document.activeElement
           if (active instanceof HTMLElement && visible(active)) {
             return active
@@ -1303,7 +1307,7 @@ async function submitClosestFormOrContainer(
           if (Number(style.opacity || '1') <= 0) return false
           return true
         }
-        const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable=\"true\"],[contenteditable=\"\"],[role=\"textbox\"],[role=\"combobox\"],[role=\"searchbox\"]'))
+        const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[contenteditable=""],[role="textbox"],[role="combobox"],[role="searchbox"]'))
         let active = document.activeElement instanceof HTMLElement && visible(document.activeElement)
           ? document.activeElement
           : null
@@ -1339,14 +1343,14 @@ async function submitClosestFormOrContainer(
         const containers = [
           active.parentElement,
           active.parentElement?.parentElement,
-          active.closest('[role=\"group\"]'),
-          active.closest('[role=\"dialog\"]'),
+          active.closest('[role="group"]'),
+          active.closest('[role="dialog"]'),
           active.closest('section'),
         ].filter(Boolean)
         const activeRect = active.getBoundingClientRect()
         for (const container of containers) {
           if (!(container instanceof HTMLElement)) continue
-          const buttons = Array.from(container.querySelectorAll('button,[role=\"button\"],input[type=\"submit\"]'))
+          const buttons = Array.from(container.querySelectorAll('button,[role="button"],input[type="submit"]'))
             .filter((node) => visible(node) && node !== active)
           let best = null
           let bestScore = -1
@@ -1762,7 +1766,7 @@ function buildSmartTypeJs(options: {
           const id = el.getAttribute('id')
           if (id) {
             try {
-              const l = document.querySelector('label[for="' + id.replace(/"/g, '\\\\"') + '"]')
+              const l = document.querySelector('label[for="' + CSS.escape(id) + '"]')
               if (l) return l.textContent || ''
             } catch { /* ignore */ }
           }
@@ -2922,7 +2926,7 @@ async function locateActionTargets(
             const hugeText = meta.length > 42
             if (hugeSurface || hugeText) continue
             const likelyLeftNav = rect.left < window.innerWidth * 0.18 && rect.top < window.innerHeight * 0.72
-            const weakGenerateOnly = /^生成$/.test(meta) || /(^|\s)生成(\s|$)/.test(meta)
+            const weakGenerateOnly = /^生成$/.test(meta) || /(^|\\s)生成(\\s|$)/.test(meta)
             if (likelyLeftNav && weakGenerateOnly) continue
             const browserChromeLike = rect.top < window.innerHeight * 0.14 && rect.height <= 72
             if (browserChromeLike) continue

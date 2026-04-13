@@ -9,7 +9,6 @@ function readWorkspaceFile(path: string): string {
 
 test('browser runtime restores tab truth from the main process instead of trusting stale renderer cache', () => {
   const runtimeHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserRuntimeEffects.ts')
-  const warmStart = readWorkspaceFile('src/renderer/modules/browser/browserTabWarmStart.ts')
 
   assert.match(runtimeHook, /const existingTabs = await window\.electronAPI\?\.browser\?\.getTabs\(\)/)
   assert.match(runtimeHook, /store\.setTabs\(hydratedTabs\)/)
@@ -23,6 +22,5 @@ test('browser runtime restores tab truth from the main process instead of trusti
   assert.match(runtimeHook, /store\.setTabs\(\[\]\)/)
   assert.match(runtimeHook, /store\.setActiveTabId\(null\)/)
   assert.match(runtimeHook, /store\.setUrlInput\(''\)/)
-  assert.doesNotMatch(warmStart, /if \(useBrowserTabs\.getState\(\)\.tabs\.length > 0\) return true/)
-  assert.match(warmStart, /window\.electronAPI\.browser\.getTabs\(\)/)
+  assert.doesNotMatch(runtimeHook, /browserTabWarmStart/)
 })

@@ -41,8 +41,17 @@ function expandHomePath(input: string): string {
   return input
 }
 
+function replaceIllegalFilenameChars(value: string): string {
+  let next = ''
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    next += code <= 31 || '<>:"/\\|?*'.includes(char) ? '-' : char
+  }
+  return next
+}
+
 function sanitizeFilename(value: string, fallback: string): string {
-  const trimmed = String(value || '').trim().replace(/[<>:"/\\|?*\x00-\x1F]+/g, '-')
+  const trimmed = replaceIllegalFilenameChars(String(value || '').trim())
   return trimmed.length > 0 ? trimmed : fallback
 }
 

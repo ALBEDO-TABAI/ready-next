@@ -563,10 +563,6 @@ function getComponentEntry(name: string): DocumentWidgetCatalogEntry | null {
   return componentEntryMap.get(name as DocumentWidgetComponentName) || null
 }
 
-export function listDocumentWidgetCatalog(): readonly DocumentWidgetCatalogEntry[] {
-  return documentWidgetCatalog
-}
-
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

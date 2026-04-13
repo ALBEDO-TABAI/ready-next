@@ -2144,7 +2144,7 @@ export default function ChatPanel() {
     ...LIQUID_INACTIVE_CHROME_STYLE,
     borderRadius: 10,
     background: 'var(--input-slot-bg)',
-    border: isDragOver ? '2px solid var(--text-muted)' : '1px solid var(--input-slot-border)',
+    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid var(--input-slot-border)',
     boxShadow: isDragOver ? 'var(--input-slot-shadow-focus)' : 'var(--input-slot-shadow)',
   } as const
 
