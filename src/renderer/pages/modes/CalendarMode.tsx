@@ -146,6 +146,7 @@ export default function CalendarMode({
     currentDate,
     viewType,
     sources,
+    events,
     eventsRef,
     enabledSourceIds,
     handleOpenEditModal,

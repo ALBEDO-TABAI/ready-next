@@ -643,15 +643,12 @@ export default function RSSFeed({
                     <button
                       key={item.id}
                       onClick={() => onItemClick(item)}
-                      className="w-full rounded-[14px] border text-left transition-colors relative"
+                      className="w-full rounded-[14px] text-left transition-colors relative"
                       style={{
                         padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
                         background: isSelected
                           ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
                           : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
-                        borderColor: isSelected
-                          ? 'color-mix(in srgb, var(--color-blue) 26%, var(--border-default))'
-                          : 'color-mix(in srgb, var(--border-default) 18%, transparent)',
                         boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
                       }}
                     >

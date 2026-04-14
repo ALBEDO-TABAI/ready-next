@@ -52,8 +52,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(calendarMode, /<CalendarWorkbenchShell/)
   assert.match(calendarShell, /className="workbench-mode-root calendar-mode-shell"/)
   assert.match(calendarShell, /className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"/)
-  assert.match(calendarShell, /background: 'var\(--calendar-shell-bg\)'/)
-  assert.match(calendarShell, /border: '1px solid var\(--calendar-shell-border\)'/)
+  assert.match(calendarShell, /background: 'rgba\(241, 244, 249, 0\.94\)'/)
   assert.doesNotMatch(calendarShell, /borderRadius: 0/)
   assert.doesNotMatch(calendarShell, /borderTopRightRadius:/)
   assert.doesNotMatch(calendarShell, /borderBottomRightRadius:/)
@@ -63,14 +62,13 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(scheduleCss, /\.sx__week-header\s*\{\s*border-bottom:\s*none !important;/)
   assert.match(scheduleCss, /\.sx__week-header-border\s*\{\s*display:\s*none !important;/)
   assert.match(scheduleCss, /--sx-ready-liquid-neutral-bg:\s*rgba\(247,\s*248,\s*251,\s*0\.96\);/)
-  assert.match(scheduleCss, /--sx-ready-liquid-soft-bg:\s*rgba\(242,\s*245,\s*250,\s*0\.92\);/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__calendar-wrapper \{[\s\S]*background: var\(--sx-ready-liquid-neutral-bg\) !important;/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__calendar-wrapper \{[\s\S]*backdrop-filter: blur\(18px\) saturate\(0%\);/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__calendar,\s*html\[data-skin='liquid-glass'\] \.sx-react-calendar-wrapper \{[\s\S]*border-radius: 0 !important;/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-wrapper,[\s\S]*background: var\(--sx-ready-liquid-neutral-bg\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{/)
-  assert.match(styles, /background: var\(--calendar-shell-bg\) !important;/)
-  assert.match(styles, /border: 1px solid var\(--calendar-shell-border\) !important;/)
+  assert.match(styles, /background: rgba\(241, 244, 249, 0\.94\) !important;/)
+  assert.match(styles, /border: 1px solid rgba\(224, 230, 240, 0\.96\) !important;/)
   assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(241,\s*244,\s*249,\s*0\.94\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(20px\) saturate\(0%\) !important;/)
@@ -80,7 +78,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
 })
 
-test('browser visibility handoff cancels stale re-show work and rss shell keeps a rounded outline in liquid glass', () => {
+test('browser visibility handoff cancels stale re-show work and rss shell stays borderless in liquid glass', () => {
   const browserRuntimeEffects = readWorkspaceFile('src/renderer/modules/browser/useBrowserRuntimeEffects.ts')
   const tabShell = readWorkspaceFile('src/main/modules/browser-engine/tab-shell-service.ts')
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
@@ -97,5 +95,6 @@ test('browser visibility handoff cancels stale re-show work and rss shell keeps 
   assert.match(hostLayout, /showHost\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.setHostBoundsNow\(view, bounds\)/)
 
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-mode-shell \.workbench-canvas-shell \{/)
-  assert.match(styles, /border-color:\s*var\(--lg-border-soft\) !important;/)
+  assert.match(styles, /border-color:\s*transparent !important;/)
+  assert.match(styles, /box-shadow:\s*none !important;/)
 })

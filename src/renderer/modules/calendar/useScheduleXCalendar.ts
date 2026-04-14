@@ -32,6 +32,7 @@ interface UseScheduleXCalendarParams {
   currentDate: Date
   viewType: ViewType
   sources: CalendarSource[]
+  events: CalendarEvent[]
   eventsRef: React.MutableRefObject<CalendarEvent[]>
   enabledSourceIds: Set<string>
   handleOpenEditModal: (event: CalendarEvent) => void
@@ -45,6 +46,7 @@ export function useScheduleXCalendar({
   currentDate,
   viewType,
   sources,
+  events,
   eventsRef,
   enabledSourceIds,
   handleOpenEditModal,
@@ -166,14 +168,14 @@ export function useScheduleXCalendar({
   useEffect(() => {
     const app = calendarAppRef.current
     if (!app || !isActive) return
-    const filteredEvents = eventsRef.current.filter(e => enabledSourceIds.has(e.calendarId))
+    const filteredEvents = events.filter(e => enabledSourceIds.has(e.calendarId))
     const sxEvents = filteredEvents.map(eventToSX)
     try {
       app.events.set(sxEvents as any)
     } catch (err) {
       console.warn('SX events.set error:', err)
     }
-  }, [enabledSourceIds, eventsRef, isActive, sxReady])
+  }, [enabledSourceIds, events, isActive, sxReady])
 
   useEffect(() => {
     const app = calendarAppRef.current

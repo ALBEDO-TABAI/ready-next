@@ -131,11 +131,11 @@ export default function MiniCalendar({
                 height: 28,
                 borderRadius: today ? 14 : 4,
                 background: today
-                  ? 'var(--calendar-today-accent)'
+                  ? 'var(--color-red)'
                   : selected
-                    ? 'var(--calendar-mini-selected-bg)'
+                    ? 'var(--color-blue-light)'
                     : inCurrentWeek && inMonth
-                      ? 'var(--calendar-mini-week-bg)'
+                      ? 'rgba(91, 141, 239, 0.05)'
                       : 'transparent',
                 color: today
                   ? '#FFFFFF'

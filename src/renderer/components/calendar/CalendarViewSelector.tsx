@@ -39,8 +39,7 @@ export default function CalendarViewSelector({
         style={{
           display: 'flex', alignItems: 'center', gap: 4,
           padding: '4px 10px', borderRadius: 10,
-          border: '1px solid var(--calendar-toolbar-chip-border)', background: 'var(--calendar-toolbar-chip-bg)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+          border: '1px solid var(--border-input)', background: 'transparent',
           fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
           cursor: 'pointer',
         }}
