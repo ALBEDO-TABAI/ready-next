@@ -112,6 +112,12 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
     onCloseQuickCard,
   } = props
 
+  const calendarChipStyle = {
+    border: '1px solid var(--calendar-toolbar-chip-border)',
+    background: 'var(--calendar-toolbar-chip-bg)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+  } as const
+
   return (
     <div className="workbench-mode-root calendar-mode-shell">
       {isMock && (
@@ -146,7 +152,8 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
           className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
           style={{
             gap: 0,
-            background: 'rgba(241, 244, 249, 0.94)',
+            background: 'var(--calendar-shell-bg)',
+            border: '1px solid var(--calendar-shell-border)',
             backdropFilter: 'blur(20px) saturate(0%)',
             WebkitBackdropFilter: 'blur(20px) saturate(0%)',
           }}
@@ -156,8 +163,9 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
             style={{
               width: WORKBENCH_SUPPORT_PANEL_WIDTH,
               minWidth: WORKBENCH_SUPPORT_PANEL_WIDTH,
-              background: 'transparent',
-              padding: '0 14px 12px',
+              background: 'var(--calendar-sidebar-bg)',
+              borderRight: '1px solid var(--calendar-sidebar-border)',
+              padding: '12px 14px 14px',
             }}
           >
             <MiniCalendar
@@ -200,6 +208,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                   padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
                   background: 'transparent',
+                  borderBottom: '1px solid color-mix(in srgb, var(--calendar-toolbar-chip-border) 54%, transparent)',
                   boxSizing: 'border-box',
                 }}
               >
@@ -211,8 +220,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     style={{
                       height: 28,
                       borderRadius: 8,
-                      border: '1px solid var(--border-default)',
-                      background: 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)',
+                      ...calendarChipStyle,
                       color: 'var(--text-title)',
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -223,7 +231,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                       fontWeight: 500,
                     }}
                   >
-                    <Plus style={{ width: 13, height: 13, color: 'var(--color-red)' }} />
+                    <Plus style={{ width: 13, height: 13, color: 'var(--calendar-today-accent)' }} />
                     新建
                   </button>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>
@@ -236,7 +244,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     onClick={onGoToToday}
                     style={{
                       padding: '4px 12px', borderRadius: 10,
-                      border: '1px solid var(--border-input)', background: 'transparent',
+                      ...calendarChipStyle,
                       fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
                       cursor: 'pointer',
                     }}
@@ -260,7 +268,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                 onDragLeave={onCalendarDragLeave}
                 onDrop={onCalendarDrop}
                 style={{
-                  background: calendarDropActive ? 'var(--color-blue-light)' : 'transparent',
+                  background: calendarDropActive ? 'var(--calendar-drop-bg)' : 'transparent',
                   transition: 'background 0.15s ease',
                 }}
               >
@@ -290,7 +298,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                             padding: '8px 14px',
                             borderRadius: 12,
                             border: '1px dashed var(--color-blue)',
-                            background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
+                            background: 'var(--calendar-toolbar-chip-bg)',
                             color: 'var(--color-blue)',
                             fontSize: 12,
                             fontWeight: 600,

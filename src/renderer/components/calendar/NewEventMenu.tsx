@@ -87,9 +87,9 @@ export function NewEventMenu({
         position: 'absolute', zIndex: 30,
         top: position.top, left: position.left,
         width: 220, borderRadius: 10,
-        background: 'var(--bg-primary)',
-        border: '1px solid var(--border-default)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+        background: 'var(--calendar-popover-bg)',
+        border: '1px solid var(--calendar-popover-border)',
+        boxShadow: 'var(--calendar-popover-shadow)',
         display: 'flex', flexDirection: 'column',
         padding: 6,
       }}
@@ -211,10 +211,10 @@ export function NewEventCard({
         position: 'absolute', zIndex: 30,
         top: position.top, left: position.left,
         width: 300, borderRadius: 10,
-        background: 'var(--bg-primary)',
-        border: '1px solid var(--border-default)',
+        background: 'var(--calendar-popover-bg)',
+        border: '1px solid var(--calendar-popover-border)',
         overflow: 'hidden',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+        boxShadow: 'var(--calendar-popover-shadow)',
         display: 'flex', flexDirection: 'column',
       }}
     >

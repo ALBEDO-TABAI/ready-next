@@ -13,6 +13,8 @@ test('document canvas and rss canvas share one module surface background token',
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const documentEnterOverlay = readWorkspaceFile('src/renderer/components/document/DocumentEnterOverlay.tsx')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
+  const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
+  const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
 
   assert.match(styles, /--workbench-module-surface-bg:/)
   assert.match(
@@ -24,4 +26,21 @@ test('document canvas and rss canvas share one module surface background token',
   assert.match(markdownEditor, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(documentEnterOverlay, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(rssMode, /background: 'var\(--workbench-module-surface-bg\)'/)
+  assert.match(rssFeed, /background: 'transparent'/)
+  assert.match(previewBrowser, /rss-preview-surface/)
+  assert.match(previewBrowser, /rss-preview-content/)
+  assert.match(previewBrowser, /background: 'var\(--workbench-module-surface-bg\)'/)
+  assert.match(previewBrowser, /background: 'transparent'/)
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-preview-surface \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
+  )
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.rss-preview-content \{[\s\S]*background:\s*transparent !important;/,
+  )
+  assert.match(
+    styles,
+    /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
+  )
 })

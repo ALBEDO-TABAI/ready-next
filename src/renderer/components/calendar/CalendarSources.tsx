@@ -89,8 +89,9 @@ export default function CalendarSources({
               key={source.id}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 6,
-                padding: '8px 10px', background: 'var(--bg-hover)',
-                border: '1px solid var(--border-default)', borderRadius: 8,
+                padding: '8px 10px',
+                background: 'color-mix(in srgb, var(--calendar-toolbar-chip-bg) 78%, transparent)',
+                border: '1px solid var(--calendar-toolbar-chip-border)', borderRadius: 8,
               }}
             >
               <input
@@ -150,8 +151,11 @@ export default function CalendarSources({
             key={source.id}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              height: 22, cursor: 'pointer',
+              height: 24, cursor: 'pointer',
               opacity: source.enabled ? 1 : 0.5,
+              padding: '0 8px',
+              borderRadius: 8,
+              background: isHovered ? 'color-mix(in srgb, var(--calendar-toolbar-chip-bg) 72%, transparent)' : 'transparent',
             }}
             onMouseEnter={() => setHoveredId(source.id)}
             onMouseLeave={() => { setHoveredId(null); setConfirmDeleteId(null) }}
@@ -206,8 +210,9 @@ export default function CalendarSources({
         <div
           style={{
             display: 'flex', flexDirection: 'column', gap: 6,
-            padding: 10, background: 'rgba(91,141,239,0.04)',
-            border: '1px solid rgba(91,141,239,0.15)', borderRadius: 8,
+            padding: 10,
+            background: 'color-mix(in srgb, var(--calendar-toolbar-chip-bg) 74%, transparent)',
+            border: '1px solid var(--calendar-toolbar-chip-border)', borderRadius: 8,
             marginTop: 2,
           }}
         >

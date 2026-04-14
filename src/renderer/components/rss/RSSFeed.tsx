@@ -288,7 +288,7 @@ export default function RSSFeed({
   return (
     <div
       className="rss-feed-surface content-surface-panel rss-workbench-surface flex flex-col h-full"
-      style={{ padding: '0', background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))', backdropFilter: 'blur(18px) saturate(138%)', WebkitBackdropFilter: 'blur(18px) saturate(138%)' }}
+      style={{ padding: '0', background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none' }}
     >
       {/* Header Bar */}
       <div
@@ -580,18 +580,20 @@ export default function RSSFeed({
       {/* Item List */}
       <div
         className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
-        style={{ background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))' }}
+        style={{ background: 'transparent' }}
       >
-        <div className="divide-y divide-[var(--border-default)]">
+        <div className="flex flex-col gap-2 px-2 py-3">
           {shouldShowBootstrapSkeleton ? (
             Array.from({ length: 6 }).map((_, index) => (
               <div
                 key={`rss-skeleton-${index}`}
                 style={{
-                  padding: `12px ${WORKBENCH_HEADER_EDGE_X}px`,
+                  padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
                   display: 'grid',
                   gap: 10,
                   opacity: 0.92,
+                  borderRadius: 14,
+                  background: 'color-mix(in srgb, var(--surface-card-bg) 8%, transparent)',
                 }}
               >
                 <div
@@ -629,27 +631,30 @@ export default function RSSFeed({
               </div>
             ))
           ) : filteredItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
-              <Filter className="w-10 h-10 mb-3 opacity-50" />
-              <p className="text-[13px]">暂无内容</p>
-            </div>
-          ) : (
-            filteredItems.map((item) => {
-              const isNew = newItemIds.has(item.id)
-              const isSelected = selectedItemId === item.id
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onItemClick(item)}
-                  className="w-full text-left transition-colors relative"
-                  style={{
-                    padding: `12px ${WORKBENCH_HEADER_EDGE_X}px`,
-                    background: isSelected
-                      ? 'color-mix(in srgb, var(--surface-card-bg) 12%, transparent)'
-                      : 'transparent',
-                    boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
-                  }}
-                >
+                <div className="flex flex-col items-center justify-center h-64 text-[var(--text-light)]">
+                  <Filter className="w-10 h-10 mb-3 opacity-50" />
+                  <p className="text-[13px]">暂无内容</p>
+                </div>
+              ) : (
+                filteredItems.map((item) => {
+                  const isNew = newItemIds.has(item.id)
+                  const isSelected = selectedItemId === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => onItemClick(item)}
+                      className="w-full rounded-[14px] border text-left transition-colors relative"
+                      style={{
+                        padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
+                        background: isSelected
+                          ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
+                          : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
+                        borderColor: isSelected
+                          ? 'color-mix(in srgb, var(--color-blue) 26%, var(--border-default))'
+                          : 'color-mix(in srgb, var(--border-default) 18%, transparent)',
+                        boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
+                      }}
+                    >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-2 min-w-0 basis-[82%] max-w-[82%]">
                       <div

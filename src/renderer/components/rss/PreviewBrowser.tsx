@@ -177,7 +177,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   }, [item.link, item.title, onClose])
 
   return (
-    <div className="content-surface-panel flex-1 flex flex-col animate-fadeIn" style={{ background: 'var(--surface-panel-bg)' }}>
+    <div className="content-surface-panel rss-preview-surface flex-1 flex flex-col animate-fadeIn" style={{ background: 'var(--workbench-module-surface-bg)' }}>
       <div
         className="glass-surface-panel flex items-center justify-between flex-shrink-0"
         style={{
@@ -234,9 +234,12 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         </button>
       </div>
 
-      <div ref={contentRef} className="flex-1 relative overflow-hidden" style={{ background: 'var(--bg-content)' }}>
+      <div ref={contentRef} className="rss-preview-content flex-1 relative overflow-hidden" style={{ background: 'transparent' }}>
         {previewState.loading && !previewState.error && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg-content)]/90">
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center"
+            style={{ background: 'color-mix(in srgb, var(--workbench-module-surface-bg) 90%, transparent)' }}
+          >
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-8 h-8 text-[var(--color-blue)] animate-spin" />
               <span className="text-[12px] text-[var(--text-muted)]">正在加载文章...</span>
