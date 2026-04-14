@@ -200,6 +200,7 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   return (
     <div
       data-liquid-shell="side-panel"
+      data-side-panel-variant={isVisible ? variant : 'hidden'}
       className="workbench-panel-frame flex-shrink-0 flex flex-col select-none overflow-hidden"
       style={{
         width: isVisible ? panelWidth : 0,
