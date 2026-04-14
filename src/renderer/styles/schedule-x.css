@@ -36,6 +36,7 @@
 
   --sx-color-shadow: rgba(0, 0, 0, 0.08);
   --sx-color-surface-tint: var(--color-blue);
+  --sx-ready-liquid-neutral-bg: rgba(247, 248, 251, 0.96);
 }
 
 html[data-skin='liquid-glass'] {
@@ -52,6 +53,10 @@ html[data-skin='liquid-glass'] {
 
 html[data-theme='dark'] {
   --sx-color-shadow: rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'] {
+  --sx-ready-liquid-neutral-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 85%, rgba(255, 255, 255, 0.18) 15%);
 }
 
 /* ========== Undo Tailwind v4 preflight border reset inside SX ========== */
@@ -87,10 +92,6 @@ html[data-theme='dark'] {
   overflow: hidden;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-
-:root {
-  --sx-ready-liquid-neutral-bg: rgba(247, 248, 251, 0.96);
 }
 
 html[data-skin='liquid-glass'] .sx__calendar-wrapper {
@@ -174,6 +175,11 @@ html[data-skin='liquid-glass'] .sx__week-header-border {
 }
 
 html[data-skin='liquid-glass'] .sx__week-grid .sx__time-grid-day:first-child {
+  border-left: none !important;
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx__time-grid-day:first-child,
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid .sx__time-grid-day:first-child {
   border-left: none !important;
 }
 

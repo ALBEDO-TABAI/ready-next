@@ -2495,6 +2495,12 @@ html[data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
     0 8px 24px rgba(15, 23, 42, 0.05) !important;
 }
 
+html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
+  background: var(--workbench-module-surface-bg) !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-canvas-shell,
 html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-panel,
 html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-card {
