@@ -26,7 +26,7 @@ export default function DocumentEnterOverlay({
           className="pointer-events-none absolute inset-0 z-30 overflow-hidden"
           style={{
             borderRadius: 'inherit',
-            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+            background: 'var(--workbench-module-surface-bg)',
           }}
         >
           {/* 骨架结构：模拟文档标签栏、路径栏和编辑器 */}
@@ -66,7 +66,7 @@ export default function DocumentEnterOverlay({
               style={{
                 height: 30,
                 borderBottom: '1px solid var(--border-subtle)',
-                background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))',
+                background: 'var(--workbench-module-surface-bg)',
               }}
             >
               <div
@@ -79,7 +79,7 @@ export default function DocumentEnterOverlay({
             <div
               className="relative flex flex-1 flex-col overflow-hidden"
               style={{
-                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                background: 'var(--workbench-module-surface-bg)',
               }}
             >
               {/* 模拟编辑器内容 */}

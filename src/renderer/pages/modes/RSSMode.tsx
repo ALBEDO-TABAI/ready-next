@@ -700,7 +700,7 @@ export default function RSSMode({
   }
 
   return (
-    <div className="workbench-mode-root rss-mode-shell" style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}>
+    <div className="workbench-mode-root rss-mode-shell" style={{ background: 'var(--workbench-module-surface-bg)' }}>
       <div
         className="flex-1 min-h-0"
         style={{
@@ -709,7 +709,7 @@ export default function RSSMode({
       >
         <div
           className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
-          style={{ background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)' }}
+          style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
           {/* Feed list (shrinks when preview is open) */}
           <div
@@ -719,7 +719,7 @@ export default function RSSMode({
             style={{
               width: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
               minWidth: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
-              background: 'color-mix(in srgb, var(--bg-content) 18%, transparent)',
+              background: 'var(--workbench-module-surface-bg)',
             }}
           >
             <RSSFeed

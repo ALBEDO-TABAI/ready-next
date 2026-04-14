@@ -264,7 +264,7 @@ export default function DocumentMode({
               height: 30,
               paddingLeft: 18,
               paddingRight: 18,
-              background: 'var(--workbench-liquid-chrome-bg, color-mix(in srgb, var(--bg-content) 18%, transparent))',
+              background: 'var(--workbench-module-surface-bg)',
             }}
           >
             <div

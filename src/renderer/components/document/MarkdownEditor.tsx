@@ -494,7 +494,7 @@ export default function MarkdownEditor({
   return (
     <div className="flex flex-col h-full">
       {/* ── Content area ──────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}>
+      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-module-surface-bg)' }}>
         <>
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
@@ -539,7 +539,7 @@ export default function MarkdownEditor({
           {viewMode === 'preview' && (
             <div
               className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
-              style={{ background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
+              style={{ background: 'var(--workbench-module-surface-bg)' }}
               onContextMenu={handleContextMenu}
             >
               <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
