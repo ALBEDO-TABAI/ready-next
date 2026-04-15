@@ -7,13 +7,18 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('ai settings panel defines compact field cards and capability chips', () => {
+test('ai settings panel exposes four top-level model categories and per-preset switcher visibility controls', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
 
-  assert.match(settingsPage, /function AISettingsFieldCard/)
-  assert.match(settingsPage, /function AISettingsCapabilityChip/)
-  assert.match(settingsPage, /grid gap-3 md:grid-cols-2/)
-  assert.match(settingsPage, /能力分组/)
-  assert.match(settingsPage, /capabilityModes/)
-  assert.match(settingsPage, /当前状态/)
+  assert.match(settingsPage, /OpenAI/)
+  assert.match(settingsPage, /Anthropic/)
+  assert.match(settingsPage, /Gemini/)
+  assert.match(settingsPage, /自定义/)
+  assert.match(settingsPage, /showInChatSwitcher/)
+  assert.match(settingsPage, /在切换面板显示/)
+  assert.match(settingsPage, /模型列表/)
+  assert.match(settingsPage, /添加模型 ID/)
+  assert.match(settingsPage, /设为默认/)
+  assert.match(settingsPage, /高级设置/)
+  assert.match(settingsPage, /自定义预设/)
 })

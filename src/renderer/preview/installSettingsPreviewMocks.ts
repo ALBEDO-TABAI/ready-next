@@ -1,5 +1,5 @@
 import type { ThemeOption, ThemeSkin } from '../stores/useTheme'
-import type { AIModelConfig } from '../../shared/ai-providers'
+import type { AIModelConfig, AIProviderWorkspace } from '../../shared/ai-providers'
 
 type Success<T> = Promise<{ success: true; data: T }>
 type SuccessNoData = Promise<{ success: true }>
@@ -41,7 +41,85 @@ const mockAIConfig: AIModelConfig = {
   nativeVideoMode: 'auto',
 }
 
+const mockAIWorkspace: AIProviderWorkspace = {
+  version: 1,
+  activeProfileId: 'custom-kimi-preview',
+  profiles: [
+    {
+      id: 'builtin-openai',
+      category: 'openai',
+      name: 'OpenAI',
+      builtIn: true,
+      showInChatSwitcher: true,
+      config: {
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-openai-preview',
+        model: 'gpt-5',
+        displayName: 'OpenAI',
+        agentProtocol: 'openai',
+        wireApi: 'responses',
+        reasoningEffort: 'high',
+        toolUseMode: 'on',
+        visionMode: 'on',
+        nativeVideoMode: 'auto',
+      },
+    },
+    {
+      id: 'builtin-anthropic',
+      category: 'anthropic',
+      name: 'Anthropic',
+      builtIn: true,
+      showInChatSwitcher: true,
+      config: {
+        provider: 'anthropic',
+        baseUrl: 'https://api.anthropic.com/v1',
+        apiKey: 'sk-ant-preview',
+        model: 'claude-sonnet-4-5',
+        displayName: 'Anthropic',
+        agentProtocol: 'anthropic',
+        reasoningEffort: 'medium',
+        toolUseMode: 'on',
+        visionMode: 'on',
+        nativeVideoMode: 'auto',
+      },
+    },
+    {
+      id: 'builtin-gemini',
+      category: 'gemini',
+      name: 'Gemini',
+      builtIn: true,
+      showInChatSwitcher: true,
+      config: {
+        provider: 'gemini',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: 'AIza-preview',
+        model: 'gemini-2.5-pro',
+        displayName: 'Gemini',
+        agentProtocol: 'openai',
+        wireApi: 'chat/completions',
+        reasoningEffort: 'medium',
+        toolUseMode: 'on',
+        visionMode: 'on',
+        nativeVideoMode: 'auto',
+      },
+    },
+    {
+      id: 'custom-kimi-preview',
+      category: 'custom',
+      name: 'Kimi 代码主力',
+      builtIn: false,
+      showInChatSwitcher: true,
+      config: mockAIConfig,
+    },
+  ],
+}
+
+let currentAIConfig: AIModelConfig = mockAIConfig
+let currentAIWorkspace: AIProviderWorkspace = mockAIWorkspace
+
 const settingsStore = new Map<string, string>([
+  ['ai_provider_workspace', JSON.stringify(mockAIWorkspace)],
   ['ai_saved_configs', JSON.stringify({
     moonshot: mockAIConfig,
     openai: {
@@ -253,9 +331,21 @@ export function installSettingsPreviewMocks(): void {
         return { success: true }
       },
       getAll: async () => ({ success: true, data: Object.fromEntries(settingsStore.entries()) }),
-      getAIConfig: async () => ({ success: true, data: mockAIConfig }),
+      getAIConfig: async () => ({ success: true, data: currentAIConfig }),
+      getAIWorkspace: async () => ({ success: true, data: currentAIWorkspace }),
       setAIConfig: async (config: AIModelConfig) => {
+        currentAIConfig = config
         settingsStore.set('ai_model_config', JSON.stringify(config))
+        return { success: true }
+      },
+      setAIWorkspace: async (workspace: AIProviderWorkspace) => {
+        currentAIWorkspace = workspace
+        const activeProfile = workspace.profiles.find((profile) => profile.id === workspace.activeProfileId)
+        if (activeProfile) {
+          currentAIConfig = activeProfile.config
+          settingsStore.set('ai_model_config', JSON.stringify(activeProfile.config))
+        }
+        settingsStore.set('ai_provider_workspace', JSON.stringify(workspace))
         return { success: true }
       },
       testAIConnection: async () => ({

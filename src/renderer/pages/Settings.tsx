@@ -9,8 +9,8 @@ import { useTheme, type ThemeSkin } from '../stores/useTheme'
 import { resolveAIConfigCapabilities } from '../../shared/ai-providers'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
-import { useSettings, AI_PROVIDERS, getProviderDef } from '../stores/useSettings'
-import type { AIProviderType } from '../stores/useSettings'
+import { useSettings, getProviderDef } from '../stores/useSettings'
+import type { AIProviderCategory } from '../stores/useSettings'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import {
   SETTINGS_CARD_STYLE,
@@ -293,13 +293,32 @@ function AISettingsInfoChip({
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 function AISettingsPanel() {
   const {
-    config, loaded, testStatus, testMessage, testLatency,
-    loadConfig, updateField, updateCapabilityMode, switchProvider, testConnection,
-    savedConfigs,
+    config: activeConfig,
+    workspace,
+    loaded,
+    testStatus,
+    testMessage,
+    testLatency,
+    remoteModels,
+    loadConfig,
+    updateField,
+    updateCapabilityMode,
+    selectProfile,
+    activateProfile,
+    renameProfile,
+    setProfileVisibility,
+    addCustomProfile,
+    removeCustomProfile,
+    addModelId,
+    removeModelId,
+    testConnection,
+    getSelectedProfile,
+    getActiveProfile,
   } = useSettings()
 
   const [showKey, setShowKey] = useState(false)
-  const [customModel, setCustomModel] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [pendingModelId, setPendingModelId] = useState('')
   const [remoteChannelsEnabled, setRemoteChannelsEnabled] = useState(true)
   const [sidecarAutostart, setSidecarAutostart] = useState(true)
   const [sidecarHost, setSidecarHost] = useState('127.0.0.1')
@@ -315,6 +334,61 @@ function AISettingsPanel() {
     feishuConnected?: boolean
   } | null>(null)
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
+
+  const selectedProfile = getSelectedProfile()
+  const activeProfile = getActiveProfile()
+  const selectedConfig = selectedProfile?.config || activeConfig
+  const config = selectedConfig
+  const activeCategory = (selectedProfile?.category || 'custom') as AIProviderCategory
+  const currentProvider = getProviderDef(selectedConfig.provider, selectedConfig.baseUrl)
+  const capabilities = resolveAIConfigCapabilities(selectedConfig)
+  const models = currentProvider?.models || []
+  const showReasoningEffort = capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses'
+  const capabilityGroups = listSettingsCapabilityGroups()
+  const customProfiles = workspace.profiles.filter((profile) => profile.category === 'custom')
+  const builtinProfiles = workspace.profiles.filter((profile) => profile.builtIn)
+  const resolvedAgentInterfaceLabel = capabilities?.agentProtocol === 'anthropic'
+    ? 'Anthropic /v1/messages'
+    : capabilities?.wireApi === 'responses'
+      ? 'OpenAI /responses'
+      : 'OpenAI /chat/completions'
+  const compactInputStyle = {
+    ...SETTINGS_INPUT_STYLE,
+    padding: '6px 12px',
+  }
+  const compactSelectStyle = {
+    ...SETTINGS_INPUT_STYLE,
+    padding: '6px 28px 6px 12px',
+  }
+  const stackedInputStyle = {
+    ...compactInputStyle,
+    width: '100%',
+    textAlign: 'left' as const,
+  }
+  const stackedSelectStyle = {
+    ...compactSelectStyle,
+    width: '100%',
+  }
+  const toolTransportLabel = capabilities?.toolCallTransport === 'text'
+    ? '文本桥接'
+    : capabilities?.toolCallTransport === 'native'
+      ? '原生'
+      : '关闭'
+  const knownModel = models.find((model) => model.id === selectedConfig.model)
+  const managedModelIds = selectedConfig.modelIds || (selectedConfig.model ? [selectedConfig.model] : [])
+  const managedModelIdSet = new Set(managedModelIds)
+  const isCustomModelInput = selectedProfile?.category === 'custom'
+    || !knownModel
+    || selectedConfig.model === '__custom__'
+    || selectedConfig.model === 'custom'
+
+  const safeHostname = (() => {
+    try {
+      return selectedConfig.baseUrl ? new URL(selectedConfig.baseUrl).hostname : '未配置'
+    } catch {
+      return selectedConfig.baseUrl || '未配置'
+    }
+  })()
 
   const persistBridgeSetting = useCallback((key: string, value: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.settings) return
@@ -342,10 +416,10 @@ function AISettingsPanel() {
     const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(config)
     if (!result.success || !result.data) return
     setCapabilityRuntimeSnapshot(result.data)
-  }, [config])
+  }, [config, selectedConfig])
 
   useEffect(() => {
-    if (!loaded) loadConfig()
+    if (!loaded) void loadConfig()
   }, [loaded, loadConfig])
 
   useEffect(() => {
@@ -382,69 +456,46 @@ function AISettingsPanel() {
     void refreshCapabilityRuntimeSnapshot()
   }, [refreshCapabilityRuntimeSnapshot])
 
-  const currentProvider = getProviderDef(config.provider)
-  const capabilities = resolveAIConfigCapabilities(config)
-  const models = currentProvider?.models || []
-  const isCustomProvider = config.provider === 'openai-compatible'
-  const showReasoningEffort = capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses'
-  const resolvedAgentInterfaceLabel = capabilities?.agentProtocol === 'anthropic'
-    ? 'Anthropic /v1/messages'
-    : capabilities?.wireApi === 'responses'
-      ? 'OpenAI /responses'
-      : 'OpenAI /chat/completions'
-  const compactInputStyle = {
-    ...SETTINGS_INPUT_STYLE,
-    padding: '6px 12px',
-  }
-  const compactSelectStyle = {
-    ...SETTINGS_INPUT_STYLE,
-    padding: '6px 28px 6px 12px',
-  }
-  const stackedInputStyle = {
-    ...compactInputStyle,
-    width: '100%',
-    textAlign: 'left' as const,
-  }
-  const stackedSelectStyle = {
-    ...compactSelectStyle,
-    width: '100%',
-  }
-  const toolTransportLabel = capabilities?.toolCallTransport === 'text'
-    ? '文本桥接'
-    : capabilities?.toolCallTransport === 'native'
-      ? '原生'
-      : '关闭'
-  const capabilityGroups = listSettingsCapabilityGroups()
+  useEffect(() => {
+    setShowAdvanced(false)
+  }, [selectedProfile?.id])
+
+  useEffect(() => {
+    setPendingModelId('')
+  }, [selectedProfile?.id])
+
+  const selectCategory = useCallback((category: AIProviderCategory) => {
+    if (category === 'custom') {
+      const firstCustom = customProfiles[0]
+      if (firstCustom) {
+        selectProfile(firstCustom.id)
+      } else {
+        addCustomProfile()
+      }
+      return
+    }
+
+    const builtinProfile = builtinProfiles.find((profile) => profile.category === category)
+    if (builtinProfile) {
+      selectProfile(builtinProfile.id)
+    }
+  }, [addCustomProfile, builtinProfiles, customProfiles, selectProfile])
 
   const getCapabilityModeValue = useCallback((groupId: CapabilityGroupId): 'auto' | 'on' | 'off' => {
-    const current = config.capabilityModes?.[groupId]
+    const current = selectedConfig.capabilityModes?.[groupId]
     return current === 'on' || current === 'off' || current === 'auto' ? current : 'auto'
-  }, [config.capabilityModes])
+  }, [selectedConfig.capabilityModes])
 
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
     const snapshot = capabilityRuntimeSnapshot?.groups[groupId]
-    if (!snapshot) {
-      return { label: '读取中', tone: 'muted' as const }
-    }
-    if (snapshot.status === 'inactive') {
-      return { label: '保留占位', tone: 'muted' as const }
-    }
-    if (snapshot.status === 'host_only') {
-      return { label: '宿主内部', tone: 'muted' as const }
-    }
-    if (snapshot.status === 'environment_unavailable') {
-      return { label: '因环境不可用而关闭', tone: 'muted' as const }
-    }
-    if (snapshot.status === 'run_intent_suppressed') {
-      return { label: '因本轮任务抑制', tone: 'muted' as const }
-    }
+    if (!snapshot) return { label: '读取中', tone: 'muted' as const }
+    if (snapshot.status === 'inactive') return { label: '保留占位', tone: 'muted' as const }
+    if (snapshot.status === 'host_only') return { label: '宿主内部', tone: 'muted' as const }
+    if (snapshot.status === 'environment_unavailable') return { label: '因环境不可用而关闭', tone: 'muted' as const }
+    if (snapshot.status === 'run_intent_suppressed') return { label: '因本轮任务抑制', tone: 'muted' as const }
     if (snapshot.status === 'closed') {
-      if (snapshot.reason === 'provider_disabled_tools') {
-        return { label: '因接口能力关闭', tone: 'muted' as const }
-      }
-      if (snapshot.reason === 'disabled_by_config') {
-        return { label: '已关闭', tone: 'muted' as const }
-      }
+      if (snapshot.reason === 'provider_disabled_tools') return { label: '因接口能力关闭', tone: 'muted' as const }
+      if (snapshot.reason === 'disabled_by_config') return { label: '已关闭', tone: 'muted' as const }
       return { label: '当前场景未启用', tone: 'muted' as const }
     }
     return {
@@ -453,27 +504,45 @@ function AISettingsPanel() {
     }
   }, [capabilityRuntimeSnapshot])
 
+  const categoryTabs: Array<{ id: AIProviderCategory; label: string; meta: string }> = [
+    { id: 'openai', label: 'OpenAI', meta: '官方 GPT / Responses' },
+    { id: 'anthropic', label: 'Anthropic', meta: 'Claude / Messages' },
+    { id: 'gemini', label: 'Gemini', meta: 'Google Gemini' },
+    { id: 'custom', label: '自定义', meta: `${customProfiles.length} 个预设` },
+  ]
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Provider Quick Select */}
-      <div>
-        <h4
-          className="text-[11px] font-semibold uppercase tracking-wider mb-3"
-          style={{ color: 'var(--text-light)' }}
-        >
-          API 提供商
-        </h4>
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
-          {AI_PROVIDERS.map((p) => {
-            const isActive = config.provider === p.id
-            const hasSaved = !!(savedConfigs[p.id as AIProviderType]?.apiKey)
+      <div
+        className="glass-surface-card rounded-2xl border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          padding: '16px 18px',
+        }}
+      >
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>模型配置</div>
+            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 760 }}>
+              只保留 OpenAI、Anthropic、Gemini 三个内置入口，其他供应商统一放进自定义预设。每个预设都可以决定是否在聊天切换面板显示。
+            </div>
+          </div>
+          <AISettingsInfoChip
+            label="聊天切换可见项"
+            value={`${workspace.profiles.filter((profile) => profile.showInChatSwitcher).length} 个预设`}
+          />
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
+          {categoryTabs.map((tab) => {
+            const isActive = activeCategory === tab.id
             return (
               <button
-                key={p.id}
-                onClick={() => switchProvider(p.id as AIProviderType)}
-                className="glass-surface-card flex items-center gap-2 rounded-xl border transition-all duration-200 text-left relative"
+                key={tab.id}
+                onClick={() => selectCategory(tab.id)}
+                className="glass-surface-card rounded-2xl border text-left transition-all duration-200"
                 style={{
-                  padding: '9px 11px',
+                  padding: '12px 14px',
                   ...(isActive ? {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
@@ -481,366 +550,626 @@ function AISettingsPanel() {
                   } : SETTINGS_CARD_STYLE),
                 }}
               >
-                {hasSaved && !isActive && (
-                  <span
-                    className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
-                    style={{ background: 'var(--color-green, #22c55e)' }}
-                    title="已配置"
+                <div className="text-[13px] font-semibold" style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}>{tab.label}</div>
+                <div className="text-[10px] mt-1" style={{ color: 'var(--text-light)' }}>{tab.meta}</div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {activeCategory === 'custom' && (
+        <div
+          className="glass-surface-card rounded-2xl border"
+          style={{
+            ...SETTINGS_CARD_STYLE,
+            padding: '16px 18px',
+          }}
+        >
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>自定义预设</div>
+              <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                用来管理 Kimi、FoxCode、火山方舟或你自己的任意模型供应商。
+              </div>
+            </div>
+            <button
+              onClick={() => addCustomProfile()}
+              className="rounded-lg text-[12px] font-medium"
+              style={{
+                ...SETTINGS_PRIMARY_BUTTON_STYLE,
+                padding: '7px 12px',
+              }}
+            >
+              新建自定义预设
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2">
+            {customProfiles.map((profile) => {
+              const isSelected = profile.id === selectedProfile?.id
+              const isCurrent = profile.id === activeProfile?.id
+              return (
+                <button
+                  key={profile.id}
+                  onClick={() => selectProfile(profile.id)}
+                  className="glass-surface-card rounded-xl border text-left transition-all duration-200"
+                  style={{
+                    padding: '12px 14px',
+                    ...(isSelected ? {
+                      borderColor: 'color-mix(in srgb, var(--color-blue) 32%, var(--lg-border-soft) 68%)',
+                      background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
+                    } : SETTINGS_SUBTLE_CARD_STYLE),
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[13px] font-semibold" style={{ color: isSelected ? 'var(--color-blue)' : 'var(--text-title)' }}>{profile.name}</span>
+                        {isCurrent && (
+                          <span className="text-[10px] font-semibold" style={{ color: 'var(--color-green)' }}>当前生效</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] mt-1 truncate" style={{ color: 'var(--text-light)' }}>
+                        {profile.config.model || '未设置模型'} · {profile.config.baseUrl || '未设置地址'}
+                      </div>
+                    </div>
+                    <label
+                      className="flex items-center gap-2 text-[11px] shrink-0"
+                      style={{ color: 'var(--text-light)' }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span>在切换面板显示</span>
+                      <input
+                        type="checkbox"
+                        checked={profile.showInChatSwitcher}
+                        onChange={(event) => setProfileVisibility(profile.id, event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {selectedProfile && (
+        <>
+          <div
+            className="glass-surface-card rounded-2xl border"
+            style={{
+              ...SETTINGS_CARD_STYLE,
+              padding: '14px 16px',
+            }}
+          >
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="min-w-0">
+                <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{selectedProfile.name}</div>
+                <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                  {activeProfile?.id === selectedProfile.id ? '当前默认正在使用这个预设。' : '你可以先调整这里的内容，再决定是否设为当前默认。'}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {activeProfile?.id !== selectedProfile.id && (
+                  <button
+                    onClick={() => activateProfile(selectedProfile.id)}
+                    className="rounded-lg text-[12px] font-medium"
+                    style={{
+                      ...SETTINGS_SECONDARY_BUTTON_STYLE,
+                      padding: '7px 12px',
+                    }}
+                  >
+                    设为当前默认
+                  </button>
+                )}
+                {!selectedProfile.builtIn && (
+                  <button
+                    onClick={() => removeCustomProfile(selectedProfile.id)}
+                    className="rounded-lg text-[12px] font-medium"
+                    style={{
+                      ...SETTINGS_DANGER_BUTTON_STYLE,
+                      padding: '7px 12px',
+                    }}
+                  >
+                    删除预设
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <AISettingsCapabilityChip label="接口" value={resolvedAgentInterfaceLabel} />
+              <AISettingsCapabilityChip label="工具传输" value={toolTransportLabel} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
+              <AISettingsCapabilityChip label="聊天可见" value={selectedProfile.showInChatSwitcher ? '显示' : '隐藏'} tone={selectedProfile.showInChatSwitcher ? 'positive' : 'muted'} />
+              <AISettingsCapabilityChip label="当前主机" value={safeHostname} tone="muted" />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <AISettingsFieldCard
+              title="预设名称"
+              description="聊天区和设置页里看到的名字。"
+              control={(
+                <input
+                  type="text"
+                  value={selectedProfile.name}
+                  onChange={(event) => renameProfile(selectedProfile.id, event.target.value)}
+                  placeholder="给这个预设起个容易识别的名字"
+                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                  style={stackedInputStyle}
+                />
+              )}
+            />
+
+            <AISettingsFieldCard
+              title="在切换面板显示"
+              description="决定它是否会出现在 Agent 聊天区的快速切换面板。"
+              control={(
+                <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+                  <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>showInChatSwitcher</span>
+                  <input
+                    type="checkbox"
+                    checked={selectedProfile.showInChatSwitcher}
+                    onChange={(event) => setProfileVisibility(selectedProfile.id, event.target.checked)}
+                  />
+                </label>
+              )}
+            />
+
+            {selectedProfile.category === 'custom' && (
+              <AISettingsFieldCard
+                wide
+                title="API 地址"
+                description={currentProvider?.helpUrl ? (
+                  <>
+                    服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
+                  </>
+                ) : '自定义供应商地址'}
+                control={(
+                  <input
+                    type="text"
+                    value={selectedConfig.baseUrl}
+                    onChange={(event) => updateField('baseUrl', event.target.value)}
+                    placeholder={currentProvider?.baseUrl || 'https://...'}
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                    style={stackedInputStyle}
                   />
                 )}
-                <span className="text-[16px]">{p.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div
-                    className="text-[12px] font-medium truncate"
-                    style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}
+              />
+            )}
+
+            <AISettingsFieldCard
+              wide={selectedProfile.category !== 'custom'}
+              title="API Key"
+              description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+              control={(
+                <div className="flex items-center gap-2">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={selectedConfig.apiKey}
+                    onChange={(event) => updateField('apiKey', event.target.value)}
+                    placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                    style={stackedInputStyle}
+                  />
+                  <button
+                    onClick={() => setShowKey((value) => !value)}
+                    className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+                    style={{ color: 'var(--text-muted)' }}
                   >
-                    {p.label.split('(')[0].trim()}
+                    {showKey ? '隐藏' : '显示'}
+                  </button>
+                </div>
+              )}
+            />
+
+            <AISettingsFieldCard
+              title="默认模型"
+              description={knownModel?.description || '这个预设默认要使用的模型。'}
+              control={isCustomModelInput ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={selectedConfig.model === '__custom__' ? '' : selectedConfig.model}
+                    onChange={(event) => updateField('model', event.target.value)}
+                    placeholder="模型 ID，如 gpt-5.4 / kimi-for-coding"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                    style={stackedInputStyle}
+                  />
+                  {selectedProfile.category !== 'custom' && models.length > 0 && (
+                    <button
+                      onClick={() => updateField('model', models[0]?.id || '')}
+                      className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      用推荐列表
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <select
+                  value={selectedConfig.model}
+                  onChange={(event) => {
+                    if (event.target.value === '__custom__' || event.target.value === 'custom') {
+                      updateField('model', '')
+                    } else {
+                      updateField('model', event.target.value)
+                    }
+                  }}
+                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                  style={stackedSelectStyle}
+                >
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}{model.contextWindow ? ` (${Math.round(model.contextWindow / 1000)}K)` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            />
+
+            <AISettingsFieldCard
+              wide
+              title="模型列表"
+              description="给当前预设维护多个模型 ID；“设为默认”会切换实际调用的主模型。"
+              control={(
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    {managedModelIds.length > 0 ? managedModelIds.map((modelId) => {
+                      const isDefaultModel = selectedConfig.model === modelId
+                      return (
+                        <div
+                          key={modelId}
+                          className="glass-surface-floating flex items-center gap-2 rounded-full border px-3 py-1.5"
+                          style={{
+                            borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
+                            background: 'color-mix(in srgb, var(--surface-floating-bg) 78%, transparent)',
+                          }}
+                        >
+                          <span className="text-[11px] font-mono" style={{ color: 'var(--text-body)' }}>{modelId}</span>
+                          {isDefaultModel ? (
+                            <span className="text-[10px] font-semibold" style={{ color: 'var(--color-green)' }}>默认</span>
+                          ) : (
+                            <button
+                              onClick={() => updateField('model', modelId)}
+                              className="text-[10px] font-semibold transition-colors hover:opacity-80"
+                              style={{ color: 'var(--color-blue)' }}
+                            >
+                              设为默认
+                            </button>
+                          )}
+                          <button
+                            onClick={() => removeModelId(modelId)}
+                            className="text-[10px] font-semibold transition-colors hover:opacity-80"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      )
+                    }) : (
+                      <span className="text-[11px]" style={{ color: 'var(--text-light)' }}>还没有添加模型 ID。</span>
+                    )}
                   </div>
-                  <div className="text-[10px] truncate" style={{ color: 'var(--text-light)' }}>
-                    {p.labelEn}
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={pendingModelId}
+                      onChange={(event) => setPendingModelId(event.target.value)}
+                      placeholder="添加模型 ID，例如 k2.6-code-preview"
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                      style={stackedInputStyle}
+                    />
+                    <button
+                      onClick={() => {
+                        addModelId(pendingModelId)
+                        setPendingModelId('')
+                      }}
+                      disabled={!pendingModelId.trim()}
+                      className="rounded-lg text-[12px] font-medium disabled:opacity-50"
+                      style={{
+                        ...SETTINGS_SECONDARY_BUTTON_STYLE,
+                        padding: '7px 12px',
+                      }}
+                    >
+                      添加模型 ID
+                    </button>
                   </div>
                 </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+              )}
+            />
 
-      <div
-        className="glass-surface-card rounded-2xl border"
-        style={{
-          ...SETTINGS_CARD_STYLE,
-          padding: '14px 16px',
-        }}
-      >
-        <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
-          当前兼容状态
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <AISettingsCapabilityChip label="接口" value={resolvedAgentInterfaceLabel} />
-          <AISettingsCapabilityChip label="工具传输" value={toolTransportLabel} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
-          <AISettingsCapabilityChip label="工具调用" value={capabilities?.supportsToolCalls ? '开启' : '关闭'} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
-          <AISettingsCapabilityChip label="网页视觉" value={capabilities?.supportsVision ? '开启' : '关闭'} tone={capabilities?.supportsVision ? 'positive' : 'muted'} />
-        </div>
-      </div>
+            {selectedProfile.category !== 'custom' && (
+              <AISettingsFieldCard
+                wide
+                title="API 地址"
+                description="内置供应商默认不会常改；如需代理或镜像地址，可在这里手动覆盖。"
+                control={(
+                  <input
+                    type="text"
+                    value={selectedConfig.baseUrl}
+                    onChange={(event) => updateField('baseUrl', event.target.value)}
+                    placeholder={currentProvider?.baseUrl || 'https://...'}
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                    style={stackedInputStyle}
+                  />
+                )}
+              />
+            )}
 
-      <div
-        className="glass-surface-card rounded-2xl border"
-        style={{
-          ...SETTINGS_CARD_STYLE,
-          padding: '14px 16px',
-        }}
-      >
-        <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
-          能力分组
-        </div>
-        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-          控制哪些业务能力默认暴露给模型；当前状态会显示是已启用，还是因环境不可用而关闭。
-        </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {capabilityGroups.map((group) => {
-            const runtimeDisplay = resolveCapabilityRuntimeDisplay(group.id)
-            return (
-              <div
-                key={group.id}
-                className="glass-surface-card rounded-xl border"
-                style={{
-                  ...SETTINGS_SUBTLE_CARD_STYLE,
-                  padding: '12px 14px',
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{group.label}</div>
-                    <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>{group.description}</div>
-                  </div>
-                  <select
-                    value={getCapabilityModeValue(group.id)}
-                    onChange={(e) => updateCapabilityMode(group.id, e.target.value as 'auto' | 'on' | 'off')}
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-                    style={{
-                      ...compactSelectStyle,
-                      width: 112,
-                    }}
-                  >
-                    <option value="auto">自动</option>
-                    <option value="on">开启</option>
-                    <option value="off">关闭</option>
-                  </select>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <span className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>当前状态</span>
-                  <span
-                    className="text-[11px] font-semibold"
-                    style={{
-                      color: runtimeDisplay.tone === 'positive' ? 'var(--color-green)' : 'var(--text-muted)',
-                    }}
-                  >
-                    {runtimeDisplay.label}
-                  </span>
+            {selectedConfig.provider === 'volcengine' && (
+              <AISettingsFieldCard
+                title="推理接入点 ID"
+                description="火山方舟控制台生成的 ep-xxx。"
+                control={(
+                  <input
+                    type="text"
+                    value={selectedConfig.endpointId || ''}
+                    onChange={(event) => updateField('endpointId', event.target.value)}
+                    placeholder="ep-20250101xxxxx"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
+                    style={stackedInputStyle}
+                  />
+                )}
+              />
+            )}
+          </div>
+
+          <div
+            className="glass-surface-card rounded-2xl border"
+            style={{
+              ...SETTINGS_CARD_STYLE,
+              padding: '14px 16px',
+            }}
+          >
+            <button
+              onClick={() => setShowAdvanced((value) => !value)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <div>
+                <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>高级设置</div>
+                <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                  接口形式、工具调用、网页视觉和思考强度默认收起，需要时再展开。
                 </div>
               </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <AISettingsFieldCard
-          wide
-          title="API 地址"
-          description={currentProvider?.helpUrl ? (
-            <>
-              服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
-            </>
-          ) : '服务端点 URL'}
-          control={(
-            <input
-              type="text"
-              value={config.baseUrl}
-              onChange={(e) => updateField('baseUrl', e.target.value)}
-              placeholder={currentProvider?.baseUrl || 'https://...'}
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
-              style={stackedInputStyle}
-            />
-          )}
-        />
-
-        <AISettingsFieldCard
-          wide
-          title="API Key"
-          description={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-          control={(
-            <div className="flex items-center gap-2">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={config.apiKey}
-                onChange={(e) => updateField('apiKey', e.target.value)}
-                placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
-                style={stackedInputStyle}
-              />
-              <button
-                onClick={() => setShowKey(!showKey)}
-                className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                {showKey ? '隐藏' : '显示'}
-              </button>
-            </div>
-          )}
-        />
-
-        <AISettingsFieldCard
-          title="配置名称"
-          description="聊天面板里显示的别名，可选。"
-          control={(
-            <input
-              type="text"
-              value={config.displayName || ''}
-              onChange={(e) => updateField('displayName', e.target.value)}
-              placeholder="自适应配置"
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
-              style={stackedInputStyle}
-            />
-          )}
-        />
-
-        {config.provider === 'volcengine' && (
-          <AISettingsFieldCard
-            title="推理接入点 ID"
-            description="火山方舟控制台生成的 ep-xxx。"
-            control={(
-              <input
-                type="text"
-                value={config.endpointId || ''}
-                onChange={(e) => updateField('endpointId', e.target.value)}
-                placeholder="ep-20250101xxxxx"
-                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
-                style={stackedInputStyle}
-              />
-            )}
-          />
-        )}
-
-        <AISettingsFieldCard
-          title="默认模型"
-          description={models.find(m => m.id === config.model)?.description || '对话默认使用的模型。'}
-          control={isCustomProvider || config.model === '__custom__' || (!models.some(m => m.id === config.model) && config.model !== '') ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={config.model === '__custom__' ? (customModel || '') : (customModel || config.model)}
-                onChange={(e) => {
-                  setCustomModel(e.target.value)
-                  updateField('model', e.target.value)
+              <ChevronRight
+                className="w-4 h-4"
+                style={{
+                  color: 'var(--text-muted)',
+                  transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 160ms ease',
                 }}
-                placeholder="模型 ID，如 kimi-for-coding"
-                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
-                style={stackedInputStyle}
               />
-              {!isCustomProvider && (
-                <button
-                  onClick={() => {
-                    setCustomModel('')
-                    updateField('model', models[0]?.id || '')
-                  }}
-                  className="text-[11px] px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] transition-colors shrink-0"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  选列表
-                </button>
-              )}
-            </div>
-          ) : (
-            <select
-              value={config.model}
-              onChange={(e) => {
-                if (e.target.value === '__custom__') {
-                  setCustomModel('')
-                  updateField('model', '__custom__')
-                } else {
-                  updateField('model', e.target.value)
-                }
-              }}
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={stackedSelectStyle}
-            >
-              {models.map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.label}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}K)` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-        />
+            </button>
 
-        <AISettingsFieldCard
-          title="Agent 接口"
-          description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
-          control={(
-            <select
-              value={config.agentProtocol || 'auto'}
-              onChange={(e) => updateField('agentProtocol', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.agentProtocol)}
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={stackedSelectStyle}
-            >
-              <option value="auto">自动</option>
-              <option value="openai">OpenAI 兼容</option>
-              <option value="anthropic">Anthropic 兼容</option>
-            </select>
-          )}
-        />
+            {showAdvanced && (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <AISettingsFieldCard
+                  title="Agent 接口"
+                  description={`当前解析为 ${resolvedAgentInterfaceLabel}。`}
+                  control={(
+                    <select
+                      value={selectedConfig.agentProtocol || 'auto'}
+                      onChange={(event) => updateField('agentProtocol', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.agentProtocol)}
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      style={stackedSelectStyle}
+                    >
+                      <option value="auto">自动</option>
+                      <option value="openai">OpenAI 兼容</option>
+                      <option value="anthropic">Anthropic 兼容</option>
+                    </select>
+                  )}
+                />
 
-        {capabilities?.agentProtocol === 'openai' && (
-          <AISettingsFieldCard
-            title="OpenAI API 形式"
-            description={(
-              <>
-                在 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/chat/completions</code> 和 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/responses</code> 之间切换。
-              </>
-            )}
-            control={(
-              <select
-                value={config.wireApi || 'auto'}
-                onChange={(e) => updateField('wireApi', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.wireApi)}
-                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-                style={stackedSelectStyle}
-              >
-                <option value="auto">自动</option>
-                <option value="chat/completions">chat/completions</option>
-                <option value="responses">responses</option>
-              </select>
-            )}
-          />
-        )}
+                {capabilities?.agentProtocol === 'openai' && (
+                  <AISettingsFieldCard
+                    title="OpenAI API 形式"
+                    description="在 chat/completions 和 responses 之间切换。"
+                    control={(
+                      <select
+                        value={selectedConfig.wireApi || 'auto'}
+                        onChange={(event) => updateField('wireApi', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.wireApi)}
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        style={stackedSelectStyle}
+                      >
+                        <option value="auto">自动</option>
+                        <option value="chat/completions">chat/completions</option>
+                        <option value="responses">responses</option>
+                      </select>
+                    )}
+                  />
+                )}
 
-        <AISettingsFieldCard
-          title="工具调用"
-          description={`当前为 ${capabilities?.supportsToolCalls ? '开启' : '关闭'}。`}
-          control={(
-            <select
-              value={config.toolUseMode || 'auto'}
-              onChange={(e) => updateField('toolUseMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.toolUseMode)}
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={stackedSelectStyle}
-            >
-              <option value="auto">自动</option>
-              <option value="on">强制开启</option>
-              <option value="off">关闭</option>
-            </select>
-          )}
-        />
+                <AISettingsFieldCard
+                  title="工具调用"
+                  description={`当前为 ${capabilities?.supportsToolCalls ? '开启' : '关闭'}。`}
+                  control={(
+                    <select
+                      value={selectedConfig.toolUseMode || 'auto'}
+                      onChange={(event) => updateField('toolUseMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.toolUseMode)}
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      style={stackedSelectStyle}
+                    >
+                      <option value="auto">自动</option>
+                      <option value="on">强制开启</option>
+                      <option value="off">关闭</option>
+                    </select>
+                  )}
+                />
 
-        <AISettingsFieldCard
-          title="网页视觉"
-          description={`浏览器自动化视觉分析当前为 ${capabilities?.supportsVision ? '开启' : '关闭'}。`}
-          control={(
-            <select
-              value={config.visionMode || 'auto'}
-              onChange={(e) => updateField('visionMode', (e.target.value === 'auto' ? undefined : e.target.value) as typeof config.visionMode)}
-              className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-              style={stackedSelectStyle}
-            >
-              <option value="auto">自动</option>
-              <option value="on">强制开启</option>
-              <option value="off">关闭</option>
-            </select>
-          )}
-        />
+                <AISettingsFieldCard
+                  title="网页视觉"
+                  description={`浏览器自动化视觉分析当前为 ${capabilities?.supportsVision ? '开启' : '关闭'}。`}
+                  control={(
+                    <select
+                      value={selectedConfig.visionMode || 'auto'}
+                      onChange={(event) => updateField('visionMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.visionMode)}
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      style={stackedSelectStyle}
+                    >
+                      <option value="auto">自动</option>
+                      <option value="on">强制开启</option>
+                      <option value="off">关闭</option>
+                    </select>
+                  )}
+                />
 
-        {showReasoningEffort && (
-          <AISettingsFieldCard
-            title="思考强度"
-            description="只在 responses 风格接口下显示。"
-            control={(
-              <select
-                value={config.reasoningEffort || 'high'}
-                onChange={(e) => updateField('reasoningEffort', e.target.value as typeof config.reasoningEffort)}
-                className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
-                style={stackedSelectStyle}
-              >
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-              </select>
-            )}
-          />
-        )}
-
-        <AISettingsFieldCard
-          wide
-          title="测试连接"
-          description="验证当前地址、密钥和模型是否能通。"
-          control={(
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] flex items-center gap-1.5 min-w-0" style={{ color: testStatus === 'success' ? 'var(--color-green)' : testStatus === 'error' ? 'var(--color-red)' : 'var(--text-light)' }}>
-                {testStatus === 'testing' && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
-                {testStatus === 'success' && <CheckCircle2 className="w-3 h-3 shrink-0" />}
-                {testStatus === 'error' && <XCircle className="w-3 h-3 shrink-0" />}
-                <span className="truncate">{testMessage || '验证 API 配置是否有效'}</span>
-                {typeof testLatency === 'number' && testStatus === 'success' && (
-                  <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{testLatency} ms</span>
+                {showReasoningEffort && (
+                  <AISettingsFieldCard
+                    title="思考强度"
+                    description="只在 responses 风格接口下显示。"
+                    control={(
+                      <select
+                        value={selectedConfig.reasoningEffort || 'high'}
+                        onChange={(event) => updateField('reasoningEffort', event.target.value as typeof selectedConfig.reasoningEffort)}
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        style={stackedSelectStyle}
+                      >
+                        <option value="minimal">minimal</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                      </select>
+                    )}
+                  />
                 )}
               </div>
-              <button
-                onClick={() => testConnection()}
-                disabled={testStatus === 'testing'}
-                className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-                style={{
-                  ...SETTINGS_PRIMARY_BUTTON_STYLE,
-                  padding: '7px 16px',
-                }}
-              >
-                {testStatus === 'testing' ? '测试中...' : '测试'}
-              </button>
+            )}
+          </div>
+
+          <div
+            className="glass-surface-card rounded-2xl border"
+            style={{
+              ...SETTINGS_CARD_STYLE,
+              padding: '14px 16px',
+            }}
+          >
+            <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+              能力分组
+            </div>
+            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+              控制哪些业务能力默认暴露给模型；当前状态会显示是已启用，还是因环境不可用而关闭。
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {capabilityGroups.map((group) => {
+                const runtimeDisplay = resolveCapabilityRuntimeDisplay(group.id)
+                return (
+                  <div
+                    key={group.id}
+                    className="glass-surface-card rounded-xl border"
+                    style={{
+                      ...SETTINGS_SUBTLE_CARD_STYLE,
+                      padding: '12px 14px',
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{group.label}</div>
+                        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>{group.description}</div>
+                      </div>
+                      <select
+                        value={getCapabilityModeValue(group.id)}
+                        onChange={(event) => updateCapabilityMode(group.id, event.target.value as 'auto' | 'on' | 'off')}
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        style={{
+                          ...compactSelectStyle,
+                          width: 112,
+                        }}
+                      >
+                        <option value="auto">自动</option>
+                        <option value="on">开启</option>
+                        <option value="off">关闭</option>
+                      </select>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>当前状态</span>
+                      <span
+                        className="text-[11px] font-semibold"
+                        style={{
+                          color: runtimeDisplay.tone === 'positive' ? 'var(--color-green)' : 'var(--text-muted)',
+                        }}
+                      >
+                        {runtimeDisplay.label}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <AISettingsFieldCard
+            wide
+            title="测试连接"
+            description="验证当前地址、密钥和模型是否能通。"
+            control={(
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] flex items-center gap-1.5 min-w-0" style={{ color: testStatus === 'success' ? 'var(--color-green)' : testStatus === 'error' ? 'var(--color-red)' : 'var(--text-light)' }}>
+                  {testStatus === 'testing' && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+                  {testStatus === 'success' && <CheckCircle2 className="w-3 h-3 shrink-0" />}
+                  {testStatus === 'error' && <XCircle className="w-3 h-3 shrink-0" />}
+                  <span className="truncate">{testMessage || '验证当前预设是否可用'}</span>
+                  {typeof testLatency === 'number' && testStatus === 'success' && (
+                    <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{testLatency} ms</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => testConnection(selectedProfile.id)}
+                  disabled={testStatus === 'testing'}
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                  style={{
+                    ...SETTINGS_PRIMARY_BUTTON_STYLE,
+                    padding: '7px 16px',
+                  }}
+                >
+                  {testStatus === 'testing' ? '测试中...' : '测试'}
+                </button>
+              </div>
+            )}
+          />
+
+          {remoteModels.length > 0 && (
+            <div
+              className="glass-surface-card rounded-2xl border"
+              style={{
+                ...SETTINGS_CARD_STYLE,
+                padding: '14px 16px',
+              }}
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+                远端返回的模型列表
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {remoteModels.map((modelId) => (
+                  <div
+                    key={modelId}
+                    className="glass-surface-floating flex items-center gap-2 rounded-full border px-3 py-1"
+                    style={{
+                      borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
+                    }}
+                  >
+                    <span className="text-[11px] font-mono" style={{ color: 'var(--text-body)' }}>
+                      {modelId}
+                    </span>
+                    {!managedModelIdSet.has(modelId) && (
+                      <button
+                        onClick={() => addModelId(modelId)}
+                        className="text-[10px] font-semibold transition-colors hover:opacity-80"
+                        style={{ color: 'var(--color-blue)' }}
+                      >
+                        加入预设
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        />
-      </div>
+        </>
+      )}
 
-      {/* Message Coalescing */}
       <div
         className="glass-surface-card rounded-2xl border"
         style={{
@@ -860,8 +1189,8 @@ function AISettingsPanel() {
             <input
               type="checkbox"
               checked={messageCoalesceEnabled}
-              onChange={(e) => {
-                const next = e.target.checked
+              onChange={(event) => {
+                const next = event.target.checked
                 setMessageCoalesceEnabled(next)
                 persistBridgeSetting('agent_message_coalesce_enabled', String(next))
               }}
@@ -871,9 +1200,9 @@ function AISettingsPanel() {
             <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
             <select
               value={messageCoalesceWindowMs}
-              onChange={(e) => {
-                setMessageCoalesceWindowMs(e.target.value)
-                persistBridgeSetting('agent_message_coalesce_window_ms', e.target.value)
+              onChange={(event) => {
+                setMessageCoalesceWindowMs(event.target.value)
+                persistBridgeSetting('agent_message_coalesce_window_ms', event.target.value)
               }}
               className="mt-1 w-full bg-transparent text-[12px] outline-none cursor-pointer"
               style={{ color: 'var(--text-body)' }}
@@ -888,7 +1217,6 @@ function AISettingsPanel() {
         </div>
       </div>
 
-      {/* Agent Runtime */}
       <div
         className="glass-surface-card rounded-2xl border overflow-hidden"
         style={SETTINGS_CARD_STYLE}
@@ -919,8 +1247,8 @@ function AISettingsPanel() {
             <input
               type="checkbox"
               checked={remoteChannelsEnabled}
-              onChange={(e) => {
-                const next = e.target.checked
+              onChange={(event) => {
+                const next = event.target.checked
                 setRemoteChannelsEnabled(next)
                 persistBridgeSetting('remote_channels_enabled', String(next))
               }}
@@ -931,8 +1259,8 @@ function AISettingsPanel() {
             <input
               type="checkbox"
               checked={sidecarAutostart}
-              onChange={(e) => {
-                const next = e.target.checked
+              onChange={(event) => {
+                const next = event.target.checked
                 setSidecarAutostart(next)
                 persistBridgeSetting('sidecar_autostart', String(next))
               }}
@@ -945,7 +1273,7 @@ function AISettingsPanel() {
             <input
               type="text"
               value={sidecarHost}
-              onChange={(e) => setSidecarHost(e.target.value)}
+              onChange={(event) => setSidecarHost(event.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_host', sidecarHost)}
               className="mt-1 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
@@ -956,7 +1284,7 @@ function AISettingsPanel() {
             <input
               type="text"
               value={sidecarPort}
-              onChange={(e) => setSidecarPort(e.target.value)}
+              onChange={(event) => setSidecarPort(event.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_port', sidecarPort)}
               className="mt-1 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
@@ -985,31 +1313,30 @@ function AISettingsPanel() {
         </div>
       </div>
 
-      {/* Provider Notes */}
       {currentProvider && (
         <div
           className="text-[11px] leading-relaxed"
           style={{ padding: '2px 0 0', color: 'var(--text-light)' }}
         >
-          {config.provider === 'anthropic' && (
+          {selectedConfig.provider === 'anthropic' && (
             <>注意：Anthropic API 使用 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>x-api-key</code> 认证头（非 Bearer），且 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>max_tokens</code> 为必填字段。系统已自动处理。</>
           )}
-          {config.provider === 'gemini' && (
+          {selectedConfig.provider === 'gemini' && (
             <>Gemini API 已使用 OpenAI 兼容层 (<code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/v1beta/openai/</code>)，API Key 在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>Google AI Studio</a> 获取。</>
           )}
-          {config.provider === 'volcengine' && (
+          {selectedConfig.provider === 'volcengine' && (
             <>火山方舟需要先在<a href="https://console.volcengine.com/ark" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>控制台</a>创建推理接入点，获取 ep-xxx 格式的 Endpoint ID。Seedance/Seedream 为异步任务模式。</>
           )}
-          {config.provider === 'moonshot' && (
+          {selectedConfig.provider === 'moonshot' && (
             <>Moonshot API 完全兼容 OpenAI SDK，在<a href="https://platform.moonshot.cn/console" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>月之暗面控制台</a>获取 API Key。支持最多 128K 上下文和文件上传。</>
           )}
-          {config.provider === 'openai' && (
+          {selectedConfig.provider === 'openai' && (
             <>在 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>OpenAI Dashboard</a> 获取 API Key。推理模型 (o1/o3) 不支持 temperature 参数，系统已自动处理。</>
           )}
-          {config.provider === 'fox' && (
-            <>FoxCode / NewCLI Codex 使用 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/responses</code> 接口，并通过 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>Authorization: Bearer ...</code> 认证。默认地址为 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>https://code.newcli.com/codex/v1</code>。若切换其它供应商，可在上方把 Agent 接口、OpenAI API 形式与工具调用能力调成对应模式。</>
+          {selectedConfig.provider === 'fox' && (
+            <>FoxCode / NewCLI Codex 使用 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>/responses</code> 接口，并通过 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>Authorization: Bearer ...</code> 认证。默认地址为 <code className="font-mono text-[10px]" style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 4 }}>https://code.newcli.com/codex/v1</code>。</>
           )}
-          {config.provider === 'openai-compatible' && (
+          {selectedConfig.provider === 'openai-compatible' && (
             <>输入任意 OpenAI 或 Anthropic 兼容 API 的地址和密钥。支持 LM Studio、Ollama、vLLM、FastChat 等本地或第三方服务；若要让浏览器 / 文档工具继续可用，请在上方同步设置 Agent 接口、API 形式与工具调用能力。</>
           )}
         </div>

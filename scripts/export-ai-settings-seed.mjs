@@ -25,7 +25,7 @@ db_path = sys.argv[1]
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 rows = dict(cur.execute(
-    "SELECT key, value FROM settings WHERE key IN ('ai_model_config', 'ai_saved_configs')"
+    "SELECT key, value FROM settings WHERE key IN ('ai_model_config', 'ai_saved_configs', 'ai_provider_workspace')"
 ).fetchall())
 conn.close()
 print(json.dumps(rows))
@@ -43,6 +43,7 @@ if (pythonResult.status !== 0) {
 const rawSettings = JSON.parse(pythonResult.stdout || '{}')
 const currentConfig = rawSettings.ai_model_config ? JSON.parse(rawSettings.ai_model_config) : null
 const savedConfigs = rawSettings.ai_saved_configs ? JSON.parse(rawSettings.ai_saved_configs) : {}
+const workspace = rawSettings.ai_provider_workspace ? JSON.parse(rawSettings.ai_provider_workspace) : null
 
 const moonshotConfig = currentConfig?.provider === 'moonshot'
   ? currentConfig
@@ -58,6 +59,7 @@ const seed = {
   ai_saved_configs: {
     moonshot: moonshotConfig,
   },
+  ...(workspace ? { ai_provider_workspace: workspace } : {}),
 }
 
 mkdirSync(dirname(outputPath), { recursive: true })

@@ -447,6 +447,8 @@ const settingsAPI = {
   getAll: () => ipcRenderer.invoke('settings:getAll'),
   getAIConfig: () => ipcRenderer.invoke('settings:getAIConfig'),
   setAIConfig: (config: unknown) => ipcRenderer.invoke('settings:setAIConfig', config),
+  getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),
+  setAIWorkspace: (workspace: unknown) => ipcRenderer.invoke('settings:setAIWorkspace', workspace),
   testAIConnection: (config: unknown) => ipcRenderer.invoke('settings:testAIConnection', config),
 }
 

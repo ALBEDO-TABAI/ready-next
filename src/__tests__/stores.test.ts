@@ -77,6 +77,7 @@ const { useWorkspace } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 const { useSettings } = await import('../renderer/stores/useSettings')
+const { createDefaultAIWorkspace, getActiveAIConfig } = await import('../shared/ai-providers')
 
 // ============================================================
 // Existing Type Validation Tests (preserved from original)
@@ -782,6 +783,47 @@ describe('useAgent Store', () => {
         cleanup()
     })
 
+    it('should preserve the placeholder local scope id when creating a fresh local session', async () => {
+        const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (agent: string, scopeId?: string) => {
+                    createLocalScopeCalls.push({ agent, scopeId })
+                    const id = scopeId || 'persisted-scope-id'
+                    return {
+                        success: true,
+                        data: {
+                            id,
+                            agent,
+                            title: '新对话',
+                            sourceKind: 'local',
+                            sourceId: 'app',
+                            threadKey: id,
+                            meta: { sourceLabel: '应用内', createdBy: 'app' },
+                            createdAt: '2026-04-15T10:00:00.000Z',
+                            updatedAt: '2026-04-15T10:00:00.000Z',
+                            lastMessageAt: null,
+                        },
+                    }
+                },
+            },
+        }
+
+        useAgent.getState().newSession()
+        const initialScopeId = useAgent.getState().currentScopeId
+
+        assert.ok(initialScopeId)
+        assert.match(initialScopeId!, /^conv-local-/)
+
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        const state = useAgent.getState()
+        assert.deepStrictEqual(createLocalScopeCalls, [{ agent: 'butler', scopeId: initialScopeId! }])
+        assert.strictEqual(state.currentScopeId, initialScopeId)
+        assert.strictEqual(state.currentScope?.id, initialScopeId)
+    })
+
     it('should keep streaming chunks keyed by runId and scopeId even after switching active scope', async () => {
         const listeners: {
             onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
@@ -1335,28 +1377,22 @@ describe('useTheme Store', () => {
 describe('useSettings Store', () => {
     beforeEach(() => {
         storage.clear()
+        const workspace = createDefaultAIWorkspace()
         ;(globalThis as any).window.electronAPI = {
             settings: {
-                getAIConfig: async () => ({ success: true, data: null }),
+                getAIWorkspace: async () => ({ success: true, data: workspace }),
+                getAIConfig: async () => ({ success: true, data: getActiveAIConfig(workspace) }),
                 get: async () => ({ success: false }),
+                setAIWorkspace: async () => ({ success: true }),
                 setAIConfig: async () => ({ success: true }),
                 set: async () => ({ success: true }),
                 testAIConnection: async () => ({ success: false, error: 'not configured' }),
             },
         }
         useSettings.setState({
-            config: {
-                provider: 'moonshot',
-                baseUrl: 'https://api.moonshot.cn/v1',
-                apiKey: '',
-                model: 'kimi-for-coding',
-                agentProtocol: 'openai',
-                wireApi: 'chat/completions',
-                reasoningEffort: 'medium',
-                toolUseMode: 'auto',
-                visionMode: 'auto',
-                nativeVideoMode: 'auto',
-            },
+            config: getActiveAIConfig(workspace)!,
+            workspace,
+            selectedProfileId: workspace.activeProfileId,
             loaded: true,
             testStatus: 'idle',
             testMessage: '',
@@ -1368,8 +1404,9 @@ describe('useSettings Store', () => {
 
     it('debounces updateField persistence and only flushes the latest value', async () => {
         const calls: string[] = []
-        ;(globalThis as any).window.electronAPI.settings.setAIConfig = async (config: { apiKey: string }) => {
-            calls.push(config.apiKey)
+        ;(globalThis as any).window.electronAPI.settings.setAIWorkspace = async (workspace: { profiles: Array<{ id: string; config: { apiKey: string } }>; activeProfileId: string }) => {
+            const profile = workspace.profiles.find((item) => item.id === workspace.activeProfileId)
+            calls.push(profile?.config.apiKey || '')
             return { success: true }
         }
         ;(globalThis as any).window.electronAPI.settings.set = async () => ({ success: true })
@@ -1386,8 +1423,9 @@ describe('useSettings Store', () => {
 
     it('flushes pending config before switching provider', async () => {
         const calls: Array<{ provider: string; apiKey: string }> = []
-        ;(globalThis as any).window.electronAPI.settings.setAIConfig = async (config: { provider: string; apiKey: string }) => {
-            calls.push({ provider: config.provider, apiKey: config.apiKey })
+        ;(globalThis as any).window.electronAPI.settings.setAIWorkspace = async (workspace: { profiles: Array<{ id: string; config: { provider: string; apiKey: string } }>; activeProfileId: string }) => {
+            const profile = workspace.profiles.find((item) => item.id === workspace.activeProfileId)
+            calls.push({ provider: profile?.config.provider || '', apiKey: profile?.config.apiKey || '' })
             return { success: true }
         }
         ;(globalThis as any).window.electronAPI.settings.set = async () => ({ success: true })

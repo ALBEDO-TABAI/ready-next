@@ -56,6 +56,7 @@ export interface AIModelConfig {
   baseUrl: string
   apiKey: string
   model: string
+  modelIds?: string[]
   agentProtocol?: AIAgentProtocol
   wireApi?: AIWireAPI
   reasoningEffort?: AIReasoningEffort
@@ -68,6 +69,33 @@ export interface AIModelConfig {
   displayName?: string
   /** 业务能力分组开关 */
   capabilityModes?: CapabilityModeMap
+}
+
+export type AIProviderCategory = 'openai' | 'anthropic' | 'gemini' | 'custom'
+
+export interface AIProviderProfile {
+  id: string
+  category: AIProviderCategory
+  name: string
+  builtIn: boolean
+  showInChatSwitcher: boolean
+  config: AIModelConfig
+}
+
+export interface AIProviderWorkspace {
+  version: 1
+  activeProfileId: string
+  profiles: AIProviderProfile[]
+}
+
+export interface LegacyAISettingsPayload {
+  aiModelConfig?: AIModelConfig | null
+  aiSavedConfigs?: Partial<Record<AIProviderType, AIModelConfig>> | null
+}
+
+export interface ChatSwitcherProfileGroups {
+  currentHiddenProfile: AIProviderProfile | null
+  visibleProfiles: AIProviderProfile[]
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +277,112 @@ const PROVIDER_ALIASES: Record<string, AIProviderType> = {
   'compatible': 'openai-compatible',
 }
 
+const BUILTIN_PROFILE_META: Record<Exclude<AIProviderCategory, 'custom'>, { id: string; name: string; provider: AIProviderType }> = {
+  openai: { id: 'builtin-openai', name: 'OpenAI', provider: 'openai' },
+  anthropic: { id: 'builtin-anthropic', name: 'Anthropic', provider: 'anthropic' },
+  gemini: { id: 'builtin-gemini', name: 'Gemini', provider: 'gemini' },
+}
+
+function cloneConfig(config: AIModelConfig): AIModelConfig {
+  return normalizeAIConfig({
+    ...config,
+    capabilityModes: normalizeCapabilityModeMap(config.capabilityModes),
+  })
+}
+
+function normalizeModelIds(model: unknown, modelIds: unknown): string[] | undefined {
+  const primaryModel = String(model || '').trim()
+  const rawIds = Array.isArray(modelIds) ? modelIds : []
+  const ordered = [
+    primaryModel,
+    ...rawIds.map((value) => String(value || '').trim()),
+  ].filter((value) => value && value !== '__custom__' && value !== 'custom')
+
+  if (ordered.length === 0) return undefined
+
+  const deduped: string[] = []
+  for (const value of ordered) {
+    if (!deduped.includes(value)) deduped.push(value)
+  }
+  return deduped
+}
+
+export function createConfigFromProvider(providerId: AIProviderType, overrides?: Partial<AIModelConfig>): AIModelConfig {
+  const provider = getProviderDef(providerId)
+  return normalizeAIConfig({
+    provider: providerId,
+    baseUrl: provider?.baseUrl || '',
+    apiKey: '',
+    model: provider?.models[0]?.id || '',
+    agentProtocol: provider?.agentProtocol,
+    wireApi: provider?.wireApi,
+    reasoningEffort: provider?.defaultReasoningEffort,
+    toolUseMode: 'auto',
+    visionMode: 'auto',
+    nativeVideoMode: 'auto',
+    capabilityModes: {},
+    ...(overrides || {}),
+  })
+}
+
+function resolveCategoryForConfig(config: AIModelConfig | null | undefined): AIProviderCategory {
+  if (!config) return 'custom'
+  if (config.provider === 'openai') return 'openai'
+  if (config.provider === 'anthropic') return 'anthropic'
+  if (config.provider === 'gemini') return 'gemini'
+  return 'custom'
+}
+
+function resolveProfileName(config: AIModelConfig, fallback: string): string {
+  const trimmed = String(config.displayName || '').trim()
+  if (trimmed) return trimmed
+  const provider = getProviderDef(config.provider, config.baseUrl)
+  return provider?.label.split('(')[0]?.trim() || fallback
+}
+
+function createBuiltinProfile(
+  category: Exclude<AIProviderCategory, 'custom'>,
+  config?: AIModelConfig,
+): AIProviderProfile {
+  const meta = BUILTIN_PROFILE_META[category]
+  const nextConfig = cloneConfig(config || createConfigFromProvider(meta.provider))
+  return {
+    id: meta.id,
+    category,
+    name: resolveProfileName(nextConfig, meta.name),
+    builtIn: true,
+    showInChatSwitcher: true,
+    config: {
+      ...nextConfig,
+      displayName: resolveProfileName(nextConfig, meta.name),
+    },
+  }
+}
+
+function generateProfileId(prefix: string): string {
+  const randomPart = Math.random().toString(36).slice(2, 8)
+  return `${prefix}-${Date.now().toString(36)}-${randomPart}`
+}
+
+export function createCustomAIProviderProfile(
+  config?: Partial<AIModelConfig>,
+  options?: Partial<Pick<AIProviderProfile, 'id' | 'name' | 'showInChatSwitcher'>>,
+): AIProviderProfile {
+  const nextConfig = cloneConfig(createConfigFromProvider('openai-compatible', config))
+  const name = String(options?.name || '').trim() || resolveProfileName(nextConfig, '自定义预设')
+  return {
+    id: options?.id || generateProfileId('custom'),
+    category: 'custom',
+    name,
+    builtIn: false,
+    showInChatSwitcher: options?.showInChatSwitcher ?? true,
+    config: {
+      ...nextConfig,
+      displayName: name,
+    },
+  }
+}
+
 export function normalizeProviderId(id: string | undefined | null, baseUrl?: string): AIProviderType | undefined {
   const normalizedId = String(id || '').trim().toLowerCase()
   const normalizedBaseUrl = String(baseUrl || '').trim().toLowerCase()
@@ -287,12 +421,19 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
   if (!providerId) return config
 
   const provider = AI_PROVIDERS.find((item) => item.id === providerId)
+  const normalizedBaseUrl = String(config.baseUrl || '').trim().replace(/\/+$/, '')
+  const isKimiCoding = normalizedBaseUrl.includes('api.kimi.com/coding')
+  const normalizedModelIds = normalizeModelIds(config.model, config.modelIds)
   const nextConfig: AIModelConfig = {
     ...config,
     provider: providerId,
     wireApi: config.wireApi || provider?.wireApi || config.wireApi,
     reasoningEffort: config.reasoningEffort || provider?.defaultReasoningEffort || config.reasoningEffort,
     capabilityModes: normalizeCapabilityModeMap(config.capabilityModes),
+    modelIds: normalizedModelIds,
+  }
+  if (isKimiCoding) {
+    nextConfig.agentProtocol = 'anthropic'
   }
   return nextConfig as T
 }
@@ -335,8 +476,8 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
   const provider = getProviderDef(normalizedConfig.provider, baseUrl)
   const explicitProtocol = normalizeAgentProtocol(normalizedConfig.agentProtocol)
   const inferredProtocol = (() => {
-    if (provider?.agentProtocol) return provider.agentProtocol
     if (baseUrl.includes('api.kimi.com/coding')) return 'anthropic'
+    if (provider?.agentProtocol) return provider.agentProtocol
     if (baseUrl.includes('api.anthropic.com')) return 'anthropic'
     if (/\/v1\/messages$/i.test(baseUrl)) return 'anthropic'
     return 'openai'
@@ -395,6 +536,173 @@ export function getDefaultConfig(): AIModelConfig {
     toolUseMode: 'auto',
     visionMode: 'auto',
     nativeVideoMode: 'auto',
+  }
+}
+
+export function migrateLegacyAISettingsToWorkspace(payload: LegacyAISettingsPayload): AIProviderWorkspace {
+  const currentConfig = normalizeAIConfig(payload.aiModelConfig || getDefaultConfig())
+  const savedConfigs = Object.fromEntries(
+    Object.entries(payload.aiSavedConfigs || {}).map(([providerId, config]) => [
+      providerId,
+      normalizeAIConfig(config as AIModelConfig),
+    ]),
+  ) as Partial<Record<AIProviderType, AIModelConfig>>
+
+  const builtinProfiles = (Object.keys(BUILTIN_PROFILE_META) as Array<Exclude<AIProviderCategory, 'custom'>>).map((category) => {
+    const meta = BUILTIN_PROFILE_META[category]
+    const nextConfig = currentConfig.provider === meta.provider
+      ? currentConfig
+      : savedConfigs[meta.provider] || createConfigFromProvider(meta.provider)
+    return createBuiltinProfile(category, nextConfig)
+  })
+
+  const customByProvider = new Map<AIProviderType, AIModelConfig>()
+
+  for (const [providerId, config] of Object.entries(savedConfigs) as Array<[AIProviderType, AIModelConfig]>) {
+    if (resolveCategoryForConfig(config) === 'custom') {
+      customByProvider.set(providerId, config)
+    }
+  }
+
+  if (resolveCategoryForConfig(currentConfig) === 'custom') {
+    customByProvider.set(currentConfig.provider, currentConfig)
+  }
+
+  const customProfiles = Array.from(customByProvider.entries()).map(([providerId, config]) => {
+    const isActive = currentConfig.provider === providerId
+      && currentConfig.baseUrl === config.baseUrl
+      && currentConfig.model === config.model
+    return createCustomAIProviderProfile(config, {
+      id: `custom-${providerId}`,
+      name: resolveProfileName(config, '自定义预设'),
+      showInChatSwitcher: isActive,
+    })
+  })
+
+  const activeBuiltin = builtinProfiles.find((profile) => profile.config.provider === currentConfig.provider)
+  const activeCustom = customProfiles.find((profile) => (
+    profile.config.provider === currentConfig.provider
+    && profile.config.baseUrl === currentConfig.baseUrl
+    && profile.config.model === currentConfig.model
+  ))
+
+  return {
+    version: 1,
+    activeProfileId: activeCustom?.id || activeBuiltin?.id || builtinProfiles[0]?.id || customProfiles[0]?.id || '',
+    profiles: [...builtinProfiles, ...customProfiles],
+  }
+}
+
+export function createDefaultAIWorkspace(): AIProviderWorkspace {
+  return {
+    version: 1,
+    activeProfileId: 'custom-default-moonshot',
+    profiles: [
+      createBuiltinProfile('openai'),
+      createBuiltinProfile('anthropic'),
+      createBuiltinProfile('gemini'),
+      createCustomAIProviderProfile(getDefaultConfig(), {
+        id: 'custom-default-moonshot',
+        name: resolveProfileName(getDefaultConfig(), 'Kimi'),
+        showInChatSwitcher: true,
+      }),
+    ],
+  }
+}
+
+export function deriveLegacyAISettingsPayload(workspace: AIProviderWorkspace | null | undefined): LegacyAISettingsPayload {
+  const normalizedWorkspace = normalizeAIWorkspace(workspace)
+  const activeConfig = getActiveAIConfig(normalizedWorkspace)
+  const activeProfile = getActiveAIProfile(normalizedWorkspace)
+  const savedConfigs = normalizedWorkspace.profiles.reduce<Partial<Record<AIProviderType, AIModelConfig>>>((acc, profile) => {
+    const providerId = profile.config.provider
+    if (!providerId) return acc
+    const existing = acc[providerId]
+    if (!existing || profile.id === activeProfile?.id) {
+      acc[providerId] = cloneConfig({
+        ...profile.config,
+        displayName: profile.name,
+      })
+    }
+    return acc
+  }, {})
+
+  return {
+    aiModelConfig: activeConfig || undefined,
+    aiSavedConfigs: savedConfigs,
+  }
+}
+
+export function normalizeAIWorkspace(workspace: AIProviderWorkspace | null | undefined): AIProviderWorkspace {
+  const fallback = createDefaultAIWorkspace()
+  if (!workspace || !Array.isArray(workspace.profiles) || workspace.profiles.length === 0) {
+    return fallback
+  }
+
+  const normalizedProfiles = workspace.profiles.map((profile) => {
+    const normalizedCategory = profile.category === 'openai' || profile.category === 'anthropic' || profile.category === 'gemini'
+      ? profile.category
+      : 'custom'
+    const baseProfile = normalizedCategory === 'custom'
+      ? createCustomAIProviderProfile(profile.config, {
+        id: profile.id,
+        name: profile.name,
+        showInChatSwitcher: profile.showInChatSwitcher,
+      })
+      : createBuiltinProfile(normalizedCategory, profile.config)
+
+    return {
+      ...baseProfile,
+      id: profile.id || baseProfile.id,
+      name: String(profile.name || '').trim() || baseProfile.name,
+      builtIn: normalizedCategory === 'custom' ? false : true,
+      showInChatSwitcher: profile.showInChatSwitcher ?? baseProfile.showInChatSwitcher,
+      config: {
+        ...baseProfile.config,
+        ...cloneConfig(profile.config),
+        displayName: String(profile.name || '').trim() || baseProfile.name,
+      },
+    }
+  })
+
+  const hasActive = normalizedProfiles.some((profile) => profile.id === workspace.activeProfileId)
+
+  return {
+    version: 1,
+    activeProfileId: hasActive ? workspace.activeProfileId : normalizedProfiles[0]?.id || fallback.activeProfileId,
+    profiles: normalizedProfiles,
+  }
+}
+
+export function getActiveAIProfile(workspace: AIProviderWorkspace | null | undefined): AIProviderProfile | null {
+  const normalizedWorkspace = normalizeAIWorkspace(workspace)
+  return normalizedWorkspace.profiles.find((profile) => profile.id === normalizedWorkspace.activeProfileId) || null
+}
+
+export function getActiveAIConfig(workspace: AIProviderWorkspace | null | undefined): AIModelConfig | null {
+  const activeProfile = getActiveAIProfile(workspace)
+  if (!activeProfile) return null
+  return cloneConfig({
+    ...activeProfile.config,
+    displayName: activeProfile.name,
+  })
+}
+
+export function listChatSwitcherProfiles(workspace: AIProviderWorkspace | null | undefined): ChatSwitcherProfileGroups {
+  const normalizedWorkspace = normalizeAIWorkspace(workspace)
+  const activeProfile = getActiveAIProfile(normalizedWorkspace)
+  const visibleProfiles = normalizedWorkspace.profiles.filter((profile) => profile.showInChatSwitcher)
+
+  if (!activeProfile || activeProfile.showInChatSwitcher) {
+    return {
+      currentHiddenProfile: null,
+      visibleProfiles,
+    }
+  }
+
+  return {
+    currentHiddenProfile: activeProfile,
+    visibleProfiles: visibleProfiles.filter((profile) => profile.id !== activeProfile.id),
   }
 }
 

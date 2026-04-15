@@ -6,6 +6,7 @@ import { AppSettingsRepository } from '../repositories/app-settings-repository'
 interface AISeedFile {
   ai_model_config?: unknown
   ai_saved_configs?: unknown
+  ai_provider_workspace?: unknown
 }
 
 function resolveSeedPath(): string {
@@ -17,7 +18,7 @@ function resolveSeedPath(): string {
 
 export function applyBundledAISettingsSeed(): void {
   const repository = new AppSettingsRepository()
-  if (repository.getSetting('ai_model_config')) return
+  if (repository.getSetting('ai_provider_workspace') || repository.getSetting('ai_model_config')) return
 
   const seedPath = resolveSeedPath()
   if (!existsSync(seedPath)) return
@@ -28,6 +29,9 @@ export function applyBundledAISettingsSeed(): void {
 
     if (parsed.ai_model_config) {
       repository.setSetting('ai_model_config', JSON.stringify(parsed.ai_model_config))
+    }
+    if (parsed.ai_provider_workspace) {
+      repository.setSetting('ai_provider_workspace', JSON.stringify(parsed.ai_provider_workspace))
     }
     if (parsed.ai_saved_configs) {
       repository.setSetting('ai_saved_configs', JSON.stringify(parsed.ai_saved_configs))

@@ -1,5 +1,13 @@
 import { ipcMain } from 'electron'
-import { AIModelConfig, getProviderDef, normalizeAIConfig, normalizeProviderId, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
+import {
+  AIModelConfig,
+  getProviderDef,
+  normalizeAIConfig,
+  normalizeAIWorkspace,
+  normalizeProviderId,
+  resolveAIConfigCapabilities,
+  type AIProviderWorkspace,
+} from '../../../shared/ai-providers'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 interface SettingsIPCResponse<T = unknown> {
@@ -54,6 +62,23 @@ export function setupSettingsIPC(): void {
   ipcMain.handle('settings:setAIConfig', (_, config: AIModelConfig): SettingsIPCResponse => {
     try {
       repository.setAIConfig(normalizeAIConfig(config))
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:getAIWorkspace', (): SettingsIPCResponse<AIProviderWorkspace> => {
+    try {
+      return { success: true, data: repository.getAIWorkspace() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:setAIWorkspace', (_, workspace: AIProviderWorkspace): SettingsIPCResponse => {
+    try {
+      repository.setAIWorkspace(normalizeAIWorkspace(workspace))
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

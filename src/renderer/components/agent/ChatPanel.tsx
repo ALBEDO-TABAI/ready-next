@@ -25,7 +25,8 @@ import {
   ScopeRunState
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useSettings } from '../../stores/useSettings'
+import { useSettings, listChatSwitcherProfiles } from '../../stores/useSettings'
+import { useNavigate } from 'react-router-dom'
 import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import { toLocalFileUrl } from '../../utils/dragDrop'
@@ -1003,7 +1004,17 @@ function CollapsedChatRail({
 // ---------------------------------------------------------------------------
 
 function ModelSelector() {
-  const { config, loaded, loadConfig, getShortModelLabel, getShortProviderLabel } = useSettings()
+  const navigate = useNavigate()
+  const {
+    config,
+    workspace,
+    loaded,
+    loadConfig,
+    activateProfile,
+    getActiveProfile,
+    getShortModelLabel,
+    getShortProviderLabel,
+  } = useSettings()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1021,7 +1032,18 @@ function ModelSelector() {
   }, [open])
 
   const hasKey = !!config.apiKey
-  const label = config.displayName || getShortProviderLabel()
+  const activeProfile = getActiveProfile()
+  const label = activeProfile?.name || config.displayName || getShortProviderLabel()
+  // `showInChatSwitcher` is pre-filtered into `visibleProfiles`.
+  const { currentHiddenProfile, visibleProfiles } = listChatSwitcherProfiles(workspace)
+
+  const resolveHost = (value: string): string => {
+    try {
+      return value ? new URL(value).hostname : '未配置'
+    } catch {
+      return value || '未配置'
+    }
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -1059,10 +1081,10 @@ function ModelSelector() {
             bottom: '100%',
             left: 0,
             marginBottom: 4,
-            minWidth: 200,
+            minWidth: 248,
             background: 'var(--bg-panel)',
             border: '1px solid var(--border-default)',
-            borderRadius: 8,
+            borderRadius: 12,
             boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
             padding: 8,
             zIndex: 100
@@ -1089,9 +1111,91 @@ function ModelSelector() {
               {getShortModelLabel()}
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
-              {config.baseUrl ? new URL(config.baseUrl).hostname : '未配置'}
+              {resolveHost(config.baseUrl)}
             </div>
           </div>
+
+          {currentHiddenProfile && (
+            <div style={{ marginTop: 8 }}>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-light)',
+                  padding: '2px 8px',
+                  marginBottom: 4,
+                }}
+              >
+                当前使用中
+              </div>
+              <button
+                onClick={() => {
+                  activateProfile(currentHiddenProfile.id)
+                  setOpen(false)
+                }}
+                className="w-full text-left hover:bg-black/5 transition-colors"
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-default)',
+                  background: 'transparent',
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
+                  {currentHiddenProfile.name}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+                  {getShortModelLabel(currentHiddenProfile.id)}
+                </div>
+              </button>
+            </div>
+          )}
+
+          {visibleProfiles.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-light)',
+                  padding: '2px 8px',
+                  marginBottom: 4,
+                }}
+              >
+                快速切换
+              </div>
+              <div className="flex flex-col gap-1">
+                {visibleProfiles.map((profile) => {
+                  const isActive = profile.id === activeProfile?.id
+                  return (
+                    <button
+                      key={profile.id}
+                      onClick={() => {
+                        activateProfile(profile.id)
+                        setOpen(false)
+                      }}
+                      className="w-full text-left hover:bg-black/5 transition-colors"
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: isActive ? '1px solid color-mix(in srgb, var(--color-blue) 28%, transparent)' : '1px solid transparent',
+                        background: isActive ? 'var(--bg-hover)' : 'transparent',
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>{profile.name}</span>
+                        {isActive && (
+                          <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+                        {getShortModelLabel(profile.id)}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {!hasKey && (
             <div
               style={{ fontSize: 10, color: 'var(--color-red)', padding: '4px 8px', marginTop: 4 }}
@@ -1099,6 +1203,26 @@ function ModelSelector() {
               未配置 API Key，请前往设置页配置
             </div>
           )}
+
+          <button
+            onClick={() => {
+              navigate('/settings?section=ai')
+              setOpen(false)
+            }}
+            className="w-full flex items-center justify-center gap-2 hover:bg-black/5 transition-colors"
+            style={{
+              marginTop: 8,
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border-default)',
+              background: 'transparent',
+              fontSize: 11,
+              color: 'var(--text-muted)',
+            }}
+          >
+            <Wrench style={{ width: 12, height: 12 }} strokeWidth={2} />
+            管理显示项
+          </button>
         </div>
       )}
     </div>

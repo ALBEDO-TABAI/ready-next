@@ -1575,6 +1575,8 @@ interface AIModelConfigData {
   baseUrl: string
   apiKey: string
   model: string
+  modelIds?: string[]
+  displayName?: string
   agentProtocol?: 'anthropic' | 'openai'
   wireApi?: 'chat/completions' | 'responses'
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'
@@ -1583,6 +1585,21 @@ interface AIModelConfigData {
   nativeVideoMode?: 'auto' | 'on' | 'off'
   capabilityModes?: Record<string, 'auto' | 'on' | 'off'>
   endpointId?: string
+}
+
+interface AIProviderProfileData {
+  id: string
+  category: 'openai' | 'anthropic' | 'gemini' | 'custom'
+  name: string
+  builtIn: boolean
+  showInChatSwitcher: boolean
+  config: AIModelConfigData
+}
+
+interface AIProviderWorkspaceData {
+  version: 1
+  activeProfileId: string
+  profiles: AIProviderProfileData[]
 }
 
 interface SettingsTestResult {
@@ -1596,6 +1613,8 @@ interface ElectronSettingsAPI {
   getAll: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
   getAIConfig: () => Promise<{ success: boolean; data?: AIModelConfigData | null; error?: string }>
   setAIConfig: (config: AIModelConfigData) => Promise<{ success: boolean; error?: string }>
+  getAIWorkspace: () => Promise<{ success: boolean; data?: AIProviderWorkspaceData; error?: string }>
+  setAIWorkspace: (workspace: AIProviderWorkspaceData) => Promise<{ success: boolean; error?: string }>
   testAIConnection: (
     config: AIModelConfigData
   ) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
