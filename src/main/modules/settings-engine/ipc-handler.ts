@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { appendFileSync } from 'fs'
 import {
   AIModelConfig,
   getProviderDef,
@@ -9,11 +10,17 @@ import {
   type AIProviderWorkspace,
 } from '../../../shared/ai-providers'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { getLogPath } from '../../utils/platform'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
+}
+
+const SETTINGS_LOG = getLogPath('ready-settings.log')
+function logSettings(msg: string) {
+  try { appendFileSync(SETTINGS_LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* ignore */ }
 }
 
 export function setupSettingsIPC(): void {
@@ -52,8 +59,11 @@ export function setupSettingsIPC(): void {
   // Get AI model config
   ipcMain.handle('settings:getAIConfig', (): SettingsIPCResponse<AIModelConfig | null> => {
     try {
-      return { success: true, data: repository.getAIConfig() }
+      const config = repository.getAIConfig()
+      logSettings(`[ipc] settings:getAIConfig provider=${config?.provider || 'none'} baseUrl=${config?.baseUrl || 'none'} model=${config?.model || 'none'}`)
+      return { success: true, data: config }
     } catch (error) {
+      logSettings(`[ipc] settings:getAIConfig failed error=${error instanceof Error ? error.message : String(error)}`)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
@@ -70,8 +80,11 @@ export function setupSettingsIPC(): void {
 
   ipcMain.handle('settings:getAIWorkspace', (): SettingsIPCResponse<AIProviderWorkspace> => {
     try {
-      return { success: true, data: repository.getAIWorkspace() }
+      const workspace = repository.getAIWorkspace()
+      logSettings(`[ipc] settings:getAIWorkspace activeProfileId=${workspace.activeProfileId} profiles=${workspace.profiles.length}`)
+      return { success: true, data: workspace }
     } catch (error) {
+      logSettings(`[ipc] settings:getAIWorkspace failed error=${error instanceof Error ? error.message : String(error)}`)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })

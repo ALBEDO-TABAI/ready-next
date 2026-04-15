@@ -51,7 +51,7 @@ const agentAPI = {
     ipcRenderer.invoke('agent:resumeSessionCandidate', payload),
   getConversationScopeMessages: (scopeId: string) =>
     ipcRenderer.invoke('agent:getConversationScopeMessages', { scopeId }),
-  createLocalScope: (agent: string) => ipcRenderer.invoke('agent:createLocalScope', { agent }),
+  createLocalScope: (agent: string, id?: string) => ipcRenderer.invoke('agent:createLocalScope', { agent, id }),
   listScopeAttachments: (scopeId?: string) => ipcRenderer.invoke('agent:listScopeAttachments', { scopeId }),
   getScopeAttachment: (scopeId: string, attachmentId: string) =>
     ipcRenderer.invoke('agent:getScopeAttachment', { scopeId, attachmentId }),

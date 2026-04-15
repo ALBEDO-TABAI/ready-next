@@ -1,6 +1,9 @@
+import { appendFileSync } from 'fs'
+import { createRequire } from 'module'
 import { join } from 'path'
 import { app } from 'electron'
 import { runMigrations } from './migrations'
+import { getLogPath } from '../utils/platform'
 
 interface DatabaseStatement {
   run(...params: unknown[]): unknown
@@ -284,15 +287,22 @@ export interface ConversationAttachmentRecord {
 }
 
 let DatabaseConstructor: BetterSqliteConstructor | null = null
+const require = createRequire(import.meta.url)
+const DATABASE_LOG = getLogPath('ready-database.log')
+
+function logDatabase(message: string): void {
+  try { appendFileSync(DATABASE_LOG, `[${new Date().toISOString()}] ${message}\n`) } catch { /* ignore */ }
+}
 
 // Lazy load better-sqlite3 to handle missing module gracefully
 try {
-
   const betterSqlite3 = require('better-sqlite3') as BetterSqliteConstructor & {
     default?: BetterSqliteConstructor
   }
   DatabaseConstructor = betterSqlite3.default || betterSqlite3
-} catch {
+  logDatabase('better-sqlite3 loaded successfully')
+} catch (error) {
+  logDatabase(`better-sqlite3 load failed: ${error instanceof Error ? error.stack || error.message : String(error)}`)
   console.warn('better-sqlite3 not available, using in-memory fallback')
 }
 
@@ -330,14 +340,18 @@ export class DatabaseManager {
   private init(): void {
     try {
       if (!DatabaseConstructor) {
+        logDatabase('DatabaseConstructor unavailable; database disabled')
         console.warn('Database module not available, using mock implementation')
         this.db = null
         return
       }
 
+      logDatabase(`opening database path=${this.dbPath}`)
       this.db = new DatabaseConstructor(this.dbPath)
       this.createTables()
+      logDatabase(`database initialized path=${this.dbPath}`)
     } catch (error) {
+      logDatabase(`database initialization failed path=${this.dbPath} error=${error instanceof Error ? error.stack || error.message : String(error)}`)
       console.error('Database initialization failed:', error)
       this.db = null
     }

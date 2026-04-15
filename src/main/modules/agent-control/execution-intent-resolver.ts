@@ -90,12 +90,27 @@ export function buildExecutionToolState(params: {
   const hasDocumentKeyword =
     /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
       .test(params.userInstructionText)
+  const hasRSSKeyword =
+    /(^|[^a-z])(rss|feed|rsshub)([^a-z]|$)|订阅源|订阅|源站|抓取文章|抓取订阅|信息源/i
+      .test(params.userInstructionText)
+  const hasCalendarKeyword =
+    /日历|日程|会议|提醒|排期|行程|calendar|event|时间冲突|安排到.*(今天|明天|本周|日历)/i
+      .test(params.userInstructionText)
+  const hasFeishuKeyword =
+    /飞书|feishu|lark|多维表格|飞书文档|飞书群|飞书消息|群聊|知识库/i
+      .test(params.userInstructionText)
   const allowDocumentTools = baseVisibilityPlan.hasTools && (
     params.hasDocumentEnvironment ||
     params.hasWidgetTargetContext ||
     Boolean(params.documentWidgetTaskKind) ||
     shouldForceDocumentToolCall(params.contextualUserInput) ||
     hasDocumentKeyword
+  )
+  const allowRSSTools = baseVisibilityPlan.hasTools && hasRSSKeyword
+  const allowCalendarTools = baseVisibilityPlan.hasTools && hasCalendarKeyword
+  const allowFeishuTools = baseVisibilityPlan.hasTools && (
+    params.capabilityProfile === 'remote_channel' ||
+    hasFeishuKeyword
   )
   const capabilityResolution = resolveCapabilityResolution({
     config: params.config || getDefaultConfig(),
@@ -107,6 +122,9 @@ export function buildExecutionToolState(params: {
     },
     intentGroupModes: {
       document: allowDocumentTools,
+      rss: allowRSSTools,
+      calendar: allowCalendarTools,
+      channel_feishu: allowFeishuTools,
     },
   })
   const allowBrowserTools = capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')

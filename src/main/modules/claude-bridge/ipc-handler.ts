@@ -268,8 +268,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:listConversationScopes', (_, payload?: { agent?: string }): IPCResponse => {
     try {
-      return { success: true, data: runtime!.listConversationScopes(payload?.agent) }
+      const scopes = runtime!.listConversationScopes(payload?.agent)
+      log(`[ipc] agent:listConversationScopes agent=${payload?.agent || 'all'} count=${scopes.length}`)
+      return { success: true, data: scopes }
     } catch (error) {
+      log(`[ipc] agent:listConversationScopes failed agent=${payload?.agent || 'all'} error=${error instanceof Error ? error.message : String(error)}`)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
@@ -380,10 +383,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  ipcMain.handle('agent:createLocalScope', (_, payload: { agent: string }): IPCResponse => {
+  ipcMain.handle('agent:createLocalScope', (_, payload: { agent: string; id?: string }): IPCResponse => {
     try {
-      return { success: true, data: runtime!.createLocalScope(payload.agent) }
+      const scope = runtime!.createLocalScope(payload.agent, payload.id)
+      log(`[ipc] agent:createLocalScope agent=${payload.agent} requestedId=${payload.id || 'auto'} actualId=${scope.id}`)
+      return { success: true, data: scope }
     } catch (error) {
+      log(`[ipc] agent:createLocalScope failed agent=${payload.agent} requestedId=${payload.id || 'auto'} error=${error instanceof Error ? error.message : String(error)}`)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
@@ -432,9 +438,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     requestId?: string
   }): Promise<IPCResponse> => {
     try {
+      log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'}`)
       const result = await runtime!.sendScoped(payload)
+      log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} success=${result.success} error=${result.error || 'none'}`)
       return { success: result.success, error: result.error }
     } catch (error) {
+      log(`[ipc] agent:sendScoped failed scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} error=${error instanceof Error ? error.message : String(error)}`)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })

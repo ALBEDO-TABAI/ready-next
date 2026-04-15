@@ -1,8 +1,24 @@
 # Ready 经验文档
 
-> 更新时间: 2026-04-14
+> 更新时间: 2026-04-15
 
 ## 1. 架构经验
+### 1.0 Electron 开发态里，原生依赖 ABI 不匹配会把“设置丢失 / 历史空白 / scope not found”伪装成前端问题
+- 这次真正的根因不是设置页没保存，也不是历史会话被清空，而是主进程数据库根本没起来。
+- 直接症状：
+  - 设置页看起来回到默认配置
+  - 历史会话列表空白
+  - 新建本地会话时报 `Database not available`，随后连锁变成 `Conversation scope not found`
+- 真正原因：
+  - `better-sqlite3` 是原生模块，必须按当前 Electron 版本重新编译。
+  - 如果它是按别的 Node ABI 编出来的，Electron 主进程加载时会失败，但界面层很容易把后续连锁症状误判成“状态没读出来”。
+- 这次的直接报错是：
+  - `NODE_MODULE_VERSION 127`，但当前 Electron 需要 `NODE_MODULE_VERSION 132`
+- 固化规则：
+  - `package.json` 的 `dev / build / verify` 都要先跑 `electron-builder install-app-deps`
+  - `postinstall` 也要补这一步，避免换环境后继续用旧的 `.node`
+  - 排这类问题时，优先看 `ready-database.log`，不要先怀疑 Zustand、Settings 页面或聊天面板
+
 ### 1.1 “OpenAI 兼容”不等于真的兼容 tools
 - 有些供应商虽然长得像 OpenAI API，但会吞掉 `tools` 或只实现一部分字段。
 - 结论：不能只按 provider 名称分支，必须建立共享能力层，并允许原生调用失败后自动降级。
@@ -32,6 +48,15 @@
 - 只有 `planning / tool_running / done` 这类粗粒度状态时，聊天面板很难解释“现在卡在哪一步”“还能怎么继续”。
 - 更稳的做法是把浏览器阶段、workflow blocker、最近产物和自动沉淀结果统一投影成宿主管理的任务摘要。
 - 这层摘要最好由主进程保留最近状态，renderer 刷新后直接恢复，不要只依赖前端内存。
+
+### 1.7 本地普通请求默认不要暴露 RSS / 日程 / 飞书工具
+- 这次有一类跑偏不是模型“突然变傻”，而是我们把无关工具默认也暴露给了它。
+- 当本地普通请求既不是 RSS，也不是日程，也不是飞书操作时，如果这些 capability group 仍然可见，模型就可能误打到 `rss_*` 或 `feishu_*`。
+- 更稳的做法是：
+  - `rss` 只在用户明确提到 RSS / 订阅源 / feed / RSSHub 时开放
+  - `calendar` 只在用户明确提到日程 / 日历 / 会议 / 提醒 / 排期时开放
+  - `channel_feishu` 只在远程渠道会话里默认开放，或用户明确提到飞书时开放
+- 原则：能力宣告必须贴近当前意图，不能因为“技术上能调用”就默认让模型看见。
 
 ## 2. BrowserView 与前端壳层经验
 ### 2.1 BrowserView 是原生覆盖层

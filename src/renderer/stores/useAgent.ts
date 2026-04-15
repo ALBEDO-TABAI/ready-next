@@ -126,6 +126,16 @@ let pendingSendBuffer:
   | null = null
 let bypassCoalescingOnce = false
 
+async function persistLocalConversationScope(scope: ConversationScope | null): Promise<void> {
+  if (!scope || scope.sourceKind !== 'local') return
+  if (typeof window === 'undefined' || !window.electronAPI?.chat?.createConversation) return
+  await window.electronAPI.chat.createConversation({
+    id: scope.id,
+    agent: scope.agent,
+    title: scope.title || '新对话',
+  }).catch(() => undefined)
+}
+
 function clearPendingSendBufferState() {
   if (pendingSendTimer) {
     clearTimeout(pendingSendTimer)
@@ -426,14 +436,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     const { currentAgent } = get()
     const agentData = get().agents.find(a => a.name === currentAgent)
     const displayName = agentData?.displayName || '管家'
+    const fallbackScopeId = `conv-${generateId('local')}`
     const fallbackScope: ConversationScope = {
-      id: `conv-${generateId('local')}`,
+      id: fallbackScopeId,
       agent: currentAgent,
       title: '新对话',
       sourceKind: 'local',
       sourceId: 'app',
-      threadKey: '',
-      meta: { sourceLabel: '应用内' },
+      threadKey: fallbackScopeId,
+      meta: { sourceLabel: '应用内', createdBy: 'app' },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastMessageAt: null,
@@ -456,6 +467,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       conversationId: fallbackScope.id,
       currentScopeId: fallbackScope.id,
       currentScope: fallbackScope,
+      scopes: [fallbackScope, ...get().scopes.filter((item) => item.id !== fallbackScope.id)],
+      conversations: [mapScopeToConversation(fallbackScope), ...get().conversations.filter((item) => item.id !== fallbackScope.id)],
       scopeRunStates: {
         ...get().scopeRunStates,
         [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
@@ -465,9 +478,10 @@ export const useAgent = create<AgentState>((set, get) => ({
       attachments: [],
       filePool: []
     })
+    void persistLocalConversationScope(fallbackScope)
 
     if (typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope) {
-      void window.electronAPI.agent.createLocalScope(currentAgent)
+      void window.electronAPI.agent.createLocalScope(currentAgent, fallbackScope.id)
         .then((result) => {
           if (!result.success || !result.data) return
           const scope = result.data as unknown as ConversationScope
@@ -490,8 +504,31 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       const { currentAgent } = get()
       const result = await window.electronAPI.agent.listConversationScopes(currentAgent)
-      if (!result.success || !result.data) return
-      const scopes = result.data as unknown as ConversationScope[]
+      let scopes: ConversationScope[] = result.success && Array.isArray(result.data)
+        ? result.data as unknown as ConversationScope[]
+        : []
+      if (
+        scopes.length === 0 &&
+        typeof window !== 'undefined' &&
+        window.electronAPI?.chat?.getConversations
+      ) {
+        const fallback = await window.electronAPI.chat.getConversations(currentAgent).catch(() => null)
+        if (fallback?.success && Array.isArray(fallback.data)) {
+          scopes = fallback.data.map((conversation) => ({
+            id: conversation.id,
+            agent: conversation.agent,
+            title: conversation.title,
+            sourceKind: 'local',
+            sourceId: 'app',
+            threadKey: conversation.id,
+            meta: { sourceLabel: '应用内', createdBy: 'app' },
+            createdAt: conversation.created_at,
+            updatedAt: conversation.updated_at,
+            lastMessageAt: conversation.updated_at,
+          }))
+        }
+      }
+      if (scopes.length === 0) return
       const currentScopeId = get().currentScopeId
       const currentScope = scopes.find((scope) => scope.id === currentScopeId) || scopes[0] || null
       const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScope?.id || null)
@@ -697,7 +734,9 @@ export const useAgent = create<AgentState>((set, get) => ({
 
     let scope = currentScope
     let scopeId = currentScopeId
+    let localScopeBootstrapAttempted = false
     if ((!scope || !scopeId) && typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope) {
+      localScopeBootstrapAttempted = true
       const created = await window.electronAPI.agent.createLocalScope(currentAgent).catch(() => null)
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
@@ -725,7 +764,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       typeof window !== 'undefined' &&
       window.electronAPI?.agent?.createLocalScope
     ) {
-      const created = await window.electronAPI.agent.createLocalScope(currentAgent).catch(() => null)
+      localScopeBootstrapAttempted = true
+      const created = await window.electronAPI.agent.createLocalScope(currentAgent, scopeId || undefined).catch(() => null)
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
         scope = nextScope
@@ -747,6 +787,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       typeof window !== 'undefined' &&
       window.electronAPI?.agent?.createLocalScope
     ) {
+      localScopeBootstrapAttempted = true
       const created = await window.electronAPI.agent.createLocalScope(currentAgent).catch(() => null)
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
@@ -763,7 +804,30 @@ export const useAgent = create<AgentState>((set, get) => ({
       }
     }
     if (!scope || !scopeId) return
-    const activeScope = scope
+    let activeScope = scope
+    let activeScopeId = scopeId
+    await persistLocalConversationScope(activeScope)
+    if (
+      !localScopeBootstrapAttempted &&
+      activeScope.sourceKind === 'local' &&
+      typeof window !== 'undefined' &&
+      window.electronAPI?.agent?.createLocalScope
+    ) {
+      const ensured = await window.electronAPI.agent.createLocalScope(activeScope.agent, activeScope.id).catch(() => null)
+      if (ensured?.success && ensured.data) {
+        const nextScope = ensured.data as unknown as ConversationScope
+        activeScope = nextScope
+        activeScopeId = nextScope.id
+        const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
+        set({
+          currentScopeId: nextScope.id,
+          currentScope: nextScope,
+          conversationId: nextScope.id,
+          scopes: updatedScopes,
+          conversations: updatedScopes.map(mapScopeToConversation),
+        })
+      }
+    }
 
     // Capture attachments before clearing
     const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
@@ -785,7 +849,7 @@ export const useAgent = create<AgentState>((set, get) => ({
 
     // Persist user message
     const persistedAttachments = serializeAttachments(currentAttachments)
-    await persistChatMessage(scopeId, userMsgId, 'user', content, {
+    await persistChatMessage(activeScopeId, userMsgId, 'user', content, {
       sourceKind: activeScope.sourceKind,
       sourceId: activeScope.sourceId,
       threadKey: activeScope.threadKey,
@@ -797,10 +861,10 @@ export const useAgent = create<AgentState>((set, get) => ({
       const firstAttachmentName = currentAttachments[0]?.name
       const title = content.slice(0, 20) || (firstAttachmentName ? `附件: ${firstAttachmentName}` : '新对话')
       if (title) {
-        void window.electronAPI.chat.updateConversationTitle({ id: scopeId, title }).catch(() => undefined)
+        void window.electronAPI.chat.updateConversationTitle({ id: activeScopeId, title }).catch(() => undefined)
         const nextScope = { ...activeScope, title, updatedAt: new Date().toISOString() }
         set((state) => {
-          const scopes = state.scopes.map((item) => item.id === scopeId ? nextScope : item)
+          const scopes = state.scopes.map((item) => item.id === activeScopeId ? nextScope : item)
           return {
             currentScope: nextScope,
             scopes,
@@ -831,7 +895,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
 
     if (typeof window !== 'undefined' && window.electronAPI && get().isStreaming) {
-      await window.electronAPI.agent.kill(currentAgent, scopeId).catch(console.error)
+      await window.electronAPI.agent.kill(currentAgent, activeScopeId).catch(console.error)
     }
 
     setIsStreaming(true)
@@ -853,9 +917,9 @@ export const useAgent = create<AgentState>((set, get) => ({
       toolTraceStatus: 'running',
       scopeRunStates: {
         ...state.scopeRunStates,
-        [scopeId]: {
+        [activeScopeId]: {
           ...createEmptyScopeRunState({
-            scopeId,
+            scopeId: activeScopeId,
             agent: currentAgent,
             requestId,
             phase: 'planning',
@@ -877,9 +941,37 @@ export const useAgent = create<AgentState>((set, get) => ({
           filePool,
         })
 
-        const result = window.electronAPI.agent.sendScoped
-          ? await window.electronAPI.agent.sendScoped(scopeId, finalMessage, requestId)
-          : await window.electronAPI.agent.send(currentAgent, finalMessage, scopeId || undefined, requestId)
+        const sendWithCurrentScope = async () => (
+          window.electronAPI.agent.sendScoped
+            ? window.electronAPI.agent.sendScoped(activeScopeId, finalMessage, requestId)
+            : window.electronAPI.agent.send(currentAgent, finalMessage, activeScopeId, requestId)
+        )
+
+        let result = await sendWithCurrentScope()
+        if (
+          !result.success &&
+          activeScope.sourceKind === 'local' &&
+          /Conversation scope not found:/i.test(String(result.error || ''))
+        ) {
+          await persistLocalConversationScope(activeScope)
+          if (window.electronAPI.agent.createLocalScope) {
+            const recovered = await window.electronAPI.agent.createLocalScope(activeScope.agent, activeScope.id).catch(() => null)
+            if (recovered?.success && recovered.data) {
+              const nextScope = recovered.data as unknown as ConversationScope
+              activeScope = nextScope
+              activeScopeId = nextScope.id
+              const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
+              set({
+                currentScopeId: nextScope.id,
+                currentScope: nextScope,
+                conversationId: nextScope.id,
+                scopes: updatedScopes,
+                conversations: updatedScopes.map(mapScopeToConversation),
+              })
+            }
+          }
+          result = await sendWithCurrentScope()
+        }
 
         if (!result.success) {
           if (get().streamingRequestId !== requestId) {
@@ -896,9 +988,9 @@ export const useAgent = create<AgentState>((set, get) => ({
             streamingRequestId: null,
             scopeRunStates: {
               ...state.scopeRunStates,
-              [scopeId]: {
-                ...(state.scopeRunStates[scopeId] || {
-                  scopeId,
+              [activeScopeId]: {
+                ...(state.scopeRunStates[activeScopeId] || {
+                  scopeId: activeScopeId,
                   agent: currentAgent,
                   requestId,
                   toolTrace: [],
@@ -951,9 +1043,9 @@ export const useAgent = create<AgentState>((set, get) => ({
         streamingRequestId: null,
         scopeRunStates: {
           ...state.scopeRunStates,
-          [scopeId]: {
-            ...(state.scopeRunStates[scopeId] || {
-              scopeId,
+          [activeScopeId]: {
+            ...(state.scopeRunStates[activeScopeId] || {
+              scopeId: activeScopeId,
               agent: currentAgent,
               requestId,
               toolTrace: [],

@@ -8,8 +8,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ./scripts/sync-dev-icon.mjs && electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "rebuild:native": "electron-builder install-app-deps",
+    "dev": "node ./scripts/sync-dev-icon.mjs && npm run rebuild:native && electron-vite dev",
+    "build": "npm run rebuild:native && npm run typecheck && electron-vite build",
     "build:dist": "npm run build && electron-builder --config electron-builder.yml",
     "build:dist:seeded": "node ./scripts/export-ai-settings-seed.mjs && npm run build:dist",
     "build:dir": "npm run build && electron-builder --config electron-builder.yml --dir",
@@ -23,8 +24,9 @@
     "test": "npx tsx@^4.19.2 --test src/__tests__/*.test.ts",
     "test:watch": "npx tsx@^4.19.2 --test --watch src/__tests__/*.test.ts",
     "generate:document-widget-openui": "npx tsx@^4.19.2 ./scripts/generate-document-widget-openui-artifacts.ts",
-    "verify": "npm run typecheck && npm run lint:check && npm run test",
-    "verify:cloud": "npm run typecheck && npm run lint:check && npm run test"
+    "verify": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
+    "verify:cloud": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

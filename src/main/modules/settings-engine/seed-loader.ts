@@ -18,6 +18,12 @@ function resolveSeedPath(): string {
 
 export function applyBundledAISettingsSeed(): void {
   const repository = new AppSettingsRepository()
+  if (!repository.getSetting('ai_provider_workspace') && (
+    repository.getSetting('ai_model_config') || repository.getSetting('ai_saved_configs')
+  )) {
+    repository.getAIWorkspace()
+    return
+  }
   if (repository.getSetting('ai_provider_workspace') || repository.getSetting('ai_model_config')) return
 
   const seedPath = resolveSeedPath()
@@ -38,5 +44,11 @@ export function applyBundledAISettingsSeed(): void {
     }
   } catch (error) {
     console.warn('[settings] Failed to apply bundled AI seed:', error)
+  }
+
+  if (!repository.getSetting('ai_provider_workspace') && (
+    repository.getSetting('ai_model_config') || repository.getSetting('ai_saved_configs')
+  )) {
+    repository.getAIWorkspace()
   }
 }

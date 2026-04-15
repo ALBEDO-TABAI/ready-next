@@ -712,6 +712,41 @@ describe('useAgent Store', () => {
         assert.strictEqual(state.messages[0].type, 'agent')
     })
 
+    it('should fall back to chat history when scoped conversation loading is temporarily unavailable', async () => {
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                listConversationScopes: async () => ({
+                    success: false,
+                    error: 'runtime unavailable',
+                }),
+            },
+            chat: {
+                getConversations: async (_agent: string) => ({
+                    success: true,
+                    data: [
+                        {
+                            id: 'conv-local-history-1',
+                            agent: 'butler',
+                            title: '历史会话',
+                            created_at: '2026-04-15T09:00:00.000Z',
+                            updated_at: '2026-04-15T09:30:00.000Z',
+                        },
+                    ],
+                }),
+            },
+        }
+
+        await useAgent.getState().loadScopes()
+
+        const state = useAgent.getState()
+        assert.strictEqual(state.scopes.length, 1)
+        assert.strictEqual(state.scopes[0].id, 'conv-local-history-1')
+        assert.strictEqual(state.scopes[0].sourceKind, 'local')
+        assert.strictEqual(state.currentScopeId, 'conv-local-history-1')
+        assert.strictEqual(state.conversations.length, 1)
+        assert.strictEqual(state.conversations[0].title, '历史会话')
+    })
+
     it('should merge remote conversation events into scopes and active messages', async () => {
         const listeners: {
             onConversationEvent?: (data: unknown) => void
@@ -785,6 +820,7 @@ describe('useAgent Store', () => {
 
     it('should preserve the placeholder local scope id when creating a fresh local session', async () => {
         const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+        const createConversationCalls: Array<{ id: string; agent: string; title: string }> = []
 
         ;(globalThis as any).window.electronAPI = {
             agent: {
@@ -808,6 +844,12 @@ describe('useAgent Store', () => {
                     }
                 },
             },
+            chat: {
+                createConversation: async (data: { id: string; agent: string; title: string }) => {
+                    createConversationCalls.push(data)
+                    return { success: true }
+                },
+            },
         }
 
         useAgent.getState().newSession()
@@ -820,8 +862,182 @@ describe('useAgent Store', () => {
 
         const state = useAgent.getState()
         assert.deepStrictEqual(createLocalScopeCalls, [{ agent: 'butler', scopeId: initialScopeId! }])
+        assert.deepStrictEqual(createConversationCalls, [{
+            id: initialScopeId!,
+            agent: 'butler',
+            title: '新对话',
+        }])
         assert.strictEqual(state.currentScopeId, initialScopeId)
         assert.strictEqual(state.currentScope?.id, initialScopeId)
+    })
+
+    it('should persist a local scope before sending when the runtime scope bootstrap fails', async () => {
+        const createConversationCalls: Array<{ id: string; agent: string; title: string }> = []
+        const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (agent: string, scopeId?: string) => {
+                    createLocalScopeCalls.push({ agent, scopeId })
+                    return { success: false, error: 'runtime unavailable' }
+                },
+                sendScoped: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async (data: { id: string; agent: string; title: string }) => {
+                    createConversationCalls.push(data)
+                    return { success: true }
+                },
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-test-send',
+            currentScope: {
+                id: 'conv-local-test-send',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-test-send',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        await useAgent.getState().sendMessage('hello')
+
+        assert.deepStrictEqual(createConversationCalls, [{
+            id: 'conv-local-test-send',
+            agent: 'butler',
+            title: '新对话',
+        }])
+        assert.deepStrictEqual(createLocalScopeCalls, [{
+            agent: 'butler',
+            scopeId: 'conv-local-test-send',
+        }])
+    })
+
+    it('should retry once after rebuilding a missing local scope during send', async () => {
+        const createConversationCalls: Array<{ id: string; agent: string; title: string }> = []
+        const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+        const sendScopedCalls: string[] = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (agent: string, scopeId?: string) => {
+                    createLocalScopeCalls.push({ agent, scopeId })
+                    const id = scopeId || 'conv-local-retry'
+                    return {
+                        success: true,
+                        data: {
+                            id,
+                            agent,
+                            title: '新对话',
+                            sourceKind: 'local',
+                            sourceId: 'app',
+                            threadKey: id,
+                            meta: { sourceLabel: '应用内', createdBy: 'app' },
+                            createdAt: '2026-04-15T10:00:00.000Z',
+                            updatedAt: '2026-04-15T10:00:00.000Z',
+                            lastMessageAt: null,
+                        },
+                    }
+                },
+                sendScoped: async (scopeId: string) => {
+                    sendScopedCalls.push(scopeId)
+                    if (sendScopedCalls.length === 1) {
+                        return { success: false, error: `Conversation scope not found: ${scopeId}` }
+                    }
+                    return { success: true }
+                },
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async (data: { id: string; agent: string; title: string }) => {
+                    createConversationCalls.push(data)
+                    return { success: true }
+                },
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-retry',
+            currentScope: {
+                id: 'conv-local-retry',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-retry',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [{
+                id: 'conv-local-retry',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-retry',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            }],
+            conversations: [{
+                id: 'conv-local-retry',
+                agent: 'butler',
+                title: '新对话',
+                created_at: '2026-04-15T10:00:00.000Z',
+                updated_at: '2026-04-15T10:00:00.000Z',
+            }],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        await useAgent.getState().sendMessage('hello again')
+
+        assert.deepStrictEqual(createConversationCalls, [
+            {
+                id: 'conv-local-retry',
+                agent: 'butler',
+                title: '新对话',
+            },
+            {
+                id: 'conv-local-retry',
+                agent: 'butler',
+                title: '新对话',
+            },
+        ])
+        assert.deepStrictEqual(sendScopedCalls, ['conv-local-retry', 'conv-local-retry'])
+        assert.deepStrictEqual(createLocalScopeCalls, [
+            { agent: 'butler', scopeId: 'conv-local-retry' },
+            { agent: 'butler', scopeId: 'conv-local-retry' },
+        ])
     })
 
     it('should keep streaming chunks keyed by runId and scopeId even after switching active scope', async () => {

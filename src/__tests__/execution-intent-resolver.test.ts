@@ -83,3 +83,70 @@ test('buildExecutionToolState keeps document tools closed for plain informationa
   assert.equal(state.toolPolicy.allowDocumentTools, false)
   assert.equal(state.toolPolicy.allowBrowserTools, false)
 })
+
+test('buildExecutionToolState suppresses rss, calendar, and feishu tools for generic local design requests', () => {
+  const state = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: '帮我整理一个三层卡片关系图，输出 SVG，并补两行说明文字',
+    userInstructionText: '帮我整理一个三层卡片关系图，输出 SVG，并补两行说明文字',
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: true,
+  })
+
+  assert.equal(state.capabilityResolution.visibleCapabilityGroupIds.includes('rss'), false)
+  assert.equal(state.capabilityResolution.visibleCapabilityGroupIds.includes('calendar'), false)
+  assert.equal(state.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
+})
+
+test('buildExecutionToolState keeps rss and feishu tools available only when user intent is explicit', () => {
+  const rssState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: '帮我抓取这个 RSS 订阅源的最近文章并分析',
+    userInstructionText: '帮我抓取这个 RSS 订阅源的最近文章并分析',
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: true,
+  })
+
+  const feishuState = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: '把结果发到飞书群里，并更新飞书文档',
+    userInstructionText: '把结果发到飞书群里，并更新飞书文档',
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    capabilityProfile: 'local_chat',
+    feishuConnected: true,
+  })
+
+  assert.equal(rssState.capabilityResolution.visibleCapabilityGroupIds.includes('rss'), true)
+  assert.equal(rssState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
+  assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), true)
+  assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('rss'), false)
+})

@@ -577,15 +577,15 @@ export class AgentControlRuntime extends EventEmitter {
     return { removedFiles, removedBytes, targetPath }
   }
 
-  createLocalScope(agent: string): ConversationScope {
-    const id = `conv-${randomUUID()}`
+  createLocalScope(agent: string, id?: string): ConversationScope {
+    const scopeId = typeof id === 'string' && id.trim() ? id.trim() : `conv-${randomUUID()}`
     const row = this.db.upsertConversationScope({
-      id,
+      id: scopeId,
       agent,
       title: '新对话',
       sourceKind: 'local',
       sourceId: 'app',
-      threadKey: id,
+      threadKey: scopeId,
       meta: { sourceLabel: '应用内', createdBy: 'app' }
     })
     const scope = this.mapConversationRow(row)

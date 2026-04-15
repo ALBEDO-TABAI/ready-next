@@ -484,7 +484,7 @@ interface ElectronAgentAPI {
   getConversationScopeMessages: (
     scopeId: string
   ) => Promise<IPCResponse<ConversationScopeMessageData[]>>
-  createLocalScope: (agent: string) => Promise<IPCResponse<ConversationScopeData>>
+  createLocalScope: (agent: string, id?: string) => Promise<IPCResponse<ConversationScopeData>>
   listScopeAttachments: (scopeId?: string) => Promise<IPCResponse<ConversationAttachmentData[]>>
   getScopeAttachment: (
     scopeId: string,
