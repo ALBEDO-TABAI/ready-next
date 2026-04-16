@@ -68,6 +68,12 @@ const agentAPI = {
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
     requestId?: string
   ) => ipcRenderer.invoke('agent:sendScoped', { scopeId, message, requestId }),
+  suspendRun: (payload: { scopeId: string; taskId?: string }) =>
+    ipcRenderer.invoke('agent:suspendRun', payload),
+  resumeRun: (payload: { scopeId: string; taskId?: string; requestId?: string; responseText?: string }) =>
+    ipcRenderer.invoke('agent:resumeRun', payload),
+  respondToInteraction: (payload: { scopeId: string; taskId?: string; requestId?: string; responseText: string }) =>
+    ipcRenderer.invoke('agent:respondToInteraction', payload),
   upsertChannel: (payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'

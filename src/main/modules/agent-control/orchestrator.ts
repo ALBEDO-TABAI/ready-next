@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import { randomUUID } from 'node:crypto'
 import { DirectChatEngine, type MultimodalBlock } from '../claude-bridge/direct-chat'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
@@ -8,6 +9,7 @@ import type { IntentClassification } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
+import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
 
 interface SessionDescriptor {
   agent: string
@@ -18,11 +20,18 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
   private readonly engine: DirectChatEngine
   private readonly sessions: AgentSessionManager
   private readonly descriptors = new Map<string, SessionDescriptor>()
+  private readonly runCleanupRegistry = new RunCleanupRegistry()
+  private readonly activeRunIds = new Map<string, string>()
 
   constructor(options?: { browserController?: BrowserController; sidecarManager?: SidecarManager }) {
     super()
     this.engine = new DirectChatEngine()
     this.sessions = new AgentSessionManager()
+    this.engine.setRunCleanupRegistry({
+      registerRunCleanup: (runId, cleanup) => {
+        this.registerRunCleanup(runId, cleanup)
+      },
+    })
 
     if (options?.browserController) {
       this.engine.setBrowserController(options.browserController)
@@ -161,25 +170,34 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       taskProjectionId?: ExecutionHostResult['taskProjectionId']
       executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
     }> {
+    const effectiveRequestId = requestId || randomUUID()
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
+    this.activeRunIds.set(taskKey, effectiveRequestId)
     if (systemPrompt) {
       this.engine.setSystemPrompt(internalKey, systemPrompt)
     }
-    const result = await this.engine.sendMessage(internalKey, message, requestId, {
-      taskId,
-      requestEnvelope,
-      intentClassification,
-      budget,
-      budgetState,
-      taskBudgetRuntime,
-    })
-    if (!result.success) {
-      this.sessions.setState(taskKey, 'failed', result.error)
+    try {
+      const result = await this.engine.sendMessage(internalKey, message, effectiveRequestId, {
+        taskId,
+        requestEnvelope,
+        intentClassification,
+        budget,
+        budgetState,
+        taskBudgetRuntime,
+      })
+      if (!result.success) {
+        this.sessions.setState(taskKey, 'failed', result.error)
+      }
+      return result
+    } finally {
+      if (this.activeRunIds.get(taskKey) === effectiveRequestId) {
+        this.activeRunIds.delete(taskKey)
+      }
+      await this.drainRunCleanup(effectiveRequestId)
     }
-    return result
   }
 
   async sendAndCollect(
@@ -298,10 +316,28 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     this.sessions.setState(this.toTaskKey(agent, sessionId), 'done')
   }
 
+  registerRunCleanup(runId: string, cleanup: RunCleanupCallback): void {
+    this.runCleanupRegistry.register(runId, cleanup)
+  }
+
+  async drainRunCleanup(runId: string, timeoutMs = 1_500): Promise<void> {
+    try {
+      await this.runCleanupRegistry.drain(runId, timeoutMs)
+    } catch (error) {
+      console.warn('[ClaudeSdkOrchestrator] Run cleanup failed:', error)
+    }
+  }
+
   kill(agent: string, sessionId?: string): void {
+    const taskKey = this.toTaskKey(agent, sessionId)
+    const runId = this.activeRunIds.get(taskKey)
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     this.engine.stopGeneration(internalKey)
-    this.sessions.setState(this.toTaskKey(agent, sessionId), 'cancelled')
+    this.sessions.setState(taskKey, 'cancelled')
+    if (runId) {
+      this.activeRunIds.delete(taskKey)
+      void this.drainRunCleanup(runId)
+    }
   }
 
   getSessionManager(): AgentSessionManager {

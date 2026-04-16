@@ -30,6 +30,15 @@ function createSummary(): ScopeRunSummary {
     currentStepId: 'upload',
     waitingFor: 'none',
     resumableActions: ['cancel'],
+    recentArtifacts: [
+      {
+        id: 'artifact-1',
+        module: 'browser',
+        kind: 'screenshot',
+        label: '页面截图',
+        createdAt: '2026-04-16T11:00:00.000Z',
+      },
+    ],
     executionDiagnostics: {
       budget: {
         maxIterations: 60,
@@ -91,6 +100,9 @@ test('syncTaskProjection creates and then updates projection records from scope 
     listByScope(scopeId) {
       return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
     },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
   }
 
   const summary = createSummary()
@@ -99,11 +111,14 @@ test('syncTaskProjection creates and then updates projection records from scope 
   const created = records.get('task-1')
   assert.ok(created)
   assert.equal(created?.module, 'browser')
+  assert.equal(created?.taskTitle, '浏览器任务')
+  assert.equal(created?.taskSummary, '正在上传附件')
   assert.equal(created?.taskType, 'media_task')
   assert.equal(created?.status, 'running')
   assert.equal(created?.budgetUsagePercent, 35)
   assert.equal(created?.budget?.stepBudget?.stepId, 'upload')
   assert.equal(created?.steps[0]?.status, 'running')
+  assert.equal(created?.recentArtifacts?.[0]?.label, '页面截图')
 
   const blockedSummary: ScopeRunSummary = {
     ...summary,

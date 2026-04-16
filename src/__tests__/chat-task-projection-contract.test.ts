@@ -13,6 +13,10 @@ test('chat task cards merge task projections and expose task-type, status, budge
 
   assert.match(chatPanel, /const \[persistedTaskProjections, setPersistedTaskProjections\] = useState/)
   assert.match(chatPanel, /window\.electronAPI\.agent\.listTaskProjections\(scope\.id\)/)
+  assert.match(chatPanel, /taskTitle:\s*projection\?\.taskTitle\s*\|\|\s*run\.taskTitle/)
+  assert.match(chatPanel, /taskSummary:\s*projection\?\.taskSummary\s*\|\|\s*run\.taskSummary/)
+  assert.match(chatPanel, /recentArtifacts:\s*\(projection\?\.recentArtifacts && projection\.recentArtifacts\.length > 0\)\s*\?\s*projection\.recentArtifacts\s*:\s*\(run\.recentArtifacts \|\| \[\]\)/)
+  assert.match(chatPanel, /blockedReason:\s*projection\?\.blockedReason\s*\|\|\s*run\.blockedReason/)
   assert.match(chatPanel, /taskType:\s*projection\?\.taskType/)
   assert.match(chatPanel, /interactionState:\s*projection\?\.interactionState/)
   assert.match(chatPanel, /budgetUsagePercent:\s*projection\?\.budgetUsagePercent/)
@@ -38,4 +42,5 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(viewModel, /budgetWarningLevel\?:/)
   assert.match(viewModel, /degradationReason\?:/)
   assert.match(viewModel, /recoveryHistory\?:/)
+  assert.match(viewModel, /recentArtifacts\?:/)
 })

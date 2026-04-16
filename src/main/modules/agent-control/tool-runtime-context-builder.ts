@@ -14,6 +14,7 @@ export function buildToolRuntimeContext(params: {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal: AbortSignal
   sessionId?: string
+  registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
 }): ToolContext {
   return {
     browserController: params.browserController,
@@ -25,5 +26,6 @@ export function buildToolRuntimeContext(params: {
     requestModuleToolAction: params.requestModuleToolAction,
     abortSignal: params.abortSignal,
     sessionId: params.sessionId,
+    registerRunCleanup: params.registerRunCleanup,
   }
 }

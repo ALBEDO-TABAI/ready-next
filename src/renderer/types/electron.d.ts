@@ -372,14 +372,26 @@ interface TaskProjectionStepData {
   toolHints?: string[]
   budget?: number
   dependsOn?: string[]
+  childTasks?: Array<{
+    taskId: string
+    taskType: TaskTypeData
+    status: TaskProjectionStatusData
+    summary?: string | null
+    artifactSummary?: string | null
+    updatedAt?: string | null
+  }>
 }
 
 interface TaskProjectionRecordData {
   taskId: string
   scopeId: string
   runId: string
+  parentTaskId?: string | null
+  parentStepId?: string | null
   taskType: TaskTypeData
   module: string
+  taskTitle?: string | null
+  taskSummary?: string | null
   status: TaskProjectionStatusData
   interactionState: TaskInteractionStateData
   steps: TaskProjectionStepData[]
@@ -392,6 +404,7 @@ interface TaskProjectionRecordData {
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableActionData[]
   continuationRef?: ScopeRunTaskContinuationData | null
+  recentArtifacts?: ScopeRunEventData['artifactRefs']
   createdAt: string
   updatedAt: string
 }
@@ -492,7 +505,16 @@ interface ScopeRunEventData {
   jobId?: string
   artifactRefs?: Array<{
     id: string
-    module: string
+    module:
+      | 'browser'
+      | 'document'
+      | 'design'
+      | 'skill'
+      | 'video'
+      | 'rss'
+      | 'calendar'
+      | 'feishu'
+      | 'system'
     kind: string
     label: string
     path?: string | null
@@ -622,6 +644,22 @@ interface ElectronAgentAPI {
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
     requestId?: string
   ) => Promise<{ success: boolean; error?: string | null }>
+  suspendRun: (payload: {
+    scopeId: string
+    taskId?: string
+  }) => Promise<{ success: boolean; error?: string | null }>
+  resumeRun: (payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText?: string
+  }) => Promise<{ success: boolean; error?: string | null }>
+  respondToInteraction: (payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText: string
+  }) => Promise<{ success: boolean; error?: string | null }>
   upsertChannel: (payload: {
     id?: string
     type: ChannelAdapterType

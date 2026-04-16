@@ -10,7 +10,12 @@ import type {
   RunMessage,
   RunBudgetUsage,
 } from './run-contracts'
-import { createRunBudgetSeed, createTaskBudgetRuntime } from './run-budget-policy'
+import {
+  createRunBudgetSeed,
+  createTaskBudgetRuntime,
+  getBudgetUsagePercent,
+  rebindTaskBudgetRuntime,
+} from './run-budget-policy'
 import { buildExecutionFallbackState } from '../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
 
@@ -54,6 +59,7 @@ export class RunCoordinator {
     const taskBudgetRuntime = createTaskBudgetRuntime('short_task', {
       budget,
       usage: { ...budgetState },
+      bootstrapBudget: !request.budget,
     })
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
@@ -73,6 +79,8 @@ export class RunCoordinator {
       agent: request.scope.agent,
       runId: request.requestId,
       taskId,
+      parentTaskId: request.parentTaskId,
+      parentStepId: request.parentStepId,
       phase: 'planning',
       module: primaryTrigger?.module,
       latestText: planningTaskSummary,
@@ -97,6 +105,8 @@ export class RunCoordinator {
       sessionId: request.scope.id,
       requestId: request.requestId,
       taskId,
+      parentTaskId: request.parentTaskId,
+      parentStepId: request.parentStepId,
       systemPrompt: prepared.systemPrompt,
       message: messageWithBootstrap,
       requestEnvelope: prepared.requestEnvelope,
@@ -105,6 +115,25 @@ export class RunCoordinator {
       budgetState,
       taskBudgetRuntime,
     })
+
+    const resolvedTaskBudgetRuntime = result.taskBudgetRuntime
+      || result.executionDiagnostics?.taskBudgetRuntime
+      || (
+        result.taskType && taskBudgetRuntime.bootstrapBudget
+          ? rebindTaskBudgetRuntime(taskBudgetRuntime, result.taskType, {
+            bootstrapBudget: false,
+          })
+          : null
+      )
+    const resolvedBudgetDiagnostics = resolvedTaskBudgetRuntime
+      ? {
+        ...resolvedTaskBudgetRuntime.budget,
+        ...resolvedTaskBudgetRuntime.usage,
+      }
+      : {
+        ...budget,
+        ...(result.budgetState || budgetState),
+      }
 
     this.deps.promptAssembly.recordRunOutcome({
       scope: request.scope,
@@ -119,19 +148,19 @@ export class RunCoordinator {
       agent: request.scope.agent,
       runId: request.requestId,
       taskId,
+      parentTaskId: request.parentTaskId,
+      parentStepId: request.parentStepId,
       phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
       taskType: result.taskType,
       interactionState: result.interactionState,
       taskProjectionId: result.taskProjectionId || result.taskId || taskId,
       executionDiagnostics: {
         taskId: result.taskId || taskId,
-        taskBudgetRuntime: result.taskBudgetRuntime || result.executionDiagnostics?.taskBudgetRuntime || taskBudgetRuntime,
+        taskBudgetRuntime: resolvedTaskBudgetRuntime || taskBudgetRuntime,
         compression: prepared.compression || null,
-        budget: {
-          ...budget,
-          ...(result.budgetState || budgetState),
-        },
-        budgetUsagePercent: result.executionDiagnostics?.budgetUsagePercent ?? null,
+        budget: resolvedBudgetDiagnostics,
+        budgetUsagePercent: result.executionDiagnostics?.budgetUsagePercent
+          ?? (resolvedTaskBudgetRuntime ? getBudgetUsagePercent(resolvedTaskBudgetRuntime) : null),
         stepBudget: result.executionDiagnostics?.stepBudget ?? null,
         fallback: buildExecutionFallbackState(result.executionDiagnostics?.fallback || null),
         recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,

@@ -439,7 +439,9 @@ function TaskCard({
   onContinueInput,
   onSubmitConfirmation,
   onSubmitAgentResult,
-  onRetry
+  onRetry,
+  onSuspendRun,
+  onResumeRun,
 }: {
   run: TaskCardRun
   taskKey: string
@@ -457,6 +459,8 @@ function TaskCard({
   onSubmitConfirmation?: (scopeId: string, confirmed: boolean) => void
   onSubmitAgentResult?: (scopeId: string) => void
   onRetry?: (scopeId: string) => void
+  onSuspendRun?: (scopeId: string) => void
+  onResumeRun?: (scopeId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
@@ -754,6 +758,24 @@ function TaskCard({
       {expanded &&
         (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
           <div className="flex flex-wrap gap-1.5">
+            {(run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
+              <button
+                type="button"
+                onClick={() => onSuspendRun?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                暂停任务
+              </button>
+            )}
+            {run.interactionState === 'suspended' && (
+              <button
+                type="button"
+                onClick={() => onResumeRun?.(run.scopeId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                继续运行
+              </button>
+            )}
             {run.waitingFor === 'input' && (
               <button
                 type="button"
@@ -1910,8 +1932,8 @@ export default function ChatPanel() {
         taskId: projection?.taskId || run.taskContinuation?.taskId || null,
         phase: run.phase,
         title: run.title,
-        taskTitle: run.taskTitle,
-        taskSummary: run.taskSummary,
+        taskTitle: projection?.taskTitle || run.taskTitle,
+        taskSummary: projection?.taskSummary || run.taskSummary,
         steps: run.steps,
         currentStepId: run.currentStepId,
         waitingFor: run.waitingFor,
@@ -1919,7 +1941,10 @@ export default function ChatPanel() {
           (run.resumableActions && run.resumableActions.length > 0)
             ? run.resumableActions
             : (projection?.resumableActions || []),
-        recentArtifacts: run.recentArtifacts,
+        recentArtifacts:
+          (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
+            ? projection.recentArtifacts
+            : (run.recentArtifacts || []),
         taskContinuation: run.taskContinuation || projection?.continuationRef || null,
         memoryCapture: run.memoryCapture,
         taskType: projection?.taskType,
@@ -1929,7 +1954,7 @@ export default function ChatPanel() {
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: run.blockedReason,
+        blockedReason: projection?.blockedReason || run.blockedReason,
         error: run.error,
         updatedAt: run.updatedAt,
         toolTrace: []
@@ -1942,10 +1967,16 @@ export default function ChatPanel() {
       merged.set(run.scopeId, {
         ...run,
         taskId: projection?.taskId || run.executionDiagnostics?.taskId || run.taskContinuation?.taskId || run.taskId || null,
+        taskTitle: projection?.taskTitle || run.taskTitle,
+        taskSummary: projection?.taskSummary || run.taskSummary,
         resumableActions:
           (run.resumableActions && run.resumableActions.length > 0)
             ? run.resumableActions
             : (projection?.resumableActions || []),
+        recentArtifacts:
+          (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
+            ? projection.recentArtifacts
+            : (run.recentArtifacts || []),
         taskContinuation: run.taskContinuation || projection?.continuationRef || null,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
@@ -1953,7 +1984,8 @@ export default function ChatPanel() {
         stepBudget: projection?.budget?.stepBudget,
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
-        recoveryHistory: projection?.recoveryHistory
+        recoveryHistory: projection?.recoveryHistory,
+        blockedReason: projection?.blockedReason || run.blockedReason
       })
     }
     return Array.from(merged.values()).sort(
@@ -2333,25 +2365,21 @@ export default function ChatPanel() {
   )
 
   const handleContinueTaskInput = useCallback(
-    (scopeId: string) => {
+    async (scopeId: string) => {
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
-      const continuation = run?.taskContinuation
-      const taskId = run?.taskId || continuation?.taskId || null
-      const draft = [
-        '继续当前任务。',
-        taskId ? `Task ID: ${taskId}` : null,
-        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
-        run?.taskSummary ? `需要补充：${run.taskSummary}` : null,
-        '我的补充是：'
-      ]
-        .filter(Boolean)
-        .join('\n')
-      setInputValue(draft)
-      focusInputWithResize()
+      const responseText = window.prompt('补充后继续', run?.taskSummary || '请继续，补充信息如下：')
+      if (responseText == null) return
+      const trimmed = responseText.trim()
+      if (!trimmed) return
+      await window.electronAPI.agent.respondToInteraction({
+        scopeId,
+        taskId: run?.taskId || undefined,
+        responseText: trimmed,
+      })
     },
-    [focusInputWithResize, mergedTaskRuns, setInputValue]
+    [mergedTaskRuns]
   )
 
   const handleSubmitTaskConfirmation = useCallback(
@@ -2359,44 +2387,52 @@ export default function ChatPanel() {
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
-      const continuation = run?.taskContinuation
-      if (!continuation?.executionId || !continuation.stepId) return
-      const result = await window.electronAPI.skills
-        .submitConfirmation({
-          executionId: continuation.executionId,
-          stepId: continuation.stepId,
-          confirmed
-        })
-        .catch(() => null)
-      if (result?.success && result.data) {
-        applySkillExecutionDetailToScope(scopeId, result.data)
-      }
+      await window.electronAPI.agent.respondToInteraction({
+        scopeId,
+        taskId: run?.taskId || undefined,
+        responseText: confirmed ? '确认继续。' : '暂不继续，请先停止。',
+      })
     },
-    [applySkillExecutionDetailToScope, mergedTaskRuns]
+    [mergedTaskRuns]
   )
 
   const handleSubmitTaskAgentResult = useCallback(
-    (scopeId: string) => {
+    async (scopeId: string) => {
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
-      const continuation = run?.taskContinuation
-      const taskId = run?.taskId || continuation?.taskId || null
-      const draft = [
-        '继续当前任务。',
-        taskId ? `Task ID: ${taskId}` : null,
-        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
-        continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
-        run?.taskSummary ? `需要补交结果：${run.taskSummary}` : null,
-        '我的结果是：'
-      ]
-        .filter(Boolean)
-        .join('\n')
-      setInputValue(draft)
-      focusInputWithResize()
+      const responseText = window.prompt('补交结果', run?.taskSummary || '人工步骤已完成，请继续。')
+      if (responseText == null) return
+      const trimmed = responseText.trim()
+      if (!trimmed) return
+      await window.electronAPI.agent.respondToInteraction({
+        scopeId,
+        taskId: run?.taskId || undefined,
+        responseText: trimmed,
+      })
     },
-    [focusInputWithResize, mergedTaskRuns, setInputValue]
+    [mergedTaskRuns]
   )
+
+  const handleSuspendTask = useCallback(async (scopeId: string) => {
+    const run =
+      useAgent.getState().scopeRunStates[scopeId] ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    await window.electronAPI.agent.suspendRun({
+      scopeId,
+      taskId: run?.taskId || undefined,
+    })
+  }, [mergedTaskRuns])
+
+  const handleResumeTask = useCallback(async (scopeId: string) => {
+    const run =
+      useAgent.getState().scopeRunStates[scopeId] ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    await window.electronAPI.agent.resumeRun({
+      scopeId,
+      taskId: run?.taskId || undefined,
+    })
+  }, [mergedTaskRuns])
 
   const handleRetryTask = useCallback(
     async (scopeId: string) => {
@@ -2530,6 +2566,8 @@ export default function ChatPanel() {
           onSubmitConfirmation={handleSubmitTaskConfirmation}
           onSubmitAgentResult={handleSubmitTaskAgentResult}
           onRetry={handleRetryTask}
+          onSuspendRun={handleSuspendTask}
+          onResumeRun={handleResumeTask}
         />
       )
     },
@@ -2538,6 +2576,8 @@ export default function ChatPanel() {
       handleDismissMemoryCapture,
       handleOpenTaskArtifact,
       handleRetryTask,
+      handleResumeTask,
+      handleSuspendTask,
       handleSubmitTaskAgentResult,
       handleSubmitTaskConfirmation,
       handleSupplementMemoryCapture,

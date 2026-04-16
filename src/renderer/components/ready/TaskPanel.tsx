@@ -291,7 +291,14 @@ export default function TaskPanel() {
     }))
   }, [activeRun])
 
-  const artifactItems = useMemo(() => activeRun?.artifactRefs?.slice(-6) || [], [activeRun])
+  const activeTaskTitle = activeProjection?.taskTitle || activeRun?.taskTitle || null
+  const activeTaskSummary = activeProjection?.taskSummary || activeRun?.taskSummary || null
+  const artifactItems = useMemo(() => {
+    if (activeProjection?.recentArtifacts && activeProjection.recentArtifacts.length > 0) {
+      return activeProjection.recentArtifacts.slice(-6)
+    }
+    return activeRun?.artifactRefs?.slice(-6) || []
+  }, [activeProjection, activeRun])
   const memoryRefs = useMemo(() => activeRun?.memoryRefs?.slice(-6) || [], [activeRun])
   const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
   const documentPipelineDiagnostics = activeRun?.executionDiagnostics?.pipeline?.document || null
@@ -304,6 +311,7 @@ export default function TaskPanel() {
       ? null
       : Math.max(0, Math.min(100, Math.round(activeProjection?.budgetUsagePercent)))
   const safeProjectionBudgetPercent = projectionBudgetPercent ?? 0
+  const projectionStepBudget = activeProjection?.budget?.stepBudget || null
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -311,28 +319,46 @@ export default function TaskPanel() {
     setInputValue('')
   }
 
-  const handleContinueProjection = useCallback(() => {
-    if (!activeProjection?.continuationRef) return
-    const draft = [
-      '继续当前任务。',
-      activeProjection?.continuationRef?.executionId
-        ? `Execution ID: ${activeProjection.continuationRef.executionId}`
-        : null,
-      activeProjection?.continuationRef?.stepId
-        ? `Step ID: ${activeProjection.continuationRef.stepId}`
-        : null,
-      activeProjection?.blockedReason ? `当前阻塞：${activeProjection.blockedReason}` : null,
-      '我的补充是：'
-    ]
-      .filter(Boolean)
-      .join('\n')
-    setInputValue(draft)
-  }, [activeProjection, setInputValue])
+  const handleResumeProjection = useCallback(async () => {
+    if (!activeProjection?.scopeId) return
+    await window.electronAPI.agent.resumeRun({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId || undefined,
+    })
+  }, [activeProjection])
+
+  const handleSuspendProjection = useCallback(async () => {
+    if (!activeProjection?.scopeId) return
+    await window.electronAPI.agent.suspendRun({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId || undefined,
+    })
+  }, [activeProjection])
+
+  const handleRespondToProjection = useCallback(async () => {
+    if (!activeProjection?.scopeId) return
+    const placeholder =
+      activeProjection.interactionState === 'awaiting_confirmation'
+        ? '确认继续'
+        : activeProjection.interactionState === 'human_takeover'
+          ? '我已完成，请继续'
+          : '请继续，补充信息如下：'
+    const responseText = window.prompt('补充后继续', placeholder)
+    if (responseText == null) return
+    const trimmed = responseText.trim() || placeholder
+    if (!trimmed) return
+    await window.electronAPI.agent.respondToInteraction({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId || undefined,
+      responseText: trimmed,
+    })
+  }, [activeProjection])
 
   const handleRetryProjection = useCallback(() => {
     if (!(activeProjection?.resumableActions || []).includes('retry')) return
     const draft = [
       '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
+      activeProjection?.taskId ? `Task ID: ${activeProjection.taskId}` : null,
       activeProjection?.continuationRef?.executionId
         ? `Execution ID: ${activeProjection.continuationRef.executionId}`
         : null,
@@ -449,6 +475,29 @@ export default function TaskPanel() {
                 </span>
               )}
             </div>
+            {(activeTaskTitle || activeTaskSummary) && (
+              <div
+                className="rounded-[10px] border px-2.5 py-2"
+                style={{
+                  borderColor: 'var(--border-default)',
+                  background: 'var(--surface-card-bg)'
+                }}
+              >
+                {activeTaskTitle && (
+                  <div className="text-[11px] font-semibold" style={{ color: 'var(--text-body)' }}>
+                    {activeTaskTitle}
+                  </div>
+                )}
+                {activeTaskSummary && (
+                  <div
+                    className="mt-1 text-[10px]"
+                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                  >
+                    {activeTaskSummary}
+                  </div>
+                )}
+              </div>
+            )}
             {activeProjection && (
               <div
                 className="rounded-[10px] border px-2.5 py-2"
@@ -500,6 +549,20 @@ export default function TaskPanel() {
                     </div>
                   </div>
                 )}
+                {projectionStepBudget && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-light)', lineHeight: 1.5 }}>
+                    当前步骤额度
+                    {projectionStepBudget.stepId ? ` · ${projectionStepBudget.stepId}` : ''}
+                    {typeof projectionStepBudget.remainingIterations === 'number'
+                      ? ` · 剩余 ${projectionStepBudget.remainingIterations}/${projectionStepBudget.maxIterations}`
+                      : ` · 总计 ${projectionStepBudget.maxIterations}`}
+                  </div>
+                )}
+                {activeProjection?.degradationReason && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: 'var(--color-orange)', lineHeight: 1.5 }}>
+                    degradationReason: {activeProjection.degradationReason}
+                  </div>
+                )}
               </div>
             )}
             {activeRun?.ownerResourceId && (
@@ -528,14 +591,42 @@ export default function TaskPanel() {
             )}
             {activeProjection && (
               <div className="flex flex-wrap gap-1.5">
-                {activeProjection?.continuationRef && (
+                {(activeProjection?.continuationRef
+                  || activeProjection?.interactionState === 'suspended'
+                  || (activeProjection?.resumableActions || []).includes('continue')) && (
                   <button
                     type="button"
-                    onClick={handleContinueProjection}
+                    onClick={handleResumeProjection}
                     className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
-                    继续任务
+                    继续运行
+                  </button>
+                )}
+                {(activeProjection?.status === 'running' || activeProjection?.interactionState === 'resuming') && (
+                  <button
+                    type="button"
+                    onClick={handleSuspendProjection}
+                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                  >
+                    暂停任务
+                  </button>
+                )}
+                {(activeProjection?.interactionState === 'awaiting_clarification'
+                  || activeProjection?.interactionState === 'awaiting_confirmation'
+                  || activeProjection?.interactionState === 'human_takeover') && (
+                  <button
+                    type="button"
+                    onClick={handleRespondToProjection}
+                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                  >
+                    {activeProjection?.interactionState === 'awaiting_confirmation'
+                      ? '确认继续'
+                      : activeProjection?.interactionState === 'human_takeover'
+                        ? '我已完成'
+                        : '补充后继续'}
                   </button>
                 )}
                 {(activeProjection?.resumableActions || []).includes('retry') && (

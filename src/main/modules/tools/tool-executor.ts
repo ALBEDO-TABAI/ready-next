@@ -28,6 +28,7 @@ export interface ToolContext {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
   sessionId?: string
+  registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
 }
 
 export async function executeToolCall(
@@ -45,6 +46,11 @@ export async function executeToolCall(
   }
 
   return withToolExecutionTimeout(toolName, async () => {
+    if (context.abortSignal?.aborted) {
+      const error = new Error('Operation aborted')
+      error.name = 'AbortError'
+      throw error
+    }
     if (toolName.startsWith('browser_')) {
       if (!context.browserController) {
         return 'Browser controller is not available'
@@ -68,7 +74,7 @@ export async function executeToolCall(
     }
 
     if (toolName.startsWith('skill_')) {
-      return executeSkillTool(toolName, args, context.sessionId)
+      return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup)
     }
 
     if (toolName.startsWith('system_')) {

@@ -254,6 +254,7 @@ export interface ScopeRunExecutionDiagnostics {
     maxIterations?: number
     maxToolCalls?: number
     maxParallelToolGroups?: number
+    reservedToolCalls?: number
     iterationsUsed?: number
     toolCallsUsed?: number
     parallelToolGroupsUsed?: number
@@ -278,6 +279,12 @@ export interface ScopeRunExecutionDiagnostics {
     recovered: boolean
     timestamp: string
   }> | null
+  continuationBudgetRestore?: {
+    inheritedBudget: boolean
+    restoredUsage: boolean
+    grantedIterationSafetyFloor: boolean
+    grantedToolCallSafetyFloor: boolean
+  } | null
   degradationReason?: string | null
   pipeline?: {
     document?: {
@@ -301,6 +308,8 @@ export interface ScopeRunSummary {
   threadKey: string
   phase: ScopeRunEventPayload['phase']
   taskId?: string | null
+  parentTaskId?: string | null
+  parentStepId?: string | null
   taskTitle?: string | null
   taskSummary?: string | null
   taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
@@ -336,6 +345,8 @@ export interface ScopeRunEventPayload {
   agent: string
   runId?: string
   taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
   phase:
     | 'queued'
     | 'planning'

@@ -302,6 +302,36 @@
 
 ## [0.1.4] - 2026-03-06
 
+## [0.1.5] - 2026-04-16
+
+### 修复
+
+#### Agent Core：预算与续跑真值
+- 默认 scoped run 不再永久锁死在 `short_task` 预算；真实任务类型解析完成后，会回正到对应预算档位
+- continuation 现在会恢复之前已经消耗的迭代、工具调用和并行消耗，并在剩余额度过低时补最小安全余量
+- `reserveToolCalls` 预算提示已接入运行时，不再只是空接口
+
+#### Agent Core：执行与交互控制
+- 工具批执行已接入取消信号；取消后不会继续启动后续串行工具或下一批并行工具
+- 冻结预算会真正停住工具循环，不再只是把 UI 标签改成 `suspended`
+- 多步任务现在会在步骤完成提示或当前步骤额度耗尽时推进到下一步，并记录步骤摘要
+- 通用文本回复里的“请补充 / 请确认 / 需要人工接管”会提升为结构化交互状态
+
+### 调整
+
+#### Agent / Task UI
+- 新增 `agent:suspendRun / agent:resumeRun / agent:respondToInteraction` IPC 链路
+- `TaskPanel` 与 `ChatPanel` 中的继续、暂停、确认、补充类按钮已改为真实运行控制，不再只是生成草稿文本
+
+#### Agent Core：子任务与任务投影
+- `task_projections` 已补上 `parent_task_id / parent_step_id / task_title / task_summary / recent_artifacts_json`
+- child task 现在可以带独立 `taskId` 和父步骤引用运行，并把完成摘要与产物摘要回写到父任务步骤
+- `TaskPanel` 与 `ChatPanel` 改为优先读取 projection 持久化真值，不再默认以 scope run 文本摘要为准
+
+#### Agent Core：运行级资源清理
+- 新增 run-scoped cleanup registry，取消、失败和超时都会统一触发已注册的清理回调
+- skill workflow 启动后会把活跃 execution 挂到当前 run 的清理注册表里，避免中断后留下悬挂 execution
+
 ### 变更
 
 #### Browser Agent V7：任务图执行框架

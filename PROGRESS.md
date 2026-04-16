@@ -255,9 +255,33 @@
    - Browser orchestration 最后收口
    - Diagnostics labs 从当前 dock 继续升级完整化
 
+## 2026-04-16 Agent Core Gap Closure（已完成）
+
+- **Batch A：预算真值 + 取消/冻结**
+  - 默认 scoped run 现在会先带 `bootstrap budget` 占位标记，等真实任务类型解析出来后再回正到对应预算档位。
+  - `reserveToolCalls` 不再只是接口占位，已经会实际压缩剩余工具调用头寸。
+  - 工具批执行已接入取消信号；串行工具不会在取消后继续跑下一项；冻结预算也会真正停住迭代。
+- **Batch B：续跑预算恢复 + 执行器真分流**
+  - continuation 现在会恢复之前已经消耗的 `iterations/toolCalls/parallel groups`，并在剩余额度过低时补最小安全余量。
+  - `skill / rss / calendar / feishu` 执行器不再只是路由标签，运行时会注入专用执行指令，并收窄实际允许调用的工具集合。
+- **Batch C：步骤推进 + 交互阻塞 + 运行控制**
+  - 多步任务现在会维护运行中步骤，支持“模型明确宣布步骤完成”或“当前步骤额度耗尽”时推进到下一步，并记录步骤摘要。
+  - 通用文本回复里出现“请补充 / 请确认 / 需要你手动完成”时，会被提升为结构化交互状态，而不再一直挂成普通运行中。
+  - 新增 `agent:suspendRun / agent:resumeRun / agent:respondToInteraction` IPC 链路；`TaskPanel` 和 `ChatPanel` 的相关按钮已改为真实控制，不再只是帮用户填草稿。
+- **Batch D：子任务脚手架 + 运行级资源清理**
+  - `task_projections` 现已补上 `parent_task_id / parent_step_id`，child task 可以按父任务查询，并把完成摘要与产物摘要回写到父步骤。
+  - `runtime.sendScoped` / `RunCoordinator` 已能透传父子任务关联，继续沿用原有单轮执行链，不额外生成第二套外层循环。
+  - 新增 run-scoped cleanup registry；取消、失败或超时后，注册过的清理回调会按 run 统一收口，skill workflow 也会把未收尾 execution 挂进去。
+- **Batch E：projection cleanup + 文档同步**
+  - `TaskProjectionStore` 现在会持久化 `taskTitle / taskSummary / recentArtifacts`，不再只存“任务骨架”。
+  - `ChatPanel` 与 `TaskPanel` 已改成优先消费 projection 真值，再回退到 scope run 摘要。
+  - 协作文档已同步补齐预算、子任务、清理注册表和 projection-first 的当前口径。
+
 ## 最近一次有效校验
 
 - `npm run typecheck` 通过
+- `npx tsx --test src/__tests__/run-coordinator-budget.test.ts src/__tests__/task-budget-runtime-alignment.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/execution-loop-cancellation.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-step-progression.test.ts src/__tests__/interaction-state-detection.test.ts src/__tests__/task-run-control-ipc.test.ts src/__tests__/task-projection-repository.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/run-resource-reaper.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts` 通过
+- `npx tsx --test src/__tests__/run-coordinator-budget.test.ts src/__tests__/task-budget-runtime-alignment.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/execution-loop-cancellation.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-step-progression.test.ts src/__tests__/interaction-state-detection.test.ts src/__tests__/task-run-control-ipc.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/intent-classifier.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-actions-contract.test.ts src/__tests__/recovery-router.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/run-coordinator.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-actions-contract.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/recovery-router.test.ts src/__tests__/agent-task-runtime-contract.test.ts src/__tests__/agent-runtime-host-contract.test.ts` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-coordinator-budget.test.ts src/__tests__/execution-fallback-policy.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-projection-repository.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/openai-execution-client-contract.test.ts src/__tests__/anthropic-execution-client-contract.test.ts src/__tests__/kimi-coding-client-contract.test.ts` 通过

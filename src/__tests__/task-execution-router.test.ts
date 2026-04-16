@@ -94,7 +94,15 @@ test('task execution router restores continuation from projection state when ava
         status: 'blocked',
         interactionState: 'awaiting_confirmation',
         steps: [],
-        budget: null,
+        budget: {
+          taskType: 'short_task',
+          maxIterations: 24,
+          maxToolCalls: 24,
+          maxParallelToolGroups: 5,
+          iterationsUsed: 7,
+          toolCallsUsed: 4,
+          parallelToolGroupsUsed: 1,
+        },
         budgetUsagePercent: 60,
         recoveryHistory: [],
         blockedReason: '等待确认',
@@ -114,6 +122,8 @@ test('task execution router restores continuation from projection state when ava
   assert.equal(route.chain, 'continuation')
   assert.equal(route.executor, 'skill')
   assert.equal(route.continuation?.taskId, 'task-3')
+  assert.equal(route.continuation?.budgetRuntime?.usage.iterationsUsed, 7)
+  assert.equal(route.continuation?.budgetRuntime?.usage.toolCallsUsed, 4)
 })
 
 test('task execution router keeps skill requests on the dedicated skill executor path', () => {

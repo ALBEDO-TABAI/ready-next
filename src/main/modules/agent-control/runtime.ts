@@ -26,6 +26,7 @@ import { RunCoordinator } from './run-coordinator'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { TaskProjectionRecord } from './run-contracts'
+import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -613,6 +614,9 @@ export class AgentControlRuntime extends EventEmitter {
     scopeId: string
     message: string | MultimodalBlock[]
     requestId?: string
+    taskId?: string
+    parentTaskId?: string
+    parentStepId?: string
   }): Promise<{ success: boolean; error?: string }> {
     const scopeRow = this.db.getConversationScope(payload.scopeId)
     if (!scopeRow) {
@@ -625,7 +629,10 @@ export class AgentControlRuntime extends EventEmitter {
         message: payload.message as
           | string
           | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId: payload.requestId
+        requestId: payload.requestId,
+        taskId: payload.taskId,
+        parentTaskId: payload.parentTaskId,
+        parentStepId: payload.parentStepId,
       },
       {
         onSuccess: async (result) => {
@@ -643,6 +650,120 @@ export class AgentControlRuntime extends EventEmitter {
         }
       }
     )
+  }
+
+  async suspendRun(payload: {
+    scopeId: string
+    taskId?: string
+  }): Promise<{ success: boolean; error?: string }> {
+    const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
+    if (!target) {
+      return { success: false, error: 'Conversation scope not found' }
+    }
+    this.orchestrator.kill(target.scope.agent, target.scope.id)
+
+    const restored = restoreContinuationTaskBudgetRuntime({
+      taskType: target.projection?.taskType || 'short_task',
+      budget: target.projection?.budget || null,
+    })
+    const runtime = restored.runtime
+      ? {
+        ...restored.runtime,
+        frozen: true,
+      }
+      : null
+    const timestamp = new Date().toISOString()
+    this.emitScopeRunEvent({
+      type: 'updated',
+      scopeId: target.scope.id,
+      agent: target.scope.agent,
+      runId: target.projection?.runId,
+      taskId: target.projection?.taskId || payload.taskId,
+      phase: 'takeover',
+      taskType: target.projection?.taskType || 'short_task',
+      interactionState: 'suspended',
+      taskTitle: target.projection?.taskId ? target.projection.taskId : undefined,
+      taskSummary: '任务已暂停，等待继续。',
+      steps: target.projection?.steps as any,
+      currentStepId: target.projection?.currentStepId || null,
+      waitingFor: 'none',
+      resumableActions: ['continue', 'cancel'],
+      blockedReason: '任务已暂停，等待继续。',
+      taskProjectionId: target.projection?.taskId || payload.taskId,
+      executionDiagnostics: runtime
+        ? {
+          taskId: target.projection?.taskId || payload.taskId,
+          taskBudgetRuntime: runtime,
+          budget: {
+            ...runtime.budget,
+            ...runtime.usage,
+          },
+          stepBudget: runtime.stepBudget
+            ? {
+              stepId: runtime.stepBudget.stepId || null,
+              maxIterations: runtime.stepBudget.maxIterations,
+              remainingIterations: runtime.stepBudget.remainingIterations,
+            }
+            : null,
+          budgetUsagePercent: getBudgetUsagePercent(runtime),
+          budgetWarningLevel: runtime.warningLevel,
+        }
+        : null,
+      timestamp,
+    })
+    return { success: true }
+  }
+
+  async resumeRun(payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText?: string
+  }): Promise<{ success: boolean; error?: string }> {
+    const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
+    if (!target) {
+      return { success: false, error: 'Conversation scope not found' }
+    }
+    return this.sendScoped({
+      scopeId: target.scope.id,
+      requestId: payload.requestId,
+      message: this.buildContinuationControlMessage({
+        projection: target.projection,
+        lead: '继续当前任务。',
+        responseText: payload.responseText,
+      }),
+    })
+  }
+
+  async respondToInteraction(payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText: string
+  }): Promise<{ success: boolean; error?: string }> {
+    const responseText = String(payload.responseText || '').trim()
+    if (!responseText) {
+      return { success: false, error: 'Interaction response is required' }
+    }
+    const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
+    if (!target) {
+      return { success: false, error: 'Conversation scope not found' }
+    }
+    const lead =
+      target.projection?.interactionState === 'awaiting_confirmation'
+        ? '我已确认，继续执行。'
+        : target.projection?.interactionState === 'human_takeover'
+          ? '人工步骤已完成，请继续。'
+          : '以下是我补充的信息，请继续。'
+    return this.sendScoped({
+      scopeId: target.scope.id,
+      requestId: payload.requestId,
+      message: this.buildContinuationControlMessage({
+        projection: target.projection,
+        lead,
+        responseText,
+      }),
+    })
   }
 
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
@@ -1287,13 +1408,48 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   recordScopeRunEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
-    const summary = this.runProjection.recordEvent(payload)
+    const summary = this.recordRunProjectionEvent(payload)
     if (summary) {
       void syncTaskProjection(this.taskProjectionStore, summary, payload).catch((error) => {
         console.error('[AgentControlRuntime] Failed to sync task projection:', error)
       })
     }
     return summary
+  }
+
+  private recordRunProjectionEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
+    return this.runProjection.recordEvent(payload)
+  }
+
+  private resolveTaskControlTarget(
+    scopeId: string,
+    taskId?: string,
+  ): { scope: ConversationScope; projection: TaskProjectionRecord | null } | null {
+    const scope = this.getConversationScope(scopeId)
+    if (!scope) return null
+    const projection = taskId
+      ? this.getTaskProjection(taskId)
+      : this.listTaskProjections(scopeId)[0] || null
+    return { scope, projection }
+  }
+
+  private buildContinuationControlMessage(params: {
+    projection: TaskProjectionRecord | null
+    lead: string
+    responseText?: string
+  }): string {
+    return [
+      params.lead,
+      params.projection?.taskId ? `Task ID: ${params.projection.taskId}` : null,
+      params.projection?.continuationRef?.executionId
+        ? `Execution ID: ${params.projection.continuationRef.executionId}`
+        : null,
+      params.projection?.continuationRef?.stepId
+        ? `Step ID: ${params.projection.continuationRef.stepId}`
+        : null,
+      params.projection?.blockedReason ? `继续前上下文：${params.projection.blockedReason}` : null,
+      params.responseText ? `我的回复：${params.responseText}` : null,
+    ].filter(Boolean).join('\n')
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {

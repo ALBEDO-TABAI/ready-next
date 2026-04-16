@@ -1190,8 +1190,12 @@ const migrations: Migration[] = [
           task_id TEXT PRIMARY KEY,
           scope_id TEXT NOT NULL,
           run_id TEXT NOT NULL,
+          parent_task_id TEXT,
+          parent_step_id TEXT,
           task_type TEXT NOT NULL,
           module TEXT NOT NULL,
+          task_title TEXT,
+          task_summary TEXT,
           status TEXT NOT NULL,
           interaction_state TEXT NOT NULL,
           steps_json TEXT NOT NULL,
@@ -1202,6 +1206,7 @@ const migrations: Migration[] = [
           blocked_reason TEXT,
           resumable_actions_json TEXT,
           continuation_ref_json TEXT,
+          recent_artifacts_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -1211,6 +1216,43 @@ const migrations: Migration[] = [
       )
       db.exec(
         'CREATE INDEX IF NOT EXISTS idx_task_projections_status_updated ON task_projections(status, updated_at DESC)'
+      )
+    }
+  },
+  {
+    name: '024_extend_task_projection_store_for_budget_warning',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE task_projections ADD COLUMN budget_warning_level TEXT')
+      } catch {
+        // column already exists
+      }
+      try {
+        db.exec('ALTER TABLE task_projections ADD COLUMN degradation_reason TEXT')
+      } catch {
+        // column already exists
+      }
+    }
+  },
+  {
+    name: '025_extend_task_projection_store_for_parent_link_and_runtime_truth',
+    up: (db) => {
+      const alterStatements = [
+        'ALTER TABLE task_projections ADD COLUMN parent_task_id TEXT',
+        'ALTER TABLE task_projections ADD COLUMN parent_step_id TEXT',
+        'ALTER TABLE task_projections ADD COLUMN task_title TEXT',
+        'ALTER TABLE task_projections ADD COLUMN task_summary TEXT',
+        'ALTER TABLE task_projections ADD COLUMN recent_artifacts_json TEXT',
+      ]
+      for (const statement of alterStatements) {
+        try {
+          db.exec(statement)
+        } catch {
+          // column already exists
+        }
+      }
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_task_projections_parent_updated ON task_projections(parent_task_id, updated_at DESC)'
       )
     }
   }

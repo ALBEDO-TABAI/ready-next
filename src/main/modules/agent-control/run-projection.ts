@@ -55,6 +55,8 @@ export class RunProjection {
       threadKey: scope.threadKey,
       phase: payload.phase,
       taskId: payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
+      parentTaskId: payload.parentTaskId ?? previous?.parentTaskId ?? null,
+      parentStepId: payload.parentStepId ?? previous?.parentStepId ?? null,
       taskTitle: payload.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
       taskSummary: payload.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
       taskType: payload.taskType ?? previous?.taskType,

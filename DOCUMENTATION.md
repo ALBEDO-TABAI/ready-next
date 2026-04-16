@@ -174,9 +174,11 @@ Ready 采用 Electron 三层架构：
 - 远程消息：channel coalesce / scope 建立仍在 runtime，真正执行改为 `RunCoordinator.runInboundChannel`
 - `RunCoordinator` 是当前单轮执行 owner；`runtime` 不再直接内联 prompt assembly + sendAndCollect + outcome writeback 这整段链路
 - 现在每轮启动时都会先生成稳定 `taskId`；`RunCoordinator -> execution host -> RunProjection -> TaskProjectionStore` 已统一按 `taskId` 串联，`runId` 只保留单次执行实例语义
+- 受控 child task 现在继续复用这条链：`runtime.sendScoped` 可选透传 `parentTaskId / parentStepId`，`RunCoordinator` 负责带着父任务关联启动子任务，而不是再起第二套外层循环
 - 阶段 5 第二轮已落地：`RunCoordinator` 现在会为每轮执行创建统一任务预算，并把 `budget / budgetState / taskId` 一起传给 execution host
 - execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，并能带回步骤预算、预算预警和降级原因
 - 浏览器 / 文档 / 设计三条子域当前给出的 budget hint 也已经会被主流程实际消费，但语义已收口为“给当前步骤补 headroom”，不再直接抬高全局预算上限
+- orchestration 层现在还额外持有 run-scoped cleanup registry：工具或 runtime 只要按 run 注册清理动作，取消 / 失败 / 超时都会统一收口一次
 
 ### 5.1 原生工具调用
 - Anthropic 协议走 `messages` + `tool_use/tool_result`
@@ -313,6 +315,8 @@ Ready 采用 Electron 三层架构：
 - `TaskProjectionStore` 当前是正式任务看板主表，但只负责任务投影，不承担浏览器或 skill 的内部执行细节。
 - Browser / Skill continuation 现在会先通过 `taskId` 找到对应 projection，再跳模块内部持久化恢复细节，不再直接靠 `sessionId` 猜最近任务。
 - `TaskPanel` 和聊天任务卡生成的继续/重试草稿现在都会显式带上 `Task ID`，便于后续轮次精确恢复到正确任务。
+- projection 现已持久化 `taskTitle / taskSummary / recentArtifacts`，前台卡片默认优先消费 projection，再回退到 `ScopeRunSummary`
+- `task_projections` 现已补上 `parent_task_id / parent_step_id`；child task 完成后，会把摘要和产物摘要回写到父步骤的 `childTasks/detail`
 
 ## 6. Browser Agent V7
 ### 6.1 核心原则

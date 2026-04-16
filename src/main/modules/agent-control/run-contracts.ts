@@ -1,5 +1,6 @@
 import type {
   ConversationScope,
+  ScopeRunEventPayload,
   ScopeRunMemoryCapture,
   ScopeRunResumableAction,
   ScopeRunTaskContinuation,
@@ -44,6 +45,16 @@ export interface TaskStep {
   toolHints?: string[]
   budget?: number
   dependsOn?: string[]
+  childTasks?: TaskStepChildTask[]
+}
+
+export interface TaskStepChildTask {
+  taskId: string
+  taskType: TaskType
+  status: UnifiedTaskState['status']
+  summary?: string | null
+  artifactSummary?: string | null
+  updatedAt?: string | null
 }
 
 export interface TaskBudget {
@@ -51,6 +62,12 @@ export interface TaskBudget {
   maxIterations: number
   maxToolCalls: number
   maxParallelToolGroups: number
+  reservedToolCalls?: number
+  iterationsUsed?: number
+  toolCallsUsed?: number
+  parallelToolGroupsUsed?: number
+  frozen?: boolean
+  bootstrapBudget?: boolean
   stepBudget?: {
     stepId?: string | null
     maxIterations: number
@@ -73,6 +90,14 @@ export interface TaskBudgetRuntime {
   stepBudget: StepBudgetState | null
   warningLevel: BudgetWarningLevel
   frozen: boolean
+  bootstrapBudget: boolean
+}
+
+export interface ContinuationBudgetRestoreDiagnostics {
+  inheritedBudget: boolean
+  restoredUsage: boolean
+  grantedIterationSafetyFloor: boolean
+  grantedToolCallSafetyFloor: boolean
 }
 
 export interface RecoveryRecord {
@@ -124,6 +149,8 @@ export interface TaskExecutionRoute {
     taskId: string
     module?: TaskProjectionRecord['module']
     continuationRef?: ScopeRunTaskContinuation | null
+    budgetRuntime?: TaskBudgetRuntime | null
+    budgetRestore?: ContinuationBudgetRestoreDiagnostics | null
   } | null
 }
 
@@ -145,8 +172,12 @@ export interface TaskProjectionRecord {
   taskId: string
   scopeId: string
   runId: string
+  parentTaskId?: string | null
+  parentStepId?: string | null
   taskType: TaskType
   module: string
+  taskTitle?: string | null
+  taskSummary?: string | null
   status: UnifiedTaskState['status']
   interactionState: TaskInteractionState
   steps: TaskStep[]
@@ -159,6 +190,7 @@ export interface TaskProjectionRecord {
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableAction[]
   continuationRef?: ScopeRunTaskContinuation | null
+  recentArtifacts?: ScopeRunEventPayload['artifactRefs']
   createdAt: string
   updatedAt: string
 }
@@ -168,12 +200,14 @@ export interface TaskProjectionStore {
   update(taskId: string, patch: Partial<TaskProjectionRecord>): void | Promise<void>
   get(taskId: string): TaskProjectionRecord | null | Promise<TaskProjectionRecord | null>
   listByScope(scopeId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
+  listByParentTask(parentTaskId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
 }
 
 export interface RunBudgetSeed {
   maxIterations: number
   maxToolCalls: number
   maxParallelToolGroups: number
+  reservedToolCalls?: number
 }
 
 export interface RunBudgetUsage {
@@ -209,6 +243,7 @@ export interface ExecutionRunDiagnostics {
     attempts: number
   } | null
   recoveryHistory?: RecoveryRecord[] | null
+  continuationBudgetRestore?: ContinuationBudgetRestoreDiagnostics | null
   degradationReason?: string | null
   pipeline?: {
     document?: {
@@ -227,6 +262,8 @@ export interface RunCoordinatorRequest {
   message: RunMessage
   requestId?: string
   taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
   budget?: RunBudgetSeed
 }
 
@@ -240,6 +277,8 @@ export interface ExecutionHostRequest {
   sessionId?: string
   requestId?: string
   taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
   systemPrompt?: string
   message: RunMessage
   requestEnvelope?: RequestEnvelope

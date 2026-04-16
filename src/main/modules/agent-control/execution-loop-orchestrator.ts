@@ -125,6 +125,7 @@ export class ExecutionLoopOrchestrator {
     onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: ParallelToolCall[] }) => void
     budget?: RunBudgetSeed
     budgetState?: RunBudgetUsage
+    signal?: AbortSignal
   }): Promise<ExecuteToolCallsResult> {
     const groups = groupParallelSafeToolCalls(params.toolCalls)
     const results: ToolExecutionResult[] = []
@@ -133,6 +134,7 @@ export class ExecutionLoopOrchestrator {
     let shouldSerializeRemainingGroups = false
 
     for (const group of groups) {
+      this.throwIfAborted(params.signal)
       const remainingToolCalls = params.budget && params.budgetState
         ? getRemainingToolCallBudget(params.budget, params.budgetState)
         : group.toolCalls.length
@@ -155,28 +157,34 @@ export class ExecutionLoopOrchestrator {
         : 'serial'
       params.onGroupStart?.({ mode: effectiveMode, toolCalls: limitedToolCalls })
       if (effectiveMode === 'parallel') {
-        const settled = await Promise.allSettled(limitedToolCalls.map((toolCall) =>
-          this.executeToolCallWithRecovery(toolCall, params.executeTool)))
-        const firstRejected = settled.find((item) => item.status === 'rejected')
-        if (firstRejected?.status === 'rejected') {
-          throw firstRejected.reason
-        }
-        for (const item of settled as Array<PromiseFulfilledResult<ToolExecutionResult & { recoveryHistory: RecoveryRecord[] }>>) {
-          results.push({
-            id: item.value.id,
-            name: item.value.name,
-            input: item.value.input,
-            result: item.value.result,
-          })
-          recoveryHistory.push(...item.value.recoveryHistory)
-          if (item.value.recoveryHistory.length > 0) {
-            shouldSerializeRemainingGroups = true
+        const maxConcurrentTools = Math.max(1, params.budget?.maxParallelToolGroups || 5)
+        for (let index = 0; index < limitedToolCalls.length; index += maxConcurrentTools) {
+          this.throwIfAborted(params.signal)
+          const chunk = limitedToolCalls.slice(index, index + maxConcurrentTools)
+          const settled = await Promise.allSettled(chunk.map((toolCall) =>
+            this.executeToolCallWithRecovery(toolCall, params.executeTool)))
+          const firstRejected = settled.find((item) => item.status === 'rejected')
+          if (firstRejected?.status === 'rejected') {
+            throw firstRejected.reason
+          }
+          for (const item of settled as Array<PromiseFulfilledResult<ToolExecutionResult & { recoveryHistory: RecoveryRecord[] }>>) {
+            results.push({
+              id: item.value.id,
+              name: item.value.name,
+              input: item.value.input,
+              result: item.value.result,
+            })
+            recoveryHistory.push(...item.value.recoveryHistory)
+            if (item.value.recoveryHistory.length > 0) {
+              shouldSerializeRemainingGroups = true
+            }
           }
         }
         continue
       }
 
       for (const toolCall of limitedToolCalls) {
+        this.throwIfAborted(params.signal)
         const executedTool = await this.executeToolCallWithRecovery(toolCall, params.executeTool)
         results.push({
           id: executedTool.id,
@@ -334,5 +342,12 @@ export class ExecutionLoopOrchestrator {
     const jitterFloor = Math.max(350, Math.round(exponential * 0.75))
     const jitterRange = Math.max(1, exponential - jitterFloor)
     return Math.min(8_000, jitterFloor + Math.floor(Math.random() * jitterRange))
+  }
+
+  private throwIfAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) return
+    const error = new Error('Operation aborted')
+    error.name = 'AbortError'
+    throw error
   }
 }

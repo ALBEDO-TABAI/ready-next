@@ -71,6 +71,8 @@ Renderer (React / Zustand)
 - `src/main/modules/openai-responses.ts`：SSE / JSON 兼容解析
 - `src/main/modules/claude-bridge/tool-bridge.ts`：文本工具桥接
 - `src/main/modules/repositories/memory-repository.ts`：长期记忆存取
+- `src/main/modules/repositories/task-projection-repository.ts`：任务投影、父子任务关联、projection-first 真值
+- `src/main/modules/agent-control/run-cleanup-registry.ts`：run-scoped cleanup 注册与统一回收
 
 ### 7. Skills
 `SkillsCenterPanel`

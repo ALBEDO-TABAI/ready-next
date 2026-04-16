@@ -273,6 +273,7 @@ export async function executeSkillTool(
   toolName: string,
   args: Record<string, unknown>,
   sessionId?: string,
+  registerRunCleanup?: (cleanup: () => void | Promise<void>) => void,
 ): Promise<string> {
   const tool = findSkillToolByName(toolName)
   if (!tool) {
@@ -334,6 +335,19 @@ export async function executeSkillTool(
     sessionId,
     executionMode: 'workflow',
   })
+  if (
+    registerRunCleanup
+    && result.mode === 'workflow'
+    && result.execution?.id
+    && result.execution.status !== 'completed'
+    && result.execution.status !== 'failed'
+    && result.execution.status !== 'cancelled'
+  ) {
+    const executionId = result.execution.id
+    registerRunCleanup(() => {
+      manager.cancelExecution(executionId)
+    })
+  }
   const formatted = formatRunResult(result)
   rememberSkillRun(sessionId, {
     toolName,

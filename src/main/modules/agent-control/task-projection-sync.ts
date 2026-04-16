@@ -31,18 +31,32 @@ function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status']
   return 'running'
 }
 
-function mapSteps(summary: ScopeRunSummary): TaskStep[] {
-  return (summary.steps || []).map((step) => ({
-    id: step.id,
-    title: step.title,
-    description: step.detail || step.title,
-    status: step.status,
-    detail: step.detail || null,
-    updatedAt: step.updatedAt,
-  }))
+function mapSteps(summary: ScopeRunSummary, previous?: TaskProjectionRecord | null): TaskStep[] {
+  const previousSteps = new Map((previous?.steps || []).map((step) => [step.id, step]))
+  return (summary.steps || []).map((step) => {
+    const prior = previousSteps.get(step.id)
+    return {
+      ...prior,
+      id: step.id,
+      title: step.title || prior?.title,
+      description: step.detail || prior?.description || step.title,
+      status: step.status ?? prior?.status,
+      detail: step.detail ?? prior?.detail ?? null,
+      updatedAt: step.updatedAt || prior?.updatedAt,
+      childTasks: prior?.childTasks ? prior.childTasks.map((item) => ({ ...item })) : undefined,
+    }
+  })
 }
 
 function resolveStepBudget(summary: ScopeRunSummary) {
+  const runtimeStepBudget = summary.executionDiagnostics?.taskBudgetRuntime?.stepBudget
+  if (runtimeStepBudget && typeof runtimeStepBudget.maxIterations === 'number') {
+    return {
+      stepId: runtimeStepBudget.stepId || null,
+      maxIterations: runtimeStepBudget.maxIterations,
+      remainingIterations: runtimeStepBudget.remainingIterations,
+    }
+  }
   const candidate = summary.stepBudget || summary.executionDiagnostics?.stepBudget || null
   if (!candidate || typeof candidate.maxIterations !== 'number') return null
   return {
@@ -74,6 +88,120 @@ function mapRecoveryHistory(summary: ScopeRunSummary): RecoveryRecord[] {
     )
 }
 
+function resolveTaskBudget(summary: ScopeRunSummary) {
+  const runtime = summary.executionDiagnostics?.taskBudgetRuntime
+  if (runtime) {
+    return {
+      taskType: runtime.taskType,
+      maxIterations: runtime.budget.maxIterations,
+      maxToolCalls: runtime.budget.maxToolCalls,
+      maxParallelToolGroups: runtime.budget.maxParallelToolGroups,
+      reservedToolCalls: runtime.budget.reservedToolCalls || 0,
+      iterationsUsed: runtime.usage.iterationsUsed,
+      toolCallsUsed: runtime.usage.toolCallsUsed,
+      parallelToolGroupsUsed: runtime.usage.parallelToolGroupsUsed,
+      stepBudget: resolveStepBudget(summary),
+      frozen: runtime.frozen,
+      bootstrapBudget: runtime.bootstrapBudget,
+    }
+  }
+  if (!summary.executionDiagnostics?.budget) return null
+  return {
+    taskType: summary.taskType || 'short_task',
+    maxIterations: Number(summary.executionDiagnostics.budget.maxIterations || 0),
+    maxToolCalls: Number(summary.executionDiagnostics.budget.maxToolCalls || 0),
+    maxParallelToolGroups: Number(summary.executionDiagnostics.budget.maxParallelToolGroups || 0),
+    reservedToolCalls: Number(summary.executionDiagnostics.budget.reservedToolCalls || 0),
+    iterationsUsed: Number(summary.executionDiagnostics.budget.iterationsUsed || 0),
+    toolCallsUsed: Number(summary.executionDiagnostics.budget.toolCallsUsed || 0),
+    parallelToolGroupsUsed: Number(summary.executionDiagnostics.budget.parallelToolGroupsUsed || 0),
+    stepBudget: resolveStepBudget(summary),
+  }
+}
+
+function buildArtifactSummary(artifacts: ScopeRunSummary['recentArtifacts'] | undefined): string | null {
+  const labels = (artifacts || [])
+    .map((artifact) => String(artifact?.label || '').trim())
+    .filter(Boolean)
+    .slice(-3)
+  if (labels.length === 0) return null
+  return labels.join('、')
+}
+
+function formatChildTaskStatus(status: TaskProjectionRecord['status']): string {
+  if (status === 'done') return '已完成'
+  if (status === 'failed') return '失败'
+  if (status === 'cancelled') return '已取消'
+  if (status === 'blocked') return '待继续'
+  if (status === 'queued') return '排队中'
+  return '进行中'
+}
+
+function stripChildTaskDetail(detail: string | null | undefined): string {
+  const raw = String(detail || '').trim()
+  if (!raw) return ''
+  const marker = ' | 子任务 '
+  const markerIndex = raw.indexOf(marker)
+  return markerIndex === -1 ? raw : raw.slice(0, markerIndex).trim()
+}
+
+function mergeChildTaskIntoParentSteps(
+  parent: TaskProjectionRecord,
+  child: TaskProjectionRecord,
+): TaskStep[] | null {
+  if (!child.parentStepId) return null
+  let changed = false
+  const nextSteps = (parent.steps || []).map((step) => {
+    if (step.id !== child.parentStepId) return step
+    changed = true
+    const childTasks = (step.childTasks || []).filter((item) => item.taskId !== child.taskId)
+    const nextChildTasks = [
+      ...childTasks,
+      {
+        taskId: child.taskId,
+        taskType: child.taskType,
+        status: child.status,
+        summary: child.taskSummary || child.blockedReason || null,
+        artifactSummary: buildArtifactSummary(child.recentArtifacts),
+        updatedAt: child.updatedAt,
+      },
+    ].sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+    const baseDetail = stripChildTaskDetail(step.detail)
+    const childDetail = nextChildTasks
+      .map((item) => {
+        const parts = [
+          `子任务 ${item.taskId}（${formatChildTaskStatus(item.status)}）`,
+          item.summary ? `：${item.summary}` : '',
+          item.artifactSummary ? ` · 产物 ${item.artifactSummary}` : '',
+        ]
+        return parts.join('')
+      })
+      .join('；')
+    return {
+      ...step,
+      childTasks: nextChildTasks,
+      detail: [baseDetail, childDetail].filter(Boolean).join(' | ') || null,
+      updatedAt: child.updatedAt || step.updatedAt,
+    }
+  })
+  return changed ? nextSteps : null
+}
+
+async function syncParentProjectionFromChild(
+  store: TaskProjectionStore,
+  child: TaskProjectionRecord,
+): Promise<void> {
+  if (!child.parentTaskId) return
+  const parent = await store.get(child.parentTaskId)
+  if (!parent) return
+  const nextSteps = mergeChildTaskIntoParentSteps(parent, child)
+  if (!nextSteps) return
+  await store.update(child.parentTaskId, {
+    steps: nextSteps,
+    updatedAt: child.updatedAt,
+  })
+}
+
 export function buildTaskProjectionRecord(
   summary: ScopeRunSummary,
   payload: ScopeRunEventPayload,
@@ -86,21 +214,17 @@ export function buildTaskProjectionRecord(
     taskId,
     scopeId: summary.scopeId,
     runId: payload.runId || previous?.runId || taskId,
+    parentTaskId: summary.parentTaskId ?? payload.parentTaskId ?? previous?.parentTaskId ?? null,
+    parentStepId: summary.parentStepId ?? payload.parentStepId ?? previous?.parentStepId ?? null,
     taskType: summary.taskType || 'short_task',
     module: payload.module || previous?.module || 'system',
+    taskTitle: summary.taskTitle ?? previous?.taskTitle ?? null,
+    taskSummary: summary.taskSummary ?? previous?.taskSummary ?? null,
     status: resolveStatus(summary),
     interactionState: resolveInteractionState(summary),
-    steps: mapSteps(summary),
+    steps: mapSteps(summary, previous),
     currentStepId: summary.currentStepId || null,
-    budget: summary.executionDiagnostics?.budget
-      ? {
-        taskType: summary.taskType || 'short_task',
-        maxIterations: Number(summary.executionDiagnostics.budget.maxIterations || 0),
-        maxToolCalls: Number(summary.executionDiagnostics.budget.maxToolCalls || 0),
-        maxParallelToolGroups: Number(summary.executionDiagnostics.budget.maxParallelToolGroups || 0),
-        stepBudget: resolveStepBudget(summary),
-      }
-      : null,
+    budget: resolveTaskBudget(summary),
     budgetUsagePercent: summary.budgetUsagePercent ?? summary.executionDiagnostics?.budgetUsagePercent ?? null,
     budgetWarningLevel: summary.budgetWarningLevel ?? summary.executionDiagnostics?.budgetWarningLevel ?? null,
     recoveryHistory: mapRecoveryHistory(summary),
@@ -108,6 +232,7 @@ export function buildTaskProjectionRecord(
     blockedReason: summary.blockedReason || null,
     resumableActions: summary.resumableActions || [],
     continuationRef: summary.taskContinuation || null,
+    recentArtifacts: summary.recentArtifacts || previous?.recentArtifacts || [],
     createdAt: previous?.createdAt || payload.timestamp,
     updatedAt: summary.updatedAt,
   }
@@ -129,5 +254,6 @@ export async function syncTaskProjection(
   } else {
     await store.create(next)
   }
+  await syncParentProjectionFromChild(store, next)
   return next
 }

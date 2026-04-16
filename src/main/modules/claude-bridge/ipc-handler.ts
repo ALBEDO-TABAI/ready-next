@@ -470,6 +470,46 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:suspendRun', async (_, payload: {
+    scopeId: string
+    taskId?: string
+  }): Promise<IPCResponse> => {
+    try {
+      const result = await runtime!.suspendRun(payload)
+      return { success: result.success, error: result.error }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:resumeRun', async (_, payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText?: string
+  }): Promise<IPCResponse> => {
+    try {
+      const result = await runtime!.resumeRun(payload)
+      return { success: result.success, error: result.error }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:respondToInteraction', async (_, payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText: string
+  }): Promise<IPCResponse> => {
+    try {
+      const result = await runtime!.respondToInteraction(payload)
+      return { success: result.success, error: result.error }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('agent:upsertChannel', async (_, payload: {
     id?: string
     type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'

@@ -119,6 +119,41 @@ test('ExecutionLoopOrchestrator degrades parallel groups and truncates calls whe
   assert.deepEqual(result.results.map((item) => item.id), ['1', '2'])
 })
 
+test('ExecutionLoopOrchestrator caps actual concurrent tool execution per parallel batch', async () => {
+  const orchestrator = new ExecutionLoopOrchestrator({ log: () => {} })
+  let active = 0
+  let maxActive = 0
+
+  const result = await orchestrator.executeToolCalls({
+    toolCalls: Array.from({ length: 7 }, (_, index) => ({
+      id: `${index + 1}`,
+      name: 'memory_search',
+      input: { q: `item-${index + 1}` },
+    })),
+    budget: {
+      maxIterations: 24,
+      maxToolCalls: 24,
+      maxParallelToolGroups: 5,
+      reservedToolCalls: 0,
+    },
+    budgetState: {
+      iterationsUsed: 0,
+      toolCallsUsed: 0,
+      parallelToolGroupsUsed: 0,
+    },
+    executeTool: async (toolCall) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      active -= 1
+      return `${toolCall.name}:ok`
+    },
+  })
+
+  assert.equal(maxActive, 5)
+  assert.equal(result.results.length, 7)
+})
+
 test('ExecutionLoopOrchestrator retries model requests for runtime-recoverable rate limits before applying fallback logic', async () => {
   const delays: number[] = []
   const orchestrator = new ExecutionLoopOrchestrator({
