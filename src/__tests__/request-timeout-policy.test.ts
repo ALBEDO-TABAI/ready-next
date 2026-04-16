@@ -38,4 +38,16 @@ describe('request timeout policy', () => {
       baseUrl: 'https://api.kimi.com/coding',
     }), 90_000)
   })
+
+  it('extends browser-heavy model requests beyond the default budget', () => {
+    assert.equal(resolveApiRequestTimeoutMs({
+      allowBrowserTools: true,
+    }), 120_000)
+  })
+
+  it('extends skill-heavy model requests beyond the default budget', () => {
+    assert.equal(resolveApiRequestTimeoutMs({
+      preferredSkillToolNames: ['skill_get_state'],
+    }), 120_000)
+  })
 })

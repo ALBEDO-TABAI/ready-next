@@ -117,6 +117,7 @@ export class AnthropicExecutionClient {
     baseUrl: string
     signal: AbortSignal
     policy?: ToolPolicy
+    timeoutMs?: number
   }): Promise<AnthropicExecutionResponse> {
     try {
       return await this.requestWithToolsOnce(params)
@@ -142,12 +143,13 @@ export class AnthropicExecutionClient {
     baseUrl: string
     signal: AbortSignal
     policy?: ToolPolicy
+    timeoutMs?: number
   }): Promise<AnthropicExecutionResponse> {
     const headers = this.buildHeaders(params.config, params.baseUrl)
     const model = this.resolveModel(params.config, params.baseUrl)
-    const timeoutMs = resolveApiRequestTimeoutMs(params.policy, {
+    const timeoutMs = Math.max(params.timeoutMs || 0, resolveApiRequestTimeoutMs(params.policy, {
       baseUrl: params.baseUrl,
-    })
+    }))
     const tools = getPolicyAnthropicTools(params.policy)
     if (params.policy?.forceDocumentTool) {
       this.deps.log(`forceDocumentTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`)

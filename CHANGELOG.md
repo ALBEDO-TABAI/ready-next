@@ -4,6 +4,15 @@
 
 ### 新增
 
+#### Agent 运行时恢复与任务分层骨架
+- Agent 主循环新增运行时恢复链路：模型请求现在会先走错误分类，再决定退避重试、上下文压缩重试或继续进入原有通道降级
+- 保留原有 `execution-fallback-policy` 处理协议/通道不兼容，同时把运行时恢复拆成独立组件，避免两类问题继续混用
+- 工具执行新增统一超时预算：查询、文档写入、浏览器交互、Skill、飞书分别走不同超时配置
+- 工具并行策略从只读白名单升级为资源域标签分组，同域写入与交互型工具保持串行，跨域只读可并行
+- 预算默认值开始按任务类型分层：直答、短任务、多步任务、媒体任务不再共用同一轮次模板
+- 主控事件链开始透传 `taskType / interactionState / budgetUsagePercent / recoveryHistory / degradationReason`
+- 新增 `TaskTypeResolver`，并把它接入主链：低信号通用问题可直接走直答，不再一律落入工具循环
+
 #### 文档深读后制卡 MVP
 - 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt
 - 新增 `DocumentTaskPipeline`，把这类请求拆成“读取文档 -> 提炼 insight -> 生成 componentSpec -> 写入 widget -> 保存文档”五段执行，并把阶段状态映射回现有任务卡
@@ -15,6 +24,7 @@
 - 文档深读热路径已先异步化：`readDocxRawText` 和 `readDocumentEditableText` 不再用同步读取，先把 pipeline 会命中的读取路径从主线程阻塞里挪开一层
 - 文档 pipeline 的阶段文案现在会带关键指标：例如 insight 阶段会显示共拆了多少段、实际用了多少段、是否命中缓存，前台任务卡不看日志也能知道这轮为什么快或慢
 - 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`：状态层会保留当前阶段、切段数量、实际使用数量、是否命中缓存和切分方式，TaskPanel 已能直接展示
+- 文档主进程的常用读取入口也继续异步化了：`document:read`、`document:list`、`document:parseDocx`、`document:parseXlsx` 现在都改成异步读取，减少打开文件和解析大文档时的主线程阻塞
 - 卡片写回继续复用现有确定性文档动作：优先 `componentSpec`，最终仍走 `document.insertWidget` / `document.saveTab`
 
 #### 模型预设工作区与聊天快速切换

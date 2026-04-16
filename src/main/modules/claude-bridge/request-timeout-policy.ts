@@ -3,12 +3,15 @@ import type { DocumentWidgetTaskKind } from './tool-policy-heuristics'
 export interface ApiRequestTimeoutPolicyInput {
   forceDocumentTool?: boolean
   documentWidgetTaskKind?: DocumentWidgetTaskKind
+  allowBrowserTools?: boolean
+  preferredSkillToolNames?: string[] | null
 }
 
 export const DEFAULT_API_REQUEST_TIMEOUT_MS = 45_000
 export const DOCUMENT_API_REQUEST_TIMEOUT_MS = 75_000
 export const DOCUMENT_WIDGET_API_REQUEST_TIMEOUT_MS = 90_000
 export const KIMI_CODING_TOOL_REQUEST_TIMEOUT_MS = 90_000
+export const BROWSER_OR_SKILL_API_REQUEST_TIMEOUT_MS = 120_000
 
 function isKimiCodingBaseUrl(baseUrl: string | null | undefined): boolean {
   return String(baseUrl || '').trim().replace(/\/+$/, '').includes('api.kimi.com/coding')
@@ -25,6 +28,10 @@ export function resolveApiRequestTimeoutMs(
     } else {
       timeoutMs = DOCUMENT_API_REQUEST_TIMEOUT_MS
     }
+  }
+
+  if (policy?.allowBrowserTools || (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0)) {
+    timeoutMs = Math.max(timeoutMs, BROWSER_OR_SKILL_API_REQUEST_TIMEOUT_MS)
   }
 
   if (isKimiCodingBaseUrl(options?.baseUrl)) {

@@ -32,6 +32,9 @@ export interface SendAndCollectResult {
   cancelled: boolean
   usedTools: string[]
   error?: string
+  taskType?: import('./run-contracts').TaskType
+  interactionState?: import('./run-contracts').TaskInteractionState
+  taskProjectionId?: string | null
   executionDiagnostics?: {
     compression?: {
       historyCompressed: boolean
@@ -46,11 +49,18 @@ export interface SendAndCollectResult {
       toolCallsUsed?: number
       parallelToolGroupsUsed?: number
     } | null
+    stepBudget?: {
+      maxIterations?: number
+      remainingIterations?: number
+    } | null
+    budgetUsagePercent?: number | null
     fallback?: {
       happened: boolean
       kind: string
       attempts: number
     } | null
+    recoveryHistory?: import('./run-contracts').RecoveryRecord[] | null
+    degradationReason?: string | null
   } | null
 }
 

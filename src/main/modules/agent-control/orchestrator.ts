@@ -150,7 +150,14 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     intentClassification?: IntentClassification,
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
-  ): Promise<{ success: boolean; error?: string; executionDiagnostics?: ExecutionHostResult['executionDiagnostics'] }> {
+  ): Promise<{
+    success: boolean
+    error?: string
+    taskType?: ExecutionHostResult['taskType']
+    interactionState?: ExecutionHostResult['interactionState']
+    taskProjectionId?: ExecutionHostResult['taskProjectionId']
+    executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
+  }> {
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
@@ -192,6 +199,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     cleanupFns.push(() => this.off('error', collector.handleError))
 
     let executionDiagnostics: ExecutionHostResult['executionDiagnostics'] | null = null
+    let taskType: ExecutionHostResult['taskType']
+    let interactionState: ExecutionHostResult['interactionState']
+    let taskProjectionId: ExecutionHostResult['taskProjectionId']
     void this.send(
       agent,
       message,
@@ -204,6 +214,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       budgetState,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
+      taskType = result.taskType
+      interactionState = result.interactionState
+      taskProjectionId = result.taskProjectionId
       if (!result.success) {
         collector.handleError({
           agent,
@@ -224,6 +237,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       const result = await collector.result
       return {
         ...result,
+        taskType,
+        interactionState,
+        taskProjectionId,
         executionDiagnostics,
       }
     } finally {
@@ -252,6 +268,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       usedTools: result.usedTools,
       error: result.error,
       budgetState: request.budgetState,
+      taskType: result.taskType,
+      interactionState: result.interactionState,
+      taskProjectionId: result.taskProjectionId,
       executionDiagnostics: result.executionDiagnostics || null,
     }
   }

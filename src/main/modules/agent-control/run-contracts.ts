@@ -19,6 +19,119 @@ export interface RunMessageBlock {
 
 export type RunMessage = string | RunMessageBlock[]
 
+export type TaskType =
+  | 'direct_answer'
+  | 'short_task'
+  | 'multi_step_task'
+  | 'media_task'
+  | 'continuation'
+
+export type TaskInteractionState =
+  | 'running'
+  | 'awaiting_clarification'
+  | 'awaiting_confirmation'
+  | 'human_takeover'
+  | 'suspended'
+  | 'resuming'
+
+export interface TaskStep {
+  id: string
+  description: string
+  toolHints?: string[]
+  budget?: number
+  dependsOn?: string[]
+}
+
+export interface TaskBudget {
+  taskType: TaskType
+  maxIterations: number
+  maxToolCalls: number
+  maxParallelToolGroups: number
+  stepBudget?: {
+    maxIterations: number
+    remainingIterations?: number
+  } | null
+}
+
+export interface RecoveryRecord {
+  kind:
+    | 'rate_limit'
+    | 'context_overflow'
+    | 'timeout_model'
+    | 'timeout_tool'
+    | 'auth'
+    | 'transient'
+    | 'host_unavailable'
+  source: 'model_request' | 'tool_execution' | 'runtime'
+  message: string
+  attempt: number
+  recovered: boolean
+  timestamp: string
+}
+
+export interface ToolResourceTag {
+  domain:
+    | 'browser'
+    | 'document'
+    | 'rss'
+    | 'calendar'
+    | 'feishu'
+    | 'skill'
+    | 'memory'
+    | 'session'
+    | 'system'
+  accessMode: 'read' | 'write' | 'interactive'
+}
+
+export interface TaskTypeResolution {
+  taskType: TaskType
+  executionChain: 'direct' | 'tool_loop' | 'planner' | 'domain_executor' | 'continuation'
+  degradationReason?: string | null
+  requiresPlanner: boolean
+  preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'none'
+}
+
+export interface UnifiedTaskState {
+  taskId: string
+  runId?: string | null
+  scopeId?: string | null
+  taskType: TaskType
+  status: 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
+  interactionState: TaskInteractionState
+  steps: TaskStep[]
+  currentStepId?: string | null
+  budget?: TaskBudget | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: RecoveryRecord[]
+}
+
+export interface TaskProjectionRecord {
+  taskId: string
+  scopeId: string
+  runId: string
+  taskType: TaskType
+  module: string
+  status: UnifiedTaskState['status']
+  interactionState: TaskInteractionState
+  steps: TaskStep[]
+  currentStepId?: string | null
+  budget?: TaskBudget | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: RecoveryRecord[]
+  blockedReason?: string | null
+  resumableActions?: ScopeRunResumableAction[]
+  continuationRef?: ScopeRunTaskContinuation | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskProjectionStore {
+  create(record: TaskProjectionRecord): void | Promise<void>
+  update(taskId: string, patch: Partial<TaskProjectionRecord>): void | Promise<void>
+  get(taskId: string): TaskProjectionRecord | null | Promise<TaskProjectionRecord | null>
+  listByScope(scopeId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
+}
+
 export interface RunBudgetSeed {
   maxIterations: number
   maxToolCalls: number
@@ -43,11 +156,18 @@ export interface ExecutionRunDiagnostics {
     artifactSummaryUsed: boolean
   } | null
   budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null
+  stepBudget?: {
+    maxIterations?: number
+    remainingIterations?: number
+  } | null
+  budgetUsagePercent?: number | null
   fallback?: {
     happened: boolean
     kind: string
     attempts: number
   } | null
+  recoveryHistory?: RecoveryRecord[] | null
+  degradationReason?: string | null
   pipeline?: {
     document?: {
       phase?: string
@@ -91,6 +211,9 @@ export interface ExecutionHostResult {
   usedTools: string[]
   error?: string
   budgetState?: RunBudgetUsage
+  taskType?: TaskType
+  interactionState?: TaskInteractionState
+  taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
 }
 

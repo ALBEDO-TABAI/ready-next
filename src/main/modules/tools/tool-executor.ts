@@ -16,6 +16,7 @@ import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import { withToolExecutionTimeout } from './tool-execution-timeout-policy'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -43,47 +44,49 @@ export async function executeToolCall(
     return `Tool not allowed in current context: ${toolName}`
   }
 
-  if (toolName.startsWith('browser_')) {
-    if (!context.browserController) {
-      return 'Browser controller is not available'
+  return withToolExecutionTimeout(toolName, async () => {
+    if (toolName.startsWith('browser_')) {
+      if (!context.browserController) {
+        return 'Browser controller is not available'
+      }
+      return executeBrowserTool(toolName, args, context.browserController, context.abortSignal, context.sessionId)
     }
-    return executeBrowserTool(toolName, args, context.browserController, context.abortSignal, context.sessionId)
-  }
 
-  if (toolName.startsWith('document_')) {
-    return executeDocumentTool(toolName, args, {
-      emitToolAction: context.emitToolAction,
-      requestModuleToolAction: context.requestModuleToolAction,
-    })
-  }
+    if (toolName.startsWith('document_')) {
+      return executeDocumentTool(toolName, args, {
+        emitToolAction: context.emitToolAction,
+        requestModuleToolAction: context.requestModuleToolAction,
+      })
+    }
 
-  if (toolName.startsWith('rss_')) {
-    return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
-  }
+    if (toolName.startsWith('rss_')) {
+      return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
+    }
 
-  if (toolName.startsWith('calendar_')) {
-    return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
-  }
+    if (toolName.startsWith('calendar_')) {
+      return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
+    }
 
-  if (toolName.startsWith('skill_')) {
-    return executeSkillTool(toolName, args, context.sessionId)
-  }
+    if (toolName.startsWith('skill_')) {
+      return executeSkillTool(toolName, args, context.sessionId)
+    }
 
-  if (toolName.startsWith('system_')) {
-    return executeSystemTool(toolName, args)
-  }
+    if (toolName.startsWith('system_')) {
+      return executeSystemTool(toolName, args)
+    }
 
-  if (toolName.startsWith('feishu_')) {
-    return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
-  }
+    if (toolName.startsWith('feishu_')) {
+      return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
+    }
 
-  if (toolName.startsWith('memory_')) {
-    return executeMemoryTool(toolName, args, context)
-  }
+    if (toolName.startsWith('memory_')) {
+      return executeMemoryTool(toolName, args, context)
+    }
 
-  if (toolName.startsWith('session_')) {
-    return executeSessionRecallTool(toolName, args, context)
-  }
+    if (toolName.startsWith('session_')) {
+      return executeSessionRecallTool(toolName, args, context)
+    }
 
-  return `Unknown tool: ${toolName}`
+    return `Unknown tool: ${toolName}`
+  })
 }

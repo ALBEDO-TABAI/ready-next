@@ -9,47 +9,145 @@ export interface ParallelToolGroup {
   toolCalls: ParallelToolCall[]
 }
 
-const PARALLEL_SAFE_TOOL_NAMES = new Set([
+export interface ToolResourceTag {
+  domain: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'system'
+  accessMode: 'read' | 'write' | 'interactive'
+}
+
+const READ_ONLY_DOCUMENT_TOOL_NAMES = new Set([
   'document_list_widgets',
-  'memory_search',
-  'memory_list_recent',
-  'session_search',
+])
+
+const READ_ONLY_RSS_TOOL_NAMES = new Set([
   'rss_capture_session',
-  'skill_get_state',
+])
+
+const READ_ONLY_CALENDAR_TOOL_NAMES = new Set([
+  'calendar_list_window',
+])
+
+const READ_ONLY_FEISHU_TOOL_NAMES = new Set([
+  'feishu_doc_read',
+  'feishu_doc_list',
+  'feishu_message_get_context',
+  'feishu_calendar_list_events',
+  'feishu_chat_list',
+  'feishu_chat_get_members',
+  'feishu_chat_get_info',
+  'feishu_file_download',
+])
+
+const READ_ONLY_SKILL_TOOL_NAMES = new Set([
   'skill_rss_status',
   'skill_rss_list',
   'skill_rss_stats',
 ])
 
+const INTERACTIVE_SKILL_TOOL_NAMES = new Set([
+  'skill_get_state',
+  'skill_submit_input',
+  'skill_submit_confirmation',
+  'skill_submit_agent_result',
+  'skill_restart_from_step',
+  'skill_cancel_execution',
+])
+
+export function getToolResourceTag(toolName: string): ToolResourceTag {
+  const normalized = String(toolName || '').trim()
+
+  if (normalized.startsWith('browser_')) {
+    return { domain: 'browser', accessMode: 'interactive' }
+  }
+  if (normalized.startsWith('document_')) {
+    return {
+      domain: 'document',
+      accessMode: READ_ONLY_DOCUMENT_TOOL_NAMES.has(normalized) ? 'read' : 'write',
+    }
+  }
+  if (normalized.startsWith('rss_')) {
+    return {
+      domain: 'rss',
+      accessMode: READ_ONLY_RSS_TOOL_NAMES.has(normalized) ? 'read' : 'write',
+    }
+  }
+  if (normalized.startsWith('calendar_')) {
+    return {
+      domain: 'calendar',
+      accessMode: READ_ONLY_CALENDAR_TOOL_NAMES.has(normalized) ? 'read' : 'write',
+    }
+  }
+  if (normalized.startsWith('feishu_')) {
+    return {
+      domain: 'feishu',
+      accessMode: READ_ONLY_FEISHU_TOOL_NAMES.has(normalized) ? 'read' : 'write',
+    }
+  }
+  if (normalized.startsWith('memory_')) {
+    return { domain: 'memory', accessMode: 'read' }
+  }
+  if (normalized.startsWith('session_')) {
+    return { domain: 'session', accessMode: 'read' }
+  }
+  if (normalized.startsWith('skill_')) {
+    return {
+      domain: 'skill',
+      accessMode: INTERACTIVE_SKILL_TOOL_NAMES.has(normalized)
+        ? 'interactive'
+        : READ_ONLY_SKILL_TOOL_NAMES.has(normalized)
+          ? 'read'
+          : 'interactive',
+    }
+  }
+  return { domain: 'system', accessMode: 'interactive' }
+}
+
 export function isParallelSafeTool(toolName: string): boolean {
-  return PARALLEL_SAFE_TOOL_NAMES.has(String(toolName || '').trim())
+  return getToolResourceTag(toolName).accessMode === 'read'
+}
+
+function canJoinParallelGroup(buffer: ParallelToolCall[], toolCall: ParallelToolCall): boolean {
+  const candidate = getToolResourceTag(toolCall.name)
+  if (candidate.accessMode === 'interactive') return false
+  return buffer.every((existing) => {
+    const current = getToolResourceTag(existing.name)
+    if (current.accessMode === 'interactive') return false
+    if (candidate.domain === current.domain && (candidate.accessMode === 'write' || current.accessMode === 'write')) {
+      return false
+    }
+    return true
+  })
 }
 
 export function groupParallelSafeToolCalls(toolCalls: ParallelToolCall[]): ParallelToolGroup[] {
   const groups: ParallelToolGroup[] = []
-  let safeBuffer: ParallelToolCall[] = []
+  let parallelBuffer: ParallelToolCall[] = []
 
-  const flushSafeBuffer = () => {
-    if (safeBuffer.length === 0) return
+  const flushParallelBuffer = () => {
+    if (parallelBuffer.length === 0) return
     groups.push({
-      mode: safeBuffer.length > 1 ? 'parallel' : 'serial',
-      toolCalls: safeBuffer,
+      mode: parallelBuffer.length > 1 ? 'parallel' : 'serial',
+      toolCalls: parallelBuffer,
     })
-    safeBuffer = []
+    parallelBuffer = []
   }
 
   for (const toolCall of toolCalls) {
-    if (isParallelSafeTool(toolCall.name)) {
-      safeBuffer.push(toolCall)
+    if (canJoinParallelGroup(parallelBuffer, toolCall)) {
+      parallelBuffer.push(toolCall)
       continue
     }
-    flushSafeBuffer()
-    groups.push({
-      mode: 'serial',
-      toolCalls: [toolCall],
-    })
+    flushParallelBuffer()
+    const tag = getToolResourceTag(toolCall.name)
+    if (tag.accessMode === 'interactive') {
+      groups.push({
+        mode: 'serial',
+        toolCalls: [toolCall],
+      })
+      continue
+    }
+    parallelBuffer.push(toolCall)
   }
 
-  flushSafeBuffer()
+  flushParallelBuffer()
   return groups
 }

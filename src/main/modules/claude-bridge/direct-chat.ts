@@ -26,6 +26,8 @@ import {
   type DocumentTaskPipelinePhaseUpdate,
   type DocumentWidgetDraft,
 } from '../agent-control/document-task-pipeline'
+import { DocumentInsightCache } from '../agent-control/document-insight-cache'
+import { buildDocumentInsightSourceMaterial } from '../agent-control/document-source-materials'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
@@ -35,13 +37,20 @@ import {
   consumeParallelGroupBudget,
   consumeToolCallBudget,
   createRunBudgetSeed,
+  getBudgetUsagePercent,
   getRemainingToolCallBudget,
 } from '../agent-control/run-budget-policy'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
 } from '../agent-control/execution-tool-config'
-import type { RunBudgetSeed, RunBudgetUsage } from '../agent-control/run-contracts'
+import type {
+  RecoveryRecord,
+  RunBudgetSeed,
+  RunBudgetUsage,
+  TaskInteractionState,
+  TaskType,
+} from '../agent-control/run-contracts'
 import type {
   BrowserTaskAttachmentResource,
   BrowserTaskDecision,
@@ -76,11 +85,13 @@ import { compactToolPolicyHistory } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
+import { compressHistoryForPrompt } from '../agent-control/context-compression'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'
 import type { RequestEnvelope } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
+import { resolveTaskType } from '../agent-control/task-type-resolver'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
@@ -134,6 +145,7 @@ interface APIResponse {
   rawText?: string
   toolTransport?: 'native' | 'text'
   fallback?: ExecutionFallbackInfo
+  recoveryHistory?: RecoveryRecord[]
 }
 
 export interface MultimodalBlock {
@@ -206,6 +218,7 @@ show-widget 规则：
 
 export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
+  private readonly documentInsightCache = new DocumentInsightCache()
   private browserController: BrowserController | null = null
   private readonly browserDomainOrchestrator: BrowserDomainOrchestrator
   private readonly skillContextOrchestrator: SkillContextOrchestrator
@@ -538,7 +551,21 @@ export class DirectChatEngine extends EventEmitter {
       budget?: RunBudgetSeed
       budgetState?: RunBudgetUsage
     },
-  ): Promise<{ success: boolean; error?: string; executionDiagnostics?: { budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null; fallback?: { happened: boolean; kind: string; attempts: number } | null } | null }> {
+  ): Promise<{
+    success: boolean
+    error?: string
+    taskType?: TaskType
+    interactionState?: TaskInteractionState
+    taskProjectionId?: string | null
+    executionDiagnostics?: {
+      budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null
+      stepBudget?: { maxIterations?: number; remainingIterations?: number } | null
+      budgetUsagePercent?: number | null
+      fallback?: { happened: boolean; kind: string; attempts: number } | null
+      recoveryHistory?: RecoveryRecord[] | null
+      degradationReason?: string | null
+    } | null
+  }> {
     const contentPreview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} blocks]`
     log(`sendMessage called: agent=${name}, content=${contentPreview}`)
     const runId = requestId || randomUUID()
@@ -549,6 +576,10 @@ export class DirectChatEngine extends EventEmitter {
     let effectiveRunBudget = executionOptions?.budget ? { ...executionOptions.budget } : null
     const runBudgetState = executionOptions?.budgetState
     let latestFallback: ExecutionFallbackInfo | null = null
+    let recoveryHistory: RecoveryRecord[] = []
+    let resolvedTaskType: TaskType | undefined
+    let interactionState: TaskInteractionState = 'running'
+    let degradationReason: string | null = null
     const buildExecutionDiagnostics = () => ({
       budget: effectiveRunBudget || runBudgetState
         ? {
@@ -556,7 +587,21 @@ export class DirectChatEngine extends EventEmitter {
           ...(runBudgetState || {}),
         }
         : null,
+      budgetUsagePercent: effectiveRunBudget && runBudgetState
+        ? getBudgetUsagePercent(effectiveRunBudget, runBudgetState)
+        : null,
+      stepBudget: null,
       fallback: buildExecutionFallbackState(latestFallback),
+      recoveryHistory: recoveryHistory.length > 0 ? recoveryHistory : null,
+      degradationReason,
+    })
+    const buildRunResult = (success: boolean, error?: string) => ({
+      success,
+      error,
+      taskType: resolvedTaskType,
+      interactionState,
+      taskProjectionId: null,
+      executionDiagnostics: buildExecutionDiagnostics(),
     })
     if (session.abortController) {
       session.generation += 1
@@ -595,7 +640,7 @@ export class DirectChatEngine extends EventEmitter {
       emitOutput('未配置 API Key，请前往设置页配置', 'error')
       emitOutput('', 'done')
       emitStatus('error')
-      return { success: false, error: '未配置 API Key', executionDiagnostics: buildExecutionDiagnostics() }
+      return buildRunResult(false, '未配置 API Key')
     }
 
     const capabilities = resolveAIConfigCapabilities(config)
@@ -737,6 +782,14 @@ export class DirectChatEngine extends EventEmitter {
         && requestModuleToolAction
         && !(preferredSkillToolNames && preferredSkillToolNames.length > 0)
       ) {
+        resolvedTaskType = 'media_task'
+        if (!effectiveRunBudget) {
+          effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
+        }
+        const sourceMaterial = buildDocumentInsightSourceMaterial({
+          requestEnvelope: executionIntentContext.requestEnvelope,
+          snapshotContent: '',
+        })
         const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = [
           'loading_document',
           'building_insight',
@@ -833,6 +886,10 @@ export class DirectChatEngine extends EventEmitter {
           buildInsight: async ({ question, snapshot, signal }) => await this.buildDocumentPipelineInsight({
             question,
             snapshot,
+            sourceText: sourceMaterial.kind === 'snapshot' ? snapshot.content : sourceMaterial.text,
+            sourceKind: sourceMaterial.kind === 'snapshot' && sourceMaterial.text.trim()
+              ? 'snapshot'
+              : sourceMaterial.kind,
             timeoutMs: 60_000,
             config,
             baseUrl,
@@ -887,7 +944,7 @@ export class DirectChatEngine extends EventEmitter {
             session.messages.push({ role: 'assistant', content: pipelineResult.finalText })
             emitOutput('', 'done')
             emitStatus('done')
-            return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+            return buildRunResult(true)
           }
           throw new Error(pipelineResult.error || '文档信息卡 pipeline 失败')
         }
@@ -897,7 +954,7 @@ export class DirectChatEngine extends EventEmitter {
         }
         emitOutput('', 'done')
         emitStatus('done')
-        return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+        return buildRunResult(true)
       }
 
       if (hasTools) {
@@ -974,6 +1031,30 @@ export class DirectChatEngine extends EventEmitter {
         `targetUrl=${browserDecision.plan?.targetUrl || browserDecision.plan?.resources?.links?.[0]?.url || 'none'} ` +
         `stepCount=${browserDecision.plan?.steps?.length || 0}`,
       )
+      const requestedContinuation =
+        /(继续|接着|恢复|上次)/.test(executionIntentContext.requestEnvelope.primaryInstruction || executionIntentContext.requestEnvelope.pureUserText)
+      const continuationTaskId = requestedContinuation && sessionId && (
+        getBrowserWorkflowState(sessionId)?.canResume
+        || Boolean(getLatestSkillRun(sessionId))
+      )
+        ? sessionId
+        : null
+      const taskTypeResolution = resolveTaskType({
+        intent: executionIntentContext.intentClassification,
+        envelope: executionIntentContext.requestEnvelope,
+        capabilities: reconciledRunCapabilities.runtimeSnapshot,
+        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
+      })
+      resolvedTaskType = taskTypeResolution.taskType
+      degradationReason = taskTypeResolution.degradationReason || null
+      if (!effectiveRunBudget) {
+        effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
+      }
+      log(
+        `taskType=${resolvedTaskType}, executionChain=${taskTypeResolution.executionChain}, ` +
+        `preferredExecutor=${taskTypeResolution.preferredExecutor || 'none'}, ` +
+        `degradationReason=${degradationReason || 'none'}`,
+      )
 
       const browserExecutionDispatch = this.browserDomainOrchestrator.resolveExecutionDispatch({
         hasTools,
@@ -991,11 +1072,12 @@ export class DirectChatEngine extends EventEmitter {
       }
 
       if (browserExecutionDispatch.kind === 'clarify' && browserExecutionDispatch.responseText) {
+        interactionState = 'awaiting_clarification'
         emitOutput(browserExecutionDispatch.responseText, 'text')
         session.messages.push({ role: 'assistant', content: browserExecutionDispatch.responseText })
         emitOutput('', 'done')
         emitStatus('done')
-        return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+        return buildRunResult(true)
       }
 
       if (browserExecutionDispatch.fallbackLog) {
@@ -1019,7 +1101,7 @@ export class DirectChatEngine extends EventEmitter {
           session.messages.push({ role: 'assistant', content: browserResult.message })
           emitOutput('', 'done')
           emitStatus(browserResult.state === 'cancelled' ? 'cancelled' : browserResult.state === 'failed' ? 'error' : 'done')
-          return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+          return buildRunResult(true)
         }
       }
 
@@ -1070,10 +1152,18 @@ export class DirectChatEngine extends EventEmitter {
         }
         emitOutput('', 'done')
         emitStatus('done')
-        return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+        return buildRunResult(true)
       }
 
-      if (!hasTools) {
+      if (!resolvedTaskType) {
+        resolvedTaskType = hasTools ? 'short_task' : 'direct_answer'
+      }
+      if (!effectiveRunBudget) {
+        effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
+      }
+      const shouldUseToolLoop = Boolean(hasTools && resolvedTaskType !== 'direct_answer')
+
+      if (!shouldUseToolLoop) {
         // No tool calling — original simple path
         let simpleResponse: { text: string; fallback?: ExecutionFallbackInfo }
         const hasMediaInputs = this.sessionHasMediaInputs(session.messages)
@@ -1178,6 +1268,7 @@ export class DirectChatEngine extends EventEmitter {
         let finishedBeforeLimit = false
         let textToolBridgeNudges = 0
         let budgetLimitedBeforeCompletion = false
+        let toolLoopTimeoutOverrideMs: number | undefined
 
         // Inject tool guidance into system prompt based on intent
         const toolGuidance = buildToolGuidance(toolPolicy)
@@ -1244,6 +1335,7 @@ export class DirectChatEngine extends EventEmitter {
               baseUrl,
               signal: abortController.signal,
               policy: toolPolicy,
+              timeoutMs: toolLoopTimeoutOverrideMs,
             }),
             callOpenAIWithTools: () => this.openAIExecutionClient.requestWithTools({
               session: toolLoopSession,
@@ -1252,7 +1344,15 @@ export class DirectChatEngine extends EventEmitter {
               provider: provider!,
               signal: abortController.signal,
               policy: toolPolicy,
+              timeoutMs: toolLoopTimeoutOverrideMs,
             }),
+            compressContext: () => this.compressSessionMessagesForRetry(session),
+            onBeforeRetry: (result, attempt) => {
+              if (result.kind === 'timeout_model') {
+                toolLoopTimeoutOverrideMs = Math.max(toolLoopTimeoutOverrideMs || 0, 120_000)
+              }
+              log(`tool loop recovery scheduled kind=${result.kind} attempt=${attempt}`)
+            },
             buildVideoFrameFallbackMessages: () => this.videoFallbackService.buildVideoFrameFallbackMessages(session.messages),
             assignFallbackMessages: (messages) => {
               session.messages = messages as ChatMessage[]
@@ -1260,6 +1360,9 @@ export class DirectChatEngine extends EventEmitter {
           })
           if (response.fallback) {
             latestFallback = response.fallback
+          }
+          if (Array.isArray(response.recoveryHistory) && response.recoveryHistory.length > 0) {
+            recoveryHistory = recoveryHistory.concat(response.recoveryHistory)
           }
 
           // No tool calls — done
@@ -1410,6 +1513,9 @@ export class DirectChatEngine extends EventEmitter {
               },
             })
             const executedToolResults = executedToolBatch.results
+            if (executedToolBatch.recoveryHistory.length > 0) {
+              recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
+            }
             if (runBudgetState) {
               Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
               if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
@@ -1480,6 +1586,9 @@ export class DirectChatEngine extends EventEmitter {
                 },
               })
               const executedToolResults = executedToolBatch.results
+              if (executedToolBatch.recoveryHistory.length > 0) {
+                recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
+              }
               if (runBudgetState) {
                 Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
                 if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
@@ -1563,6 +1672,9 @@ export class DirectChatEngine extends EventEmitter {
                 },
               })
               const executedToolResults = executedToolBatch.results
+              if (executedToolBatch.recoveryHistory.length > 0) {
+                recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
+              }
               if (runBudgetState) {
                 Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
                 if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
@@ -1726,12 +1838,12 @@ export class DirectChatEngine extends EventEmitter {
 
       emitOutput('', 'done')
       emitStatus('done')
-      return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+      return buildRunResult(true)
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         emitOutput('', 'done')
         emitStatus('cancelled')
-        return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+        return buildRunResult(true)
       }
       const msg = error instanceof Error ? error.message : String(error)
       log(`Error: ${msg}`)
@@ -1739,7 +1851,7 @@ export class DirectChatEngine extends EventEmitter {
       emitOutput('', 'done')
       emitRuntimeError(msg)
       emitStatus('error')
-      return { success: false, error: msg, executionDiagnostics: buildExecutionDiagnostics() }
+      return buildRunResult(false, msg)
     } finally {
       if (session.abortController === abortController) {
         session.abortController = null
@@ -1756,6 +1868,30 @@ export class DirectChatEngine extends EventEmitter {
       .filter((block) => block?.type === 'text' && typeof block.text === 'string')
       .map((block) => String(block.text || ''))
       .join('\n')
+  }
+
+  private compressSessionMessagesForRetry(session: DirectChatSession): boolean {
+    if (session.messages.length <= 6) return false
+    const earlierMessages = session.messages
+      .slice(0, -6)
+      .map((message) => ({
+        role: message.role,
+        content: this.extractIncomingText(message.content).trim(),
+      }))
+      .filter((message) => message.content.length > 0)
+    if (earlierMessages.length === 0) return false
+
+    const compressed = compressHistoryForPrompt(earlierMessages, {
+      keepRecent: 2,
+      maxChars: 900,
+    })
+    if (!compressed.compressed) return false
+
+    session.messages = [
+      { role: 'system', content: `更早对话已压缩以继续执行：\n${compressed.text}` },
+      ...session.messages.slice(-6),
+    ]
+    return true
   }
 
   private extractPrimaryUserInstruction(raw: string): string {
@@ -2043,6 +2179,8 @@ export class DirectChatEngine extends EventEmitter {
   private async buildDocumentPipelineInsight(params: {
     question: string
     snapshot: ActiveDocumentSnapshot
+    sourceText: string
+    sourceKind: 'attachment_body' | 'document_excerpt' | 'snapshot'
     timeoutMs: number
     config: AIModelConfig
     baseUrl: string
@@ -2054,9 +2192,9 @@ export class DirectChatEngine extends EventEmitter {
   }): Promise<DocumentInsightStageResult> {
     const focusedContext = buildFocusedDocumentContext({
       question: params.question,
-      content: params.snapshot.content,
+      content: params.sourceText,
       maxCharsPerChunk: 2200,
-      maxSelectedChunks: params.snapshot.charCount > 4000 ? 4 : 6,
+      maxSelectedChunks: params.sourceText.length > 4000 ? 4 : 6,
       maxPromptChars: 12_000,
     })
     const promptBody = focusedContext.promptText || this.clipDocumentForInsight(params.snapshot.content, 12_000)
@@ -2071,7 +2209,8 @@ export class DirectChatEngine extends EventEmitter {
       `问题：${params.question}`,
       `文档标题：${params.snapshot.title}`,
       `文档路径：${params.snapshot.path || '(未保存草稿)'}`,
-      `文档字数：${params.snapshot.charCount}`,
+      `来源类型：${params.sourceKind}`,
+      `来源字数：${params.sourceText.length}`,
       `文档片段数：${focusedContext.chunks.length}`,
       `本次使用片段数：${focusedContext.selectedChunks.length}`,
       '',
@@ -2207,12 +2346,24 @@ export class DirectChatEngine extends EventEmitter {
   ): DocumentInsightStageResult | null {
     const key = this.buildDocumentInsightCacheKey(question, snapshot)
     const hit = session.documentInsightCache.find((entry) => entry.key === key)
-    if (!hit) return null
-    log(`document insight cache hit key=${key}`)
+    if (hit) {
+      log(`document insight session cache hit key=${key}`)
+      return {
+        insight: hit.insight,
+        metrics: {
+          ...(hit.metrics || {}),
+          cacheHit: true,
+        },
+      }
+    }
+
+    const sharedHit = this.documentInsightCache.get(key)
+    if (!sharedHit) return null
+    log(`document insight shared cache hit key=${key}`)
     return {
-      insight: hit.insight,
+      insight: sharedHit.insight,
       metrics: {
-        ...(hit.metrics || {}),
+        ...(sharedHit.metrics || {}),
         cacheHit: true,
       },
     }
@@ -2236,6 +2387,7 @@ export class DirectChatEngine extends EventEmitter {
       nextEntry,
       ...session.documentInsightCache.filter((entry) => entry.key !== key),
     ].slice(0, 6)
+    this.documentInsightCache.set(key, { insight, metrics })
     log(`document insight cache store key=${key}`)
   }
 

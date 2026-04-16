@@ -8,6 +8,7 @@ import {
   consumeParallelGroupBudget,
   consumeToolCallBudget,
   createRunBudgetSeed,
+  getBudgetUsagePercent,
   getRemainingToolCallBudget,
 } from '../main/modules/agent-control/run-budget-policy'
 
@@ -54,4 +55,28 @@ test('run budget policy exposes remaining tool capacity and parallel group avail
 
   assert.equal(getRemainingToolCallBudget(seed, usage), 1)
   assert.equal(canUseParallelToolGroup(seed, usage), false)
+})
+
+test('run budget policy seeds different iteration budgets for direct, short, and multi-step tasks', () => {
+  const direct = createRunBudgetSeed('direct_answer')
+  const short = createRunBudgetSeed('short_task')
+  const multi = createRunBudgetSeed('multi_step_task')
+  const media = createRunBudgetSeed('media_task')
+
+  assert.equal(direct.maxIterations, 8)
+  assert.equal(short.maxIterations, 24)
+  assert.equal(multi.maxIterations, 60)
+  assert.equal(media.maxIterations, 60)
+  assert.equal(short.maxParallelToolGroups, 5)
+})
+
+test('run budget policy computes a stable usage percentage from the active budget counters', () => {
+  const seed = createRunBudgetSeed('multi_step_task')
+  const usage = {
+    iterationsUsed: 30,
+    toolCallsUsed: 15,
+    parallelToolGroupsUsed: 2,
+  }
+
+  assert.equal(getBudgetUsagePercent(seed, usage), 50)
 })

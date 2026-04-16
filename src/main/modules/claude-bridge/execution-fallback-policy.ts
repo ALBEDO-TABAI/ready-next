@@ -122,7 +122,7 @@ export function buildExecutionFallbackState(
 
 function shouldRetryWithVideoFrames(error: unknown): boolean {
   const message = stringifyError(error)
-  return /HTTP 400/i.test(message)
+  return /(HTTP 400|video blocks?.*not supported|unsupported video|video input.*not supported)/i.test(message)
 }
 
 function shouldRetryWithWireApi(error: unknown): boolean {

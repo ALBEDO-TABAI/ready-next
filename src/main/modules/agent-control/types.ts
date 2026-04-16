@@ -260,6 +260,20 @@ export interface ScopeRunExecutionDiagnostics {
     kind: string
     attempts: number
   } | null
+  stepBudget?: {
+    maxIterations?: number
+    remainingIterations?: number
+  } | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: Array<{
+    kind: string
+    source: string
+    message: string
+    attempt: number
+    recovered: boolean
+    timestamp: string
+  }> | null
+  degradationReason?: string | null
   pipeline?: {
     document?: {
       phase?: string
@@ -283,6 +297,14 @@ export interface ScopeRunSummary {
   phase: ScopeRunEventPayload['phase']
   taskTitle?: string | null
   taskSummary?: string | null
+  taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
+  interactionState?:
+    | 'running'
+    | 'awaiting_clarification'
+    | 'awaiting_confirmation'
+    | 'human_takeover'
+    | 'suspended'
+    | 'resuming'
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
   waitingFor?: ScopeRunWaitingFor
@@ -291,6 +313,11 @@ export interface ScopeRunSummary {
   taskContinuation?: ScopeRunTaskContinuation | null
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: ScopeRunExecutionDiagnostics['recoveryHistory']
+  degradationReason?: string | null
+  stepBudget?: ScopeRunExecutionDiagnostics['stepBudget']
+  taskProjectionId?: string | null
   blockedReason?: string | null
   error?: string | null
   updatedAt: string
@@ -351,10 +378,23 @@ export interface ScopeRunEventPayload {
   checkpointExpiresAt?: number
   taskTitle?: string
   taskSummary?: string
+  taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
+  interactionState?:
+    | 'running'
+    | 'awaiting_clarification'
+    | 'awaiting_confirmation'
+    | 'human_takeover'
+    | 'suspended'
+    | 'resuming'
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
   waitingFor?: ScopeRunWaitingFor
   resumableActions?: ScopeRunResumableAction[]
+  budgetUsagePercent?: number
+  recoveryHistory?: ScopeRunExecutionDiagnostics['recoveryHistory']
+  degradationReason?: string
+  stepBudget?: ScopeRunExecutionDiagnostics['stepBudget']
+  taskProjectionId?: string
   recentArtifacts?: Array<{
     id: string
     module: string

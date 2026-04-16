@@ -55,8 +55,11 @@ export class RunCoordinator {
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
-    const planningTaskTitle = '正在理解需求'
-    const planningTaskSummary = '正在整理任务边界、上下文与可用能力'
+    const primaryTrigger = prepared.triggerHits[0]
+    const planningTaskTitle = primaryTrigger?.label || '正在理解需求'
+    const planningTaskSummary = primaryTrigger
+      ? `准备开始 ${primaryTrigger.label}`
+      : '正在整理任务边界、上下文与可用能力'
 
     this.deps.emitScopeRunEvent({
       type: 'started',
@@ -64,7 +67,7 @@ export class RunCoordinator {
       agent: request.scope.agent,
       runId: request.requestId,
       phase: 'planning',
-      module: undefined,
+      module: primaryTrigger?.module,
       latestText: planningTaskSummary,
       taskTitle: planningTaskTitle,
       taskSummary: planningTaskSummary,
@@ -104,13 +107,21 @@ export class RunCoordinator {
       agent: request.scope.agent,
       runId: request.requestId,
       phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
+      taskType: result.taskType,
+      interactionState: result.interactionState,
+      taskProjectionId: result.taskProjectionId || undefined,
       executionDiagnostics: {
         compression: prepared.compression || null,
         budget: {
           ...budget,
           ...(result.budgetState || budgetState),
         },
+        budgetUsagePercent: result.executionDiagnostics?.budgetUsagePercent ?? null,
+        stepBudget: result.executionDiagnostics?.stepBudget ?? null,
         fallback: buildExecutionFallbackState(result.executionDiagnostics?.fallback || null),
+        recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,
+        degradationReason: result.executionDiagnostics?.degradationReason ?? null,
+        pipeline: result.executionDiagnostics?.pipeline ?? null,
       },
       timestamp: new Date().toISOString(),
     })

@@ -4,6 +4,15 @@
 
 ## 当前真值摘要
 
+0. Agent 核心重构已先落地第一段可上线基础层。
+
+- 已补齐统一任务状态/恢复记录/任务投影的类型契约，后续阶段不再需要各长一套字段。
+- 运行时恢复现已正式接入工具循环：限流、模型超时、上下文过长会先走恢复，再回到原有协议降级。
+- 工具超时已统一进入主分发层，超时型工具结果不再直接打崩整轮执行。
+- 工具并行策略已从白名单切到粗粒度资源域分组，并行上限默认收口为 `5`。
+- 默认预算已开始按任务类型分层，主控和运行态事件也开始透传任务类型、交互状态、预算占用和恢复记录。
+- `TaskTypeResolver` 已接入主链第一版：低信号通用问题会优先直答，浏览器/文档/跨域任务会走不同执行路径。
+
 1. 当前基线是本地 `main`。
 
 - 本地相对 `origin/main` 为 `ahead 130`。
@@ -131,6 +140,7 @@
 - `document-engine` 深读热路径已先改成异步读取：`readDocxRawText` 与 `readDocumentEditableText` 不再同步读文件，先把 pipeline 常用读取路径的主线程阻塞风险压下一层。
 - 文档 pipeline 当前阶段文案已开始带可见指标：会显示本轮共拆多少段、使用多少段、是否命中缓存，现有任务卡不用进日志也能看到这轮深读是怎么跑的。
 - 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`，前台状态层和 TaskPanel 都能稳定读到，不再只靠自然语言摘要硬猜。
+- 文档主进程另外四条高频读取入口也已跟进异步化：`document:read / document:list / document:parseDocx / document:parseXlsx` 不再继续同步读大文件。
   - `BrowserPageState` 已补齐 evidence / risks / continuity 摘要
   - 浏览器结构化任务现已补上 `blockedReason / taskContinuation / recentEvidence`
   - Browser 模式页内新增轻量 diagnostics dock，可直接看到当前任务、页面状态、最近失败和继续/重试/回到目标页入口

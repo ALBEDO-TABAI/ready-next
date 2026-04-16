@@ -141,3 +141,51 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.deepEqual(recordedOutcome?.usedTools, ['browser_click_at'])
   assert.equal(reflected, true)
 })
+
+test('RunCoordinator forwards task metadata from execution results into the final scope event', async () => {
+  const events: ScopeRunEventPayload[] = []
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: 'done text',
+      cancelled: false,
+      usedTools: ['document_update_widget'],
+      taskType: 'multi_step_task',
+      interactionState: 'running',
+      taskProjectionId: 'task-proj-1',
+      executionDiagnostics: {
+        budgetUsagePercent: 70,
+        degradationReason: 'browser_host_unavailable',
+      },
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: 'hello',
+    requestId: 'req-2',
+  })
+
+  assert.deepEqual(result, { success: true })
+  assert.equal(events.at(-1)?.taskType, 'multi_step_task')
+  assert.equal(events.at(-1)?.interactionState, 'running')
+  assert.equal(events.at(-1)?.taskProjectionId, 'task-proj-1')
+  assert.equal(events.at(-1)?.executionDiagnostics?.budgetUsagePercent, 70)
+  assert.equal(events.at(-1)?.executionDiagnostics?.degradationReason, 'browser_host_unavailable')
+})

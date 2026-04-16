@@ -227,6 +227,7 @@ export class OpenAIExecutionClient {
     provider: AIProviderDef | undefined
     signal: AbortSignal
     policy?: ToolPolicy
+    timeoutMs?: number
   }): Promise<OpenAIExecutionResponse> {
     const headers = this.buildHeaders(params.config, params.provider)
     const isKimiCodingBase = params.baseUrl.replace(/\/+$/, '').includes('api.kimi.com/coding')
@@ -247,9 +248,9 @@ export class OpenAIExecutionClient {
       provider: params.provider,
       baseUrl: openAIBase,
     })
-    const timeoutMs = resolveApiRequestTimeoutMs(params.policy, {
+    const timeoutMs = Math.max(params.timeoutMs || 0, resolveApiRequestTimeoutMs(params.policy, {
       baseUrl: params.baseUrl,
-    })
+    }))
     const tools = getPolicyOpenAITools(params.policy)
     const repairedMessages = this.repairOpenAIToolMessageHistory(params.session.messages) as unknown as OpenAIChatMessage[]
     if (params.policy?.forceDocumentTool) {
