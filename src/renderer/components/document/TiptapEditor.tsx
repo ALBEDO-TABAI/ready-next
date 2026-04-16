@@ -20,6 +20,7 @@ import { tryParseWidgetPayload } from './widget-fence-parser'
 import {
   buildWidgetFenceSource,
   exportWidgetCardSnapshot,
+  getDocumentWidgetRenderBudget,
 } from './widget-card-helpers'
 
 export interface TiptapEditorProps {
@@ -53,6 +54,7 @@ function getWidgetMemoryKey(title: string, widgetCode: string): string {
 
 function createWidgetBlockExtension(
   getEditor: () => Editor | null,
+  preferManualPreview: boolean,
   onRequestPreview?: (title: string) => void,
   onRequestAgentUpdate?: (title: string, widgetCode: string) => void,
 ): Extension {
@@ -103,6 +105,7 @@ function createWidgetBlockExtension(
                   <DocumentWidgetBlockCard
                     title={title}
                     widgetCode={widget.widgetCode}
+                    preferManualPreview={preferManualPreview}
                     sourceVisible={sourceVisible}
                     onRequestPreview={onRequestPreview}
                     onRenameTitle={(nextTitle) => {
@@ -236,9 +239,15 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     const isUpdatingRef = useRef(false)
     const revealClearTimerRef = useRef<number | null>(null)
     const editorRef = useRef<Editor | null>(null)
+    const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(content), [content])
     const widgetBlockExtension = useMemo(
-      () => createWidgetBlockExtension(() => editorRef.current, onRequestPreview, onRequestAgentUpdate),
-      [onRequestAgentUpdate, onRequestPreview],
+      () => createWidgetBlockExtension(
+        () => editorRef.current,
+        widgetRenderBudget.forceManualPreviewAll,
+        onRequestPreview,
+        onRequestAgentUpdate,
+      ),
+      [onRequestAgentUpdate, onRequestPreview, widgetRenderBudget.forceManualPreviewAll],
     )
 
     const editor = useEditor({

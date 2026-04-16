@@ -5,7 +5,9 @@ import type {
   ScopeRunTaskContinuation,
   ScopeRunTaskStep,
 } from './types'
+import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
+import type { RequestEnvelope } from './request-envelope'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 
 export interface RunMessageBlock {
@@ -66,6 +68,8 @@ export interface ExecutionHostRequest {
   requestId?: string
   systemPrompt?: string
   message: RunMessage
+  requestEnvelope?: RequestEnvelope
+  intentClassification?: IntentClassification
   budget?: RunBudgetSeed
   budgetState?: RunBudgetUsage
 }

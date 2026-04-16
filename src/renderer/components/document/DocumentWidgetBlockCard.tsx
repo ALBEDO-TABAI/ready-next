@@ -6,6 +6,7 @@ import WidgetRenderer from './WidgetRenderer'
 interface DocumentWidgetBlockCardProps {
   title: string
   widgetCode: string
+  preferManualPreview?: boolean
   sourceVisible: boolean
   onToggleSource: () => void
   onCopySource: () => void
@@ -19,6 +20,7 @@ interface DocumentWidgetBlockCardProps {
 export default function DocumentWidgetBlockCard({
   title,
   widgetCode,
+  preferManualPreview = false,
   sourceVisible,
   onToggleSource,
   onCopySource,
@@ -99,7 +101,7 @@ export default function DocumentWidgetBlockCard({
       }
       contentEditable={false}
     >
-      <WidgetRenderer widgetCode={widgetCode} />
+      <WidgetRenderer widgetCode={widgetCode} preferManualPreview={preferManualPreview} />
     </DocumentWidgetCardShell>
   )
 }

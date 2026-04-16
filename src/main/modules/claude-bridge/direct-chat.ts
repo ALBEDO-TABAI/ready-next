@@ -68,6 +68,10 @@ import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/types'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
+import type { IntentClassification } from '../agent-control/intent-classifier'
+import { classifyIntent } from '../agent-control/intent-classifier'
+import type { RequestEnvelope } from '../agent-control/request-envelope'
+import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
@@ -452,32 +456,7 @@ export class DirectChatEngine extends EventEmitter {
    * Extract pure user input (remove auto-injected environment context and assistant messages)
    */
   private extractPureUserInput(userText: string): string {
-    // First, check if there's a "用户:" prefix - extract only user's input
-    const userPrefixMatch = userText.match(/用户:\s*(.+?)(?:\n|$)/s)
-    if (userPrefixMatch) {
-      return userPrefixMatch[1].trim()
-    }
-
-    // Remove environment information blocks
-    const envMarkers = [
-      '## 环境信息',
-      '### Widget 更新上下文',
-      '### 当前设计画布上下文',
-      '### 设计项目引用',
-      '### 当前文档上下文',
-      '--- 引用设计项目:',
-      '--- 文档内容开始 ---',
-    ]
-
-    let pureInput = userText
-    for (const marker of envMarkers) {
-      const index = pureInput.indexOf(marker)
-      if (index >= 0) {
-        pureInput = pureInput.slice(0, index).trim()
-      }
-    }
-
-    return pureInput
+    return extractPureUserInputFromEnvelope(userText)
   }
 
   private collectRecentPureUserInputs(messages: ChatMessage[], limit = 6): string[] {
@@ -535,6 +514,8 @@ export class DirectChatEngine extends EventEmitter {
     content: string | MultimodalBlock[],
     requestId?: string,
     executionOptions?: {
+      requestEnvelope?: RequestEnvelope
+      intentClassification?: IntentClassification
       budget?: RunBudgetSeed
       budgetState?: RunBudgetUsage
     },
@@ -653,12 +634,13 @@ export class DirectChatEngine extends EventEmitter {
       const isKimi = isKimiCoding || (!useAnthropicProtocol && (baseUrl.includes('kimi') || baseUrl.includes('moonshot')))
       const sessionId = this.extractSessionIdFromInternalName(name)
       const userText = this.extractIncomingText(content)
-      const pureUserInput = this.extractPureUserInput(userText)
+      const requestEnvelope = executionOptions?.requestEnvelope || buildRequestEnvelope({ userText })
+      const pureUserInput = requestEnvelope.pureUserText
       const executionIntentContext = resolveExecutionIntentContext({
-        userText,
-        pureUserInput,
+        requestEnvelope,
         previousInputs: this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
         lastDocumentContextInput: session.lastDocumentContextInput,
+        intentClassification: executionOptions?.intentClassification || classifyIntent(requestEnvelope),
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       if (contextualUserInput !== pureUserInput) {
@@ -705,7 +687,9 @@ export class DirectChatEngine extends EventEmitter {
         browserDecisionMode: browserDecision.mode,
         runtimeAvailability,
         hostContext: {
-          userText,
+          userText: executionIntentContext.requestEnvelope.primaryInstruction
+            || executionIntentContext.requestEnvelope.pureUserText
+            || userText,
         },
       })
       const preparedToolContext = buildToolRuntimeContext({
@@ -1009,9 +993,14 @@ export class DirectChatEngine extends EventEmitter {
 
         // Inject tool guidance into system prompt based on intent
         const toolGuidance = buildToolGuidance(toolPolicy)
+        const toolLoopSession = toolGuidance
+          ? {
+            ...session,
+            systemPrompt: `${session.systemPrompt}\n\n${toolGuidance}`,
+          }
+          : session
         if (toolGuidance) {
-          session.systemPrompt = `${session.systemPrompt}\n\n${toolGuidance}`
-          log('Injected tool guidance into system prompt')
+          log(`Prepared per-run tool guidance chars=${toolGuidance.length}, systemPromptChars=${toolLoopSession.systemPrompt.length}`)
         }
 
         // 浏览器步骤追踪
@@ -1062,14 +1051,14 @@ export class DirectChatEngine extends EventEmitter {
             signal: abortController.signal,
             policy: toolPolicy,
             callAnthropicWithTools: () => this.anthropicExecutionClient.requestWithTools({
-              session,
+              session: toolLoopSession,
               config,
               baseUrl,
               signal: abortController.signal,
               policy: toolPolicy,
             }),
             callOpenAIWithTools: () => this.openAIExecutionClient.requestWithTools({
-              session,
+              session: toolLoopSession,
               config,
               baseUrl,
               provider: provider!,

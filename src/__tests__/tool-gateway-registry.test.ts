@@ -35,3 +35,21 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(skillsGroup?.hasDynamicSource, true)
   assert.ok(systemOpenAISchemas.some((tool) => (tool.function as { name?: string } | undefined)?.name === 'system_run_openclaw'))
 })
+
+test('tool gateway does not expose empty fallback schemas when a group provider fails to load', () => {
+  const gateway = new ToolGateway({
+    __testGroupProviders: {
+      system_host: {
+        staticToolNames: ['system_run_openclaw'],
+        getOpenAITools: () => {
+          throw new Error('broken provider')
+        },
+      },
+    },
+  })
+
+  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai')
+
+  assert.deepEqual(systemOpenAISchemas, [])
+  assert.match(gateway.getLastSchemaResolutionError('system_host', 'openai') || '', /broken provider/)
+})

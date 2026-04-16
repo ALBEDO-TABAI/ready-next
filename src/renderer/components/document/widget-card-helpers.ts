@@ -31,6 +31,35 @@ export function getWidgetModeLabel(widgetCode: string): string {
   return 'HTML widget'
 }
 
+export function widgetNeedsManualPreview(widgetCode: string): boolean {
+  const normalized = String(widgetCode || '')
+  if (!normalized.trim()) return false
+  if (normalized.length >= 5000) return true
+  if (/@keyframes|animation\s*:|animation-name\s*:/i.test(normalized)) return true
+  const emojiCount = normalized.match(/\p{Extended_Pictographic}/gu)?.length || 0
+  if (emojiCount >= 4) return true
+  return false
+}
+
+export function getDocumentWidgetRenderBudget(content: string): {
+  widgetCount: number
+  totalWidgetChars: number
+  forceManualPreviewAll: boolean
+} {
+  const widgets = parseShowWidgetFences(content)
+    .filter((segment) => segment.type === 'widget')
+    .map((segment) => segment.data.widgetCode)
+
+  const widgetCount = widgets.length
+  const totalWidgetChars = widgets.reduce((sum, widgetCode) => sum + widgetCode.length, 0)
+
+  return {
+    widgetCount,
+    totalWidgetChars,
+    forceManualPreviewAll: widgetCount >= 4 || totalWidgetChars >= 12000,
+  }
+}
+
 const DEFAULT_WIDGET_EXPORT_WIDTH = 1080
 const WIDGET_EXPORT_SCALE = 2
 

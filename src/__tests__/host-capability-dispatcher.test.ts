@@ -19,6 +19,7 @@ test('dispatcher executes openclaw as a host-only shortcut outside the normal to
       kind: 'openclaw',
       reason: 'pairing_command',
       command: 'openclaw pairing approve feishu 123456',
+      authorizationSource: 'explicit_user_command',
     },
     toolContext: {
       allowedToolNames: ['system_run_openclaw'],
@@ -58,4 +59,32 @@ test('dispatcher runs deterministic document formatting via host shortcut decisi
 
   assert.equal(result.handled, true)
   assert.equal(result.outputText, null)
+})
+
+test('dispatcher refuses openclaw host shortcuts without explicit authorization source', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const dispatcher = new HostCapabilityDispatcher({
+    executeHostTool: async (toolName, args) => {
+      calls.push({ name: toolName, args })
+      return 'should not run'
+    },
+    tryDeterministicSectionFormatFlow: async () => false,
+    tryDeterministicSectionRewriteFlow: async () => false,
+  })
+
+  const result = await dispatcher.dispatch({
+    decision: {
+      kind: 'openclaw',
+      reason: 'pairing_command',
+      command: 'openclaw pairing approve feishu 123456',
+      authorizationSource: 'none',
+    },
+    toolContext: {
+      allowedToolNames: ['system_run_openclaw'],
+    },
+  })
+
+  assert.equal(result.handled, false)
+  assert.equal(result.outputText, null)
+  assert.deepEqual(calls, [])
 })

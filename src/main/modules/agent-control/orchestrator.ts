@@ -4,6 +4,8 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { ExecutionHostRequest, ExecutionHostResult } from './run-contracts'
+import type { IntentClassification } from './intent-classifier'
+import type { RequestEnvelope } from './request-envelope'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 
@@ -144,6 +146,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     sessionId?: string,
     requestId?: string,
     systemPrompt?: string,
+    requestEnvelope?: RequestEnvelope,
+    intentClassification?: IntentClassification,
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
   ): Promise<{ success: boolean; error?: string; executionDiagnostics?: ExecutionHostResult['executionDiagnostics'] }> {
@@ -155,6 +159,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       this.engine.setSystemPrompt(internalKey, systemPrompt)
     }
     const result = await this.engine.sendMessage(internalKey, message, requestId, {
+      requestEnvelope,
+      intentClassification,
       budget,
       budgetState,
     })
@@ -170,6 +176,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     sessionId?: string,
     requestId?: string,
     systemPrompt?: string,
+    requestEnvelope?: RequestEnvelope,
+    intentClassification?: IntentClassification,
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
   ): Promise<SendAndCollectResult> {
@@ -184,7 +192,17 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     cleanupFns.push(() => this.off('error', collector.handleError))
 
     let executionDiagnostics: ExecutionHostResult['executionDiagnostics'] | null = null
-    void this.send(agent, message, sessionId, requestId, systemPrompt, budget, budgetState).then((result) => {
+    void this.send(
+      agent,
+      message,
+      sessionId,
+      requestId,
+      systemPrompt,
+      requestEnvelope,
+      intentClassification,
+      budget,
+      budgetState,
+    ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       if (!result.success) {
         collector.handleError({
@@ -222,6 +240,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       request.sessionId,
       request.requestId,
       request.systemPrompt,
+      request.requestEnvelope,
+      request.intentClassification,
       request.budget,
       request.budgetState,
     )

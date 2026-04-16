@@ -1,6 +1,13 @@
-import { createRequire } from 'node:module'
 import type { CapabilityGroupDefinition, CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { CAPABILITY_GROUPS } from '../../../shared/ai-capability-groups'
+import { logAgentMetric } from './metrics'
+import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
+import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../tools/document-tools'
+import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
+import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
+import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
+import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
+import { createRequire } from 'node:module'
 
 type ToolSchemaFormat = 'anthropic' | 'openai'
 const require = createRequire(import.meta.url)
@@ -178,26 +185,6 @@ function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat):
   }
 }
 
-function mergeSchemasWithFallback(
-  tools: Array<Record<string, unknown>>,
-  staticToolNames: string[],
-  format: ToolSchemaFormat,
-): Array<Record<string, unknown>> {
-  const merged = new Map<string, Record<string, unknown>>()
-  for (const tool of tools) {
-    const name = format === 'anthropic' ? getAnthropicToolName(tool) : getOpenAIToolName(tool)
-    if (name && !merged.has(name)) {
-      merged.set(name, tool)
-    }
-  }
-  for (const toolName of staticToolNames) {
-    if (!merged.has(toolName)) {
-      merged.set(toolName, createStaticFallbackSchema(toolName, format))
-    }
-  }
-  return Array.from(merged.values())
-}
-
 function resolveStaticSkillToolNames(): string[] {
   try {
     const { STATIC_SKILL_TOOL_NAMES } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
@@ -251,36 +238,18 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, CapabilityGroupToolProvide
   },
   document: {
     staticToolNames: DOCUMENT_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getDocumentAnthropicTools } = require('../tools/document-tools') as typeof import('../tools/document-tools')
-      return getDocumentAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getDocumentOpenAITools } = require('../tools/document-tools') as typeof import('../tools/document-tools')
-      return getDocumentOpenAITools()
-    },
+    getAnthropicTools: () => getDocumentAnthropicTools(),
+    getOpenAITools: () => getDocumentOpenAITools(),
   },
   rss: {
     staticToolNames: RSS_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getRSSAnthropicTools } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
-      return getRSSAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getRSSOpenAITools } = require('../tools/rss-tools') as typeof import('../tools/rss-tools')
-      return getRSSOpenAITools()
-    },
+    getAnthropicTools: () => getRSSAnthropicTools(),
+    getOpenAITools: () => getRSSOpenAITools(),
   },
   calendar: {
     staticToolNames: CALENDAR_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getCalendarAnthropicTools } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
-      return getCalendarAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getCalendarOpenAITools } = require('../tools/calendar-tools') as typeof import('../tools/calendar-tools')
-      return getCalendarOpenAITools()
-    },
+    getAnthropicTools: () => getCalendarAnthropicTools(),
+    getOpenAITools: () => getCalendarOpenAITools(),
   },
   skills: {
     staticToolNames: resolveStaticSkillToolNames(),
@@ -296,36 +265,18 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, CapabilityGroupToolProvide
   },
   memory: {
     staticToolNames: MEMORY_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getMemoryAnthropicTools } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
-      return getMemoryAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getMemoryOpenAITools } = require('../tools/memory-tools') as typeof import('../tools/memory-tools')
-      return getMemoryOpenAITools()
-    },
+    getAnthropicTools: () => getMemoryAnthropicTools(),
+    getOpenAITools: () => getMemoryOpenAITools(),
   },
   session_recall: {
     staticToolNames: SESSION_RECALL_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getSessionRecallAnthropicTools } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
-      return getSessionRecallAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getSessionRecallOpenAITools } = require('../tools/session-recall-tools') as typeof import('../tools/session-recall-tools')
-      return getSessionRecallOpenAITools()
-    },
+    getAnthropicTools: () => getSessionRecallAnthropicTools(),
+    getOpenAITools: () => getSessionRecallOpenAITools(),
   },
   channel_feishu: {
     staticToolNames: FEISHU_TOOL_NAMES,
-    getAnthropicTools: () => {
-      const { getFeishuAnthropicTools } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
-      return getFeishuAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getFeishuOpenAITools } = require('../tools/feishu-tools') as typeof import('../tools/feishu-tools')
-      return getFeishuOpenAITools()
-    },
+    getAnthropicTools: () => getFeishuAnthropicTools(),
+    getOpenAITools: () => getFeishuOpenAITools(),
   },
   system_host: {
     staticToolNames: SYSTEM_TOOL_NAMES,
@@ -343,26 +294,55 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, CapabilityGroupToolProvide
   },
 }
 
+interface ToolGatewayOptions {
+  __testGroupProviders?: Partial<Record<CapabilityGroupId, CapabilityGroupToolProvider>>
+}
+
 export class ToolGateway {
   private readonly capabilityGroupMeta = new Map<CapabilityGroupId, CapabilityGroupDefinition>(
     CAPABILITY_GROUPS.map((group) => [group.id, group]),
   )
+  private readonly groupToolProviders: Record<CapabilityGroupId, CapabilityGroupToolProvider>
+  private readonly lastSchemaResolutionErrors = new Map<string, string>()
+
+  constructor(options?: ToolGatewayOptions) {
+    this.groupToolProviders = {
+      ...GROUP_TOOL_PROVIDERS,
+      ...(options?.__testGroupProviders || {}),
+    }
+  }
+
+  private resolutionErrorKey(groupId: CapabilityGroupId, format: ToolSchemaFormat): string {
+    return `${groupId}:${format}`
+  }
 
   private resolveGroupToolSchemas(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
-    const provider = GROUP_TOOL_PROVIDERS[groupId]
+    const provider = this.groupToolProviders[groupId]
     const staticToolNames = provider?.staticToolNames || []
+    const errorKey = this.resolutionErrorKey(groupId, format)
+    this.lastSchemaResolutionErrors.delete(errorKey)
     try {
-      const resolved = format === 'anthropic'
-        ? provider?.getAnthropicTools?.() || []
-        : provider?.getOpenAITools?.() || []
-      return mergeSchemasWithFallback(resolved, staticToolNames, format)
-    } catch {
+      if (format === 'anthropic' && provider?.getAnthropicTools) {
+        return provider.getAnthropicTools()
+      }
+      if (format === 'openai' && provider?.getOpenAITools) {
+        return provider.getOpenAITools()
+      }
       return staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.lastSchemaResolutionErrors.set(errorKey, message)
+      logAgentMetric('tool_group_blocked_rate', {
+        groupId,
+        format,
+        reason: message,
+      })
+      return []
     }
   }
 
   private resolveGroupToolNames(groupId: CapabilityGroupId): string[] {
-    const provider = GROUP_TOOL_PROVIDERS[groupId]
+    const provider = this.groupToolProviders[groupId]
     const names = new Set(provider?.staticToolNames || [])
     for (const toolName of collectToolNames(this.resolveGroupToolSchemas(groupId, 'openai'), 'openai')) {
       names.add(toolName)
@@ -378,7 +358,7 @@ export class ToolGateway {
     return {
       ...group,
       toolNames: this.resolveGroupToolNames(groupId),
-      hasDynamicSource: Boolean(GROUP_TOOL_PROVIDERS[groupId]?.hasDynamicSource),
+      hasDynamicSource: Boolean(this.groupToolProviders[groupId]?.hasDynamicSource),
     }
   }
 
@@ -421,6 +401,10 @@ export class ToolGateway {
 
   getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
     return this.resolveGroupToolSchemas(groupId, format)
+  }
+
+  getLastSchemaResolutionError(groupId: CapabilityGroupId, format: ToolSchemaFormat): string | null {
+    return this.lastSchemaResolutionErrors.get(this.resolutionErrorKey(groupId, format)) || null
   }
 
   getAnthropicToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {

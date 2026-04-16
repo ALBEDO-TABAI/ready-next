@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
+import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { buildExecutionToolState, resolveExecutionIntentContext } from '../main/modules/agent-control/execution-intent-resolver'
 
 test('resolveExecutionIntentContext preserves document follow-up context and widget intent', () => {
-  const result = resolveExecutionIntentContext({
+  const requestEnvelope = buildRequestEnvelope({
     userText: '把这个趋势图改成蓝色，并保留原来的布局\n### Widget 更新上下文',
-    pureUserInput: '把这个趋势图改成蓝色，并保留原来的布局',
+  })
+  const result = resolveExecutionIntentContext({
+    requestEnvelope,
     previousInputs: ['请在文档里插入一个趋势图组件'],
     lastDocumentContextInput: '请在文档里插入一个趋势图组件',
   })
@@ -18,6 +22,8 @@ test('resolveExecutionIntentContext preserves document follow-up context and wid
 })
 
 test('buildExecutionToolState enables browser tools only after browser decision is ready', () => {
+  const browserEnvelope = buildRequestEnvelope({ userText: '帮我上传图片并提交' })
+  const browserIntent = classifyIntent(browserEnvelope)
   const initial = buildExecutionToolState({
     supportsToolCalls: true,
     hasVideoInputs: false,
@@ -26,6 +32,7 @@ test('buildExecutionToolState enables browser tools only after browser decision 
     preferredSkillToolNames: null,
     contextualUserInput: '帮我上传图片并提交',
     userInstructionText: '帮我上传图片并提交',
+    intentClassification: browserIntent,
     hasDocumentEnvironment: false,
     hasWidgetTargetContext: false,
     explicitWidgetCreateIntent: false,
@@ -42,6 +49,7 @@ test('buildExecutionToolState enables browser tools only after browser decision 
     preferredSkillToolNames: null,
     contextualUserInput: '帮我上传图片并提交',
     userInstructionText: '帮我上传图片并提交',
+    intentClassification: browserIntent,
     hasDocumentEnvironment: false,
     hasWidgetTargetContext: false,
     explicitWidgetCreateIntent: false,
@@ -55,9 +63,11 @@ test('buildExecutionToolState enables browser tools only after browser decision 
 })
 
 test('buildExecutionToolState keeps document tools closed for plain informational questions even if recent history mentioned widgets', () => {
-  const context = resolveExecutionIntentContext({
+  const requestEnvelope = buildRequestEnvelope({
     userText: '今天广州天气怎么样\n\n## 最近会话摘要\n刚才在更新 stock_price_chart widget',
-    pureUserInput: '今天广州天气怎么样',
+  })
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
     previousInputs: ['更新当前文档里的 stock_price_chart widget：把边框去掉'],
     lastDocumentContextInput: '更新当前文档里的 stock_price_chart widget：把边框去掉',
   })
@@ -70,6 +80,7 @@ test('buildExecutionToolState keeps document tools closed for plain informationa
     preferredSkillToolNames: null,
     contextualUserInput: context.contextualUserInput,
     userInstructionText: context.userInstructionText,
+    intentClassification: context.intentClassification,
     hasDocumentEnvironment: context.hasDocumentEnvironment,
     hasWidgetTargetContext: context.hasWidgetTargetContext,
     explicitWidgetCreateIntent: context.explicitWidgetCreateIntent,
@@ -85,6 +96,9 @@ test('buildExecutionToolState keeps document tools closed for plain informationa
 })
 
 test('buildExecutionToolState suppresses rss, calendar, and feishu tools for generic local design requests', () => {
+  const genericEnvelope = buildRequestEnvelope({
+    userText: '帮我整理一个三层卡片关系图，输出 SVG，并补两行说明文字',
+  })
   const state = buildExecutionToolState({
     supportsToolCalls: true,
     hasVideoInputs: false,
@@ -93,6 +107,7 @@ test('buildExecutionToolState suppresses rss, calendar, and feishu tools for gen
     preferredSkillToolNames: null,
     contextualUserInput: '帮我整理一个三层卡片关系图，输出 SVG，并补两行说明文字',
     userInstructionText: '帮我整理一个三层卡片关系图，输出 SVG，并补两行说明文字',
+    intentClassification: classifyIntent(genericEnvelope),
     hasDocumentEnvironment: false,
     hasWidgetTargetContext: false,
     explicitWidgetCreateIntent: false,
@@ -109,6 +124,9 @@ test('buildExecutionToolState suppresses rss, calendar, and feishu tools for gen
 })
 
 test('buildExecutionToolState keeps rss and feishu tools available only when user intent is explicit', () => {
+  const rssEnvelope = buildRequestEnvelope({
+    userText: '帮我抓取这个 RSS 订阅源的最近文章并分析',
+  })
   const rssState = buildExecutionToolState({
     supportsToolCalls: true,
     hasVideoInputs: false,
@@ -117,6 +135,7 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
     preferredSkillToolNames: null,
     contextualUserInput: '帮我抓取这个 RSS 订阅源的最近文章并分析',
     userInstructionText: '帮我抓取这个 RSS 订阅源的最近文章并分析',
+    intentClassification: classifyIntent(rssEnvelope),
     hasDocumentEnvironment: false,
     hasWidgetTargetContext: false,
     explicitWidgetCreateIntent: false,
@@ -127,6 +146,9 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
     feishuConnected: true,
   })
 
+  const feishuEnvelope = buildRequestEnvelope({
+    userText: '把结果发到飞书群里，并更新飞书文档',
+  })
   const feishuState = buildExecutionToolState({
     supportsToolCalls: true,
     hasVideoInputs: false,
@@ -135,6 +157,7 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
     preferredSkillToolNames: null,
     contextualUserInput: '把结果发到飞书群里，并更新飞书文档',
     userInstructionText: '把结果发到飞书群里，并更新飞书文档',
+    intentClassification: classifyIntent(feishuEnvelope),
     hasDocumentEnvironment: false,
     hasWidgetTargetContext: false,
     explicitWidgetCreateIntent: false,

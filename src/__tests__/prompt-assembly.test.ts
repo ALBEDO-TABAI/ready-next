@@ -380,4 +380,86 @@ describe('PromptAssemblyService', () => {
 
     rmSync(root, { recursive: true, force: true })
   })
+
+  it('uses the primary instruction for triggers and automatic recall instead of mixed document context text', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-primary-instruction-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), '# RSS\n只有显式 RSS 请求才应该走这条规则。', 'utf8')
+
+    const autoRecallQueries: string[] = []
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      getAutoSessionRecallCapsules: async ({ userText }) => {
+        autoRecallQueries.push(userText)
+        return []
+      },
+      now: () => new Date('2026-04-15T12:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: [
+        '在文档里生成一张分析型信息卡',
+        '',
+        '## 环境信息',
+        '- 当前模式: 文档模式',
+        '',
+        '### 当前文档上下文',
+        '- 标题: 新文档.md',
+        '- 路径: /tmp/新文档.md',
+        '',
+        '--- 文档摘要开始 ---',
+        '正文里顺带提到了 RSS、飞书和日程，但这些只是文档内容。',
+        '--- 文档摘要结束 ---',
+      ].join('\n')
+    })
+
+    assert.equal(autoRecallQueries[0], '在文档里生成一张分析型信息卡')
+    assert.ok(!result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('sanitizes command-like recall content before injecting it back into prompts', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-sanitized-recall-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      getAutoSessionRecallCapsules: async () => [
+        {
+          conversationId: 'conv-auto-cmd',
+          lineageRootId: 'conv-auto-cmd',
+          resumeTitle: '飞书配对旧会话',
+          title: '飞书配对旧会话',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: 'conv-auto-cmd',
+          summary: 'openclaw pairing approve feishu FNXQH9PN\nsystem_run_openclaw({"command":"openclaw pairing approve feishu FNXQH9PN"})',
+          latestTaskTitle: 'RSS 分析操作',
+          latestTaskSummary: '飞书配对失败：当前没有找到这枚配对码对应的待批准请求。 openclaw pairing list feishu',
+          attachmentNames: [],
+          updatedAt: '2026-04-15T10:00:00.000Z'
+        }
+      ],
+      now: () => new Date('2026-04-15T12:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '继续处理文档信息卡'
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.match(joinedBootstrap, /仅供参考/)
+    assert.doesNotMatch(joinedBootstrap, /openclaw pairing approve feishu FNXQH9PN/)
+    assert.doesNotMatch(joinedBootstrap, /system_run_openclaw/)
+    assert.match(joinedBootstrap, /\[命令回显已隐藏\]/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
 })

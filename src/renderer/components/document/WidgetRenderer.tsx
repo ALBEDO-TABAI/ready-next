@@ -8,12 +8,14 @@ import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } fro
 import WidgetDomRuntime from './WidgetDomRuntime'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
+import { widgetNeedsManualPreview } from './widget-card-helpers'
 
 interface WidgetRendererProps {
   title?: string
   widgetCode: string
   widgetState?: DocumentWidgetPersistedState | null
   onWidgetStateChange?: (state: DocumentWidgetPersistedState) => void
+  preferManualPreview?: boolean
 }
 
 const MAX_IFRAME_HEIGHT = 2000
@@ -28,6 +30,7 @@ export default function WidgetRenderer({
   widgetCode,
   widgetState,
   onWidgetStateChange,
+  preferManualPreview = false,
 }: WidgetRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const widgetTokenRef = useRef(`widget-${Math.random().toString(36).slice(2, 10)}`)
@@ -35,6 +38,11 @@ export default function WidgetRenderer({
   const [height, setHeight] = useState(() => widgetHeightCache.get(getCacheKey(widgetCode)) || 180)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [showSandboxFallback, setShowSandboxFallback] = useState(false)
+  const manualPreviewRequired = useMemo(
+    () => preferManualPreview || widgetNeedsManualPreview(widgetCode),
+    [preferManualPreview, widgetCode],
+  )
+  const [manualPreviewEnabled, setManualPreviewEnabled] = useState(() => !manualPreviewRequired)
 
   const sanitizedWidgetCode = useMemo(() => sanitizeWidgetHtml(widgetCode), [widgetCode])
   const staticFallbackHtml = useMemo(() => stripWidgetScripts(sanitizedWidgetCode), [sanitizedWidgetCode])
@@ -132,6 +140,10 @@ export default function WidgetRenderer({
   }, [srcDoc, widgetCode])
 
   useEffect(() => {
+    setManualPreviewEnabled(!manualPreviewRequired)
+  }, [manualPreviewRequired, widgetCode])
+
+  useEffect(() => {
     if (!receiverReady) return
 
     const observer = new MutationObserver(() => {
@@ -168,24 +180,44 @@ export default function WidgetRenderer({
   return (
     <div className="document-widget-shell">
       {title ? <div className="document-widget-title">{title}</div> : null}
+      {!manualPreviewEnabled ? (
+        <div className="document-widget-fallback-shell">
+          <div className="document-widget-fallback-note">
+            {preferManualPreview
+              ? '当前文档里的组件较多，默认不自动渲染，避免拖垮当前文档页面。'
+              : '这个组件内容较重，默认不自动渲染，避免拖垮当前文档页面。'}
+          </div>
+          <button
+            type="button"
+            className="ready-doc-widget-card-action"
+            onClick={() => {
+              setManualPreviewEnabled(true)
+            }}
+          >
+            启用预览
+          </button>
+        </div>
+      ) : null}
       {renderError ? (
         <div className="document-widget-error">
           <AlertTriangle style={{ width: 16, height: 16 }} strokeWidth={2} />
           <span>{renderError}</span>
         </div>
       ) : null}
-      <iframe
-        ref={iframeRef}
-        title={title || 'Document widget'}
-        sandbox="allow-scripts"
-        srcDoc={srcDoc}
-        className="document-widget-frame"
-        style={{
-          height: showSandboxFallback ? 0 : height,
-          display: showSandboxFallback ? 'none' : 'block',
-        }}
-      />
-      {(showSandboxFallback || renderError) ? (
+      {manualPreviewEnabled ? (
+        <iframe
+          ref={iframeRef}
+          title={title || 'Document widget'}
+          sandbox="allow-scripts"
+          srcDoc={srcDoc}
+          className="document-widget-frame"
+          style={{
+            height: showSandboxFallback ? 0 : height,
+            display: showSandboxFallback ? 'none' : 'block',
+          }}
+        />
+      ) : null}
+      {(manualPreviewEnabled && (showSandboxFallback || renderError)) ? (
         <div className="document-widget-fallback-shell">
           {renderError ? (
             <div className="document-widget-fallback-note">

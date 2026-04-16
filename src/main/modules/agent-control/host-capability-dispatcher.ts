@@ -2,6 +2,7 @@ import type { AIModelConfig, AIProviderDef } from '../../../shared/ai-providers'
 import type { ToolContext } from '../tools/tool-executor'
 import type { DocumentChatSessionLike } from './document-domain-helpers'
 import type { HostShortcutDecision } from './run-capability-controller'
+import { logAgentMetric } from './metrics'
 
 interface HostCapabilityDispatcherDeps {
   executeHostTool: (toolName: string, args: Record<string, unknown>, toolContext: ToolContext) => Promise<string>
@@ -60,6 +61,18 @@ export class HostCapabilityDispatcher {
     }
 
     if (params.decision.kind === 'openclaw' && params.decision.command) {
+      if (params.decision.authorizationSource !== 'explicit_user_command' && params.decision.authorizationSource !== 'ui_action') {
+        logAgentMetric('host_shortcut_reject_rate', {
+          kind: params.decision.kind,
+          reason: params.decision.reason,
+          authorizationSource: params.decision.authorizationSource,
+        })
+        return {
+          handled: false,
+          outputText: null,
+          toolUseText: null,
+        }
+      }
       const result = await this.deps.executeHostTool(
         'system_run_openclaw',
         { command: params.decision.command },

@@ -1,8 +1,28 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
-import { rememberBrowserWorkflowState } from '../main/modules/agent-control/session-continuity'
+import {
+  __resetSessionContinuityForTests,
+  __setSessionContinuityStoragePathForTests,
+  rememberBrowserWorkflowState,
+} from '../main/modules/agent-control/session-continuity'
+
+const TEST_CONTINUITY_PATH = join(tmpdir(), 'ready-browser-task-planner-continuity.json')
+
+beforeEach(() => {
+  __setSessionContinuityStoragePathForTests(TEST_CONTINUITY_PATH)
+  __resetSessionContinuityForTests()
+})
+
+afterEach(() => {
+  __resetSessionContinuityForTests()
+  __setSessionContinuityStoragePathForTests(null)
+  rmSync(TEST_CONTINUITY_PATH, { force: true })
+})
 
 function createPlanner() {
   return new BrowserTaskPlanner({
@@ -142,5 +162,38 @@ describe('BrowserTaskPlanner', () => {
     assert.ok((continuity?.forcedRules || []).some((rule) => rule.includes('页面未确认进入运行态')))
     assert.equal(continuity?.rememberedWorkflow?.canResume, true)
     assert.equal(continuity?.rememberedWorkflow?.lastFailureReason, '页面未确认进入运行态')
+  })
+
+  it('does not reuse the current page when persisted continuity points to a different site', async () => {
+    rememberBrowserWorkflowState('scope-other-site', {
+      url: 'https://chatgpt.example.com/workspace',
+      title: '其他站点',
+      workflowKind: 'upload_generate',
+      stage: 'submit',
+      attachmentName: 'poster.png',
+      promptPreview: '做一张温暖的美食海报',
+      evidence: ['prompt_matched'],
+      running: false,
+      uploadMounted: true,
+      promptFilled: true,
+      status: 'failed',
+      canResume: true,
+      lastFailureReason: '站点已切走',
+    })
+
+    const planner = createPlanner()
+    const decision = planner.decideTask({
+      userText: '继续刚才在即梦里的任务',
+      sessionMessages: [],
+      sessionId: 'scope-other-site',
+    })
+    const continuity = await planner.buildContinuityContext({
+      userText: '继续刚才在即梦里的任务',
+      sessionId: 'scope-other-site',
+      decision,
+    })
+
+    assert.equal(continuity?.canReuseCurrentPage, false)
+    assert.match(continuity?.reuseReason || '', /关联不足/)
   })
 })

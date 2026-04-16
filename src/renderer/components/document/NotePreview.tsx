@@ -19,7 +19,7 @@ import {
 } from './note-preview-parser'
 import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
-import { getWidgetPersistenceKey } from './widget-card-helpers'
+import { getDocumentWidgetRenderBudget, getWidgetPersistenceKey } from './widget-card-helpers'
 import WidgetRenderer from './WidgetRenderer'
 
 interface NotePreviewProps {
@@ -254,6 +254,7 @@ export default function NotePreview({
 }: NotePreviewProps) {
   const [copiedChipId, setCopiedChipId] = useState<string | null>(null)
   const preview = useMemo(() => buildStructuredNotePreview(content, notePath), [content, notePath])
+  const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(content), [content])
   const embedsById = useMemo(
     () => new Map(preview.embeds.map((embed) => [embed.id, embed])),
     [preview.embeds],
@@ -446,6 +447,7 @@ export default function NotePreview({
                 <WidgetRenderer
                   title={widget.title}
                   widgetCode={widget.widgetCode}
+                  preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
                   widgetState={widgetState}
                   onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}
                 />

@@ -137,7 +137,9 @@ describe('document widget target context', () => {
 
     assert.equal(typeof composed, 'string')
     assert.match(String(composed), /### 当前文档上下文/)
+    assert.match(String(composed), /--- 文档摘要开始 ---/)
     assert.match(String(composed), /这是当前文档的正文内容/)
+    assert.doesNotMatch(String(composed), /--- 文档内容开始 ---/)
     assert.doesNotMatch(String(composed), /## 环境信息\n- 当前模式: 文档模式/)
   })
 
@@ -147,7 +149,7 @@ describe('document widget target context', () => {
       'utf8',
     )
 
-    assert.match(source, /const hasWidgetTargetContext = params\.userText\.includes\('### Widget 更新上下文'\)/)
+    assert.match(source, /const hasWidgetTargetContext = params\.requestEnvelope\.environmentHints\.hasWidgetTargetContext/)
     assert.match(source, /const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent\(contextualUserInput\)/)
     assert.match(source, /hasWidgetTargetContext && !explicitWidgetCreateIntent[\s\S]*\? 'update'/)
     assert.match(source, /const allowDocumentTools = baseVisibilityPlan\.hasTools && \([\s\S]*params\.hasWidgetTargetContext[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)

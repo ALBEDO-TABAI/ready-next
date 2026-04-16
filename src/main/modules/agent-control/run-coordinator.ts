@@ -55,11 +55,8 @@ export class RunCoordinator {
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
-    const primaryTriggerHit = prepared.triggerHits[0]
-    const planningTaskTitle = primaryTriggerHit?.label || undefined
-    const planningTaskSummary = primaryTriggerHit
-      ? `准备开始${primaryTriggerHit.label}`
-      : 'Prompt assembly ready'
+    const planningTaskTitle = '正在理解需求'
+    const planningTaskSummary = '正在整理任务边界、上下文与可用能力'
 
     this.deps.emitScopeRunEvent({
       type: 'started',
@@ -67,7 +64,7 @@ export class RunCoordinator {
       agent: request.scope.agent,
       runId: request.requestId,
       phase: 'planning',
-      module: primaryTriggerHit?.module,
+      module: undefined,
       latestText: planningTaskSummary,
       taskTitle: planningTaskTitle,
       taskSummary: planningTaskSummary,
@@ -88,6 +85,8 @@ export class RunCoordinator {
       requestId: request.requestId,
       systemPrompt: prepared.systemPrompt,
       message: messageWithBootstrap,
+      requestEnvelope: prepared.requestEnvelope,
+      intentClassification: prepared.intentClassification,
       budget,
       budgetState,
     })

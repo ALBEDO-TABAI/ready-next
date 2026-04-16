@@ -1,6 +1,7 @@
 const CONTEXT_MARKERS = [
   '### 当前文档上下文',
   '### Widget 更新上下文',
+  '--- 文档摘要开始 ---',
   '--- 文档内容开始 ---',
   '--- 附件:',
 ]
@@ -123,6 +124,7 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   const normalized = userText.toLowerCase()
   const hasDocContext =
     userText.includes('### 当前文档上下文') ||
+    userText.includes('--- 文档摘要开始 ---') ||
     userText.includes('--- 文档内容开始 ---') ||
     normalized.includes('current document context')
   const editIntent = /(直接|帮我|请|请你)?(修改|改写|重写|润色|整理|优化|调整|写入|追加|替换|保存|新建|编辑)|\b(edit|rewrite|refine|update|replace|append|save)\b/i

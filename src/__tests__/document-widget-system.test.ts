@@ -6,6 +6,10 @@ import { parseShowWidgetFences } from '../renderer/components/document/widget-fe
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, widgetHtmlNeedsSandbox } from '../renderer/components/document/widget-sanitizer'
 import { clampNumericInputValue } from '../renderer/components/document/widget-runtime-helpers'
+import {
+  getDocumentWidgetRenderBudget,
+  widgetNeedsManualPreview,
+} from '../renderer/components/document/widget-card-helpers'
 
 describe('document widget fence parsing', () => {
   it('parses a single widget fence into a widget segment', () => {
@@ -125,6 +129,46 @@ describe('document widget runtime helpers', () => {
 })
 
 describe('document widget renderer contract', () => {
+  it('forces manual preview when a document contains too many widgets or too much widget code', () => {
+    const content = [
+      '```show-widget',
+      '{"title":"w1","widget_code":"<div>one</div>"}',
+      '```',
+      '```show-widget',
+      '{"title":"w2","widget_code":"<div>two</div>"}',
+      '```',
+      '```show-widget',
+      '{"title":"w3","widget_code":"<div>three</div>"}',
+      '```',
+      '```show-widget',
+      '{"title":"w4","widget_code":"<div>four</div>"}',
+      '```',
+    ].join('\n')
+
+    const budget = getDocumentWidgetRenderBudget(content)
+
+    assert.equal(budget.widgetCount, 4)
+    assert.equal(budget.forceManualPreviewAll, true)
+  })
+
+  it('flags animation-heavy emoji-rich widgets for manual preview instead of auto-render', () => {
+    const heavyWidget = `
+<div style="animation: glow 2s ease-in-out infinite alternate;">
+  <style>
+    @keyframes glow {
+      0% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+  </style>
+  <div>🏀 篮球全明星狂欢夜 🎉 🔥 ⚡ 🏆</div>
+</div>
+`
+    const simpleWidget = '<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="#eee" /></svg>'
+
+    assert.equal(widgetNeedsManualPreview(heavyWidget), true)
+    assert.equal(widgetNeedsManualPreview(simpleWidget), false)
+  })
+
   it('keeps widget runtime on the sandboxed iframe path instead of branching by needsSandbox', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/renderer/components/document/WidgetRenderer.tsx'),
@@ -138,6 +182,9 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(source, /src=\{iframeBlobUrl/)
     assert.doesNotMatch(source, /onLoad=\{\(\) => setReceiverReady\(true\)\}/)
     assert.match(source, /WidgetDomRuntime/)
+    assert.match(source, /widgetNeedsManualPreview/)
+    assert.match(source, /preferManualPreview/)
+    assert.match(source, /启用预览/)
   })
 
   it('keeps DOM fallback runtime in the regular document tree for document.getElementById compatibility', () => {

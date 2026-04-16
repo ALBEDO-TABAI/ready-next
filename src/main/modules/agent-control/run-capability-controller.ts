@@ -13,6 +13,7 @@ export interface HostShortcutDecision {
   kind: 'none' | 'openclaw' | 'document_format' | 'document_rewrite'
   reason: string
   command?: string
+  authorizationSource: 'explicit_user_command' | 'ui_action' | 'none'
 }
 
 interface RunCapabilityBaseParams {
@@ -59,8 +60,6 @@ function extractOpenclawPairingCommand(userText: string): string | null {
   if (!text) return null
   const direct = text.match(/^\s*(openclaw\s+pairing\s+[^\n\r]+)\s*$/i)
   if (direct) return direct[1].trim()
-  const embedded = text.match(/\b(openclaw\s+pairing\s+approve\s+\S+\s+\S+)\b/i)
-  if (embedded) return embedded[1].trim()
   return null
 }
 
@@ -76,6 +75,7 @@ function resolveHostShortcutDecision(params: {
       kind: 'openclaw',
       reason: 'pairing_command',
       command: openclawCommand,
+      authorizationSource: 'explicit_user_command',
     }
   }
 
@@ -88,6 +88,7 @@ function resolveHostShortcutDecision(params: {
     return {
       kind: 'document_format',
       reason: 'prefer_format_only',
+      authorizationSource: 'none',
     }
   }
 
@@ -100,12 +101,14 @@ function resolveHostShortcutDecision(params: {
     return {
       kind: 'document_rewrite',
       reason: 'prefer_section_rewrite',
+      authorizationSource: 'none',
     }
   }
 
   return {
     kind: 'none',
     reason: 'tool_loop_or_simple_response',
+    authorizationSource: 'none',
   }
 }
 
@@ -148,6 +151,7 @@ function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<Prepa
     preferredSkillToolNames: baseParams.preferredSkillToolNames,
     contextualUserInput: baseParams.executionIntentContext.contextualUserInput,
     userInstructionText: baseParams.executionIntentContext.userInstructionText,
+    intentClassification: baseParams.executionIntentContext.intentClassification,
     hasDocumentEnvironment: baseParams.executionIntentContext.hasDocumentEnvironment,
     hasWidgetTargetContext: baseParams.executionIntentContext.hasWidgetTargetContext,
     explicitWidgetCreateIntent: baseParams.executionIntentContext.explicitWidgetCreateIntent,

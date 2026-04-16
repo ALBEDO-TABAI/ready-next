@@ -5,6 +5,7 @@ import type {
   ScopeRunTaskContinuation,
   ScopeRunTaskStep,
 } from './types'
+import { logAgentMetric } from './metrics'
 import type { RunProjectionPatch } from './run-contracts'
 
 function browserStepTitle(id: string): string {
@@ -66,6 +67,12 @@ export class RunProjection {
       blockedReason: payload.blockedReason ?? derivedTask.blockedReason ?? previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
       updatedAt: payload.timestamp,
+    }
+    if (previous?.taskTitle === '正在理解需求' && summary.taskTitle && summary.taskTitle !== previous.taskTitle) {
+      logAgentMetric('task_title_correction_rate', {
+        scopeId: payload.scopeId,
+        nextTaskTitle: summary.taskTitle,
+      })
     }
     this.deps.setSummary(payload.scopeId, summary)
     return summary

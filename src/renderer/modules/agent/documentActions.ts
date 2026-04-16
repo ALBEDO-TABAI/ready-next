@@ -833,8 +833,8 @@ export function buildActiveDocumentContext(): string | null {
 
   const ext = activeTab.path?.split('.').pop()?.toLowerCase() || 'untitled'
   const raw = activeTab.content || ''
-  const clipped = raw.slice(0, 20_000)
-  const truncated = raw.length > 20_000
+  const clipped = raw.slice(0, 1_200)
+  const truncated = raw.length > 1_200
 
   const lines = [
     '### 当前文档上下文',
@@ -843,10 +843,10 @@ export function buildActiveDocumentContext(): string | null {
     `- 类型: ${ext}`,
     `- 字符数: ${raw.length}`,
     '',
-    '--- 文档内容开始 ---',
+    '--- 文档摘要开始 ---',
     clipped,
-    truncated ? '...[文档内容已截断]' : null,
-    '--- 文档内容结束 ---',
+    truncated ? '...[文档摘要已截断]' : null,
+    '--- 文档摘要结束 ---',
   ].filter(Boolean)
 
   return lines.join('\n')
