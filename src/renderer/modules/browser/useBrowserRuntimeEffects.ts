@@ -10,7 +10,6 @@ interface UseBrowserRuntimeEffectsParams {
   isActive: boolean
   isAddressEditingRef: RefObject<boolean>
   sendBoundsImmediate: (options?: { forceExact?: boolean }) => Promise<void>
-  handleNewTab: () => void | Promise<void>
 }
 
 export function useBrowserRuntimeEffects({
@@ -18,7 +17,6 @@ export function useBrowserRuntimeEffects({
   isActive,
   isAddressEditingRef,
   sendBoundsImmediate,
-  handleNewTab,
 }: UseBrowserRuntimeEffectsParams) {
   const activationFrameRef = useRef<number | null>(null)
   const hasHydratedRuntimeRef = useRef(!isElectron)
@@ -60,7 +58,7 @@ export function useBrowserRuntimeEffects({
     return true
   }, [isElectron])
 
-  const ensureBrowserRuntime = useCallback(async ({ allowNewTab }: { allowNewTab: boolean }) => {
+  const ensureBrowserRuntime = useCallback(async () => {
     if (!isElectron) return true
 
     if (!hydrationPromiseRef.current) {
@@ -79,15 +77,8 @@ export function useBrowserRuntimeEffects({
         hydrationPromiseRef.current = null
       }
     }
-
-    if (allowNewTab && !hasHydratedRuntimeRef.current) {
-      await handleNewTab()
-      hasHydratedRuntimeRef.current = true
-      return true
-    }
-
     return hasHydratedRuntimeRef.current
-  }, [handleNewTab, isElectron, restoreExistingTabs])
+  }, [isElectron, restoreExistingTabs])
 
   useEffect(() => {
     if (!isElectron) return
@@ -167,7 +158,7 @@ export function useBrowserRuntimeEffects({
     if (!isElectron) return
     let cancelled = false
 
-    void ensureBrowserRuntime({ allowNewTab: false }).then((hasTabs) => {
+    void ensureBrowserRuntime().then((hasTabs) => {
       if (cancelled) return
       setBrowserRuntimeReady(hasTabs)
     }).catch(() => undefined)
@@ -198,11 +189,13 @@ export function useBrowserRuntimeEffects({
     let cancelled = false
     activationFrameRef.current = requestAnimationFrame(async () => {
       activationFrameRef.current = null
-      const hasTabs = await ensureBrowserRuntime({ allowNewTab: true })
-      if (cancelled || !hasTabs) return
+      const hasTabs = await ensureBrowserRuntime()
+      if (cancelled) return
 
-      await sendBoundsImmediate({ forceExact: true })
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      if (hasTabs) {
+        await sendBoundsImmediate({ forceExact: true })
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      }
       if (!cancelled) {
         setBrowserRuntimeReady(true)
       }

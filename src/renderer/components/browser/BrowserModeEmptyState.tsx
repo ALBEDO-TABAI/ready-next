@@ -12,11 +12,25 @@ import {
 export default function BrowserModeEmptyState({
   onNewTab,
   contentRef,
+  urlInput,
+  onUrlChange,
+  onNavigate,
+  onFocus,
+  onBlur,
+  onEditStart,
+  onEditEnd,
   loading = false,
   onShowUtilityMenu,
 }: {
   onNewTab: () => void | Promise<void>
   contentRef: RefObject<HTMLDivElement | null>
+  urlInput: string
+  onUrlChange: (value: string) => void
+  onNavigate: () => void
+  onFocus: () => void
+  onBlur: () => void
+  onEditStart: () => void
+  onEditEnd: () => void
   loading?: boolean
   onShowUtilityMenu: (kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => void
 }) {
@@ -33,7 +47,7 @@ export default function BrowserModeEmptyState({
             isActive
             tabs={[]}
             activeTabId={null}
-            urlInput=""
+            urlInput={urlInput}
             bookmarkedUrls={[]}
             loading={loading}
             canGoBack={false}
@@ -43,15 +57,15 @@ export default function BrowserModeEmptyState({
             onTabClose={() => undefined}
             onNewTab={onNewTab}
             onReorder={() => undefined}
-            onUrlChange={() => undefined}
-            onNavigate={() => undefined}
+            onUrlChange={onUrlChange}
+            onNavigate={onNavigate}
             onGoBack={() => undefined}
             onGoForward={() => undefined}
             onRefresh={() => undefined}
-            onFocus={() => undefined}
-            onBlur={() => undefined}
-            onEditStart={() => undefined}
-            onEditEnd={() => undefined}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            onEditStart={onEditStart}
+            onEditEnd={onEditEnd}
             onToggleBookmark={() => undefined}
             onToggleBookmarkForTab={() => undefined}
             onShowUtilityMenu={onShowUtilityMenu}

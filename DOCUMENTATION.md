@@ -486,6 +486,8 @@ Ready 采用 Electron 三层架构：
 - 恢复浏览内容时，再 `showActive()` 并更新 bounds
 - 工作台切到非 browser 可见态时，优先由壳层统一调用 `browser.hideAll()`，不要只隐藏 active tab host；否则 RSS preview / popup 这类原生子视图可能残留在前台
 - Browser 运行态初始化要尽量做到“一次准备，多次复用”：已有 tab 可在后台预热恢复，但不要因为后台预热强行新建空白页
+- 浏览器冷启动若后端当前没有 tab，应先展示空状态；首个 tab 只在用户或任务主动触发时创建，不要把默认外部页当成启动必经步骤
+- 空状态必须沿用真实地址栏交互：输入网址后直接走同一套导航逻辑创建首个 tab，而不是挂一套只会显示 UI、不会真正跳转的占位 header
 - browser 回场时可以在壳层离场覆盖还没收完之前提前露出原生 host，但 browser 切出时仍要尽早 `hideAll()`，不要让原生网页和 DOM 过场抢前台
 
 ### 9.3 Workbench Keep-Alive 约定

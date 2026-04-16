@@ -152,16 +152,46 @@ export function useBrowserTabActions({
   }, [executeTabSwitch, isElectron, syncTabsFromBackend])
 
   const handleNavigate = useCallback(async (url?: string) => {
-    if (!isElectron || !activeTabId) return
+    if (!isElectron) return
     const { urlInput: currentInput } = useBrowserTabs.getState()
     const targetUrl = normalizeUrl(url || currentInput)
     if (!isSupportedBrowserNavigationUrl(targetUrl)) {
-      updateTab(activeTabId, {
-        loading: false,
-        error: '浏览器当前只支持网页地址，本地文件请改用文稿或文件区打开。',
-      })
+      if (activeTabId) {
+        updateTab(activeTabId, {
+          loading: false,
+          error: '浏览器当前只支持网页地址，本地文件请改用文稿或文件区打开。',
+        })
+      }
       return
     }
+
+    if (!activeTabId) {
+      await sendBoundsImmediate({ forceExact: true })
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      const created = await window.electronAPI?.browser?.createTab(targetUrl) as { success: boolean; tabId?: string } | undefined
+      if (created?.success && created.tabId) {
+        const newTab: BrowserTab = {
+          id: created.tabId,
+          url: targetUrl,
+          title: 'Loading...',
+          loading: true,
+          canGoBack: false,
+          canGoForward: false,
+          domain: extractBrowserDomain(targetUrl),
+          owner: 'manual',
+          required: false,
+          activity: 'idle',
+        }
+        addTab(newTab)
+        browserTabActivationSequencer.invalidate()
+        setActiveTabId(created.tabId)
+        setUrlInput(targetUrl === DEFAULT_BROWSER_URL ? '' : targetUrl)
+        await syncTabsFromBackend()
+        requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+      }
+      return
+    }
+
     updateTab(activeTabId, { url: targetUrl, loading: true, error: undefined })
     setUrlInput(targetUrl)
     const result = await window.electronAPI?.browser?.navigate(activeTabId, targetUrl)
@@ -171,7 +201,7 @@ export function useBrowserTabActions({
         error: result?.error || '页面打开失败',
       })
     }
-  }, [isElectron, activeTabId, normalizeUrl, updateTab, setUrlInput])
+  }, [isElectron, activeTabId, normalizeUrl, updateTab, setUrlInput, sendBoundsImmediate, addTab, setActiveTabId, syncTabsFromBackend])
 
   const handleContentDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     const types = new Set(Array.from(event.dataTransfer.types || []))

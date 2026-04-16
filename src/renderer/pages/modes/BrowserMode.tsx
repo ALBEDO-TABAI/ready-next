@@ -231,7 +231,6 @@ export default function BrowserMode({
     isActive,
     isAddressEditingRef,
     sendBoundsImmediate,
-    handleNewTab,
   })
   hostVisibleRef.current = browserRuntimeReady && tabs.length > 0
 
@@ -458,6 +457,13 @@ export default function BrowserMode({
       <BrowserModeEmptyState
         onNewTab={handleNewTab}
         contentRef={contentRef}
+        urlInput={urlInput}
+        onUrlChange={setUrlInput}
+        onNavigate={() => void handleNavigate()}
+        onFocus={handleUrlFocus}
+        onBlur={handleUrlBlur}
+        onEditStart={handleBrowserEditStart}
+        onEditEnd={handleBrowserEditEnd}
         loading={!browserRuntimeReady}
         onShowUtilityMenu={handleShowUtilityMenu}
       />
