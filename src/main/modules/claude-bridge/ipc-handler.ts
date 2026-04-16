@@ -302,6 +302,28 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:listTaskProjections', (_, payload?: { scopeId?: string }): IPCResponse => {
+    try {
+      const scopeId = String(payload?.scopeId || '').trim()
+      if (!scopeId) return { success: true, data: [] }
+      return { success: true, data: runtime!.listTaskProjections(scopeId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:getTaskProjection', (_, payload?: { taskId?: string }): IPCResponse => {
+    try {
+      const taskId = String(payload?.taskId || '').trim()
+      if (!taskId) return { success: false, error: 'taskId is required' }
+      const projection = runtime!.getTaskProjection(taskId)
+      if (!projection) return { success: false, error: `Task projection not found: ${taskId}` }
+      return { success: true, data: projection }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('agent:searchSessionRecall', (_, payload?: {
     query?: string
     channelKey?: string

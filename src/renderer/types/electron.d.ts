@@ -287,6 +287,82 @@ interface ScopeRunExecutionDiagnosticsData {
   } | null
 }
 
+type TaskTypeData =
+  | 'direct_answer'
+  | 'short_task'
+  | 'multi_step_task'
+  | 'media_task'
+  | 'continuation'
+
+type TaskInteractionStateData =
+  | 'running'
+  | 'awaiting_clarification'
+  | 'awaiting_confirmation'
+  | 'human_takeover'
+  | 'suspended'
+  | 'resuming'
+
+type TaskProjectionStatusData = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
+
+interface TaskBudgetData {
+  taskType: TaskTypeData
+  maxIterations: number
+  maxToolCalls: number
+  maxParallelToolGroups: number
+  stepBudget?: {
+    maxIterations: number
+    remainingIterations?: number
+  } | null
+}
+
+interface RecoveryRecordData {
+  kind:
+    | 'rate_limit'
+    | 'context_overflow'
+    | 'timeout_model'
+    | 'timeout_tool'
+    | 'auth'
+    | 'transient'
+    | 'host_unavailable'
+  source: 'model_request' | 'tool_execution' | 'runtime'
+  message: string
+  attempt: number
+  recovered: boolean
+  timestamp: string
+}
+
+interface TaskProjectionStepData {
+  id: string
+  description: string
+  title?: string
+  status?: ScopeRunTaskStepStatusData
+  detail?: string | null
+  updatedAt?: string
+  toolHints?: string[]
+  budget?: number
+  dependsOn?: string[]
+}
+
+interface TaskProjectionRecordData {
+  taskId: string
+  scopeId: string
+  runId: string
+  taskType: TaskTypeData
+  module: string
+  status: TaskProjectionStatusData
+  interactionState: TaskInteractionStateData
+  steps: TaskProjectionStepData[]
+  currentStepId?: string | null
+  budget?: TaskBudgetData | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: RecoveryRecordData[]
+  blockedReason?: string | null
+  resumableActions?: ScopeRunResumableActionData[]
+  continuationRef?: ScopeRunTaskContinuationData | null
+  createdAt: string
+  updatedAt: string
+}
+
 interface ScopeRunSummaryData {
   scopeId: string
   agent: string
@@ -447,6 +523,8 @@ interface ElectronAgentAPI {
     statuses?: string[]
     limit?: number
   }) => Promise<IPCResponse<ScopeRunSummaryData[]>>
+  listTaskProjections: (scopeId: string) => Promise<IPCResponse<TaskProjectionRecordData[]>>
+  getTaskProjection: (taskId: string) => Promise<IPCResponse<TaskProjectionRecordData>>
   searchSessionRecall: (payload?: {
     query?: string
     channelKey?: string
@@ -1935,5 +2013,7 @@ export type {
   TriggerFilters,
   MemoryStats,
   MemoryLifecycleStatus,
-  MemoryMaintenanceResult
+  MemoryMaintenanceResult,
+  TaskProjectionRecordData,
+  RecoveryRecordData
 }

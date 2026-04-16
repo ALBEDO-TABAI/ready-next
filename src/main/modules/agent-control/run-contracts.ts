@@ -37,6 +37,10 @@ export type TaskInteractionState =
 export interface TaskStep {
   id: string
   description: string
+  title?: string
+  status?: ScopeRunTaskStep['status']
+  detail?: string | null
+  updatedAt?: string
   toolHints?: string[]
   budget?: number
   dependsOn?: string[]

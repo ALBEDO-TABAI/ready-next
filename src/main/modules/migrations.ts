@@ -1181,6 +1181,38 @@ const migrations: Migration[] = [
            OR source_type NOT IN ('resident_agent', 'resident_user', 'scope_memory', 'trigger_rule')
       `)
     }
+  },
+  {
+    name: '023_create_task_projection_store',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS task_projections (
+          task_id TEXT PRIMARY KEY,
+          scope_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          task_type TEXT NOT NULL,
+          module TEXT NOT NULL,
+          status TEXT NOT NULL,
+          interaction_state TEXT NOT NULL,
+          steps_json TEXT NOT NULL,
+          current_step_id TEXT,
+          budget_json TEXT,
+          budget_usage_percent INTEGER,
+          recovery_history_json TEXT,
+          blocked_reason TEXT,
+          resumable_actions_json TEXT,
+          continuation_ref_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_task_projections_scope_updated ON task_projections(scope_id, updated_at DESC)'
+      )
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_task_projections_status_updated ON task_projections(status, updated_at DESC)'
+      )
+    }
   }
 ]
 

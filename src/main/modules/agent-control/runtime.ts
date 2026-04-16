@@ -24,6 +24,8 @@ import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
 import { RunProjection } from './run-projection'
+import { syncTaskProjection } from './task-projection-sync'
+import type { TaskProjectionRecord } from './run-contracts'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -37,6 +39,7 @@ import { ExternalMemoryProviderSlot } from './external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
+import { TaskProjectionRepository } from '../repositories/task-projection-repository'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -143,6 +146,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly agentManager: AgentManager
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
+  private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
   private readonly pendingInboundChannels = new Map<
     string,
     {
@@ -388,6 +392,18 @@ export class AgentControlRuntime extends EventEmitter {
       .filter((item) => (statuses ? statuses.has(item.phase) : true))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, limit)
+  }
+
+  listTaskProjections(scopeId: string): TaskProjectionRecord[] {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return []
+    return this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[]
+  }
+
+  getTaskProjection(taskId: string): TaskProjectionRecord | null {
+    const normalizedTaskId = String(taskId || '').trim()
+    if (!normalizedTaskId) return null
+    return this.taskProjectionStore.get(normalizedTaskId) as TaskProjectionRecord | null
   }
 
   searchSessionRecall(payload?: {
@@ -1271,7 +1287,13 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   recordScopeRunEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
-    return this.runProjection.recordEvent(payload)
+    const summary = this.runProjection.recordEvent(payload)
+    if (summary) {
+      void syncTaskProjection(this.taskProjectionStore, summary, payload).catch((error) => {
+        console.error('[AgentControlRuntime] Failed to sync task projection:', error)
+      })
+    }
+    return summary
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {

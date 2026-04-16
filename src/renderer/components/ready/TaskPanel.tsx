@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Send } from 'lucide-react'
 import {
   useAgent,
@@ -6,6 +6,7 @@ import {
   type ScopeRunState,
   type ToolTraceEvent
 } from '../../stores/useAgent'
+import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 
@@ -109,7 +110,7 @@ function summarizeTraceItem(item: ToolTraceEvent): string {
   return item.text.replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
-function moduleLabel(module: ScopeRunState['module'] | undefined): string {
+function moduleLabel(module: ScopeRunState['module'] | string | undefined): string {
   switch (module) {
     case 'browser':
       return '浏览器'
@@ -163,6 +164,100 @@ async function revealArtifact(artifact: AgentArtifact): Promise<void> {
   await window.electronAPI.document.showInFolder(path).catch(() => undefined)
 }
 
+function taskTypeLabel(taskType: TaskProjectionRecordData['taskType'] | undefined): string {
+  switch (taskType) {
+    case 'direct_answer':
+      return '直答'
+    case 'short_task':
+      return '短任务'
+    case 'multi_step_task':
+      return '多步任务'
+    case 'media_task':
+      return '媒体任务'
+    case 'continuation':
+      return '继续任务'
+    default:
+      return '任务'
+  }
+}
+
+function interactionStateLabel(
+  interactionState: TaskProjectionRecordData['interactionState'] | undefined,
+): string {
+  switch (interactionState) {
+    case 'awaiting_clarification':
+      return '等待补充'
+    case 'awaiting_confirmation':
+      return '等待确认'
+    case 'human_takeover':
+      return '人工接手'
+    case 'suspended':
+      return '已暂停'
+    case 'resuming':
+      return '恢复中'
+    case 'running':
+      return '执行中'
+    default:
+      return '进行中'
+  }
+}
+
+function projectionStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string {
+  switch (status) {
+    case 'queued':
+      return '排队中'
+    case 'running':
+      return '进行中'
+    case 'blocked':
+      return '待继续'
+    case 'done':
+      return '已完成'
+    case 'failed':
+      return '失败'
+    case 'cancelled':
+      return '已取消'
+    default:
+      return '待命'
+  }
+}
+
+function projectionStatusTone(
+  status: TaskProjectionRecordData['status'] | undefined,
+): { bg: string; color: string } {
+  switch (status) {
+    case 'done':
+      return { bg: 'var(--color-green-light)', color: 'var(--color-green)' }
+    case 'failed':
+    case 'cancelled':
+      return { bg: 'rgba(224, 69, 72, 0.12)', color: 'var(--color-red)' }
+    case 'blocked':
+      return { bg: 'var(--color-orange-light)', color: 'var(--color-orange)' }
+    default:
+      return { bg: 'var(--color-blue-light)', color: 'var(--color-blue)' }
+  }
+}
+
+function recoveryKindLabel(kind: RecoveryRecordData['kind']): string {
+  switch (kind) {
+    case 'rate_limit':
+      return '限流重试'
+    case 'context_overflow':
+      return '上下文压缩'
+    case 'timeout_model':
+      return '模型超时'
+    case 'timeout_tool':
+      return '工具超时'
+    case 'auth':
+      return '认证失败'
+    case 'transient':
+      return '瞬态重试'
+    case 'host_unavailable':
+      return '宿主降级'
+    default:
+      return '自动恢复'
+  }
+}
+
 export default function TaskPanel() {
   const {
     inputValue,
@@ -174,7 +269,11 @@ export default function TaskPanel() {
     sendMessage
   } = useAgent()
 
+  const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
+  const activeProjection = useMemo(() => {
+    return taskProjections[0] || null
+  }, [taskProjections])
   const fallbackTasks = useMemo(() => {
     const extracted = extractTasksFromMessages(messages)
     if (extracted.length > 0) return extracted
@@ -196,6 +295,15 @@ export default function TaskPanel() {
   const memoryRefs = useMemo(() => activeRun?.memoryRefs?.slice(-6) || [], [activeRun])
   const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
   const documentPipelineDiagnostics = activeRun?.executionDiagnostics?.pipeline?.document || null
+  const projectionSteps = useMemo(() => activeProjection?.steps || [], [activeProjection])
+  const projectionRecoveryHistory = useMemo(() => {
+    return (activeProjection?.recoveryHistory || []).slice(-3).reverse()
+  }, [activeProjection])
+  const projectionBudgetPercent =
+    activeProjection?.budgetUsagePercent == null
+      ? null
+      : Math.max(0, Math.min(100, Math.round(activeProjection?.budgetUsagePercent)))
+  const safeProjectionBudgetPercent = projectionBudgetPercent ?? 0
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -204,6 +312,35 @@ export default function TaskPanel() {
   }
 
   const phaseColors = phaseTone(activeRun?.phase)
+  const projectionColors = projectionStatusTone(activeProjection?.status)
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!currentScopeId || !window.electronAPI?.agent?.listTaskProjections) {
+      setTaskProjections([])
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void window.electronAPI.agent.listTaskProjections(currentScopeId)
+      .then((result) => {
+        if (cancelled) return
+        if (!result?.success || !Array.isArray(result.data)) {
+          setTaskProjections([])
+          return
+        }
+        setTaskProjections(result.data)
+      })
+      .catch(() => {
+        if (!cancelled) setTaskProjections([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentScopeId, activeRun?.updatedAt])
 
   return (
     <div
@@ -230,7 +367,7 @@ export default function TaskPanel() {
         style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
       >
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
-          {activeRun ? '运行时间线' : '任务'}
+          {activeRun || activeProjection ? '运行时间线' : '任务'}
         </span>
         <button
           className="flex items-center justify-center rounded-lg hover:bg-black/5 transition-colors"
@@ -245,36 +382,98 @@ export default function TaskPanel() {
       </div>
 
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-default)' }}>
-        {activeRun ? (
+        {activeRun || activeProjection ? (
           <div className="flex flex-col" style={{ gap: 8 }}>
             <div className="flex items-center justify-between">
               <span
                 className="rounded-full px-2 py-1 text-[10px] font-semibold"
-                style={{ background: phaseColors.bg, color: phaseColors.color }}
+                style={{
+                  background: activeRun ? phaseColors.bg : projectionColors.bg,
+                  color: activeRun ? phaseColors.color : projectionColors.color
+                }}
               >
-                {phaseLabel(activeRun.phase)}
+                {activeRun ? phaseLabel(activeRun.phase) : projectionStatusLabel(activeProjection?.status)}
               </span>
-              <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                工具 {activeRun.stepMetrics?.toolCalls || 0}/
-                {activeRun.stepMetrics?.toolResults || 0}
-              </span>
+              {activeRun ? (
+                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                  工具 {activeRun.stepMetrics?.toolCalls || 0}/
+                  {activeRun.stepMetrics?.toolResults || 0}
+                </span>
+              ) : (
+                <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
+                  步骤 {projectionSteps.length}
+                </span>
+              )}
             </div>
             <div className="flex items-center justify-between" style={{ gap: 8 }}>
               <span className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
-                模块：{moduleLabel(activeRun.module)}
+                模块：{moduleLabel(activeRun?.module || activeProjection?.module)}
               </span>
-              {activeRun.executionKind && (
+              {activeRun?.executionKind && (
                 <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
                   {activeRun.executionKind}
                 </span>
               )}
             </div>
-            {activeRun.ownerResourceId && (
+            {activeProjection && (
+              <div
+                className="rounded-[10px] border px-2.5 py-2"
+                style={{
+                  borderColor: 'var(--border-default)',
+                  background: 'var(--surface-card-bg)'
+                }}
+              >
+                <div
+                  className="grid grid-cols-2"
+                  style={{ gap: 6, fontSize: 10.5, color: 'var(--text-light)' }}
+                >
+                  <div>任务类型</div>
+                  <div style={{ color: 'var(--text-body)', textAlign: 'right' }}>
+                    {taskTypeLabel(activeProjection.taskType)}
+                  </div>
+                  <div>当前状态</div>
+                  <div style={{ color: 'var(--text-body)', textAlign: 'right' }}>
+                    {interactionStateLabel(activeProjection?.interactionState)}
+                  </div>
+                </div>
+                {activeProjection?.budgetUsagePercent != null && (
+                  <div style={{ marginTop: 8 }}>
+                    <div
+                      className="flex items-center justify-between"
+                      style={{ fontSize: 10, color: 'var(--text-light)', marginBottom: 5 }}
+                    >
+                      <span>预算进度</span>
+                      <span>{projectionBudgetPercent}%</span>
+                    </div>
+                    <div
+                      style={{
+                        height: 6,
+                        borderRadius: 999,
+                        background: 'color-mix(in srgb, var(--text-light) 14%, transparent)',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${safeProjectionBudgetPercent}%`,
+                          height: '100%',
+                          background:
+                            safeProjectionBudgetPercent >= 90
+                              ? 'var(--color-orange)'
+                              : 'var(--color-blue)'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {activeRun?.ownerResourceId && (
               <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>
                 资源：{String(activeRun.ownerResourceId).slice(0, 48)}
               </div>
             )}
-            {activeRun.blockedReason && (
+            {(activeRun?.blockedReason || activeProjection?.blockedReason) && (
               <div
                 className="rounded-[10px] border px-2.5 py-2"
                 style={{
@@ -289,8 +488,44 @@ export default function TaskPanel() {
                   className="mt-1 text-[11px]"
                   style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
                 >
-                  {activeRun.blockedReason}
+                  {activeRun?.blockedReason || activeProjection?.blockedReason}
                 </div>
+              </div>
+            )}
+            {projectionRecoveryHistory.length > 0 && (
+              <div className="flex flex-col" style={{ gap: 6 }}>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                  自动恢复
+                </div>
+                {projectionRecoveryHistory.map((entry) => (
+                  <div
+                    key={`${entry.timestamp}-${entry.kind}-${entry.attempt}`}
+                    className="rounded-[10px] border px-2.5 py-2"
+                    style={{
+                      borderColor: 'var(--border-default)',
+                      background: 'var(--surface-card-bg)'
+                    }}
+                  >
+                    <div
+                      className="flex items-center justify-between"
+                      style={{ gap: 8, marginBottom: 4 }}
+                    >
+                      <div
+                        className="text-[10px] font-semibold"
+                        style={{ color: 'var(--text-body)' }}
+                      >
+                        {recoveryKindLabel(entry.kind)}
+                      </div>
+                      <div className="text-[9px]" style={{ color: 'var(--text-light)' }}>
+                        第 {entry.attempt} 次
+                      </div>
+                    </div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                      {entry.message}
+                      {entry.recovered ? ' · 已恢复' : ' · 未恢复'}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {artifactItems.length > 0 && (
@@ -322,7 +557,7 @@ export default function TaskPanel() {
                 </div>
               </div>
             )}
-            {(memoryRefs.length > 0 || triggerHits.length > 0 || activeRun.contextBudget) && (
+            {(memoryRefs.length > 0 || triggerHits.length > 0 || activeRun?.contextBudget) && (
               <div className="flex flex-col" style={{ gap: 6 }}>
                 {triggerHits.length > 0 && (
                   <div className="flex flex-col" style={{ gap: 4 }}>
@@ -373,7 +608,7 @@ export default function TaskPanel() {
                     ))}
                   </div>
                 )}
-                {activeRun.contextBudget && (
+                {activeRun?.contextBudget && (
                   <div
                     className="text-[10px]"
                     style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
@@ -407,7 +642,7 @@ export default function TaskPanel() {
                 )}
               </div>
             )}
-            {activeRun.latestText && !activeRun.blockedReason && (
+            {activeRun?.latestText && !activeRun?.blockedReason && (
               <div
                 className="text-[11px]"
                 style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}
@@ -472,6 +707,73 @@ export default function TaskPanel() {
                   >
                     {item.summary}
                   </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : activeProjection ? (
+          projectionSteps.length === 0 ? (
+            <div
+              className="rounded-[12px] border px-3 py-3"
+              style={{ borderColor: 'var(--border-default)' }}
+            >
+              <div className="text-[11px]" style={{ color: 'var(--text-light)' }}>
+                当前任务已经写入看板，等待新的步骤或恢复记录。
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col" style={{ gap: 8 }}>
+              {projectionSteps.map((step) => (
+                <div
+                  key={step.id}
+                  className="rounded-[12px] border px-3 py-2.5"
+                  style={{ borderColor: 'var(--border-default)', background: 'var(--surface-card-bg)' }}
+                >
+                  <div className="mb-1 flex items-center justify-between" style={{ gap: 8 }}>
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[9px] font-semibold"
+                      style={{
+                        background:
+                          step.status === 'done'
+                            ? 'rgba(16, 185, 129, 0.12)'
+                            : step.status === 'running'
+                              ? 'var(--color-blue-light)'
+                              : 'rgba(120, 120, 120, 0.12)',
+                        color:
+                          step.status === 'done'
+                            ? 'var(--color-green)'
+                            : step.status === 'running'
+                              ? 'var(--color-blue)'
+                              : 'var(--text-light)'
+                      }}
+                    >
+                      {step.status === 'done'
+                        ? '已完成'
+                        : step.status === 'running'
+                          ? '进行中'
+                          : step.status === 'blocked'
+                            ? '待继续'
+                            : step.status === 'error'
+                              ? '失败'
+                              : '待执行'}
+                    </span>
+                    {step.updatedAt && (
+                      <span className="text-[9px]" style={{ color: 'var(--text-light)' }}>
+                        {new Date(step.updatedAt).toLocaleTimeString('zh-CN', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
+                    {step.title || step.description}
+                  </div>
+                  {step.detail && (
+                    <div className="mt-1 text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
+                      {step.detail}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

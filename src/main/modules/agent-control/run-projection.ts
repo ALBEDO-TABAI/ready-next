@@ -56,6 +56,8 @@ export class RunProjection {
       phase: payload.phase,
       taskTitle: payload.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
       taskSummary: payload.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
+      taskType: payload.taskType ?? previous?.taskType,
+      interactionState: payload.interactionState ?? previous?.interactionState,
       steps: payload.steps ?? derivedTask.steps ?? previous?.steps ?? [],
       currentStepId: payload.currentStepId ?? derivedTask.currentStepId ?? previous?.currentStepId ?? null,
       waitingFor: payload.waitingFor ?? derivedTask.waitingFor ?? previous?.waitingFor ?? 'none',
@@ -64,6 +66,27 @@ export class RunProjection {
       taskContinuation: payload.taskContinuation ?? derivedTask.taskContinuation ?? previous?.taskContinuation ?? null,
       memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
       executionDiagnostics: payload.executionDiagnostics ?? previous?.executionDiagnostics ?? null,
+      budgetUsagePercent:
+        payload.budgetUsagePercent
+        ?? payload.executionDiagnostics?.budgetUsagePercent
+        ?? previous?.budgetUsagePercent
+        ?? null,
+      recoveryHistory:
+        payload.recoveryHistory
+        ?? payload.executionDiagnostics?.recoveryHistory
+        ?? previous?.recoveryHistory
+        ?? null,
+      degradationReason:
+        payload.degradationReason
+        ?? payload.executionDiagnostics?.degradationReason
+        ?? previous?.degradationReason
+        ?? null,
+      stepBudget:
+        payload.stepBudget
+        ?? payload.executionDiagnostics?.stepBudget
+        ?? previous?.stepBudget
+        ?? null,
+      taskProjectionId: payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
       blockedReason: payload.blockedReason ?? derivedTask.blockedReason ?? previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
       updatedAt: payload.timestamp,

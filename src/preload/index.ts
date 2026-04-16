@@ -22,6 +22,10 @@ const agentAPI = {
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
+  listTaskProjections: (scopeId: string) =>
+    ipcRenderer.invoke('agent:listTaskProjections', { scopeId }),
+  getTaskProjection: (taskId: string) =>
+    ipcRenderer.invoke('agent:getTaskProjection', { taskId }),
   searchSessionRecall: (payload?: {
     query?: string
     channelKey?: string
