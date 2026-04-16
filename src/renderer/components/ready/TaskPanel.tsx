@@ -195,6 +195,7 @@ export default function TaskPanel() {
   const artifactItems = useMemo(() => activeRun?.artifactRefs?.slice(-6) || [], [activeRun])
   const memoryRefs = useMemo(() => activeRun?.memoryRefs?.slice(-6) || [], [activeRun])
   const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
+  const documentPipelineDiagnostics = activeRun?.executionDiagnostics?.pipeline?.document || null
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -384,6 +385,24 @@ export default function TaskPanel() {
                     {activeRun.contextBudget.droppedRefs.length > 0
                       ? ` · dropped ${activeRun.contextBudget.droppedRefs.length}`
                       : ''}
+                  </div>
+                )}
+                {documentPipelineDiagnostics && (
+                  <div
+                    className="text-[10px]"
+                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                  >
+                    文档深读
+                    {documentPipelineDiagnostics.phase ? ` · ${documentPipelineDiagnostics.phase}` : ''}
+                    {typeof documentPipelineDiagnostics.chunkCount === 'number'
+                      ? ` · 共 ${documentPipelineDiagnostics.chunkCount} 段`
+                      : ''}
+                    {typeof documentPipelineDiagnostics.selectedChunkCount === 'number'
+                      ? ` · 用 ${documentPipelineDiagnostics.selectedChunkCount} 段`
+                      : ''}
+                    {documentPipelineDiagnostics.cacheHit ? ' · 缓存命中' : ''}
+                    {documentPipelineDiagnostics.usedSectionAnchors === true ? ' · 章节切分' : ''}
+                    {documentPipelineDiagnostics.usedSectionAnchors === false ? ' · 段落切分' : ''}
                   </div>
                 )}
               </div>

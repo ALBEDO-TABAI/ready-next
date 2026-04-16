@@ -32,6 +32,7 @@ export class KimiCodingClient {
     fallbackToAnthropic?: (
       params: { messagesOverride?: KimiCodingSessionLike['messages'] },
     ) => Promise<{ text: string; fallback?: ExecutionFallbackInfo }>
+    timeoutMs?: number
   }): Promise<{ text: string; fallback?: ExecutionFallbackInfo }> {
     try {
       return { text: await this.requestSimpleOnce(params) }
@@ -256,6 +257,7 @@ export class KimiCodingClient {
     config: AIModelConfig
     baseUrl: string
     signal: AbortSignal
+    timeoutMs?: number
   }): Promise<string> {
     const v1Base = this.resolveV1Base(params.baseUrl)
     const url = `${v1Base}/chat/completions`
@@ -277,7 +279,7 @@ export class KimiCodingClient {
         stream: false,
       }),
       signal: params.signal,
-    }, params.signal, 'kimi coding simple')
+    }, params.signal, 'kimi coding simple', params.timeoutMs)
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')

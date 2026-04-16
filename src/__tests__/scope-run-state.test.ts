@@ -107,6 +107,37 @@ describe('scope run state helpers', () => {
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
   })
 
+  it('parses document pipeline diagnostics from structured payloads', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        latestText: JSON.stringify({
+          module: 'document',
+          taskTitle: '文档信息卡',
+          taskSummary: '已完成文档重点提炼 · 共 12 段，使用 4 段 · 章节切分',
+          executionDiagnostics: {
+            pipeline: {
+              document: {
+                phase: 'building_insight',
+                chunkCount: 12,
+                selectedChunkCount: 4,
+                cacheHit: false,
+                usedSectionAnchors: true,
+              },
+            },
+          },
+        }),
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.phase, 'building_insight')
+    assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.chunkCount, 12)
+    assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.selectedChunkCount, 4)
+    assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.usedSectionAnchors, true)
+  })
+
   it('derives browser workflow task metadata from plan and stage tool events', () => {
     const planningPatch = deriveScopeRunStatePatch(
       {

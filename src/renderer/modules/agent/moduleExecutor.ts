@@ -1,6 +1,6 @@
 import { requestModuleAgentAction } from '../../utils/moduleAgentBridge'
 import { createAgentArtifact, mergeArtifacts } from './scopeRunState'
-import { mapToolActionToDocAction, performDocAction } from './documentActions'
+import { getActiveDocumentSnapshot, mapToolActionToDocAction, performDocAction } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
@@ -204,6 +204,32 @@ export async function executeModuleToolAction(
       payload: {
         intent: 'write_document_file',
         summary: summaries.join('；'),
+      },
+    }
+  }
+
+  if (tool === 'document.inspectActive') {
+    pushTrace('call', '读取当前活动文档快照', 'tool_running', {
+      module: 'document',
+      executionKind: 'deterministic',
+    })
+    const snapshot = getActiveDocumentSnapshot()
+    const summary = snapshot
+      ? `已读取当前文档快照：${snapshot.title}（${snapshot.charCount} 字）`
+      : '当前没有可读取的活动文档'
+    pushTrace('result', summary, 'tool_running', {
+      module: 'document',
+      intent: tool,
+      executionKind: 'deterministic',
+      lastEvidenceAt: new Date().toISOString(),
+      ...createSingleStepTask('文档任务', summary, new Date().toISOString()),
+    })
+    return {
+      handled: true,
+      payload: {
+        intent: tool,
+        summary,
+        snapshot,
       },
     }
   }

@@ -58,6 +58,7 @@ export class OpenAIExecutionClient {
     signal: AbortSignal
     isKimi?: boolean
     enableKimiWebSearch?: boolean
+    timeoutMs?: number
   }): Promise<{ text: string; fallback?: ExecutionFallbackInfo }> {
     const headers = this.buildHeaders(params.config, params.provider)
     let model = params.config.model
@@ -88,7 +89,7 @@ export class OpenAIExecutionClient {
         headers,
         body: JSON.stringify(reqBody),
         signal: params.signal,
-      }, params.signal, 'openai simple responses')
+      }, params.signal, 'openai simple responses', params.timeoutMs)
 
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => '')
@@ -118,7 +119,7 @@ export class OpenAIExecutionClient {
       headers,
       body: JSON.stringify(reqBody),
       signal: params.signal,
-    }, params.signal, 'openai simple')
+    }, params.signal, 'openai simple', params.timeoutMs)
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')

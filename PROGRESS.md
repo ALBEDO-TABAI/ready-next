@@ -118,6 +118,19 @@
 - renderer 侧 `scopeRunState` 已支持优先消费浏览器结构化任务字段。
 - 最新一轮继续补上了“短期连续性 + 诊断收口”：
   - 最近浏览器工作流会记录 `canResume / lastFailureReason / lastEvidence`
+
+11. 文档“先读再制卡”链路已落下第一版结构化执行（2026-04-16）。
+
+- 新增 `document_read_then_widget_create` 结构化意图，像“先阅读当前文档，再做一个信息卡”这类请求开始从通用单轮聊天链中分流。
+- `DirectChatEngine` 现已接入 `DocumentTaskPipeline` MVP：读取活动文档快照、生成 `DocumentInsight`、再生成 `componentSpec` 并用现有文档工具确定性写回。
+- renderer 文档模块新增 host-only `document.inspectActive`，主进程第一次能直接拿到当前活动文档全文，而不再只能依赖 1200 字上下文摘要或已落盘路径。
+- 两轮模型请求现在有独立阶段超时，文档深读场景不再完全受 simple request 默认 45 秒限制。
+- 同一会话内已补上 `DocumentInsight` 短期缓存：相同文档内容和相同问题重复触发时，会直接复用上次提炼结果，不再重新跑第一轮 insight 生成。
+- 已补上 `document-sectioning` 深读前置：长文档现在会先按章节/段落切块，再挑最相关的片段进入 insight 阶段，第一轮不再默认整篇截断后硬塞给模型。
+- 文档 pipeline 现已支持“部分成功先返回”：若卡片阶段或保存阶段失败，前面已完成的 insight / widget draft 不会丢，用户仍能先拿到可继续推进的结果。
+- `document-engine` 深读热路径已先改成异步读取：`readDocxRawText` 与 `readDocumentEditableText` 不再同步读文件，先把 pipeline 常用读取路径的主线程阻塞风险压下一层。
+- 文档 pipeline 当前阶段文案已开始带可见指标：会显示本轮共拆多少段、使用多少段、是否命中缓存，现有任务卡不用进日志也能看到这轮深读是怎么跑的。
+- 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`，前台状态层和 TaskPanel 都能稳定读到，不再只靠自然语言摘要硬猜。
   - `BrowserPageState` 已补齐 evidence / risks / continuity 摘要
   - 浏览器结构化任务现已补上 `blockedReason / taskContinuation / recentEvidence`
   - Browser 模式页内新增轻量 diagnostics dock，可直接看到当前任务、页面状态、最近失败和继续/重试/回到目标页入口

@@ -48,6 +48,16 @@ export interface ExecutionRunDiagnostics {
     kind: string
     attempts: number
   } | null
+  pipeline?: {
+    document?: {
+      phase?: string
+      chunkCount?: number
+      selectedChunkCount?: number
+      promptChars?: number
+      cacheHit?: boolean
+      usedSectionAnchors?: boolean
+    } | null
+  } | null
 }
 
 export interface RunCoordinatorRequest {

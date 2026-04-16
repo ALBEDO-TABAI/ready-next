@@ -852,6 +852,32 @@ export function buildActiveDocumentContext(): string | null {
   return lines.join('\n')
 }
 
+export interface ActiveDocumentSnapshot {
+  title: string
+  path: string | null
+  content: string
+  isDirty: boolean
+  charCount: number
+}
+
+export function getActiveDocumentSnapshot(): ActiveDocumentSnapshot | null {
+  const mode = useMode.getState().workbenchMode
+  if (mode !== 'document') return null
+
+  const docStore = useDocTabs.getState()
+  const activeTab = docStore.tabs.find((tab) => tab.id === docStore.activeTabId)
+  if (!activeTab) return null
+
+  const content = activeTab.content || ''
+  return {
+    title: activeTab.title,
+    path: activeTab.path || null,
+    content,
+    isDirty: Boolean(activeTab.isDirty),
+    charCount: content.length,
+  }
+}
+
 export async function performDocAction(action: DocActionPayload): Promise<string> {
   const docStore = useDocTabs.getState()
   useMode.getState().setWorkbenchMode('document')

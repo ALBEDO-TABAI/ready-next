@@ -3,6 +3,7 @@ import {
   readFileSync, writeFileSync, readdirSync, statSync, existsSync,
   mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, type FSWatcher
 } from 'fs'
+import { readFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
@@ -143,7 +144,7 @@ async function readDocxRawText(path: string): Promise<string> {
   const mammoth = await getMammoth()
   if (!mammoth) return ''
   try {
-    const buffer = readFileSync(path)
+    const buffer = await readFile(path)
     const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
     const textResult = await mammothMod.extractRawText({ buffer })
     return (textResult.value || '').trim()
@@ -325,7 +326,7 @@ export async function readDocumentEditableText(
     if (isBinaryFile(filePath)) {
       return { success: false, content: '', error: `不支持直接编辑二进制文件: ${ext || 'unknown'}` }
     }
-    const content = readFileSync(filePath, 'utf-8')
+    const content = await readFile(filePath, 'utf-8')
     return { success: true, content }
   } catch (error) {
     return {

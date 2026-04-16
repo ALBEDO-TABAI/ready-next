@@ -4,6 +4,27 @@
 
 ### 新增
 
+#### 文档深读后制卡 MVP
+- 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt
+- 新增 `DocumentTaskPipeline`，把这类请求拆成“读取文档 -> 提炼 insight -> 生成 componentSpec -> 写入 widget -> 保存文档”五段执行，并把阶段状态映射回现有任务卡
+- renderer 侧新增 host-only `document.inspectActive`，主进程现在可以读取当前活动文档的完整快照，未保存草稿也能走深读链路
+- 文档 pipeline 两轮模型请求现已支持独立阶段超时，不再只能吃 simple 请求默认 45 秒预算
+- 同一会话里相同文档 + 相同问题的 `DocumentInsight` 现已做短期缓存，重复生成时会优先复用第一轮提炼结果，减少重复阅读与重复总结
+- 新增 `document-sectioning`：长文档现在会优先按章节切块，章节过长再按段落/句子拆开；insight 阶段只把和问题最相关的片段送入第一轮提炼
+- 文档 pipeline 现在支持部分成功降级返回：如果 insight 已完成但卡片阶段失败，会先把重点提炼结果回给用户；如果卡片草稿已生成但写入/保存失败，也会保留草稿结果，避免整轮白做
+- 文档深读热路径已先异步化：`readDocxRawText` 和 `readDocumentEditableText` 不再用同步读取，先把 pipeline 会命中的读取路径从主线程阻塞里挪开一层
+- 文档 pipeline 的阶段文案现在会带关键指标：例如 insight 阶段会显示共拆了多少段、实际用了多少段、是否命中缓存，前台任务卡不看日志也能知道这轮为什么快或慢
+- 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`：状态层会保留当前阶段、切段数量、实际使用数量、是否命中缓存和切分方式，TaskPanel 已能直接展示
+- 卡片写回继续复用现有确定性文档动作：优先 `componentSpec`，最终仍走 `document.insertWidget` / `document.saveTab`
+
+#### 模型预设工作区与聊天快速切换
+- 设置页的模型配置收敛为 `OpenAI / Anthropic / Gemini / 自定义` 四个入口，不再把 Moonshot、Fox、火山方舟等单独铺成一排
+- 新增 `AIProviderWorkspace / AIProviderProfile`，把“前台管理的预设集合”和“当前生效配置”正式拆开
+- 主进程新增 `settings:getAIWorkspace / settings:setAIWorkspace`，同时保留 `settings:getAIConfig` 作为运行时兼容出口
+- 旧 `ai_model_config + ai_saved_configs` 会自动迁移到新的工作区结构；旧第三方供应商会并入“自定义预设”
+- 每个预设新增 `showInChatSwitcher`，用户可以决定它是否出现在聊天区模型切换面板
+- 聊天区底部模型入口现已支持真正切换默认预设，并在当前激活预设被隐藏时以“当前使用中”单独保留入口
+
 #### 文档卡片头部动作
 - 文档里的 widget 卡片现在统一拥有新的头部：左侧可直接点击重命名，右侧提供完整字样的 `引用` 与 `导出` 按钮
 - 预览里的 widget 卡片也复用了同一套头部语言，不再只有渲染内容没有卡片级操作

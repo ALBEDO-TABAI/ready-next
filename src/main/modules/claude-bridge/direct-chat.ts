@@ -5,7 +5,7 @@
  */
 
 import { EventEmitter } from 'events'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { appendFileSync, existsSync } from 'fs'
 import { AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
@@ -17,6 +17,15 @@ import { DocumentDomainOrchestrator } from '../agent-control/document-domain-orc
 import { DocumentToolLoopOrchestrator } from '../agent-control/document-tool-loop-orchestrator'
 import { ExecutionLoopOrchestrator } from '../agent-control/execution-loop-orchestrator'
 import { HostCapabilityDispatcher } from '../agent-control/host-capability-dispatcher'
+import {
+  DocumentTaskPipeline,
+  type ActiveDocumentSnapshot,
+  type DocumentInsight,
+  type DocumentInsightMetrics,
+  type DocumentInsightStageResult,
+  type DocumentTaskPipelinePhaseUpdate,
+  type DocumentWidgetDraft,
+} from '../agent-control/document-task-pipeline'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
@@ -77,6 +86,9 @@ import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
 import { VideoFallbackService } from './video-fallback-service'
 import { getLogPath } from '../../utils/platform'
+import { readDocumentEditableText } from '../document-engine/ipc-handler'
+import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
+import { buildFocusedDocumentContext } from '../../../shared/document-sectioning'
 
 const LOG = getLogPath('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -99,6 +111,12 @@ interface DirectChatSession {
   activeRunId: string | null
   preferTextToolBridge: boolean
   lastDocumentContextInput?: string | null
+  documentInsightCache: Array<{
+    key: string
+    insight: DocumentInsight
+    metrics?: DocumentInsightMetrics
+    createdAt: string
+  }>
 }
 
 interface ToolCall {
@@ -480,6 +498,7 @@ export class DirectChatEngine extends EventEmitter {
       activeRunId: null,
       preferTextToolBridge: false,
       lastDocumentContextInput: null,
+      documentInsightCache: [],
     })
   }
 
@@ -711,6 +730,175 @@ export class DirectChatEngine extends EventEmitter {
       }
 
       log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, ${preparedRunCapabilities.capabilityLogLine}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+
+      if (
+        executionIntentContext.structuredDocumentIntent === 'document_read_then_widget_create'
+        && hasTools
+        && requestModuleToolAction
+        && !(preferredSkillToolNames && preferredSkillToolNames.length > 0)
+      ) {
+        const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = [
+          'loading_document',
+          'building_insight',
+          'generating_widget_spec',
+          'writing_widget',
+          'saving_document',
+        ]
+        const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
+          loading_document: '读取文档',
+          building_insight: '提炼重点',
+          generating_widget_spec: '生成卡片草稿',
+          writing_widget: '写入卡片',
+          saving_document: '保存文档',
+          completed: '完成',
+          failed: '失败',
+        }
+        const pipelinePhaseStatus = new Map<string, 'running' | 'done' | 'error'>()
+        let documentPipelineDiagnostics: {
+          phase?: string
+          chunkCount?: number
+          selectedChunkCount?: number
+          promptChars?: number
+          cacheHit?: boolean
+          usedSectionAnchors?: boolean
+        } | null = null
+        const emitDocumentPipelinePhase = (update: DocumentTaskPipelinePhaseUpdate): void => {
+          if (update.phase === 'completed') {
+            pipelinePhaseStatus.forEach((value, key) => {
+              if (value === 'running') pipelinePhaseStatus.set(key, 'done')
+            })
+          } else if (update.phase === 'failed') {
+            const lastRunning = pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running')
+            if (lastRunning) pipelinePhaseStatus.set(lastRunning, 'error')
+          } else if (update.status === 'running') {
+            pipelinePhaseStatus.set(update.phase, 'running')
+          } else if (update.status === 'completed') {
+            pipelinePhaseStatus.set(update.phase, 'done')
+          } else if (update.status === 'failed') {
+            pipelinePhaseStatus.set(update.phase, 'error')
+          }
+          documentPipelineDiagnostics = {
+            ...(documentPipelineDiagnostics || {}),
+            ...(update.metrics || {}),
+            phase: update.phase === 'completed' || update.phase === 'failed'
+              ? documentPipelineDiagnostics?.phase || update.phase
+              : update.phase,
+          }
+
+          emitStructuredTaskPayload({
+            module: 'document',
+            message: update.summary,
+            taskTitle: '文档信息卡',
+            taskSummary: update.summary,
+            executionDiagnostics: {
+              pipeline: {
+                document: documentPipelineDiagnostics,
+              },
+            },
+            steps: pipelinePhaseOrder.map((phase) => ({
+              id: phase,
+              title: pipelinePhaseTitles[phase],
+              status: pipelinePhaseStatus.get(phase) === 'done'
+                ? 'done'
+                : pipelinePhaseStatus.get(phase) === 'error'
+                  ? 'blocked'
+                  : pipelinePhaseStatus.get(phase) === 'running'
+                    ? 'running'
+                    : 'running',
+              updatedAt: update.endedAt || update.startedAt,
+            })),
+            currentStepId:
+              update.phase === 'completed' || update.phase === 'failed'
+                ? pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running' || pipelinePhaseStatus.get(phase) === 'error') || pipelinePhaseOrder[pipelinePhaseOrder.length - 1]
+                : update.phase,
+            waitingFor: 'none',
+            resumableActions: update.phase === 'failed' ? ['retry', 'cancel'] : ['cancel'],
+            blockedReason: update.phase === 'failed' ? (update.error || update.summary) : null,
+          })
+        }
+
+        const pipeline = new DocumentTaskPipeline({
+          now: () => new Date(),
+          log: (message) => log(message),
+          loadDocumentSnapshot: async ({ question, signal }) => await this.loadDocumentPipelineSnapshot({
+            userText: question,
+            requestModuleToolAction,
+            signal,
+          }),
+          getCachedInsight: ({ question, snapshot }) => this.getCachedDocumentInsight(
+            session,
+            question,
+            snapshot,
+          ),
+          buildInsight: async ({ question, snapshot, signal }) => await this.buildDocumentPipelineInsight({
+            question,
+            snapshot,
+            timeoutMs: 60_000,
+            config,
+            baseUrl,
+            provider,
+            signal,
+            isKimi,
+            isKimiCoding,
+            useAnthropicProtocol,
+          }),
+          storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
+            this.storeCachedDocumentInsight(session, question, snapshot, insight, metrics)
+          },
+          buildWidgetDraft: async ({ question, snapshot, insight, signal }) => await this.buildDocumentPipelineWidgetDraft({
+            question,
+            snapshot,
+            insight,
+            timeoutMs: 60_000,
+            config,
+            baseUrl,
+            provider,
+            signal,
+            isKimi,
+            isKimiCoding,
+            useAnthropicProtocol,
+          }),
+          insertWidget: async ({ draft, signal }) => {
+            void signal
+            const payload = await requestModuleToolAction('document.insertWidget', {
+              title: draft.title,
+              componentSpec: draft.componentSpec,
+              widgetCode: draft.widgetCode,
+              position: draft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
+              sectionTitle: draft.targetSectionTitle,
+            })
+            return typeof payload.summary === 'string' ? payload.summary : '已写入信息卡'
+          },
+          saveDocument: async ({ signal }) => {
+            void signal
+            const payload = await requestModuleToolAction('document.saveTab', {})
+            return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
+          },
+          emitPhase: emitDocumentPipelinePhase,
+        })
+
+        const pipelineResult = await pipeline.run({
+          question: executionIntentContext.userInstructionText || userText,
+          signal: abortController.signal,
+        })
+        if (!pipelineResult.success) {
+          if (pipelineResult.finalText) {
+            emitOutput(pipelineResult.finalText, 'text')
+            session.messages.push({ role: 'assistant', content: pipelineResult.finalText })
+            emitOutput('', 'done')
+            emitStatus('done')
+            return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+          }
+          throw new Error(pipelineResult.error || '文档信息卡 pipeline 失败')
+        }
+        if (pipelineResult.finalText) {
+          emitOutput(pipelineResult.finalText, 'text')
+          session.messages.push({ role: 'assistant', content: pipelineResult.finalText })
+        }
+        emitOutput('', 'done')
+        emitStatus('done')
+        return { success: true, executionDiagnostics: buildExecutionDiagnostics() }
+      }
 
       if (hasTools) {
         await this.skillContextOrchestrator.maybeInjectExplicitSkillContext({
@@ -1610,6 +1798,488 @@ export class DirectChatEngine extends EventEmitter {
     }
 
     return null
+  }
+
+  private clipDocumentForInsight(content: string, maxChars: number): string {
+    const normalized = String(content || '').trim()
+    if (normalized.length <= maxChars) return normalized
+    const segmentSize = Math.max(800, Math.floor((maxChars - 64) / 3))
+    const head = normalized.slice(0, segmentSize)
+    const middleStart = Math.max(0, Math.floor((normalized.length - segmentSize) / 2))
+    const middle = normalized.slice(middleStart, middleStart + segmentSize)
+    const tail = normalized.slice(-segmentSize)
+    return [
+      head,
+      '...[文档中间内容已截断]...',
+      middle,
+      '...[文档尾部内容已截断]...',
+      tail,
+    ].join('\n')
+  }
+
+  private createPipelineSession(systemPrompt: string, userPrompt: string, options?: { includeSystemMessage?: boolean }): DirectChatSession {
+    const messages: ChatMessage[] = options?.includeSystemMessage
+      ? [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ]
+      : [{ role: 'user', content: userPrompt }]
+    return {
+      messages,
+      abortController: null,
+      systemPrompt,
+      generation: 0,
+      activeRunId: null,
+      preferTextToolBridge: false,
+      lastDocumentContextInput: null,
+      documentInsightCache: [],
+    }
+  }
+
+  private async requestDocumentPipelineSimpleText(params: {
+    systemPrompt: string
+    userPrompt: string
+    config: AIModelConfig
+    baseUrl: string
+    provider: ReturnType<typeof getProviderDef> | undefined
+    signal: AbortSignal
+    isKimi: boolean
+    isKimiCoding: boolean
+    useAnthropicProtocol: boolean
+    timeoutMs: number
+  }): Promise<string> {
+    if (params.isKimiCoding) {
+      const session = this.createPipelineSession(params.systemPrompt, params.userPrompt, { includeSystemMessage: true })
+      const result = await this.kimiCodingClient.requestSimple({
+        session,
+        config: params.config,
+        baseUrl: params.baseUrl,
+        signal: params.signal,
+        timeoutMs: params.timeoutMs,
+      })
+      return result.text
+    }
+
+    if (params.useAnthropicProtocol) {
+      const session = this.createPipelineSession(params.systemPrompt, params.userPrompt)
+      const result = await this.anthropicExecutionClient.requestSimple({
+        session,
+        config: params.config,
+        baseUrl: params.baseUrl,
+        signal: params.signal,
+        timeoutMs: params.timeoutMs,
+      })
+      return result.text
+    }
+
+    const session = this.createPipelineSession(params.systemPrompt, params.userPrompt)
+    const result = await this.openAIExecutionClient.requestSimple({
+      session,
+      config: params.config,
+      baseUrl: params.baseUrl,
+      provider: params.provider,
+      signal: params.signal,
+      isKimi: params.isKimi,
+      enableKimiWebSearch: false,
+      timeoutMs: params.timeoutMs,
+    })
+    return result.text
+  }
+
+  private parsePipelineJson<T extends Record<string, unknown>>(raw: string): T | null {
+    if (!raw) return null
+    const candidates: string[] = []
+    const fencedRegex = /```(?:json)?\s*([\s\S]*?)```/gi
+    let fencedMatch: RegExpExecArray | null = fencedRegex.exec(raw)
+    while (fencedMatch) {
+      if (fencedMatch[1]?.trim()) candidates.push(fencedMatch[1].trim())
+      fencedMatch = fencedRegex.exec(raw)
+    }
+    const firstBrace = raw.indexOf('{')
+    const lastBrace = raw.lastIndexOf('}')
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      candidates.push(raw.slice(firstBrace, lastBrace + 1))
+    }
+    candidates.push(raw.trim())
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate) as T
+        if (parsed && typeof parsed === 'object') return parsed
+      } catch {
+        // Try next candidate.
+      }
+    }
+    return null
+  }
+
+  private normalizePipelineInsight(
+    raw: Record<string, unknown>,
+    question: string,
+    snapshot: ActiveDocumentSnapshot,
+  ): DocumentInsight {
+    const summary = typeof raw.summary === 'string' ? raw.summary.trim() : ''
+    const keyPoints = Array.isArray(raw.keyPoints)
+      ? raw.keyPoints.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+    const evidence = Array.isArray(raw.evidence)
+      ? raw.evidence
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const quote = typeof (item as { quote?: unknown }).quote === 'string'
+            ? (item as { quote: string }).quote.trim()
+            : ''
+          if (!quote) return null
+          const sectionTitle = typeof (item as { sectionTitle?: unknown }).sectionTitle === 'string'
+            ? String((item as { sectionTitle: string }).sectionTitle).trim()
+            : undefined
+          return { quote, sectionTitle }
+        })
+        .filter(Boolean) as Array<{ sectionTitle?: string; quote: string }>
+      : []
+    const recommendedWidget = (() => {
+      const value = typeof raw.recommendedWidget === 'string' ? raw.recommendedWidget.trim() : ''
+      switch (value) {
+        case 'stats_card':
+        case 'comparison_grid':
+        case 'callout_block':
+        case 'data_table':
+          return value
+        default:
+          return 'info_card'
+      }
+    })()
+    const warnings = Array.isArray(raw.warnings)
+      ? raw.warnings.map((item) => String(item || '').trim()).filter(Boolean)
+      : undefined
+
+    if (!summary || keyPoints.length === 0) {
+      throw new Error('Document insight JSON 缺少 summary 或 keyPoints')
+    }
+
+    return {
+      question,
+      documentPath: snapshot.path,
+      documentTitle: snapshot.title,
+      summary,
+      keyPoints,
+      evidence,
+      recommendedWidget,
+      warnings,
+    }
+  }
+
+  private slugifyWidgetTitle(value: string): string {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48) || 'document_summary_card'
+  }
+
+  private buildFallbackDocumentWidgetDraft(params: {
+    insight: DocumentInsight
+    snapshot: ActiveDocumentSnapshot
+  }): DocumentWidgetDraft {
+    const heading = params.snapshot.title.replace(/\.[^.]+$/, '') || '文档摘要'
+    return {
+      title: this.slugifyWidgetTitle(`${heading}_summary_card`),
+      insertionMode: 'append_end',
+      componentSpec: {
+        component: 'info_card',
+        props: {
+          heading,
+          body: params.insight.summary,
+          points: params.insight.keyPoints.slice(0, 4),
+          tone: 'info',
+        },
+      },
+    }
+  }
+
+  private normalizePipelineWidgetDraft(
+    raw: Record<string, unknown> | null,
+    params: {
+      insight: DocumentInsight
+      snapshot: ActiveDocumentSnapshot
+    },
+  ): DocumentWidgetDraft {
+    const fallback = this.buildFallbackDocumentWidgetDraft(params)
+    if (!raw) return fallback
+
+    const title = typeof raw.title === 'string' ? raw.title.trim() : fallback.title
+    const insertionMode = raw.insertionMode === 'after_section' || raw.insertionMode === 'update_existing'
+      ? raw.insertionMode
+      : 'append_end'
+    const componentSpec = raw.componentSpec && typeof raw.componentSpec === 'object'
+      ? raw.componentSpec as Record<string, unknown>
+      : null
+    if (!componentSpec) {
+      return fallback
+    }
+    if (typeof componentSpec.component !== 'string' || !componentSpec.component.trim()) {
+      return fallback
+    }
+    const normalizedComponentSpec: DocumentWidgetComponentSpec = {
+      component: componentSpec.component.trim(),
+      props: componentSpec.props && typeof componentSpec.props === 'object'
+        ? componentSpec.props as Record<string, unknown>
+        : undefined,
+      dataSource: componentSpec.dataSource && typeof componentSpec.dataSource === 'object'
+        ? componentSpec.dataSource as DocumentWidgetComponentSpec['dataSource']
+        : undefined,
+    }
+
+    return {
+      title: this.slugifyWidgetTitle(title),
+      insertionMode,
+      targetSectionTitle: typeof raw.targetSectionTitle === 'string' ? raw.targetSectionTitle.trim() : undefined,
+      targetWidgetTitle: typeof raw.targetWidgetTitle === 'string' ? raw.targetWidgetTitle.trim() : undefined,
+      componentSpec: normalizedComponentSpec,
+    }
+  }
+
+  private async buildDocumentPipelineInsight(params: {
+    question: string
+    snapshot: ActiveDocumentSnapshot
+    timeoutMs: number
+    config: AIModelConfig
+    baseUrl: string
+    provider: ReturnType<typeof getProviderDef> | undefined
+    signal: AbortSignal
+    isKimi: boolean
+    isKimiCoding: boolean
+    useAnthropicProtocol: boolean
+  }): Promise<DocumentInsightStageResult> {
+    const focusedContext = buildFocusedDocumentContext({
+      question: params.question,
+      content: params.snapshot.content,
+      maxCharsPerChunk: 2200,
+      maxSelectedChunks: params.snapshot.charCount > 4000 ? 4 : 6,
+      maxPromptChars: 12_000,
+    })
+    const promptBody = focusedContext.promptText || this.clipDocumentForInsight(params.snapshot.content, 12_000)
+    const systemPrompt = [
+      '你是 Ready 的文档 insight 阶段。',
+      '你只负责阅读文档并提炼和问题最相关的结构化结果，不要生成 widget，不要写回文档。',
+      '必须只输出 JSON，对象字段为 summary、keyPoints、evidence、recommendedWidget、warnings。',
+      'recommendedWidget 只能是 info_card、stats_card、comparison_grid、callout_block、data_table 之一。',
+      'keyPoints 保持 3 到 6 条，evidence 至少给 1 条简短引文。',
+    ].join('\n')
+    const userPrompt = [
+      `问题：${params.question}`,
+      `文档标题：${params.snapshot.title}`,
+      `文档路径：${params.snapshot.path || '(未保存草稿)'}`,
+      `文档字数：${params.snapshot.charCount}`,
+      `文档片段数：${focusedContext.chunks.length}`,
+      `本次使用片段数：${focusedContext.selectedChunks.length}`,
+      '',
+      '请围绕这个问题提炼可直接用于制作信息卡的 insight。',
+      '只返回 JSON。',
+      '',
+      focusedContext.warnings.length > 0
+        ? `系统提示：${focusedContext.warnings.join(' ')}`
+        : '系统提示：当前已挑选与问题最相关的文档片段。',
+      '',
+      '相关文档片段：',
+      promptBody,
+    ].join('\n')
+    log(
+      `document insight focused read chunks=${focusedContext.chunks.length}, selected=${focusedContext.selectedChunks.length}, sectioned=${focusedContext.usedSectionAnchors}`,
+    )
+    const raw = await this.requestDocumentPipelineSimpleText({
+      systemPrompt,
+      userPrompt,
+      config: params.config,
+      baseUrl: params.baseUrl,
+      provider: params.provider,
+      signal: params.signal,
+      isKimi: params.isKimi,
+      isKimiCoding: params.isKimiCoding,
+      useAnthropicProtocol: params.useAnthropicProtocol,
+      timeoutMs: params.timeoutMs,
+    })
+    const parsed = this.parsePipelineJson<Record<string, unknown>>(raw)
+    if (!parsed) {
+      throw new Error('Document insight 阶段未返回可解析 JSON')
+    }
+    const insight = this.normalizePipelineInsight(parsed, params.question, params.snapshot)
+    const warningSet = new Set([
+      ...(insight.warnings || []),
+      ...focusedContext.warnings,
+    ])
+    if (warningSet.size > 0) {
+      insight.warnings = Array.from(warningSet)
+    }
+    return {
+      insight,
+      metrics: {
+        chunkCount: focusedContext.chunks.length,
+        selectedChunkCount: focusedContext.selectedChunks.length,
+        promptChars: promptBody.length,
+        usedSectionAnchors: focusedContext.usedSectionAnchors,
+      },
+    }
+  }
+
+  private async buildDocumentPipelineWidgetDraft(params: {
+    question: string
+    snapshot: ActiveDocumentSnapshot
+    insight: DocumentInsight
+    timeoutMs: number
+    config: AIModelConfig
+    baseUrl: string
+    provider: ReturnType<typeof getProviderDef> | undefined
+    signal: AbortSignal
+    isKimi: boolean
+    isKimiCoding: boolean
+    useAnthropicProtocol: boolean
+  }): Promise<DocumentWidgetDraft> {
+    const systemPrompt = [
+      '你是 Ready 的 widget 草稿阶段。',
+      '你只负责根据给定 insight 生成一个可写入文档的 componentSpec 草稿。',
+      '必须只输出 JSON。',
+      '字段为 title、insertionMode、componentSpec、targetSectionTitle、targetWidgetTitle。',
+      '默认 insertionMode 使用 append_end。',
+      'componentSpec.component 只能是 info_card、stats_card、comparison_grid、callout_block、data_table。',
+      '优先选择简单稳定的组件，不要发明 catalog 外的新组件。',
+    ].join('\n')
+    const userPrompt = [
+      `用户问题：${params.question}`,
+      `文档标题：${params.snapshot.title}`,
+      `推荐组件：${params.insight.recommendedWidget}`,
+      '',
+      'insight JSON：',
+      JSON.stringify(params.insight, null, 2),
+    ].join('\n')
+    const raw = await this.requestDocumentPipelineSimpleText({
+      systemPrompt,
+      userPrompt,
+      config: params.config,
+      baseUrl: params.baseUrl,
+      provider: params.provider,
+      signal: params.signal,
+      isKimi: params.isKimi,
+      isKimiCoding: params.isKimiCoding,
+      useAnthropicProtocol: params.useAnthropicProtocol,
+      timeoutMs: params.timeoutMs,
+    })
+    const parsed = this.parsePipelineJson<Record<string, unknown>>(raw)
+    return this.normalizePipelineWidgetDraft(parsed, {
+      insight: params.insight,
+      snapshot: params.snapshot,
+    })
+  }
+
+  private normalizeActiveDocumentSnapshot(raw: unknown): ActiveDocumentSnapshot | null {
+    if (!raw || typeof raw !== 'object') return null
+    const title = typeof (raw as { title?: unknown }).title === 'string' ? String((raw as { title: string }).title).trim() : ''
+    const content = typeof (raw as { content?: unknown }).content === 'string' ? String((raw as { content: string }).content) : ''
+    if (!title || !content) return null
+    return {
+      title,
+      path: typeof (raw as { path?: unknown }).path === 'string' && (raw as { path: string }).path.trim()
+        ? String((raw as { path: string }).path).trim()
+        : null,
+      content,
+      isDirty: Boolean((raw as { isDirty?: unknown }).isDirty),
+      charCount: typeof (raw as { charCount?: unknown }).charCount === 'number'
+        ? Number((raw as { charCount: number }).charCount)
+        : content.length,
+    }
+  }
+
+  private buildDocumentInsightCacheKey(question: string, snapshot: ActiveDocumentSnapshot): string {
+    const normalizedQuestion = String(question || '').trim().toLowerCase().replace(/\s+/g, ' ')
+    const documentIdentity = snapshot.path || snapshot.title || 'active-document'
+    const contentHash = createHash('sha1')
+      .update(snapshot.content)
+      .digest('hex')
+      .slice(0, 12)
+    return `${documentIdentity}::${contentHash}::${normalizedQuestion}`
+  }
+
+  private getCachedDocumentInsight(
+    session: DirectChatSession,
+    question: string,
+    snapshot: ActiveDocumentSnapshot,
+  ): DocumentInsightStageResult | null {
+    const key = this.buildDocumentInsightCacheKey(question, snapshot)
+    const hit = session.documentInsightCache.find((entry) => entry.key === key)
+    if (!hit) return null
+    log(`document insight cache hit key=${key}`)
+    return {
+      insight: hit.insight,
+      metrics: {
+        ...(hit.metrics || {}),
+        cacheHit: true,
+      },
+    }
+  }
+
+  private storeCachedDocumentInsight(
+    session: DirectChatSession,
+    question: string,
+    snapshot: ActiveDocumentSnapshot,
+    insight: DocumentInsight,
+    metrics?: DocumentInsightMetrics,
+  ): void {
+    const key = this.buildDocumentInsightCacheKey(question, snapshot)
+    const nextEntry = {
+      key,
+      insight,
+      metrics,
+      createdAt: new Date().toISOString(),
+    }
+    session.documentInsightCache = [
+      nextEntry,
+      ...session.documentInsightCache.filter((entry) => entry.key !== key),
+    ].slice(0, 6)
+    log(`document insight cache store key=${key}`)
+  }
+
+  private async loadDocumentPipelineSnapshot(params: {
+    userText: string
+    requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+  }): Promise<ActiveDocumentSnapshot> {
+    const targetPath = this.extractDocumentPathFromUserText(params.userText)
+    const requestSnapshot = async (): Promise<ActiveDocumentSnapshot | null> => {
+      if (!params.requestModuleToolAction) return null
+      const payload = await params.requestModuleToolAction('document.inspectActive', {})
+      return this.normalizeActiveDocumentSnapshot((payload as { snapshot?: unknown }).snapshot)
+    }
+
+    if (params.requestModuleToolAction && targetPath) {
+      const activeSnapshot = await requestSnapshot()
+      if (!activeSnapshot || activeSnapshot.path !== targetPath) {
+        await params.requestModuleToolAction('document.openTab', { path: targetPath })
+      }
+    }
+
+    const activeSnapshot = await requestSnapshot()
+    if (activeSnapshot) {
+      if (!targetPath || activeSnapshot.path === targetPath || activeSnapshot.path === null) {
+        return activeSnapshot
+      }
+    }
+
+    if (targetPath) {
+      const readResult = await readDocumentEditableText(targetPath)
+      if (readResult.success) {
+        return {
+          title: targetPath.split('/').pop() || targetPath,
+          path: targetPath,
+          content: readResult.content,
+          isDirty: false,
+          charCount: readResult.content.length,
+        }
+      }
+      throw new Error(`文档读取失败：${readResult.error || targetPath}`)
+    }
+
+    throw new Error('当前没有可读取的活动文档')
   }
 
   // ── OpenAI: simple (no tools) ─────────────────────────────────────

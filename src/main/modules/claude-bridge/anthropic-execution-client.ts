@@ -47,6 +47,7 @@ export class AnthropicExecutionClient {
     hasVideoInputs?: boolean
     buildVideoFrameFallbackMessages?: () => Promise<AnthropicSessionLike['messages']>
     onFallbackApplied?: (messages: AnthropicSessionLike['messages']) => void
+    timeoutMs?: number
   }): Promise<{ text: string; fallback?: ExecutionFallbackInfo }> {
     try {
       return { text: await this.requestSimpleOnce(params) }
@@ -80,6 +81,7 @@ export class AnthropicExecutionClient {
     baseUrl: string
     signal: AbortSignal
     messagesOverride?: AnthropicSessionLike['messages']
+    timeoutMs?: number
   }): Promise<string> {
     const headers = this.buildHeaders(params.config, params.baseUrl)
     const model = this.resolveModel(params.config, params.baseUrl)
@@ -96,7 +98,7 @@ export class AnthropicExecutionClient {
         messages: this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
       }),
       signal: params.signal,
-    }, params.signal, 'anthropic simple')
+    }, params.signal, 'anthropic simple', params.timeoutMs)
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')

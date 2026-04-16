@@ -21,6 +21,7 @@ import {
 } from '../claude-bridge/tool-policy-heuristics'
 import { resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
+import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-task-types'
 
 export interface ExecutionIntentContext {
   requestEnvelope: RequestEnvelope
@@ -32,6 +33,7 @@ export interface ExecutionIntentContext {
   explicitWidgetCreateIntent: boolean
   documentWidgetTaskKind: DocumentWidgetTaskKind
   documentWidgetProfile: DocumentWidgetProfile | null
+  structuredDocumentIntent: StructuredDocumentIntent
 }
 
 export function resolveExecutionIntentContext(params: {
@@ -67,6 +69,7 @@ export function resolveExecutionIntentContext(params: {
     explicitWidgetCreateIntent,
     documentWidgetTaskKind,
     documentWidgetProfile: inferDocumentWidgetProfile(contextualUserInput),
+    structuredDocumentIntent: classifyStructuredDocumentIntent(userInstructionText),
   }
 }
 

@@ -121,7 +121,19 @@ Ready 采用 Electron 三层架构：
 
 ## 4. AI 供应商与能力层
 ### 4.1 共享配置模型
-统一配置定义在 `src/shared/ai-providers.ts`，主要字段包括：
+统一配置定义在 `src/shared/ai-providers.ts`，目前拆成两层：
+- 运行时生效配置：`AIModelConfig`
+- 前台管理工作区：`AIProviderWorkspace -> AIProviderProfile[]`
+
+`AIProviderProfile` 主要字段包括：
+- `id`
+- `category`
+- `name`
+- `builtIn`
+- `showInChatSwitcher`
+- `config`
+
+`AIModelConfig` 主要字段包括：
 - `provider`
 - `baseUrl`
 - `model`
@@ -140,13 +152,21 @@ Ready 采用 Electron 三层架构：
 - 当前工具传输方式是 `native`、`text` 还是 `none`
 
 ### 4.3 设置页
-设置页支持高级选项：
-- `Agent 接口`
-- `OpenAI API 形式`
-- `工具调用`
-- `网页视觉`
+设置页的模型配置现已收敛为四个入口：
+- `OpenAI`
+- `Anthropic`
+- `Gemini`
+- `自定义`
 
-这些配置在切换 provider 时会自动按 provider 默认值播种，但允许手动覆盖。
+其中：
+- 前三个是固定内置预设，各自只保留一个主预设
+- `自定义` 入口允许保存多个供应商预设
+- 每个预设都有 `showInChatSwitcher`，控制它是否出现在聊天区快速切换面板
+- `Agent 接口 / OpenAI API 形式 / 工具调用 / 网页视觉 / 思考强度` 统一折叠到高级设置
+
+兼容接口仍保留：
+- `settings:getAIConfig` 始终返回当前激活预设对应的生效配置
+- `settings:getAIWorkspace` / `settings:setAIWorkspace` 负责前台预设管理
 
 ## 5. Agent 工具调用链
 ### 5.0 主控循环入口
@@ -388,6 +408,15 @@ Ready 采用 Electron 三层架构：
 - `direct-chat` 现在会在视频输入场景下，为显式 `/skill`、手动阶段控制、embedded python 请求、活跃 execution 保留 tools
 - `direct-chat` 现已开始消费 capability resolution：provider tool 开关、浏览器任务模式、文档意图与飞书可用性会先收口成可见能力组，再生成本轮 allowlist。
 - `direct-chat` 的运行前能力判断现在统一走 `run-capability-controller`：initial run 和 browser decision 后的 reconcile 都在这一层完成，主循环只消费结果
+- `direct-chat` 新增 `DocumentTaskPipeline` MVP：当请求命中“先读文档再做卡片”结构化意图时，会先读取当前活动文档快照，再拆成 `insight -> componentSpec -> deterministic writeback` 两轮执行
+- renderer 文档模块新增 host-only `document.inspectActive`，供主进程读取当前活动文档全文；这条路径不对模型直接暴露
+- 文档深读 pipeline 的 simple 请求现已支持独立阶段超时，不再只能沿用默认 45 秒 simple request 预算
+- `direct-chat` 现已在会话内短期缓存 `DocumentInsight`：同一文档内容 + 同一问题重复触发时，第一轮 insight 会优先复用缓存结果，减少重复模型调用
+- 新增共享 `document-sectioning` helper：长文档会优先按章节切块，章节过长再按段落/句子拆开，并在 insight 阶段先筛相关片段后再发第一轮模型请求
+- `DocumentTaskPipeline` 现已支持部分成功降级：insight 或 widget draft 一旦已生成，后续阶段失败时会优先把这些中间结果回给用户，而不是整轮直接报错结束
+- `document-engine` 的深读热路径已先异步化：`readDocxRawText` 与 `readDocumentEditableText` 现在改为异步读取，优先降低这条 pipeline 在主进程上的阻塞风险
+- `DocumentTaskPipeline` 的 insight 阶段完成文案现在会补上关键指标，例如本轮共切了多少片段、实际使用了多少片段、是否命中缓存；当前任务卡已可直接消费这类阶段摘要
+- 文档深读相关指标也已正式进入 `executionDiagnostics.pipeline.document`，供 renderer 状态层和任务卡稳定消费，而不再只依赖摘要文本解析
 - `system_run_openclaw` 与文档 format/rewrite 的 deterministic 直通现在统一走 `host-capability-dispatcher`，不再在 `direct-chat.ts` 里各自手写 host-only 分支
 - `ToolGateway` 继续只负责 registry 真相：已补上 group 级 schema/query 与 dynamic source 标记，`skills` 组会把静态 execution control 和运行期 skill action 一起输出
 - AI 设置页“能力分组”的当前状态改为读取 agent runtime 返回的 capability runtime snapshot；renderer 只负责展示，不再自己猜飞书/浏览器可用性

@@ -14,4 +14,20 @@ describe('document tool session context', () => {
     assert.match(source, /lastDocumentContextInput:\s*session\.lastDocumentContextInput/)
     assert.match(source, /session\.lastDocumentContextInput = contextualUserInput/)
   })
+
+  it('keeps tool guidance scoped to the current run instead of mutating the session prompt', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
+      'utf8',
+    )
+
+    assert.doesNotMatch(
+      source,
+      /session\.systemPrompt\s*=\s*`\$\{session\.systemPrompt\}\\n\\n\$\{toolGuidance\}`/,
+    )
+    assert.match(
+      source,
+      /const toolLoopSession = toolGuidance\s*\?\s*\{\s*\.\.\.session,\s*systemPrompt:\s*`\$\{session\.systemPrompt\}\\n\\n\$\{toolGuidance\}`,\s*\}\s*:\s*session/,
+    )
+  })
 })

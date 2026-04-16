@@ -253,9 +253,35 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
           attempts: Number((record.fallback as Record<string, unknown>).attempts || 0)
         }
       : null
+  const pipeline =
+    record.pipeline && typeof record.pipeline === 'object'
+      ? {
+          document:
+            (record.pipeline as Record<string, unknown>).document &&
+            typeof (record.pipeline as Record<string, unknown>).document === 'object'
+              ? {
+                  phase: String((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).phase || '')).trim() || undefined,
+                  chunkCount:
+                    Number((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).chunkCount || 0)) || undefined,
+                  selectedChunkCount:
+                    Number((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).selectedChunkCount || 0)) || undefined,
+                  promptChars:
+                    Number((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).promptChars || 0)) || undefined,
+                  cacheHit:
+                    (((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).cacheHit === undefined)
+                      ? undefined
+                      : Boolean((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).cacheHit)),
+                  usedSectionAnchors:
+                    (((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).usedSectionAnchors === undefined)
+                      ? undefined
+                      : Boolean((((record.pipeline as Record<string, unknown>).document as Record<string, unknown>).usedSectionAnchors)),
+                }
+              : null,
+        }
+      : null
 
-  if (!compression && !budget && !fallback) return null
-  return { compression, budget, fallback }
+  if (!compression && !budget && !fallback && !pipeline) return null
+  return { compression, budget, fallback, pipeline }
 }
 
 export function mergeArtifacts(
