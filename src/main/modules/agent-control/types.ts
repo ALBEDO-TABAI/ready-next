@@ -220,6 +220,7 @@ export interface ScopeRunTaskStep {
 }
 
 export interface ScopeRunTaskContinuation {
+  taskId?: string | null
   executionId: string
   stepId?: string | null
   blockerType?: string | null
@@ -242,6 +243,8 @@ export interface ScopeRunMemoryCapture {
 }
 
 export interface ScopeRunExecutionDiagnostics {
+  taskId?: string | null
+  taskBudgetRuntime?: import('./run-contracts').TaskBudgetRuntime | null
   compression?: {
     historyCompressed: boolean
     toolTraceCompressed: boolean
@@ -261,10 +264,12 @@ export interface ScopeRunExecutionDiagnostics {
     attempts: number
   } | null
   stepBudget?: {
+    stepId?: string | null
     maxIterations?: number
     remainingIterations?: number
   } | null
   budgetUsagePercent?: number | null
+  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
   recoveryHistory?: Array<{
     kind: string
     source: string
@@ -295,6 +300,7 @@ export interface ScopeRunSummary {
   channelKey: string
   threadKey: string
   phase: ScopeRunEventPayload['phase']
+  taskId?: string | null
   taskTitle?: string | null
   taskSummary?: string | null
   taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
@@ -317,6 +323,7 @@ export interface ScopeRunSummary {
   recoveryHistory?: ScopeRunExecutionDiagnostics['recoveryHistory']
   degradationReason?: string | null
   stepBudget?: ScopeRunExecutionDiagnostics['stepBudget']
+  budgetWarningLevel?: ScopeRunExecutionDiagnostics['budgetWarningLevel']
   taskProjectionId?: string | null
   blockedReason?: string | null
   error?: string | null
@@ -328,6 +335,7 @@ export interface ScopeRunEventPayload {
   scopeId: string
   agent: string
   runId?: string
+  taskId?: string
   phase:
     | 'queued'
     | 'planning'
@@ -394,6 +402,7 @@ export interface ScopeRunEventPayload {
   recoveryHistory?: ScopeRunExecutionDiagnostics['recoveryHistory']
   degradationReason?: string
   stepBudget?: ScopeRunExecutionDiagnostics['stepBudget']
+  budgetWarningLevel?: ScopeRunExecutionDiagnostics['budgetWarningLevel']
   taskProjectionId?: string
   recentArtifacts?: Array<{
     id: string

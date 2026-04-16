@@ -85,3 +85,16 @@ test('task type resolver restores continuation tasks when current task context i
   assert.equal(result.taskType, 'continuation')
   assert.equal(result.executionChain, 'continuation')
 })
+
+test('task type resolver routes explicit skill workflow requests into the skill executor path', () => {
+  const envelope = buildRequestEnvelope({ userText: '用 skill 帮我继续执行这个 workflow，并处理 blocker' })
+  const result = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities: createCapabilities(),
+  })
+
+  assert.equal(result.taskType, 'short_task')
+  assert.equal(result.executionChain, 'domain_executor')
+  assert.equal(result.preferredExecutor, 'skill')
+})

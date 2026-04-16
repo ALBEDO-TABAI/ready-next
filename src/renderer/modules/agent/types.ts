@@ -171,6 +171,7 @@ export interface ScopeRunTaskStep {
 }
 
 export interface ScopeRunTaskContinuation {
+  taskId?: string | null
   executionId: string
   stepId?: string | null
   blockerType?: string | null
@@ -193,6 +194,7 @@ export interface ScopeRunMemoryCapture {
 }
 
 export interface ScopeRunExecutionDiagnostics {
+  taskId?: string | null
   compression?: {
     historyCompressed: boolean
     toolTraceCompressed: boolean
@@ -206,6 +208,22 @@ export interface ScopeRunExecutionDiagnostics {
     toolCallsUsed?: number
     parallelToolGroupsUsed?: number
   } | null
+  stepBudget?: {
+    stepId?: string | null
+    maxIterations?: number
+    remainingIterations?: number
+  } | null
+  budgetUsagePercent?: number | null
+  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  recoveryHistory?: Array<{
+    kind: string
+    source: string
+    message: string
+    attempt: number
+    recovered: boolean
+    timestamp: string
+  }> | null
+  degradationReason?: string | null
   fallback?: {
     happened: boolean
     kind: string
@@ -233,6 +251,7 @@ export interface ScopeRunState {
   scopeId: string
   agent: string
   requestId: string | null
+  taskId?: string | null
   phase:
     | 'idle'
     | 'queued'

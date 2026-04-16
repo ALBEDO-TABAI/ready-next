@@ -32,10 +32,12 @@ export interface SendAndCollectResult {
   cancelled: boolean
   usedTools: string[]
   error?: string
+  taskId?: string | null
   taskType?: import('./run-contracts').TaskType
   interactionState?: import('./run-contracts').TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: {
+    taskBudgetRuntime?: import('./run-contracts').TaskBudgetRuntime | null
     compression?: {
       historyCompressed: boolean
       toolTraceCompressed: boolean
@@ -50,6 +52,7 @@ export interface SendAndCollectResult {
       parallelToolGroupsUsed?: number
     } | null
     stepBudget?: {
+      stepId?: string | null
       maxIterations?: number
       remainingIterations?: number
     } | null

@@ -37,6 +37,19 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
     toolCallsUsed: number
     parallelToolGroupsUsed: number
   } | null = null
+  let executionTaskBudgetRuntime: {
+    taskType: string
+    budget: {
+      maxIterations: number
+      maxToolCalls: number
+      maxParallelToolGroups: number
+    }
+    usage: {
+      iterationsUsed: number
+      toolCallsUsed: number
+      parallelToolGroupsUsed: number
+    }
+  } | null = null
 
   const coordinator = new RunCoordinator({
     promptAssembly: {
@@ -75,6 +88,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
     executeAndCollect: async (request) => {
       executionBudget = request.budget || null
       executionBudgetState = request.budgetState || null
+      executionTaskBudgetRuntime = request.taskBudgetRuntime || null
       if (request.budgetState) {
         request.budgetState.iterationsUsed = 3
         request.budgetState.toolCallsUsed = 4
@@ -84,13 +98,24 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
         success: true,
         finalText: 'done text',
         cancelled: false,
-        usedTools: ['browser_click_at'],
-        budgetState: request.budgetState,
-        executionDiagnostics: {
-          fallback: {
-            kind: 'text_bridge',
-            attempts: 1
+      usedTools: ['browser_click_at'],
+      budgetState: request.budgetState,
+      taskBudgetRuntime: request.taskBudgetRuntime
+        ? {
+            ...request.taskBudgetRuntime,
+            usage: {
+              ...request.taskBudgetRuntime.usage,
+              iterationsUsed: 3,
+              toolCallsUsed: 4,
+              parallelToolGroupsUsed: 1,
+            },
           }
+        : undefined,
+      executionDiagnostics: {
+        fallback: {
+          kind: 'text_bridge',
+          attempts: 1
+        }
         }
       }
     },
@@ -124,6 +149,8 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.equal(typeof executionBudget?.maxIterations, 'number')
   assert.equal(typeof executionBudget?.maxToolCalls, 'number')
   assert.equal(typeof executionBudget?.maxParallelToolGroups, 'number')
+  assert.equal(executionTaskBudgetRuntime?.budget.maxIterations, executionBudget?.maxIterations)
+  assert.equal(executionTaskBudgetRuntime?.usage.iterationsUsed, 0)
   assert.deepEqual(executionBudgetState, {
     iterationsUsed: 3,
     toolCallsUsed: 4,
@@ -136,6 +163,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.equal(events[1]?.executionDiagnostics?.fallback?.happened, true)
   assert.equal(events[1]?.executionDiagnostics?.fallback?.kind, 'text_bridge')
   assert.equal(events[1]?.executionDiagnostics?.fallback?.attempts, 1)
+  assert.equal(events[1]?.executionDiagnostics?.taskBudgetRuntime?.usage?.iterationsUsed, 3)
   assert.equal(recordedOutcome?.success, true)
   assert.equal(recordedOutcome?.finalText, 'done text')
   assert.deepEqual(recordedOutcome?.usedTools, ['browser_click_at'])
@@ -157,11 +185,12 @@ test('RunCoordinator forwards task metadata from execution results into the fina
       applyToMessage: (message) => message,
       recordRunOutcome: () => {},
     },
-    executeAndCollect: async () => ({
+    executeAndCollect: async (request) => ({
       success: true,
       finalText: 'done text',
       cancelled: false,
       usedTools: ['document_update_widget'],
+      taskId: request.taskId,
       taskType: 'multi_step_task',
       interactionState: 'running',
       taskProjectionId: 'task-proj-1',
@@ -183,9 +212,52 @@ test('RunCoordinator forwards task metadata from execution results into the fina
   })
 
   assert.deepEqual(result, { success: true })
+  assert.match(events[0]?.taskId || '', /^task-/)
+  assert.equal(events[0]?.taskId, events.at(-1)?.taskId)
   assert.equal(events.at(-1)?.taskType, 'multi_step_task')
   assert.equal(events.at(-1)?.interactionState, 'running')
   assert.equal(events.at(-1)?.taskProjectionId, 'task-proj-1')
   assert.equal(events.at(-1)?.executionDiagnostics?.budgetUsagePercent, 70)
   assert.equal(events.at(-1)?.executionDiagnostics?.degradationReason, 'browser_host_unavailable')
+})
+
+test('RunCoordinator creates a stable task id when execution host does not provide one', async () => {
+  const events: ScopeRunEventPayload[] = []
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async (request) => ({
+      success: true,
+      finalText: 'done text',
+      cancelled: false,
+      usedTools: [],
+      taskId: request.taskId,
+      executionDiagnostics: null,
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: 'hello',
+    requestId: 'req-3',
+  })
+
+  assert.deepEqual(result, { success: true })
+  assert.match(events[0]?.taskId || '', /^task-/)
+  assert.equal(events[0]?.taskId, events.at(-1)?.taskId)
+  assert.equal(events[0]?.taskProjectionId, events[0]?.taskId)
 })

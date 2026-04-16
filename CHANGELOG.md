@@ -18,6 +18,15 @@
 - `TaskPanel` 现已支持直接从任务投影生成“继续任务 / 重试任务”草稿，最近任务不必先进聊天区任务卡才能接着做
 - ChatPanel 里的任务卡也开始并入任务投影：持久任务与当前任务卡会补上任务类型、交互状态、预算占用和自动恢复提示，不再只显示旧摘要
 - ChatPanel 现在还会用任务投影补足继续信息和恢复动作；即使旧摘要没把 continuation 写全，任务卡也能继续给出正确入口
+- 本轮继续把第二阶段收口做完：`taskId` 现已成为正式任务主键，`RunCoordinator / execution host / run projection / task projection / continuation` 全链都开始显式透传它，`runId` 回到单次执行实例语义
+- 新增正式 `task-execution-router`，`TaskTypeResolver` 的 `executionChain / preferredExecutor / degradationReason` 不再只停留在分类结果，而是开始真实驱动 `direct / tool_loop / planner / domain_executor / continuation` 五条执行链
+- 新增最小 `StepPlanner` 路由输出：多步任务会先生成结构化步骤，再进入后续执行；继续任务恢复失败时也会显式写入降级原因，不再静默回落
+- 预算运行时升级为三层：新增 `TaskBudgetRuntime / StepBudgetState / BudgetWarningLevel`，主链开始统一写回步骤预算、预算预警、只读轮次退还、暂停冻结与恢复继续
+- `TaskPanel` 与任务卡本轮补显示当前步骤预算、预算预警和降级原因；继续/重试草稿会显式附带 `Task ID`
+- `skill` 现已正式进入意图识别与任务路由：显式 skill / workflow / blocker 请求会走 dedicated skill executor，而不是继续混在 generic tool loop 里兜圈
+- `RunCoordinator -> execution host -> DirectChatEngine` 新增统一 `TaskBudgetRuntime` 透传；执行诊断、任务投影和前台任务卡现在都能看到任务预算、步骤预算与 warning level 的同一份运行时真相
+- continuation 入口不再依赖“继续/恢复”关键词：显式 `Task ID` 会优先恢复对应任务；聊天任务卡和右侧任务面板生成的继续/重试草稿都会稳定带回同一任务身份
+- 恢复路由补齐指数抖动退避元数据，并在预算进入 warning 或已经发生恢复后把后续工具批次自动降为串行；`host_unavailable` 也会显式落成降级原因
 
 #### 文档深读后制卡 MVP
 - 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt

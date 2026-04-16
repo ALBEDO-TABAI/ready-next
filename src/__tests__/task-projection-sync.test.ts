@@ -36,6 +36,11 @@ function createSummary(): ScopeRunSummary {
         maxToolCalls: 60,
         maxParallelToolGroups: 5,
       },
+      stepBudget: {
+        stepId: 'upload',
+        maxIterations: 20,
+        remainingIterations: 14,
+      },
       budgetUsagePercent: 35,
       recoveryHistory: [
         {
@@ -49,6 +54,7 @@ function createSummary(): ScopeRunSummary {
       ],
       degradationReason: null,
     },
+    taskId: 'task-1',
     taskProjectionId: 'run-1',
     updatedAt: '2026-04-16T11:00:00.000Z',
   }
@@ -60,6 +66,7 @@ function createPayload(): ScopeRunEventPayload {
     scopeId: 'scope-1',
     agent: 'butler',
     runId: 'run-1',
+    taskId: 'task-1',
     phase: 'tool_running',
     module: 'browser',
     timestamp: '2026-04-16T11:00:00.000Z',
@@ -89,12 +96,13 @@ test('syncTaskProjection creates and then updates projection records from scope 
   const summary = createSummary()
   await syncTaskProjection(store, summary, createPayload())
 
-  const created = records.get('run-1')
+  const created = records.get('task-1')
   assert.ok(created)
   assert.equal(created?.module, 'browser')
   assert.equal(created?.taskType, 'media_task')
   assert.equal(created?.status, 'running')
   assert.equal(created?.budgetUsagePercent, 35)
+  assert.equal(created?.budget?.stepBudget?.stepId, 'upload')
   assert.equal(created?.steps[0]?.status, 'running')
 
   const blockedSummary: ScopeRunSummary = {
@@ -111,7 +119,7 @@ test('syncTaskProjection creates and then updates projection records from scope 
   }
   await syncTaskProjection(store, blockedSummary, blockedPayload)
 
-  const updated = records.get('run-1')
+  const updated = records.get('task-1')
   assert.equal(updated?.status, 'blocked')
   assert.equal(updated?.interactionState, 'human_takeover')
   assert.equal(updated?.blockedReason, '等待用户输入验证码')

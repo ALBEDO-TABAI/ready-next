@@ -15,6 +15,8 @@ test('recovery router maps runtime classifications to stable recovery actions', 
   }), {
     shouldRetry: true,
     retryDelayMs: 350,
+    backoff: 'exponential_jitter',
+    maxAttempts: 3,
     shouldCompressContext: false,
     shouldSurfaceDirectly: false,
   })
@@ -28,6 +30,7 @@ test('recovery router maps runtime classifications to stable recovery actions', 
     message: 'context length exceeded',
   }), {
     shouldRetry: true,
+    maxAttempts: 1,
     shouldCompressContext: true,
     shouldSurfaceDirectly: false,
   })
@@ -41,6 +44,7 @@ test('recovery router maps runtime classifications to stable recovery actions', 
     message: 'Browser controller is not available',
   }), {
     shouldRetry: false,
+    maxAttempts: 0,
     shouldCompressContext: false,
     shouldSurfaceDirectly: true,
   })

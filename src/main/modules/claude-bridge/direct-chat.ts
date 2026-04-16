@@ -31,12 +31,17 @@ import { buildDocumentInsightSourceMaterial } from '../agent-control/document-so
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
+import { getToolResourceTag } from '../agent-control/tool-parallelism-policy'
 import {
   applyRunBudgetHint,
+  createStepBudgetState,
+  createTaskBudgetRuntime,
+  getBudgetWarningLevel,
   consumeIterationBudget,
   consumeParallelGroupBudget,
   consumeToolCallBudget,
   createRunBudgetSeed,
+  refundIterationBudget,
   getBudgetUsagePercent,
   getRemainingToolCallBudget,
 } from '../agent-control/run-budget-policy'
@@ -45,9 +50,12 @@ import {
   buildToolGuidance,
 } from '../agent-control/execution-tool-config'
 import type {
+  BudgetWarningLevel,
   RecoveryRecord,
   RunBudgetSeed,
   RunBudgetUsage,
+  TaskBudgetRuntime,
+  TaskProjectionRecord,
   TaskInteractionState,
   TaskType,
 } from '../agent-control/run-contracts'
@@ -92,6 +100,7 @@ import { classifyIntent } from '../agent-control/intent-classifier'
 import type { RequestEnvelope } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
 import { resolveTaskType } from '../agent-control/task-type-resolver'
+import { resolveTaskExecutionRoute } from '../agent-control/task-execution-router'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
@@ -546,21 +555,27 @@ export class DirectChatEngine extends EventEmitter {
     content: string | MultimodalBlock[],
     requestId?: string,
     executionOptions?: {
+      taskId?: string
       requestEnvelope?: RequestEnvelope
       intentClassification?: IntentClassification
       budget?: RunBudgetSeed
       budgetState?: RunBudgetUsage
+      taskBudgetRuntime?: TaskBudgetRuntime
     },
   ): Promise<{
     success: boolean
     error?: string
+    taskId?: string | null
     taskType?: TaskType
     interactionState?: TaskInteractionState
     taskProjectionId?: string | null
     executionDiagnostics?: {
+      taskId?: string | null
+      taskBudgetRuntime?: TaskBudgetRuntime | null
       budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null
-      stepBudget?: { maxIterations?: number; remainingIterations?: number } | null
+      stepBudget?: { stepId?: string | null; maxIterations?: number; remainingIterations?: number } | null
       budgetUsagePercent?: number | null
+      budgetWarningLevel?: BudgetWarningLevel | null
       fallback?: { happened: boolean; kind: string; attempts: number } | null
       recoveryHistory?: RecoveryRecord[] | null
       degradationReason?: string | null
@@ -573,14 +588,69 @@ export class DirectChatEngine extends EventEmitter {
       this.newSession(name)
     }
     const session = this.sessions.get(name)!
-    let effectiveRunBudget = executionOptions?.budget ? { ...executionOptions.budget } : null
-    const runBudgetState = executionOptions?.budgetState
+    const taskId = executionOptions?.taskId || `task-${runId}`
+    let taskBudgetRuntime = executionOptions?.taskBudgetRuntime
+      ? {
+        ...executionOptions.taskBudgetRuntime,
+        budget: { ...executionOptions.taskBudgetRuntime.budget },
+        usage: { ...executionOptions.taskBudgetRuntime.usage },
+        stepBudget: executionOptions.taskBudgetRuntime.stepBudget
+          ? { ...executionOptions.taskBudgetRuntime.stepBudget }
+          : null,
+      }
+      : null
+    let effectiveRunBudget = taskBudgetRuntime?.budget || (executionOptions?.budget ? { ...executionOptions.budget } : null)
+    const runBudgetState = taskBudgetRuntime?.usage || executionOptions?.budgetState || {
+      iterationsUsed: 0,
+      toolCallsUsed: 0,
+      parallelToolGroupsUsed: 0,
+    }
     let latestFallback: ExecutionFallbackInfo | null = null
     let recoveryHistory: RecoveryRecord[] = []
     let resolvedTaskType: TaskType | undefined
     let interactionState: TaskInteractionState = 'running'
     let degradationReason: string | null = null
+    let stepBudgetState: { stepId?: string | null; maxIterations?: number; remainingIterations?: number } | null = taskBudgetRuntime?.stepBudget
+      ? { ...taskBudgetRuntime.stepBudget }
+      : null
+    let budgetWarningLevel: BudgetWarningLevel = 'none' as BudgetWarningLevel
+    const syncTaskBudgetRuntime = (): TaskBudgetRuntime | null => {
+      if (!effectiveRunBudget) return null
+      taskBudgetRuntime = createTaskBudgetRuntime(resolvedTaskType || taskBudgetRuntime?.taskType || 'short_task', {
+        budget: effectiveRunBudget,
+        usage: runBudgetState,
+        stepBudget: stepBudgetState
+          ? {
+            stepId: stepBudgetState.stepId || null,
+            maxIterations: Number(stepBudgetState.maxIterations || 0),
+            remainingIterations: Number(stepBudgetState.remainingIterations || 0),
+          }
+          : null,
+        frozen: interactionState === 'suspended',
+      })
+      taskBudgetRuntime.warningLevel = budgetWarningLevel
+      return taskBudgetRuntime
+    }
+    const syncBudgetWarning = () => {
+      budgetWarningLevel = effectiveRunBudget
+        ? createTaskBudgetRuntime(resolvedTaskType || taskBudgetRuntime?.taskType || 'short_task', {
+          budget: effectiveRunBudget,
+          usage: runBudgetState,
+          stepBudget: stepBudgetState
+            ? {
+              stepId: stepBudgetState.stepId || null,
+              maxIterations: Number(stepBudgetState.maxIterations || 0),
+              remainingIterations: Number(stepBudgetState.remainingIterations || 0),
+            }
+            : null,
+          frozen: interactionState === 'suspended',
+        }).warningLevel
+        : 'none'
+      syncTaskBudgetRuntime()
+    }
     const buildExecutionDiagnostics = () => ({
+      taskId,
+      taskBudgetRuntime: syncTaskBudgetRuntime(),
       budget: effectiveRunBudget || runBudgetState
         ? {
           ...(effectiveRunBudget || {}),
@@ -590,7 +660,8 @@ export class DirectChatEngine extends EventEmitter {
       budgetUsagePercent: effectiveRunBudget && runBudgetState
         ? getBudgetUsagePercent(effectiveRunBudget, runBudgetState)
         : null,
-      stepBudget: null,
+      stepBudget: stepBudgetState,
+      budgetWarningLevel,
       fallback: buildExecutionFallbackState(latestFallback),
       recoveryHistory: recoveryHistory.length > 0 ? recoveryHistory : null,
       degradationReason,
@@ -598,9 +669,10 @@ export class DirectChatEngine extends EventEmitter {
     const buildRunResult = (success: boolean, error?: string) => ({
       success,
       error,
+      taskId,
       taskType: resolvedTaskType,
       interactionState,
-      taskProjectionId: null,
+      taskProjectionId: taskId,
       executionDiagnostics: buildExecutionDiagnostics(),
     })
     if (session.abortController) {
@@ -725,6 +797,24 @@ export class DirectChatEngine extends EventEmitter {
       const emitStructuredTaskPayload = (payload: unknown): void => {
         emitOutput(JSON.stringify(payload), 'tool_result')
       }
+      const appendRecoveryHistory = (entries: RecoveryRecord[] | null | undefined): void => {
+        if (!entries || entries.length === 0) return
+        recoveryHistory = recoveryHistory.concat(entries)
+        if (!degradationReason && entries.some((entry) => entry.kind === 'host_unavailable')) {
+          degradationReason = 'host_unavailable'
+        }
+      }
+      const syncInteractionStateFromToolResult = (toolName: string, result: string): void => {
+        if (!toolName.startsWith('skill_')) return
+        const blockerType = result.match(/^Blocker:\s*([^-\n]+)-/m)?.[1]?.trim() || null
+        if (blockerType === 'need_confirmation') {
+          interactionState = 'awaiting_confirmation'
+          return
+        }
+        if (blockerType === 'need_input' || blockerType === 'need_agent_result') {
+          interactionState = 'awaiting_clarification'
+        }
+      }
       const incomingAttachmentHints = this.getIncomingAttachmentHints(content)
       let browserDecision = ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
 
@@ -775,8 +865,42 @@ export class DirectChatEngine extends EventEmitter {
       }
 
       log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, ${preparedRunCapabilities.capabilityLogLine}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
+      const continuationHintText =
+        executionIntentContext.requestEnvelope.primaryInstruction
+        || executionIntentContext.requestEnvelope.pureUserText
+        || userText
+      const explicitTaskId = this.extractTaskIdFromText(userText)
+      const shouldResolveContinuation =
+        Boolean(explicitTaskId)
+        || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
+      let continuationProjection = this.resolveContinuationProjection(sessionId, userText, {
+        explicitTaskId,
+        allowImplicitContinuation: shouldResolveContinuation,
+      })
+      const continuationTaskId = continuationProjection?.taskId || null
+      const initialTaskTypeResolution = resolveTaskType({
+        intent: executionIntentContext.intentClassification,
+        envelope: executionIntentContext.requestEnvelope,
+        capabilities: preparedRunCapabilities.runtimeSnapshot,
+        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
+      })
+      const initialTaskExecutionRoute = resolveTaskExecutionRoute({
+        taskId,
+        resolution: initialTaskTypeResolution,
+        envelope: executionIntentContext.requestEnvelope,
+        capabilities: preparedRunCapabilities.runtimeSnapshot,
+        currentTaskContext: continuationTaskId
+          ? {
+            continuationTaskId,
+            continuationProjection,
+          }
+          : null,
+      })
 
       if (
+        initialTaskExecutionRoute.executor === 'document'
+        && initialTaskExecutionRoute.chain === 'domain_executor'
+        &&
         executionIntentContext.structuredDocumentIntent === 'document_read_then_widget_create'
         && hasTools
         && requestModuleToolAction
@@ -1031,40 +1155,117 @@ export class DirectChatEngine extends EventEmitter {
         `targetUrl=${browserDecision.plan?.targetUrl || browserDecision.plan?.resources?.links?.[0]?.url || 'none'} ` +
         `stepCount=${browserDecision.plan?.steps?.length || 0}`,
       )
-      const requestedContinuation =
-        /(继续|接着|恢复|上次)/.test(executionIntentContext.requestEnvelope.primaryInstruction || executionIntentContext.requestEnvelope.pureUserText)
-      const continuationTaskId = requestedContinuation && sessionId && (
-        getBrowserWorkflowState(sessionId)?.canResume
-        || Boolean(getLatestSkillRun(sessionId))
-      )
-        ? sessionId
-        : null
       const taskTypeResolution = resolveTaskType({
         intent: executionIntentContext.intentClassification,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
         currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
       })
-      resolvedTaskType = taskTypeResolution.taskType
-      degradationReason = taskTypeResolution.degradationReason || null
+      const taskExecutionRoute = resolveTaskExecutionRoute({
+        taskId,
+        resolution: taskTypeResolution,
+        envelope: executionIntentContext.requestEnvelope,
+        capabilities: reconciledRunCapabilities.runtimeSnapshot,
+        currentTaskContext: continuationTaskId
+          ? {
+            continuationTaskId,
+            continuationProjection,
+          }
+          : null,
+      })
+      resolvedTaskType = taskExecutionRoute.taskType
+      degradationReason = taskExecutionRoute.degradationReason || null
       if (!effectiveRunBudget) {
         effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
       }
+      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
+        interactionState = 'resuming'
+      }
+      stepBudgetState = continuationProjection?.budget?.stepBudget || (
+        taskExecutionRoute.steps.length > 0
+          ? createStepBudgetState({
+            stepId: taskExecutionRoute.steps[0]?.id || null,
+            totalIterations: effectiveRunBudget.maxIterations,
+            stepCount: taskExecutionRoute.steps.length,
+            suggestedMaxIterations: taskExecutionRoute.steps[0]?.budget,
+          })
+          : createStepBudgetState({
+            stepId: null,
+            totalIterations: effectiveRunBudget.maxIterations,
+            suggestedMaxIterations: effectiveRunBudget.maxIterations,
+          })
+      )
+      syncBudgetWarning()
       log(
-        `taskType=${resolvedTaskType}, executionChain=${taskTypeResolution.executionChain}, ` +
+        `taskType=${resolvedTaskType}, executionChain=${taskExecutionRoute.chain}, ` +
         `preferredExecutor=${taskTypeResolution.preferredExecutor || 'none'}, ` +
         `degradationReason=${degradationReason || 'none'}`,
       )
+      if (taskExecutionRoute.chain === 'planner' && taskExecutionRoute.steps.length > 0) {
+        emitStructuredTaskPayload({
+          module: taskTypeResolution.preferredExecutor || 'system',
+          taskTitle: executionIntentContext.userInstructionText || '多步任务',
+          taskSummary: '已拆分任务步骤，开始逐步执行',
+          steps: taskExecutionRoute.steps.map((step) => ({
+            id: step.id,
+            title: step.title || step.description,
+            status: step.id === taskExecutionRoute.steps[0]?.id ? 'running' : 'pending',
+            updatedAt: new Date().toISOString(),
+          })),
+          currentStepId: taskExecutionRoute.steps[0]?.id || null,
+          waitingFor: 'none',
+          resumableActions: ['cancel'],
+        })
+        session.messages.push({
+          role: 'user',
+          content: [
+            '系统规划步骤：',
+            ...taskExecutionRoute.steps.map((step, index) =>
+              `${index + 1}. ${step.title || step.description}（预算 ${step.budget || 0} 轮）`
+            ),
+            '请严格按以上步骤推进，并在接近预算上限时主动收敛总结。',
+          ].join('\n'),
+        })
+      }
+      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
+        session.messages.push({
+          role: 'user',
+          content: [
+            `Task ID: ${taskExecutionRoute.continuation.taskId}`,
+            taskExecutionRoute.continuation.continuationRef?.executionId
+              ? `Execution ID: ${taskExecutionRoute.continuation.continuationRef.executionId}`
+              : null,
+            taskExecutionRoute.continuation.continuationRef?.stepId
+              ? `Step ID: ${taskExecutionRoute.continuation.continuationRef.stepId}`
+              : null,
+            continuationProjection?.blockedReason
+              ? `继续前上下文：${continuationProjection.blockedReason}`
+              : null,
+          ].filter(Boolean).join('\n'),
+        })
+      }
 
-      const browserExecutionDispatch = this.browserDomainOrchestrator.resolveExecutionDispatch({
-        hasTools,
-        browserControllerAvailable: Boolean(this.browserController),
-        browserDecision,
-        browserContinuityInstruction: preparedBrowserExecution.browserContinuityInstruction,
-        clarifyText: preparedBrowserExecution.clarifyText,
-        canUseDeterministicBrowserRunner: preparedBrowserExecution.canUseDeterministicBrowserRunner,
-        shouldInspectAmbiguousModeEntry: preparedBrowserExecution.shouldInspectAmbiguousModeEntry,
-      })
+      const allowBrowserDispatch =
+        taskExecutionRoute.executor === 'browser'
+        || taskExecutionRoute.executor === 'tool_loop'
+        || taskExecutionRoute.executor === 'planner'
+      const browserExecutionDispatch = allowBrowserDispatch
+        ? this.browserDomainOrchestrator.resolveExecutionDispatch({
+          hasTools,
+          browserControllerAvailable: Boolean(this.browserController),
+          browserDecision,
+          browserContinuityInstruction: preparedBrowserExecution.browserContinuityInstruction,
+          clarifyText: preparedBrowserExecution.clarifyText,
+          canUseDeterministicBrowserRunner: preparedBrowserExecution.canUseDeterministicBrowserRunner,
+          shouldInspectAmbiguousModeEntry: preparedBrowserExecution.shouldInspectAmbiguousModeEntry,
+        })
+        : {
+          kind: 'none',
+          continuityInstruction: null,
+          responseText: null,
+          toolLoopMessage: null,
+          fallbackLog: null,
+        }
 
       if (browserExecutionDispatch.continuityInstruction) {
         session.messages.push({ role: 'user', content: browserExecutionDispatch.continuityInstruction })
@@ -1097,6 +1298,9 @@ export class DirectChatEngine extends EventEmitter {
           },
         })
         if (browserResult.handled) {
+          if (browserResult.state === 'partial' && /(人工|手动|验证码|接管)/.test(browserResult.message)) {
+            interactionState = 'human_takeover'
+          }
           emitOutput(browserResult.message, 'text')
           session.messages.push({ role: 'assistant', content: browserResult.message })
           emitOutput('', 'done')
@@ -1161,7 +1365,7 @@ export class DirectChatEngine extends EventEmitter {
       if (!effectiveRunBudget) {
         effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
       }
-      const shouldUseToolLoop = Boolean(hasTools && resolvedTaskType !== 'direct_answer')
+      const shouldUseToolLoop = Boolean(hasTools && taskExecutionRoute.chain !== 'direct')
 
       if (!shouldUseToolLoop) {
         // No tool calling — original simple path
@@ -1231,28 +1435,48 @@ export class DirectChatEngine extends EventEmitter {
           : this.maxToolIterations
         let documentToolLoopState = this.documentToolLoopOrchestrator.createState()
         let designToolLoopState = this.designToolLoopOrchestrator.createState()
-        effectiveRunBudget = applyRunBudgetHint(
-          effectiveRunBudget || createRunBudgetSeed(),
+        const hintedRuntimeBase = syncTaskBudgetRuntime() || createTaskBudgetRuntime(resolvedTaskType || 'short_task', {
+          budget: effectiveRunBudget || createRunBudgetSeed(),
+          usage: runBudgetState,
+          stepBudget: stepBudgetState
+            ? {
+              stepId: stepBudgetState.stepId || null,
+              maxIterations: Number(stepBudgetState.maxIterations || 0),
+              remainingIterations: Number(stepBudgetState.remainingIterations || 0),
+            }
+            : null,
+        })
+        taskBudgetRuntime = applyRunBudgetHint(
+          hintedRuntimeBase,
           this.browserDomainOrchestrator.getBudgetHint({
             userText,
             decision: browserDecision,
             baseMaxToolIterations: configuredMaxToolIterations,
           }),
-        )
-        effectiveRunBudget = applyRunBudgetHint(
-          effectiveRunBudget,
+        ) as TaskBudgetRuntime
+        taskBudgetRuntime = applyRunBudgetHint(
+          taskBudgetRuntime,
           this.documentToolLoopOrchestrator.getBudgetHint({
             forceDocumentTool: toolPolicy.forceDocumentTool,
             state: documentToolLoopState,
           }),
-        )
-        effectiveRunBudget = applyRunBudgetHint(
-          effectiveRunBudget,
+        ) as TaskBudgetRuntime
+        taskBudgetRuntime = applyRunBudgetHint(
+          taskBudgetRuntime,
           this.designToolLoopOrchestrator.getBudgetHint({
             forceDesignTool: toolPolicy.forceDesignTool,
             primaryArtifactProduced: designToolLoopState.primaryArtifactProduced,
           }),
-        )
+        ) as TaskBudgetRuntime
+        effectiveRunBudget = taskBudgetRuntime.budget
+        stepBudgetState = taskBudgetRuntime.stepBudget
+          ? {
+            stepId: taskBudgetRuntime.stepBudget.stepId || null,
+            maxIterations: taskBudgetRuntime.stepBudget.maxIterations,
+            remainingIterations: taskBudgetRuntime.stepBudget.remainingIterations,
+          }
+          : null
+        budgetWarningLevel = taskBudgetRuntime.warningLevel
         const baseMaxToolIterations = effectiveRunBudget.maxIterations > 0
           ? effectiveRunBudget.maxIterations
           : configuredMaxToolIterations
@@ -1269,6 +1493,7 @@ export class DirectChatEngine extends EventEmitter {
         let textToolBridgeNudges = 0
         let budgetLimitedBeforeCompletion = false
         let toolLoopTimeoutOverrideMs: number | undefined
+        let convergencePromptInjected = false
 
         // Inject tool guidance into system prompt based on intent
         const toolGuidance = buildToolGuidance(toolPolicy)
@@ -1287,10 +1512,28 @@ export class DirectChatEngine extends EventEmitter {
 
         while (iterations < effectiveMaxToolIterations) {
           ensureNotAborted()
+          if (budgetWarningLevel === 'exhausted' || (stepBudgetState?.remainingIterations || 0) <= 0) {
+            budgetLimitedBeforeCompletion = true
+            break
+          }
+          if (budgetWarningLevel === 'converge' && !convergencePromptInjected) {
+            session.messages.push({
+              role: 'user',
+              content: '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。',
+            })
+            convergencePromptInjected = true
+          }
           iterations++
           if (runBudgetState) {
             Object.assign(runBudgetState, consumeIterationBudget(runBudgetState))
           }
+          if (stepBudgetState) {
+            stepBudgetState = {
+              ...stepBudgetState,
+              remainingIterations: Math.max(0, Number(stepBudgetState.remainingIterations || 0) - 1),
+            }
+          }
+          syncBudgetWarning()
           log(`Tool loop iteration ${iterations}`)
 
           // Get scope from runtime if available
@@ -1361,9 +1604,7 @@ export class DirectChatEngine extends EventEmitter {
           if (response.fallback) {
             latestFallback = response.fallback
           }
-          if (Array.isArray(response.recoveryHistory) && response.recoveryHistory.length > 0) {
-            recoveryHistory = recoveryHistory.concat(response.recoveryHistory)
-          }
+          appendRecoveryHistory(Array.isArray(response.recoveryHistory) ? response.recoveryHistory : null)
 
           // No tool calls — done
           if (response.toolCalls.length === 0) {
@@ -1513,9 +1754,7 @@ export class DirectChatEngine extends EventEmitter {
               },
             })
             const executedToolResults = executedToolBatch.results
-            if (executedToolBatch.recoveryHistory.length > 0) {
-              recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
-            }
+            appendRecoveryHistory(executedToolBatch.recoveryHistory)
             if (runBudgetState) {
               Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
               if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
@@ -1548,12 +1787,34 @@ export class DirectChatEngine extends EventEmitter {
                 rawResult: result,
                 policy: toolPolicy,
               })
+              syncInteractionStateFromToolResult(toolName, result)
               if (designResult.isPrimaryArtifact) {
                 executedPrimaryDesignToolThisIteration = true
                 designToolLoopState = designResult.state
               }
               emitOutput(result.slice(0, 200), 'tool_result')
               toolResults.push({ type: 'tool_result', tool_use_id: executedTool.id, content: result })
+            }
+            if (toolCallsForIteration.length > 0 && toolCallsForIteration.every((toolCall) => {
+              const tag = getToolResourceTag(toolCall.name)
+              return tag.accessMode === 'read'
+            })) {
+              if (stepBudgetState) {
+                stepBudgetState = refundIterationBudget({
+                  taskType: resolvedTaskType || 'short_task',
+                  budget: effectiveRunBudget,
+                  usage: runBudgetState,
+                  stepBudget: {
+                    stepId: stepBudgetState.stepId || null,
+                    maxIterations: Number(stepBudgetState.maxIterations || 0),
+                    remainingIterations: Number(stepBudgetState.remainingIterations || 0),
+                  },
+                  warningLevel: budgetWarningLevel,
+                  frozen: false,
+                }).stepBudget
+              }
+              runBudgetState.iterationsUsed = Math.max(0, runBudgetState.iterationsUsed - 1)
+              syncBudgetWarning()
             }
             session.messages.push({ role: 'user', content: toolResults })
           } else {
@@ -1586,11 +1847,9 @@ export class DirectChatEngine extends EventEmitter {
                 },
               })
               const executedToolResults = executedToolBatch.results
-              if (executedToolBatch.recoveryHistory.length > 0) {
-                recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
-              }
-              if (runBudgetState) {
-                Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
+              appendRecoveryHistory(executedToolBatch.recoveryHistory)
+            if (runBudgetState) {
+              Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
                 if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
                   budgetLimitedBeforeCompletion = true
                 }
@@ -1621,6 +1880,7 @@ export class DirectChatEngine extends EventEmitter {
                   rawResult: result,
                   policy: toolPolicy,
                 })
+                syncInteractionStateFromToolResult(toolName, result)
                 if (designResult.isPrimaryArtifact) {
                   executedPrimaryDesignToolThisIteration = true
                   designToolLoopState = designResult.state
@@ -1631,6 +1891,7 @@ export class DirectChatEngine extends EventEmitter {
               if (textBridgeResults.length > 0) {
                 session.messages.push({ role: 'user', content: buildTextToolResultMessage(textBridgeResults) })
               }
+              syncBudgetWarning()
             } else {
               // For OpenAI: assistant message with tool_calls, then separate tool messages
               const assistantMsg: Record<string, unknown> = {
@@ -1672,9 +1933,7 @@ export class DirectChatEngine extends EventEmitter {
                 },
               })
               const executedToolResults = executedToolBatch.results
-              if (executedToolBatch.recoveryHistory.length > 0) {
-                recoveryHistory = recoveryHistory.concat(executedToolBatch.recoveryHistory)
-              }
+              appendRecoveryHistory(executedToolBatch.recoveryHistory)
               if (runBudgetState) {
                 Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
                 if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
@@ -1683,6 +1942,7 @@ export class DirectChatEngine extends EventEmitter {
               } else if (executedToolBatch.budgetLimited) {
                 budgetLimitedBeforeCompletion = true
               }
+              syncBudgetWarning()
               for (const executedTool of executedToolResults) {
                 const result = executedTool.result
                 const toolName = executedTool.name
@@ -1707,6 +1967,7 @@ export class DirectChatEngine extends EventEmitter {
                   rawResult: result,
                   policy: toolPolicy,
                 })
+                syncInteractionStateFromToolResult(toolName, result)
                 if (designResult.isPrimaryArtifact) {
                   executedPrimaryDesignToolThisIteration = true
                   designToolLoopState = designResult.state
@@ -1841,6 +2102,8 @@ export class DirectChatEngine extends EventEmitter {
       return buildRunResult(true)
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
+        interactionState = 'suspended'
+        syncBudgetWarning()
         emitOutput('', 'done')
         emitStatus('cancelled')
         return buildRunResult(true)
@@ -1892,6 +2155,37 @@ export class DirectChatEngine extends EventEmitter {
       ...session.messages.slice(-6),
     ]
     return true
+  }
+
+  private extractTaskIdFromText(text: string): string | null {
+    const matched = String(text || '').match(/^Task ID:\s*(.+)$/m)?.[1]?.trim()
+    return matched || null
+  }
+
+  private resolveContinuationProjection(
+    sessionId: string | undefined,
+    userText: string,
+    options?: {
+      explicitTaskId?: string | null
+      allowImplicitContinuation?: boolean
+    },
+  ): TaskProjectionRecord | null {
+    const runtime = this.runtime
+    if (!runtime || !sessionId) return null
+    const explicitTaskId = options?.explicitTaskId ?? this.extractTaskIdFromText(userText)
+    if (explicitTaskId) {
+      return runtime.getTaskProjection(explicitTaskId)
+    }
+    if (!options?.allowImplicitContinuation) {
+      return null
+    }
+    const projections = runtime.listTaskProjections(sessionId)
+    return projections.find((item) =>
+      item.status === 'blocked'
+      || item.status === 'running'
+      || item.interactionState === 'resuming'
+      || item.taskType === 'continuation',
+    ) || projections[0] || null
   }
 
   private extractPrimaryUserInstruction(raw: string): string {

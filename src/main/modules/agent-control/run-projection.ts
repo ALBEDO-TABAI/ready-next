@@ -54,6 +54,7 @@ export class RunProjection {
       channelKey: this.deps.toChannelKey(scope),
       threadKey: scope.threadKey,
       phase: payload.phase,
+      taskId: payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
       taskTitle: payload.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
       taskSummary: payload.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
       taskType: payload.taskType ?? previous?.taskType,
@@ -86,7 +87,18 @@ export class RunProjection {
         ?? payload.executionDiagnostics?.stepBudget
         ?? previous?.stepBudget
         ?? null,
-      taskProjectionId: payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
+      budgetWarningLevel:
+        payload.budgetWarningLevel
+        ?? payload.executionDiagnostics?.budgetWarningLevel
+        ?? previous?.budgetWarningLevel
+        ?? null,
+      taskProjectionId:
+        payload.taskId
+        ?? payload.taskProjectionId
+        ?? previous?.taskId
+        ?? previous?.taskProjectionId
+        ?? payload.runId
+        ?? null,
       blockedReason: payload.blockedReason ?? derivedTask.blockedReason ?? previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
       updatedAt: payload.timestamp,
@@ -192,6 +204,7 @@ export class RunProjection {
           'cancel' as const,
         ],
         taskContinuation: {
+          taskId: payload.taskId ?? previous?.taskId ?? null,
           executionId,
           stepId: currentStepId,
           blockerType,

@@ -18,6 +18,14 @@
 - Ready 右侧 `TaskPanel` 也已经能直接从任务投影生成继续/重试草稿，最近任务恢复入口不再只在聊天区里。
 - 聊天区任务卡也已并入任务投影补充字段：当前任务与持久任务都会带出任务类型、交互状态、预算占用和恢复提示。
 - 聊天区任务卡现在也会用任务投影兜底 continuation / resumableActions，旧摘要不完整时仍能继续任务。
+- 第二阶段收口本轮已补上稳定 `taskId`：`RunCoordinator -> execution host -> run projection -> task projection -> continuation 草稿` 现已统一按任务主键串联，`runId` 回到“单次执行实例”语义。
+- `TaskTypeResolver` 现在不再只是打标：新增正式执行路由层后，`direct / tool_loop / planner / domain_executor / continuation` 五条执行链已经能直接驱动主循环。
+- 三层预算本轮已开始进入真实运行态：任务预算、步骤预算、单轮消耗、`70/90/100%` 预警、只读轮次退还、暂停冻结与恢复继续都已有正式字段和主链写回。
+- `TaskPanel` 与聊天任务卡本轮已补显示当前步骤预算、预算预警和降级原因；继续/重试草稿也会显式带上 `Task ID`，前台恢复入口不再靠会话猜测。
+- 本轮继续把 7 个剩余缺口往主链里收口：`skill` 已正式进入意图识别与任务路由；文档深读后制卡只会在 document executor 路径下触发，不再作为长期前置特例漂在主循环外。
+- `RunCoordinator -> execution host -> DirectChatEngine` 现已开始透传统一 `TaskBudgetRuntime`；旧 `budget / budgetState` 仍保留兼容，但主链诊断与任务投影已经能读到当前任务预算、步骤预算和 warning level 的单一真相。
+- continuation 入口已不再强依赖“继续/恢复”关键词：显式 `Task ID` 会优先命中任务投影恢复；恢复或宿主不可用时也会把降级原因与恢复记录显式写回任务诊断。
+- 恢复策略本轮补齐了 `350ms -> 8s` 的指数抖动退避元数据，并在出现恢复记录或预算进入 warning 后把后续工具批次自动降为串行，避免继续并行放大抖动。
 
 1. 当前基线是本地 `main`。
 
@@ -249,6 +257,10 @@
 
 ## 最近一次有效校验
 
+- `npm run typecheck` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/intent-classifier.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-actions-contract.test.ts src/__tests__/recovery-router.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/run-coordinator.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-actions-contract.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/recovery-router.test.ts src/__tests__/agent-task-runtime-contract.test.ts src/__tests__/agent-runtime-host-contract.test.ts` 通过
+- `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-coordinator-budget.test.ts src/__tests__/execution-fallback-policy.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-projection-repository.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/openai-execution-client-contract.test.ts src/__tests__/anthropic-execution-client-contract.test.ts src/__tests__/kimi-coding-client-contract.test.ts` 通过
 - `npm run typecheck` 通过
 - `npx tsx@^4.19.2 --test src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/run-coordinator.test.ts src/__tests__/run-coordinator-budget.test.ts src/__tests__/execution-fallback-policy.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-projection.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-card-view-model-contract.test.ts src/__tests__/openai-execution-client-contract.test.ts src/__tests__/anthropic-execution-client-contract.test.ts src/__tests__/kimi-coding-client-contract.test.ts src/__tests__/video-fallback-service-contract.test.ts src/__tests__/simple-execution-fallbacks.test.ts` 通过
 - `npm test` 未通过：当前工作区仍有 `browser-tab-switch-executor`、多组 document contract、以及一批 liquid shell / workbench UI contract 旧失败；本轮主控与客户端相关重点测试已通过

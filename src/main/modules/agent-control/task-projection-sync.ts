@@ -3,7 +3,7 @@ import type { ScopeRunEventPayload, ScopeRunSummary } from './types'
 import type { RecoveryRecord } from './run-contracts'
 
 function resolveTaskId(summary: ScopeRunSummary, payload: ScopeRunEventPayload): string | null {
-  return summary.taskProjectionId || payload.taskProjectionId || payload.runId || null
+  return summary.taskId || payload.taskId || summary.taskProjectionId || payload.taskProjectionId || payload.runId || null
 }
 
 function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState {
@@ -46,6 +46,7 @@ function resolveStepBudget(summary: ScopeRunSummary) {
   const candidate = summary.stepBudget || summary.executionDiagnostics?.stepBudget || null
   if (!candidate || typeof candidate.maxIterations !== 'number') return null
   return {
+    stepId: candidate.stepId || null,
     maxIterations: candidate.maxIterations,
     remainingIterations: candidate.remainingIterations,
   }
@@ -101,7 +102,9 @@ export function buildTaskProjectionRecord(
       }
       : null,
     budgetUsagePercent: summary.budgetUsagePercent ?? summary.executionDiagnostics?.budgetUsagePercent ?? null,
+    budgetWarningLevel: summary.budgetWarningLevel ?? summary.executionDiagnostics?.budgetWarningLevel ?? null,
     recoveryHistory: mapRecoveryHistory(summary),
+    degradationReason: summary.degradationReason ?? summary.executionDiagnostics?.degradationReason ?? null,
     blockedReason: summary.blockedReason || null,
     resumableActions: summary.resumableActions || [],
     continuationRef: summary.taskContinuation || null,

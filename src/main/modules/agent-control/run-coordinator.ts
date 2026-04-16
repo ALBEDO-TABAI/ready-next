@@ -10,8 +10,9 @@ import type {
   RunMessage,
   RunBudgetUsage,
 } from './run-contracts'
-import { createRunBudgetSeed } from './run-budget-policy'
+import { createRunBudgetSeed, createTaskBudgetRuntime } from './run-budget-policy'
 import { buildExecutionFallbackState } from '../claude-bridge/execution-fallback-policy'
+import { randomUUID } from 'node:crypto'
 
 export class RunCoordinator {
   constructor(private readonly deps: {
@@ -43,12 +44,17 @@ export class RunCoordinator {
     request: RunCoordinatorRequest,
     hooks?: RunCompletionHooks & ReflectionResultHook,
   ): Promise<RunCoordinatorResult> {
+    const taskId = request.taskId || `task-${randomUUID()}`
     const budget = request.budget || createRunBudgetSeed()
     const budgetState: RunBudgetUsage = {
       iterationsUsed: 0,
       toolCallsUsed: 0,
       parallelToolGroupsUsed: 0,
     }
+    const taskBudgetRuntime = createTaskBudgetRuntime('short_task', {
+      budget,
+      usage: { ...budgetState },
+    })
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
       message: request.message,
@@ -66,15 +72,19 @@ export class RunCoordinator {
       scopeId: request.scope.id,
       agent: request.scope.agent,
       runId: request.requestId,
+      taskId,
       phase: 'planning',
       module: primaryTrigger?.module,
       latestText: planningTaskSummary,
       taskTitle: planningTaskTitle,
       taskSummary: planningTaskSummary,
+      taskProjectionId: taskId,
       memoryRefs: prepared.memoryRefs,
       triggerHits: prepared.triggerHits,
       contextBudget: prepared.contextBudget,
       executionDiagnostics: {
+        taskId,
+        taskBudgetRuntime,
         compression: prepared.compression || null,
         budget,
         fallback: buildExecutionFallbackState(null),
@@ -86,12 +96,14 @@ export class RunCoordinator {
       agent: request.scope.agent,
       sessionId: request.scope.id,
       requestId: request.requestId,
+      taskId,
       systemPrompt: prepared.systemPrompt,
       message: messageWithBootstrap,
       requestEnvelope: prepared.requestEnvelope,
       intentClassification: prepared.intentClassification,
       budget,
       budgetState,
+      taskBudgetRuntime,
     })
 
     this.deps.promptAssembly.recordRunOutcome({
@@ -106,11 +118,14 @@ export class RunCoordinator {
       scopeId: request.scope.id,
       agent: request.scope.agent,
       runId: request.requestId,
+      taskId,
       phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
       taskType: result.taskType,
       interactionState: result.interactionState,
-      taskProjectionId: result.taskProjectionId || undefined,
+      taskProjectionId: result.taskProjectionId || result.taskId || taskId,
       executionDiagnostics: {
+        taskId: result.taskId || taskId,
+        taskBudgetRuntime: result.taskBudgetRuntime || result.executionDiagnostics?.taskBudgetRuntime || taskBudgetRuntime,
         compression: prepared.compression || null,
         budget: {
           ...budget,
@@ -141,6 +156,7 @@ export class RunCoordinator {
           scopeId: request.scope.id,
           agent: request.scope.agent,
           runId: request.requestId,
+          taskId,
           phase: 'done',
           taskSummary: `已记录 ${memoryCapture.items.length} 条常驻偏好/上下文`,
           memoryCapture,

@@ -12,6 +12,7 @@ export type TaskDisclosureState = Partial<Record<TaskSectionKey, boolean>>
 
 export interface TaskCardRunLike {
   scopeId: string
+  taskId?: string | null
   phase: ScopeRunState['phase']
   title: string
   taskTitle?: string | null
@@ -27,6 +28,13 @@ export interface TaskCardRunLike {
   taskType?: TaskProjectionRecordData['taskType']
   interactionState?: TaskProjectionRecordData['interactionState']
   budgetUsagePercent?: number | null
+  stepBudget?: {
+    stepId?: string | null
+    maxIterations: number
+    remainingIterations?: number
+  } | null
+  budgetWarningLevel?: TaskProjectionRecordData['budgetWarningLevel']
+  degradationReason?: TaskProjectionRecordData['degradationReason']
   recoveryHistory?: RecoveryRecordData[]
   blockedReason?: string | null
   error?: string | null

@@ -400,6 +400,19 @@ function recoveryBadgeLabel(recoveryHistory: RecoveryRecordData[]): string {
   }
 }
 
+function budgetWarningBadgeLabel(level: TaskProjectionRecordData['budgetWarningLevel']): string | null {
+  switch (level) {
+    case 'warning':
+      return '预算预警'
+    case 'converge':
+      return '接近上限'
+    case 'exhausted':
+      return '预算耗尽'
+    default:
+      return null
+  }
+}
+
 function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
   if (!run) return false
   return Boolean(
@@ -458,6 +471,11 @@ function TaskCard({
       ? interactionStateBadgeLabel(run.interactionState)
       : null,
     run.budgetUsagePercent != null ? `预算 ${Math.round(run.budgetUsagePercent)}%` : null,
+    run.stepBudget
+      ? `步骤余量 ${Math.max(0, Math.round(run.stepBudget.remainingIterations || 0))}/${Math.max(0, Math.round(run.stepBudget.maxIterations || 0))}`
+      : null,
+    run.budgetWarningLevel ? budgetWarningBadgeLabel(run.budgetWarningLevel) : null,
+    run.degradationReason ? `降级 ${run.degradationReason}` : null,
     run.recoveryHistory && run.recoveryHistory.length > 0
       ? recoveryBadgeLabel(run.recoveryHistory)
       : null
@@ -1889,6 +1907,7 @@ export default function ChatPanel() {
       const projection = persistedTaskProjections[run.scopeId]?.[0]
       return {
         scopeId: run.scopeId,
+        taskId: projection?.taskId || run.taskContinuation?.taskId || null,
         phase: run.phase,
         title: run.title,
         taskTitle: run.taskTitle,
@@ -1906,6 +1925,9 @@ export default function ChatPanel() {
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
+        stepBudget: projection?.budget?.stepBudget,
+        budgetWarningLevel: projection?.budgetWarningLevel,
+        degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
         blockedReason: run.blockedReason,
         error: run.error,
@@ -1919,6 +1941,7 @@ export default function ChatPanel() {
       const projection = persistedTaskProjections[run.scopeId]?.[0]
       merged.set(run.scopeId, {
         ...run,
+        taskId: projection?.taskId || run.executionDiagnostics?.taskId || run.taskContinuation?.taskId || run.taskId || null,
         resumableActions:
           (run.resumableActions && run.resumableActions.length > 0)
             ? run.resumableActions
@@ -1927,6 +1950,9 @@ export default function ChatPanel() {
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
+        stepBudget: projection?.budget?.stepBudget,
+        budgetWarningLevel: projection?.budgetWarningLevel,
+        degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory
       })
     }
@@ -2312,8 +2338,10 @@ export default function ChatPanel() {
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
       const continuation = run?.taskContinuation
+      const taskId = run?.taskId || continuation?.taskId || null
       const draft = [
         '继续当前任务。',
+        taskId ? `Task ID: ${taskId}` : null,
         continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
         run?.taskSummary ? `需要补充：${run.taskSummary}` : null,
         '我的补充是：'
@@ -2353,8 +2381,10 @@ export default function ChatPanel() {
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
       const continuation = run?.taskContinuation
+      const taskId = run?.taskId || continuation?.taskId || null
       const draft = [
         '继续当前任务。',
+        taskId ? `Task ID: ${taskId}` : null,
         continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
         continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
         run?.taskSummary ? `需要补交结果：${run.taskSummary}` : null,
@@ -2374,6 +2404,7 @@ export default function ChatPanel() {
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
       const continuation = run?.taskContinuation
+      const taskId = run?.taskId || continuation?.taskId || null
       if (continuation?.executionId && continuation.stepId) {
         const result = await window.electronAPI.skills
           .restartFromStep({
@@ -2386,7 +2417,12 @@ export default function ChatPanel() {
           return
         }
       }
-      setInputValue('请重试刚才的任务，并在开始前先说明你准备怎么继续。')
+      setInputValue([
+        '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
+        taskId ? `Task ID: ${taskId}` : null,
+        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
+        continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
+      ].filter(Boolean).join('\n'))
       focusInputWithResize()
     },
     [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue]

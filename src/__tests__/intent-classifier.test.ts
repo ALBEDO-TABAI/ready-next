@@ -36,3 +36,14 @@ test('intent classifier recognizes explicit cross-domain rss to feishu workflows
   assert.ok(result.mentionedDomains.includes('rss'))
   assert.ok(result.mentionedDomains.includes('feishu'))
 })
+
+test('intent classifier recognizes explicit skill workflow requests', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: '用 skill 帮我继续执行这个 workflow，并把 blocker 处理掉',
+  }))
+
+  assert.equal(result.primaryDomain, 'skill')
+  assert.equal(result.crossDomain, false)
+  assert.ok(result.objectSignals.some((item) => /skill/i.test(item)))
+  assert.ok(result.actionSignals.length > 0)
+})

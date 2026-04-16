@@ -98,6 +98,15 @@ export function resolveTaskType(params: {
     }
   }
 
+  if (params.intent.primaryDomain === 'skill') {
+    return {
+      taskType: 'short_task',
+      executionChain: 'domain_executor',
+      requiresPlanner: false,
+      preferredExecutor: 'skill',
+    }
+  }
+
   if (params.intent.primaryDomain === 'rss' || params.intent.primaryDomain === 'calendar' || params.intent.primaryDomain === 'feishu') {
     return {
       taskType: params.intent.confidence === 'high' ? 'short_task' : 'multi_step_task',

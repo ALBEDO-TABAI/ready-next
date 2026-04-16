@@ -235,6 +235,7 @@ interface ScopeRunTaskStepData {
 }
 
 interface ScopeRunTaskContinuationData {
+  taskId?: string | null
   executionId: string
   stepId?: string | null
   blockerType?: string | null
@@ -257,6 +258,26 @@ interface ScopeRunMemoryCaptureData {
 }
 
 interface ScopeRunExecutionDiagnosticsData {
+  taskBudgetRuntime?: {
+    taskType: TaskTypeData
+    budget: {
+      maxIterations: number
+      maxToolCalls: number
+      maxParallelToolGroups: number
+    }
+    usage: {
+      iterationsUsed: number
+      toolCallsUsed: number
+      parallelToolGroupsUsed: number
+    }
+    stepBudget?: {
+      stepId?: string | null
+      maxIterations: number
+      remainingIterations: number
+    } | null
+    warningLevel: 'none' | 'warning' | 'converge' | 'exhausted'
+    frozen: boolean
+  } | null
   compression?: {
     historyCompressed: boolean
     toolTraceCompressed: boolean
@@ -275,6 +296,15 @@ interface ScopeRunExecutionDiagnosticsData {
     kind: string
     attempts: number
   } | null
+  stepBudget?: {
+    stepId?: string | null
+    maxIterations?: number
+    remainingIterations?: number
+  } | null
+  budgetUsagePercent?: number | null
+  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  recoveryHistory?: RecoveryRecordData[] | null
+  degradationReason?: string | null
   pipeline?: {
     document?: {
       phase?: string
@@ -310,6 +340,7 @@ interface TaskBudgetData {
   maxToolCalls: number
   maxParallelToolGroups: number
   stepBudget?: {
+    stepId?: string | null
     maxIterations: number
     remainingIterations?: number
   } | null
@@ -355,7 +386,9 @@ interface TaskProjectionRecordData {
   currentStepId?: string | null
   budget?: TaskBudgetData | null
   budgetUsagePercent?: number | null
+  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
   recoveryHistory?: RecoveryRecordData[]
+  degradationReason?: string | null
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableActionData[]
   continuationRef?: ScopeRunTaskContinuationData | null

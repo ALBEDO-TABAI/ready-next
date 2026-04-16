@@ -145,19 +145,22 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     message: string | MultimodalBlock[],
     sessionId?: string,
     requestId?: string,
+    taskId?: string,
     systemPrompt?: string,
     requestEnvelope?: RequestEnvelope,
     intentClassification?: IntentClassification,
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
+    taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
   ): Promise<{
     success: boolean
     error?: string
+    taskId?: ExecutionHostResult['taskId']
     taskType?: ExecutionHostResult['taskType']
     interactionState?: ExecutionHostResult['interactionState']
-    taskProjectionId?: ExecutionHostResult['taskProjectionId']
-    executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
-  }> {
+      taskProjectionId?: ExecutionHostResult['taskProjectionId']
+      executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
+    }> {
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
@@ -166,10 +169,12 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       this.engine.setSystemPrompt(internalKey, systemPrompt)
     }
     const result = await this.engine.sendMessage(internalKey, message, requestId, {
+      taskId,
       requestEnvelope,
       intentClassification,
       budget,
       budgetState,
+      taskBudgetRuntime,
     })
     if (!result.success) {
       this.sessions.setState(taskKey, 'failed', result.error)
@@ -182,11 +187,13 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     message: string | MultimodalBlock[],
     sessionId?: string,
     requestId?: string,
+    taskId?: string,
     systemPrompt?: string,
     requestEnvelope?: RequestEnvelope,
     intentClassification?: IntentClassification,
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
+    taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
   ): Promise<SendAndCollectResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -199,6 +206,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     cleanupFns.push(() => this.off('error', collector.handleError))
 
     let executionDiagnostics: ExecutionHostResult['executionDiagnostics'] | null = null
+    let resolvedTaskId: ExecutionHostResult['taskId']
     let taskType: ExecutionHostResult['taskType']
     let interactionState: ExecutionHostResult['interactionState']
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
@@ -207,13 +215,16 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       message,
       sessionId,
       requestId,
+      taskId,
       systemPrompt,
       requestEnvelope,
       intentClassification,
       budget,
       budgetState,
+      taskBudgetRuntime,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
+      resolvedTaskId = result.taskId
       taskType = result.taskType
       interactionState = result.interactionState
       taskProjectionId = result.taskProjectionId
@@ -237,6 +248,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       const result = await collector.result
       return {
         ...result,
+        taskId: resolvedTaskId || undefined,
         taskType,
         interactionState,
         taskProjectionId,
@@ -255,11 +267,13 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       request.message as string | MultimodalBlock[],
       request.sessionId,
       request.requestId,
+      request.taskId,
       request.systemPrompt,
       request.requestEnvelope,
       request.intentClassification,
       request.budget,
       request.budgetState,
+      request.taskBudgetRuntime,
     )
     return {
       success: result.success,
@@ -267,7 +281,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       cancelled: result.cancelled,
       usedTools: result.usedTools,
       error: result.error,
+      taskId: result.taskId,
       budgetState: request.budgetState,
+      taskBudgetRuntime: result.executionDiagnostics?.taskBudgetRuntime || request.taskBudgetRuntime,
       taskType: result.taskType,
       interactionState: result.interactionState,
       taskProjectionId: result.taskProjectionId,

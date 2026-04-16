@@ -52,9 +52,27 @@ export interface TaskBudget {
   maxToolCalls: number
   maxParallelToolGroups: number
   stepBudget?: {
+    stepId?: string | null
     maxIterations: number
     remainingIterations?: number
   } | null
+}
+
+export type BudgetWarningLevel = 'none' | 'warning' | 'converge' | 'exhausted'
+
+export interface StepBudgetState {
+  stepId?: string | null
+  maxIterations: number
+  remainingIterations: number
+}
+
+export interface TaskBudgetRuntime {
+  taskType: TaskType
+  budget: RunBudgetSeed
+  usage: RunBudgetUsage
+  stepBudget: StepBudgetState | null
+  warningLevel: BudgetWarningLevel
+  frozen: boolean
 }
 
 export interface RecoveryRecord {
@@ -95,6 +113,20 @@ export interface TaskTypeResolution {
   preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'none'
 }
 
+export interface TaskExecutionRoute {
+  taskId: string
+  taskType: TaskType
+  chain: TaskTypeResolution['executionChain']
+  executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu'
+  steps: TaskStep[]
+  degradationReason?: string | null
+  continuation?: {
+    taskId: string
+    module?: TaskProjectionRecord['module']
+    continuationRef?: ScopeRunTaskContinuation | null
+  } | null
+}
+
 export interface UnifiedTaskState {
   taskId: string
   runId?: string | null
@@ -121,7 +153,9 @@ export interface TaskProjectionRecord {
   currentStepId?: string | null
   budget?: TaskBudget | null
   budgetUsagePercent?: number | null
+  budgetWarningLevel?: BudgetWarningLevel | null
   recoveryHistory?: RecoveryRecord[]
+  degradationReason?: string | null
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableAction[]
   continuationRef?: ScopeRunTaskContinuation | null
@@ -154,6 +188,8 @@ export interface RunBudgetHint {
 }
 
 export interface ExecutionRunDiagnostics {
+  taskId?: string | null
+  taskBudgetRuntime?: TaskBudgetRuntime | null
   compression?: {
     historyCompressed: boolean
     toolTraceCompressed: boolean
@@ -161,10 +197,12 @@ export interface ExecutionRunDiagnostics {
   } | null
   budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null
   stepBudget?: {
+    stepId?: string | null
     maxIterations?: number
     remainingIterations?: number
   } | null
   budgetUsagePercent?: number | null
+  budgetWarningLevel?: BudgetWarningLevel | null
   fallback?: {
     happened: boolean
     kind: string
@@ -188,6 +226,7 @@ export interface RunCoordinatorRequest {
   scope: ConversationScope
   message: RunMessage
   requestId?: string
+  taskId?: string
   budget?: RunBudgetSeed
 }
 
@@ -200,12 +239,14 @@ export interface ExecutionHostRequest {
   agent: string
   sessionId?: string
   requestId?: string
+  taskId?: string
   systemPrompt?: string
   message: RunMessage
   requestEnvelope?: RequestEnvelope
   intentClassification?: IntentClassification
   budget?: RunBudgetSeed
   budgetState?: RunBudgetUsage
+  taskBudgetRuntime?: TaskBudgetRuntime
 }
 
 export interface ExecutionHostResult {
@@ -214,7 +255,9 @@ export interface ExecutionHostResult {
   cancelled: boolean
   usedTools: string[]
   error?: string
+  taskId?: string | null
   budgetState?: RunBudgetUsage
+  taskBudgetRuntime?: TaskBudgetRuntime
   taskType?: TaskType
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null

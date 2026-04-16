@@ -17,5 +17,6 @@ test('task panel exposes continue and retry actions from task projections', () =
   assert.match(source, /setInputValue\(draft\)/)
   assert.match(source, /继续任务/)
   assert.match(source, /重试任务/)
+  assert.match(source, /Task ID:/)
   assert.match(source, /Execution ID:/)
 })

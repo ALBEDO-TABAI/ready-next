@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-03-31
+> 更新时间: 2026-04-16
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -173,9 +173,10 @@ Ready 采用 Electron 三层架构：
 - 本地会话：`runtime.sendScoped -> RunCoordinator -> orchestrator.executeAndCollect -> DirectChatEngine`
 - 远程消息：channel coalesce / scope 建立仍在 runtime，真正执行改为 `RunCoordinator.runInboundChannel`
 - `RunCoordinator` 是当前单轮执行 owner；`runtime` 不再直接内联 prompt assembly + sendAndCollect + outcome writeback 这整段链路
-- 阶段 5 第一轮已开始：`RunCoordinator` 现在会为每轮执行创建统一 budget seed，并把 `budget / budgetState` 传给 execution host
-- execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，预算不再只停留在 planning 层字段
-- 浏览器 / 文档 / 设计三条子域当前给出的 budget hint 也已经会被主流程实际消费，而不是只停留在建议接口。
+- 现在每轮启动时都会先生成稳定 `taskId`；`RunCoordinator -> execution host -> RunProjection -> TaskProjectionStore` 已统一按 `taskId` 串联，`runId` 只保留单次执行实例语义
+- 阶段 5 第二轮已落地：`RunCoordinator` 现在会为每轮执行创建统一任务预算，并把 `budget / budgetState / taskId` 一起传给 execution host
+- execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，并能带回步骤预算、预算预警和降级原因
+- 浏览器 / 文档 / 设计三条子域当前给出的 budget hint 也已经会被主流程实际消费，但语义已收口为“给当前步骤补 headroom”，不再直接抬高全局预算上限
 
 ### 5.1 原生工具调用
 - Anthropic 协议走 `messages` + `tool_use/tool_result`
@@ -243,38 +244,75 @@ Ready 采用 Electron 三层架构：
   - widget / 文档格式 / 章节改写这类规则该怎么选
 - 这一步同时修正了浏览器工具可见性的判断时机，不再用浏览器决策尚未准备好的旧值去做过滤。
 
+### 5.6b.1 正式任务路由
+- `TaskTypeResolver` 现在不再只是分类器；主链新增 `task-execution-router`，会把 `taskType / executionChain / preferredExecutor / degradationReason` 真正转换成执行路线。
+- 当前固定执行链为：
+  - `direct`：简单直答，不进入工具循环
+  - `tool_loop`：短任务与 RSS / Calendar / Feishu 轻执行器共用增强版工具循环
+  - `planner`：多步任务先生成结构化步骤，再推进后续执行
+  - `domain_executor`：Browser / Document / Skill 重执行器
+  - `continuation`：优先从 `TaskProjectionStore + 模块持久化` 恢复
+- 最小 `StepPlanner` 当前只负责产出结构化步骤骨架：`id / description / toolHints / budget / dependsOn`
+- continuation 恢复失败时不会再静默回到普通工具循环，而是会显式记录 `degradationReason`，然后再降级到 `short_task` 或 `direct_answer`
+
 ### 5.6c Prompt 压缩
 - `context-compression` 当前先负责 prompt 侧压缩 helper。
 - 第一轮已正式接入超长历史摘要压缩，并会通过 `PromptAssemblyResult.compression` 回传压缩报告。
 - 这些压缩结果只影响发给模型的 prompt，不会覆盖前台任务卡的 `taskTitle / taskSummary / steps`。
 
 ### 5.6d 安全并行工具
-- `tool-parallelism-policy` 当前使用显式 allowlist 判断哪些工具可以并行。
-- 第一轮只放开只读、无副作用、无顺序依赖的工具，例如：
-  - `document_list_widgets`
-  - `memory_search / memory_list_recent`
-  - `session_search`
-  - `rss_capture_session`
-  - `skill_get_state / skill_rss_status / skill_rss_list / skill_rss_stats`
-- `ExecutionLoopOrchestrator.executeToolCalls()` 已开始按批并行执行这些工具，并保持结果回收顺序稳定。
+- `tool-parallelism-policy` 已从显式 allowlist 收口到资源域标签：
+  - `domain`: `browser | document | rss | calendar | feishu | skill | memory | session | system`
+  - `accessMode`: `read | write | interactive`
+- 当前并行规则为：
+  - `interactive` 永远串行
+  - 同域且任一为 `write` 时串行
+  - 跨域且无 `interactive` 时可并行
+  - 全 `read` 时可并行
+  - 全局并行上限 `5`
+- `ExecutionLoopOrchestrator.executeToolCalls()` 已开始按资源域批次执行工具，并保持结果回收顺序稳定。
+- 连续恢复或运行时压力升高时，执行层会主动降为串行批，避免工具批次继续放大抖动。
 - 当本轮剩余工具预算不足时，执行层会在边界处停下，并把“预算已达上限”的状态留给主流程统一收尾。
 - 当某个工具批次已经把本轮预算打满时，主流程会在这一轮末尾直接停下，不再继续请求下一轮模型响应。
+
+### 5.6e 三层预算运行时
+- 当前预算真相已从单层计数器升级为三层：
+  - `TaskBudget`
+  - `StepBudget`
+  - 单轮 `IterationBudget / usage`
+- 预算预警固定为：
+  - `70%`：warning
+  - `90%`：converge，会向模型注入收敛提醒
+  - `100%`：exhausted，停止新一轮请求并交付部分结果摘要
+- 纯 `read` 工具轮次会退还当前步骤的 iteration 消耗，但不会退还工具调用数。
+- `suspended` 会冻结预算；`resuming` 会从冻结点继续，不会重置消耗。
+- 前台任务卡与 `TaskPanel` 当前都可以读到：
+  - `budgetUsagePercent`
+  - `stepBudget`
+  - `budgetWarningLevel`
+  - `degradationReason`
 
 ### 5.7 Planning 投影
 - `RunCoordinator` 在 planning 阶段已开始直接输出正式 `taskTitle / taskSummary`。
 - 命中 trigger 的任务在前台会更早拿到结构化任务标题，不再只看到一条泛化准备态文本。
 - planning 事件现在也会携带次级诊断信息，例如：
   - prompt compression 是否发生
+  - 本轮 taskId 是多少
   - 本轮 budget seed 是多少
   - 本轮 fallback 是否发生、是什么类型、已重试几次
 - 这些字段只用于诊断保留，不会顶掉前台任务卡的主标题和主摘要。
-- 一轮执行结束后，`RunCoordinator` 也会补一次 execution diagnostics 更新，把本轮真实的 budget usage 写回前台状态层。
+- 一轮执行结束后，`RunCoordinator` 也会补一次 execution diagnostics 更新，把本轮真实的 budget usage、step budget、budget warning 和 degradation reason 写回前台状态层。
 
 ### 5.8 文档任务结构化投影
 - 文档 deterministic flow 在完成时已开始输出正式结构化任务字段。
 - 主进程 scope run 事件现在不只接受浏览器模块的结构化任务结果，也能接住文档与设计模块的结构化任务结果。
 - 文档与设计工具循环在“阻塞 / 完成”关键节点也已开始主动输出结构化任务字段，进一步减少前台只靠自然语言猜状态的比例。
 - renderer 侧已补上文档/设计任务卡的显式回归测试，确保任务卡不再默认“有步骤的任务主要是浏览器或 skill”。
+
+### 5.9 Task Projection 与继续任务
+- `TaskProjectionStore` 当前是正式任务看板主表，但只负责任务投影，不承担浏览器或 skill 的内部执行细节。
+- Browser / Skill continuation 现在会先通过 `taskId` 找到对应 projection，再跳模块内部持久化恢复细节，不再直接靠 `sessionId` 猜最近任务。
+- `TaskPanel` 和聊天任务卡生成的继续/重试草稿现在都会显式带上 `Task ID`，便于后续轮次精确恢复到正确任务。
 
 ## 6. Browser Agent V7
 ### 6.1 核心原则
@@ -417,11 +455,17 @@ Ready 采用 Electron 三层架构：
 - `document-engine` 的深读热路径已先异步化：`readDocxRawText` 与 `readDocumentEditableText` 现在改为异步读取，优先降低这条 pipeline 在主进程上的阻塞风险
 - `DocumentTaskPipeline` 的 insight 阶段完成文案现在会补上关键指标，例如本轮共切了多少片段、实际使用了多少片段、是否命中缓存；当前任务卡已可直接消费这类阶段摘要
 - 文档深读相关指标也已正式进入 `executionDiagnostics.pipeline.document`，供 renderer 状态层和任务卡稳定消费，而不再只依赖摘要文本解析
+- 文档主进程的通用读取入口也已继续异步化：`document:read`、`document:list`、`document:parseDocx`、`document:parseXlsx` 现在改为异步 fs 读取，进一步降低打开和解析大文档时的阻塞风险
 - `system_run_openclaw` 与文档 format/rewrite 的 deterministic 直通现在统一走 `host-capability-dispatcher`，不再在 `direct-chat.ts` 里各自手写 host-only 分支
 - `ToolGateway` 继续只负责 registry 真相：已补上 group 级 schema/query 与 dynamic source 标记，`skills` 组会把静态 execution control 和运行期 skill action 一起输出
 - AI 设置页“能力分组”的当前状态改为读取 agent runtime 返回的 capability runtime snapshot；renderer 只负责展示，不再自己猜飞书/浏览器可用性
 - OpenAI `chat/completions` / `responses` 发请求前都会修复缺失的 tool response history，避免 `tool_call_id` 400
 - `need_agent_result` blocker 会自动注入文本类 source materials 正文，而不是只告诉模型文件路径
+- Agent continuation 现已优先按 `Task ID` 恢复任务投影：聊天任务卡和右侧 `TaskPanel` 生成的继续/重试草稿都会显式带上 `Task ID`，主循环不再强依赖“继续/恢复”关键词猜测要恢复哪个任务
+- `RunCoordinator -> ClaudeSdkOrchestrator -> DirectChatEngine` 现已开始透传 `TaskBudgetRuntime`：任务预算、当前步骤预算、warning level 和 frozen state 会统一进入 `executionDiagnostics`，供 `ScopeRunSummary / task_projections / ChatPanel / TaskPanel` 共用
+- `intent-classifier` 与 `task-type-resolver` 已补齐 `skill` 域：显式 skill / workflow / blocker 请求会进入正式 skill executor 路径，不再只靠 skill tool allowlist 在通用循环里碰运气
+- `direct-chat` 里的文档深读后制卡 pipeline 已开始受正式任务路由约束：只有 document executor 路径命中时才会进入这条 deterministic pipeline，避免继续漂成主循环前置特例
+- `RecoveryRouter` 现在会产出稳定的重试元数据：`rate_limit / transient` 使用 `350ms` 起步、最大 `8s`、最多 `3` 次的指数抖动退避；一旦出现恢复记录或预算进入 warning，`ExecutionLoopOrchestrator` 会把后续工具批次自动降为串行
 
 ## 9. 开发约定
 ### 9.1 新增跨进程功能的最小闭环

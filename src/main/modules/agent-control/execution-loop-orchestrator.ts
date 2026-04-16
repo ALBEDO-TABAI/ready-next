@@ -3,7 +3,12 @@ import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/ex
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
-import { canUseParallelToolGroup, getRemainingToolCallBudget } from './run-budget-policy'
+import {
+  canUseParallelToolGroup,
+  getBudgetUsagePercent,
+  getBudgetWarningLevel,
+  getRemainingToolCallBudget,
+} from './run-budget-policy'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage } from './run-contracts'
 
 interface APIResponseLike {
@@ -125,6 +130,7 @@ export class ExecutionLoopOrchestrator {
     const results: ToolExecutionResult[] = []
     const recoveryHistory: RecoveryRecord[] = []
     let budgetLimited = false
+    let shouldSerializeRemainingGroups = false
 
     for (const group of groups) {
       const remainingToolCalls = params.budget && params.budgetState
@@ -138,9 +144,15 @@ export class ExecutionLoopOrchestrator {
       if (limitedToolCalls.length < group.toolCalls.length) {
         budgetLimited = true
       }
-      const effectiveMode = group.mode === 'parallel' && params.budget && params.budgetState && !canUseParallelToolGroup(params.budget, params.budgetState)
-        ? 'serial'
-        : group.mode
+      const budgetWarningLevel = params.budget && params.budgetState
+        ? getBudgetWarningLevel(getBudgetUsagePercent(params.budget, params.budgetState))
+        : 'none'
+      const effectiveMode = group.mode === 'parallel'
+        && !shouldSerializeRemainingGroups
+        && budgetWarningLevel === 'none'
+        && !(params.budget && params.budgetState && !canUseParallelToolGroup(params.budget, params.budgetState))
+        ? 'parallel'
+        : 'serial'
       params.onGroupStart?.({ mode: effectiveMode, toolCalls: limitedToolCalls })
       if (effectiveMode === 'parallel') {
         const settled = await Promise.allSettled(limitedToolCalls.map((toolCall) =>
@@ -157,6 +169,9 @@ export class ExecutionLoopOrchestrator {
             result: item.value.result,
           })
           recoveryHistory.push(...item.value.recoveryHistory)
+          if (item.value.recoveryHistory.length > 0) {
+            shouldSerializeRemainingGroups = true
+          }
         }
         continue
       }
@@ -170,6 +185,9 @@ export class ExecutionLoopOrchestrator {
           result: executedTool.result,
         })
         recoveryHistory.push(...executedTool.recoveryHistory)
+        if (executedTool.recoveryHistory.length > 0) {
+          shouldSerializeRemainingGroups = true
+        }
       }
     }
 
@@ -214,12 +232,11 @@ export class ExecutionLoopOrchestrator {
           return { error, recoveryHistory }
         }
 
-        const maxRetries = classified.kind === 'timeout_model' ? 1 : 3
-        if (plan.shouldRetry && nextAttempt <= maxRetries) {
+        if (plan.shouldRetry && nextAttempt <= plan.maxAttempts) {
           retryCounts[classified.kind] = nextAttempt
           pendingRecoveries.push({ result: classified as KnownExecutionErrorResult, attempt: nextAttempt })
           await params.onBeforeRetry?.(classified, nextAttempt)
-          const retryDelayMs = Math.max(0, plan.retryDelayMs || 0)
+          const retryDelayMs = Math.max(0, this.resolveRetryDelayMs(plan, nextAttempt))
           if (retryDelayMs > 0) {
             await this.sleep(retryDelayMs)
           }
@@ -302,5 +319,20 @@ export class ExecutionLoopOrchestrator {
 
   private now(): string {
     return this.deps.now ? this.deps.now() : new Date().toISOString()
+  }
+
+  private resolveRetryDelayMs(
+    plan: ReturnType<typeof buildRecoveryPlan>,
+    attempt: number,
+  ): number {
+    const baseDelayMs = Math.max(0, plan.retryDelayMs || 0)
+    if (baseDelayMs <= 0) return 0
+    if (plan.backoff !== 'exponential_jitter') {
+      return baseDelayMs
+    }
+    const exponential = Math.min(8_000, baseDelayMs * Math.pow(2, Math.max(0, attempt - 1)))
+    const jitterFloor = Math.max(350, Math.round(exponential * 0.75))
+    const jitterRange = Math.max(1, exponential - jitterFloor)
+    return Math.min(8_000, jitterFloor + Math.floor(Math.random() * jitterRange))
   }
 }
