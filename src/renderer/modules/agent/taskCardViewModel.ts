@@ -4,6 +4,7 @@ import type {
   ScopeRunState,
   ToolTraceEvent,
 } from './types'
+import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
 
@@ -23,6 +24,10 @@ export interface TaskCardRunLike {
   taskContinuation?: ScopeRunState['taskContinuation']
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunState['executionDiagnostics']
+  taskType?: TaskProjectionRecordData['taskType']
+  interactionState?: TaskProjectionRecordData['interactionState']
+  budgetUsagePercent?: number | null
+  recoveryHistory?: RecoveryRecordData[]
   blockedReason?: string | null
   error?: string | null
   updatedAt: string

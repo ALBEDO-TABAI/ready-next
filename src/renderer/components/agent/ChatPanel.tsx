@@ -45,6 +45,7 @@ import {
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
+import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -85,6 +86,8 @@ interface PersistedScopeRunSummary {
   error?: string | null
   updatedAt: string
 }
+
+type PersistedTaskProjection = TaskProjectionRecordData
 
 interface TaskCardRun extends TaskCardRunLike {
   responseMessageId?: string | null
@@ -336,6 +339,67 @@ function taskPhaseLabel(phase: ScopeRunState['phase']): string {
   return '待处理'
 }
 
+function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined): string {
+  switch (taskType) {
+    case 'direct_answer':
+      return '直答'
+    case 'short_task':
+      return '短任务'
+    case 'multi_step_task':
+      return '多步任务'
+    case 'media_task':
+      return '媒体任务'
+    case 'continuation':
+      return '继续任务'
+    default:
+      return '任务'
+  }
+}
+
+function interactionStateBadgeLabel(
+  interactionState: TaskCardRun['interactionState'] | undefined
+): string {
+  switch (interactionState) {
+    case 'awaiting_clarification':
+      return '等补充'
+    case 'awaiting_confirmation':
+      return '等确认'
+    case 'human_takeover':
+      return '人工接手'
+    case 'suspended':
+      return '已暂停'
+    case 'resuming':
+      return '恢复中'
+    case 'running':
+      return '执行中'
+    default:
+      return '进行中'
+  }
+}
+
+function recoveryBadgeLabel(recoveryHistory: RecoveryRecordData[]): string {
+  const latest = recoveryHistory[recoveryHistory.length - 1]
+  if (!latest) return '自动恢复'
+  switch (latest.kind) {
+    case 'rate_limit':
+      return '限流恢复'
+    case 'context_overflow':
+      return '压缩恢复'
+    case 'timeout_model':
+      return '模型超时恢复'
+    case 'timeout_tool':
+      return '工具超时恢复'
+    case 'auth':
+      return '认证恢复'
+    case 'transient':
+      return '重试恢复'
+    case 'host_unavailable':
+      return '宿主降级'
+    default:
+      return '自动恢复'
+  }
+}
+
 function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
   if (!run) return false
   return Boolean(
@@ -388,6 +452,16 @@ function TaskCard({
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const collapsedSummary = vm.summary
+  const metaBadges = [
+    run.taskType ? taskTypeBadgeLabel(run.taskType) : null,
+    run.interactionState && run.interactionState !== 'running'
+      ? interactionStateBadgeLabel(run.interactionState)
+      : null,
+    run.budgetUsagePercent != null ? `预算 ${Math.round(run.budgetUsagePercent)}%` : null,
+    run.recoveryHistory && run.recoveryHistory.length > 0
+      ? recoveryBadgeLabel(run.recoveryHistory)
+      : null
+  ].filter(Boolean) as string[]
   const renderSectionButton = (sectionKey: TaskSectionKey) => {
     const section = vm.sections[sectionKey]
     if (section.count <= 0) return null
@@ -471,6 +545,25 @@ function TaskCard({
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
             {expanded ? vm.summary : collapsedSummary}
           </div>
+          {metaBadges.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" style={{ marginTop: 6 }}>
+              {metaBadges.map((badge) => (
+                <span
+                  key={badge}
+                  style={{
+                    padding: '3px 7px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border-default)',
+                    fontSize: 10,
+                    color: 'var(--text-light)',
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)'
+                  }}
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          )}
           {expanded && vm.currentStep && (
             <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
               当前步骤：{vm.currentStep.title}
@@ -1509,6 +1602,9 @@ export default function ChatPanel() {
   const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
   const [persistedScopeRuns, setPersistedScopeRuns] = useState<PersistedScopeRunSummary[]>([])
+  const [persistedTaskProjections, setPersistedTaskProjections] = useState<
+    Record<string, PersistedTaskProjection[]>
+  >({})
   const [sessionRecallQuery, setSessionRecallQuery] = useState('')
   const [sessionRecallResults, setSessionRecallResults] = useState<SessionRecallHit[]>([])
   const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
@@ -1622,6 +1718,27 @@ export default function ChatPanel() {
     if (!result?.success || !Array.isArray(result.data)) return
     setPersistedScopeRuns(result.data as PersistedScopeRunSummary[])
   }, [selectedChannelKey])
+
+  const refreshPersistedTaskProjections = useCallback(async () => {
+    if (!window.electronAPI?.agent?.listTaskProjections) {
+      setPersistedTaskProjections({})
+      return
+    }
+    if (filteredScopes.length === 0) {
+      setPersistedTaskProjections({})
+      return
+    }
+    const entries = await Promise.all(
+      filteredScopes.map(async (scope) => {
+        const result = await window.electronAPI.agent.listTaskProjections(scope.id).catch(() => null)
+        if (!result?.success || !Array.isArray(result.data)) {
+          return [scope.id, []] as const
+        }
+        return [scope.id, result.data as PersistedTaskProjection[]] as const
+      })
+    )
+    setPersistedTaskProjections(Object.fromEntries(entries))
+  }, [filteredScopes])
 
   const refreshAttachedSessionRecall = useCallback(async (scopeId?: string | null) => {
     if (!scopeId || !window.electronAPI?.agent?.listAttachedSessionRecallContexts) {
@@ -1768,31 +1885,47 @@ export default function ChatPanel() {
   }, [filteredScopes, scopeRunStates])
 
   const mergedTaskRuns = useMemo<TaskCardRun[]>(() => {
-    const mappedPersisted = persistedScopeRuns.map((run) => ({
-      scopeId: run.scopeId,
-      phase: run.phase,
-      title: run.title,
-      taskTitle: run.taskTitle,
-      taskSummary: run.taskSummary,
-      steps: run.steps,
-      currentStepId: run.currentStepId,
-      waitingFor: run.waitingFor,
-      resumableActions: run.resumableActions,
-      recentArtifacts: run.recentArtifacts,
-      taskContinuation: run.taskContinuation,
-      memoryCapture: run.memoryCapture,
-      blockedReason: run.blockedReason,
-      error: run.error,
-      updatedAt: run.updatedAt,
-      toolTrace: []
-    }))
+    const mappedPersisted = persistedScopeRuns.map((run) => {
+      const projection = persistedTaskProjections[run.scopeId]?.[0]
+      return {
+        scopeId: run.scopeId,
+        phase: run.phase,
+        title: run.title,
+        taskTitle: run.taskTitle,
+        taskSummary: run.taskSummary,
+        steps: run.steps,
+        currentStepId: run.currentStepId,
+        waitingFor: run.waitingFor,
+        resumableActions: run.resumableActions,
+        recentArtifacts: run.recentArtifacts,
+        taskContinuation: run.taskContinuation,
+        memoryCapture: run.memoryCapture,
+        taskType: projection?.taskType,
+        interactionState: projection?.interactionState,
+        budgetUsagePercent: projection?.budgetUsagePercent,
+        recoveryHistory: projection?.recoveryHistory,
+        blockedReason: run.blockedReason,
+        error: run.error,
+        updatedAt: run.updatedAt,
+        toolTrace: []
+      }
+    })
     const merged = new Map<string, TaskCardRun>()
     for (const run of mappedPersisted) merged.set(run.scopeId, run)
-    for (const run of inMemoryTaskRuns) merged.set(run.scopeId, run)
+    for (const run of inMemoryTaskRuns) {
+      const projection = persistedTaskProjections[run.scopeId]?.[0]
+      merged.set(run.scopeId, {
+        ...run,
+        taskType: projection?.taskType,
+        interactionState: projection?.interactionState,
+        budgetUsagePercent: projection?.budgetUsagePercent,
+        recoveryHistory: projection?.recoveryHistory
+      })
+    }
     return Array.from(merged.values()).sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     )
-  }, [inMemoryTaskRuns, persistedScopeRuns])
+  }, [inMemoryTaskRuns, persistedScopeRuns, persistedTaskProjections])
 
   const currentTaskRun = useMemo(() => {
     const currentRun = currentScopeId
@@ -2016,6 +2149,10 @@ export default function ChatPanel() {
   useEffect(() => {
     void refreshPersistedScopeRuns()
   }, [refreshPersistedScopeRuns, currentScopeId, scopes.length])
+
+  useEffect(() => {
+    void refreshPersistedTaskProjections()
+  }, [refreshPersistedTaskProjections, currentScopeId, persistedScopeRuns])
 
   useEffect(() => {
     return () => {

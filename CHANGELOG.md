@@ -15,6 +15,7 @@
 - 新增 `task_projections` 轻量任务看板表、repository 与同步器，运行中的任务摘要开始从 `ScopeRunSummary` 投影到独立持久层
 - 主进程新增 `agent:listTaskProjections / agent:getTaskProjection`，preload 与 renderer 类型同步补齐，前台可以正式读取任务投影而不只靠旧的 run summary
 - Ready 右侧 `TaskPanel` 已开始展示当前会话最近任务的任务类型、交互状态、预算进度与自动恢复记录；即使 live run 暂时不在内存里，也能读回最近任务步骤
+- ChatPanel 里的任务卡也开始并入任务投影：持久任务与当前任务卡会补上任务类型、交互状态、预算占用和自动恢复提示，不再只显示旧摘要
 
 #### 文档深读后制卡 MVP
 - 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt
