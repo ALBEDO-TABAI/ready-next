@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Send } from 'lucide-react'
 import {
   useAgent,
@@ -311,6 +311,40 @@ export default function TaskPanel() {
     setInputValue('')
   }
 
+  const handleContinueProjection = useCallback(() => {
+    if (!activeProjection?.continuationRef) return
+    const draft = [
+      '继续当前任务。',
+      activeProjection?.continuationRef?.executionId
+        ? `Execution ID: ${activeProjection.continuationRef.executionId}`
+        : null,
+      activeProjection?.continuationRef?.stepId
+        ? `Step ID: ${activeProjection.continuationRef.stepId}`
+        : null,
+      activeProjection?.blockedReason ? `当前阻塞：${activeProjection.blockedReason}` : null,
+      '我的补充是：'
+    ]
+      .filter(Boolean)
+      .join('\n')
+    setInputValue(draft)
+  }, [activeProjection, setInputValue])
+
+  const handleRetryProjection = useCallback(() => {
+    if (!(activeProjection?.resumableActions || []).includes('retry')) return
+    const draft = [
+      '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
+      activeProjection?.continuationRef?.executionId
+        ? `Execution ID: ${activeProjection.continuationRef.executionId}`
+        : null,
+      activeProjection?.continuationRef?.stepId
+        ? `Step ID: ${activeProjection.continuationRef.stepId}`
+        : null
+    ]
+      .filter(Boolean)
+      .join('\n')
+    setInputValue(draft)
+  }, [activeProjection, setInputValue])
+
   const phaseColors = phaseTone(activeRun?.phase)
   const projectionColors = projectionStatusTone(activeProjection?.status)
 
@@ -490,6 +524,30 @@ export default function TaskPanel() {
                 >
                   {activeRun?.blockedReason || activeProjection?.blockedReason}
                 </div>
+              </div>
+            )}
+            {activeProjection && (
+              <div className="flex flex-wrap gap-1.5">
+                {activeProjection?.continuationRef && (
+                  <button
+                    type="button"
+                    onClick={handleContinueProjection}
+                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                  >
+                    继续任务
+                  </button>
+                )}
+                {(activeProjection?.resumableActions || []).includes('retry') && (
+                  <button
+                    type="button"
+                    onClick={handleRetryProjection}
+                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
+                  >
+                    重试任务
+                  </button>
+                )}
               </div>
             )}
             {projectionRecoveryHistory.length > 0 && (

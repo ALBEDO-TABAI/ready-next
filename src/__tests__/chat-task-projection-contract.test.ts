@@ -17,6 +17,8 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(chatPanel, /interactionState:\s*projection\?\.interactionState/)
   assert.match(chatPanel, /budgetUsagePercent:\s*projection\?\.budgetUsagePercent/)
   assert.match(chatPanel, /recoveryHistory:\s*projection\?\.recoveryHistory/)
+  assert.match(chatPanel, /taskContinuation:\s*run\.taskContinuation \|\| projection\?\.continuationRef \|\| null/)
+  assert.match(chatPanel, /resumableActions:\s*\(run\.resumableActions && run\.resumableActions\.length > 0\)\s*\?\s*run\.resumableActions\s*:\s*\(projection\?\.resumableActions \|\| \[\]\)/)
   assert.match(chatPanel, /function taskTypeBadgeLabel\(/)
   assert.match(chatPanel, /function interactionStateBadgeLabel\(/)
   assert.match(chatPanel, /function recoveryBadgeLabel\(/)

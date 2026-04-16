@@ -1896,9 +1896,12 @@ export default function ChatPanel() {
         steps: run.steps,
         currentStepId: run.currentStepId,
         waitingFor: run.waitingFor,
-        resumableActions: run.resumableActions,
+        resumableActions:
+          (run.resumableActions && run.resumableActions.length > 0)
+            ? run.resumableActions
+            : (projection?.resumableActions || []),
         recentArtifacts: run.recentArtifacts,
-        taskContinuation: run.taskContinuation,
+        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
         memoryCapture: run.memoryCapture,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
@@ -1916,6 +1919,11 @@ export default function ChatPanel() {
       const projection = persistedTaskProjections[run.scopeId]?.[0]
       merged.set(run.scopeId, {
         ...run,
+        resumableActions:
+          (run.resumableActions && run.resumableActions.length > 0)
+            ? run.resumableActions
+            : (projection?.resumableActions || []),
+        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
