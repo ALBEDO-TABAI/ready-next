@@ -1,4 +1,5 @@
 import type { RequestEnvelope } from './request-envelope'
+import { detectLiveInfoIntent } from './live-info-intent'
 
 export type IntentDomain = 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'generic'
 export type IntentConfidence = 'high' | 'medium' | 'low'
@@ -86,6 +87,7 @@ function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
     ...envelope.referencedResources.map((ref) => ref.value),
   ].filter(Boolean).join('\n')
   const signals: DomainSignal[] = []
+  const liveInfoIntent = detectLiveInfoIntent(text)
 
   for (const domain of Object.keys(DOMAIN_OBJECT_PATTERNS) as Array<Exclude<IntentDomain, 'generic'>>) {
     const objectResult = collectSignals(text, DOMAIN_OBJECT_PATTERNS[domain])
@@ -113,6 +115,18 @@ function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
     }
     if (score <= 0) continue
     signals.push({ domain, score, signals: dedupe(domainSignals) })
+  }
+
+  if (liveInfoIntent.needsLiveInfo) {
+    const liveInfoSignals = liveInfoIntent.signals.map((signal) => `browser-live-info-${signal}`)
+    signals.push({
+      domain: 'browser',
+      score: liveInfoIntent.confidence === 'high' ? 6 : 4,
+      signals: dedupe([
+        'browser-live-info-object',
+        ...liveInfoSignals,
+      ]),
+    })
   }
 
   return signals

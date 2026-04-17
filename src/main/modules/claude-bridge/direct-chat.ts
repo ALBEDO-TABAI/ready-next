@@ -205,6 +205,7 @@ interface APIResponse {
   toolTransport?: 'native' | 'text'
   fallback?: ExecutionFallbackInfo
   recoveryHistory?: RecoveryRecord[]
+  toolSnapshots?: import('../agent-control/run-contracts').ToolSnapshot[]
 }
 
 export interface MultimodalBlock {
@@ -948,8 +949,23 @@ export class DirectChatEngine extends EventEmitter {
         session: DirectChatSession
         signal: AbortSignal
         toolPolicy: unknown
+        allowedToolNames?: string[] | null
+        hasTools?: boolean
+        allowBrowserTools?: boolean
         providerContext: TurnProviderContext
         hasVideoInputs: boolean
+        browserDecisionMode?: string | null
+        runtimeSnapshot?: {
+          browserHostAvailable?: boolean
+          groups?: Record<string, { status: string }>
+        } | null
+        visibleCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
+        suppressedCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
+        capabilityLogLine?: string | null
+        iteration?: number
+        requestedTransport?: 'native' | 'text' | 'none'
+        supportsNativeTools?: boolean
+        preferTextToolBridgeOnce?: boolean
         compressContext?: () => Promise<boolean> | boolean
         onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
       }) => this.requestToolLoopResponse(raw),
@@ -1040,8 +1056,23 @@ export class DirectChatEngine extends EventEmitter {
     session: DirectChatSession
     signal: AbortSignal
     toolPolicy: unknown
+    allowedToolNames?: string[] | null
+    hasTools?: boolean
+    allowBrowserTools?: boolean
     providerContext: TurnProviderContext
     hasVideoInputs: boolean
+    browserDecisionMode?: string | null
+    runtimeSnapshot?: {
+      browserHostAvailable?: boolean
+      groups?: Record<string, { status: string }>
+    } | null
+    visibleCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
+    suppressedCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
+    capabilityLogLine?: string | null
+    iteration?: number
+    requestedTransport?: 'native' | 'text' | 'none'
+    supportsNativeTools?: boolean
+    preferTextToolBridgeOnce?: boolean
     compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
   }): Promise<TurnModelResponse> {
@@ -1068,6 +1099,22 @@ export class DirectChatEngine extends EventEmitter {
         provider: params.providerContext.provider as ReturnType<typeof getProviderDef>,
         signal: params.signal,
         policy: params.toolPolicy as any,
+        preferTextToolBridgeOnce: params.preferTextToolBridgeOnce,
+        toolSnapshotContext: {
+          iteration: Math.max(0, Number(params.iteration || 0)),
+          browserDecisionMode: params.browserDecisionMode || null,
+          browserHostAvailable: typeof params.runtimeSnapshot?.browserHostAvailable === 'boolean'
+            ? params.runtimeSnapshot.browserHostAvailable
+            : null,
+          hasTools: params.hasTools ?? Boolean(params.allowedToolNames && params.allowedToolNames.length > 0),
+          allowBrowserTools: params.allowBrowserTools ?? Boolean((params.toolPolicy as { allowBrowserTools?: boolean } | null | undefined)?.allowBrowserTools),
+          visibleCapabilityGroupIds: [...(params.visibleCapabilityGroupIds || [])],
+          suppressedCapabilityGroupIds: [...(params.suppressedCapabilityGroupIds || [])],
+          requestedTransport: params.requestedTransport || (params.preferTextToolBridgeOnce ? 'text' : 'native'),
+          supportsNativeTools: params.supportsNativeTools ?? true,
+          preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
+          expectedAllowedToolNames: params.allowedToolNames || [],
+        },
       }),
       compressContext: params.compressContext,
       onBeforeRetry: params.onBeforeRetry as any,

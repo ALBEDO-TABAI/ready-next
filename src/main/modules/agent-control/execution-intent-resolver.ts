@@ -105,6 +105,7 @@ export function buildExecutionToolState(params: {
   browserHostAvailable?: boolean
   feishuConnected?: boolean
 }): { visibilityPlan: ToolVisibilityPlan; toolPolicy: ToolPolicy; capabilityResolution: CapabilityResolution } {
+  const hasLiveInfoBrowserIntent = params.intentClassification.objectSignals.some((signal) => /browser-live-info/i.test(signal))
   const baseVisibilityPlan = buildToolVisibilityPlan({
     supportsToolCalls: params.supportsToolCalls,
     hasVideoInputs: params.hasVideoInputs,
@@ -149,6 +150,7 @@ export function buildExecutionToolState(params: {
       feishuConnected: params.feishuConnected ?? true,
     },
     intentGroupModes: {
+      ...(hasLiveInfoBrowserIntent ? { browser_interaction: true } : {}),
       document: allowDocumentTools,
       rss: allowRSSTools,
       calendar: allowCalendarTools,

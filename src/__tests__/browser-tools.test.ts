@@ -1,7 +1,28 @@
-import { describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert'
+import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+import {
+  __resetSessionContinuityForTests,
+  __setSessionContinuityStoragePathForTests,
+} from '../main/modules/agent-control/session-continuity'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+
+const TEST_CONTINUITY_PATH = join(tmpdir(), 'ready-browser-tools-continuity.json')
+
+beforeEach(() => {
+  __setSessionContinuityStoragePathForTests(TEST_CONTINUITY_PATH)
+  __resetSessionContinuityForTests()
+})
+
+afterEach(() => {
+  __resetSessionContinuityForTests()
+  __setSessionContinuityStoragePathForTests(null)
+  rmSync(TEST_CONTINUITY_PATH, { force: true })
+})
 
 type MockedController = Partial<BrowserController> & {
   calls: {
@@ -291,5 +312,70 @@ describe('browser-tools v2', () => {
 
     assert.strictEqual((JSON.parse(galleryResult) as { taskId?: string }).taskId, 'gallery-task')
     assert.strictEqual((JSON.parse(researchResult) as { taskId?: string }).taskId, 'research-task')
+  })
+
+  it('shares recent browser actions with planner continuity so duplicate work can be suppressed across turns', async () => {
+    const controller = createControllerMock({
+      getActiveTab: () => [{ id: 'tab-1', title: '搜索结果', url: 'https://duckduckgo.com/?q=广州天气', active: true }][0],
+      getPageContent: async () => '广州天气搜索结果',
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('out.sort((a, b) => b.score - a.score)')) return []
+        if (source.includes('window.location.href')) return 'https://duckduckgo.com/?q=广州天气'
+        if (source.includes("document.readyState === 'interactive'")) return true
+        if (source.includes('readyState') && source.includes('bodyTextLen')) {
+          return { readyState: 'complete', bodyTextLen: 200, matched: true }
+        }
+        return []
+      },
+    })
+
+    await executeBrowserTool('browser_search', { query: '广州天气' }, controller, undefined, 'scope-shared')
+
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => ({
+        id: 'tab-1',
+        url: 'https://duckduckgo.com/?q=广州天气',
+        title: '搜索结果',
+        domain: 'duckduckgo.com',
+        active: true,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+        favicon: null,
+      }),
+      getTabContext: async () => ({
+        url: 'https://duckduckgo.com/?q=广州天气',
+        title: '搜索结果',
+        heading: '广州天气',
+        selection: '',
+        excerpt: '广州天气搜索结果',
+        capturedAt: Date.now(),
+        domain: 'duckduckgo.com',
+      }),
+    })
+
+    const decision = planner.decideTask({
+      userText: '明天广州天气怎么样',
+      sessionMessages: [],
+      sessionId: 'scope-shared',
+    })
+    const continuity = await planner.buildContinuityContext({
+      userText: '继续看广州天气',
+      sessionId: 'scope-shared',
+      decision,
+    })
+
+    assert.deepEqual(
+      continuity?.recentActions.map((item) => `${item.kind}:${item.value}`),
+      ['search:广州天气'],
+    )
   })
 })

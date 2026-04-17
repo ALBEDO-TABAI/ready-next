@@ -1,5 +1,6 @@
 import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from './session-continuity'
 import type { BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../shared/browser-agent-task'
+import { detectLiveInfoIntent } from './live-info-intent'
 
 interface PlannerTabLike {
   id: string
@@ -204,6 +205,7 @@ export class BrowserTaskPlanner {
   }
 
   rebuildPlan(decision: BrowserTaskDecision, context?: { sessionId?: string; userText?: string }): BrowserTaskPlan {
+    const liveInfoIntent = detectLiveInfoIntent(String(context?.userText || decision.promptIntent?.raw || ''))
     const links = this.extractLinks(String(context?.userText || decision.promptIntent?.raw || ''))
     const persistedAttachments = (this.deps.getSessionAttachmentResources || (() => []))(context?.sessionId)
     const attachmentResources = persistedAttachments.length > 0
@@ -260,18 +262,34 @@ export class BrowserTaskPlanner {
               : undefined
     )
     const targetSiteHint = !targetUrl && requestedSite ? requestedSite.displayName : undefined
-    const targetSearchQuery = !targetUrl && requestedSite ? requestedSite.searchQuery : undefined
+    const targetSearchQuery = !targetUrl
+      ? requestedSite
+        ? requestedSite.searchQuery
+        : liveInfoIntent.needsLiveInfo
+          ? liveInfoIntent.searchQuery
+          : undefined
+      : undefined
     const siteMayNeedModeSelection = requestedSite?.id === 'jimeng' || requestedSiteHints.includes('jimeng')
 
     if (!targetUrl && targetSearchQuery) {
       const resolveStep = steps.find((step) => step.id === 'resolve_target_page')
       const navigateStep = steps.find((step) => step.id === 'navigate_target')
       if (resolveStep) {
-        resolveStep.action = `用户只给了站点名 ${targetSiteHint}，未提供 URL；先搜索“${targetSearchQuery}”并锁定官方入口，若当前页已是该站点则优先复用当前页。`
-        resolveStep.failIf = Array.from(new Set([...resolveStep.failIf, '无法通过站点搜索锁定唯一官方入口']))
+        resolveStep.failIf = resolveStep.failIf.filter((item) => item !== '没有可用链接')
+        resolveStep.action = requestedSite
+          ? `用户只给了站点名 ${targetSiteHint}，未提供 URL；先搜索“${targetSearchQuery}”并锁定官方入口，若当前页已是该站点则优先复用当前页。`
+          : `这是一个依赖最新外部信息的查询；先搜索“${targetSearchQuery}”，优先锁定权威或最新的结果页，再继续读取与核对。`
+        resolveStep.failIf = Array.from(new Set([
+          ...resolveStep.failIf,
+          requestedSite
+            ? '无法通过站点搜索锁定唯一官方入口'
+            : '无法通过搜索定位到可靠的最新结果页',
+        ]))
       }
       if (navigateStep) {
-        navigateStep.action = '确认官方入口或当前页可复用后再导航，不要在搜索结果和无关页面之间来回跳转。'
+        navigateStep.action = requestedSite
+          ? '确认官方入口或当前页可复用后再导航，不要在搜索结果和无关页面之间来回跳转。'
+          : '确认最新结果页后再导航，不要在搜索结果和无关页面之间来回跳转。'
       }
     }
 
@@ -291,11 +309,17 @@ export class BrowserTaskPlanner {
 
     const expectedOutcome = decision.mode === 'browser_upload_workflow'
       ? '目标页面已挂载指定附件、提示词已进入正确输入区，并且页面已进入生成或处理状态。'
-      : '目标页面已完成用户要求的网页操作。'
+      : liveInfoIntent.needsLiveInfo
+        ? '已从网页读取到与用户问题匹配的最新外部信息，并完成核对。'
+        : '目标页面已完成用户要求的网页操作。'
 
     return {
       taskKind,
-      taskGoal: decision.mode === 'browser_upload_workflow' ? '使用当前会话中的附件，在目标网页中完成上传、填写提示词并提交生成任务。' : '根据用户指令完成网页操作，并按顺序验证结果。',
+      taskGoal: decision.mode === 'browser_upload_workflow'
+        ? '使用当前会话中的附件，在目标网页中完成上传、填写提示词并提交生成任务。'
+        : liveInfoIntent.needsLiveInfo
+          ? '根据用户问题获取最新外部信息，并通过网页结果完成核对。'
+          : '根据用户指令完成网页操作，并按顺序验证结果。',
       expectedOutcome,
       resources: {
         attachments: attachmentResources,
@@ -320,24 +344,28 @@ export class BrowserTaskPlanner {
       requiredStages: steps.map((step) => step.id),
       completionCriteria: decision.mode === 'browser_upload_workflow'
         ? [targetSearchQuery ? `已先解析目标站点：${targetSiteHint}` : '', '已检测到页面级附件证据，例如缩略图、附件 chip、文件名或素材卡片', '提示词已进入最优输入框，或页面上出现同语义文本', '页面已进入生成中、处理中、思考中或队列等待状态'].filter(Boolean)
-        : [targetSearchQuery ? `已先解析目标站点：${targetSiteHint}` : '', '页面已读取并完成目标动作'].filter(Boolean),
+        : [requestedSite ? `已先解析目标站点：${targetSiteHint}` : targetSearchQuery ? `已先完成搜索：${targetSearchQuery}` : '', liveInfoIntent.needsLiveInfo ? '已读取可靠结果页并拿到最新信息' : '页面已读取并完成目标动作'].filter(Boolean),
       skipRules: decision.mode === 'browser_upload_workflow'
         ? [targetSearchQuery ? '用户只提供站点名时，先搜索官方入口；未确认前不要在无关页面跳转' : '', '检测到页面附件证据时跳过上传阶段', '检测到提示词已在输入框时跳过填写阶段', '检测到页面运行态时跳过提交阶段'].filter(Boolean)
-        : [targetSearchQuery ? '用户只提供站点名时，先搜索官方入口；未确认前不要在无关页面跳转' : '', '页面状态已经满足目标时直接结束'].filter(Boolean),
+        : [requestedSite ? '用户只提供站点名时，先搜索官方入口；未确认前不要在无关页面跳转' : targetSearchQuery ? '先锁定最新结果页，再读取结论；未确认来源前不要直接回答' : '', '页面状态已经满足目标时直接结束'].filter(Boolean),
       successCriteria: decision.mode === 'browser_upload_workflow'
         ? [targetSearchQuery ? '已锁定目标站点的唯一官方入口' : '', '任务图已锁定唯一目标页', '任务图已锁定唯一附件', '页面级附件证据已出现', '提示词与 mustUsePrompt 高相似', '页面进入生成中、处理中或排队状态'].filter(Boolean)
-        : [targetSearchQuery ? '已锁定目标站点的唯一官方入口' : '', '当前页面状态满足用户请求'].filter(Boolean),
+        : [requestedSite ? '已锁定目标站点的唯一官方入口' : targetSearchQuery ? '已锁定可靠的最新结果页' : '', liveInfoIntent.needsLiveInfo ? '已读取与问题匹配的最新外部信息' : '当前页面状态满足用户请求'].filter(Boolean),
       failureCriteria: decision.mode === 'browser_upload_workflow'
         ? [targetSearchQuery ? '无法将站点名解析为唯一官方入口，且当前页也不可复用' : '', '无法确认目标页或可用附件', '多次上传后仍没有页面级附件证据', '无法确认 prompt 已写入', '无法确认提交已触发运行态'].filter(Boolean)
-        : [targetSearchQuery ? '无法将站点名解析为唯一官方入口，且当前页也不可复用' : '', '网页状态与用户目标明显不符'].filter(Boolean),
+        : [requestedSite ? '无法将站点名解析为唯一官方入口，且当前页也不可复用' : targetSearchQuery ? '无法定位可靠的最新结果页' : '', '网页状态与用户目标明显不符'].filter(Boolean),
       retryPolicy: decision.mode === 'browser_upload_workflow'
         ? '每个关键步骤有独立重试上限；只有在页面证据不足或恢复成功时才重试。'
-        : '仅在当前页面证据不足时轻量重试。',
+        : liveInfoIntent.needsLiveInfo
+          ? '仅在未确认来源可靠性或页面证据不足时轻量重试。'
+          : '仅在当前页面证据不足时轻量重试。',
       finalCheck: {
         expectedOutcome,
         successCriteria: decision.mode === 'browser_upload_workflow'
           ? ['附件已挂载到页面', '提示词已写入', '页面进入生成或处理态']
-          : ['页面已完成目标动作'],
+          : liveInfoIntent.needsLiveInfo
+            ? ['已读取到最新结果页', '结果与用户问题一致']
+            : ['页面已完成目标动作'],
       },
     }
   }
@@ -388,6 +416,8 @@ export class BrowserTaskPlanner {
     const hasGenerationIntent = /(生成图片|生成新图|生图|图生图|文生图|做图|继续生成|开始生成)/i.test(text)
     const hasExplicitBrowserAction = /(打开|访问|进入|网页|网站|页面|浏览器|即梦|jimeng)/i.test(text)
     const hasContinuationIntent = /^(继续|接着|下一步|继续在)/i.test(text)
+    const requestedSite = this.resolveRequestedBrowserSite(text)
+    const liveInfoIntent = detectLiveInfoIntent(text)
     const activeTab = this.deps.getActiveTab()
     const activeContext = `${activeTab?.title || ''} ${activeTab?.url || ''}`.toLowerCase()
     const activeTabLooksCreative = /(jimeng|即梦|创作|生成|image|图像)/.test(activeContext)
@@ -405,8 +435,10 @@ export class BrowserTaskPlanner {
 
     const effectiveBrowserIntent =
       (hasExplicitBrowserAction && links.length > 0) ||
+      Boolean(requestedSite && hasExplicitBrowserAction) ||
       (attachments.count > 0 && (hasUploadIntent || hasGenerationIntent)) ||
-      (hasContinuationIntent && activeTabLooksCreative)
+      (hasContinuationIntent && activeTabLooksCreative) ||
+      liveInfoIntent.needsLiveInfo
 
     if (!effectiveBrowserIntent) return { mode: 'free_tool_loop', reason: 'no_browser_intent' }
 
@@ -423,7 +455,7 @@ export class BrowserTaskPlanner {
 
     const decision: BrowserTaskDecision = {
       mode: 'browser_workflow',
-      reason: 'generic_browser_workflow',
+      reason: liveInfoIntent.needsLiveInfo ? 'live_information_lookup' : 'generic_browser_workflow',
       attachmentSelection: attachments.count > 0 ? attachments : undefined,
       promptIntent,
     }

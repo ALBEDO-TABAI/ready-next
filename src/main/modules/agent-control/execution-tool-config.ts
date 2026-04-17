@@ -1,5 +1,6 @@
 import {
   defaultToolGateway,
+  type ToolGroupResolutionEntry,
 } from './tool-gateway'
 import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
 import { buildTextToolBridgePrompt } from '../claude-bridge/tool-bridge'
@@ -11,6 +12,7 @@ import {
   type DocumentWidgetProfile,
 } from '../claude-bridge/widget-guidance'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
+import type { ToolResolutionDiagnostics } from './run-contracts'
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
@@ -29,6 +31,12 @@ export interface ToolPolicy {
   visibleCapabilityGroupIds?: CapabilityGroupId[]
   hostOnlyCapabilityGroupIds?: CapabilityGroupId[]
   capabilityReasons?: Partial<Record<CapabilityGroupId, string>>
+}
+
+export interface PolicyOpenAIToolBundle {
+  tools: Array<Record<string, unknown>>
+  toolNames: string[]
+  toolResolution: ToolResolutionDiagnostics
 }
 
 const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
@@ -198,13 +206,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 }
 
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-  const visibleGroupIds = policy?.visibleCapabilityGroupIds
-    && policy.visibleCapabilityGroupIds.length > 0
-    ? policy.visibleCapabilityGroupIds
-    : defaultToolGateway
-      .listCapabilityGroups()
-      .filter((group) => group.exposure === 'model_visible' && group.availability === 'active')
-      .map((group) => group.id)
+  const visibleGroupIds = resolveVisibleGroupIds(policy)
 
   let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds)
   if (policy?.forceDocumentTool) {
@@ -249,15 +251,13 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
 }
 
 export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, unknown>> {
-  const visibleGroupIds = policy?.visibleCapabilityGroupIds
-    && policy.visibleCapabilityGroupIds.length > 0
-    ? policy.visibleCapabilityGroupIds
-    : defaultToolGateway
-      .listCapabilityGroups()
-      .filter((group) => group.exposure === 'model_visible' && group.availability === 'active')
-      .map((group) => group.id)
+  return getPolicyOpenAIToolBundle(policy).tools
+}
 
-  let tools = defaultToolGateway.getOpenAIToolsForGroups(visibleGroupIds)
+export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAIToolBundle {
+  const visibleGroupIds = resolveVisibleGroupIds(policy)
+  const resolution = defaultToolGateway.getToolSchemaResolutionForGroups(visibleGroupIds, 'openai')
+  let tools = resolution.tools
   if (policy?.forceDocumentTool) {
     const allowedNames = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -296,7 +296,18 @@ export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, 
       return typeof fn === 'string' ? allowed.has(fn) : false
     })
   }
-  return tools.map((tool) => normalizeOpenAIToolSchema(tool))
+  const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
+  const toolNames = collectToolNames(normalizedTools, 'openai')
+  return {
+    tools: normalizedTools,
+    toolNames,
+    toolResolution: buildToolResolutionDiagnostics({
+      visibleGroupIds,
+      groupResolutions: resolution.groupResolutions,
+      toolNames,
+      allowBrowserTools: Boolean(policy?.allowBrowserTools),
+    }),
+  }
 }
 
 export function collectToolNames(
@@ -315,17 +326,17 @@ export function collectToolNames(
 }
 
 export function buildTextToolBridgeSystemPrompt(policy?: ToolPolicy): string {
-  return buildTextToolBridgePrompt(getPolicyOpenAITools(policy), {
+  return buildTextToolBridgePrompt(getPolicyOpenAIToolBundle(policy).tools, {
     forceDocumentTool: !!policy?.forceDocumentTool,
   })
 }
 
 export function collectAllowedToolNames(policy?: ToolPolicy): string[] {
-  return collectToolNames(getPolicyOpenAITools(policy), 'openai')
+  return getPolicyOpenAIToolBundle(policy).toolNames
 }
 
 export function buildTextToolBridgeCorrectionMessage(policy?: ToolPolicy): string {
-  const toolNames = collectToolNames(getPolicyOpenAITools(policy), 'openai')
+  const toolNames = getPolicyOpenAIToolBundle(policy).toolNames
   return [
     '系统纠正：当前会话已经启用文本工具桥接，下面这些 Ready 工具都可以真实执行。',
     `可用工具：${toolNames.join(', ') || '无'}`,
@@ -333,4 +344,53 @@ export function buildTextToolBridgeCorrectionMessage(policy?: ToolPolicy): strin
     '如果你不确定该用哪个浏览器动作，优先先读页、定位输入框、定位按钮或读取 skill 说明，再继续。',
     '如果信息确实不足，可以提一个澄清问题，但不要伪造工具不可用。',
   ].join('\n')
+}
+
+function resolveVisibleGroupIds(policy?: ToolPolicy): CapabilityGroupId[] {
+  return policy?.visibleCapabilityGroupIds
+    && policy.visibleCapabilityGroupIds.length > 0
+    ? policy.visibleCapabilityGroupIds
+    : defaultToolGateway
+      .listCapabilityGroups()
+      .filter((group) => group.exposure === 'model_visible' && group.availability === 'active')
+      .map((group) => group.id)
+}
+
+function buildToolResolutionDiagnostics(params: {
+  visibleGroupIds: CapabilityGroupId[]
+  groupResolutions: ToolGroupResolutionEntry[]
+  toolNames: string[]
+  allowBrowserTools: boolean
+}): ToolResolutionDiagnostics {
+  const visibleGroupToolCounts: Partial<Record<CapabilityGroupId, number>> = {}
+  const groupSchemaErrors: Partial<Record<CapabilityGroupId, string>> = {}
+  const usedStaticFallbackGroups = new Set<CapabilityGroupId>()
+
+  for (const group of params.groupResolutions) {
+    visibleGroupToolCounts[group.groupId] = group.toolCount
+    if (group.schemaError) {
+      groupSchemaErrors[group.groupId] = group.schemaError
+    }
+    if (group.usedStaticFallback) {
+      usedStaticFallbackGroups.add(group.groupId)
+    }
+  }
+
+  const browserGroupsVisible = params.visibleGroupIds.filter((groupId) =>
+    groupId === 'browser_interaction' || groupId === 'browser_content_tasks')
+  const invariantViolations: string[] = []
+  if ((params.allowBrowserTools || browserGroupsVisible.length > 0) && !params.toolNames.some((name) => name.startsWith('browser_'))) {
+    invariantViolations.push([
+      'browser_tools_missing',
+      `visibleGroups=${browserGroupsVisible.join('|') || 'none'}`,
+      `allowBrowserTools=${params.allowBrowserTools}`,
+    ].join(','))
+  }
+
+  return {
+    visibleGroupToolCounts,
+    groupSchemaErrors: Object.keys(groupSchemaErrors).length > 0 ? groupSchemaErrors : undefined,
+    usedStaticFallbackGroups: usedStaticFallbackGroups.size > 0 ? Array.from(usedStaticFallbackGroups) : undefined,
+    invariantViolations: invariantViolations.length > 0 ? invariantViolations : undefined,
+  }
 }

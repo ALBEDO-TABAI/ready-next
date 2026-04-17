@@ -264,6 +264,8 @@ export interface ScopeRunExecutionDiagnostics {
     kind: string
     attempts: number
   } | null
+  toolSnapshots?: import('./run-contracts').ToolSnapshot[] | null
+  toolResolution?: import('./run-contracts').ToolResolutionDiagnostics | null
   stepBudget?: {
     stepId?: string | null
     maxIterations?: number

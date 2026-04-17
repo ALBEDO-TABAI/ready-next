@@ -17,6 +17,7 @@ import type {
   TaskInteractionState,
   TaskStep,
   TaskType,
+  ToolSnapshot,
 } from './run-contracts'
 
 export class TurnState {
@@ -35,6 +36,8 @@ export class TurnState {
   runtimeTaskSteps: TaskStep[]
   runtimeCurrentStepId: string | null
   pipelineDiagnostics: ExecutionRunDiagnostics['pipeline']
+  toolSnapshots: ToolSnapshot[]
+  toolResolution: ExecutionRunDiagnostics['toolResolution']
 
   constructor(params: {
     taskId: string
@@ -76,6 +79,8 @@ export class TurnState {
     this.runtimeTaskSteps = []
     this.runtimeCurrentStepId = null
     this.pipelineDiagnostics = null
+    this.toolSnapshots = []
+    this.toolResolution = null
   }
 
   syncTaskBudgetRuntime(taskType?: TaskType): TaskBudgetRuntime | null {
@@ -177,6 +182,37 @@ export class TurnState {
     this.pipelineDiagnostics = pipeline || null
   }
 
+  appendToolSnapshots(entries: ToolSnapshot[] | null | undefined): void {
+    if (!entries || entries.length === 0) return
+    this.toolSnapshots = this.toolSnapshots.concat(entries.map((entry) => ({
+      ...entry,
+      visibleCapabilityGroupIds: [...entry.visibleCapabilityGroupIds],
+      suppressedCapabilityGroupIds: [...entry.suppressedCapabilityGroupIds],
+      allowedToolNames: [...entry.allowedToolNames],
+    })))
+  }
+
+  setToolResolution(resolution: ExecutionRunDiagnostics['toolResolution']): void {
+    if (!resolution) {
+      this.toolResolution = null
+      return
+    }
+    this.toolResolution = {
+      visibleGroupToolCounts: resolution.visibleGroupToolCounts
+        ? { ...resolution.visibleGroupToolCounts }
+        : undefined,
+      groupSchemaErrors: resolution.groupSchemaErrors
+        ? { ...resolution.groupSchemaErrors }
+        : undefined,
+      usedStaticFallbackGroups: resolution.usedStaticFallbackGroups
+        ? [...resolution.usedStaticFallbackGroups]
+        : undefined,
+      invariantViolations: resolution.invariantViolations
+        ? [...resolution.invariantViolations]
+        : undefined,
+    }
+  }
+
   buildExecutionDiagnostics(): ExecutionRunDiagnostics {
     const runtime = this.syncTaskBudgetRuntime()
     return {
@@ -192,6 +228,8 @@ export class TurnState {
       stepBudget: this.stepBudgetState,
       budgetWarningLevel: this.budgetWarningLevel,
       fallback: this.latestFallback || null,
+      toolSnapshots: this.toolSnapshots.length > 0 ? this.toolSnapshots : null,
+      toolResolution: this.toolResolution,
       recoveryHistory: this.recoveryHistory.length > 0 ? this.recoveryHistory : null,
       continuationBudgetRestore: this.continuationBudgetRestore,
       degradationReason: this.degradationReason,

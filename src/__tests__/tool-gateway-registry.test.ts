@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { collectAllowedToolNames } from '../main/modules/agent-control/execution-tool-config'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
@@ -68,4 +69,74 @@ test('tool gateway does not expose empty fallback schemas when a group provider 
 
   assert.deepEqual(systemOpenAISchemas, [])
   assert.match(gateway.getLastSchemaResolutionError('system_host', 'openai') || '', /broken provider/)
+})
+
+test('browser tool schemas stay available after the browser executor module loads first', async () => {
+  await import('../main/modules/tools/browser-tools')
+
+  const gateway = new ToolGateway()
+  const browserOpenAISchemas = gateway.getToolSchemasForGroup('browser_interaction', 'openai')
+  const browserToolNames = browserOpenAISchemas
+    .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
+    .filter(Boolean)
+
+  assert.ok(browserToolNames.includes('browser_search'))
+  assert.ok(browserToolNames.includes('browser_read_page'))
+  assert.equal(gateway.getLastSchemaResolutionError('browser_interaction', 'openai'), null)
+})
+
+test('tool gateway reports grouped schema diagnostics and static fallback usage', () => {
+  const gateway = new ToolGateway({
+    __testGroupProviders: {
+      skills: {
+        staticToolNames: ['skill_get_state'],
+        hasDynamicSource: true,
+        getOpenAIToolsDetailed: () => ({
+          tools: [{
+            type: 'function',
+            function: {
+              name: 'skill_get_state',
+              description: 'fallback',
+              parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+              },
+            },
+          }],
+          error: 'runtime unavailable',
+          usedStaticFallback: true,
+        }),
+      },
+    },
+  })
+
+  const resolution = gateway.getToolSchemaResolutionForGroups(['skills'], 'openai')
+
+  assert.equal(resolution.groupResolutions[0]?.toolCount, 1)
+  assert.equal(resolution.groupResolutions[0]?.usedStaticFallback, true)
+  assert.match(resolution.groupResolutions[0]?.schemaError || '', /runtime unavailable/)
+  assert.match(gateway.getLastSchemaResolutionError('skills', 'openai') || '', /runtime unavailable/)
+})
+
+test('collectAllowedToolNames keeps browser tools when browser groups are visible', () => {
+  const allowedToolNames = collectAllowedToolNames({
+    forceDocumentTool: false,
+    allowDocumentTools: true,
+    forceDesignTool: false,
+    preferredDesignTool: null,
+    primaryDesignInstruction: null,
+    allowMultipleDesignArtifacts: false,
+    preferSectionRewrite: false,
+    preferFormatOnly: false,
+    allowBrowserTools: true,
+    preferredSkillToolNames: null,
+    visibleCapabilityGroupIds: ['browser_interaction', 'browser_content_tasks', 'memory', 'session_recall'],
+    hostOnlyCapabilityGroupIds: [],
+    capabilityReasons: {},
+  })
+
+  assert.ok(allowedToolNames.includes('browser_search'))
+  assert.ok(allowedToolNames.includes('browser_read_page'))
+  assert.ok(allowedToolNames.includes('browser_extract_structured'))
 })

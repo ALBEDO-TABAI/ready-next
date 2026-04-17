@@ -146,6 +146,37 @@ export interface RecoveryRecord {
   timestamp: string
 }
 
+export interface ToolSnapshot {
+  stage: 'host_prepared' | 'host_effective' | 'tool_loop_request' | 'provider_request' | 'provider_response'
+  source: 'host' | 'provider'
+  iteration: number
+  provider: string
+  baseUrl: string
+  model: string
+  wireApi?: 'responses' | 'chat/completions' | null
+  browserDecisionMode?: string | null
+  browserHostAvailable?: boolean | null
+  hasTools: boolean
+  allowBrowserTools: boolean
+  visibleCapabilityGroupIds: CapabilityGroupId[]
+  suppressedCapabilityGroupIds: CapabilityGroupId[]
+  allowedToolNames: string[]
+  requestedTransport: 'native' | 'text' | 'none'
+  effectiveTransport: 'native' | 'text' | 'none'
+  supportsNativeTools: boolean
+  preferTextToolBridge: boolean
+  fallbackReason?: string | null
+  toolCallsCount?: number | null
+  mismatch?: boolean
+}
+
+export interface ToolResolutionDiagnostics {
+  visibleGroupToolCounts?: Partial<Record<CapabilityGroupId, number>>
+  groupSchemaErrors?: Partial<Record<CapabilityGroupId, string>>
+  usedStaticFallbackGroups?: CapabilityGroupId[]
+  invariantViolations?: string[]
+}
+
 export interface ToolResourceTag {
   domain:
     | 'browser'
@@ -277,6 +308,8 @@ export interface ExecutionRunDiagnostics {
     kind: string
     attempts: number
   } | null
+  toolSnapshots?: ToolSnapshot[] | null
+  toolResolution?: ToolResolutionDiagnostics | null
   recoveryHistory?: RecoveryRecord[] | null
   continuationBudgetRestore?: ContinuationBudgetRestoreDiagnostics | null
   degradationReason?: string | null
@@ -474,6 +507,7 @@ export interface TurnModelResponse extends TurnSimpleResponse {
   providerResponseId?: string
   rawText?: string
   toolTransport?: 'native' | 'text'
+  toolSnapshots?: ToolSnapshot[]
   recoveryHistory?: RecoveryRecord[]
 }
 
@@ -530,8 +564,23 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
     session: TSession
     signal: AbortSignal
     toolPolicy: unknown
+    allowedToolNames?: string[] | null
+    hasTools?: boolean
+    allowBrowserTools?: boolean
     providerContext: TurnProviderContext
     hasVideoInputs: boolean
+    browserDecisionMode?: string | null
+    runtimeSnapshot?: {
+      browserHostAvailable?: boolean
+      groups?: Partial<Record<CapabilityGroupId, { status: string }>>
+    } | null
+    visibleCapabilityGroupIds?: CapabilityGroupId[]
+    suppressedCapabilityGroupIds?: CapabilityGroupId[]
+    capabilityLogLine?: string | null
+    iteration?: number
+    requestedTransport?: 'native' | 'text' | 'none'
+    supportsNativeTools?: boolean
+    preferTextToolBridgeOnce?: boolean
     compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
   }) => Promise<TurnModelResponse>

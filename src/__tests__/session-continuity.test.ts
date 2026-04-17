@@ -9,10 +9,16 @@ import {
   __reloadSessionContinuityFromDiskForTests,
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
+  forgetSession,
   getContinuationState,
   getBrowserWorkflowState,
+  getLatestSkillRun,
+  getRecentBrowserActions,
+  listContinuationStates,
+  rememberBrowserAction,
   rememberContinuationState,
   rememberBrowserWorkflowState,
+  rememberSkillRun,
 } from '../main/modules/agent-control/session-continuity'
 
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-session-continuity-persisted.json')
@@ -234,6 +240,78 @@ test('clearing one continuation snapshot keeps other tasks in the same scope res
   assert.equal(latest?.taskId, 'task-prev-1')
   assert.equal(firstTask?.taskId, 'task-prev-1')
   assert.equal(secondTask, null)
+})
+
+test('forgetSession clears browser actions, workflow, skill runs, and continuation state together', () => {
+  rememberBrowserAction('scope-forget', 'search', '广州天气')
+  rememberBrowserWorkflowState('scope-forget', {
+    url: 'https://weather.example.com/guangzhou',
+    title: '广州天气',
+    workflowKind: 'live_info_lookup',
+    stage: 'read_result',
+    evidence: ['weather_ready'],
+    running: false,
+    uploadMounted: false,
+    promptFilled: false,
+    status: 'done',
+    canResume: false,
+  })
+  rememberSkillRun('scope-forget', {
+    toolName: 'skill_browser_lookup',
+    skillId: 'skill-browser',
+    action: 'search_weather',
+    success: true,
+    summary: '查询广州天气',
+  })
+  rememberContinuationState('scope-forget', {
+    taskId: 'task-forget',
+    scopeId: 'scope-forget',
+    runId: 'run-forget',
+    module: 'browser',
+    taskType: 'short_task',
+    interactionState: 'awaiting_confirmation',
+    steps: [],
+    currentStepId: 'confirm',
+    blockedReason: '等待确认',
+    resumableActions: ['continue'],
+    continuationRef: {
+      taskId: 'task-forget',
+      executionId: 'exec-forget',
+      stepId: 'confirm',
+      blockerType: 'need_confirmation',
+    },
+  })
+
+  forgetSession('scope-forget')
+
+  assert.deepEqual(getRecentBrowserActions('scope-forget'), [])
+  assert.equal(getBrowserWorkflowState('scope-forget'), null)
+  assert.equal(getLatestSkillRun('scope-forget'), null)
+  assert.equal(getContinuationState('scope-forget'), null)
+  assert.deepEqual(listContinuationStates('scope-forget'), [])
+})
+
+test('session continuity prunes the oldest scopes when the session cap is exceeded', () => {
+  for (let index = 0; index < 202; index += 1) {
+    rememberBrowserWorkflowState(`scope-${index}`, {
+      url: `https://example.com/${index}`,
+      title: `Scope ${index}`,
+      workflowKind: 'live_info_lookup',
+      stage: 'read_result',
+      evidence: [`evidence-${index}`],
+      running: false,
+      uploadMounted: false,
+      promptFilled: false,
+      status: 'done',
+      canResume: false,
+      updatedAt: index + 1,
+    })
+  }
+
+  assert.equal(getBrowserWorkflowState('scope-0'), null)
+  assert.equal(getBrowserWorkflowState('scope-1'), null)
+  assert.equal(getBrowserWorkflowState('scope-2')?.title, 'Scope 2')
+  assert.equal(getBrowserWorkflowState('scope-201')?.title, 'Scope 201')
 })
 
 test('session continuity keeps loading legacy payloads that do not contain continuation snapshots', () => {

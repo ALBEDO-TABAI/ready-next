@@ -85,15 +85,18 @@ export class BrowserDomainOrchestrator {
     pureUserInput: string
     sessionMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>
     sessionId?: string
+    decision?: BrowserTaskDecision
     refineDecision?: (decision: BrowserTaskDecision) => Promise<BrowserTaskDecision>
   }): Promise<BrowserExecutionPreparation> {
-    let browserDecision = params.hasTools && params.browserControllerAvailable && params.browserAgentEnabled
-      ? this.planner.decideTask({
-        userText: params.pureUserInput,
-        sessionMessages: params.sessionMessages,
-        sessionId: params.sessionId,
-      })
-      : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
+    let browserDecision = params.decision || (
+      params.hasTools && params.browserControllerAvailable && params.browserAgentEnabled
+        ? this.planner.decideTask({
+          userText: params.pureUserInput,
+          sessionMessages: params.sessionMessages,
+          sessionId: params.sessionId,
+        })
+        : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
+    )
 
     if (params.hasTools && browserDecision.mode === 'browser_upload_workflow' && params.refineDecision) {
       browserDecision = await params.refineDecision(browserDecision)

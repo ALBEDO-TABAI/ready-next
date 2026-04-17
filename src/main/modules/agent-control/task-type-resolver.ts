@@ -24,6 +24,11 @@ export function resolveTaskType(params: {
   const normalized = userText.toLowerCase()
   const browserAvailable = params.capabilities.environment.browserHostAvailable
   const feishuConnected = params.capabilities.environment.feishuConnected
+  const hasConcreteBrowserWork =
+    params.intent.actionSignals.length > 0
+    || params.envelope.environmentHints.hasAttachments
+    || /https?:\/\/|www\./i.test(userText)
+    || params.intent.objectSignals.some((signal) => /browser-live-info/i.test(signal))
 
   if (params.intent.primaryDomain === 'generic' && params.intent.confidence === 'low' && params.intent.actionSignals.length === 0) {
     return {
@@ -35,6 +40,14 @@ export function resolveTaskType(params: {
   }
 
   if (params.intent.primaryDomain === 'browser') {
+    if (!hasConcreteBrowserWork) {
+      return {
+        taskType: 'direct_answer',
+        executionChain: 'direct',
+        requiresPlanner: false,
+        preferredExecutor: 'none',
+      }
+    }
     const looksLikeMediaTask = params.envelope.environmentHints.hasAttachments
       || /(上传|图片|图像|视频|提交)/.test(userText)
     if (!browserAvailable) {

@@ -196,4 +196,60 @@ describe('BrowserTaskPlanner', () => {
     assert.equal(continuity?.canReuseCurrentPage, false)
     assert.match(continuity?.reuseReason || '', /关联不足/)
   })
+
+  it('treats live info lookup requests as browser workflows and prepares a search query', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '帮我看看今天广州天气怎么样',
+      sessionMessages: [],
+      sessionId: 'scope-weather',
+    })
+
+    assert.equal(decision.mode, 'browser_workflow')
+    assert.equal(decision.reason, 'live_information_lookup')
+    assert.equal(decision.plan?.targetSearchQuery, '今天广州天气怎么样')
+  })
+
+  it('normalizes official-source follow-up phrasing into a cleaner search query', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '那你去中国气象台帮我看看',
+      sessionMessages: [],
+      sessionId: 'scope-weather-followup',
+    })
+
+    assert.equal(decision.mode, 'browser_workflow')
+    assert.equal(decision.plan?.targetSearchQuery, '中国气象台')
+  })
+
+  it('treats explicit site open requests as browser workflows even without a direct url', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '帮我打开 pinterest',
+      sessionMessages: [],
+      sessionId: 'scope-open-pinterest',
+    })
+
+    assert.equal(decision.mode, 'browser_workflow')
+    assert.equal(decision.reason, 'generic_browser_workflow')
+    assert.equal(decision.plan?.targetSearchQuery, 'Pinterest official website')
+  })
 })

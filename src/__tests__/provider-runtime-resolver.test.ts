@@ -48,4 +48,9 @@ test('provider runtime resolver decides text bridge usage and retry consistently
     config,
     preferTextToolBridge: true,
   }), false)
+  assert.equal(shouldRetryWithTextToolBridge({
+    text: '我这边当前消息里虽然写了“浏览器任务执行计划”，但实际没有可调用的浏览器工具组结果返回给我。',
+    config,
+    preferTextToolBridge: false,
+  }), true)
 })

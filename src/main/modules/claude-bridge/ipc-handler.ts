@@ -670,7 +670,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('chat:deleteConversation', (_, conversationId: string): IPCResponse => {
     try {
-      chatRepository.deleteConversation(conversationId)
+      runtime!.deleteConversation(conversationId)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

@@ -9,6 +9,12 @@ import type {
   ToolTimeoutProfile,
 } from './tool-definition'
 import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
+import {
+  BROWSER_CONTENT_TASK_TOOL_NAMES,
+  BROWSER_INTERACTION_TOOL_NAMES,
+  getBrowserAnthropicTools,
+  getBrowserOpenAITools,
+} from '../tools/browser-tool-catalog'
 import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../tools/document-tools'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
@@ -19,11 +25,14 @@ import { createRequire } from 'node:module'
 export type ToolSchemaFormat = 'anthropic' | 'openai'
 
 export interface ToolRegistryProvider {
-  staticToolNames?: string[]
+  staticToolNames?: readonly string[]
   hasDynamicSource?: boolean
   getToolDefinitions?: () => ToolDefinition[]
+  getToolDefinitionsDetailed?: () => ToolDefinitionResolution
   getAnthropicTools?: () => Array<Record<string, unknown>>
+  getAnthropicToolsDetailed?: () => ToolSchemaResolution
   getOpenAITools?: () => Array<Record<string, unknown>>
+  getOpenAIToolsDetailed?: () => ToolSchemaResolution
 }
 
 export interface ToolRegistryOptions {
@@ -38,51 +47,19 @@ export interface ToolRegistryReader {
   getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>>
 }
 
+export interface ToolDefinitionResolution {
+  definitions: ToolDefinition[]
+  error?: string | null
+  usedStaticFallback?: boolean
+}
+
+export interface ToolSchemaResolution {
+  tools: Array<Record<string, unknown>>
+  error?: string | null
+  usedStaticFallback?: boolean
+}
+
 const require = createRequire(import.meta.url)
-
-const BROWSER_INTERACTION_TOOL_NAMES = [
-  'browser_navigate',
-  'browser_search',
-  'browser_get_tabs',
-  'browser_read_page',
-  'browser_click',
-  'browser_click_text',
-  'browser_type',
-  'browser_type_smart',
-  'browser_compose_message',
-  'browser_capture_viewport',
-  'browser_probe_workflow_state',
-  'browser_locate_action_targets',
-  'browser_locate_input_targets',
-  'browser_analyze_viewport',
-  'browser_list_upload_targets',
-  'browser_upload_scope_attachment',
-  'browser_click_at',
-  'browser_type_at',
-  'browser_scroll_at',
-  'browser_send_keys',
-  'browser_ask_user_takeover',
-  'browser_query_gemini',
-  'browser_wait',
-  'browser_wait_for_condition',
-  'browser_go_back',
-]
-
-const BROWSER_CONTENT_TASK_TOOL_NAMES = [
-  'browser_collect_images',
-  'browser_download_urls',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-  'browser_start_task',
-  'browser_get_task',
-  'browser_resume_task',
-  'browser_cancel_task',
-  'browser_aggregate_results',
-  'browser_download_gallery',
-  'browser_research_topic',
-  'browser_run_workflow',
-  'browser_execute_js',
-]
 
 const DOCUMENT_TOOL_NAMES = [
   'document_new_tab',
@@ -270,21 +247,11 @@ function buildToolDefinition(groupId: CapabilityGroupId, toolName: string): Tool
   }
 }
 
-function buildToolDefinitions(groupId: CapabilityGroupId, toolNames: string[]): ToolDefinition[] {
+function buildToolDefinitions(groupId: CapabilityGroupId, toolNames: readonly string[]): ToolDefinition[] {
   return Array.from(new Set(toolNames)).map((toolName) => buildToolDefinition(groupId, toolName))
 }
 
-function getBrowserAnthropicTools(): Array<Record<string, unknown>> {
-  const { getAnthropicTools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
-  return getAnthropicTools()
-}
-
-function getBrowserOpenAITools(): Array<Record<string, unknown>> {
-  const { getOpenAITools } = require('../tools/browser-tools') as typeof import('../tools/browser-tools')
-  return getOpenAITools()
-}
-
-function filterBrowserAnthropicTools(toolNames: string[]): Array<Record<string, unknown>> {
+function filterBrowserAnthropicTools(toolNames: readonly string[]): Array<Record<string, unknown>> {
   const visible = new Set(toolNames)
   return getBrowserAnthropicTools().filter((tool) => {
     const name = getAnthropicToolName(tool)
@@ -292,7 +259,7 @@ function filterBrowserAnthropicTools(toolNames: string[]): Array<Record<string, 
   })
 }
 
-function filterBrowserOpenAITools(toolNames: string[]): Array<Record<string, unknown>> {
+function filterBrowserOpenAITools(toolNames: readonly string[]): Array<Record<string, unknown>> {
   const visible = new Set(toolNames)
   return getBrowserOpenAITools().filter((tool) => {
     const name = getOpenAIToolName(tool)
@@ -300,13 +267,44 @@ function filterBrowserOpenAITools(toolNames: string[]): Array<Record<string, unk
   })
 }
 
-function getSkillToolDefinitions(): ToolDefinition[] {
-  const { getSkillOpenAITools, findSkillToolByName } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-  const skillNames = collectToolNames(getSkillOpenAITools(), 'openai')
-  return skillNames.map((toolName) => {
-    const tool = findSkillToolByName(toolName)
-    return buildToolDefinition('skills', tool?.name || toolName)
-  })
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution {
+  const staticToolNames = resolveStaticSkillToolNames()
+  const staticTools = staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
+  try {
+    const skillToolsModule = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+    return {
+      tools: format === 'anthropic'
+        ? skillToolsModule.getSkillAnthropicTools()
+        : skillToolsModule.getSkillOpenAITools(),
+    }
+  } catch (error) {
+    return {
+      tools: staticTools,
+      error: getErrorMessage(error),
+      usedStaticFallback: true,
+    }
+  }
+}
+
+function resolveSkillToolDefinitions(): ToolDefinitionResolution {
+  const staticToolNames = resolveStaticSkillToolNames()
+  try {
+    const { getSkillOpenAITools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+    const skillNames = collectToolNames(getSkillOpenAITools(), 'openai')
+    return {
+      definitions: buildToolDefinitions('skills', skillNames),
+    }
+  } catch (error) {
+    return {
+      definitions: buildToolDefinitions('skills', staticToolNames),
+      error: getErrorMessage(error),
+      usedStaticFallback: true,
+    }
+  }
 }
 
 const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
@@ -343,15 +341,9 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
   skills: {
     staticToolNames: resolveStaticSkillToolNames(),
     hasDynamicSource: true,
-    getToolDefinitions: () => getSkillToolDefinitions(),
-    getAnthropicTools: () => {
-      const { getSkillAnthropicTools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-      return getSkillAnthropicTools()
-    },
-    getOpenAITools: () => {
-      const { getSkillOpenAITools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-      return getSkillOpenAITools()
-    },
+    getToolDefinitionsDetailed: () => resolveSkillToolDefinitions(),
+    getAnthropicToolsDetailed: () => resolveSkillToolSchemas('anthropic'),
+    getOpenAIToolsDetailed: () => resolveSkillToolSchemas('openai'),
   },
   memory: {
     staticToolNames: MEMORY_TOOL_NAMES,
@@ -407,6 +399,62 @@ export class ToolRegistry implements ToolRegistryReader {
     return this.listToolDefinitions().find((tool) => tool.name === toolName) || null
   }
 
+  getToolDefinitionsResolutionForGroup(groupId: CapabilityGroupId): ToolDefinitionResolution {
+    const provider = this.groupProviders[groupId]
+    if (!provider) {
+      return { definitions: [] }
+    }
+    if (provider.getToolDefinitionsDetailed) {
+      return provider.getToolDefinitionsDetailed()
+    }
+    if (provider.getToolDefinitions) {
+      try {
+        return { definitions: provider.getToolDefinitions() }
+      } catch (error) {
+        return {
+          definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+          error: getErrorMessage(error),
+          usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+        }
+      }
+    }
+    return {
+      definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+      usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+    }
+  }
+
+  getToolSchemasResolutionForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): ToolSchemaResolution {
+    const provider = this.groupProviders[groupId]
+    const staticToolNames = provider?.staticToolNames || []
+
+    const detailedResolver = format === 'anthropic'
+      ? provider?.getAnthropicToolsDetailed
+      : provider?.getOpenAIToolsDetailed
+    if (detailedResolver) {
+      return detailedResolver()
+    }
+
+    const directResolver = format === 'anthropic'
+      ? provider?.getAnthropicTools
+      : provider?.getOpenAITools
+    if (directResolver) {
+      try {
+        return { tools: directResolver() }
+      } catch (error) {
+        return {
+          tools: [],
+          error: getErrorMessage(error),
+        }
+      }
+    }
+
+    return {
+      tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
+      usedStaticFallback: staticToolNames.length > 0,
+    }
+  }
+
   listToolDefinitions(): ToolDefinition[] {
     const tools = new Map<string, ToolDefinition>()
     for (const groupId of Object.keys(this.groupProviders) as CapabilityGroupId[]) {
@@ -420,32 +468,11 @@ export class ToolRegistry implements ToolRegistryReader {
   }
 
   getToolDefinitionsForGroup(groupId: CapabilityGroupId): ToolDefinition[] {
-    const provider = this.groupProviders[groupId]
-    if (!provider) return []
-
-    if (provider.getToolDefinitions) {
-      try {
-        return provider.getToolDefinitions()
-      } catch {
-        // fall through to static fallback
-      }
-    }
-
-    return buildToolDefinitions(groupId, provider.staticToolNames || [])
+    return this.getToolDefinitionsResolutionForGroup(groupId).definitions
   }
 
   getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
-    const provider = this.groupProviders[groupId]
-    const staticToolNames = provider?.staticToolNames || []
-
-    if (format === 'anthropic' && provider?.getAnthropicTools) {
-      return provider.getAnthropicTools()
-    }
-    if (format === 'openai' && provider?.getOpenAITools) {
-      return provider.getOpenAITools()
-    }
-
-    return staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
+    return this.getToolSchemasResolutionForGroup(groupId, format).tools
   }
 }
 

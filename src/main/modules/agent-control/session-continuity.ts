@@ -3,18 +3,20 @@ import { homedir } from 'os'
 import { dirname, join } from 'path'
 import type { ContinuationState } from './continuation-state'
 import { normalizeContinuationState } from './continuation-state'
+import {
+  domainsLikelyMatch,
+  findRecentBrowserActionInRecords,
+  normalizeDomain,
+  rememberRecentBrowserAction,
+  type BrowserActionKind,
+  type BrowserActionRecord,
+} from './browser-action-heuristics'
+
+export { domainsLikelyMatch, normalizeDomain }
+export type { BrowserActionKind, BrowserActionRecord }
 
 function normalizeWhitespace(value: string): string {
   return String(value || '').trim().replace(/\s+/g, ' ')
-}
-
-export type BrowserActionKind = 'navigate' | 'search'
-
-export interface BrowserActionRecord {
-  kind: BrowserActionKind
-  value: string
-  normalizedValue: string
-  updatedAt: number
 }
 
 export interface BrowserWorkflowState {
@@ -57,6 +59,7 @@ const recentBrowserActions = new Map<string, BrowserActionRecord[]>()
 const browserWorkflowStates = new Map<string, BrowserWorkflowState>()
 const recentSkillRuns = new Map<string, SkillRunRecord[]>()
 const recentContinuationStates = new Map<string, ContinuationStateRecord[]>()
+const MAX_CONTINUITY_SESSIONS = 200
 let continuityHydrated = false
 let continuityStoragePathOverride: string | null = null
 
@@ -106,6 +109,61 @@ function clearInMemoryState(): void {
   browserWorkflowStates.clear()
   recentSkillRuns.clear()
   recentContinuationStates.clear()
+}
+
+function forgetSessionInMemory(sessionId: string): boolean {
+  const normalizedSessionId = normalizeWhitespace(sessionId)
+  if (!normalizedSessionId) return false
+  const hadBrowserActions = recentBrowserActions.delete(normalizedSessionId)
+  const hadWorkflowState = browserWorkflowStates.delete(normalizedSessionId)
+  const hadSkillRuns = recentSkillRuns.delete(normalizedSessionId)
+  const hadContinuationStates = recentContinuationStates.delete(normalizedSessionId)
+  const hadAny =
+    hadBrowserActions
+    || hadWorkflowState
+    || hadSkillRuns
+    || hadContinuationStates
+  return hadAny
+}
+
+function getTrackedSessionIds(): string[] {
+  return Array.from(new Set([
+    ...recentBrowserActions.keys(),
+    ...browserWorkflowStates.keys(),
+    ...recentSkillRuns.keys(),
+    ...recentContinuationStates.keys(),
+  ]))
+}
+
+function getSessionLastTouchedAt(sessionId: string): number {
+  const browserActionUpdatedAt = (recentBrowserActions.get(sessionId) || []).reduce(
+    (latest, record) => Math.max(latest, Number(record.updatedAt || 0)),
+    0,
+  )
+  const workflowUpdatedAt = Number(browserWorkflowStates.get(sessionId)?.updatedAt || 0)
+  const skillUpdatedAt = (recentSkillRuns.get(sessionId) || []).reduce(
+    (latest, record) => Math.max(latest, Number(record.updatedAt || 0)),
+    0,
+  )
+  const continuationUpdatedAt = (recentContinuationStates.get(sessionId) || []).reduce(
+    (latest, record) => Math.max(latest, Number(record.updatedAt || 0)),
+    0,
+  )
+  return Math.max(browserActionUpdatedAt, workflowUpdatedAt, skillUpdatedAt, continuationUpdatedAt)
+}
+
+function pruneStaleSessions(): boolean {
+  const sessionIds = getTrackedSessionIds()
+  if (sessionIds.length <= MAX_CONTINUITY_SESSIONS) return false
+  const staleSessionIds = sessionIds
+    .slice()
+    .sort((left, right) => getSessionLastTouchedAt(right) - getSessionLastTouchedAt(left))
+    .slice(MAX_CONTINUITY_SESSIONS)
+  let changed = false
+  for (const sessionId of staleSessionIds) {
+    changed = forgetSessionInMemory(sessionId) || changed
+  }
+  return changed
 }
 
 function hydrateFromDisk(): void {
@@ -216,6 +274,9 @@ function hydrateFromDisk(): void {
         }
       }
     }
+    if (pruneStaleSessions()) {
+      persistToDisk()
+    }
   } catch {
     clearInMemoryState()
   }
@@ -229,20 +290,6 @@ function persistToDisk(): void {
     writeFileSync(path, JSON.stringify(toPersistedPayload()), 'utf8')
   } catch {
     // Persistence must stay best-effort.
-  }
-}
-
-function normalizeBrowserActionValue(kind: BrowserActionKind, value: string): string {
-  const normalized = normalizeWhitespace(value).toLowerCase()
-  if (!normalized) return ''
-  if (kind === 'search') return normalized
-  try {
-    const parsed = new URL(normalized)
-    const pathname = parsed.pathname.replace(/\/+$/, '') || '/'
-    const search = parsed.search || ''
-    return `${parsed.origin}${pathname}${search}`
-  } catch {
-    return normalized
   }
 }
 
@@ -277,39 +324,18 @@ function cloneContinuationStateRecords(records: ContinuationStateRecord[] | null
     .filter((record): record is ContinuationStateRecord => Boolean(record))
 }
 
-export function normalizeDomain(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase()
-  } catch {
-    return ''
-  }
-}
-
-export function domainsLikelyMatch(left?: string | null, right?: string | null): boolean {
-  const a = normalizeDomain(String(left || ''))
-  const b = normalizeDomain(String(right || ''))
-  if (!a || !b) return false
-  if (a === b) return true
-  return a.endsWith(`.${b}`) || b.endsWith(`.${a}`)
-}
-
 export function rememberBrowserAction(
   sessionId: string | undefined,
   kind: BrowserActionKind,
   value: string,
 ): void {
   hydrateFromDisk()
-  const normalizedValue = normalizeBrowserActionValue(kind, value)
-  if (!sessionId || !normalizedValue) return
-  const existing = recentBrowserActions.get(sessionId) || []
-  const next = pruneToRecent(
-    [
-      { kind, value: normalizeWhitespace(value), normalizedValue, updatedAt: Date.now() },
-      ...existing.filter((item) => !(item.kind === kind && item.normalizedValue === normalizedValue)),
-    ],
-    8,
-  )
-  recentBrowserActions.set(sessionId, next)
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return
+  const next = rememberRecentBrowserAction(recentBrowserActions.get(normalizedSessionId) || [], kind, value)
+  if (next.length === 0) return
+  recentBrowserActions.set(normalizedSessionId, next)
+  pruneStaleSessions()
   persistToDisk()
 }
 
@@ -320,17 +346,16 @@ export function findRecentBrowserAction(
   withinMs = 45_000,
 ): BrowserActionRecord | null {
   hydrateFromDisk()
-  const normalizedValue = normalizeBrowserActionValue(kind, value)
-  if (!sessionId || !normalizedValue) return null
-  const items = recentBrowserActions.get(sessionId) || []
-  const now = Date.now()
-  return items.find((item) => item.kind === kind && item.normalizedValue === normalizedValue && now - item.updatedAt <= withinMs) || null
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
+  return findRecentBrowserActionInRecords(recentBrowserActions.get(normalizedSessionId) || [], kind, value, withinMs)
 }
 
 export function getRecentBrowserActions(sessionId: string | undefined): BrowserActionRecord[] {
   hydrateFromDisk()
-  if (!sessionId) return []
-  return (recentBrowserActions.get(sessionId) || []).slice()
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return []
+  return (recentBrowserActions.get(normalizedSessionId) || []).slice()
 }
 
 export function rememberBrowserWorkflowState(
@@ -341,10 +366,11 @@ export function rememberBrowserWorkflowState(
   },
 ): BrowserWorkflowState | null {
   hydrateFromDisk()
-  if (!sessionId) return null
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
   const updatedAt = payload.updatedAt || Date.now()
   const state: BrowserWorkflowState = {
-    sessionId,
+    sessionId: normalizedSessionId,
     tabId: payload.tabId,
     url: normalizeWhitespace(payload.url),
     title: normalizeWhitespace(payload.title),
@@ -364,15 +390,17 @@ export function rememberBrowserWorkflowState(
     lastEvidence: Array.from(new Set((payload.lastEvidence || payload.evidence || []).map((item) => normalizeWhitespace(item)).filter(Boolean))).slice(0, 8),
     updatedAt,
   }
-  browserWorkflowStates.set(sessionId, state)
+  browserWorkflowStates.set(normalizedSessionId, state)
+  pruneStaleSessions()
   persistToDisk()
   return state
 }
 
 export function getBrowserWorkflowState(sessionId: string | undefined): BrowserWorkflowState | null {
   hydrateFromDisk()
-  if (!sessionId) return null
-  return browserWorkflowStates.get(sessionId) || null
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
+  return browserWorkflowStates.get(normalizedSessionId) || null
 }
 
 export function rememberSkillRun(
@@ -380,7 +408,8 @@ export function rememberSkillRun(
   payload: Omit<SkillRunRecord, 'updatedAt'> & { updatedAt?: number },
 ): void {
   hydrateFromDisk()
-  if (!sessionId) return
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return
   const nextRecord: SkillRunRecord = {
     ...payload,
     toolName: normalizeWhitespace(payload.toolName),
@@ -390,7 +419,7 @@ export function rememberSkillRun(
     success: Boolean(payload.success),
     updatedAt: payload.updatedAt || Date.now(),
   }
-  const existing = recentSkillRuns.get(sessionId) || []
+  const existing = recentSkillRuns.get(normalizedSessionId) || []
   const next = pruneToRecent(
     [
       nextRecord,
@@ -398,14 +427,16 @@ export function rememberSkillRun(
     ],
     4,
   )
-  recentSkillRuns.set(sessionId, next)
+  recentSkillRuns.set(normalizedSessionId, next)
+  pruneStaleSessions()
   persistToDisk()
 }
 
 export function getLatestSkillRun(sessionId: string | undefined): SkillRunRecord | null {
   hydrateFromDisk()
-  if (!sessionId) return null
-  return (recentSkillRuns.get(sessionId) || [])[0] || null
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
+  return (recentSkillRuns.get(normalizedSessionId) || [])[0] || null
 }
 
 export function rememberContinuationState(
@@ -414,17 +445,19 @@ export function rememberContinuationState(
   options?: { updatedAt?: number },
 ): ContinuationState | null {
   hydrateFromDisk()
-  if (!sessionId) return null
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
   const normalized = normalizeContinuationState(payload)
   if (!normalized) return null
-  const existing = recentContinuationStates.get(sessionId) || []
-  recentContinuationStates.set(sessionId, pruneContinuationStateRecords([
+  const existing = recentContinuationStates.get(normalizedSessionId) || []
+  recentContinuationStates.set(normalizedSessionId, pruneContinuationStateRecords([
     {
       updatedAt: Number(options?.updatedAt || Date.now()),
       state: normalized,
     },
     ...existing.filter((record) => record.state.taskId !== normalized.taskId),
   ]))
+  pruneStaleSessions()
   persistToDisk()
   return normalizeContinuationState(normalized)
 }
@@ -434,8 +467,9 @@ export function getContinuationState(
   options?: { taskId?: string | null },
 ): ContinuationState | null {
   hydrateFromDisk()
-  if (!sessionId) return null
-  const records = recentContinuationStates.get(sessionId) || []
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return null
+  const records = recentContinuationStates.get(normalizedSessionId) || []
   if (options?.taskId) {
     return normalizeContinuationState(records.find((record) => record.state.taskId === options.taskId)?.state || null)
   }
@@ -444,25 +478,33 @@ export function getContinuationState(
 
 export function listContinuationStates(sessionId: string | undefined): ContinuationState[] {
   hydrateFromDisk()
-  if (!sessionId) return []
-  return cloneContinuationStateRecords(recentContinuationStates.get(sessionId)).map((record) => record.state)
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return []
+  return cloneContinuationStateRecords(recentContinuationStates.get(normalizedSessionId)).map((record) => record.state)
 }
 
 export function clearContinuationState(sessionId: string | undefined, taskId?: string | null): void {
   hydrateFromDisk()
-  if (!sessionId) return
-  if (!recentContinuationStates.has(sessionId)) return
+  const normalizedSessionId = normalizeWhitespace(sessionId || '')
+  if (!normalizedSessionId) return
+  if (!recentContinuationStates.has(normalizedSessionId)) return
   if (!taskId) {
-    recentContinuationStates.delete(sessionId)
+    recentContinuationStates.delete(normalizedSessionId)
     persistToDisk()
     return
   }
-  const next = (recentContinuationStates.get(sessionId) || []).filter((record) => record.state.taskId !== taskId)
+  const next = (recentContinuationStates.get(normalizedSessionId) || []).filter((record) => record.state.taskId !== taskId)
   if (next.length === 0) {
-    recentContinuationStates.delete(sessionId)
+    recentContinuationStates.delete(normalizedSessionId)
   } else {
-    recentContinuationStates.set(sessionId, pruneContinuationStateRecords(next))
+    recentContinuationStates.set(normalizedSessionId, pruneContinuationStateRecords(next))
   }
+  persistToDisk()
+}
+
+export function forgetSession(sessionId: string): void {
+  hydrateFromDisk()
+  if (!forgetSessionInMemory(sessionId)) return
   persistToDisk()
 }
 

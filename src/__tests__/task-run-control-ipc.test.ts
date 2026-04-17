@@ -42,3 +42,14 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(chatPanel, /window\.electronAPI\.agent\.resumeRun\(/)
   assert.match(chatPanel, /window\.electronAPI\.agent\.respondToInteraction\(/)
 })
+
+test('chat conversation deletion is routed through runtime cleanup before removing persisted records', () => {
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+
+  assert.match(runtime, /deleteConversation\(scopeId: string\): void/)
+  assert.match(runtime, /this\.scopeRunSummaries\.delete\(scopeId\)/)
+  assert.match(runtime, /forgetSession\(scopeId\)/)
+  assert.match(ipcHandler, /runtime!\.deleteConversation\(conversationId\)/)
+  assert.doesNotMatch(ipcHandler, /chatRepository\.deleteConversation\(conversationId\)/)
+})

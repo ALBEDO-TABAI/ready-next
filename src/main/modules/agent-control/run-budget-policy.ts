@@ -9,6 +9,7 @@ import type {
   TaskBudgetRuntime,
   TaskType,
 } from './run-contracts'
+import type { ContinuationState } from './continuation-state'
 
 const DEFAULT_MAX_PARALLEL_TOOL_GROUPS = 5
 const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterations' | 'maxToolCalls'>> = {
@@ -208,6 +209,7 @@ export function rebindTaskBudgetRuntime(
 export function restoreContinuationTaskBudgetRuntime(params: {
   taskType: TaskType
   budget?: TaskBudget | null
+  continuationState?: ContinuationState | null
   minimumRemainingIterations?: number
   minimumRemainingToolCalls?: number
 }): {
@@ -220,30 +222,49 @@ export function restoreContinuationTaskBudgetRuntime(params: {
     grantedIterationSafetyFloor: false,
     grantedToolCallSafetyFloor: false,
   }
-  const budget = params.budget
-  if (!budget) {
+  const continuationState = params.continuationState || null
+  const budget = continuationState?.budget || params.budget
+  const runtimeBudget = continuationState?.budgetRuntime || null
+
+  const hasBudgetSeed = runtimeBudget
+    ? (
+      typeof runtimeBudget.budget.maxIterations === 'number'
+      && typeof runtimeBudget.budget.maxToolCalls === 'number'
+      && typeof runtimeBudget.budget.maxParallelToolGroups === 'number'
+    )
+    : (
+      typeof budget?.maxIterations === 'number'
+      && typeof budget?.maxToolCalls === 'number'
+      && typeof budget?.maxParallelToolGroups === 'number'
+    )
+  if (!hasBudgetSeed || (!runtimeBudget && !budget)) {
     return { runtime: null, diagnostics }
   }
 
-  const hasBudgetSeed =
-    typeof budget.maxIterations === 'number'
-    && typeof budget.maxToolCalls === 'number'
-    && typeof budget.maxParallelToolGroups === 'number'
-  if (!hasBudgetSeed) {
-    return { runtime: null, diagnostics }
-  }
-
-  const usage: RunBudgetUsage = {
-    iterationsUsed: Math.max(0, Math.round(budget.iterationsUsed || 0)),
-    toolCallsUsed: Math.max(0, Math.round(budget.toolCallsUsed || 0)),
-    parallelToolGroupsUsed: Math.max(0, Math.round(budget.parallelToolGroupsUsed || 0)),
-  }
-  const seed: RunBudgetSeed = {
-    maxIterations: Math.max(1, Math.round(budget.maxIterations)),
-    maxToolCalls: Math.max(1, Math.round(budget.maxToolCalls)),
-    maxParallelToolGroups: Math.max(0, Math.round(budget.maxParallelToolGroups)),
-    reservedToolCalls: Math.max(0, Math.round(budget.reservedToolCalls || 0)),
-  }
+  const usage: RunBudgetUsage = runtimeBudget
+    ? {
+      iterationsUsed: Math.max(0, Math.round(runtimeBudget.usage.iterationsUsed || 0)),
+      toolCallsUsed: Math.max(0, Math.round(runtimeBudget.usage.toolCallsUsed || 0)),
+      parallelToolGroupsUsed: Math.max(0, Math.round(runtimeBudget.usage.parallelToolGroupsUsed || 0)),
+    }
+    : {
+      iterationsUsed: Math.max(0, Math.round(budget!.iterationsUsed || 0)),
+      toolCallsUsed: Math.max(0, Math.round(budget!.toolCallsUsed || 0)),
+      parallelToolGroupsUsed: Math.max(0, Math.round(budget!.parallelToolGroupsUsed || 0)),
+    }
+  const seed: RunBudgetSeed = runtimeBudget
+    ? {
+      maxIterations: Math.max(1, Math.round(runtimeBudget.budget.maxIterations)),
+      maxToolCalls: Math.max(1, Math.round(runtimeBudget.budget.maxToolCalls)),
+      maxParallelToolGroups: Math.max(0, Math.round(runtimeBudget.budget.maxParallelToolGroups)),
+      reservedToolCalls: Math.max(0, Math.round(runtimeBudget.budget.reservedToolCalls || 0)),
+    }
+    : {
+      maxIterations: Math.max(1, Math.round(budget!.maxIterations)),
+      maxToolCalls: Math.max(1, Math.round(budget!.maxToolCalls)),
+      maxParallelToolGroups: Math.max(0, Math.round(budget!.maxParallelToolGroups)),
+      reservedToolCalls: Math.max(0, Math.round(budget!.reservedToolCalls || 0)),
+    }
   const minimumRemainingIterations = Math.max(1, Math.round(params.minimumRemainingIterations || 4))
   const minimumRemainingToolCalls = Math.max(1, Math.round(params.minimumRemainingToolCalls || 2))
 
@@ -263,15 +284,21 @@ export function restoreContinuationTaskBudgetRuntime(params: {
     runtime: createTaskBudgetRuntime(params.taskType, {
       budget: seed,
       usage,
-      stepBudget: budget.stepBudget
+      stepBudget: runtimeBudget?.stepBudget
+        ? {
+          stepId: runtimeBudget.stepBudget.stepId || null,
+          maxIterations: Math.max(1, Math.round(runtimeBudget.stepBudget.maxIterations)),
+          remainingIterations: Math.max(0, Math.round(runtimeBudget.stepBudget.remainingIterations)),
+        }
+        : budget?.stepBudget
         ? {
           stepId: budget.stepBudget.stepId || null,
           maxIterations: Math.max(1, Math.round(budget.stepBudget.maxIterations)),
           remainingIterations: Math.max(0, Math.round(budget.stepBudget.remainingIterations ?? budget.stepBudget.maxIterations)),
         }
         : null,
-      frozen: Boolean(budget.frozen),
-      bootstrapBudget: Boolean(budget.bootstrapBudget),
+      frozen: Boolean(runtimeBudget?.frozen ?? budget?.frozen),
+      bootstrapBudget: Boolean(runtimeBudget?.bootstrapBudget ?? budget?.bootstrapBudget),
     }),
     diagnostics,
   }

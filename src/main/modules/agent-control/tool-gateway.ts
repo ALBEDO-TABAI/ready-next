@@ -4,6 +4,7 @@ import { logAgentMetric } from './metrics'
 import type { ToolDefinition } from './tool-definition'
 import {
   ToolRegistry,
+  type ToolSchemaResolution,
   type ToolRegistryOptions,
   type ToolSchemaFormat,
 } from './tool-registry'
@@ -28,6 +29,19 @@ export interface CapabilityGroupRegistryEntry extends CapabilityGroupDefinition 
   hasDynamicSource: boolean
 }
 
+export interface ToolGroupResolutionEntry {
+  groupId: CapabilityGroupId
+  visible: boolean
+  toolCount: number
+  schemaError?: string | null
+  usedStaticFallback: boolean
+}
+
+export interface ToolGroupResolutionResult {
+  tools: Array<Record<string, unknown>>
+  groupResolutions: ToolGroupResolutionEntry[]
+}
+
 interface ToolGatewayOptions extends ToolRegistryOptions {}
 
 export class ToolGateway {
@@ -49,11 +63,21 @@ export class ToolGateway {
     return this.registry.getToolDefinitionsForGroup(groupId)
   }
 
-  private resolveGroupToolSchemas(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
+  private resolveGroupToolSchemasDetailed(groupId: CapabilityGroupId, format: ToolSchemaFormat): ToolSchemaResolution {
     const errorKey = this.resolutionErrorKey(groupId, format)
     this.lastSchemaResolutionErrors.delete(errorKey)
     try {
-      return this.registry.getToolSchemasForGroup(groupId, format)
+      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format)
+      const errorMessage = resolution.error || null
+      if (errorMessage) {
+        this.lastSchemaResolutionErrors.set(errorKey, errorMessage)
+        logAgentMetric('tool_group_blocked_rate', {
+          groupId,
+          format,
+          reason: errorMessage,
+        })
+      }
+      return resolution
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.lastSchemaResolutionErrors.set(errorKey, message)
@@ -62,8 +86,15 @@ export class ToolGateway {
         format,
         reason: message,
       })
-      return []
+      return {
+        tools: [],
+        error: message,
+      }
     }
+  }
+
+  private resolveGroupToolSchemas(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
+    return this.resolveGroupToolSchemasDetailed(groupId, format).tools
   }
 
   private resolveGroupToolNames(groupId: CapabilityGroupId): string[] {
@@ -136,32 +167,41 @@ export class ToolGateway {
     return this.lastSchemaResolutionErrors.get(this.resolutionErrorKey(groupId, format)) || null
   }
 
-  getAnthropicToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
+  getToolSchemaResolutionForGroups(groupIds: CapabilityGroupId[], format: ToolSchemaFormat): ToolGroupResolutionResult {
     const tools = new Map<string, Record<string, unknown>>()
+    const groupResolutions: ToolGroupResolutionEntry[] = []
     for (const groupId of groupIds) {
-      for (const tool of this.resolveGroupToolSchemas(groupId, 'anthropic')) {
-        const name = typeof tool.name === 'string' ? tool.name : null
+      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format)
+      for (const tool of resolution.tools) {
+        const name = format === 'anthropic'
+          ? (typeof tool.name === 'string' ? tool.name : null)
+          : (typeof (tool.function as { name?: unknown } | undefined)?.name === 'string'
+              ? (tool.function as { name: string }).name
+              : null)
         if (name && !tools.has(name)) {
           tools.set(name, tool)
         }
       }
+      groupResolutions.push({
+        groupId,
+        visible: true,
+        toolCount: resolution.tools.length,
+        schemaError: resolution.error || null,
+        usedStaticFallback: Boolean(resolution.usedStaticFallback),
+      })
     }
-    return Array.from(tools.values())
+    return {
+      tools: Array.from(tools.values()),
+      groupResolutions,
+    }
+  }
+
+  getAnthropicToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
+    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic').tools
   }
 
   getOpenAIToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
-    const tools = new Map<string, Record<string, unknown>>()
-    for (const groupId of groupIds) {
-      for (const tool of this.resolveGroupToolSchemas(groupId, 'openai')) {
-        const name = typeof (tool.function as { name?: unknown } | undefined)?.name === 'string'
-          ? (tool.function as { name: string }).name
-          : null
-        if (name && !tools.has(name)) {
-          tools.set(name, tool)
-        }
-      }
-    }
-    return Array.from(tools.values())
+    return this.getToolSchemaResolutionForGroups(groupIds, 'openai').tools
   }
 
   getToolDefinition(id: string): ToolDefinition | null {

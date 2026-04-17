@@ -42,6 +42,14 @@ describe('looksLikeMissingNativeToolsReply', () => {
       looksLikeMissingNativeToolsReply('我现在还是不能真的执行这份浏览器计划，因为这轮实际开放给我的工具里，没有 browser_* 工具。'),
       true,
     )
+    assert.strictEqual(
+      looksLikeMissingNativeToolsReply('显式可用工具清单里只有 memory_create、memory_search、memory_update、memory_list_recent 和 session_search。'),
+      true,
+    )
+    assert.strictEqual(
+      looksLikeMissingNativeToolsReply('The available tools in this session only include memory_create, memory_search, memory_update, memory_list_recent, and session_search.'),
+      true,
+    )
     assert.strictEqual(looksLikeMissingNativeToolsReply("I don’t have a ping tool available in this session."), true)
     assert.strictEqual(looksLikeMissingNativeToolsReply('我现在就去读取页面并继续操作。'), false)
   })

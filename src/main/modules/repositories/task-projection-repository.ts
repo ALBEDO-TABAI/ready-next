@@ -159,6 +159,12 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     ).all<TaskProjectionRow>(parentTaskId).map((row) => this.mapRow(row))
   }
 
+  deleteByScope(scopeId: string): void {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    db.prepare('DELETE FROM task_projections WHERE scope_id = ?').run(scopeId)
+  }
+
   private mapRow(row: TaskProjectionRow): TaskProjectionRecord {
     return {
       taskId: row.task_id,

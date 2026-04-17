@@ -27,12 +27,14 @@ import {
   buildToolGuidance,
   type ToolPolicy,
 } from './execution-tool-config'
+import { buildToolDispatchDecision } from './execution-tool-policy'
 import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
   shouldEnforceBrowserToolRetry,
 } from '../claude-bridge/tool-bridge'
 import { compressHistoryForPrompt } from './context-compression'
+import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
@@ -51,6 +53,7 @@ import { TurnTranscript } from './turn-transcript'
 import type {
   RunBudgetHint,
   StepBudgetState,
+  ToolSnapshot,
   TurnEngineRequest,
   TurnEngineHost,
   TurnEngineSession,
@@ -62,6 +65,7 @@ import type {
   TurnToolExecutionResult,
   TurnTranscriptEvent,
 } from './run-contracts'
+import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
@@ -198,6 +202,147 @@ function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
   }
 }
 
+function buildHostToolSnapshot(params: {
+  stage: ToolSnapshot['stage']
+  iteration: number
+  host: TurnEngineHost<any>
+  hasTools: boolean
+  allowBrowserTools: boolean
+  browserDecisionMode?: string | null
+  browserHostAvailable?: boolean | null
+  visibleCapabilityGroupIds?: ToolSnapshot['visibleCapabilityGroupIds']
+  suppressedCapabilityGroupIds?: ToolSnapshot['suppressedCapabilityGroupIds']
+  allowedToolNames?: string[] | null
+  preferTextToolBridge: boolean
+}): ToolSnapshot {
+  const capabilities = resolveAIConfigCapabilities(params.host.providerContext.config)
+  const dispatchDecision = buildToolDispatchDecision({
+    supportsToolCalls: capabilities?.supportsToolCalls ?? params.host.providerContext.supportsToolCalls,
+    supportsNativeToolCalls: capabilities?.supportsNativeToolCalls
+      ?? capabilities?.supportsToolCalls
+      ?? params.host.providerContext.supportsToolCalls,
+    toolCallTransport: capabilities?.toolCallTransport || null,
+    preferTextToolBridge: params.preferTextToolBridge,
+  })
+  return {
+    stage: params.stage,
+    source: 'host',
+    iteration: Math.max(0, Number(params.iteration || 0)),
+    provider: params.host.providerContext.config.provider,
+    baseUrl: params.host.providerContext.baseUrl,
+    model: params.host.providerContext.config.model,
+    wireApi: capabilities?.wireApi === 'responses' || capabilities?.wireApi === 'chat/completions'
+      ? capabilities.wireApi
+      : null,
+    browserDecisionMode: params.browserDecisionMode || null,
+    browserHostAvailable: typeof params.browserHostAvailable === 'boolean'
+      ? params.browserHostAvailable
+      : null,
+    hasTools: params.hasTools,
+    allowBrowserTools: params.allowBrowserTools,
+    visibleCapabilityGroupIds: [...(params.visibleCapabilityGroupIds || [])],
+    suppressedCapabilityGroupIds: [...(params.suppressedCapabilityGroupIds || [])],
+    allowedToolNames: [...(params.allowedToolNames || [])],
+    requestedTransport: dispatchDecision.transport,
+    effectiveTransport: dispatchDecision.transport,
+    supportsNativeTools: dispatchDecision.supportsNativeTools,
+    preferTextToolBridge: params.preferTextToolBridge,
+    fallbackReason: null,
+    toolCallsCount: null,
+  }
+}
+
+function appendLoggedToolSnapshot(
+  state: TurnState,
+  host: TurnEngineHost<any>,
+  snapshot: ToolSnapshot,
+): void {
+  state.appendToolSnapshots([snapshot])
+  host.log(`[tool_snapshot] ${JSON.stringify(snapshot)}`)
+}
+
+function appendLoggedToolResolution(params: {
+  state: TurnState
+  host: TurnEngineHost<any>
+  stage: string
+  resolution: NonNullable<ReturnType<TurnState['buildExecutionDiagnostics']>['toolResolution']>
+  visibleCapabilityGroupIds: CapabilityGroupId[]
+  allowBrowserTools: boolean
+  allowedToolNames: string[]
+}): void {
+  params.state.setToolResolution(params.resolution)
+  for (const groupId of params.visibleCapabilityGroupIds) {
+    params.host.log(`[tool_group_resolution] ${JSON.stringify({
+      stage: params.stage,
+      groupId,
+      visible: true,
+      toolCount: params.resolution.visibleGroupToolCounts?.[groupId] ?? 0,
+      schemaError: params.resolution.groupSchemaErrors?.[groupId] || null,
+      usedStaticFallback: Boolean(params.resolution.usedStaticFallbackGroups?.includes(groupId)),
+    })}`)
+  }
+  if ((params.resolution.invariantViolations || []).length > 0) {
+    params.host.log(`[tool_resolution_error] ${JSON.stringify({
+      stage: params.stage,
+      invariantViolations: params.resolution.invariantViolations,
+      allowBrowserTools: params.allowBrowserTools,
+      visibleCapabilityGroupIds: params.visibleCapabilityGroupIds,
+      allowedToolNames: params.allowedToolNames,
+    })}`)
+  }
+}
+
+function buildBrowserToolInvariantViolation(params: {
+  allowBrowserTools: boolean
+  visibleCapabilityGroupIds: CapabilityGroupId[]
+  allowedToolNames: string[]
+}): string | null {
+  const browserGroupsVisible = params.visibleCapabilityGroupIds.filter((groupId) =>
+    groupId === 'browser_interaction' || groupId === 'browser_content_tasks')
+  if (!params.allowBrowserTools && browserGroupsVisible.length === 0) return null
+  if (params.allowedToolNames.some((name) => name.startsWith('browser_'))) return null
+  return [
+    'browser_tools_missing',
+    `visibleGroups=${browserGroupsVisible.join('|') || 'none'}`,
+    `allowBrowserTools=${params.allowBrowserTools}`,
+  ].join(',')
+}
+
+function assertNoToolResolutionViolation(params: {
+  state: TurnState
+  host: TurnEngineHost<any>
+  stage: string
+  resolution: NonNullable<ReturnType<TurnState['buildExecutionDiagnostics']>['toolResolution']> | null | undefined
+  allowBrowserTools: boolean
+  visibleCapabilityGroupIds: CapabilityGroupId[]
+  allowedToolNames: string[]
+}): void {
+  const invariantViolations = new Set(params.resolution?.invariantViolations || [])
+  const requestStageViolation = buildBrowserToolInvariantViolation({
+    allowBrowserTools: params.allowBrowserTools,
+    visibleCapabilityGroupIds: params.visibleCapabilityGroupIds,
+    allowedToolNames: params.allowedToolNames,
+  })
+  if (requestStageViolation) {
+    invariantViolations.add(requestStageViolation)
+  }
+  if (invariantViolations.size === 0) return
+
+  const mergedResolution = {
+    ...(params.resolution || {}),
+    invariantViolations: Array.from(invariantViolations),
+  }
+  params.state.setToolResolution(mergedResolution)
+  params.host.log(`[tool_resolution_error] ${JSON.stringify({
+    stage: params.stage,
+    invariantViolations: mergedResolution.invariantViolations,
+    allowBrowserTools: params.allowBrowserTools,
+    visibleCapabilityGroupIds: params.visibleCapabilityGroupIds,
+    allowedToolNames: params.allowedToolNames,
+  })}`)
+  throw new Error('浏览器工具名单组装异常，本轮已停止请求')
+}
+
 export class TurnEngine {
   async execute<TSession extends TurnEngineSession>(request: TurnEngineRequest<TSession>) {
     const host = request.host
@@ -306,6 +451,38 @@ export class TurnEngine {
         },
       })
       const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
+      appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({
+        stage: 'host_prepared',
+        iteration: 0,
+        host,
+        hasTools: preparedRunCapabilities.visibilityPlan.hasTools,
+        allowBrowserTools: preparedRunCapabilities.toolPolicy.allowBrowserTools,
+        browserDecisionMode: browserDecision.mode,
+        browserHostAvailable: preparedRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+        visibleCapabilityGroupIds: preparedRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        suppressedCapabilityGroupIds: preparedRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+        allowedToolNames: preparedRunCapabilities.allowedToolNames,
+        preferTextToolBridge: false,
+      }))
+      host.log(`[tool_capability] stage=host_prepared ${preparedRunCapabilities.capabilityLogLine}`)
+      appendLoggedToolResolution({
+        state,
+        host,
+        stage: 'host_prepared',
+        resolution: preparedRunCapabilities.toolResolution,
+        visibleCapabilityGroupIds: preparedRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        allowBrowserTools: preparedRunCapabilities.toolPolicy.allowBrowserTools,
+        allowedToolNames: preparedRunCapabilities.allowedToolNames,
+      })
+      assertNoToolResolutionViolation({
+        state,
+        host,
+        stage: 'host_prepared',
+        resolution: preparedRunCapabilities.toolResolution,
+        allowBrowserTools: preparedRunCapabilities.toolPolicy.allowBrowserTools,
+        visibleCapabilityGroupIds: preparedRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        allowedToolNames: preparedRunCapabilities.allowedToolNames,
+      })
       let toolPolicy = preparedRunCapabilities.toolPolicy
       if ((toolPolicy as any).forceDocumentTool) {
         session.lastDocumentContextInput = contextualUserInput
@@ -392,6 +569,38 @@ export class TurnEngine {
         browserDecisionMode: browserDecision.mode as any,
       })
       toolPolicy = reconciledRunCapabilities.toolPolicy
+      appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({
+        stage: 'host_effective',
+        iteration: 0,
+        host,
+        hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
+        allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+        browserDecisionMode: browserDecision.mode,
+        browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+        visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        preferTextToolBridge: false,
+      }))
+      host.log(`[tool_capability] stage=host_effective ${reconciledRunCapabilities.capabilityLogLine}`)
+      appendLoggedToolResolution({
+        state,
+        host,
+        stage: 'host_effective',
+        resolution: reconciledRunCapabilities.toolResolution,
+        visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+      })
+      assertNoToolResolutionViolation({
+        state,
+        host,
+        stage: 'host_effective',
+        resolution: reconciledRunCapabilities.toolResolution,
+        allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+        visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+      })
 
       const taskTypeResolution = resolveTaskType({
         intent: executionIntentContext.intentClassification as IntentClassification,
@@ -437,6 +646,14 @@ export class TurnEngine {
               allowedToolNames: reconciledRunCapabilities.allowedToolNames,
             })
             : null
+      const shouldHideBrowserProcessText =
+        selectedDomainAdapter?.id === 'browser'
+        && taskExecutionRoute.chain !== 'direct'
+        && (
+          taskExecutionRoute.executor === 'browser'
+          || Boolean((selectedDomainPrepareResult?.domainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
+            ?.browserToolLoopState?.isBrowserTask)
+        )
 
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation?.budgetRuntime) {
         state.taskBudgetRuntime = {
@@ -458,6 +675,15 @@ export class TurnEngine {
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      assertNoToolResolutionViolation({
+        state,
+        host,
+        stage: 'tool_loop_request',
+        resolution: state.toolResolution,
+        allowBrowserTools: toolPolicy.allowBrowserTools,
+        visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        allowedToolNames: routedAllowedToolNames,
+      })
       appendSessionMessages(session, selectedDomainPrepareResult?.sessionMessages)
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
         state.interactionState = 'resuming'
@@ -643,15 +869,6 @@ export class TurnEngine {
         }
       }
 
-      const shouldHideBrowserProcessText =
-        selectedDomainAdapter?.id === 'browser'
-        && taskExecutionRoute.chain !== 'direct'
-        && (
-          taskExecutionRoute.executor === 'browser'
-          || Boolean((selectedDomainPrepareResult?.domainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
-            ?.browserToolLoopState?.isBrowserTask)
-        )
-
       if (!state.resolvedTaskType) {
         state.resolvedTaskType = hasTools ? 'short_task' : 'direct_answer'
       }
@@ -711,6 +928,7 @@ export class TurnEngine {
       let textToolBridgeNudges = 0
       let budgetLimitedBeforeCompletion = false
       let convergencePromptInjected = false
+      let preferTextToolBridgeOnce = false
       const toolGuidance = buildToolGuidance(toolPolicy as any)
       const toolLoopSession = toolGuidance
         ? {
@@ -755,17 +973,52 @@ export class TurnEngine {
 
         const scope = request.sessionId ? host.runtime?.getConversationScope?.(request.sessionId) : undefined
         const toolContext = buildHostToolContext(routedAllowedToolNames, scope)
-        const response = await host.requestToolLoopResponse({
-          session: toolLoopSession,
-          signal: request.abortSignal,
-          toolPolicy,
-          providerContext: host.providerContext,
-          hasVideoInputs,
-          compressContext: () => compressSessionMessagesForRetry(session),
-        }) as TurnModelResponse
+        const toolLoopRequestSnapshot = buildHostToolSnapshot({
+          stage: 'tool_loop_request',
+          iteration: iterations,
+          host,
+          hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
+          allowBrowserTools: toolPolicy.allowBrowserTools,
+          browserDecisionMode: browserDecision.mode,
+          browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+          suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+          allowedToolNames: routedAllowedToolNames,
+          preferTextToolBridge: preferTextToolBridgeOnce,
+        })
+        appendLoggedToolSnapshot(state, host, toolLoopRequestSnapshot)
+        let response: TurnModelResponse
+        try {
+          response = await host.requestToolLoopResponse({
+            session: toolLoopSession,
+            signal: request.abortSignal,
+            toolPolicy,
+            allowedToolNames: routedAllowedToolNames,
+            hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
+            allowBrowserTools: toolPolicy.allowBrowserTools,
+            providerContext: host.providerContext,
+            hasVideoInputs,
+            browserDecisionMode: browserDecision.mode,
+            runtimeSnapshot: {
+              browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+              groups: reconciledRunCapabilities.runtimeSnapshot.groups,
+            },
+            visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+            suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+            capabilityLogLine: reconciledRunCapabilities.capabilityLogLine,
+            iteration: iterations,
+            requestedTransport: toolLoopRequestSnapshot.requestedTransport,
+            supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
+            preferTextToolBridgeOnce,
+            compressContext: () => compressSessionMessagesForRetry(session),
+          }) as TurnModelResponse
+        } finally {
+          preferTextToolBridgeOnce = false
+        }
         if (response.fallback) {
           state.latestFallback = response.fallback
         }
+        state.appendToolSnapshots(response.toolSnapshots)
         state.appendRecoveryHistory(response.recoveryHistory)
 
         if (response.toolCalls.length === 0) {
@@ -783,8 +1036,7 @@ export class TurnEngine {
             if (assistantHistoryText) {
               session.messages.push({ role: 'assistant', content: assistantHistoryText })
             }
-            session.preferTextToolBridge = true
-            toolLoopSession.preferTextToolBridge = true
+            preferTextToolBridgeOnce = true
             session.messages.push({
               role: 'user',
               content: [
@@ -798,6 +1050,7 @@ export class TurnEngine {
             session.messages.push({ role: 'assistant', content: response.rawText })
             if (looksLikeMissingNativeToolsReply(response.text || response.rawText) && textToolBridgeNudges < 2) {
               textToolBridgeNudges += 1
+              preferTextToolBridgeOnce = true
               session.messages.push({
                 role: 'user',
                 content: buildTextToolBridgeCorrectionMessage(toolPolicy as any),

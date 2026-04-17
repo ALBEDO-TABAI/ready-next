@@ -62,7 +62,7 @@ test('buildExecutionToolState enables browser tools only after browser decision 
   assert.equal(browserReady.toolPolicy.allowBrowserTools, true)
 })
 
-test('buildExecutionToolState keeps document tools closed for plain informational questions even if recent history mentioned widgets', () => {
+test('resolveExecutionIntentContext keeps live external info lookups out of document routing even if recent history mentioned widgets', () => {
   const requestEnvelope = buildRequestEnvelope({
     userText: '今天广州天气怎么样\n\n## 最近会话摘要\n刚才在更新 stock_price_chart widget',
   })
@@ -72,27 +72,38 @@ test('buildExecutionToolState keeps document tools closed for plain informationa
     lastDocumentContextInput: '更新当前文档里的 stock_price_chart widget：把边框去掉',
   })
 
+  assert.equal(context.userInstructionText, '今天广州天气怎么样')
+  assert.equal(context.intentClassification.primaryDomain, 'browser')
+  assert.equal(context.hasDocumentEnvironment, false)
+  assert.equal(context.documentWidgetTaskKind, null)
+})
+
+test('buildExecutionToolState keeps browser tools visible for live external info lookups even before browser workflow planning is attached', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '明天广州天气怎么样',
+  })
+  const intent = classifyIntent(requestEnvelope)
   const state = buildExecutionToolState({
     supportsToolCalls: true,
     hasVideoInputs: false,
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
-    contextualUserInput: context.contextualUserInput,
-    userInstructionText: context.userInstructionText,
-    intentClassification: context.intentClassification,
-    hasDocumentEnvironment: context.hasDocumentEnvironment,
-    hasWidgetTargetContext: context.hasWidgetTargetContext,
-    explicitWidgetCreateIntent: context.explicitWidgetCreateIntent,
-    documentWidgetTaskKind: context.documentWidgetTaskKind,
-    documentWidgetProfile: context.documentWidgetProfile,
+    contextualUserInput: '明天广州天气怎么样',
+    userInstructionText: '明天广州天气怎么样',
+    intentClassification: intent,
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
     browserDecisionMode: 'free_tool_loop',
+    browserHostAvailable: true,
+    feishuConnected: true,
   })
 
-  assert.equal(context.userInstructionText, '今天广州天气怎么样')
-  assert.equal(state.toolPolicy.forceDocumentTool, false)
-  assert.equal(state.toolPolicy.allowDocumentTools, false)
-  assert.equal(state.toolPolicy.allowBrowserTools, false)
+  assert.equal(state.toolPolicy.allowBrowserTools, true)
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
 })
 
 test('buildExecutionToolState suppresses rss, calendar, and feishu tools for generic local design requests', () => {
@@ -172,4 +183,45 @@ test('buildExecutionToolState keeps rss and feishu tools available only when use
   assert.equal(rssState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), false)
   assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('channel_feishu'), true)
   assert.equal(feishuState.capabilityResolution.visibleCapabilityGroupIds.includes('rss'), false)
+})
+
+test('resolveExecutionIntentContext builds a structured document task plan for explicit source-to-target requests', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: [
+      '请为@[storyboard.pdf]在@[新文档.md]生成一张信息卡',
+      '',
+      '## 环境信息',
+      '- 当前模式: 文档模式',
+      '',
+      '### 当前文档上下文',
+      '- 标题: 新文档.md',
+      '- 路径: /tmp/新文档.md',
+      '- 类型: md',
+      '- 字符数: 200',
+      '',
+      '--- 文档摘要开始 ---',
+      '这里是目标文档摘要',
+      '--- 文档摘要结束 ---',
+      '',
+      '--- 附件: storyboard.pdf ---',
+      '- 路径: /tmp/storyboard.pdf',
+      '这里是 storyboard 正文',
+    ].join('\n'),
+  })
+
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
+    previousInputs: [],
+  })
+
+  assert.equal(context.shouldUseDocumentTaskPlan, true)
+  assert.equal(context.documentTaskPlan?.jobs.length, 1)
+  assert.equal(
+    context.documentTaskPlan?.jobs[0].bindings.find((binding) => binding.role === 'primary_source')?.resource.name,
+    'storyboard.pdf',
+  )
+  assert.equal(
+    context.documentTaskPlan?.jobs[0].bindings.find((binding) => binding.role === 'target_document')?.resource.name,
+    '新文档.md',
+  )
 })

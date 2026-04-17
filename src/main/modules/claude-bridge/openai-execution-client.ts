@@ -1,9 +1,11 @@
 import { randomUUID } from 'crypto'
 
-import type { AIModelConfig, AIProviderDef } from '../../../shared/ai-providers'
+import { resolveAIConfigCapabilities, type AIModelConfig, type AIProviderDef } from '../../../shared/ai-providers'
 import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-responses'
+import { buildToolDispatchDecision } from '../agent-control/execution-tool-policy'
 import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
+import type { ToolSnapshot } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
 import { extractOpenAIMessageText } from './openai-message-text'
@@ -40,6 +42,21 @@ export interface OpenAIExecutionResponse {
   rawText?: string
   toolTransport?: 'native' | 'text'
   fallback?: ExecutionFallbackInfo
+  toolSnapshots?: ToolSnapshot[]
+}
+
+export interface OpenAIToolSnapshotContext {
+  iteration: number
+  browserDecisionMode?: string | null
+  browserHostAvailable?: boolean | null
+  hasTools: boolean
+  allowBrowserTools: boolean
+  visibleCapabilityGroupIds: ToolSnapshot['visibleCapabilityGroupIds']
+  suppressedCapabilityGroupIds: ToolSnapshot['suppressedCapabilityGroupIds']
+  requestedTransport: ToolSnapshot['requestedTransport']
+  supportsNativeTools: boolean
+  preferTextToolBridge: boolean
+  expectedAllowedToolNames?: string[] | null
 }
 
 export class OpenAIExecutionClient {
@@ -232,6 +249,8 @@ export class OpenAIExecutionClient {
     signal: AbortSignal
     policy?: ToolPolicy
     timeoutMs?: number
+    preferTextToolBridgeOnce?: boolean
+    toolSnapshotContext?: OpenAIToolSnapshotContext
   }): Promise<OpenAIExecutionResponse> {
     const headers = this.buildHeaders(params.config, params.provider)
     const isKimiCodingBase = params.baseUrl.replace(/\/+$/, '').includes('api.kimi.com/coding')
@@ -256,34 +275,91 @@ export class OpenAIExecutionClient {
       baseUrl: params.baseUrl,
     }))
     const tools = getPolicyOpenAITools(params.policy)
+    const allowedToolNames = collectToolNames(tools, 'openai')
+    const preferTextToolBridge = Boolean(params.preferTextToolBridgeOnce)
+    const toolSnapshots: ToolSnapshot[] = []
+    const snapshotDefaults = this.buildProviderSnapshotDefaults({
+      config: params.config,
+      baseUrl: openAIBase,
+      model,
+      runtime,
+      allowedToolNames,
+      preferTextToolBridge,
+      snapshotContext: params.toolSnapshotContext,
+    })
+    const mismatch = this.hasToolListMismatch(
+      params.toolSnapshotContext?.expectedAllowedToolNames || null,
+      allowedToolNames,
+    )
+    if (mismatch) {
+      this.deps.log(`[tool_snapshot_mismatch] ${JSON.stringify({
+        provider: snapshotDefaults.provider,
+        baseUrl: snapshotDefaults.baseUrl,
+        model: snapshotDefaults.model,
+        iteration: snapshotDefaults.iteration,
+        expectedAllowedToolNames: params.toolSnapshotContext?.expectedAllowedToolNames || [],
+        actualAllowedToolNames: allowedToolNames,
+      })}`)
+    }
+    const appendToolSnapshot = (snapshot: ToolSnapshot) => {
+      toolSnapshots.push(snapshot)
+      this.deps.log(`[tool_snapshot] ${JSON.stringify(snapshot)}`)
+    }
+    const recordProviderRequest = (effectiveTransport: ToolSnapshot['effectiveTransport'], fallbackReason?: string | null) => {
+      appendToolSnapshot(this.buildToolSnapshot({
+        defaults: snapshotDefaults,
+        stage: 'provider_request',
+        effectiveTransport,
+        toolCallsCount: 0,
+        fallbackReason,
+        mismatch,
+      }))
+    }
+    const recordProviderResponse = (effectiveTransport: ToolSnapshot['effectiveTransport'], response: OpenAIExecutionResponse, fallbackReason?: string | null) => {
+      appendToolSnapshot(this.buildToolSnapshot({
+        defaults: snapshotDefaults,
+        stage: 'provider_response',
+        effectiveTransport,
+        toolCallsCount: response.toolCalls.length,
+        fallbackReason,
+        mismatch,
+      }))
+    }
+    const attachToolSnapshots = <T extends OpenAIExecutionResponse>(response: T): T => ({
+      ...response,
+      toolSnapshots: toolSnapshots.length > 0 ? toolSnapshots : [],
+    })
     const repairedMessages = this.repairOpenAIToolMessageHistory(params.session.messages) as unknown as OpenAIChatMessage[]
     if (params.policy?.forceDocumentTool) {
-      this.deps.log(`forceDocumentTool openai tools=${collectToolNames(tools, 'openai').join(',')}`)
+      this.deps.log(`forceDocumentTool openai tools=${allowedToolNames.join(',')}`)
     }
     if (params.policy?.forceDesignTool) {
-      this.deps.log(`forceDesignTool openai tools=${collectToolNames(tools, 'openai').join(',')}`)
+      this.deps.log(`forceDesignTool openai tools=${allowedToolNames.join(',')}`)
     }
 
     const preRequestFallbackPlan = resolveFallbackPlan({
       mode: 'openai_prefer_text_bridge',
       config: params.config,
-      preferTextToolBridge: params.session.preferTextToolBridge,
+      preferTextToolBridge,
     })
     if (preRequestFallbackPlan.shouldRetry) {
-      params.session.preferTextToolBridge = true
       this.deps.log(`OpenAI tool transport fallback engaged before request, provider=${params.config.provider}, baseUrl=${openAIBase}`)
-      return annotateFallbackResult(await this.requestTextToolBridge({
+      recordProviderRequest('text', 'prefer_text_tool_bridge')
+      const textBridgeResponse = await this.requestTextToolBridge({
         session: params.session,
         config: params.config,
         baseUrl: openAIBase,
         provider: params.provider,
         signal: params.signal,
         policy: params.policy,
-      }), { kind: 'text_bridge', attempts: 1 })
+      })
+      recordProviderResponse('text', textBridgeResponse, 'prefer_text_tool_bridge')
+      return annotateFallbackResult(attachToolSnapshots(textBridgeResponse), { kind: 'text_bridge', attempts: 1 })
     }
 
     if (runtime.wireApi === 'responses') {
       try {
+        recordProviderRequest('native')
         const nativeResponse = await this.requestWithResponsesTools({
           session: params.session,
           runtime,
@@ -299,22 +375,28 @@ export class OpenAIExecutionClient {
         const fallbackPlan = resolveFallbackPlan({
           mode: 'openai_missing_native_tools',
           config: params.config,
-          preferTextToolBridge: params.session.preferTextToolBridge,
+          preferTextToolBridge,
           text: nativeResponse.text,
         })
+        const fallbackReason = nativeResponse.toolCalls.length === 0 && fallbackPlan.shouldRetry
+          ? 'missing_native_tools'
+          : null
+        recordProviderResponse('native', nativeResponse, fallbackReason)
         if (nativeResponse.toolCalls.length === 0 && fallbackPlan.shouldRetry) {
-          params.session.preferTextToolBridge = true
           this.deps.log(`OpenAI native tools unavailable after responses reply; retrying with text bridge, provider=${params.config.provider}, baseUrl=${openAIBase}`)
-          return annotateFallbackResult(await this.requestTextToolBridge({
+          recordProviderRequest('text', 'missing_native_tools')
+          const textBridgeResponse = await this.requestTextToolBridge({
             session: params.session,
             config: params.config,
             baseUrl: openAIBase,
             provider: params.provider,
             signal: params.signal,
             policy: params.policy,
-          }), { kind: 'text_bridge', attempts: 1 })
+          })
+          recordProviderResponse('text', textBridgeResponse, 'missing_native_tools')
+          return annotateFallbackResult(attachToolSnapshots(textBridgeResponse), { kind: 'text_bridge', attempts: 1 })
         }
-        return nativeResponse
+        return attachToolSnapshots(nativeResponse)
       } catch (error) {
         const fallbackPlan = resolveFallbackPlan({
           mode: 'openai_wire_api',
@@ -324,7 +406,8 @@ export class OpenAIExecutionClient {
           throw error
         }
         this.deps.log(`OpenAI responses wire API failed; retrying with chat/completions, provider=${params.config.provider}, baseUrl=${openAIBase}`)
-        return annotateFallbackResult(await this.requestWithChatCompletionsTools({
+        recordProviderRequest('native', 'wire_api_retry')
+        const retryResponse = await this.requestWithChatCompletionsTools({
           session: params.session,
           model,
           openAIBase,
@@ -334,10 +417,13 @@ export class OpenAIExecutionClient {
           tools,
           repairedMessages,
           policy: params.policy,
-        }), { kind: 'wire_api_retry', attempts: 1 })
+        })
+        recordProviderResponse('native', retryResponse, 'wire_api_retry')
+        return annotateFallbackResult(attachToolSnapshots(retryResponse), { kind: 'wire_api_retry', attempts: 1 })
       }
     }
 
+    recordProviderRequest('native')
     const nativeResponse = await this.requestWithChatCompletionsTools({
       session: params.session,
       model,
@@ -352,22 +438,28 @@ export class OpenAIExecutionClient {
     const fallbackPlan = resolveFallbackPlan({
       mode: 'openai_missing_native_tools',
       config: params.config,
-      preferTextToolBridge: params.session.preferTextToolBridge,
+      preferTextToolBridge,
       text: nativeResponse.text,
     })
+    const fallbackReason = nativeResponse.toolCalls.length === 0 && fallbackPlan.shouldRetry
+      ? 'missing_native_tools'
+      : null
+    recordProviderResponse('native', nativeResponse, fallbackReason)
     if (nativeResponse.toolCalls.length === 0 && fallbackPlan.shouldRetry) {
-      params.session.preferTextToolBridge = true
       this.deps.log(`OpenAI native tools unavailable after chat completion reply; retrying with text bridge, provider=${params.config.provider}, baseUrl=${openAIBase}`)
-      return annotateFallbackResult(await this.requestTextToolBridge({
+      recordProviderRequest('text', 'missing_native_tools')
+      const textBridgeResponse = await this.requestTextToolBridge({
         session: params.session,
         config: params.config,
         baseUrl: openAIBase,
         provider: params.provider,
         signal: params.signal,
         policy: params.policy,
-      }), { kind: 'text_bridge', attempts: 1 })
+      })
+      recordProviderResponse('text', textBridgeResponse, 'missing_native_tools')
+      return annotateFallbackResult(attachToolSnapshots(textBridgeResponse), { kind: 'text_bridge', attempts: 1 })
     }
-    return nativeResponse
+    return attachToolSnapshots(nativeResponse)
   }
 
   private buildHeaders(
@@ -389,6 +481,70 @@ export class OpenAIExecutionClient {
   private resolveKimiCodingV1Base(baseUrl: string): string {
     const normalized = baseUrl.replace(/\/+$/, '')
     return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`
+  }
+
+  private buildProviderSnapshotDefaults(params: {
+    config: AIModelConfig
+    baseUrl: string
+    model: string
+    runtime: ReturnType<typeof resolveOpenAIProviderRuntime>
+    allowedToolNames: string[]
+    preferTextToolBridge: boolean
+    snapshotContext?: OpenAIToolSnapshotContext
+  }): Omit<ToolSnapshot, 'stage' | 'source' | 'effectiveTransport' | 'fallbackReason' | 'toolCallsCount' | 'mismatch'> {
+    const capabilities = resolveAIConfigCapabilities(params.config)
+    const dispatchDecision = buildToolDispatchDecision({
+      supportsToolCalls: capabilities?.supportsToolCalls ?? true,
+      supportsNativeToolCalls: capabilities?.supportsNativeToolCalls ?? capabilities?.supportsToolCalls ?? true,
+      toolCallTransport: capabilities?.toolCallTransport || null,
+      preferTextToolBridge: params.preferTextToolBridge,
+    })
+    return {
+      iteration: Math.max(0, Number(params.snapshotContext?.iteration || 0)),
+      provider: params.config.provider,
+      baseUrl: params.baseUrl,
+      model: params.model,
+      wireApi: params.runtime.wireApi,
+      browserDecisionMode: params.snapshotContext?.browserDecisionMode || null,
+      browserHostAvailable: typeof params.snapshotContext?.browserHostAvailable === 'boolean'
+        ? params.snapshotContext.browserHostAvailable
+        : null,
+      hasTools: params.snapshotContext?.hasTools ?? params.allowedToolNames.length > 0,
+      allowBrowserTools: params.snapshotContext?.allowBrowserTools ?? params.allowedToolNames.some((name) => name.startsWith('browser_')),
+      visibleCapabilityGroupIds: [...(params.snapshotContext?.visibleCapabilityGroupIds || [])],
+      suppressedCapabilityGroupIds: [...(params.snapshotContext?.suppressedCapabilityGroupIds || [])],
+      allowedToolNames: [...params.allowedToolNames],
+      requestedTransport: params.snapshotContext?.requestedTransport || dispatchDecision.transport,
+      supportsNativeTools: params.snapshotContext?.supportsNativeTools ?? dispatchDecision.supportsNativeTools,
+      preferTextToolBridge: params.snapshotContext?.preferTextToolBridge ?? dispatchDecision.preferTextToolBridge,
+    }
+  }
+
+  private buildToolSnapshot(params: {
+    defaults: Omit<ToolSnapshot, 'stage' | 'source' | 'effectiveTransport' | 'fallbackReason' | 'toolCallsCount' | 'mismatch'>
+    stage: ToolSnapshot['stage']
+    effectiveTransport: ToolSnapshot['effectiveTransport']
+    fallbackReason?: string | null
+    toolCallsCount?: number | null
+    mismatch?: boolean
+  }): ToolSnapshot {
+    return {
+      stage: params.stage,
+      source: 'provider',
+      ...params.defaults,
+      effectiveTransport: params.effectiveTransport,
+      fallbackReason: params.fallbackReason || null,
+      toolCallsCount: typeof params.toolCallsCount === 'number' ? params.toolCallsCount : null,
+      mismatch: Boolean(params.mismatch),
+    }
+  }
+
+  private hasToolListMismatch(expected: string[] | null, actual: string[]): boolean {
+    if (!expected || expected.length === 0) return false
+    if (expected.length !== actual.length) return true
+    const expectedSorted = [...expected].sort()
+    const actualSorted = [...actual].sort()
+    return expectedSorted.some((name, index) => name !== actualSorted[index])
   }
 
   private async requestWithResponsesTools(params: {

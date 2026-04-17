@@ -47,3 +47,13 @@ test('intent classifier recognizes explicit skill workflow requests', () => {
   assert.ok(result.objectSignals.some((item) => /skill/i.test(item)))
   assert.ok(result.actionSignals.length > 0)
 })
+
+test('intent classifier recognizes live external info lookups as browser intent', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: '帮我看看今天广州天气怎么样',
+  }))
+
+  assert.equal(result.primaryDomain, 'browser')
+  assert.equal(result.crossDomain, false)
+  assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
+})

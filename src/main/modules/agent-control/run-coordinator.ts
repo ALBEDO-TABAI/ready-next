@@ -203,6 +203,8 @@ export class RunCoordinator {
           ?? (resolvedTaskBudgetRuntime ? getBudgetUsagePercent(resolvedTaskBudgetRuntime) : null),
         stepBudget: result.executionDiagnostics?.stepBudget ?? null,
         fallback: buildExecutionFallbackState(result.executionDiagnostics?.fallback || null),
+        toolSnapshots: result.executionDiagnostics?.toolSnapshots ?? null,
+        toolResolution: result.executionDiagnostics?.toolResolution ?? null,
         recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,
         degradationReason: result.executionDiagnostics?.degradationReason ?? null,
         pipeline: result.executionDiagnostics?.pipeline ?? null,

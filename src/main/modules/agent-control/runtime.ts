@@ -27,6 +27,7 @@ import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
+import { forgetSession } from './session-continuity'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -484,6 +485,13 @@ export class AgentControlRuntime extends EventEmitter {
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
     return this.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+  }
+
+  deleteConversation(scopeId: string): void {
+    this.scopeRunSummaries.delete(scopeId)
+    forgetSession(scopeId)
+    this.taskProjectionStore.deleteByScope(scopeId)
+    this.db.deleteConversation(scopeId)
   }
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {

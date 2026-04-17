@@ -58,6 +58,32 @@ test('task type resolver routes browser upload intents into media tasks only whe
   assert.match(degraded.degradationReason || '', /browser/i)
 })
 
+test('task type resolver routes live external info lookups into the browser tool loop', () => {
+  const envelope = buildRequestEnvelope({ userText: '帮我看看今天广州天气怎么样' })
+  const result = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities: createCapabilities(),
+  })
+
+  assert.equal(result.taskType, 'short_task')
+  assert.equal(result.executionChain, 'tool_loop')
+  assert.equal(result.preferredExecutor, 'browser')
+})
+
+test('task type resolver keeps browser capability meta questions on the direct answer path', () => {
+  const envelope = buildRequestEnvelope({ userText: '你不能调用浏览器工具吗？' })
+  const result = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities: createCapabilities(),
+  })
+
+  assert.equal(result.taskType, 'direct_answer')
+  assert.equal(result.executionChain, 'direct')
+  assert.equal(result.preferredExecutor, 'none')
+})
+
 test('task type resolver routes cross-domain work into planner-driven multi-step tasks', () => {
   const envelope = buildRequestEnvelope({ userText: '把 RSS 最新内容分析后发到飞书文档里' })
   const result = resolveTaskType({

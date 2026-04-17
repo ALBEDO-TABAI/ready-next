@@ -40,3 +40,59 @@ test('request envelope keeps only the pure user instruction for first-pass inten
   assert.ok(envelope.chunks.some((chunk) => chunk.source === 'system_generated'))
   assert.equal(envelope.provenanceSummary.userControllableSourcesOnly, false)
 })
+
+test('request envelope keeps repeated attachments and references as distinct resources', () => {
+  const envelope = buildRequestEnvelope({
+    userText: [
+      '请为@[storyboard.pdf]在@[新文档.md]生成一张信息卡',
+      '',
+      '## 环境信息',
+      '- 当前模式: 文档模式',
+      '',
+      '### 当前文档上下文',
+      '- 标题: 新文档.md',
+      '- 路径: /tmp/新文档.md',
+      '- 类型: md',
+      '- 字符数: 200',
+      '',
+      '--- 文档摘要开始 ---',
+      '这里是目标文档摘要',
+      '--- 文档摘要结束 ---',
+      '',
+      '--- 附件: storyboard.pdf ---',
+      '- 路径: /tmp/storyboard.pdf',
+      '这里是 storyboard 正文',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+      '这里是新文档正文',
+      '',
+      '--- 引用文件: storyboard.pdf ---',
+      '- 路径: /tmp/storyboard.pdf',
+      '这里是 storyboard 引用块',
+      '',
+      '--- 引用文件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+      '这里是新文档引用块',
+    ].join('\n'),
+  })
+
+  assert.equal(envelope.resources.length, 5)
+  assert.equal(
+    envelope.resources.filter((resource) => resource.kind === 'attachment').length,
+    4,
+  )
+  assert.equal(
+    envelope.resources.filter((resource) => resource.kind === 'document_context').length,
+    1,
+  )
+  assert.ok(
+    envelope.resources.some((resource) => resource.name === 'storyboard.pdf' && resource.source === 'user_attachment'),
+  )
+  assert.ok(
+    envelope.resources.some((resource) => resource.name === 'storyboard.pdf' && resource.source === 'explicit_reference'),
+  )
+  assert.ok(
+    envelope.resources.some((resource) => resource.name === '新文档.md' && resource.canWrite === true),
+  )
+})

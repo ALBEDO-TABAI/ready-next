@@ -777,3 +777,172 @@ test('TurnEngine enters the model tool-loop path when route and capability polic
   assert.equal(toolLoopRequests, 1)
   assert.equal(result.finalText, 'tool loop finished')
 })
+
+test('TurnEngine records tool snapshots and clears browser text-bridge nudges after one request', async () => {
+  const engine = new TurnEngine()
+  const preferTextBridgeFlags: boolean[] = []
+  let noToolCallPasses = 0
+  const browserAdapter: DomainAdapter = {
+    id: 'browser',
+    shouldHandle: () => true,
+    prepare: () => ({
+      allowedToolNames: ['browser_search', 'browser_read_page'],
+      sessionMessages: [],
+      domainState: {
+        preparedBrowserExecution: {
+          browserDecision: {
+            mode: 'browser_upload_workflow',
+          },
+        },
+        browserToolLoopState: {
+          isBrowserTask: true,
+        },
+      },
+    }),
+    dispatch: async ({ domainState }) => ({ domainState }),
+    applyResult: ({ phase, domainState }) => {
+      if (phase !== 'no_tool_call') {
+        return { domainState }
+      }
+      noToolCallPasses += 1
+      if (noToolCallPasses < 3) {
+        return {
+          domainState,
+          nextUserMessage: `继续第 ${noToolCallPasses} 轮`,
+        }
+      }
+      return {
+        domainState,
+        finalText: '浏览器任务已完成',
+      }
+    },
+    buildProjectionPatch: () => null,
+  }
+
+  const { request } = createRequest({
+    userText: '明天广州天气怎么样',
+    intentClassification: createIntent({
+      primaryDomain: 'browser',
+      mentionedDomains: ['browser'],
+      objectSignals: ['browser-object'],
+      actionSignals: ['browser-action'],
+      confidence: 'high',
+    }),
+    host: {
+      browserController: {},
+      providerContext: {
+        config: {
+          provider: 'openai-compatible',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://example.com/v1',
+        },
+        baseUrl: 'https://example.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      domainAdapters: [browserAdapter],
+      requestToolLoopResponse: async (params: { preferTextToolBridgeOnce?: boolean }) => {
+        preferTextBridgeFlags.push(Boolean(params.preferTextToolBridgeOnce))
+        const toolSnapshots = [
+          {
+            stage: 'provider_request',
+            source: 'provider',
+            iteration: preferTextBridgeFlags.length,
+            provider: 'openai-compatible',
+            baseUrl: 'https://example.com/v1',
+            model: 'gpt-test',
+            wireApi: 'chat/completions',
+            browserDecisionMode: 'browser_search_sequence',
+            browserHostAvailable: true,
+            hasTools: true,
+            allowBrowserTools: true,
+            visibleCapabilityGroupIds: ['browser_interaction'],
+            suppressedCapabilityGroupIds: [],
+            allowedToolNames: ['browser_search', 'browser_read_page'],
+            requestedTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
+            effectiveTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
+            supportsNativeTools: true,
+            preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
+            fallbackReason: null,
+            toolCallsCount: 0,
+          },
+          {
+            stage: 'provider_response',
+            source: 'provider',
+            iteration: preferTextBridgeFlags.length,
+            provider: 'openai-compatible',
+            baseUrl: 'https://example.com/v1',
+            model: 'gpt-test',
+            wireApi: 'chat/completions',
+            browserDecisionMode: 'browser_search_sequence',
+            browserHostAvailable: true,
+            hasTools: true,
+            allowBrowserTools: true,
+            visibleCapabilityGroupIds: ['browser_interaction'],
+            suppressedCapabilityGroupIds: [],
+            allowedToolNames: ['browser_search', 'browser_read_page'],
+            requestedTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
+            effectiveTransport: 'text',
+            supportsNativeTools: true,
+            preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
+            fallbackReason: preferTextBridgeFlags.length === 1 ? 'missing_native_tools' : null,
+            toolCallsCount: 0,
+          },
+        ]
+        if (preferTextBridgeFlags.length === 1) {
+          return {
+            text: '这轮实际开放给我的工具里，没有 browser_* 工具。',
+            rawText: '这轮实际开放给我的工具里，没有 browser_* 工具。',
+            toolCalls: [],
+            stopReason: 'stop',
+            toolTransport: 'text',
+            toolSnapshots,
+          }
+        }
+        if (preferTextBridgeFlags.length === 2) {
+          return {
+            text: '我继续查看页面。',
+            rawText: '我继续查看页面。',
+            toolCalls: [],
+            stopReason: 'stop',
+            toolTransport: 'text',
+            toolSnapshots,
+          }
+        }
+        return {
+          text: '我已经拿到结果。',
+          rawText: '我已经拿到结果。',
+          toolCalls: [],
+          stopReason: 'stop',
+          toolTransport: 'text',
+          toolSnapshots,
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.finalText, '浏览器任务已完成')
+  assert.deepEqual(preferTextBridgeFlags, [false, true, false, false])
+  const toolSnapshots = result.executionDiagnostics?.toolSnapshots || []
+  assert.deepEqual(toolSnapshots.slice(0, 5).map((snapshot) => snapshot.stage), [
+    'host_prepared',
+    'host_effective',
+    'tool_loop_request',
+    'provider_request',
+    'provider_response',
+  ])
+  assert.equal(
+    (toolSnapshots.find((snapshot) => snapshot.stage === 'tool_loop_request')?.allowedToolNames || []).includes('browser_search'),
+    true,
+  )
+  assert.equal(toolSnapshots.some((snapshot) => snapshot.stage === 'provider_response'), true)
+  assert.equal(Array.isArray(result.executionDiagnostics?.toolResolution?.usedStaticFallbackGroups), true)
+})
