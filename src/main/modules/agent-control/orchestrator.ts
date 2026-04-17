@@ -163,6 +163,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
     continuationState?: ContinuationState | null,
+    sessionIdOverride?: string,
   ): Promise<{
     success: boolean
     error?: string
@@ -174,8 +175,9 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     projectionTruth?: ExecutionHostResult['projectionTruth']
   }> {
     const effectiveRequestId = requestId || randomUUID()
-    const internalKey = this.toInternalSessionKey(agent, sessionId)
-    const taskKey = this.toTaskKey(agent, sessionId)
+    const effectiveSessionId = sessionIdOverride || sessionId
+    const internalKey = this.toInternalSessionKey(agent, effectiveSessionId)
+    const taskKey = this.toTaskKey(agent, effectiveSessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
     this.activeRunIds.set(taskKey, effectiveRequestId)
@@ -185,6 +187,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     try {
       const result = await this.engine.sendMessage(internalKey, message, effectiveRequestId, {
         taskId,
+        publicSessionId: sessionId,
         requestEnvelope,
         intentClassification,
         budget,
@@ -217,6 +220,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
     continuationState?: ContinuationState | null,
+    sessionIdOverride?: string,
   ): Promise<SendAndCollectResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -247,6 +251,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       budgetState,
       taskBudgetRuntime,
       continuationState,
+      sessionIdOverride,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       resolvedTaskId = result.taskId
@@ -302,6 +307,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       request.budgetState,
       request.taskBudgetRuntime,
       request.continuationState,
+      request.sessionIdOverride,
     )
     return {
       success: result.success,

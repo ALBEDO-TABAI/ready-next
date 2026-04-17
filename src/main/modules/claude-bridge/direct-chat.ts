@@ -34,6 +34,7 @@ import {
 } from '../agent-control/document-task-pipeline'
 import { DocumentInsightCache } from '../agent-control/document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from '../agent-control/document-source-materials'
+import { runDocumentTaskPlanWithSubtasks } from '../agent-control/document-task-subtask-runner'
 import { buildDocumentTaskStepCacheKey } from '../agent-control/document-task-cache-key'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from '../agent-control/document-task-plan'
 import {
@@ -47,6 +48,7 @@ import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-contr
 import { SkillDomainAdapter } from '../agent-control/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
+import { SubtaskRuntime } from '../agent-control/subtask-runtime'
 import { TurnEngine } from '../agent-control/turn-engine'
 import {
   createToolExecutionOutput,
@@ -627,6 +629,7 @@ export class DirectChatEngine extends EventEmitter {
     requestId?: string,
     executionOptions?: {
       taskId?: string
+      publicSessionId?: string
       requestEnvelope?: RequestEnvelope
       intentClassification?: IntentClassification
       budget?: RunBudgetSeed
@@ -643,7 +646,8 @@ export class DirectChatEngine extends EventEmitter {
     }
     const session = this.sessions.get(name)!
     const taskId = executionOptions?.taskId || `task-${runId}`
-    const sessionId = this.extractSessionIdFromInternalName(name)
+    const executionSessionId = this.extractSessionIdFromInternalName(name)
+    const sessionId = executionOptions?.publicSessionId || executionSessionId
     const rawContinuationUserText = typeof content === 'string'
       ? executionOptions?.requestEnvelope?.rawUserText || content
       : null
@@ -1079,6 +1083,9 @@ export class DirectChatEngine extends EventEmitter {
   }
 
   private async maybeRunDocumentTaskPlanShortcut(params: {
+    scopeId?: string
+    parentTaskId?: string
+    parentRunId?: string
     initialTaskExecutionRoute: import('../agent-control/run-contracts').TaskExecutionRoute
     executionIntentContext: ReturnType<typeof resolveExecutionIntentContext>
     hasTools: boolean
@@ -1115,6 +1122,9 @@ export class DirectChatEngine extends EventEmitter {
       plan: params.executionIntentContext.documentTaskPlan,
       requestEnvelope: params.executionIntentContext.requestEnvelope,
       session: params.session,
+      scopeId: params.scopeId,
+      parentTaskId: params.parentTaskId || params.initialTaskExecutionRoute.taskId,
+      parentRunId: params.parentRunId || params.session.activeRunId || null,
       requestModuleToolAction: params.requestModuleToolAction,
       signal: params.signal,
       config: params.providerContext.config,
@@ -2029,10 +2039,292 @@ export class DirectChatEngine extends EventEmitter {
     ].join('\n')
   }
 
+  private async executeDocumentTaskPlanJob(params: {
+    job: DocumentTaskJob
+    jobIndex: number
+    totalJobs: number
+    requestEnvelope: RequestEnvelope
+    session: DirectChatSession
+    requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+    config: AIModelConfig
+    baseUrl: string
+    provider: ReturnType<typeof getProviderDef> | undefined
+    isKimi: boolean
+    isKimiCoding: boolean
+    useAnthropicProtocol: boolean
+    onStepUpdate?: (payload: {
+      job: DocumentTaskJob
+      jobIndex: number
+      step: DocumentTaskStep
+      status: 'running' | 'completed' | 'failed'
+      summary: string
+      error?: string
+    }) => void
+  }): Promise<
+    | {
+      success: true
+      writeSummary: string
+      saveSummary: string
+      verifySummary: string
+    }
+    | {
+      success: false
+      step: DocumentTaskStep
+      error: string
+      insight?: DocumentInsight
+      draft?: DocumentWidgetDraft
+    }
+  > {
+    const emitStepUpdate = params.onStepUpdate || (() => {})
+    const targetResource = this.getDocumentTaskJobTarget(params.job)
+    const sourceResources = this.getDocumentTaskJobSources(params.job)
+    const sourceLabel = sourceResources.map((resource) => resource.name).join(' + ') || '材料'
+    const targetLabel = targetResource?.name || '目标文档'
+
+    let currentStep: DocumentTaskStep = 'collect_materials'
+    let currentInsight: DocumentInsight | undefined
+    let currentDraft: DocumentWidgetDraft | undefined
+
+    try {
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'collect_materials',
+        status: 'running',
+        summary: `正在读取 ${sourceLabel}，准备写入 ${targetLabel}`,
+      })
+      if (!targetResource) {
+        throw new Error('缺少明确的目标文档')
+      }
+      const targetSnapshot = await this.loadDocumentPipelineSnapshot({
+        userText: params.job.instruction,
+        requestModuleToolAction: params.requestModuleToolAction,
+        signal: params.signal,
+        targetPathOverride: targetResource.path,
+      })
+      const sourceMaterial = buildDocumentInsightSourceMaterial({
+        requestEnvelope: params.requestEnvelope,
+        snapshotContent: targetSnapshot.content,
+        job: params.job,
+      })
+      if (!sourceMaterial.text.trim()) {
+        throw new Error('没有拿到可用的来源材料')
+      }
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'collect_materials',
+        status: 'completed',
+        summary: `已读取 ${sourceLabel}，目标是 ${targetLabel}`,
+      })
+
+      currentStep = 'build_insight'
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'build_insight',
+        status: 'running',
+        summary: `正在提炼 ${sourceLabel} 的重点`,
+      })
+      const insightCacheKey = buildDocumentTaskStepCacheKey({
+        question: params.job.instruction,
+        step: 'build_insight',
+        job: params.job,
+        targetSnapshot,
+      })
+      const cachedInsight = this.getCachedDocumentInsight(
+        params.session,
+        params.job.instruction,
+        targetSnapshot,
+        {
+          job: params.job,
+          cacheKeyOverride: insightCacheKey,
+        },
+      )
+      const insightResult = cachedInsight || await this.buildDocumentPipelineInsight({
+        question: params.job.instruction,
+        snapshot: targetSnapshot,
+        sourceText: sourceMaterial.text,
+        sourceKind: sourceMaterial.kind,
+        sourceDocumentTitle: sourceMaterial.sourceDocumentTitle || sourceResources[0]?.name || targetSnapshot.title,
+        sourceDocumentPath: sourceMaterial.sourceDocumentPath ?? sourceResources[0]?.path ?? null,
+        timeoutMs: 60_000,
+        config: params.config,
+        baseUrl: params.baseUrl,
+        provider: params.provider,
+        signal: params.signal,
+        isKimi: params.isKimi,
+        isKimiCoding: params.isKimiCoding,
+        useAnthropicProtocol: params.useAnthropicProtocol,
+      })
+      currentInsight = ('insight' in insightResult ? insightResult.insight : insightResult)
+      if (!cachedInsight) {
+        this.storeCachedDocumentInsight(
+          params.session,
+          params.job.instruction,
+          targetSnapshot,
+          currentInsight,
+          'metrics' in insightResult ? insightResult.metrics : undefined,
+          {
+            job: params.job,
+            cacheKeyOverride: insightCacheKey,
+          },
+        )
+      }
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'build_insight',
+        status: 'completed',
+        summary: cachedInsight
+          ? `已复用 ${sourceLabel} 的提炼结果`
+          : `已完成 ${sourceLabel} 的重点提炼`,
+      })
+
+      currentStep = 'compose_widget'
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'compose_widget',
+        status: 'running',
+        summary: `正在为 ${targetLabel} 生成卡片草稿`,
+      })
+      const cachedDraft = this.getCachedDocumentWidgetDraft(
+        params.session,
+        params.job.instruction,
+        params.job,
+        targetSnapshot,
+      )
+      currentDraft = cachedDraft || await this.buildDocumentPipelineWidgetDraft({
+        question: params.job.instruction,
+        snapshot: targetSnapshot,
+        insight: currentInsight,
+        timeoutMs: 60_000,
+        config: params.config,
+        baseUrl: params.baseUrl,
+        provider: params.provider,
+        signal: params.signal,
+        isKimi: params.isKimi,
+        isKimiCoding: params.isKimiCoding,
+        useAnthropicProtocol: params.useAnthropicProtocol,
+      })
+      if (!cachedDraft) {
+        this.storeCachedDocumentWidgetDraft(
+          params.session,
+          params.job.instruction,
+          params.job,
+          targetSnapshot,
+          currentDraft,
+        )
+      }
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'compose_widget',
+        status: 'completed',
+        summary: cachedDraft
+          ? `已复用 ${targetLabel} 的卡片草稿`
+          : `已生成写入 ${targetLabel} 的卡片草稿`,
+      })
+
+      currentStep = 'write_target'
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'write_target',
+        status: 'running',
+        summary: `正在把卡片写入 ${targetLabel}`,
+      })
+      const writePayload = await params.requestModuleToolAction('document.insertWidget', {
+        title: currentDraft.title,
+        componentSpec: currentDraft.componentSpec,
+        widgetCode: currentDraft.widgetCode,
+        position: currentDraft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
+        sectionTitle: currentDraft.targetSectionTitle,
+      })
+      const writeSummary = typeof writePayload.summary === 'string' ? writePayload.summary : `已写入 ${targetLabel}`
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'write_target',
+        status: 'completed',
+        summary: writeSummary,
+      })
+
+      currentStep = 'save_target'
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'save_target',
+        status: 'running',
+        summary: `正在保存 ${targetLabel}`,
+      })
+      const savePayload = await params.requestModuleToolAction('document.saveTab', {})
+      const saveSummary = typeof savePayload.summary === 'string' ? savePayload.summary : `已保存 ${targetLabel}`
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'save_target',
+        status: 'completed',
+        summary: saveSummary,
+      })
+
+      currentStep = 'verify_result'
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'verify_result',
+        status: 'running',
+        summary: `正在核对 ${targetLabel}`,
+      })
+      const verifySummary = await this.verifyDocumentTaskPlanWrite({
+        draft: currentDraft,
+        targetResource,
+        requestModuleToolAction: params.requestModuleToolAction,
+        signal: params.signal,
+      })
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: 'verify_result',
+        status: 'completed',
+        summary: verifySummary,
+      })
+
+      return {
+        success: true,
+        writeSummary,
+        saveSummary,
+        verifySummary,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      emitStepUpdate({
+        job: params.job,
+        jobIndex: params.jobIndex,
+        step: currentStep,
+        status: 'failed',
+        summary: message,
+        error: message,
+      })
+      return {
+        success: false,
+        step: currentStep,
+        error: message,
+        insight: currentInsight,
+        draft: currentDraft,
+      }
+    }
+  }
+
   private async runDocumentTaskPlan(params: {
     plan: DocumentTaskPlan
     requestEnvelope: RequestEnvelope
     session: DirectChatSession
+    scopeId?: string
+    parentTaskId?: string
+    parentRunId?: string | null
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
     config: AIModelConfig
@@ -2070,6 +2362,119 @@ export class DirectChatEngine extends EventEmitter {
       return {
         success: false,
         error: '当前没有可执行的文档任务计划',
+      }
+    }
+
+    const scope = params.scopeId ? this.runtime?.getConversationScope(params.scopeId) || null : null
+    if (scope && params.parentTaskId && params.plan.jobs.length > 1 && this.runtime) {
+      let latestFailureText: string | null = null
+      const subtaskRuntime = new SubtaskRuntime({
+        publishScopeRunEvent: (payload, projectionTruth) => {
+          this.runtime?.publishScopeRunEvent(payload, projectionTruth || null)
+        },
+        runScopedTurn: async ({ scope, message, identity, requestId }) => {
+          if (!message) {
+            return { success: false, error: '子任务缺少消息内容' }
+          }
+          return this.runtime?.sendScoped({
+            scopeId: scope.id,
+            message: message as string | MultimodalBlock[],
+            requestId: requestId || identity?.workerSessionId,
+            taskId: identity?.taskId,
+            parentTaskId: identity?.parentTaskId || params.parentTaskId,
+            parentStepId: identity?.parentStepId,
+            sessionIdOverride: identity?.workerSessionId,
+          }) || { success: false, error: 'Agent runtime unavailable' }
+        },
+      })
+
+      const multiJobResult = await runDocumentTaskPlanWithSubtasks({
+        plan: params.plan,
+        scope,
+        parentTaskId: params.parentTaskId,
+        parentRunId: params.parentRunId || null,
+        subtaskRuntime,
+        publishParentScopeRunEvent: (payload) => {
+          this.runtime?.publishScopeRunEvent(payload)
+        },
+        emitStructuredTaskPayload: (payload) => params.emitStructuredTaskPayload(payload),
+        runJob: async ({ job, jobIndex, totalJobs, emitChildUpdate }) => {
+          const childStepStates = new Map<DocumentTaskStep, 'pending' | 'running' | 'done' | 'blocked'>()
+          const buildChildSteps = () => job.steps.map((step) => ({
+            id: step,
+            title: this.buildDocumentTaskStepTitle(job, step, jobIndex, totalJobs),
+            status: childStepStates.get(step) || 'pending',
+            updatedAt: new Date().toISOString(),
+          }))
+          const jobResult = await this.executeDocumentTaskPlanJob({
+            job,
+            jobIndex,
+            totalJobs,
+            requestEnvelope: params.requestEnvelope,
+            session: params.session,
+            requestModuleToolAction: params.requestModuleToolAction,
+            signal: params.signal,
+            config: params.config,
+            baseUrl: params.baseUrl,
+            provider: params.provider,
+            isKimi: params.isKimi,
+            isKimiCoding: params.isKimiCoding,
+            useAnthropicProtocol: params.useAnthropicProtocol,
+            onStepUpdate: ({ step, status, summary, error }) => {
+              childStepStates.set(
+                step,
+                status === 'running'
+                  ? 'running'
+                  : status === 'completed'
+                    ? 'done'
+                    : 'blocked',
+              )
+              emitChildUpdate({
+                phase: status === 'failed' ? 'tool_running' : 'tool_running',
+                taskSummary: summary,
+                steps: buildChildSteps(),
+                currentStepId: step,
+                waitingFor: status === 'failed' ? 'confirmation' : 'none',
+                resumableActions: status === 'failed' ? ['retry', 'cancel'] : ['cancel'],
+                blockedReason: status === 'failed' ? (error || summary) : null,
+              })
+            },
+          })
+          if (!jobResult.success) {
+            latestFailureText = this.buildDocumentTaskPlanFailureText({
+              job,
+              step: jobResult.step,
+              error: jobResult.error,
+              insight: jobResult.insight,
+              draft: jobResult.draft,
+            })
+            throw new Error(jobResult.error)
+          }
+          return {
+            finalText: jobResult.verifySummary,
+            taskSummary: jobResult.verifySummary,
+            steps: buildChildSteps(),
+            currentStepId: 'verify_result',
+            resumableActions: ['none'],
+            waitingFor: 'none',
+            writeSummary: jobResult.writeSummary,
+            saveSummary: jobResult.saveSummary,
+            verifySummary: jobResult.verifySummary,
+          }
+        },
+      })
+
+      if (!multiJobResult.success) {
+        return {
+          success: false,
+          finalText: latestFailureText || multiJobResult.error,
+          error: multiJobResult.error,
+        }
+      }
+
+      return {
+        success: true,
+        finalText: this.buildDocumentTaskPlanSuccessText(multiJobResult.results || []),
       }
     }
 
@@ -2123,249 +2528,41 @@ export class DirectChatEngine extends EventEmitter {
     }> = []
 
     for (const [jobIndex, job] of params.plan.jobs.entries()) {
-      const targetResource = this.getDocumentTaskJobTarget(job)
-      const sourceResources = this.getDocumentTaskJobSources(job)
-      const sourceLabel = sourceResources.map((resource) => resource.name).join(' + ') || '材料'
-      const targetLabel = targetResource?.name || '目标文档'
-
-      let currentStep: DocumentTaskStep = 'collect_materials'
-      let currentInsight: DocumentInsight | undefined
-      let currentDraft: DocumentWidgetDraft | undefined
-
-      try {
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'collect_materials',
-          status: 'running',
-          summary: `正在读取 ${sourceLabel}，准备写入 ${targetLabel}`,
-        })
-        if (!targetResource) {
-          throw new Error('缺少明确的目标文档')
-        }
-        const targetSnapshot = await this.loadDocumentPipelineSnapshot({
-          userText: job.instruction,
-          requestModuleToolAction: params.requestModuleToolAction,
-          signal: params.signal,
-          targetPathOverride: targetResource.path,
-        })
-        const sourceMaterial = buildDocumentInsightSourceMaterial({
-          requestEnvelope: params.requestEnvelope,
-          snapshotContent: targetSnapshot.content,
-          job,
-        })
-        if (!sourceMaterial.text.trim()) {
-          throw new Error('没有拿到可用的来源材料')
-        }
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'collect_materials',
-          status: 'completed',
-          summary: `已读取 ${sourceLabel}，目标是 ${targetLabel}`,
-        })
-
-        currentStep = 'build_insight'
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'build_insight',
-          status: 'running',
-          summary: `正在提炼 ${sourceLabel} 的重点`,
-        })
-        const insightCacheKey = buildDocumentTaskStepCacheKey({
-          question: job.instruction,
-          step: 'build_insight',
-          job,
-          targetSnapshot,
-        })
-        const cachedInsight = this.getCachedDocumentInsight(
-          params.session,
-          job.instruction,
-          targetSnapshot,
-          {
-            job,
-            cacheKeyOverride: insightCacheKey,
-          },
-        )
-        const insightResult = cachedInsight || await this.buildDocumentPipelineInsight({
-          question: job.instruction,
-          snapshot: targetSnapshot,
-          sourceText: sourceMaterial.text,
-          sourceKind: sourceMaterial.kind,
-          sourceDocumentTitle: sourceMaterial.sourceDocumentTitle || sourceResources[0]?.name || targetSnapshot.title,
-          sourceDocumentPath: sourceMaterial.sourceDocumentPath ?? sourceResources[0]?.path ?? null,
-          timeoutMs: 60_000,
-          config: params.config,
-          baseUrl: params.baseUrl,
-          provider: params.provider,
-          signal: params.signal,
-          isKimi: params.isKimi,
-          isKimiCoding: params.isKimiCoding,
-          useAnthropicProtocol: params.useAnthropicProtocol,
-        })
-        currentInsight = ('insight' in insightResult ? insightResult.insight : insightResult)
-        if (!cachedInsight) {
-          this.storeCachedDocumentInsight(
-            params.session,
-            job.instruction,
-            targetSnapshot,
-            currentInsight,
-            'metrics' in insightResult ? insightResult.metrics : undefined,
-            {
-              job,
-              cacheKeyOverride: insightCacheKey,
-            },
-          )
-        }
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'build_insight',
-          status: 'completed',
-          summary: cachedInsight
-            ? `已复用 ${sourceLabel} 的提炼结果`
-            : `已完成 ${sourceLabel} 的重点提炼`,
-        })
-
-        currentStep = 'compose_widget'
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'compose_widget',
-          status: 'running',
-          summary: `正在为 ${targetLabel} 生成卡片草稿`,
-        })
-        const cachedDraft = this.getCachedDocumentWidgetDraft(
-          params.session,
-          job.instruction,
-          job,
-          targetSnapshot,
-        )
-        currentDraft = cachedDraft || await this.buildDocumentPipelineWidgetDraft({
-          question: job.instruction,
-          snapshot: targetSnapshot,
-          insight: currentInsight,
-          timeoutMs: 60_000,
-          config: params.config,
-          baseUrl: params.baseUrl,
-          provider: params.provider,
-          signal: params.signal,
-          isKimi: params.isKimi,
-          isKimiCoding: params.isKimiCoding,
-          useAnthropicProtocol: params.useAnthropicProtocol,
-        })
-        if (!cachedDraft) {
-          this.storeCachedDocumentWidgetDraft(
-            params.session,
-            job.instruction,
-            job,
-            targetSnapshot,
-            currentDraft,
-          )
-        }
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'compose_widget',
-          status: 'completed',
-          summary: cachedDraft
-            ? `已复用 ${targetLabel} 的卡片草稿`
-            : `已生成写入 ${targetLabel} 的卡片草稿`,
-        })
-
-        currentStep = 'write_target'
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'write_target',
-          status: 'running',
-          summary: `正在把卡片写入 ${targetLabel}`,
-        })
-        const writePayload = await params.requestModuleToolAction('document.insertWidget', {
-          title: currentDraft.title,
-          componentSpec: currentDraft.componentSpec,
-          widgetCode: currentDraft.widgetCode,
-          position: currentDraft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
-          sectionTitle: currentDraft.targetSectionTitle,
-        })
-        const writeSummary = typeof writePayload.summary === 'string' ? writePayload.summary : `已写入 ${targetLabel}`
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'write_target',
-          status: 'completed',
-          summary: writeSummary,
-        })
-
-        currentStep = 'save_target'
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'save_target',
-          status: 'running',
-          summary: `正在保存 ${targetLabel}`,
-        })
-        const savePayload = await params.requestModuleToolAction('document.saveTab', {})
-        const saveSummary = typeof savePayload.summary === 'string' ? savePayload.summary : `已保存 ${targetLabel}`
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'save_target',
-          status: 'completed',
-          summary: saveSummary,
-        })
-
-        currentStep = 'verify_result'
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'verify_result',
-          status: 'running',
-          summary: `正在核对 ${targetLabel}`,
-        })
-        const verifySummary = await this.verifyDocumentTaskPlanWrite({
-          draft: currentDraft,
-          targetResource,
-          requestModuleToolAction: params.requestModuleToolAction,
-          signal: params.signal,
-        })
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: 'verify_result',
-          status: 'completed',
-          summary: verifySummary,
-        })
-
-        results.push({
-          job,
-          writeSummary,
-          saveSummary,
-          verifySummary,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        emitPlanStep({
-          job,
-          jobIndex,
-          step: currentStep,
-          status: 'failed',
-          summary: message,
-          error: message,
-        })
+      const jobResult = await this.executeDocumentTaskPlanJob({
+        job,
+        jobIndex,
+        totalJobs: params.plan.jobs.length,
+        requestEnvelope: params.requestEnvelope,
+        session: params.session,
+        requestModuleToolAction: params.requestModuleToolAction,
+        signal: params.signal,
+        config: params.config,
+        baseUrl: params.baseUrl,
+        provider: params.provider,
+        isKimi: params.isKimi,
+        isKimiCoding: params.isKimiCoding,
+        useAnthropicProtocol: params.useAnthropicProtocol,
+        onStepUpdate: emitPlanStep,
+      })
+      if (!jobResult.success) {
         return {
           success: false,
           finalText: this.buildDocumentTaskPlanFailureText({
             job,
-            step: currentStep,
-            error: message,
-            insight: currentInsight,
-            draft: currentDraft,
+            step: jobResult.step,
+            error: jobResult.error,
+            insight: jobResult.insight,
+            draft: jobResult.draft,
           }),
-          error: message,
+          error: jobResult.error,
         }
       }
+      results.push({
+        job,
+        writeSummary: jobResult.writeSummary,
+        saveSummary: jobResult.saveSummary,
+        verifySummary: jobResult.verifySummary,
+      })
     }
 
     return {

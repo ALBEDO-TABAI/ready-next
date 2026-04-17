@@ -617,6 +617,7 @@ export class AgentControlRuntime extends EventEmitter {
     taskId?: string
     parentTaskId?: string
     parentStepId?: string
+    sessionIdOverride?: string
   }): Promise<{ success: boolean; error?: string }> {
     const scopeRow = this.db.getConversationScope(payload.scopeId)
     if (!scopeRow) {
@@ -633,6 +634,7 @@ export class AgentControlRuntime extends EventEmitter {
         taskId: payload.taskId,
         parentTaskId: payload.parentTaskId,
         parentStepId: payload.parentStepId,
+        sessionIdOverride: payload.sessionIdOverride,
       },
       {
         onSuccess: async (result) => {
@@ -1408,6 +1410,10 @@ export class AgentControlRuntime extends EventEmitter {
   private emitScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
     this.recordScopeRunEvent(payload, projectionTruth)
     this.emit('scopeRunEvent', payload)
+  }
+
+  publishScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
+    this.emitScopeRunEvent(payload, projectionTruth)
   }
 
   recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {

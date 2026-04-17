@@ -62,6 +62,14 @@ export class RunProjection {
     const scope = this.deps.getScope(payload.scopeId)
     if (!scope) return null
     const previous = this.deps.getPrevious(payload.scopeId)
+    const resolvedTaskId = payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null
+    const isSameTaskAsPrevious = Boolean(
+      resolvedTaskId
+      && (
+        previous?.taskId === resolvedTaskId
+        || previous?.taskProjectionId === resolvedTaskId
+      ),
+    )
     const truthPatch = readProjectionTruthPatch(projectionTruth)
     const derivedTask = this.deriveTaskSummaryPatch(previous, payload)
     const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
@@ -74,9 +82,9 @@ export class RunProjection {
       channelKey: this.deps.toChannelKey(scope),
       threadKey: scope.threadKey,
       phase: payload.phase,
-      taskId: payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
-      parentTaskId: payload.parentTaskId ?? previous?.parentTaskId ?? null,
-      parentStepId: payload.parentStepId ?? previous?.parentStepId ?? null,
+      taskId: resolvedTaskId,
+      parentTaskId: payload.parentTaskId ?? (isSameTaskAsPrevious ? previous?.parentTaskId : null) ?? null,
+      parentStepId: payload.parentStepId ?? (isSameTaskAsPrevious ? previous?.parentStepId : null) ?? null,
       taskTitle: payload.taskTitle ?? truthPatch.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
       taskSummary: payload.taskSummary ?? truthPatch.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
       taskType: payload.taskType ?? previous?.taskType,

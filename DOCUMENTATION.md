@@ -111,6 +111,17 @@ Ready 采用 Electron 三层架构：
 - agent 工具暴露开始从“全量工具拼接后再局部裁剪”过渡到“先按 capability group resolve，再下发工具面”
 - `DirectChatEngine` 继续作为第一阶段 execution host，但开始把 tool visibility / dispatch 之类通用策略抽出主文件
 
+### 3.4c 2026-04-17 Agent 对照研究文档
+- 本轮已补四份 agent 研究/整改文档，作为后续主链整改的统一底稿：
+  - `docs/superpowers/specs/2026-04-17-claude-code-agent-architecture-study.md`
+  - `docs/superpowers/specs/2026-04-17-claude-code-vs-ready-agent-gap-analysis.md`
+  - `docs/superpowers/specs/2026-04-17-ready-agent-runtime-realignment-design.md`
+  - `docs/superpowers/plans/2026-04-17-ready-agent-runtime-realignment-roadmap.md`
+- 这四份文档的结论是：
+  - 当前 Ready 最大问题不是“模块拆得不够多”，而是 execution truth、tool runtime、domain orchestration 和 projection 真相还没有稳定收口
+  - 下一轮整改优先级应转向：`tool contract -> tool runtime -> turn engine -> domain adapter -> projection truth -> continuation truth`
+  - `RunCoordinator / RunProjection / capability groups / BrowserDomainOrchestrator / DocumentDomainOrchestrator` 这些现有积累建议保留，不做推倒重来
+
 ### 3.5 Shared / Renderer Utilities
 - 共享 URL 工具：`src/shared/url-utils.ts`
   - `getUrlHostname()` 供主进程策略判断使用
@@ -175,6 +186,9 @@ Ready 采用 Electron 三层架构：
 - `RunCoordinator` 是当前单轮执行 owner；`runtime` 不再直接内联 prompt assembly + sendAndCollect + outcome writeback 这整段链路
 - 现在每轮启动时都会先生成稳定 `taskId`；`RunCoordinator -> execution host -> RunProjection -> TaskProjectionStore` 已统一按 `taskId` 串联，`runId` 只保留单次执行实例语义
 - 受控 child task 现在继续复用这条链：`runtime.sendScoped` 可选透传 `parentTaskId / parentStepId`，`RunCoordinator` 负责带着父任务关联启动子任务，而不是再起第二套外层循环
+- `runtime.sendScoped` / `RunCoordinator` 现已额外支持 `sessionIdOverride`：子任务可以沿用原 scope 发事件与写 projection，但执行宿主会切到独立 worker session，不再和父任务共用同一个 `agent + scopeId` 会话键
+- `worker-session.ts` / `subtask-runtime.ts` 现已作为正式 child run 底座：子任务永远使用自己的 `taskId` 做 projection identity，父任务只通过 `parentTaskId / parentStepId` 建关联，不再复用父任务 id
+- `worker-projection.ts` 现已统一产出父步骤等待态、child 占位摘要和 child 完成回填补丁；前台继续沿用现有 `scopeRunEvent + task projection` 通道，本期没有新增第二套 renderer 事件链
 - 阶段 5 第二轮已落地：`RunCoordinator` 现在会为每轮执行创建统一任务预算，并把 `budget / budgetState / taskId` 一起传给 execution host
 - execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，并能带回步骤预算、预算预警和降级原因
 - 浏览器 / 文档 / 设计三条子域当前给出的 budget hint 也已经会被主流程实际消费，但语义已收口为“给当前步骤补 headroom”，不再直接抬高全局预算上限
@@ -317,7 +331,9 @@ Ready 采用 Electron 三层架构：
 ### 5.9 Task Projection 与继续任务
 - `TaskProjectionStore` 当前是正式任务看板主表，但只负责任务投影，不承担浏览器或 skill 的内部执行细节。
 - Browser / Skill continuation 现在会先通过 `taskId` 找到对应 projection，再跳模块内部持久化恢复细节，不再直接靠 `sessionId` 猜最近任务。
+- `session-continuity` 现已按 `scopeId -> taskId -> continuation snapshot` 轻量持久化最近可继续任务；同一会话里的多个 blocked/running 任务不会再互相覆盖，任务完成时也只清自己的 snapshot。
 - `TaskPanel` 和聊天任务卡生成的继续/重试草稿现在都会显式带上 `Task ID`，便于后续轮次精确恢复到正确任务。
+- `DirectChatEngine` 现在会先按原始用户文本剥离 continuation 控制行，再重建清洗后的 `RequestEnvelope`；bootstrap 前缀会原样保留给模型，continuation 恢复不再靠把 `Task ID / Step ID / blockedReason` 重新注入会话历史来补上下文。
 - projection 现已持久化 `taskTitle / taskSummary / recentArtifacts`，前台卡片默认优先消费 projection，再回退到 `ScopeRunSummary`
 - `task_projections` 现已补上 `parent_task_id / parent_step_id`；child task 完成后，会把摘要和产物摘要回写到父步骤的 `childTasks/detail`
 
@@ -457,11 +473,29 @@ Ready 采用 Electron 三层架构：
 - renderer 文档模块新增 host-only `document.inspectActive`，供主进程读取当前活动文档全文；这条路径不对模型直接暴露
 - 文档深读 pipeline 的 simple 请求现已支持独立阶段超时，不再只能沿用默认 45 秒 simple request 预算
 - `direct-chat` 现已在会话内短期缓存 `DocumentInsight`：同一文档内容 + 同一问题重复触发时，第一轮 insight 会优先复用缓存结果，减少重复模型调用
+- 新增 `live-info-intent` 轻量语义层：天气、新闻、股价、汇率、比分、航班、路况、空气质量、官网最新公告这类依赖最新外部信息的问题，会在入口阶段先被识别成“需要联网核对”，不再强依赖“打开网页/浏览器/网站”这类显式动作词
+- `intent-classifier` 现已把实时外部信息查询视作高优先级 browser intent；文档上下文、最近 widget 历史或其它环境噪声不应再把这类请求误导到 document/design 路由
+- `browser-task-planner` 现在允许这类请求走“先搜索、再锁定可靠结果页”的计划路径：没有显式 URL 时会优先生成 `targetSearchQuery`，再去权威或最新页面完成读取与核对
+- 实时查询的浏览器工作流当前会把成功标准收口成“已锁定可靠结果页 + 已读取与问题匹配的最新信息”，而不是泛化成“页面做过某个动作”
+- OpenAI 原生工具回复如果出现“没有可调用的浏览器工具组结果返回”这类新变体，当前也会被识别成缺失工具回复并自动进入现有纠偏链，而不是直接把这段借口当最终答复
+- 仅仅在文本里提到“浏览器工具/网页工具”但没有具体网页动作、链接、附件或实时查询信号时，任务路由现在会回到普通回答路径；这类 meta 追问不再误落到 browser executor
+- 站点名直达型请求现在也会进入浏览器计划层：当用户说“打开 pinterest / 去即梦 / 进入 Gemini”但没有附带 URL 时，planner 会先生成 `targetSearchQuery` 再锁定目标站点，而不是继续停在 `no_browser_intent`
+- 浏览器任务如果 native tools 回包里 `toolCalls=0`，当前会把它视为执行证据不足并主动切到纠偏重试；浏览器任务至少要先发起一个 `browser_*` 动作，不能直接拿解释性文本收尾
+- `request-envelope` 现已新增稳定 `resources[]`：每个附件、`@[文件]`、当前文档上下文、文档引用都会保留独立身份、顺序、正文与可写属性，不再在入口阶段被揉成一段混合材料
+- `document-task-plan` 现已作为文档复杂任务入口：当一句话里出现显式“根据 A 在 B 中做卡片”、多来源、多目标或顺序步骤时，会先生成 `DocumentTaskPlan -> DocumentTaskJob[]`
+- 每个 `DocumentTaskJob` 当前至少固定拆成六步：`collect_materials -> build_insight -> compose_widget -> write_target -> save_target -> verify_result`
+- 多 job 文档任务现已正式接入 child task：父任务只展示 job 级 overview step，每个 job 会生成独立子任务承载这六步细节；单 job 仍保持原来的内联路径，不强行转成 child task
+- 文档 child task 会生成独立 `workerSessionId + taskId`，但继续复用父会话里的 insight/widget cache；这轮隔离的是运行身份与后续 child turn，会话级缓存不另起一份
+- 父任务现在会按 job 顺序等待 child 完成，任何一个 child 失败都会立即 fail-fast；已完成 child 的独立投影与步骤记录会保留，父步骤摘要也会按现有 backfill 机制回填
+- 文档来源选择现已支持角色绑定：`primary_source / secondary_source / target_document / ambient_context`；`current document context` 默认只作为低优先级环境信息，不能压过显式材料
+- 文档 insight 缓存键现已切到任务级：会带上 job 角色绑定、来源文本 hash、目标文档身份与当前步骤，避免“源材料变了但缓存还命中”或“目标文档摘要污染 insight”这类复用错误
+- widget 草稿当前也开始做短期会话级缓存：如果 insight 已完成、草稿也已拿到，但写入或保存阶段失败，下一次重试会优先从草稿继续，而不是重新提炼来源材料
 - 新增共享 `document-sectioning` helper：长文档会优先按章节切块，章节过长再按段落/句子拆开，并在 insight 阶段先筛相关片段后再发第一轮模型请求
 - `DocumentTaskPipeline` 现已支持部分成功降级：insight 或 widget draft 一旦已生成，后续阶段失败时会优先把这些中间结果回给用户，而不是整轮直接报错结束
 - `document-engine` 的深读热路径已先异步化：`readDocxRawText` 与 `readDocumentEditableText` 现在改为异步读取，优先降低这条 pipeline 在主进程上的阻塞风险
 - `DocumentTaskPipeline` 的 insight 阶段完成文案现在会补上关键指标，例如本轮共切了多少片段、实际使用了多少片段、是否命中缓存；当前任务卡已可直接消费这类阶段摘要
 - 文档深读相关指标也已正式进入 `executionDiagnostics.pipeline.document`，供 renderer 状态层和任务卡稳定消费，而不再只依赖摘要文本解析
+- 文档结构化任务状态现已按计划步骤投影：未开始步骤显示 `pending`，失败步骤显示 `blocked`，前台不再把整条文档链路默认显示成进行中
 - 文档主进程的通用读取入口也已继续异步化：`document:read`、`document:list`、`document:parseDocx`、`document:parseXlsx` 现在改为异步 fs 读取，进一步降低打开和解析大文档时的阻塞风险
 - `system_run_openclaw` 与文档 format/rewrite 的 deterministic 直通现在统一走 `host-capability-dispatcher`，不再在 `direct-chat.ts` 里各自手写 host-only 分支
 - `ToolGateway` 继续只负责 registry 真相：已补上 group 级 schema/query 与 dynamic source 标记，`skills` 组会把静态 execution control 和运行期 skill action 一起输出

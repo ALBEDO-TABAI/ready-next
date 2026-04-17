@@ -141,6 +141,9 @@ export class DocumentDomainAdapter implements DomainAdapter {
     }
 
     const taskPlanShortcut = await params.host.maybeRunDocumentTaskPlan({
+      scopeId: params.request.sessionId,
+      parentTaskId: params.request.taskId,
+      parentRunId: params.request.runId,
       initialTaskExecutionRoute: params.route,
       executionIntentContext: params.executionIntentContext,
       hasTools: params.hasTools,

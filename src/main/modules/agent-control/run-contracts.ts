@@ -5,6 +5,7 @@ import type {
   ScopeRunResumableAction,
   ScopeRunTaskContinuation,
   ScopeRunTaskStep,
+  ScopeRunWaitingFor,
 } from './types'
 import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
@@ -298,6 +299,7 @@ export interface RunCoordinatorRequest {
   taskId?: string
   parentTaskId?: string
   parentStepId?: string
+  sessionIdOverride?: string
   budget?: RunBudgetSeed
 }
 
@@ -309,6 +311,7 @@ export interface RunCoordinatorResult {
 export interface ExecutionHostRequest {
   agent: string
   sessionId?: string
+  sessionIdOverride?: string
   requestId?: string
   taskId?: string
   parentTaskId?: string
@@ -356,6 +359,66 @@ export interface ExecutionTurnResult {
 export interface ProjectionTruthSnapshot {
   projectionPatch: Record<string, unknown> | null
   transcriptEvents: TurnTranscriptEvent[]
+}
+
+export interface WorkerSessionIdentity {
+  taskId: string
+  workerSessionId: string
+  parentTaskId: string
+  parentStepId: string
+}
+
+export interface SubtaskInlineWorkerUpdate {
+  phase?: ScopeRunEventPayload['phase']
+  taskSummary?: string | null
+  steps?: ScopeRunTaskStep[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingFor
+  resumableActions?: ScopeRunResumableAction[]
+  blockedReason?: string | null
+  interactionState?: TaskInteractionState
+  recentArtifacts?: ScopeRunEventPayload['artifactRefs']
+  error?: string | null
+}
+
+export interface SubtaskInlineWorkerResult {
+  finalText?: string
+  taskSummary?: string | null
+  steps?: ScopeRunTaskStep[]
+  currentStepId?: string | null
+  waitingFor?: ScopeRunWaitingFor
+  resumableActions?: ScopeRunResumableAction[]
+  blockedReason?: string | null
+  interactionState?: TaskInteractionState
+  recentArtifacts?: ScopeRunEventPayload['artifactRefs']
+  projectionTruth?: ProjectionTruthSnapshot | null
+}
+
+export interface SubtaskInlineWorkerContext {
+  identity: WorkerSessionIdentity
+  emitUpdate: (payload: SubtaskInlineWorkerUpdate) => void
+}
+
+export interface SubtaskRunRequest {
+  scope: ConversationScope
+  parentTaskId: string
+  parentStepId: string
+  taskTitle: string
+  module: ScopeRunEventPayload['module']
+  taskType: TaskType
+  initialSummary?: string | null
+  initialSteps?: ScopeRunTaskStep[]
+  message?: RunMessage
+  requestId?: string
+  runInlineWorker?: (context: SubtaskInlineWorkerContext) => Promise<SubtaskInlineWorkerResult>
+}
+
+export interface SubtaskRunResult {
+  taskId: string
+  status: 'done' | 'error' | 'cancelled'
+  finalText: string
+  error?: string
+  projectionTruth?: ProjectionTruthSnapshot | null
 }
 
 export interface TurnProviderContext {

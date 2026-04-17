@@ -104,6 +104,7 @@ export class RunCoordinator {
     const result = await this.deps.executeAndCollect({
       agent: request.scope.agent,
       sessionId: request.scope.id,
+      sessionIdOverride: request.sessionIdOverride,
       requestId: request.requestId,
       taskId,
       parentTaskId: request.parentTaskId,

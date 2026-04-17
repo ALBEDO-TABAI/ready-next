@@ -30,7 +30,14 @@
 - `skill` 现已正式进入意图识别与任务路由：显式 skill / workflow / blocker 请求会走 dedicated skill executor，而不是继续混在 generic tool loop 里兜圈
 - `RunCoordinator -> execution host -> DirectChatEngine` 新增统一 `TaskBudgetRuntime` 透传；执行诊断、任务投影和前台任务卡现在都能看到任务预算、步骤预算与 warning level 的同一份运行时真相
 - continuation 入口不再依赖“继续/恢复”关键词：显式 `Task ID` 会优先恢复对应任务；聊天任务卡和右侧任务面板生成的继续/重试草稿都会稳定带回同一任务身份
+- continuation phase6 收口已补完：控制行改为只按原始用户文本清洗，bootstrap 前缀继续原样保留；`session-continuity` 现已按 `taskId` 持久化多个 continuation snapshots，turn engine 不再把 `Task ID / Step ID / blockedReason` 重新塞回会话历史补上下文
 - 恢复路由补齐指数抖动退避元数据，并在预算进入 warning 或已经发生恢复后把后续工具批次自动降为串行；`host_unavailable` 也会显式落成降级原因
+
+#### Agent 架构对照研究文档
+- 新增 `docs/superpowers/specs/2026-04-17-claude-code-agent-architecture-study.md`，系统研究 Claude Code 的主循环、工具契约、工具调度、会话持久化与子 agent 设计
+- 新增 `docs/superpowers/specs/2026-04-17-claude-code-vs-ready-agent-gap-analysis.md`，把 Claude Code 与 Ready 当前主链逐项交叉对比，明确 P0/P1 结构缺口
+- 新增 `docs/superpowers/specs/2026-04-17-ready-agent-runtime-realignment-design.md`，定义 Ready 下一版 agent 的目标分层：`AgentRuntimeFacade / TurnEngine / ToolRuntime / DomainAdapter / Transcript+Projection / Session+Continuation`
+- 新增 `docs/superpowers/plans/2026-04-17-ready-agent-runtime-realignment-roadmap.md`，给出不做 big bang 的七阶段整改路线，后续 agent 主链收口改为按该路线推进
 
 #### 文档深读后制卡 MVP
 - 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt
@@ -45,6 +52,28 @@
 - 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`：状态层会保留当前阶段、切段数量、实际使用数量、是否命中缓存和切分方式，TaskPanel 已能直接展示
 - 文档主进程的常用读取入口也继续异步化了：`document:read`、`document:list`、`document:parseDocx`、`document:parseXlsx` 现在都改成异步读取，减少打开文件和解析大文档时的主线程阻塞
 - 卡片写回继续复用现有确定性文档动作：优先 `componentSpec`，最终仍走 `document.insertWidget` / `document.saveTab`
+
+#### 文档多资源任务计划
+- `request-envelope` 新增稳定 `resources[]`，每个附件、`@[文件]`、当前文档上下文和文档引用都会保留独立资源身份、顺序、正文与可写属性，不再在主进程入口阶段被揉成一段混合材料
+- 新增 `DocumentTaskPlan / DocumentTaskJob`：显式“根据 A 在 B 中做卡片”、多来源、多目标或顺序型文档任务会先做资源角色绑定，再按 job 顺序执行
+- 多 job 文档任务现已正式走“父任务总览 + 每个 job 一个 child task”的执行路径；单 job 保持原来的内联执行，避免把轻任务也强行拆成子任务
+- 每个文档 child task 会持有自己的六步详情：`collect_materials -> build_insight -> compose_widget -> write_target -> save_target -> verify_result`；父任务只保留 job 级 overview 与最终收口
+- 文档多 job 现在按 job 顺序 fail-fast：任何一个 child 失败都会立刻结束父任务，但已完成 child 的独立记录和父步骤回填会被保留
+- 文档来源角色现已至少区分 `primary_source / secondary_source / target_document / ambient_context`；`current document context` 默认只作为环境信息，不能覆盖用户显式点名的来源材料
+- 文档 insight 缓存键现已切到任务级：会带上 job 角色绑定、来源文本 hash、目标文档身份与当前步骤，避免源材料变化后继续复用旧 insight
+- widget 草稿新增短期会话级缓存：如果 insight 已完成、草稿也已拿到，但写入或保存阶段失败，下一次重试会优先从草稿继续
+- 文档结构化任务状态改为按计划步骤投影：`collect_materials -> build_insight -> compose_widget -> write_target -> save_target -> verify_result`，未开始步骤显示 `pending`，失败步骤显示 `blocked`
+
+#### 实时外部信息查询路由
+- 新增 `live-info-intent` 轻量语义判断：天气、新闻、股价、汇率、比分、航班、路况、空气质量、官网最新公告这类依赖最新外部信息的问题，不再要求用户显式写“打开网页/浏览器”
+- `intent-classifier` 现已把这类请求优先归到 browser intent，避免“当前文档上下文”或“最近在改 widget”把实时查询误路由到 document/design
+- `browser-task-planner` 现已支持“先搜索、再锁定可靠结果页”的工作流；没有显式 URL 时会先生成搜索词，再去权威或最新页面读取与核对
+- 浏览器查询计划对这类请求的完成标准已收口成“已锁定可靠结果页 + 已读取与问题匹配的最新信息”，不再泛化成普通网页动作
+- 新增回归测试，覆盖“今天广州天气怎么样”和“去中国气象台帮我看看”这类实时查询请求
+- 补上浏览器工具缺失借口识别：像“虽然写了浏览器任务执行计划，但没有可调用的浏览器工具组结果返回”这类新变体，现已会触发原生工具回退/纠偏，而不是被当成正常完成
+- 浏览器能力追问也已从执行链里剥离：像“你不能调用浏览器工具吗？”这类只是在问工具可用性的 meta 追问，不再误走 browser executor 并把 `memory_* / session_*` 当成“这轮唯一工具列表”念给用户
+- 显式站点打开请求现已补齐到浏览器决策层：像“帮我打开 pinterest”这类没有直接 URL、但明确点名站点的请求，也会进入浏览器工作流并先解析官方入口
+- 浏览器任务在原生 tools 回包里如果出现“零工具调用”，现在会强制进入一次纠偏重试；不会再把“这轮没有 browser_* 工具”这种解释性文本直接当成最终结果
 
 #### 模型预设工作区与聊天快速切换
 - 设置页的模型配置收敛为 `OpenAI / Anthropic / Gemini / 自定义` 四个入口，不再把 Moonshot、Fox、火山方舟等单独铺成一排
@@ -334,6 +363,9 @@
 #### Agent Core：子任务与任务投影
 - `task_projections` 已补上 `parent_task_id / parent_step_id / task_title / task_summary / recent_artifacts_json`
 - child task 现在可以带独立 `taskId` 和父步骤引用运行，并把完成摘要与产物摘要回写到父任务步骤
+- `runtime.sendScoped` / `RunCoordinator` 新增 `sessionIdOverride`，child task 现在可以沿用原 scope 发事件与写投影，同时切到独立 worker session 执行，不再和父任务共享同一个执行会话键
+- 新增 `worker-session / subtask-runtime / worker-projection` 三个底层模块，统一生成 child identity、生命周期事件、父步骤等待态和 child 完成后的摘要补丁
+- `run-projection` 已修正父子任务来回切换时的关联继承逻辑：只有同一 task 的连续事件才会沿用之前的 `parentTaskId / parentStepId`，避免 child 链接误挂到父任务摘要上
 - `TaskPanel` 与 `ChatPanel` 改为优先读取 projection 持久化真值，不再默认以 scope run 文本摘要为准
 
 #### Agent Core：运行级资源清理

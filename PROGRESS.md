@@ -309,9 +309,17 @@
   - `TaskProjectionStore` 现在会持久化 `taskTitle / taskSummary / recentArtifacts`，不再只存“任务骨架”。
   - `ChatPanel` 与 `TaskPanel` 已改成优先消费 projection 真值，再回退到 scope run 摘要。
   - 协作文档已同步补齐预算、子任务、清理注册表和 projection-first 的当前口径。
+- **Batch F：worker session 真隔离 + 文档多 job 子任务接线**
+  - 新增 `worker-session / subtask-runtime / worker-projection`，child task 现在会生成独立 `workerSessionId + taskId`，父任务只通过 `parentTaskId / parentStepId` 关联，不再和父任务抢同一个执行会话键。
+  - 文档 `DocumentTaskPlan` 的多 job 路径现已切到“父任务总览 + 每个 job 一个 child task”的正式链路；单 job 继续走原内联执行，避免无谓放大改动面。
+  - `run-projection` 已修正父子任务串线时的关联继承条件：切回父任务摘要时，不会再误把上一个 child 的 `parentTaskId / parentStepId` 挂到新的 task 上。
 
 ## 最近一次有效校验
 
+- `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/turn-engine-route.test.ts` 通过
+- `npm run typecheck` 通过
+- `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts` 通过
+- `npm run typecheck` 通过
 - `npm run typecheck` 通过
 - `npx tsx --test src/__tests__/run-coordinator-budget.test.ts src/__tests__/task-budget-runtime-alignment.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/execution-loop-cancellation.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-step-progression.test.ts src/__tests__/interaction-state-detection.test.ts src/__tests__/task-run-control-ipc.test.ts src/__tests__/task-projection-repository.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/run-resource-reaper.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts` 通过
 - `npx tsx --test src/__tests__/run-coordinator-budget.test.ts src/__tests__/task-budget-runtime-alignment.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/execution-loop-cancellation.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-step-progression.test.ts src/__tests__/interaction-state-detection.test.ts src/__tests__/task-run-control-ipc.test.ts` 通过
