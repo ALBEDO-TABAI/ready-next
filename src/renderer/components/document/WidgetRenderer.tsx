@@ -5,7 +5,6 @@ import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
 import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } from './widget-sanitizer'
-import WidgetDomRuntime from './WidgetDomRuntime'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 import { widgetNeedsManualPreview } from './widget-card-helpers'
@@ -219,28 +218,20 @@ export default function WidgetRenderer({
       ) : null}
       {(manualPreviewEnabled && (showSandboxFallback || renderError)) ? (
         <div className="document-widget-fallback-shell">
-          {renderError ? (
-            <div className="document-widget-fallback-note">
-              脚本交互预览出现错误，已显示静态回退内容。
-            </div>
-          ) : null}
-          <WidgetDomRuntime
-            title={title}
-            widgetCode={sanitizedWidgetCode}
-            widgetState={widgetState}
-            onStateChange={onWidgetStateChange}
-            onOpenHref={(href) => {
-              void openHref(href)
-            }}
-            onRuntimeError={(message) => {
-              console.error('[DocumentWidget] dom runtime error', { title, message })
-            }}
-          />
-          {renderError && staticFallbackHtml.trim().length > 0 ? (
+          <div className="document-widget-fallback-note">
+            {renderError
+              ? '脚本交互预览出现错误，已显示静态回退内容。'
+              : '交互预览加载较慢，先显示静态回退内容。'}
+          </div>
+          {staticFallbackHtml.trim().length > 0 ? (
             <div
               className="document-widget-static"
               dangerouslySetInnerHTML={{ __html: staticFallbackHtml }}
             />
+          ) : (
+            <div className="document-widget-fallback-note">
+              当前组件暂时无法展示静态回退内容。
+            </div>
           ) : null}
         </div>
       ) : null}

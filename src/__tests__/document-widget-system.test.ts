@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseShowWidgetFences } from '../renderer/components/document/widget-fence-parser'
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
@@ -181,26 +181,27 @@ describe('document widget renderer contract', () => {
     assert.match(source, /srcDoc=\{srcDoc\}/)
     assert.doesNotMatch(source, /src=\{iframeBlobUrl/)
     assert.doesNotMatch(source, /onLoad=\{\(\) => setReceiverReady\(true\)\}/)
-    assert.match(source, /WidgetDomRuntime/)
+    assert.match(source, /stripWidgetScripts/)
+    assert.doesNotMatch(source, /WidgetDomRuntime/)
     assert.match(source, /widgetNeedsManualPreview/)
     assert.match(source, /preferManualPreview/)
     assert.match(source, /启用预览/)
   })
 
-  it('keeps DOM fallback runtime in the regular document tree for document.getElementById compatibility', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/WidgetDomRuntime.tsx'),
+  it('falls back to stripped static markup instead of executing widget scripts in the renderer document', () => {
+    const rendererSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/WidgetRenderer.tsx'),
       'utf8',
     )
 
-    assert.doesNotMatch(source, /attachShadow/)
-    assert.doesNotMatch(source, /shadowRoot/)
-    assert.match(source, /host\.innerHTML = ''/)
-    assert.match(source, /buildScopedWidgetInlineScript/)
-    assert.match(source, /setAttribute\('nonce', 'cmVhZHktd2lkZ2V0'\)/)
-    assert.match(source, /clampNumericInputValue/)
-    assert.match(source, /addEventListener\('input', handleInput, true\)/)
-    assert.match(source, /invokeInlineHandlerExpression/)
+    assert.match(rendererSource, /staticFallbackHtml/)
+    assert.match(rendererSource, /dangerouslySetInnerHTML/)
+    assert.match(rendererSource, /showSandboxFallback \|\| renderError/)
+    assert.doesNotMatch(rendererSource, /WidgetDomRuntime/)
+    assert.equal(
+      existsSync(resolve(process.cwd(), 'src/renderer/components/document/WidgetDomRuntime.tsx')),
+      false,
+    )
   })
 
   it('does not describe non-script widgets as static html only', () => {
@@ -274,15 +275,10 @@ describe('document widget renderer contract', () => {
       resolve(process.cwd(), 'src/renderer/components/document/widget-sanitizer.ts'),
       'utf8',
     )
-    const domRuntimeSource = readFileSync(
-      resolve(process.cwd(), 'src/renderer/components/document/WidgetDomRuntime.tsx'),
-      'utf8',
-    )
 
     assert.match(rendererSource, /widget:message/)
     assert.match(receiverSource, /data-ready-agent-message/)
     assert.match(receiverSource, /__readyWidgetSendMessage/)
-    assert.match(domRuntimeSource, /__readyWidgetSendMessage/)
     assert.match(rendererSource, /widget:state/)
     assert.match(receiverSource, /widget:hydrate/)
   })
