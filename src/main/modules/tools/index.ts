@@ -1,4 +1,5 @@
 import { defaultToolGateway } from '../agent-control/tool-gateway'
+import type { ToolRegistryReader } from '../agent-control/tool-registry'
 import { executeBrowserTool } from './browser-tools'
 import {
   executeCalendarTool,
@@ -38,3 +39,17 @@ export { executeCalendarTool }
 export { executeSystemTool }
 export { executeToolCall } from './tool-executor'
 export type { ToolContext } from './tool-executor'
+export type {
+  ToolConcurrency,
+  ToolDefinition,
+  ToolDomain,
+  ToolInterruptBehavior,
+  ToolKind,
+  ToolTimeoutProfile,
+} from '../agent-control/tool-definition'
+export type {
+  ToolExecutionOutput,
+  ToolInteractionHint,
+  ToolResultShape,
+} from '../agent-control/tool-result-types'
+export type { ToolRegistryReader }
