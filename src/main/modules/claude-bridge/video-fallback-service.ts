@@ -9,7 +9,7 @@ import { getWhichCommand } from '../../utils/platform'
 const execFileAsync = promisify(execFile)
 
 export interface VideoFallbackMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | Array<Record<string, unknown>>
 }
 

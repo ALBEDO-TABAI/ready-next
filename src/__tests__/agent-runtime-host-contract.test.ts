@@ -7,6 +7,15 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
+function assertMatchesAll(
+  content: string,
+  expectations: Array<{ label: string; pattern: RegExp }>,
+): void {
+  for (const expectation of expectations) {
+    assert.match(content, expectation.pattern, expectation.label)
+  }
+}
+
 test('runtime host is split into run coordinator, run projection, and execution host contracts', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
@@ -30,6 +39,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const openAIExecutionClient = readWorkspaceFile('src/main/modules/claude-bridge/openai-execution-client.ts')
   const documentToolFlow = readWorkspaceFile('src/main/modules/claude-bridge/document-tool-flow.ts')
   const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/execution-loop-orchestrator.ts')
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const toolConfig = readWorkspaceFile('src/main/modules/agent-control/execution-tool-config.ts')
   const toolPolicy = readWorkspaceFile('src/main/modules/agent-control/execution-tool-policy.ts')
@@ -137,6 +147,16 @@ test('runtime host is split into run coordinator, run projection, and execution 
 
   assert.match(toolPolicy, /export function buildToolVisibilityPlan\(/)
   assert.match(toolPolicy, /export function buildToolDispatchDecision\(/)
+  assert.match(turnEngine, /export class TurnEngine/)
+  assert.match(turnEngine, /async execute(?:<|\()/)
+  assert.match(turnEngine, /hostCapabilityDispatcher\.dispatch\(/)
+  assert.match(turnEngine, /documentToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
+  assert.match(turnEngine, /designToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
+  assert.match(turnEngine, /browserDomainOrchestrator\.getBudgetHint\(/)
+  assert.match(turnEngine, /documentToolLoopOrchestrator\.getBudgetHint\(/)
+  assert.match(turnEngine, /designToolLoopOrchestrator\.getBudgetHint\(/)
+  assert.match(turnEngine, /simpleResponse\.fallback/)
+  assert.match(turnEngine, /executedToolBatch\.budgetLimited/)
   assert.match(directChat, /import \{ OpenAIExecutionClient \} from '\.\/openai-execution-client'/)
   assert.match(directChat, /import \{ resolveExecutionIntentContext \} from '\.\.\/agent-control\/execution-intent-resolver'/)
   assert.match(directChat, /import \{[\s\S]*prepareInitialRun[\s\S]*reconcileAfterBrowserDecision[\s\S]*\} from '\.\.\/agent-control\/run-capability-controller'/)
@@ -164,14 +184,9 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /private readonly documentDomainOrchestrator: DocumentDomainOrchestrator/)
   assert.match(directChat, /private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator/)
   assert.match(directChat, /private readonly hostCapabilityDispatcher: HostCapabilityDispatcher/)
-  assert.match(directChat, /await this\.hostCapabilityDispatcher\.dispatch\(/)
-  assert.match(directChat, /this\.documentToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
-  assert.match(directChat, /this\.designToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
-  assert.match(directChat, /this\.browserDomainOrchestrator\.getBudgetHint\(/)
-  assert.match(directChat, /this\.documentToolLoopOrchestrator\.getBudgetHint\(/)
-  assert.match(directChat, /this\.designToolLoopOrchestrator\.getBudgetHint\(/)
-  assert.match(directChat, /simpleResponse\.fallback/)
-  assert.match(directChat, /executedToolBatch\.budgetLimited/)
+  assert.match(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
+  assert.match(directChat, /private readonly turnEngine: TurnEngine/)
+  assert.match(directChat, /return await this\.turnEngine\.execute\(/)
   assert.match(directChat, /import \{[\s\S]*buildTextToolBridgeCorrectionMessage[\s\S]*buildToolGuidance[\s\S]*\} from '\.\.\/agent-control\/execution-tool-config'/)
   assert.doesNotMatch(directChat, /import \{ buildToolVisibilityPlan \} from '\.\.\/agent-control\/execution-tool-policy'/)
   assert.doesNotMatch(directChat, /await this\.browserTaskPlanner\.buildContinuityContext\(/)
@@ -239,4 +254,205 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.doesNotMatch(directChat, /private extensionFromVideoMediaType\(/)
   assert.doesNotMatch(directChat, /response = await this\.callAnthropicWithTools\(/)
   assert.doesNotMatch(directChat, /response = await this\.callOpenAIWithTools\(/)
+})
+
+test('phase3 moves execution-host responsibilities from DirectChatEngine into TurnEngine while preserving host wiring', () => {
+  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+
+  assertMatchesAll(directChat, [
+    {
+      label: 'phase3 should keep run setup explicit in sendMessage',
+      pattern: /const abortController = new AbortController\(/,
+    },
+    {
+      label: 'phase3 should keep provider context assembly explicit in sendMessage',
+      pattern: /providerContext: \{/,
+    },
+    {
+      label: 'phase3 should keep turn-engine host assembly explicit in direct chat',
+      pattern: /private buildTurnEngineHost\(/,
+    },
+    {
+      label: 'phase3 should keep requestSimpleText host callback local to direct chat',
+      pattern: /private async requestSimpleText\(/,
+    },
+    {
+      label: 'phase3 should keep requestToolLoopResponse host callback local to direct chat',
+      pattern: /private async requestToolLoopResponse\(/,
+    },
+  ])
+
+  assertMatchesAll(turnEngine, [
+    {
+      label: 'phase3 should move run capability preparation into TurnEngine',
+      pattern: /const preparedRunCapabilities = prepareInitialRun\(/,
+    },
+    {
+      label: 'phase3 should move initial route resolution into TurnEngine',
+      pattern: /const initialTaskExecutionRoute = resolveTaskExecutionRoute\(/,
+    },
+    {
+      label: 'phase3 should move browser pre-dispatch preparation into TurnEngine',
+      pattern: /const preparedBrowserExecution = await browserDomainOrchestrator\.prepareBrowserExecution\(/,
+    },
+    {
+      label: 'phase3 should move capability reconciliation into TurnEngine',
+      pattern: /const reconciledRunCapabilities = reconcileAfterBrowserDecision\(/,
+    },
+    {
+      label: 'phase3 should move final execution route ownership into TurnEngine',
+      pattern: /const taskExecutionRoute = resolveTaskExecutionRoute\(/,
+    },
+    {
+      label: 'phase3 should move host shortcut dispatch into TurnEngine',
+      pattern: /const hostShortcutResult = await hostCapabilityDispatcher\.dispatch\(/,
+    },
+    {
+      label: 'phase3 should move document loop state ownership into TurnEngine',
+      pattern: /let documentToolLoopState = documentToolLoopOrchestrator\.createState\(\)/,
+    },
+    {
+      label: 'phase3 should move design loop state ownership into TurnEngine',
+      pattern: /let designToolLoopState = designToolLoopOrchestrator\.createState\(\)/,
+    },
+    {
+      label: 'phase3 should move model tool-loop requests into TurnEngine',
+      pattern: /const response = await host\.requestToolLoopResponse\(/,
+    },
+    {
+      label: 'phase3 should move batch tool execution into TurnEngine',
+      pattern: /const executeBatch = async \(\) => normalizeToolBatchResult\(await host\.executeToolBatch\(/,
+    },
+    {
+      label: 'phase3 should move direct host tool execution into TurnEngine',
+      pattern: /const result = await host\.executeToolCall\(toolCall\.name, toolCall\.input, toolContext\)/,
+    },
+    {
+      label: 'phase3 should move structured payload emission into TurnEngine',
+      pattern: /emitStructuredTaskPayload\(documentToolLoopOrchestrator\.buildStructuredTaskPayload\(/,
+    },
+  ])
+})
+
+test('phase0 freezes the target runtime boundary that later refactors must satisfy', () => {
+  const roadmap = readWorkspaceFile('docs/superpowers/plans/2026-04-17-ready-agent-runtime-realignment-roadmap.md')
+  const design = readWorkspaceFile('docs/superpowers/specs/2026-04-17-ready-agent-runtime-realignment-design.md')
+  const gapAnalysis = readWorkspaceFile('docs/superpowers/specs/2026-04-17-claude-code-vs-ready-agent-gap-analysis.md')
+
+  assertMatchesAll(roadmap, [
+    {
+      label: 'roadmap should freeze the current DirectChatEngine ownership baseline into tests',
+      pattern: /把“当前哪些职责仍然在 `DirectChatEngine`”写成测试断言/,
+    },
+    {
+      label: 'roadmap should freeze the future migration boundary into tests',
+      pattern: /把“未来哪些职责应该被迁出”也写成 contract 断言/,
+    },
+    {
+      label: 'roadmap should require DirectChatEngine to shrink into a provider host',
+      pattern: /`DirectChatEngine` 缩为 provider-facing host shell/,
+    },
+    {
+      label: 'roadmap should require TurnState to absorb single-turn runtime truth',
+      pattern: /`route \/ budget \/ toolPool \/ transcript \/ interaction \/ continuation \/ domainState`/,
+    },
+    {
+      label: 'roadmap should require shrinkage to stay backed by contract tests',
+      pattern: /`DirectChatEngine` 的缩责必须有 contract test 支撑/,
+    },
+  ])
+
+  assertMatchesAll(design, [
+    {
+      label: 'design should describe TurnEngine as the new single-turn owner',
+      pattern: /单轮执行唯一真相来源/,
+    },
+    {
+      label: 'design should freeze PreparedRunPayload as TurnEngine input',
+      pattern: /接收 `PreparedRunPayload`/,
+    },
+    {
+      label: 'design should freeze ExecutionTurnResult as TurnEngine output',
+      pattern: /产出结构化 `ExecutionTurnResult`/,
+    },
+    {
+      label: 'design should freeze DirectChatEngine as a provider-facing execution host shell',
+      pattern: /`DirectChatEngine` 最终应缩成“provider-facing execution host shell”/,
+    },
+  ])
+
+  assertMatchesAll(gapAnalysis, [
+    {
+      label: 'gap analysis should freeze DirectChatEngine as the current super-host problem',
+      pattern: /`DirectChatEngine` 仍然是事实上的超级宿主/,
+    },
+    {
+      label: 'gap analysis should freeze TurnEngine as the future execution truth owner',
+      pattern: /新的 `TurnEngine` 成为唯一 execution truth owner/,
+    },
+    {
+      label: 'gap analysis should freeze DirectChatEngine as a future provider client host adapter',
+      pattern: /`DirectChatEngine` 缩成 provider client \+ host adapter/,
+    },
+  ])
+})
+
+test('phase3 keeps runtime ownership split while DirectChatEngine delegates single-turn execution to TurnEngine', () => {
+  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+  const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
+
+  assertMatchesAll(contracts, [
+    {
+      label: 'phase3 should add a distinct execution turn result contract',
+      pattern: /export interface ExecutionTurnResult/,
+    },
+    {
+      label: 'phase3 should add a dedicated turn engine request contract',
+      pattern: /export interface TurnEngineRequest/,
+    },
+  ])
+
+  assertMatchesAll(turnEngine, [
+    {
+      label: 'phase3 should add a TurnEngine class',
+      pattern: /export class TurnEngine/,
+    },
+    {
+      label: 'phase3 should make TurnEngine execute single-turn runs',
+      pattern: /async execute(?:<|\()/,
+    },
+  ])
+
+  assertMatchesAll(directChat, [
+    {
+      label: 'direct chat should import TurnEngine during phase3',
+      pattern: /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/,
+    },
+    {
+      label: 'direct chat should keep a turn engine instance during phase3',
+      pattern: /private readonly turnEngine: TurnEngine/,
+    },
+    {
+      label: 'sendMessage should delegate to turn engine during phase3',
+      pattern: /return await this\.turnEngine\.execute\(/,
+    },
+  ])
+
+  assertMatchesAll(orchestrator, [
+    {
+      label: 'orchestrator should continue consuming execution host results rather than direct-chat internals',
+      pattern: /async executeAndCollect\(request: ExecutionHostRequest\): Promise<ExecutionHostResult>/,
+    },
+    {
+      label: 'orchestrator should read stable task projection ids from host results',
+      pattern: /taskProjectionId: result\.taskProjectionId/,
+    },
+    {
+      label: 'orchestrator should read stable execution diagnostics from host results',
+      pattern: /executionDiagnostics: result\.executionDiagnostics \|\| null/,
+    },
+  ])
 })

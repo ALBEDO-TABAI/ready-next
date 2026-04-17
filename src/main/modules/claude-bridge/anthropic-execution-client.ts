@@ -1,11 +1,12 @@
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getProviderDef } from '../../../shared/ai-providers'
 import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
+import { parseJsonResponse } from '../openai-responses'
 import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 
 export interface AnthropicSessionLike {
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | Array<Record<string, unknown>> }>
+  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | Array<Record<string, unknown>> }>
   systemPrompt: string
 }
 
@@ -105,7 +106,7 @@ export class AnthropicExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       content?: Array<{ type: string; text?: string }>
     }
     return json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || ''
@@ -178,7 +179,7 @@ export class AnthropicExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
       stop_reason?: string
     }

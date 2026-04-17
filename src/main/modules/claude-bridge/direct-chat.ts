@@ -28,9 +28,17 @@ import {
 } from '../agent-control/document-task-pipeline'
 import { DocumentInsightCache } from '../agent-control/document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from '../agent-control/document-source-materials'
+import { buildDocumentTaskStepCacheKey } from '../agent-control/document-task-cache-key'
+import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from '../agent-control/document-task-plan'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
+import { TurnEngine } from '../agent-control/turn-engine'
+import {
+  createToolExecutionOutput,
+  serializeToolExecutionOutput,
+  type ToolExecutionOutput,
+} from '../agent-control/tool-result-types'
 import { getToolResourceTag } from '../agent-control/tool-parallelism-policy'
 import {
   applyRunBudgetHint,
@@ -54,11 +62,17 @@ import type {
   BudgetWarningLevel,
   RecoveryRecord,
   RunBudgetSeed,
+  RunMessage,
   RunBudgetUsage,
   TaskBudgetRuntime,
   TaskProjectionRecord,
   TaskInteractionState,
   TaskType,
+  ExecutionTurnResult,
+  TurnModelResponse,
+  TurnProviderContext,
+  TurnShortcutResult,
+  TurnSimpleResponse,
 } from '../agent-control/run-contracts'
 import type {
   BrowserTaskAttachmentResource,
@@ -82,6 +96,7 @@ import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
+  shouldEnforceBrowserToolRetry,
 } from './tool-bridge'
 import { buildExecutionFallbackState, type ExecutionFallbackInfo } from './execution-fallback-policy'
 import {
@@ -99,7 +114,7 @@ import { resolveExecutionIntentContext } from '../agent-control/execution-intent
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
-import type { RequestEnvelope } from '../agent-control/request-envelope'
+import type { RequestEnvelope, RequestEnvelopeResource } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
 import {
   advanceTaskStepProgress,
@@ -130,7 +145,7 @@ function log(msg: string) {
 }
 
 interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | Array<Record<string, unknown>>
 }
 
@@ -146,6 +161,11 @@ interface DirectChatSession {
     key: string
     insight: DocumentInsight
     metrics?: DocumentInsightMetrics
+    createdAt: string
+  }>
+  documentWidgetDraftCache: Array<{
+    key: string
+    draft: DocumentWidgetDraft
     createdAt: string
   }>
 }
@@ -239,6 +259,7 @@ show-widget 规则：
 export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
   private readonly documentInsightCache = new DocumentInsightCache()
+  private readonly documentWidgetDraftCache = new Map<string, DocumentWidgetDraft>()
   private browserController: BrowserController | null = null
   private readonly browserDomainOrchestrator: BrowserDomainOrchestrator
   private readonly skillContextOrchestrator: SkillContextOrchestrator
@@ -251,6 +272,7 @@ export class DirectChatEngine extends EventEmitter {
   private readonly documentDomainOrchestrator: DocumentDomainOrchestrator
   private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator
   private readonly hostCapabilityDispatcher: HostCapabilityDispatcher
+  private readonly turnEngine: TurnEngine
   private sidecarManager: SidecarManager | null = null
   private runtime: import('../agent-control/runtime').AgentControlRuntime | null = null
   private runCleanupRegistry: {
@@ -355,6 +377,7 @@ export class DirectChatEngine extends EventEmitter {
       tryDeterministicSectionFormatFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionFormatFlow(params),
       tryDeterministicSectionRewriteFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionRewriteFlow(params),
     })
+    this.turnEngine = new TurnEngine()
   }
 
   private async fetchWithTimeout(
@@ -493,7 +516,7 @@ export class DirectChatEngine extends EventEmitter {
     }
   }
 
-  private getIncomingAttachmentHints(content: string | MultimodalBlock[]): { count: number; latestName?: string } {
+  private getIncomingAttachmentHints(content: RunMessage): { count: number; latestName?: string } {
     if (!Array.isArray(content)) return { count: 0 }
     const mediaBlocks = content.filter((block) => block.type === 'image' || block.type === 'video')
     if (mediaBlocks.length === 0) return { count: 0 }
@@ -541,6 +564,7 @@ export class DirectChatEngine extends EventEmitter {
       preferTextToolBridge: false,
       lastDocumentContextInput: null,
       documentInsightCache: [],
+      documentWidgetDraftCache: [],
     })
   }
 
@@ -582,25 +606,7 @@ export class DirectChatEngine extends EventEmitter {
       budgetState?: RunBudgetUsage
       taskBudgetRuntime?: TaskBudgetRuntime
     },
-  ): Promise<{
-    success: boolean
-    error?: string
-    taskId?: string | null
-    taskType?: TaskType
-    interactionState?: TaskInteractionState
-    taskProjectionId?: string | null
-    executionDiagnostics?: {
-      taskId?: string | null
-      taskBudgetRuntime?: TaskBudgetRuntime | null
-      budget?: Partial<RunBudgetSeed & RunBudgetUsage> | null
-      stepBudget?: { stepId?: string | null; maxIterations?: number; remainingIterations?: number } | null
-      budgetUsagePercent?: number | null
-      budgetWarningLevel?: BudgetWarningLevel | null
-      fallback?: { happened: boolean; kind: string; attempts: number } | null
-      recoveryHistory?: RecoveryRecord[] | null
-      degradationReason?: string | null
-    } | null
-  }> {
+  ): Promise<ExecutionTurnResult> {
     const contentPreview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} blocks]`
     log(`sendMessage called: agent=${name}, content=${contentPreview}`)
     const runId = requestId || randomUUID()
@@ -609,117 +615,6 @@ export class DirectChatEngine extends EventEmitter {
     }
     const session = this.sessions.get(name)!
     const taskId = executionOptions?.taskId || `task-${runId}`
-    let taskBudgetRuntime = executionOptions?.taskBudgetRuntime
-      ? {
-        ...executionOptions.taskBudgetRuntime,
-        budget: { ...executionOptions.taskBudgetRuntime.budget },
-        usage: { ...executionOptions.taskBudgetRuntime.usage },
-        stepBudget: executionOptions.taskBudgetRuntime.stepBudget
-          ? { ...executionOptions.taskBudgetRuntime.stepBudget }
-          : null,
-      }
-      : null
-    let effectiveRunBudget = taskBudgetRuntime?.budget || (executionOptions?.budget ? { ...executionOptions.budget } : null)
-    const runBudgetState = taskBudgetRuntime?.usage || executionOptions?.budgetState || {
-      iterationsUsed: 0,
-      toolCallsUsed: 0,
-      parallelToolGroupsUsed: 0,
-    }
-    let latestFallback: ExecutionFallbackInfo | null = null
-    let recoveryHistory: RecoveryRecord[] = []
-    let resolvedTaskType: TaskType | undefined
-    let interactionState: TaskInteractionState = taskBudgetRuntime?.frozen ? 'suspended' : 'running'
-    let degradationReason: string | null = null
-    let continuationBudgetRestore: import('../agent-control/run-contracts').ContinuationBudgetRestoreDiagnostics | null = null
-    let stepBudgetState: { stepId?: string | null; maxIterations?: number; remainingIterations?: number } | null = taskBudgetRuntime?.stepBudget
-      ? { ...taskBudgetRuntime.stepBudget }
-      : null
-    let budgetWarningLevel: BudgetWarningLevel = 'none' as BudgetWarningLevel
-    const syncTaskBudgetRuntime = (): TaskBudgetRuntime | null => {
-      if (!effectiveRunBudget) return null
-      taskBudgetRuntime = createTaskBudgetRuntime(resolvedTaskType || taskBudgetRuntime?.taskType || 'short_task', {
-        budget: effectiveRunBudget,
-        usage: runBudgetState,
-        stepBudget: stepBudgetState
-          ? {
-            stepId: stepBudgetState.stepId || null,
-            maxIterations: Number(stepBudgetState.maxIterations || 0),
-            remainingIterations: Number(stepBudgetState.remainingIterations || 0),
-          }
-          : null,
-        frozen: interactionState === 'suspended',
-        bootstrapBudget: taskBudgetRuntime?.bootstrapBudget,
-      })
-      taskBudgetRuntime.warningLevel = budgetWarningLevel
-      return taskBudgetRuntime
-    }
-    const syncBudgetWarning = () => {
-      budgetWarningLevel = effectiveRunBudget
-        ? createTaskBudgetRuntime(resolvedTaskType || taskBudgetRuntime?.taskType || 'short_task', {
-          budget: effectiveRunBudget,
-          usage: runBudgetState,
-          stepBudget: stepBudgetState
-            ? {
-              stepId: stepBudgetState.stepId || null,
-              maxIterations: Number(stepBudgetState.maxIterations || 0),
-              remainingIterations: Number(stepBudgetState.remainingIterations || 0),
-            }
-            : null,
-          frozen: interactionState === 'suspended',
-          bootstrapBudget: taskBudgetRuntime?.bootstrapBudget,
-        }).warningLevel
-        : 'none'
-      syncTaskBudgetRuntime()
-    }
-    const adoptResolvedTaskTypeBudget = (taskType: TaskType): void => {
-      resolvedTaskType = taskType
-      if (taskBudgetRuntime?.bootstrapBudget) {
-        taskBudgetRuntime = rebindTaskBudgetRuntime(taskBudgetRuntime, taskType, {
-          bootstrapBudget: false,
-        })
-        effectiveRunBudget = { ...taskBudgetRuntime.budget }
-        stepBudgetState = taskBudgetRuntime.stepBudget
-          ? {
-            stepId: taskBudgetRuntime.stepBudget.stepId || null,
-            maxIterations: taskBudgetRuntime.stepBudget.maxIterations,
-            remainingIterations: taskBudgetRuntime.stepBudget.remainingIterations,
-          }
-          : stepBudgetState
-        budgetWarningLevel = taskBudgetRuntime.warningLevel
-        return
-      }
-      if (!effectiveRunBudget) {
-        effectiveRunBudget = createRunBudgetSeed(taskType)
-      }
-    }
-    const buildExecutionDiagnostics = () => ({
-      taskId,
-      taskBudgetRuntime: syncTaskBudgetRuntime(),
-      budget: effectiveRunBudget || runBudgetState
-        ? {
-          ...(effectiveRunBudget || {}),
-          ...(runBudgetState || {}),
-        }
-        : null,
-      budgetUsagePercent: effectiveRunBudget && runBudgetState
-        ? getBudgetUsagePercent(effectiveRunBudget, runBudgetState)
-        : null,
-      stepBudget: stepBudgetState,
-      budgetWarningLevel,
-      fallback: buildExecutionFallbackState(latestFallback),
-      recoveryHistory: recoveryHistory.length > 0 ? recoveryHistory : null,
-      continuationBudgetRestore,
-      degradationReason,
-    })
-    const buildRunResult = (success: boolean, error?: string) => ({
-      success,
-      error,
-      taskId,
-      taskType: resolvedTaskType,
-      interactionState,
-      taskProjectionId: taskId,
-      executionDiagnostics: buildExecutionDiagnostics(),
-    })
     if (session.abortController) {
       session.generation += 1
       session.abortController.abort()
@@ -757,7 +652,20 @@ export class DirectChatEngine extends EventEmitter {
       emitOutput('未配置 API Key，请前往设置页配置', 'error')
       emitOutput('', 'done')
       emitStatus('error')
-      return buildRunResult(false, '未配置 API Key')
+      return {
+        success: false,
+        error: '未配置 API Key',
+        finalText: '',
+        usedTools: [],
+        cancelled: false,
+        taskId,
+        taskProjectionId: taskId,
+        executionDiagnostics: {
+          taskId,
+          taskBudgetRuntime: executionOptions?.taskBudgetRuntime || null,
+          fallback: buildExecutionFallbackState(null),
+        },
+      }
     }
 
     const capabilities = resolveAIConfigCapabilities(config)
@@ -810,25 +718,8 @@ export class DirectChatEngine extends EventEmitter {
     try {
       const provider = capabilities?.provider || getProviderDef(config.provider, normalizedBaseUrl)
       const baseUrl = normalizedBaseUrl
-      // isKimi: Kimi's own OpenAI-protocol endpoint (provider=moonshot). Uses $web_search, not browser tools.
-      // Note: api.kimi.com/coding with provider=anthropic is Anthropic-compatible and DOES support tools.
       const isKimi = isKimiCoding || (!useAnthropicProtocol && (baseUrl.includes('kimi') || baseUrl.includes('moonshot')))
       const sessionId = this.extractSessionIdFromInternalName(name)
-      const userText = this.extractIncomingText(content)
-      const requestEnvelope = executionOptions?.requestEnvelope || buildRequestEnvelope({ userText })
-      const pureUserInput = requestEnvelope.pureUserText
-      const executionIntentContext = resolveExecutionIntentContext({
-        requestEnvelope,
-        previousInputs: this.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
-        lastDocumentContextInput: session.lastDocumentContextInput,
-        intentClassification: executionOptions?.intentClassification || classifyIntent(requestEnvelope),
-      })
-      const contextualUserInput = executionIntentContext.contextualUserInput
-      if (contextualUserInput !== pureUserInput) {
-        log(`tool policy context reused previous user input: ${this.extractPrimaryUserInstruction(contextualUserInput).slice(0, 120)}`)
-      }
-      const hasVideoInputs = this.sessionHasVideoInputs(session.messages)
-      const keepToolsWithVideo = this.skillContextOrchestrator.shouldKeepToolsWithVideo(contextualUserInput, sessionId)
       const publicAgentName = name.includes('::') ? name.slice(0, name.indexOf('::')) : name
       const requestModuleToolAction = this.rendererToolActionRequester
         ? (tool: string, args: Record<string, unknown>) => this.rendererToolActionRequester!({
@@ -839,1484 +730,57 @@ export class DirectChatEngine extends EventEmitter {
           args,
         })
         : undefined
-      const emitStructuredTaskPayload = (payload: unknown): void => {
-        emitOutput(JSON.stringify(payload), 'tool_result')
-      }
-      const appendRecoveryHistory = (entries: RecoveryRecord[] | null | undefined): void => {
-        if (!entries || entries.length === 0) return
-        recoveryHistory = recoveryHistory.concat(entries)
-        if (!degradationReason && entries.some((entry) => entry.kind === 'host_unavailable')) {
-          degradationReason = 'host_unavailable'
-        }
-      }
-      const syncInteractionStateFromToolResult = (toolName: string, result: string): void => {
-        if (!toolName.startsWith('skill_')) return
-        const blockerType = result.match(/^Blocker:\s*([^-\n]+)-/m)?.[1]?.trim() || null
-        if (blockerType === 'need_confirmation') {
-          interactionState = 'awaiting_confirmation'
-          return
-        }
-        if (blockerType === 'need_input' || blockerType === 'need_agent_result') {
-          interactionState = 'awaiting_clarification'
-        }
-      }
-      const incomingAttachmentHints = this.getIncomingAttachmentHints(content)
-      let browserDecision = ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
 
-      // Judge intent based on pure input (not polluted by environment context)
-      const preferredSkillToolNames = (
-        this.skillContextOrchestrator.findExplicitlyRequestedSkills(contextualUserInput).length > 0
-        || this.skillContextOrchestrator.hasActiveSkillExecution(sessionId)
-      )
-        ? this.skillContextOrchestrator.buildPreferredSkillToolNames(contextualUserInput, sessionId)
-        : null
-      const runtimeAvailability = {
-        browserHostAvailable: Boolean(this.browserController),
-        feishuConnected: this.runtime?.isChannelTypeAvailable('feishu-app') ?? false,
-      }
-      const preparedRunCapabilities = prepareInitialRun({
-        config,
-        capabilityProfile: 'local_chat',
-        supportsToolCalls: capabilities?.supportsToolCalls ?? true,
-        hasVideoInputs,
-        hasIncomingVideo: hasRawVideoInIncoming,
-        keepToolsWithVideo,
-        preferredSkillToolNames,
-        executionIntentContext,
-        browserDecisionMode: browserDecision.mode,
-        runtimeAvailability,
-        hostContext: {
-          userText: executionIntentContext.requestEnvelope.primaryInstruction
-            || executionIntentContext.requestEnvelope.pureUserText
-            || userText,
-        },
-      })
-      const preparedToolContext = buildToolRuntimeContext({
-        browserController: this.browserController,
-        sidecarManager: this.sidecarManager,
-        runtime: this.runtime,
-        allowedToolNames: preparedRunCapabilities.allowedToolNames,
-        emitToolAction: (tool, args) => {
-          emitToolAction(tool, args)
-        },
-        requestModuleToolAction,
-        abortSignal: abortController.signal,
-        sessionId,
-        registerRunCleanup: (cleanup) => {
-          this.runCleanupRegistry?.registerRunCleanup(runId, cleanup)
-        },
-      })
-      const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
-      let toolPolicy = preparedRunCapabilities.toolPolicy
-      if (toolPolicy.forceDocumentTool) {
-        session.lastDocumentContextInput = contextualUserInput
-      }
-
-      log(`provider=${config.provider}, baseUrl=${baseUrl}, model=${config.model}, agentProtocol=${capabilities?.agentProtocol || (useAnthropicProtocol ? 'anthropic' : 'openai')}, wireApi=${capabilities?.wireApi || 'n/a'}, toolCallTransport=${capabilities?.toolCallTransport || 'native'}, supportsVision=${capabilities?.supportsVision ?? true}, supportsNativeVideo=${capabilities?.supportsNativeVideo ?? supportsVideoBlock}, ${preparedRunCapabilities.capabilityLogLine}, isKimi=${isKimi}, isKimiCoding=${isKimiCoding}, anthropicProtocol=${useAnthropicProtocol}`)
-      const continuationHintText =
-        executionIntentContext.requestEnvelope.primaryInstruction
-        || executionIntentContext.requestEnvelope.pureUserText
-        || userText
-      const explicitTaskId = this.extractTaskIdFromText(userText)
-      const shouldResolveContinuation =
-        Boolean(explicitTaskId)
-        || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
-      let continuationProjection = this.resolveContinuationProjection(sessionId, userText, {
-        explicitTaskId,
-        allowImplicitContinuation: shouldResolveContinuation,
-      })
-      const continuationTaskId = continuationProjection?.taskId || null
-      const initialTaskTypeResolution = resolveTaskType({
-        intent: executionIntentContext.intentClassification,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
-      })
-      const initialTaskExecutionRoute = resolveTaskExecutionRoute({
+      return await this.turnEngine.execute({
+        runId,
         taskId,
-        resolution: initialTaskTypeResolution,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId
-          ? {
-            continuationTaskId,
-            continuationProjection,
-          }
-          : null,
-      })
-
-      if (
-        initialTaskExecutionRoute.executor === 'document'
-        && initialTaskExecutionRoute.chain === 'domain_executor'
-        &&
-        executionIntentContext.structuredDocumentIntent === 'document_read_then_widget_create'
-        && hasTools
-        && requestModuleToolAction
-        && !(preferredSkillToolNames && preferredSkillToolNames.length > 0)
-      ) {
-        adoptResolvedTaskTypeBudget('media_task')
-        const sourceMaterial = buildDocumentInsightSourceMaterial({
-          requestEnvelope: executionIntentContext.requestEnvelope,
-          snapshotContent: '',
-        })
-        const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = [
-          'loading_document',
-          'building_insight',
-          'generating_widget_spec',
-          'writing_widget',
-          'saving_document',
-        ]
-        const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
-          loading_document: '读取文档',
-          building_insight: '提炼重点',
-          generating_widget_spec: '生成卡片草稿',
-          writing_widget: '写入卡片',
-          saving_document: '保存文档',
-          completed: '完成',
-          failed: '失败',
-        }
-        const pipelinePhaseStatus = new Map<string, 'running' | 'done' | 'error'>()
-        let documentPipelineDiagnostics: {
-          phase?: string
-          chunkCount?: number
-          selectedChunkCount?: number
-          promptChars?: number
-          cacheHit?: boolean
-          usedSectionAnchors?: boolean
-        } | null = null
-        const emitDocumentPipelinePhase = (update: DocumentTaskPipelinePhaseUpdate): void => {
-          if (update.phase === 'completed') {
-            pipelinePhaseStatus.forEach((value, key) => {
-              if (value === 'running') pipelinePhaseStatus.set(key, 'done')
-            })
-          } else if (update.phase === 'failed') {
-            const lastRunning = pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running')
-            if (lastRunning) pipelinePhaseStatus.set(lastRunning, 'error')
-          } else if (update.status === 'running') {
-            pipelinePhaseStatus.set(update.phase, 'running')
-          } else if (update.status === 'completed') {
-            pipelinePhaseStatus.set(update.phase, 'done')
-          } else if (update.status === 'failed') {
-            pipelinePhaseStatus.set(update.phase, 'error')
-          }
-          documentPipelineDiagnostics = {
-            ...(documentPipelineDiagnostics || {}),
-            ...(update.metrics || {}),
-            phase: update.phase === 'completed' || update.phase === 'failed'
-              ? documentPipelineDiagnostics?.phase || update.phase
-              : update.phase,
-          }
-
-          emitStructuredTaskPayload({
-            module: 'document',
-            message: update.summary,
-            taskTitle: '文档信息卡',
-            taskSummary: update.summary,
-            executionDiagnostics: {
-              pipeline: {
-                document: documentPipelineDiagnostics,
-              },
-            },
-            steps: pipelinePhaseOrder.map((phase) => ({
-              id: phase,
-              title: pipelinePhaseTitles[phase],
-              status: pipelinePhaseStatus.get(phase) === 'done'
-                ? 'done'
-                : pipelinePhaseStatus.get(phase) === 'error'
-                  ? 'blocked'
-                  : pipelinePhaseStatus.get(phase) === 'running'
-                    ? 'running'
-                    : 'running',
-              updatedAt: update.endedAt || update.startedAt,
-            })),
-            currentStepId:
-              update.phase === 'completed' || update.phase === 'failed'
-                ? pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running' || pipelinePhaseStatus.get(phase) === 'error') || pipelinePhaseOrder[pipelinePhaseOrder.length - 1]
-                : update.phase,
-            waitingFor: 'none',
-            resumableActions: update.phase === 'failed' ? ['retry', 'cancel'] : ['cancel'],
-            blockedReason: update.phase === 'failed' ? (update.error || update.summary) : null,
-          })
-        }
-
-        const pipeline = new DocumentTaskPipeline({
-          now: () => new Date(),
-          log: (message) => log(message),
-          loadDocumentSnapshot: async ({ question, signal }) => await this.loadDocumentPipelineSnapshot({
-            userText: question,
-            requestModuleToolAction,
-            signal,
-          }),
-          getCachedInsight: ({ question, snapshot }) => this.getCachedDocumentInsight(
-            session,
-            question,
-            snapshot,
-          ),
-          buildInsight: async ({ question, snapshot, signal }) => await this.buildDocumentPipelineInsight({
-            question,
-            snapshot,
-            sourceText: sourceMaterial.kind === 'snapshot' ? snapshot.content : sourceMaterial.text,
-            sourceKind: sourceMaterial.kind === 'snapshot' && sourceMaterial.text.trim()
-              ? 'snapshot'
-              : sourceMaterial.kind,
-            timeoutMs: 60_000,
-            config,
-            baseUrl,
-            provider,
-            signal,
-            isKimi,
-            isKimiCoding,
-            useAnthropicProtocol,
-          }),
-          storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
-            this.storeCachedDocumentInsight(session, question, snapshot, insight, metrics)
-          },
-          buildWidgetDraft: async ({ question, snapshot, insight, signal }) => await this.buildDocumentPipelineWidgetDraft({
-            question,
-            snapshot,
-            insight,
-            timeoutMs: 60_000,
-            config,
-            baseUrl,
-            provider,
-            signal,
-            isKimi,
-            isKimiCoding,
-            useAnthropicProtocol,
-          }),
-          insertWidget: async ({ draft, signal }) => {
-            void signal
-            const payload = await requestModuleToolAction('document.insertWidget', {
-              title: draft.title,
-              componentSpec: draft.componentSpec,
-              widgetCode: draft.widgetCode,
-              position: draft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
-              sectionTitle: draft.targetSectionTitle,
-            })
-            return typeof payload.summary === 'string' ? payload.summary : '已写入信息卡'
-          },
-          saveDocument: async ({ signal }) => {
-            void signal
-            const payload = await requestModuleToolAction('document.saveTab', {})
-            return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
-          },
-          emitPhase: emitDocumentPipelinePhase,
-        })
-
-        const pipelineResult = await pipeline.run({
-          question: executionIntentContext.userInstructionText || userText,
-          signal: abortController.signal,
-        })
-        if (!pipelineResult.success) {
-          if (pipelineResult.finalText) {
-            emitOutput(pipelineResult.finalText, 'text')
-            session.messages.push({ role: 'assistant', content: pipelineResult.finalText })
-            emitOutput('', 'done')
-            emitStatus('done')
-            return buildRunResult(true)
-          }
-          throw new Error(pipelineResult.error || '文档信息卡 pipeline 失败')
-        }
-        if (pipelineResult.finalText) {
-          emitOutput(pipelineResult.finalText, 'text')
-          session.messages.push({ role: 'assistant', content: pipelineResult.finalText })
-        }
-        emitOutput('', 'done')
-        emitStatus('done')
-        return buildRunResult(true)
-      }
-
-      if (hasTools) {
-        await this.skillContextOrchestrator.maybeInjectExplicitSkillContext({
-          userText,
-          session,
-          sessionId,
-          emitOutput,
-          emitToolAction,
-          executeTool: async (tool, args) => executeToolCall(tool, args, preparedToolContext),
-        })
-      }
-
-      const preparedBrowserExecution = await this.browserDomainOrchestrator.prepareBrowserExecution({
-        hasTools,
-        browserControllerAvailable: Boolean(this.browserController),
-        browserAgentEnabled: this.isBrowserAgentV3Enabled(),
-        userText,
-        pureUserInput,
-        sessionMessages: session.messages,
+        agentName: name,
         sessionId,
-        refineDecision: async (decision) => this.browserDomainOrchestrator.refineUploadDecision({
-          decision,
+        session,
+        content,
+        requestEnvelope: executionOptions?.requestEnvelope,
+        intentClassification: executionOptions?.intentClassification,
+        budget: executionOptions?.budget,
+        budgetState: executionOptions?.budgetState,
+        taskBudgetRuntime: executionOptions?.taskBudgetRuntime || null,
+        abortSignal: abortController.signal,
+        ensureNotAborted,
+        emitters: {
+          emitOutput,
+          emitStatus,
+          emitRuntimeError,
+          emitToolAction,
+        },
+        host: this.buildTurnEngineHost({
+          name,
+          runId,
           sessionId,
-          userText,
-          explicitSkillRequested: this.skillContextOrchestrator.findExplicitlyRequestedSkills(userText).length > 0,
-          requestPromptDraft: async (planningPrompt) => {
-            const planningSession: DirectChatSession = {
-              ...session,
-              messages: [...session.messages, { role: 'user', content: planningPrompt }],
-              abortController: null,
-            }
-            return isKimiCoding
-              ? this.kimiCodingClient.requestSimple({
-                session: planningSession,
-                config,
-                baseUrl,
-                signal: abortController.signal,
-              }).then((result) => result.text)
-              : useAnthropicProtocol
-                ? this.anthropicExecutionClient.requestSimple({
-                  session: planningSession,
-                  config,
-                  baseUrl,
-                  signal: abortController.signal,
-                }).then((result) => result.text)
-                : this.openAIExecutionClient.requestSimple({
-                  session: planningSession,
-                  config,
-                  baseUrl,
-                  provider,
-                  signal: abortController.signal,
-                  isKimi,
-                  enableKimiWebSearch: false,
-                }).then((result) => result.text)
-          },
-          onRefineSkipped: (reason) => {
-            log(`browser prompt refiner skipped: ${reason}`)
+          requestModuleToolAction,
+          providerContext: {
+            config,
+            baseUrl,
+            provider,
+            isKimi,
+            isKimiCoding,
+            useAnthropicProtocol,
+            supportsToolCalls: capabilities?.supportsToolCalls ?? true,
+            supportsVideoBlock,
+            hasRawVideoInIncoming,
           },
         }),
       })
-      browserDecision = preparedBrowserExecution.browserDecision
-      const reconciledRunCapabilities = reconcileAfterBrowserDecision({
-        prepared: preparedRunCapabilities,
-        browserDecisionMode: browserDecision.mode,
-      })
-      toolPolicy = reconciledRunCapabilities.toolPolicy
-      log(`capabilityReconciled ${reconciledRunCapabilities.capabilityLogLine}`)
-      log(
-        `browserDecision mode=${browserDecision.mode} reason=${browserDecision.reason} ` +
-        `sessionId=${sessionId || 'none'} attachmentCount=${browserDecision.attachmentSelection?.count || 0} ` +
-        `incomingAttachmentCount=${incomingAttachmentHints.count || 0} ` +
-        `promptConfidence=${browserDecision.promptIntent?.confidence || 'none'} ` +
-        `targetUrl=${browserDecision.plan?.targetUrl || browserDecision.plan?.resources?.links?.[0]?.url || 'none'} ` +
-        `stepCount=${browserDecision.plan?.steps?.length || 0}`,
-      )
-      const taskTypeResolution = resolveTaskType({
-        intent: executionIntentContext.intentClassification,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: reconciledRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
-      })
-      const taskExecutionRoute = resolveTaskExecutionRoute({
-        taskId,
-        resolution: taskTypeResolution,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: reconciledRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId
-          ? {
-            continuationTaskId,
-            continuationProjection,
-          }
-          : null,
-      })
-      continuationBudgetRestore = taskExecutionRoute.continuation?.budgetRestore || null
-      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation?.budgetRuntime) {
-        taskBudgetRuntime = {
-          ...taskExecutionRoute.continuation.budgetRuntime,
-          budget: { ...taskExecutionRoute.continuation.budgetRuntime.budget },
-          usage: { ...taskExecutionRoute.continuation.budgetRuntime.usage },
-          stepBudget: taskExecutionRoute.continuation.budgetRuntime.stepBudget
-            ? { ...taskExecutionRoute.continuation.budgetRuntime.stepBudget }
-            : null,
-        }
-        effectiveRunBudget = { ...taskBudgetRuntime.budget }
-        Object.assign(runBudgetState, taskBudgetRuntime.usage)
-        stepBudgetState = taskBudgetRuntime.stepBudget
-          ? {
-            stepId: taskBudgetRuntime.stepBudget.stepId || null,
-            maxIterations: taskBudgetRuntime.stepBudget.maxIterations,
-            remainingIterations: taskBudgetRuntime.stepBudget.remainingIterations,
-          }
-          : null
-      }
-      adoptResolvedTaskTypeBudget(taskExecutionRoute.taskType)
-      const alignedRunBudget = effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
-      effectiveRunBudget = alignedRunBudget
-      degradationReason = taskExecutionRoute.degradationReason || null
-      const executorRuntimePolicy = buildExecutorRuntimePolicy(taskExecutionRoute.executor)
-      const executorAllowedToolNames = selectExecutorAllowedToolNames(
-        taskExecutionRoute.executor,
-        reconciledRunCapabilities.allowedToolNames,
-      )
-      const routedAllowedToolNames = executorAllowedToolNames || reconciledRunCapabilities.allowedToolNames
-      if (executorRuntimePolicy.toolPrefixes && !executorAllowedToolNames) {
-        degradationReason = degradationReason || `${taskExecutionRoute.executor}_tools_unavailable`
-      }
-      if (executorRuntimePolicy.instruction) {
-        session.messages.push({ role: 'user', content: executorRuntimePolicy.instruction })
-      }
-      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
-        interactionState = 'resuming'
-      }
-      stepBudgetState = taskExecutionRoute.continuation?.budgetRuntime?.stepBudget
-        ? {
-          stepId: taskExecutionRoute.continuation.budgetRuntime.stepBudget.stepId || null,
-          maxIterations: taskExecutionRoute.continuation.budgetRuntime.stepBudget.maxIterations,
-          remainingIterations: taskExecutionRoute.continuation.budgetRuntime.stepBudget.remainingIterations,
-        }
-        : continuationProjection?.budget?.stepBudget || (
-        taskExecutionRoute.steps.length > 0
-          ? createStepBudgetState({
-            stepId: taskExecutionRoute.steps[0]?.id || null,
-            totalIterations: alignedRunBudget.maxIterations,
-            stepCount: taskExecutionRoute.steps.length,
-            suggestedMaxIterations: taskExecutionRoute.steps[0]?.budget,
-          })
-          : createStepBudgetState({
-            stepId: null,
-            totalIterations: alignedRunBudget.maxIterations,
-            suggestedMaxIterations: alignedRunBudget.maxIterations,
-          })
-      )
-      let runtimeTaskSteps = taskExecutionRoute.steps
-      let runtimeCurrentStepId = taskExecutionRoute.steps[0]?.id || null
-      if (taskExecutionRoute.chain === 'planner') {
-        const initialPlannerProgress = initializeTaskStepProgress(taskExecutionRoute.steps)
-        runtimeTaskSteps = initialPlannerProgress.steps
-        runtimeCurrentStepId = initialPlannerProgress.currentStepId
-      }
-      const structuredModule =
-        taskTypeResolution.preferredExecutor && taskTypeResolution.preferredExecutor !== 'none'
-          ? taskTypeResolution.preferredExecutor
-          : 'system'
-      const emitRuntimeTaskPayload = (options: {
-        summary: string
-        waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
-        resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
-        blockedReason?: string | null
-      }) => {
-        emitStructuredTaskPayload({
-          module: structuredModule,
-          message: options.summary,
-          taskTitle: executionIntentContext.userInstructionText || '任务执行',
-          taskSummary: options.summary,
-          steps: runtimeTaskSteps.map((step) => ({
-            id: step.id,
-            title: step.title || step.description,
-            status: step.status || 'pending',
-            detail: step.detail || null,
-            updatedAt: step.updatedAt || new Date().toISOString(),
-          })),
-          currentStepId: runtimeCurrentStepId,
-          waitingFor: options.waitingFor || 'none',
-          resumableActions: options.resumableActions || ['cancel'],
-          blockedReason: options.blockedReason || null,
-        })
-      }
-      const advancePlannerStep = (summary: string): boolean => {
-        if (taskExecutionRoute.chain !== 'planner') return false
-        const next = advanceTaskStepProgress({
-          steps: runtimeTaskSteps,
-          currentStepId: runtimeCurrentStepId,
-          totalIterations: alignedRunBudget.maxIterations,
-          summary,
-        })
-        runtimeTaskSteps = next.steps
-        runtimeCurrentStepId = next.currentStepId
-        stepBudgetState = next.stepBudget
-          ? {
-            stepId: next.stepBudget.stepId || null,
-            maxIterations: next.stepBudget.maxIterations,
-            remainingIterations: next.stepBudget.remainingIterations,
-          }
-          : null
-        emitRuntimeTaskPayload({ summary })
-        return next.advanced
-      }
-      const syncInteractionStateFromAssistantText = (text: string): boolean => {
-        const detected = detectGenericInteractionState(text)
-        if (!detected) return false
-        interactionState = detected.interactionState
-        emitRuntimeTaskPayload({
-          summary: text,
-          waitingFor: detected.waitingFor,
-          resumableActions: detected.resumableActions,
-          blockedReason: detected.blockedReason,
-        })
-        return true
-      }
-      syncBudgetWarning()
-      log(
-        `taskType=${resolvedTaskType}, executionChain=${taskExecutionRoute.chain}, ` +
-        `preferredExecutor=${taskTypeResolution.preferredExecutor || 'none'}, ` +
-        `degradationReason=${degradationReason || 'none'}`,
-      )
-      if (taskExecutionRoute.chain === 'planner' && taskExecutionRoute.steps.length > 0) {
-        emitRuntimeTaskPayload({ summary: '已拆分任务步骤，开始逐步执行' })
-        session.messages.push({
-          role: 'user',
-          content: [
-            '系统规划步骤：',
-            ...runtimeTaskSteps.map((step, index) =>
-              `${index + 1}. ${step.title || step.description}（预算 ${step.budget || 0} 轮）`
-            ),
-            '请严格按以上步骤推进，并在接近预算上限时主动收敛总结。',
-          ].join('\n'),
-        })
-      }
-      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
-        session.messages.push({
-          role: 'user',
-          content: [
-            `Task ID: ${taskExecutionRoute.continuation.taskId}`,
-            taskExecutionRoute.continuation.continuationRef?.executionId
-              ? `Execution ID: ${taskExecutionRoute.continuation.continuationRef.executionId}`
-              : null,
-            taskExecutionRoute.continuation.continuationRef?.stepId
-              ? `Step ID: ${taskExecutionRoute.continuation.continuationRef.stepId}`
-              : null,
-            continuationProjection?.blockedReason
-              ? `继续前上下文：${continuationProjection.blockedReason}`
-              : null,
-          ].filter(Boolean).join('\n'),
-        })
-      }
-
-      const allowBrowserDispatch =
-        taskExecutionRoute.executor === 'browser'
-        || taskExecutionRoute.executor === 'tool_loop'
-        || taskExecutionRoute.executor === 'planner'
-      const browserExecutionDispatch = allowBrowserDispatch
-        ? this.browserDomainOrchestrator.resolveExecutionDispatch({
-          hasTools,
-          browserControllerAvailable: Boolean(this.browserController),
-          browserDecision,
-          browserContinuityInstruction: preparedBrowserExecution.browserContinuityInstruction,
-          clarifyText: preparedBrowserExecution.clarifyText,
-          canUseDeterministicBrowserRunner: preparedBrowserExecution.canUseDeterministicBrowserRunner,
-          shouldInspectAmbiguousModeEntry: preparedBrowserExecution.shouldInspectAmbiguousModeEntry,
-        })
-        : {
-          kind: 'none',
-          continuityInstruction: null,
-          responseText: null,
-          toolLoopMessage: null,
-          fallbackLog: null,
-        }
-
-      if (browserExecutionDispatch.continuityInstruction) {
-        session.messages.push({ role: 'user', content: browserExecutionDispatch.continuityInstruction })
-        log('Injected browser continuity instruction')
-      }
-
-      if (browserExecutionDispatch.kind === 'clarify' && browserExecutionDispatch.responseText) {
-        interactionState = 'awaiting_clarification'
-        emitOutput(browserExecutionDispatch.responseText, 'text')
-        session.messages.push({ role: 'assistant', content: browserExecutionDispatch.responseText })
-        emitOutput('', 'done')
-        emitStatus('done')
-        return buildRunResult(true)
-      }
-
-      if (browserExecutionDispatch.fallbackLog) {
-        log(browserExecutionDispatch.fallbackLog)
-      }
-
-      if (browserExecutionDispatch.kind === 'deterministic' && this.browserController) {
-        log(`browserDecision mode=${browserDecision.mode} handled by deterministic runner`)
-        const browserResult = await this.browserDomainOrchestrator.runDeterministicExecution({
-          browserController: this.browserController,
-          abortSignal: abortController.signal,
-          sessionId,
-          decision: browserDecision,
-          userText,
-          emitToolEvent: (type, text) => {
-            emitOutput(text, type)
-          },
-        })
-        if (browserResult.handled) {
-          if (browserResult.state === 'partial' && /(人工|手动|验证码|接管)/.test(browserResult.message)) {
-            interactionState = 'human_takeover'
-          }
-          emitOutput(browserResult.message, 'text')
-          session.messages.push({ role: 'assistant', content: browserResult.message })
-          emitOutput('', 'done')
-          emitStatus(browserResult.state === 'cancelled' ? 'cancelled' : browserResult.state === 'failed' ? 'error' : 'done')
-          return buildRunResult(true)
-        }
-      }
-
-      if (browserExecutionDispatch.kind === 'tool_loop' && browserExecutionDispatch.toolLoopMessage) {
-        session.messages.push({ role: 'user', content: browserExecutionDispatch.toolLoopMessage })
-        log(`Injected structured browser plan with ${browserDecision.plan?.steps?.length || 0} steps`)
-      }
-
-      const hostToolContext = buildToolRuntimeContext({
-        browserController: this.browserController,
-        sidecarManager: this.sidecarManager,
-        runtime: this.runtime,
-        allowedToolNames: routedAllowedToolNames,
-        emitToolAction: (tool, args) => {
-          emitToolAction(tool, args)
-        },
-        requestModuleToolAction,
-        abortSignal: abortController.signal,
-        sessionId,
-        registerRunCleanup: (cleanup) => {
-          this.runCleanupRegistry?.registerRunCleanup(runId, cleanup)
-        },
-      })
-
-      const hostShortcutResult = await this.hostCapabilityDispatcher.dispatch({
-        decision: reconciledRunCapabilities.hostShortcutDecision,
-        toolContext: hostToolContext,
-        agentName: name,
-        userText,
-        session,
-        config,
-        baseUrl,
-        provider,
-        signal: abortController.signal,
-        isKimi,
-        isKimiCoding,
-        useAnthropicProtocol,
-        onAssistantSummary: (summary) => {
-          session.messages.push({ role: 'assistant', content: summary })
-        },
-      })
-
-      if (hostShortcutResult.handled) {
-        if (hostShortcutResult.toolUseText) {
-          emitOutput(hostShortcutResult.toolUseText, 'tool_use')
-        }
-        if (hostShortcutResult.outputText) {
-          emitOutput(hostShortcutResult.outputText.slice(0, 300), 'tool_result')
-          emitOutput(hostShortcutResult.outputText, 'text')
-          session.messages.push({ role: 'assistant', content: hostShortcutResult.outputText })
-        }
-        emitOutput('', 'done')
-        emitStatus('done')
-        return buildRunResult(true)
-      }
-
-      if (!resolvedTaskType) {
-        resolvedTaskType = hasTools ? 'short_task' : 'direct_answer'
-      }
-      if (!effectiveRunBudget) {
-        effectiveRunBudget = createRunBudgetSeed(resolvedTaskType)
-      }
-      const shouldUseToolLoop = Boolean(hasTools && taskExecutionRoute.chain !== 'direct')
-
-      if (!shouldUseToolLoop) {
-        // No tool calling — original simple path
-        let simpleResponse: { text: string; fallback?: ExecutionFallbackInfo }
-        const hasMediaInputs = this.sessionHasMediaInputs(session.messages)
-        if (isKimiCoding) {
-          simpleResponse = await this.kimiCodingClient.requestSimple({
-            session,
-            config,
-            baseUrl,
-            signal: abortController.signal,
-            hasVideoInputs,
-            buildVideoFrameFallbackMessages: hasVideoInputs
-              ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(session.messages)
-              : undefined,
-            assignFallbackMessages: (fallbackMessages) => {
-              session.messages = fallbackMessages as ChatMessage[]
-            },
-            fallbackToAnthropic: ({ messagesOverride }) => this.anthropicExecutionClient.requestSimple({
-              session,
-              config,
-              baseUrl,
-              signal: abortController.signal,
-              messagesOverride: messagesOverride as ChatMessage[] | undefined,
-            }),
-          })
-        } else if (useAnthropicProtocol) {
-          simpleResponse = await this.anthropicExecutionClient.requestSimple({
-            session,
-            config,
-            baseUrl,
-            signal: abortController.signal,
-            hasVideoInputs,
-            buildVideoFrameFallbackMessages: hasVideoInputs
-              ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(session.messages)
-              : undefined,
-            onFallbackApplied: (fallbackMessages) => {
-              session.messages = fallbackMessages
-            },
-          })
-        } else {
-          simpleResponse = await this.openAIExecutionClient.requestSimple({
-            session,
-            config,
-            baseUrl,
-            provider,
-            signal: abortController.signal,
-            isKimi,
-            enableKimiWebSearch: !hasMediaInputs,
-          })
-        }
-
-        if (simpleResponse.fallback) {
-          latestFallback = simpleResponse.fallback
-        }
-        const text = simpleResponse.text
-        if (text) {
-          syncInteractionStateFromAssistantText(text)
-          if (taskExecutionRoute.chain === 'planner' && detectTaskStepCompletionCue(text, runtimeTaskSteps.find((step) => step.id === runtimeCurrentStepId))) {
-            advancePlannerStep(text)
-          }
-          emitOutput(text, 'text')
-          session.messages.push({ role: 'assistant', content: text })
-        }
-      } else {
-        // Tool calling loop
-        const envRaw = process.env.READY_MAX_TOOL_ITERATIONS
-        const envValue = Number(envRaw)
-        const configuredMaxToolIterations = Number.isFinite(envValue) && envValue > 0
-          ? Math.min(80, Math.max(8, Math.round(envValue)))
-          : this.maxToolIterations
-        let documentToolLoopState = this.documentToolLoopOrchestrator.createState()
-        let designToolLoopState = this.designToolLoopOrchestrator.createState()
-        const hintedRuntimeBase = syncTaskBudgetRuntime() || createTaskBudgetRuntime(resolvedTaskType || 'short_task', {
-          budget: effectiveRunBudget || createRunBudgetSeed(),
-          usage: runBudgetState,
-          stepBudget: stepBudgetState
-            ? {
-              stepId: stepBudgetState.stepId || null,
-              maxIterations: Number(stepBudgetState.maxIterations || 0),
-              remainingIterations: Number(stepBudgetState.remainingIterations || 0),
-            }
-            : null,
-        })
-        taskBudgetRuntime = applyRunBudgetHint(
-          hintedRuntimeBase,
-          this.browserDomainOrchestrator.getBudgetHint({
-            userText,
-            decision: browserDecision,
-            baseMaxToolIterations: configuredMaxToolIterations,
-          }),
-        ) as TaskBudgetRuntime
-        taskBudgetRuntime = applyRunBudgetHint(
-          taskBudgetRuntime,
-          this.documentToolLoopOrchestrator.getBudgetHint({
-            forceDocumentTool: toolPolicy.forceDocumentTool,
-            state: documentToolLoopState,
-          }),
-        ) as TaskBudgetRuntime
-        taskBudgetRuntime = applyRunBudgetHint(
-          taskBudgetRuntime,
-          this.designToolLoopOrchestrator.getBudgetHint({
-            forceDesignTool: toolPolicy.forceDesignTool,
-            primaryArtifactProduced: designToolLoopState.primaryArtifactProduced,
-          }),
-        ) as TaskBudgetRuntime
-        effectiveRunBudget = taskBudgetRuntime.budget
-        stepBudgetState = taskBudgetRuntime.stepBudget
-          ? {
-            stepId: taskBudgetRuntime.stepBudget.stepId || null,
-            maxIterations: taskBudgetRuntime.stepBudget.maxIterations,
-            remainingIterations: taskBudgetRuntime.stepBudget.remainingIterations,
-          }
-          : null
-        budgetWarningLevel = taskBudgetRuntime.warningLevel
-        const baseMaxToolIterations = effectiveRunBudget.maxIterations > 0
-          ? effectiveRunBudget.maxIterations
-          : configuredMaxToolIterations
-        const recommendedMaxToolIterations = this.browserDomainOrchestrator.getRecommendedToolLoopIterations(
-          userText,
-          browserDecision,
-          baseMaxToolIterations,
-        )
-        const effectiveMaxToolIterations = effectiveRunBudget.maxIterations > 0
-          ? Math.min(recommendedMaxToolIterations, effectiveRunBudget.maxIterations)
-          : recommendedMaxToolIterations
-        let iterations = 0
-        let finishedBeforeLimit = false
-        let textToolBridgeNudges = 0
-        let budgetLimitedBeforeCompletion = false
-        let toolLoopTimeoutOverrideMs: number | undefined
-        let convergencePromptInjected = false
-
-        // Inject tool guidance into system prompt based on intent
-        const toolGuidance = buildToolGuidance(toolPolicy)
-        const toolLoopSession = toolGuidance
-          ? {
-            ...session,
-            systemPrompt: `${session.systemPrompt}\n\n${toolGuidance}`,
-          }
-          : session
-        if (toolGuidance) {
-          log(`Prepared per-run tool guidance chars=${toolGuidance.length}, systemPromptChars=${toolLoopSession.systemPrompt.length}`)
-        }
-
-        // 浏览器步骤追踪
-        let browserToolLoopState = this.browserDomainOrchestrator.createToolLoopState(browserDecision)
-
-        while (iterations < effectiveMaxToolIterations) {
-          ensureNotAborted()
-          if (syncTaskBudgetRuntime()?.frozen) {
-            interactionState = 'suspended'
-            break
-          }
-          if (taskExecutionRoute.chain === 'planner' && (stepBudgetState?.remainingIterations || 0) <= 0) {
-            const advanced = advancePlannerStep('当前步骤预算已耗尽，已切换到下一步继续推进。')
-            if (advanced) {
-              syncBudgetWarning()
-              continue
-            }
-          }
-          if (budgetWarningLevel === 'exhausted' || (stepBudgetState?.remainingIterations || 0) <= 0) {
-            budgetLimitedBeforeCompletion = true
-            break
-          }
-          if (budgetWarningLevel === 'converge' && !convergencePromptInjected) {
-            session.messages.push({
-              role: 'user',
-              content: '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。',
-            })
-            convergencePromptInjected = true
-          }
-          iterations++
-          if (runBudgetState) {
-            Object.assign(runBudgetState, consumeIterationBudget(runBudgetState))
-          }
-          if (stepBudgetState) {
-            stepBudgetState = {
-              ...stepBudgetState,
-              remainingIterations: Math.max(0, Number(stepBudgetState.remainingIterations || 0) - 1),
-            }
-          }
-          syncBudgetWarning()
-          log(`Tool loop iteration ${iterations}`)
-
-          // Get scope from runtime if available
-          let scope: ConversationScope | undefined
-          if (sessionId && this.runtime) {
-            try {
-              const result = this.runtime.getConversationScope(sessionId)
-              scope = result || undefined
-            } catch {
-              scope = undefined
-            }
-          }
-
-          const toolContext = buildToolRuntimeContext({
-            browserController: this.browserController,
-            sidecarManager: this.sidecarManager,
-            runtime: this.runtime,
-            scope,
-            allowedToolNames: routedAllowedToolNames,
-            emitToolAction: (tool, args) => {
-              emitToolAction(tool, args)
-            },
-            requestModuleToolAction,
-            abortSignal: abortController.signal,
-            sessionId,
-            registerRunCleanup: (cleanup) => {
-              this.runCleanupRegistry?.registerRunCleanup(runId, cleanup)
-            },
-          })
-
-          let response: APIResponse
-          ensureNotAborted()
-          response = await this.executionLoopOrchestrator.requestToolLoopResponse({
-            useAnthropicProtocol,
-            hasVideoInputs,
-            session,
-            config,
-            baseUrl,
-            provider,
-            signal: abortController.signal,
-            policy: toolPolicy,
-            callAnthropicWithTools: () => this.anthropicExecutionClient.requestWithTools({
-              session: toolLoopSession,
-              config,
-              baseUrl,
-              signal: abortController.signal,
-              policy: toolPolicy,
-              timeoutMs: toolLoopTimeoutOverrideMs,
-            }),
-            callOpenAIWithTools: () => this.openAIExecutionClient.requestWithTools({
-              session: toolLoopSession,
-              config,
-              baseUrl,
-              provider: provider!,
-              signal: abortController.signal,
-              policy: toolPolicy,
-              timeoutMs: toolLoopTimeoutOverrideMs,
-            }),
-            compressContext: () => this.compressSessionMessagesForRetry(session),
-            onBeforeRetry: (result, attempt) => {
-              if (result.kind === 'timeout_model') {
-                toolLoopTimeoutOverrideMs = Math.max(toolLoopTimeoutOverrideMs || 0, 120_000)
-              }
-              log(`tool loop recovery scheduled kind=${result.kind} attempt=${attempt}`)
-            },
-            buildVideoFrameFallbackMessages: () => this.videoFallbackService.buildVideoFrameFallbackMessages(session.messages),
-            assignFallbackMessages: (messages) => {
-              session.messages = messages as ChatMessage[]
-            },
-          })
-          if (response.fallback) {
-            latestFallback = response.fallback
-          }
-          appendRecoveryHistory(Array.isArray(response.recoveryHistory) ? response.recoveryHistory : null)
-
-          // No tool calls — done
-          if (response.toolCalls.length === 0) {
-            if (response.toolTransport === 'text' && response.rawText) {
-              session.messages.push({ role: 'assistant', content: response.rawText })
-              if (looksLikeMissingNativeToolsReply(response.text || response.rawText) && textToolBridgeNudges < 2) {
-                textToolBridgeNudges += 1
-                session.messages.push({
-                  role: 'user',
-                  content: buildTextToolBridgeCorrectionMessage(toolPolicy),
-                })
-                log(`Text tool bridge correction injected, nudge=${textToolBridgeNudges}`)
-                continue
-              }
-            }
-            const documentNoToolDecision = this.documentToolLoopOrchestrator.handleNoToolCall({
-              state: documentToolLoopState,
-              forceDocumentTool: toolPolicy.forceDocumentTool,
-              responseText: response.text,
-              toolTransport: response.toolTransport,
-            })
-            documentToolLoopState = documentNoToolDecision.state
-            const plannerStepCompleted = response.text
-              ? detectTaskStepCompletionCue(response.text, runtimeTaskSteps.find((step) => step.id === runtimeCurrentStepId))
-              : false
-            if (documentNoToolDecision.nextUserMessage) {
-              emitStructuredTaskPayload(this.documentToolLoopOrchestrator.buildStructuredTaskPayload({
-                taskTitle: toolPolicy.documentWidgetTaskKind
-                  ? '文档组件操作'
-                  : toolPolicy.preferFormatOnly
-                    ? '文档格式优化'
-                    : toolPolicy.preferSectionRewrite
-                      ? '章节改写'
-                      : '文档修改',
-                taskSummary: documentNoToolDecision.nextUserMessage,
-                state: documentToolLoopState,
-                phase: 'blocked',
-              }))
-              if (documentNoToolDecision.preserveAssistantText && response.text && response.toolTransport !== 'text') {
-                session.messages.push({ role: 'assistant', content: response.text })
-              }
-              session.messages.push({
-                role: 'user',
-                content: documentNoToolDecision.nextUserMessage,
-              })
-              continue
-            }
-            if (documentNoToolDecision.finalText) {
-              emitStructuredTaskPayload(this.documentToolLoopOrchestrator.buildStructuredTaskPayload({
-                taskTitle: toolPolicy.documentWidgetTaskKind
-                  ? '文档组件操作'
-                  : toolPolicy.preferFormatOnly
-                    ? '文档格式优化'
-                    : toolPolicy.preferSectionRewrite
-                      ? '章节改写'
-                      : '文档修改',
-                taskSummary: documentNoToolDecision.finalText,
-                state: documentToolLoopState,
-                phase: 'done',
-              }))
-              emitOutput(documentNoToolDecision.finalText, 'text')
-              session.messages.push({ role: 'assistant', content: documentNoToolDecision.finalText })
-              advancePlannerStep(documentNoToolDecision.finalText)
-              finishedBeforeLimit = true
-              break
-            }
-            // REMOVED: forceDesignTool nudge mechanism
-            // If LLM decides not to use tools, respect that decision
-            if (response.text) {
-              const genericInteractionDetected = syncInteractionStateFromAssistantText(response.text)
-              emitOutput(response.text, 'text')
-              if (plannerStepCompleted) {
-                const advanced = advancePlannerStep(response.text)
-                if (advanced) {
-                  session.messages.push({
-                    role: 'user',
-                    content: `系统提醒：已进入下一步 ${runtimeCurrentStepId || ''}，请继续执行。`,
-                  })
-                  continue
-                }
-              }
-              if (genericInteractionDetected) {
-                session.messages.push({ role: 'assistant', content: response.text })
-                finishedBeforeLimit = true
-                break
-              }
-            }
-            if (response.text && response.toolTransport !== 'text') {
-              session.messages.push({ role: 'assistant', content: response.text })
-            }
-            finishedBeforeLimit = true
-            break
-          }
-
-          const designToolFilter = this.designToolLoopOrchestrator.filterToolCalls({
-            toolCalls: response.toolCalls,
-            policy: toolPolicy,
-            primaryArtifactProduced: designToolLoopState.primaryArtifactProduced,
-          })
-          if (designToolFilter.droppedCount > 0) {
-            log(`Single-artifact design guard dropped ${designToolFilter.droppedCount} extra design tool call(s)`)
-          }
-          if (designToolFilter.nextUserMessage) {
-            emitStructuredTaskPayload(this.designToolLoopOrchestrator.buildStructuredTaskPayload({
-              taskTitle: '设计任务',
-              taskSummary: designToolFilter.nextUserMessage,
-              state: designToolLoopState,
-              phase: 'blocked',
-            }))
-            session.messages.push({
-              role: 'user',
-              content: designToolFilter.nextUserMessage,
-            })
-            log('Dropped repeated primary design artifact call after artifact already existed')
-            continue
-          }
-
-          const toolCallsForIteration = designToolFilter.toolCalls
-            .map((toolCall) => this.designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
-          if (runBudgetState) {
-            const remainingToolCallBudget = getRemainingToolCallBudget(effectiveRunBudget, runBudgetState)
-            if (remainingToolCallBudget < toolCallsForIteration.length) {
-              log(`Tool loop hit tool-call budget (${runBudgetState.toolCallsUsed}/${effectiveRunBudget.maxToolCalls})`)
-              budgetLimitedBeforeCompletion = true
-              break
-            }
-          }
-
-          // Execute tool calls
-          let executedDocActionCount = 0
-          let executedMutatingDocActionCount = 0
-          let executedInspectionDocActionCount = 0
-          let executedSaveDocActionCount = 0
-          let executedBrowserToolsThisIteration = 0
-          let executedPrimaryDesignToolThisIteration = false
-          const documentToolResultsThisIteration: string[] = []
-          if (useAnthropicProtocol) {
-            // For Anthropic: assistant message contains both text + tool_use blocks
-            const assistantContent: Array<Record<string, unknown>> = []
-            if (response.text) {
-              emitOutput(response.text, 'text')
-              assistantContent.push({ type: 'text', text: response.text })
-            }
-            for (const tc of toolCallsForIteration) {
-              assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input })
-            }
-            session.messages.push({ role: 'assistant', content: assistantContent })
-
-            // Execute each tool and collect results
-            const toolResults: Array<Record<string, unknown>> = []
-            const executedToolBatch = await this.executionLoopOrchestrator.executeToolCalls({
-              toolCalls: toolCallsForIteration,
-              budget: effectiveRunBudget,
-              budgetState: runBudgetState,
-              signal: abortController.signal,
-              onGroupStart: (group) => {
-                if (runBudgetState && group.mode === 'parallel') {
-                  Object.assign(runBudgetState, consumeParallelGroupBudget(runBudgetState))
-                }
-              },
-              executeTool: async (toolCall) => {
-                ensureNotAborted()
-                emitOutput(`${toolCall.name}(${JSON.stringify(toolCall.input).slice(0, 100)})`, 'tool_use')
-                const result = await executeToolCall(toolCall.name, toolCall.input, toolContext)
-                ensureNotAborted()
-                log(`tool execute: ${toolCall.name}, result=${result.slice(0, 140)}`)
-                return result
-              },
-            })
-            const executedToolResults = executedToolBatch.results
-            appendRecoveryHistory(executedToolBatch.recoveryHistory)
-            if (runBudgetState) {
-              Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
-              if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
-                budgetLimitedBeforeCompletion = true
-              }
-            } else if (executedToolBatch.budgetLimited) {
-              budgetLimitedBeforeCompletion = true
-            }
-            for (const executedTool of executedToolResults) {
-              const result = executedTool.result
-              const toolName = executedTool.name
-              const documentToolInspection = inspectDocumentToolCall(toolName, result)
-              if (documentToolInspection.isDocumentTool) {
-                documentToolResultsThisIteration.push(result)
-                executedDocActionCount += documentToolInspection.executedDocActionCount
-                executedMutatingDocActionCount += documentToolInspection.executedMutatingDocActionCount
-                executedInspectionDocActionCount += documentToolInspection.executedInspectionDocActionCount
-                executedSaveDocActionCount += documentToolInspection.executedSaveDocActionCount
-                documentToolLoopState = this.documentToolLoopOrchestrator.applyToolInspection(
-                  documentToolLoopState,
-                  documentToolInspection,
-                )
-              }
-              if (toolName.startsWith('browser_')) {
-                executedBrowserToolsThisIteration += 1
-              }
-              const designResult = this.designToolLoopOrchestrator.recordToolResult({
-                state: designToolLoopState,
-                toolName,
-                rawResult: result,
-                policy: toolPolicy,
-              })
-              syncInteractionStateFromToolResult(toolName, result)
-              if (designResult.isPrimaryArtifact) {
-                executedPrimaryDesignToolThisIteration = true
-                designToolLoopState = designResult.state
-              }
-              emitOutput(result.slice(0, 200), 'tool_result')
-              toolResults.push({ type: 'tool_result', tool_use_id: executedTool.id, content: result })
-            }
-            if (toolCallsForIteration.length > 0 && toolCallsForIteration.every((toolCall) => {
-              const tag = getToolResourceTag(toolCall.name)
-              return tag.accessMode === 'read'
-            })) {
-              if (stepBudgetState) {
-                stepBudgetState = refundIterationBudget({
-                  taskType: resolvedTaskType || 'short_task',
-                  budget: effectiveRunBudget,
-                  usage: runBudgetState,
-                  stepBudget: {
-                    stepId: stepBudgetState.stepId || null,
-                    maxIterations: Number(stepBudgetState.maxIterations || 0),
-                    remainingIterations: Number(stepBudgetState.remainingIterations || 0),
-                  },
-                  warningLevel: budgetWarningLevel,
-                  frozen: false,
-                  bootstrapBudget: false,
-                }).stepBudget
-              }
-              runBudgetState.iterationsUsed = Math.max(0, runBudgetState.iterationsUsed - 1)
-              syncBudgetWarning()
-            }
-            session.messages.push({ role: 'user', content: toolResults })
-          } else {
-            if (response.toolTransport === 'text') {
-              const historyText = response.rawText || response.text
-              if (historyText) {
-                session.messages.push({ role: 'assistant', content: historyText })
-              }
-              if (response.text) {
-                emitOutput(response.text, 'text')
-              }
-
-              const textBridgeResults: Array<{ id: string; name: string; result: string }> = []
-              const executedToolBatch = await this.executionLoopOrchestrator.executeToolCalls({
-                toolCalls: toolCallsForIteration,
-                budget: effectiveRunBudget,
-                budgetState: runBudgetState,
-                signal: abortController.signal,
-                onGroupStart: (group) => {
-                  if (runBudgetState && group.mode === 'parallel') {
-                    Object.assign(runBudgetState, consumeParallelGroupBudget(runBudgetState))
-                  }
-                },
-                executeTool: async (toolCall) => {
-                  ensureNotAborted()
-                  emitOutput(`${toolCall.name}(${JSON.stringify(toolCall.input).slice(0, 100)})`, 'tool_use')
-                  const result = await executeToolCall(toolCall.name, toolCall.input, toolContext)
-                  ensureNotAborted()
-                  log(`tool execute: ${toolCall.name}, result=${result.slice(0, 140)}`)
-                  return result
-                },
-              })
-              const executedToolResults = executedToolBatch.results
-              appendRecoveryHistory(executedToolBatch.recoveryHistory)
-            if (runBudgetState) {
-              Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
-                if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
-                  budgetLimitedBeforeCompletion = true
-                }
-              } else if (executedToolBatch.budgetLimited) {
-                budgetLimitedBeforeCompletion = true
-              }
-              for (const executedTool of executedToolResults) {
-                const result = executedTool.result
-                const toolName = executedTool.name
-                const documentToolInspection = inspectDocumentToolCall(toolName, result)
-                if (documentToolInspection.isDocumentTool) {
-                  documentToolResultsThisIteration.push(result)
-                  executedDocActionCount += documentToolInspection.executedDocActionCount
-                  executedMutatingDocActionCount += documentToolInspection.executedMutatingDocActionCount
-                  executedInspectionDocActionCount += documentToolInspection.executedInspectionDocActionCount
-                  executedSaveDocActionCount += documentToolInspection.executedSaveDocActionCount
-                  documentToolLoopState = this.documentToolLoopOrchestrator.applyToolInspection(
-                    documentToolLoopState,
-                    documentToolInspection,
-                  )
-                }
-                if (toolName.startsWith('browser_')) {
-                  executedBrowserToolsThisIteration += 1
-                }
-                const designResult = this.designToolLoopOrchestrator.recordToolResult({
-                  state: designToolLoopState,
-                  toolName,
-                  rawResult: result,
-                  policy: toolPolicy,
-                })
-                syncInteractionStateFromToolResult(toolName, result)
-                if (designResult.isPrimaryArtifact) {
-                  executedPrimaryDesignToolThisIteration = true
-                  designToolLoopState = designResult.state
-                }
-                emitOutput(result.slice(0, 200), 'tool_result')
-                textBridgeResults.push({ id: executedTool.id, name: toolName, result })
-              }
-              if (textBridgeResults.length > 0) {
-                session.messages.push({ role: 'user', content: buildTextToolResultMessage(textBridgeResults) })
-              }
-              syncBudgetWarning()
-            } else {
-              // For OpenAI: assistant message with tool_calls, then separate tool messages
-              const assistantMsg: Record<string, unknown> = {
-                role: 'assistant',
-                content: response.text || null,
-                  tool_calls: toolCallsForIteration.map(tc => ({
-                  id: tc.id,
-                  type: 'function',
-                  function: { name: tc.name, arguments: JSON.stringify(tc.input) }
-                }))
-              }
-              if (response.providerResponseId) {
-                assistantMsg.response_id = response.providerResponseId
-              }
-              if (response.reasoningContent !== undefined || isKimiCoding) {
-                assistantMsg.reasoning_content = response.reasoningContent ?? ''
-              }
-              session.messages.push(assistantMsg as unknown as ChatMessage)
-              if (response.text) {
-                emitOutput(response.text, 'text')
-              }
-
-              const executedToolBatch = await this.executionLoopOrchestrator.executeToolCalls({
-                toolCalls: toolCallsForIteration,
-                budget: effectiveRunBudget,
-                budgetState: runBudgetState,
-                signal: abortController.signal,
-                onGroupStart: (group) => {
-                  if (runBudgetState && group.mode === 'parallel') {
-                    Object.assign(runBudgetState, consumeParallelGroupBudget(runBudgetState))
-                  }
-                },
-                executeTool: async (toolCall) => {
-                  ensureNotAborted()
-                  emitOutput(`${toolCall.name}(${JSON.stringify(toolCall.input).slice(0, 100)})`, 'tool_use')
-                  const result = await executeToolCall(toolCall.name, toolCall.input, toolContext)
-                  ensureNotAborted()
-                  log(`tool execute: ${toolCall.name}, result=${result.slice(0, 140)}`)
-                  return result
-                },
-              })
-              const executedToolResults = executedToolBatch.results
-              appendRecoveryHistory(executedToolBatch.recoveryHistory)
-              if (runBudgetState) {
-                Object.assign(runBudgetState, consumeToolCallBudget(runBudgetState, executedToolResults.length))
-                if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(effectiveRunBudget, runBudgetState) <= 0) {
-                  budgetLimitedBeforeCompletion = true
-                }
-              } else if (executedToolBatch.budgetLimited) {
-                budgetLimitedBeforeCompletion = true
-              }
-              syncBudgetWarning()
-              for (const executedTool of executedToolResults) {
-                const result = executedTool.result
-                const toolName = executedTool.name
-                const documentToolInspection = inspectDocumentToolCall(toolName, result)
-                if (documentToolInspection.isDocumentTool) {
-                  documentToolResultsThisIteration.push(result)
-                  executedDocActionCount += documentToolInspection.executedDocActionCount
-                  executedMutatingDocActionCount += documentToolInspection.executedMutatingDocActionCount
-                  executedInspectionDocActionCount += documentToolInspection.executedInspectionDocActionCount
-                  executedSaveDocActionCount += documentToolInspection.executedSaveDocActionCount
-                  documentToolLoopState = this.documentToolLoopOrchestrator.applyToolInspection(
-                    documentToolLoopState,
-                    documentToolInspection,
-                  )
-                }
-                if (toolName.startsWith('browser_')) {
-                  executedBrowserToolsThisIteration += 1
-                }
-                const designResult = this.designToolLoopOrchestrator.recordToolResult({
-                  state: designToolLoopState,
-                  toolName,
-                  rawResult: result,
-                  policy: toolPolicy,
-                })
-                syncInteractionStateFromToolResult(toolName, result)
-                if (designResult.isPrimaryArtifact) {
-                  executedPrimaryDesignToolThisIteration = true
-                  designToolLoopState = designResult.state
-                }
-                emitOutput(result.slice(0, 200), 'tool_result')
-                session.messages.push({ role: 'tool' as 'system', content: result, ...({ tool_call_id: executedTool.id } as Record<string, unknown>) } as ChatMessage)
-              }
-            }
-          }
-
-          // 浏览器步骤追踪：检测 AI 声明完成当前步骤，并注入检查点提醒
-          if (browserToolLoopState.isBrowserTask && executedBrowserToolsThisIteration > 0) {
-            const progress = this.browserDomainOrchestrator.recordToolLoopProgress({
-              state: browserToolLoopState,
-              responseText: response.text,
-              executedBrowserToolsThisIteration,
-            })
-            browserToolLoopState = progress.state
-            if (progress.advancedStepIndex !== null) {
-              log(`Browser step advanced to ${progress.advancedStepIndex}/${browserToolLoopState.steps.length}`)
-            }
-            if (progress.checkpointMessage) {
-              session.messages.push({ role: 'user', content: progress.checkpointMessage })
-              log(`Injected browser checkpoint at step ${browserToolLoopState.stepIndex + 1}/${browserToolLoopState.steps.length}`)
-            }
-          }
-          if (response.text) {
-            const plannerStepCompleted = detectTaskStepCompletionCue(
-              response.text,
-              runtimeTaskSteps.find((step) => step.id === runtimeCurrentStepId),
-            )
-            if (plannerStepCompleted) {
-              const advanced = advancePlannerStep(response.text)
-              if (advanced) {
-                session.messages.push({
-                  role: 'user',
-                  content: `系统提醒：已进入下一步 ${runtimeCurrentStepId || ''}，请继续执行。`,
-                })
-                continue
-              }
-            }
-            if (syncInteractionStateFromAssistantText(response.text)) {
-              session.messages.push({ role: 'assistant', content: response.text })
-              finishedBeforeLimit = true
-              break
-            }
-          }
-
-          const documentIterationDecision = this.documentToolLoopOrchestrator.handleIterationResult({
-            state: documentToolLoopState,
-            forceDocumentTool: toolPolicy.forceDocumentTool,
-            documentWidgetTaskKind: toolPolicy.documentWidgetTaskKind,
-            executedDocActionCount,
-            executedMutatingDocActionCount,
-            executedInspectionDocActionCount,
-            executedSaveDocActionCount,
-            documentToolResultsThisIteration,
-          })
-          documentToolLoopState = documentIterationDecision.state
-          if (documentIterationDecision.nextUserMessage) {
-            if (!budgetLimitedBeforeCompletion) {
-              emitStructuredTaskPayload(this.documentToolLoopOrchestrator.buildStructuredTaskPayload({
-                taskTitle: toolPolicy.documentWidgetTaskKind
-                  ? '文档组件操作'
-                  : toolPolicy.preferFormatOnly
-                    ? '文档格式优化'
-                    : toolPolicy.preferSectionRewrite
-                      ? '章节改写'
-                      : '文档修改',
-                taskSummary: documentIterationDecision.nextUserMessage,
-                state: documentToolLoopState,
-                phase: 'blocked',
-              }))
-              session.messages.push({
-                role: 'user',
-                content: documentIterationDecision.nextUserMessage,
-              })
-              continue
-            }
-          }
-
-          if (documentIterationDecision.completionText) {
-            emitStructuredTaskPayload(this.documentToolLoopOrchestrator.buildStructuredTaskPayload({
-              taskTitle: toolPolicy.documentWidgetTaskKind
-                ? '文档组件操作'
-                : toolPolicy.preferFormatOnly
-                  ? '文档格式优化'
-                  : toolPolicy.preferSectionRewrite
-                    ? '章节改写'
-                    : '文档修改',
-              taskSummary: documentIterationDecision.completionText,
-              state: documentToolLoopState,
-              phase: 'done',
-            }))
-            emitOutput(documentIterationDecision.completionText, 'text')
-            session.messages.push({ role: 'assistant', content: documentIterationDecision.completionText })
-            advancePlannerStep(documentIterationDecision.completionText)
-            finishedBeforeLimit = true
-            break
-          }
-
-          if (
-            toolPolicy.forceDesignTool &&
-            !toolPolicy.allowMultipleDesignArtifacts &&
-            executedPrimaryDesignToolThisIteration
-          ) {
-            const completionText = this.designToolLoopOrchestrator.buildCompletionText(designToolLoopState)
-            if (completionText) {
-              emitStructuredTaskPayload(this.designToolLoopOrchestrator.buildStructuredTaskPayload({
-                taskTitle: '设计任务',
-                taskSummary: completionText,
-                state: designToolLoopState,
-                phase: 'done',
-              }))
-              emitOutput(completionText, 'text')
-              session.messages.push({ role: 'assistant', content: completionText })
-              advancePlannerStep(completionText)
-            }
-            finishedBeforeLimit = true
-            log(`Completed single-artifact design run after primary design tool with status=${String(designToolLoopState.lastPrimaryDesignToolPayload?.status || 'unknown')}`)
-            break
-          }
-
-          if (budgetLimitedBeforeCompletion) {
-            break
-          }
-
-        }
-
-        if (interactionState === 'suspended') {
-          emitOutput('', 'done')
-          emitStatus('cancelled')
-          return buildRunResult(true)
-        }
-
-        if (!finishedBeforeLimit && (iterations >= effectiveMaxToolIterations || budgetLimitedBeforeCompletion)) {
-          log(
-            budgetLimitedBeforeCompletion
-              ? 'Tool loop hit tool budget before completion'
-              : `Tool loop hit max iterations (${effectiveMaxToolIterations})`,
-          )
-          const browserLimitMessage = this.browserDomainOrchestrator.buildToolLoopLimitMessage(browserToolLoopState)
-          if (browserLimitMessage) {
-            log(`Browser task incomplete: step ${browserToolLoopState.stepIndex + 1}/${browserToolLoopState.steps.length}`)
-            session.messages.push({
-              role: 'user',
-              content: browserLimitMessage,
-            })
-          }
-          emitOutput(
-            budgetLimitedBeforeCompletion
-              ? '\n[已达到本轮工具预算上限，请总结当前进度并建议下一步重试方式]'
-              : '\n[已达到最大工具调用次数，请尝试让助手使用 browser_run_workflow 或 browser_download_urls 批量执行后重试]',
-            'text',
-          )
-        }
-      }
-
-      emitOutput('', 'done')
-      emitStatus('done')
-      return buildRunResult(true)
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        interactionState = 'suspended'
-        syncBudgetWarning()
         emitOutput('', 'done')
         emitStatus('cancelled')
-        return buildRunResult(true)
+        return {
+          success: true,
+          finalText: '',
+          usedTools: [],
+          cancelled: true,
+          taskId,
+          taskProjectionId: taskId,
+        }
       }
       const msg = error instanceof Error ? error.message : String(error)
       log(`Error: ${msg}`)
@@ -2324,7 +788,15 @@ export class DirectChatEngine extends EventEmitter {
       emitOutput('', 'done')
       emitRuntimeError(msg)
       emitStatus('error')
-      return buildRunResult(false, msg)
+      return {
+        success: false,
+        error: msg,
+        finalText: '',
+        usedTools: [],
+        cancelled: false,
+        taskId,
+        taskProjectionId: taskId,
+      }
     } finally {
       if (session.abortController === abortController) {
         session.abortController = null
@@ -2332,6 +804,468 @@ export class DirectChatEngine extends EventEmitter {
       if (session.activeRunId === runId) {
         session.activeRunId = null
       }
+    }
+  }
+
+  private buildTurnEngineHost(params: {
+    name: string
+    runId: string
+    sessionId?: string
+    requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    providerContext: {
+      config: AIModelConfig
+      baseUrl: string
+      provider?: ReturnType<typeof getProviderDef>
+      isKimi: boolean
+      isKimiCoding: boolean
+      useAnthropicProtocol: boolean
+      supportsToolCalls: boolean
+      supportsVideoBlock: boolean
+      hasRawVideoInIncoming: boolean
+    }
+  }) {
+    return {
+      log,
+      maxToolIterations: this.maxToolIterations,
+      browserController: this.browserController,
+      sidecarManager: this.sidecarManager,
+      runtime: {
+        isChannelTypeAvailable: (channelType: string) =>
+          this.runtime?.isChannelTypeAvailable(channelType as any) ?? false,
+        getConversationScope: (sessionId: string) => this.runtime?.getConversationScope(sessionId) || null,
+      },
+      requestModuleToolAction: params.requestModuleToolAction,
+      registerRunCleanup: (cleanup: () => void | Promise<void>) => {
+        this.runCleanupRegistry?.registerRunCleanup(params.runId, cleanup)
+      },
+      providerContext: params.providerContext,
+      isBrowserAgentV3Enabled: () => this.isBrowserAgentV3Enabled(),
+      resolveContinuationProjection: (
+        sessionId: string | undefined,
+        userText: string,
+        options?: {
+          explicitTaskId?: string | null
+          allowImplicitContinuation?: boolean
+        },
+      ) => this.resolveContinuationProjection(sessionId, userText, options),
+      getIncomingAttachmentHints: (turnContent: RunMessage) => this.getIncomingAttachmentHints(turnContent),
+      collectRecentPureUserInputs: (messages: ChatMessage[], limit?: number) => this.collectRecentPureUserInputs(messages, limit),
+      sessionHasMediaInputs: (messages: ChatMessage[]) => this.sessionHasMediaInputs(messages),
+      sessionHasVideoInputs: (messages: ChatMessage[]) => this.sessionHasVideoInputs(messages),
+      maybeRunDocumentTaskPlan: async (raw: Record<string, unknown>) => this.maybeRunDocumentTaskPlanShortcut(raw as any),
+      maybeRunDocumentWidgetPipeline: async (raw: Record<string, unknown>) => this.maybeRunDocumentWidgetPipelineShortcut(raw as any),
+      skillContextOrchestrator: this.skillContextOrchestrator,
+      browserDomainOrchestrator: this.browserDomainOrchestrator,
+      documentToolLoopOrchestrator: this.documentToolLoopOrchestrator,
+      designToolLoopOrchestrator: this.designToolLoopOrchestrator,
+      hostCapabilityDispatcher: this.hostCapabilityDispatcher,
+      executeToolCall: (toolName: string, args: Record<string, unknown>, context: unknown) =>
+        executeToolCall(toolName, args, context as any),
+      requestSimpleText: async (raw: {
+        session: DirectChatSession
+        signal: AbortSignal
+        providerContext: TurnProviderContext
+        enableKimiWebSearch?: boolean
+        timeoutMs?: number
+      }) => this.requestSimpleText(raw),
+      requestToolLoopResponse: async (raw: {
+        session: DirectChatSession
+        signal: AbortSignal
+        toolPolicy: unknown
+        providerContext: TurnProviderContext
+        hasVideoInputs: boolean
+        compressContext?: () => Promise<boolean> | boolean
+        onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
+      }) => this.requestToolLoopResponse(raw),
+      executeToolBatch: async (raw: {
+        toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>
+        executeTool: (toolCall: { id: string; name: string; input: Record<string, unknown> }) => Promise<unknown>
+        onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }) => void
+        budget?: RunBudgetSeed
+        budgetState?: RunBudgetUsage
+        signal?: AbortSignal
+      }) => this.executionLoopOrchestrator.executeToolCalls(raw as any),
+    }
+  }
+
+  private async requestSimpleText(params: {
+    session: DirectChatSession
+    signal: AbortSignal
+    providerContext: TurnProviderContext
+    enableKimiWebSearch?: boolean
+    timeoutMs?: number
+  }): Promise<TurnSimpleResponse> {
+    const hasVideoInputs = this.sessionHasVideoInputs(params.session.messages)
+    if (params.providerContext.isKimiCoding) {
+      const response = await this.kimiCodingClient.requestSimple({
+        session: params.session,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        signal: params.signal,
+        hasVideoInputs,
+        timeoutMs: params.timeoutMs,
+        buildVideoFrameFallbackMessages: hasVideoInputs
+          ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages)
+          : undefined,
+        assignFallbackMessages: (fallbackMessages) => {
+          params.session.messages = fallbackMessages as ChatMessage[]
+        },
+        fallbackToAnthropic: ({ messagesOverride }) => this.anthropicExecutionClient.requestSimple({
+          session: params.session,
+          config: params.providerContext.config,
+          baseUrl: params.providerContext.baseUrl,
+          signal: params.signal,
+          messagesOverride: messagesOverride as ChatMessage[] | undefined,
+          timeoutMs: params.timeoutMs,
+        }),
+      })
+      return {
+        text: response.text,
+        fallback: buildExecutionFallbackState(response.fallback),
+      }
+    }
+    if (params.providerContext.useAnthropicProtocol) {
+      const response = await this.anthropicExecutionClient.requestSimple({
+        session: params.session,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        signal: params.signal,
+        hasVideoInputs,
+        timeoutMs: params.timeoutMs,
+        buildVideoFrameFallbackMessages: hasVideoInputs
+          ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages)
+          : undefined,
+        onFallbackApplied: (fallbackMessages) => {
+          params.session.messages = fallbackMessages
+        },
+      })
+      return {
+        text: response.text,
+        fallback: buildExecutionFallbackState(response.fallback),
+      }
+    }
+    const response = await this.openAIExecutionClient.requestSimple({
+      session: params.session,
+      config: params.providerContext.config,
+      baseUrl: params.providerContext.baseUrl,
+      provider: params.providerContext.provider as ReturnType<typeof getProviderDef> | undefined,
+      signal: params.signal,
+      isKimi: params.providerContext.isKimi,
+      enableKimiWebSearch: params.enableKimiWebSearch,
+      timeoutMs: params.timeoutMs,
+    })
+    return {
+      text: response.text,
+      fallback: buildExecutionFallbackState(response.fallback),
+    }
+  }
+
+  private async requestToolLoopResponse(params: {
+    session: DirectChatSession
+    signal: AbortSignal
+    toolPolicy: unknown
+    providerContext: TurnProviderContext
+    hasVideoInputs: boolean
+    compressContext?: () => Promise<boolean> | boolean
+    onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
+  }): Promise<TurnModelResponse> {
+    const response = await this.executionLoopOrchestrator.requestToolLoopResponse({
+      useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
+      hasVideoInputs: params.hasVideoInputs,
+      session: params.session,
+      config: params.providerContext.config,
+      baseUrl: params.providerContext.baseUrl,
+      provider: params.providerContext.provider as ReturnType<typeof getProviderDef> | undefined,
+      signal: params.signal,
+      policy: params.toolPolicy,
+      callAnthropicWithTools: () => this.anthropicExecutionClient.requestWithTools({
+        session: params.session,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        signal: params.signal,
+        policy: params.toolPolicy as any,
+      }),
+      callOpenAIWithTools: () => this.openAIExecutionClient.requestWithTools({
+        session: params.session,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        provider: params.providerContext.provider as ReturnType<typeof getProviderDef>,
+        signal: params.signal,
+        policy: params.toolPolicy as any,
+      }),
+      compressContext: params.compressContext,
+      onBeforeRetry: params.onBeforeRetry as any,
+      buildVideoFrameFallbackMessages: () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages),
+      assignFallbackMessages: (messages) => {
+        params.session.messages = messages as ChatMessage[]
+      },
+    })
+    return {
+      ...response,
+      fallback: buildExecutionFallbackState(response.fallback),
+    }
+  }
+
+  private async maybeRunDocumentTaskPlanShortcut(params: {
+    initialTaskExecutionRoute: import('../agent-control/run-contracts').TaskExecutionRoute
+    executionIntentContext: ReturnType<typeof resolveExecutionIntentContext>
+    hasTools: boolean
+    requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+    session: DirectChatSession
+    providerContext: {
+      config: AIModelConfig
+      baseUrl: string
+      provider?: ReturnType<typeof getProviderDef>
+      isKimi: boolean
+      isKimiCoding: boolean
+      useAnthropicProtocol: boolean
+    }
+    emitStructuredTaskPayload: (payload: unknown) => void
+  }): Promise<TurnShortcutResult | null> {
+    const preferredSkillToolNames = this.skillContextOrchestrator.buildPreferredSkillToolNames(
+      params.executionIntentContext.contextualUserInput,
+      undefined,
+    )
+    if (
+      params.initialTaskExecutionRoute.executor !== 'document'
+      || params.initialTaskExecutionRoute.chain !== 'domain_executor'
+      || !params.executionIntentContext.shouldUseDocumentTaskPlan
+      || !params.executionIntentContext.documentTaskPlan
+      || !params.hasTools
+      || !params.requestModuleToolAction
+      || (preferredSkillToolNames && preferredSkillToolNames.length > 0)
+    ) {
+      return null
+    }
+
+    const planResult = await this.runDocumentTaskPlan({
+      plan: params.executionIntentContext.documentTaskPlan,
+      requestEnvelope: params.executionIntentContext.requestEnvelope,
+      session: params.session,
+      requestModuleToolAction: params.requestModuleToolAction,
+      signal: params.signal,
+      config: params.providerContext.config,
+      baseUrl: params.providerContext.baseUrl,
+      provider: params.providerContext.provider,
+      isKimi: params.providerContext.isKimi,
+      isKimiCoding: params.providerContext.isKimiCoding,
+      useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
+      emitStructuredTaskPayload: params.emitStructuredTaskPayload,
+    })
+
+    if (!planResult.success && !planResult.finalText) {
+      throw new Error(planResult.error || '文档任务计划执行失败')
+    }
+
+    return {
+      finalText: planResult.finalText || null,
+      error: planResult.error,
+      status: planResult.success ? 'done' : 'error',
+      success: planResult.success,
+      interactionState: 'running' as TaskInteractionState,
+    }
+  }
+
+  private async maybeRunDocumentWidgetPipelineShortcut(params: {
+    initialTaskExecutionRoute: import('../agent-control/run-contracts').TaskExecutionRoute
+    executionIntentContext: ReturnType<typeof resolveExecutionIntentContext>
+    hasTools: boolean
+    requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+    session: DirectChatSession
+    providerContext: {
+      config: AIModelConfig
+      baseUrl: string
+      provider?: ReturnType<typeof getProviderDef>
+      isKimi: boolean
+      isKimiCoding: boolean
+      useAnthropicProtocol: boolean
+    }
+    emitStructuredTaskPayload: (payload: unknown) => void
+    setPipelineDiagnostics?: (pipeline: unknown) => void
+  }): Promise<TurnShortcutResult | null> {
+    const preferredSkillToolNames = this.skillContextOrchestrator.buildPreferredSkillToolNames(
+      params.executionIntentContext.contextualUserInput,
+      undefined,
+    )
+    if (
+      params.initialTaskExecutionRoute.executor !== 'document'
+      || params.initialTaskExecutionRoute.chain !== 'domain_executor'
+      || params.executionIntentContext.structuredDocumentIntent !== 'document_read_then_widget_create'
+      || !params.hasTools
+      || !params.requestModuleToolAction
+      || (preferredSkillToolNames && preferredSkillToolNames.length > 0)
+    ) {
+      return null
+    }
+
+    const sourceMaterial = buildDocumentInsightSourceMaterial({
+      requestEnvelope: params.executionIntentContext.requestEnvelope,
+      snapshotContent: '',
+    })
+    const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = [
+      'loading_document',
+      'building_insight',
+      'generating_widget_spec',
+      'writing_widget',
+      'saving_document',
+    ]
+    const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
+      loading_document: '读取文档',
+      building_insight: '提炼重点',
+      generating_widget_spec: '生成卡片草稿',
+      writing_widget: '写入卡片',
+      saving_document: '保存文档',
+      completed: '完成',
+      failed: '失败',
+    }
+    const pipelinePhaseStatus = new Map<string, 'running' | 'done' | 'error'>()
+    let documentPipelineDiagnostics: {
+      phase?: string
+      chunkCount?: number
+      selectedChunkCount?: number
+      promptChars?: number
+      cacheHit?: boolean
+      usedSectionAnchors?: boolean
+    } | null = null
+    const emitDocumentPipelinePhase = (update: DocumentTaskPipelinePhaseUpdate): void => {
+      if (update.phase === 'completed') {
+        pipelinePhaseStatus.forEach((value, key) => {
+          if (value === 'running') pipelinePhaseStatus.set(key, 'done')
+        })
+      } else if (update.phase === 'failed') {
+        const lastRunning = pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running')
+        if (lastRunning) pipelinePhaseStatus.set(lastRunning, 'error')
+      } else if (update.status === 'running') {
+        pipelinePhaseStatus.set(update.phase, 'running')
+      } else if (update.status === 'completed') {
+        pipelinePhaseStatus.set(update.phase, 'done')
+      } else if (update.status === 'failed') {
+        pipelinePhaseStatus.set(update.phase, 'error')
+      }
+      documentPipelineDiagnostics = {
+        ...(documentPipelineDiagnostics || {}),
+        ...(update.metrics || {}),
+        phase: update.phase === 'completed' || update.phase === 'failed'
+          ? documentPipelineDiagnostics?.phase || update.phase
+          : update.phase,
+      }
+
+      params.setPipelineDiagnostics?.({
+        document: documentPipelineDiagnostics,
+      })
+      params.emitStructuredTaskPayload({
+        module: 'document',
+        message: update.summary,
+        taskTitle: '文档信息卡',
+        taskSummary: update.summary,
+        executionDiagnostics: {
+          pipeline: {
+            document: documentPipelineDiagnostics,
+          },
+        },
+        steps: pipelinePhaseOrder.map((phase) => ({
+          id: phase,
+          title: pipelinePhaseTitles[phase],
+          status: pipelinePhaseStatus.get(phase) === 'done'
+            ? 'done'
+            : pipelinePhaseStatus.get(phase) === 'error'
+              ? 'blocked'
+              : pipelinePhaseStatus.get(phase) === 'running'
+                ? 'running'
+                : 'pending',
+          updatedAt: update.endedAt || update.startedAt,
+        })),
+        currentStepId:
+          update.phase === 'completed' || update.phase === 'failed'
+            ? pipelinePhaseOrder.find((phase) => pipelinePhaseStatus.get(phase) === 'running' || pipelinePhaseStatus.get(phase) === 'error') || pipelinePhaseOrder[pipelinePhaseOrder.length - 1]
+            : update.phase,
+        waitingFor: 'none',
+        resumableActions: update.phase === 'failed' ? ['retry', 'cancel'] : ['cancel'],
+        blockedReason: update.phase === 'failed' ? (update.error || update.summary) : null,
+      })
+    }
+
+    const pipeline = new DocumentTaskPipeline({
+      now: () => new Date(),
+      log: (message) => log(message),
+      loadDocumentSnapshot: async ({ question, signal }) => await this.loadDocumentPipelineSnapshot({
+        userText: question,
+        requestModuleToolAction: params.requestModuleToolAction!,
+        signal,
+      }),
+      getCachedInsight: ({ question, snapshot }) => this.getCachedDocumentInsight(
+        params.session,
+        question,
+        snapshot,
+      ),
+      buildInsight: async ({ question, snapshot, signal }) => await this.buildDocumentPipelineInsight({
+        question,
+        snapshot,
+        sourceText: sourceMaterial.kind === 'snapshot' ? snapshot.content : sourceMaterial.text,
+        sourceKind: sourceMaterial.kind === 'snapshot' && sourceMaterial.text.trim()
+          ? 'snapshot'
+          : sourceMaterial.kind,
+        sourceDocumentTitle: sourceMaterial.sourceDocumentTitle || snapshot.title,
+        sourceDocumentPath: sourceMaterial.sourceDocumentPath ?? snapshot.path,
+        timeoutMs: 60_000,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        provider: params.providerContext.provider,
+        signal,
+        isKimi: params.providerContext.isKimi,
+        isKimiCoding: params.providerContext.isKimiCoding,
+        useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
+      }),
+      storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
+        this.storeCachedDocumentInsight(params.session, question, snapshot, insight, metrics)
+      },
+      buildWidgetDraft: async ({ question, snapshot, insight, signal }) => await this.buildDocumentPipelineWidgetDraft({
+        question,
+        snapshot,
+        insight,
+        timeoutMs: 60_000,
+        config: params.providerContext.config,
+        baseUrl: params.providerContext.baseUrl,
+        provider: params.providerContext.provider,
+        signal,
+        isKimi: params.providerContext.isKimi,
+        isKimiCoding: params.providerContext.isKimiCoding,
+        useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
+      }),
+      insertWidget: async ({ draft, signal }) => {
+        void signal
+        const payload = await params.requestModuleToolAction!('document.insertWidget', {
+          title: draft.title,
+          componentSpec: draft.componentSpec,
+          widgetCode: draft.widgetCode,
+          position: draft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
+          sectionTitle: draft.targetSectionTitle,
+        })
+        return typeof payload.summary === 'string' ? payload.summary : '已写入信息卡'
+      },
+      saveDocument: async ({ signal }) => {
+        void signal
+        const payload = await params.requestModuleToolAction!('document.saveTab', {})
+        return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
+      },
+      emitPhase: emitDocumentPipelinePhase,
+    })
+
+    const pipelineResult = await pipeline.run({
+      question: params.executionIntentContext.userInstructionText || this.extractIncomingText(params.executionIntentContext.requestEnvelope.pureUserText),
+      signal: params.signal,
+    })
+    if (!pipelineResult.success && !pipelineResult.finalText) {
+      throw new Error(pipelineResult.error || '文档信息卡 pipeline 失败')
+    }
+    return {
+      finalText: pipelineResult.finalText || null,
+      error: pipelineResult.error,
+      status: pipelineResult.success ? 'done' : 'error',
+      success: pipelineResult.success,
+      interactionState: 'running' as TaskInteractionState,
     }
   }
 
@@ -2473,6 +1407,7 @@ export class DirectChatEngine extends EventEmitter {
       preferTextToolBridge: false,
       lastDocumentContextInput: null,
       documentInsightCache: [],
+      documentWidgetDraftCache: [],
     }
   }
 
@@ -2556,7 +1491,10 @@ export class DirectChatEngine extends EventEmitter {
   private normalizePipelineInsight(
     raw: Record<string, unknown>,
     question: string,
-    snapshot: ActiveDocumentSnapshot,
+    sourceDocument: {
+      title: string
+      path: string | null
+    },
   ): DocumentInsight {
     const summary = typeof raw.summary === 'string' ? raw.summary.trim() : ''
     const keyPoints = Array.isArray(raw.keyPoints)
@@ -2599,8 +1537,8 @@ export class DirectChatEngine extends EventEmitter {
 
     return {
       question,
-      documentPath: snapshot.path,
-      documentTitle: snapshot.title,
+      documentPath: sourceDocument.path,
+      documentTitle: sourceDocument.title,
       summary,
       keyPoints,
       evidence,
@@ -2636,6 +1574,58 @@ export class DirectChatEngine extends EventEmitter {
         },
       },
     }
+  }
+
+  private getDocumentTaskJobTarget(job: DocumentTaskJob): RequestEnvelopeResource | null {
+    return job.bindings.find((binding) => binding.role === 'target_document')?.resource || null
+  }
+
+  private getDocumentTaskJobSources(job: DocumentTaskJob): RequestEnvelopeResource[] {
+    return job.bindings
+      .filter((binding) => binding.role === 'primary_source' || binding.role === 'secondary_source')
+      .map((binding) => binding.resource)
+  }
+
+  private buildDocumentTaskStepTitle(job: DocumentTaskJob, step: DocumentTaskStep, jobIndex: number, totalJobs: number): string {
+    const sources = this.getDocumentTaskJobSources(job)
+    const target = this.getDocumentTaskJobTarget(job)
+    const sourceLabel = sources.map((resource) => resource.name).join(' + ') || '材料'
+    const targetLabel = target?.name || '目标文档'
+    const jobPrefix = totalJobs > 1 ? `${jobIndex + 1}. ` : ''
+
+    switch (step) {
+      case 'collect_materials':
+        return `${jobPrefix}读取 ${sourceLabel}`
+      case 'build_insight':
+        return `${jobPrefix}提炼 ${sourceLabel}`
+      case 'compose_widget':
+        return `${jobPrefix}生成卡片草稿`
+      case 'write_target':
+        return `${jobPrefix}写入 ${targetLabel}`
+      case 'save_target':
+        return `${jobPrefix}保存 ${targetLabel}`
+      case 'verify_result':
+        return `${jobPrefix}核对 ${targetLabel}`
+      default:
+        return `${jobPrefix}${step}`
+    }
+  }
+
+  private buildDocumentTaskStepId(job: DocumentTaskJob, step: DocumentTaskStep): string {
+    return `${job.id}:${step}`
+  }
+
+  private buildDocumentWidgetDraftCacheKey(
+    question: string,
+    job: DocumentTaskJob,
+    snapshot: ActiveDocumentSnapshot,
+  ): string {
+    return buildDocumentTaskStepCacheKey({
+      question,
+      step: 'compose_widget',
+      job,
+      targetSnapshot: snapshot,
+    })
   }
 
   private normalizePipelineWidgetDraft(
@@ -2684,7 +1674,9 @@ export class DirectChatEngine extends EventEmitter {
     question: string
     snapshot: ActiveDocumentSnapshot
     sourceText: string
-    sourceKind: 'attachment_body' | 'document_excerpt' | 'snapshot'
+    sourceKind: 'attachment_body' | 'document_excerpt' | 'snapshot' | 'task_plan'
+    sourceDocumentTitle: string
+    sourceDocumentPath: string | null
     timeoutMs: number
     config: AIModelConfig
     baseUrl: string
@@ -2711,8 +1703,9 @@ export class DirectChatEngine extends EventEmitter {
     ].join('\n')
     const userPrompt = [
       `问题：${params.question}`,
-      `文档标题：${params.snapshot.title}`,
-      `文档路径：${params.snapshot.path || '(未保存草稿)'}`,
+      `来源标题：${params.sourceDocumentTitle}`,
+      `来源路径：${params.sourceDocumentPath || '(未保存草稿)'}`,
+      `写入目标：${params.snapshot.title}`,
       `来源类型：${params.sourceKind}`,
       `来源字数：${params.sourceText.length}`,
       `文档片段数：${focusedContext.chunks.length}`,
@@ -2747,7 +1740,10 @@ export class DirectChatEngine extends EventEmitter {
     if (!parsed) {
       throw new Error('Document insight 阶段未返回可解析 JSON')
     }
-    const insight = this.normalizePipelineInsight(parsed, params.question, params.snapshot)
+    const insight = this.normalizePipelineInsight(parsed, params.question, {
+      title: params.sourceDocumentTitle,
+      path: params.sourceDocumentPath,
+    })
     const warningSet = new Set([
       ...(insight.warnings || []),
       ...focusedContext.warnings,
@@ -2815,6 +1811,422 @@ export class DirectChatEngine extends EventEmitter {
     })
   }
 
+  private async verifyDocumentTaskPlanWrite(params: {
+    draft: DocumentWidgetDraft
+    targetResource: RequestEnvelopeResource
+    requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+  }): Promise<string> {
+    void params.signal
+    const payload = await params.requestModuleToolAction('document.listWidgets', {})
+    const summary = typeof payload.summary === 'string' ? payload.summary : ''
+    if (params.draft.title && summary && !summary.includes(params.draft.title) && !/当前文档共有\s+\d+\s+个 widget/.test(summary)) {
+      throw new Error(`写入后未在 ${params.targetResource.name} 中确认到目标信息卡`)
+    }
+    return summary || `已核对 ${params.targetResource.name}`
+  }
+
+  private buildDocumentTaskPlanFailureText(params: {
+    job: DocumentTaskJob
+    step: DocumentTaskStep
+    error: string
+    insight?: DocumentInsight
+    draft?: DocumentWidgetDraft
+  }): string {
+    const target = this.getDocumentTaskJobTarget(params.job)
+    const sources = this.getDocumentTaskJobSources(params.job)
+    const sourceLabel = sources.map((resource) => resource.name).join(' + ') || '材料'
+    const targetLabel = target?.name || '目标文档'
+
+    if (params.step === 'collect_materials' || params.step === 'build_insight') {
+      return `读取 ${sourceLabel} 失败，暂时没法继续写入 ${targetLabel}。原因：${params.error}`
+    }
+
+    const lines = [
+      `已先完成对 ${sourceLabel} 的重点提炼，但在写入 ${targetLabel} 时中断。`,
+      params.insight?.summary ? `提炼结果：${params.insight.summary}` : null,
+      params.insight?.keyPoints?.length
+        ? `重点：${params.insight.keyPoints.slice(0, 3).join('；')}`
+        : null,
+      params.draft?.title ? `卡片草稿：${params.draft.title}` : null,
+      `失败原因：${params.error}`,
+    ].filter(Boolean)
+
+    return lines.join('\n')
+  }
+
+  private buildDocumentTaskPlanSuccessText(results: Array<{
+    job: DocumentTaskJob
+    writeSummary: string
+    saveSummary: string
+    verifySummary: string
+  }>): string {
+    if (results.length === 1) {
+      const item = results[0]
+      const target = this.getDocumentTaskJobTarget(item.job)
+      const sources = this.getDocumentTaskJobSources(item.job)
+      return [
+        `已根据 ${sources.map((resource) => resource.name).join(' + ')} 在 ${target?.name || '目标文档'} 中生成信息卡。`,
+        item.writeSummary,
+        item.saveSummary,
+      ].join('\n')
+    }
+
+    return [
+      `本次共完成 ${results.length} 个文档任务：`,
+      ...results.map((item, index) => {
+        const target = this.getDocumentTaskJobTarget(item.job)
+        const sources = this.getDocumentTaskJobSources(item.job)
+        return `${index + 1}. ${sources.map((resource) => resource.name).join(' + ')} -> ${target?.name || '目标文档'}`
+      }),
+    ].join('\n')
+  }
+
+  private async runDocumentTaskPlan(params: {
+    plan: DocumentTaskPlan
+    requestEnvelope: RequestEnvelope
+    session: DirectChatSession
+    requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    signal: AbortSignal
+    config: AIModelConfig
+    baseUrl: string
+    provider: ReturnType<typeof getProviderDef> | undefined
+    isKimi: boolean
+    isKimiCoding: boolean
+    useAnthropicProtocol: boolean
+    emitStructuredTaskPayload: (payload: unknown) => void
+  }): Promise<{ success: boolean; finalText?: string; error?: string }> {
+    if (params.plan.blockedReason) {
+      params.emitStructuredTaskPayload({
+        module: 'document',
+        taskTitle: '文档信息卡',
+        taskSummary: params.plan.blockedReason,
+        steps: [{
+          id: 'clarify_resource_mapping',
+          title: '确认材料与目标映射',
+          status: 'blocked',
+          updatedAt: new Date().toISOString(),
+        }],
+        currentStepId: 'clarify_resource_mapping',
+        waitingFor: 'confirmation',
+        resumableActions: ['continue', 'cancel'],
+        blockedReason: params.plan.blockedReason,
+      })
+      return {
+        success: false,
+        finalText: params.plan.blockedReason,
+        error: params.plan.blockedReason,
+      }
+    }
+
+    if (params.plan.jobs.length === 0) {
+      return {
+        success: false,
+        error: '当前没有可执行的文档任务计划',
+      }
+    }
+
+    const stepStates = new Map<string, 'pending' | 'running' | 'done' | 'blocked'>()
+    const allSteps = params.plan.jobs.flatMap((job, jobIndex) => job.steps.map((step) => ({
+      id: this.buildDocumentTaskStepId(job, step),
+      title: this.buildDocumentTaskStepTitle(job, step, jobIndex, params.plan.jobs.length),
+    })))
+
+    const emitPlanStep = (payload: {
+      job: DocumentTaskJob
+      jobIndex: number
+      step: DocumentTaskStep
+      status: 'running' | 'completed' | 'failed'
+      summary: string
+      error?: string
+    }): void => {
+      const stepId = this.buildDocumentTaskStepId(payload.job, payload.step)
+      stepStates.set(
+        stepId,
+        payload.status === 'running'
+          ? 'running'
+          : payload.status === 'completed'
+            ? 'done'
+            : 'blocked',
+      )
+
+      params.emitStructuredTaskPayload({
+        module: 'document',
+        taskTitle: '文档信息卡',
+        taskSummary: payload.summary,
+        message: payload.summary,
+        steps: allSteps.map((step) => ({
+          id: step.id,
+          title: step.title,
+          status: stepStates.get(step.id) || 'pending',
+          updatedAt: new Date().toISOString(),
+        })),
+        currentStepId: stepId,
+        waitingFor: payload.status === 'failed' ? 'confirmation' : 'none',
+        resumableActions: payload.status === 'failed' ? ['retry', 'cancel'] : ['cancel'],
+        blockedReason: payload.status === 'failed' ? (payload.error || payload.summary) : null,
+      })
+    }
+
+    const results: Array<{
+      job: DocumentTaskJob
+      writeSummary: string
+      saveSummary: string
+      verifySummary: string
+    }> = []
+
+    for (const [jobIndex, job] of params.plan.jobs.entries()) {
+      const targetResource = this.getDocumentTaskJobTarget(job)
+      const sourceResources = this.getDocumentTaskJobSources(job)
+      const sourceLabel = sourceResources.map((resource) => resource.name).join(' + ') || '材料'
+      const targetLabel = targetResource?.name || '目标文档'
+
+      let currentStep: DocumentTaskStep = 'collect_materials'
+      let currentInsight: DocumentInsight | undefined
+      let currentDraft: DocumentWidgetDraft | undefined
+
+      try {
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'collect_materials',
+          status: 'running',
+          summary: `正在读取 ${sourceLabel}，准备写入 ${targetLabel}`,
+        })
+        if (!targetResource) {
+          throw new Error('缺少明确的目标文档')
+        }
+        const targetSnapshot = await this.loadDocumentPipelineSnapshot({
+          userText: job.instruction,
+          requestModuleToolAction: params.requestModuleToolAction,
+          signal: params.signal,
+          targetPathOverride: targetResource.path,
+        })
+        const sourceMaterial = buildDocumentInsightSourceMaterial({
+          requestEnvelope: params.requestEnvelope,
+          snapshotContent: targetSnapshot.content,
+          job,
+        })
+        if (!sourceMaterial.text.trim()) {
+          throw new Error('没有拿到可用的来源材料')
+        }
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'collect_materials',
+          status: 'completed',
+          summary: `已读取 ${sourceLabel}，目标是 ${targetLabel}`,
+        })
+
+        currentStep = 'build_insight'
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'build_insight',
+          status: 'running',
+          summary: `正在提炼 ${sourceLabel} 的重点`,
+        })
+        const insightCacheKey = buildDocumentTaskStepCacheKey({
+          question: job.instruction,
+          step: 'build_insight',
+          job,
+          targetSnapshot,
+        })
+        const cachedInsight = this.getCachedDocumentInsight(
+          params.session,
+          job.instruction,
+          targetSnapshot,
+          {
+            job,
+            cacheKeyOverride: insightCacheKey,
+          },
+        )
+        const insightResult = cachedInsight || await this.buildDocumentPipelineInsight({
+          question: job.instruction,
+          snapshot: targetSnapshot,
+          sourceText: sourceMaterial.text,
+          sourceKind: sourceMaterial.kind,
+          sourceDocumentTitle: sourceMaterial.sourceDocumentTitle || sourceResources[0]?.name || targetSnapshot.title,
+          sourceDocumentPath: sourceMaterial.sourceDocumentPath ?? sourceResources[0]?.path ?? null,
+          timeoutMs: 60_000,
+          config: params.config,
+          baseUrl: params.baseUrl,
+          provider: params.provider,
+          signal: params.signal,
+          isKimi: params.isKimi,
+          isKimiCoding: params.isKimiCoding,
+          useAnthropicProtocol: params.useAnthropicProtocol,
+        })
+        currentInsight = ('insight' in insightResult ? insightResult.insight : insightResult)
+        if (!cachedInsight) {
+          this.storeCachedDocumentInsight(
+            params.session,
+            job.instruction,
+            targetSnapshot,
+            currentInsight,
+            'metrics' in insightResult ? insightResult.metrics : undefined,
+            {
+              job,
+              cacheKeyOverride: insightCacheKey,
+            },
+          )
+        }
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'build_insight',
+          status: 'completed',
+          summary: cachedInsight
+            ? `已复用 ${sourceLabel} 的提炼结果`
+            : `已完成 ${sourceLabel} 的重点提炼`,
+        })
+
+        currentStep = 'compose_widget'
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'compose_widget',
+          status: 'running',
+          summary: `正在为 ${targetLabel} 生成卡片草稿`,
+        })
+        const cachedDraft = this.getCachedDocumentWidgetDraft(
+          params.session,
+          job.instruction,
+          job,
+          targetSnapshot,
+        )
+        currentDraft = cachedDraft || await this.buildDocumentPipelineWidgetDraft({
+          question: job.instruction,
+          snapshot: targetSnapshot,
+          insight: currentInsight,
+          timeoutMs: 60_000,
+          config: params.config,
+          baseUrl: params.baseUrl,
+          provider: params.provider,
+          signal: params.signal,
+          isKimi: params.isKimi,
+          isKimiCoding: params.isKimiCoding,
+          useAnthropicProtocol: params.useAnthropicProtocol,
+        })
+        if (!cachedDraft) {
+          this.storeCachedDocumentWidgetDraft(
+            params.session,
+            job.instruction,
+            job,
+            targetSnapshot,
+            currentDraft,
+          )
+        }
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'compose_widget',
+          status: 'completed',
+          summary: cachedDraft
+            ? `已复用 ${targetLabel} 的卡片草稿`
+            : `已生成写入 ${targetLabel} 的卡片草稿`,
+        })
+
+        currentStep = 'write_target'
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'write_target',
+          status: 'running',
+          summary: `正在把卡片写入 ${targetLabel}`,
+        })
+        const writePayload = await params.requestModuleToolAction('document.insertWidget', {
+          title: currentDraft.title,
+          componentSpec: currentDraft.componentSpec,
+          widgetCode: currentDraft.widgetCode,
+          position: currentDraft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
+          sectionTitle: currentDraft.targetSectionTitle,
+        })
+        const writeSummary = typeof writePayload.summary === 'string' ? writePayload.summary : `已写入 ${targetLabel}`
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'write_target',
+          status: 'completed',
+          summary: writeSummary,
+        })
+
+        currentStep = 'save_target'
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'save_target',
+          status: 'running',
+          summary: `正在保存 ${targetLabel}`,
+        })
+        const savePayload = await params.requestModuleToolAction('document.saveTab', {})
+        const saveSummary = typeof savePayload.summary === 'string' ? savePayload.summary : `已保存 ${targetLabel}`
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'save_target',
+          status: 'completed',
+          summary: saveSummary,
+        })
+
+        currentStep = 'verify_result'
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'verify_result',
+          status: 'running',
+          summary: `正在核对 ${targetLabel}`,
+        })
+        const verifySummary = await this.verifyDocumentTaskPlanWrite({
+          draft: currentDraft,
+          targetResource,
+          requestModuleToolAction: params.requestModuleToolAction,
+          signal: params.signal,
+        })
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: 'verify_result',
+          status: 'completed',
+          summary: verifySummary,
+        })
+
+        results.push({
+          job,
+          writeSummary,
+          saveSummary,
+          verifySummary,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        emitPlanStep({
+          job,
+          jobIndex,
+          step: currentStep,
+          status: 'failed',
+          summary: message,
+          error: message,
+        })
+        return {
+          success: false,
+          finalText: this.buildDocumentTaskPlanFailureText({
+            job,
+            step: currentStep,
+            error: message,
+            insight: currentInsight,
+            draft: currentDraft,
+          }),
+          error: message,
+        }
+      }
+    }
+
+    return {
+      success: true,
+      finalText: this.buildDocumentTaskPlanSuccessText(results),
+    }
+  }
+
   private normalizeActiveDocumentSnapshot(raw: unknown): ActiveDocumentSnapshot | null {
     if (!raw || typeof raw !== 'object') return null
     const title = typeof (raw as { title?: unknown }).title === 'string' ? String((raw as { title: string }).title).trim() : ''
@@ -2833,7 +2245,23 @@ export class DirectChatEngine extends EventEmitter {
     }
   }
 
-  private buildDocumentInsightCacheKey(question: string, snapshot: ActiveDocumentSnapshot): string {
+  private buildDocumentInsightCacheKey(
+    question: string,
+    snapshot: ActiveDocumentSnapshot,
+    options?: {
+      job?: DocumentTaskJob | null
+      cacheKeyOverride?: string | null
+    },
+  ): string {
+    if (options?.cacheKeyOverride) return options.cacheKeyOverride
+    if (options?.job) {
+      return buildDocumentTaskStepCacheKey({
+        question,
+        step: 'build_insight',
+        job: options.job,
+        targetSnapshot: snapshot,
+      })
+    }
     const normalizedQuestion = String(question || '').trim().toLowerCase().replace(/\s+/g, ' ')
     const documentIdentity = snapshot.path || snapshot.title || 'active-document'
     const contentHash = createHash('sha1')
@@ -2847,8 +2275,12 @@ export class DirectChatEngine extends EventEmitter {
     session: DirectChatSession,
     question: string,
     snapshot: ActiveDocumentSnapshot,
+    options?: {
+      job?: DocumentTaskJob | null
+      cacheKeyOverride?: string | null
+    },
   ): DocumentInsightStageResult | null {
-    const key = this.buildDocumentInsightCacheKey(question, snapshot)
+    const key = this.buildDocumentInsightCacheKey(question, snapshot, options)
     const hit = session.documentInsightCache.find((entry) => entry.key === key)
     if (hit) {
       log(`document insight session cache hit key=${key}`)
@@ -2879,8 +2311,12 @@ export class DirectChatEngine extends EventEmitter {
     snapshot: ActiveDocumentSnapshot,
     insight: DocumentInsight,
     metrics?: DocumentInsightMetrics,
+    options?: {
+      job?: DocumentTaskJob | null
+      cacheKeyOverride?: string | null
+    },
   ): void {
-    const key = this.buildDocumentInsightCacheKey(question, snapshot)
+    const key = this.buildDocumentInsightCacheKey(question, snapshot, options)
     const nextEntry = {
       key,
       insight,
@@ -2895,12 +2331,53 @@ export class DirectChatEngine extends EventEmitter {
     log(`document insight cache store key=${key}`)
   }
 
+  private getCachedDocumentWidgetDraft(
+    session: DirectChatSession,
+    question: string,
+    job: DocumentTaskJob,
+    snapshot: ActiveDocumentSnapshot,
+  ): DocumentWidgetDraft | null {
+    const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
+    const sessionHit = session.documentWidgetDraftCache.find((entry) => entry.key === key)
+    if (sessionHit) {
+      log(`document widget draft session cache hit key=${key}`)
+      return sessionHit.draft
+    }
+
+    const sharedHit = this.documentWidgetDraftCache.get(key)
+    if (!sharedHit) return null
+    log(`document widget draft shared cache hit key=${key}`)
+    return sharedHit
+  }
+
+  private storeCachedDocumentWidgetDraft(
+    session: DirectChatSession,
+    question: string,
+    job: DocumentTaskJob,
+    snapshot: ActiveDocumentSnapshot,
+    draft: DocumentWidgetDraft,
+  ): void {
+    const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
+    const nextEntry = {
+      key,
+      draft,
+      createdAt: new Date().toISOString(),
+    }
+    session.documentWidgetDraftCache = [
+      nextEntry,
+      ...session.documentWidgetDraftCache.filter((entry) => entry.key !== key),
+    ].slice(0, 6)
+    this.documentWidgetDraftCache.set(key, draft)
+    log(`document widget draft cache store key=${key}`)
+  }
+
   private async loadDocumentPipelineSnapshot(params: {
     userText: string
     requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
+    targetPathOverride?: string | null
   }): Promise<ActiveDocumentSnapshot> {
-    const targetPath = this.extractDocumentPathFromUserText(params.userText)
+    const targetPath = params.targetPathOverride?.trim() || this.extractDocumentPathFromUserText(params.userText)
     const requestSnapshot = async (): Promise<ActiveDocumentSnapshot | null> => {
       if (!params.requestModuleToolAction) return null
       const payload = await params.requestModuleToolAction('document.inspectActive', {})

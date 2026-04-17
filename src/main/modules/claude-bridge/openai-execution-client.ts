@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 
 import type { AIModelConfig, AIProviderDef } from '../../../shared/ai-providers'
-import { parseJsonOrEventStreamResponse } from '../openai-responses'
+import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-responses'
 import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
@@ -11,8 +11,12 @@ import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { buildTextToolResultMessage, parseTextToolBridgeResponse } from './tool-bridge'
 
 export interface OpenAIChatMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | Array<Record<string, unknown>>
+  tool_call_id?: string
+  tool_calls?: Array<Record<string, unknown>>
+  response_id?: string
+  reasoning_content?: unknown
 }
 
 export interface OpenAISessionLike {
@@ -96,7 +100,7 @@ export class OpenAIExecutionClient {
         throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
       }
 
-      return { text: this.extractResponsesText(await parseJsonOrEventStreamResponse(resp)) }
+      return { text: this.extractResponsesText(await parseJsonOrEventStreamResponse(resp, { requestUrl: url })) }
     }
 
     const messages = [
@@ -126,7 +130,7 @@ export class OpenAIExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{ message?: { content?: string } }>
     }
     return { text: json.choices?.[0]?.message?.content || '' }
@@ -178,7 +182,7 @@ export class OpenAIExecutionClient {
         throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
       }
 
-      const json = await parseJsonOrEventStreamResponse(resp) as Record<string, unknown>
+      const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
       return this.toTextToolBridgeResponse(
         this.extractResponsesText(json),
         (json as { reasoning?: unknown }).reasoning,
@@ -205,7 +209,7 @@ export class OpenAIExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{
         message?: {
           content?: string
@@ -430,7 +434,7 @@ export class OpenAIExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await parseJsonOrEventStreamResponse(resp) as Record<string, unknown>
+    const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
     return {
       text: this.extractResponsesText(json),
       toolCalls: this.extractResponsesToolCalls(json),
@@ -470,7 +474,7 @@ export class OpenAIExecutionClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{
         message?: {
           content?: string

@@ -2,11 +2,12 @@ import { randomUUID } from 'crypto'
 import { Buffer } from 'node:buffer'
 
 import type { AIModelConfig } from '../../../shared/ai-providers'
+import { parseJsonResponse } from '../openai-responses'
 import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
 import { extractOpenAIMessageText } from './openai-message-text'
 
 export interface KimiCodingSessionLike {
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | Array<Record<string, unknown>> }>
+  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | Array<Record<string, unknown>> }>
 }
 
 export class KimiCodingClient {
@@ -215,7 +216,7 @@ export class KimiCodingClient {
       throw new Error(`upload video failed: HTTP ${resp.status}: ${errBody.slice(0, 240)}`)
     }
 
-    const json = await resp.json() as { id?: string }
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as { id?: string }
     if (!json.id) throw new Error('upload video failed: missing file id')
     const msUrl = `ms://${json.id}`
     this.deps.log(`uploaded video to kimi files: ${msUrl}`)
@@ -286,7 +287,7 @@ export class KimiCodingClient {
       throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
     }
 
-    const json = await resp.json() as {
+    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{ message?: { content?: string | Array<Record<string, unknown>> } }>
     }
     return extractOpenAIMessageText(json.choices?.[0]?.message?.content)

@@ -10,6 +10,7 @@ import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
 import type { RequestEnvelope } from './request-envelope'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
+import type { AIModelConfig } from '../../../shared/ai-providers'
 
 export interface RunMessageBlock {
   type: string
@@ -19,6 +20,31 @@ export interface RunMessageBlock {
 }
 
 export type RunMessage = string | RunMessageBlock[]
+
+export interface TurnEngineSessionMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | Array<Record<string, unknown>>
+}
+
+export interface TurnEngineSession {
+  messages: TurnEngineSessionMessage[]
+  abortController: AbortController | null
+  systemPrompt: string
+  generation: number
+  activeRunId: string | null
+  preferTextToolBridge: boolean
+  lastDocumentContextInput?: string | null
+}
+
+export interface TurnTranscriptEvent {
+  kind: 'output' | 'status' | 'error' | 'tool_action'
+  type?: string
+  chunk?: string
+  status?: string
+  error?: string
+  tool?: string
+  args?: Record<string, unknown>
+}
 
 export type TaskType =
   | 'direct_answer'
@@ -301,6 +327,165 @@ export interface ExecutionHostResult {
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
+}
+
+export interface ExecutionTurnResult {
+  success: boolean
+  finalText: string
+  cancelled: boolean
+  usedTools: string[]
+  error?: string
+  taskId?: string | null
+  taskType?: TaskType
+  interactionState?: TaskInteractionState
+  taskProjectionId?: string | null
+  executionDiagnostics?: ExecutionRunDiagnostics | null
+}
+
+export interface TurnProviderContext {
+  config: AIModelConfig
+  baseUrl: string
+  provider?: unknown
+  isKimi: boolean
+  isKimiCoding: boolean
+  useAnthropicProtocol: boolean
+  supportsToolCalls: boolean
+  supportsVideoBlock: boolean
+  hasRawVideoInIncoming: boolean
+}
+
+export interface TurnSimpleResponse {
+  text: string
+  fallback?: {
+    happened: boolean
+    kind: string
+    attempts: number
+  } | null
+}
+
+export interface TurnToolCall {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export interface TurnToolExecutionResult {
+  id: string
+  name: string
+  input: Record<string, unknown>
+  result: {
+    text: string
+    shape?: string
+    data?: unknown
+    projectionPatch?: Record<string, unknown> | null
+    interactionHint?: string | null
+  }
+}
+
+export interface TurnToolBatchResult {
+  results: TurnToolExecutionResult[]
+  budgetLimited: boolean
+  recoveryHistory: RecoveryRecord[]
+}
+
+export interface TurnModelResponse extends TurnSimpleResponse {
+  toolCalls: TurnToolCall[]
+  stopReason: string
+  reasoningContent?: unknown
+  providerResponseId?: string
+  rawText?: string
+  toolTransport?: 'native' | 'text'
+  recoveryHistory?: RecoveryRecord[]
+}
+
+export interface TurnShortcutResult {
+  finalText?: string | null
+  error?: string
+  interactionState?: TaskInteractionState
+  status?: 'done' | 'error' | 'cancelled'
+  success?: boolean
+}
+
+export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineSession> {
+  log: (message: string) => void
+  maxToolIterations: number
+  browserController?: unknown | null
+  sidecarManager?: unknown | null
+  runtime?: {
+    isChannelTypeAvailable?: (channelType: string) => boolean
+    getConversationScope?: (sessionId: string) => unknown
+  } | null
+  requestModuleToolAction?: ((tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined
+  registerRunCleanup?: ((cleanup: () => void | Promise<void>) => void) | undefined
+  providerContext: TurnProviderContext
+  isBrowserAgentV3Enabled: () => boolean
+  resolveContinuationProjection: (sessionId: string | undefined, userText: string, options?: {
+    explicitTaskId?: string | null
+    allowImplicitContinuation?: boolean
+  }) => TaskProjectionRecord | null
+  getIncomingAttachmentHints: (content: RunMessage) => { count: number; latestName?: string }
+  collectRecentPureUserInputs: (messages: TurnEngineSessionMessage[], limit?: number) => string[]
+  sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean
+  sessionHasVideoInputs: (messages: TurnEngineSessionMessage[]) => boolean
+  maybeRunDocumentTaskPlan: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
+  maybeRunDocumentWidgetPipeline: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
+  skillContextOrchestrator: unknown
+  browserDomainOrchestrator: unknown
+  documentToolLoopOrchestrator: unknown
+  designToolLoopOrchestrator: unknown
+  hostCapabilityDispatcher: unknown
+  executeToolCall: (
+    toolName: string,
+    args: Record<string, unknown>,
+    context: unknown,
+  ) => Promise<TurnToolExecutionResult['result']>
+  requestSimpleText: (params: {
+    session: TSession
+    signal: AbortSignal
+    providerContext: TurnProviderContext
+    enableKimiWebSearch?: boolean
+    timeoutMs?: number
+  }) => Promise<TurnSimpleResponse>
+  requestToolLoopResponse: (params: {
+    session: TSession
+    signal: AbortSignal
+    toolPolicy: unknown
+    providerContext: TurnProviderContext
+    hasVideoInputs: boolean
+    compressContext?: () => Promise<boolean> | boolean
+    onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
+  }) => Promise<TurnModelResponse>
+  executeToolBatch: (params: {
+    toolCalls: TurnToolCall[]
+    executeTool: (toolCall: TurnToolCall) => Promise<unknown>
+    onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: TurnToolCall[] }) => void
+    budget?: RunBudgetSeed
+    budgetState?: RunBudgetUsage
+    signal?: AbortSignal
+  }) => Promise<TurnToolBatchResult>
+}
+
+export interface TurnEngineRequest<TSession extends TurnEngineSession = TurnEngineSession> {
+  runId: string
+  taskId: string
+  agentName: string
+  sessionId?: string
+  session: TSession
+  content: RunMessage
+  requestEnvelope?: RequestEnvelope
+  intentClassification?: IntentClassification
+  budget?: RunBudgetSeed
+  budgetState?: RunBudgetUsage
+  taskBudgetRuntime?: TaskBudgetRuntime | null
+  abortSignal: AbortSignal
+  ensureNotAborted: () => void
+  emitters: {
+    emitOutput: (chunk: string, type: string) => void
+    emitStatus: (status: string) => void
+    emitRuntimeError: (error: string) => void
+    emitToolAction: (tool: string, args: Record<string, unknown>) => void
+  }
+  host: TurnEngineHost<TSession>
 }
 
 export interface ToolVisibilityPlan {
