@@ -9,6 +9,8 @@ import type {
 import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
 import type { RequestEnvelope } from './request-envelope'
+import type { ContinuationState } from './continuation-state'
+import type { DomainAdapter } from './domain-adapter'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 
@@ -37,13 +39,14 @@ export interface TurnEngineSession {
 }
 
 export interface TurnTranscriptEvent {
-  kind: 'output' | 'status' | 'error' | 'tool_action'
+  kind: 'output' | 'status' | 'error' | 'tool_action' | 'structured_payload'
   type?: string
   chunk?: string
   status?: string
   error?: string
   tool?: string
   args?: Record<string, unknown>
+  projectionPatch?: Record<string, unknown> | null
 }
 
 export type TaskType =
@@ -170,11 +173,16 @@ export interface TaskExecutionRoute {
   chain: TaskTypeResolution['executionChain']
   executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu'
   steps: TaskStep[]
+  currentStepId?: string | null
   degradationReason?: string | null
   continuation?: {
     taskId: string
     module?: TaskProjectionRecord['module']
     continuationRef?: ScopeRunTaskContinuation | null
+    blockedReason?: string | null
+    resumableActions?: ScopeRunResumableAction[]
+    interactionState?: TaskInteractionState
+    currentStepId?: string | null
     budgetRuntime?: TaskBudgetRuntime | null
     budgetRestore?: ContinuationBudgetRestoreDiagnostics | null
   } | null
@@ -312,6 +320,7 @@ export interface ExecutionHostRequest {
   budget?: RunBudgetSeed
   budgetState?: RunBudgetUsage
   taskBudgetRuntime?: TaskBudgetRuntime
+  continuationState?: ContinuationState | null
 }
 
 export interface ExecutionHostResult {
@@ -327,6 +336,7 @@ export interface ExecutionHostResult {
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
+  projectionTruth?: ProjectionTruthSnapshot | null
 }
 
 export interface ExecutionTurnResult {
@@ -340,6 +350,12 @@ export interface ExecutionTurnResult {
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
+  projectionTruth?: ProjectionTruthSnapshot | null
+}
+
+export interface ProjectionTruthSnapshot {
+  projectionPatch: Record<string, unknown> | null
+  transcriptEvents: TurnTranscriptEvent[]
 }
 
 export interface TurnProviderContext {
@@ -429,6 +445,7 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   sessionHasVideoInputs: (messages: TurnEngineSessionMessage[]) => boolean
   maybeRunDocumentTaskPlan: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
   maybeRunDocumentWidgetPipeline: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
+  domainAdapters?: DomainAdapter[]
   skillContextOrchestrator: unknown
   browserDomainOrchestrator: unknown
   documentToolLoopOrchestrator: unknown
@@ -477,10 +494,17 @@ export interface TurnEngineRequest<TSession extends TurnEngineSession = TurnEngi
   budget?: RunBudgetSeed
   budgetState?: RunBudgetUsage
   taskBudgetRuntime?: TaskBudgetRuntime | null
+  continuationState?: ContinuationState | null
   abortSignal: AbortSignal
   ensureNotAborted: () => void
   emitters: {
-    emitOutput: (chunk: string, type: string) => void
+    emitOutput: (
+      chunk: string,
+      type: string,
+      options?: {
+        projectionPatch?: Record<string, unknown> | null
+      },
+    ) => void
     emitStatus: (status: string) => void
     emitRuntimeError: (error: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void

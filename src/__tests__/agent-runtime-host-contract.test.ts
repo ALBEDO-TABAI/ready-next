@@ -23,8 +23,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const runProjection = readWorkspaceFile('src/main/modules/agent-control/run-projection.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
   const browserDomainOrchestrator = readWorkspaceFile('src/main/modules/agent-control/browser-domain-orchestrator.ts')
+  const browserDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/browser-domain-adapter.ts')
+  const domainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapter.ts')
   const designToolLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/design-tool-loop-orchestrator.ts')
   const documentToolLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/document-tool-loop-orchestrator.ts')
+  const documentDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/document-domain-adapter.ts')
   const documentDomainOrchestrator = readWorkspaceFile('src/main/modules/agent-control/document-domain-orchestrator.ts')
   const documentDomainHelpers = readWorkspaceFile('src/main/modules/agent-control/document-domain-helpers.ts')
   const executionIntentResolver = readWorkspaceFile('src/main/modules/agent-control/execution-intent-resolver.ts')
@@ -32,6 +35,10 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const hostCapabilityDispatcher = readWorkspaceFile('src/main/modules/agent-control/host-capability-dispatcher.ts')
   const providerRuntimeResolver = readWorkspaceFile('src/main/modules/agent-control/provider-runtime-resolver.ts')
   const skillContextOrchestrator = readWorkspaceFile('src/main/modules/agent-control/skill-context-orchestrator.ts')
+  const skillDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/skill-domain-adapter.ts')
+  const rssDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/rss-domain-adapter.ts')
+  const calendarDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/calendar-domain-adapter.ts')
+  const feishuDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/feishu-domain-adapter.ts')
   const toolRuntimeContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tool-runtime-context-builder.ts')
   const videoFallbackService = readWorkspaceFile('src/main/modules/claude-bridge/video-fallback-service.ts')
   const anthropicExecutionClient = readWorkspaceFile('src/main/modules/claude-bridge/anthropic-execution-client.ts')
@@ -71,6 +78,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(browserDomainOrchestrator, /refineUploadDecision\(/)
   assert.match(browserDomainOrchestrator, /runDeterministicExecution\(/)
   assert.match(browserDomainOrchestrator, /resolveExecutionDispatch\(/)
+  assert.match(domainAdapter, /export interface DomainAdapter/)
+  assert.match(domainAdapter, /export function selectDomainAdapter\(/)
+  assert.match(browserDomainAdapter, /export class BrowserDomainAdapter/)
+  assert.match(browserDomainAdapter, /prepare\(/)
+  assert.match(browserDomainAdapter, /dispatch\(/)
   assert.match(designToolLoopOrchestrator, /export class DesignToolLoopOrchestrator/)
   assert.match(designToolLoopOrchestrator, /applySourceInput\(/)
   assert.match(designToolLoopOrchestrator, /filterToolCalls\(/)
@@ -83,6 +95,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(documentToolLoopOrchestrator, /handleNoToolCall\(/)
   assert.match(documentToolLoopOrchestrator, /handleIterationResult\(/)
   assert.match(documentToolLoopOrchestrator, /buildStructuredTaskPayload\(/)
+  assert.match(documentDomainAdapter, /export class DocumentDomainAdapter/)
   assert.match(documentDomainOrchestrator, /export class DocumentDomainOrchestrator/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionFormatFlow\(/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionRewriteFlow\(/)
@@ -104,6 +117,10 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(skillContextOrchestrator, /shouldKeepToolsWithVideo\(/)
   assert.match(skillContextOrchestrator, /buildPreferredSkillToolNames\(/)
   assert.match(skillContextOrchestrator, /maybeInjectExplicitSkillContext\(/)
+  assert.match(skillDomainAdapter, /export class SkillDomainAdapter/)
+  assert.match(rssDomainAdapter, /export class RSSDomainAdapter/)
+  assert.match(calendarDomainAdapter, /export class CalendarDomainAdapter/)
+  assert.match(feishuDomainAdapter, /export class FeishuDomainAdapter/)
   assert.match(toolRuntimeContextBuilder, /export function buildToolRuntimeContext\(/)
   assert.match(videoFallbackService, /export class VideoFallbackService/)
   assert.match(videoFallbackService, /async buildVideoFrameFallbackMessages\(/)
@@ -150,10 +167,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(turnEngine, /export class TurnEngine/)
   assert.match(turnEngine, /async execute(?:<|\()/)
   assert.match(turnEngine, /hostCapabilityDispatcher\.dispatch\(/)
-  assert.match(turnEngine, /documentToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
+  assert.match(turnEngine, /selectDomainAdapter\(domainAdapters/)
+  assert.match(turnEngine, /selectedDomainAdapter\.buildProjectionPatch\(/)
   assert.match(turnEngine, /designToolLoopOrchestrator\.buildStructuredTaskPayload\(/)
-  assert.match(turnEngine, /browserDomainOrchestrator\.getBudgetHint\(/)
-  assert.match(turnEngine, /documentToolLoopOrchestrator\.getBudgetHint\(/)
+  assert.match(turnEngine, /selectedDomainPrepareResult\?\.budgetHint/)
+  assert.match(turnEngine, /selectedDomainAdapter\.applyResult\(/)
   assert.match(turnEngine, /designToolLoopOrchestrator\.getBudgetHint\(/)
   assert.match(turnEngine, /simpleResponse\.fallback/)
   assert.match(turnEngine, /executedToolBatch\.budgetLimited/)
@@ -293,8 +311,8 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
       pattern: /const initialTaskExecutionRoute = resolveTaskExecutionRoute\(/,
     },
     {
-      label: 'phase3 should move browser pre-dispatch preparation into TurnEngine',
-      pattern: /const preparedBrowserExecution = await browserDomainOrchestrator\.prepareBrowserExecution\(/,
+      label: 'phase4 should prepare browser routing through the domain adapter contract',
+      pattern: /const browserPrepareResult = browserDomainAdapter/,
     },
     {
       label: 'phase3 should move capability reconciliation into TurnEngine',
@@ -309,8 +327,8 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
       pattern: /const hostShortcutResult = await hostCapabilityDispatcher\.dispatch\(/,
     },
     {
-      label: 'phase3 should move document loop state ownership into TurnEngine',
-      pattern: /let documentToolLoopState = documentToolLoopOrchestrator\.createState\(\)/,
+      label: 'phase4 should select a single domain adapter after route resolution',
+      pattern: /const selectedDomainAdapter = selectDomainAdapter\(domainAdapters/,
     },
     {
       label: 'phase3 should move design loop state ownership into TurnEngine',
@@ -329,8 +347,8 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
       pattern: /const result = await host\.executeToolCall\(toolCall\.name, toolCall\.input, toolContext\)/,
     },
     {
-      label: 'phase3 should move structured payload emission into TurnEngine',
-      pattern: /emitStructuredTaskPayload\(documentToolLoopOrchestrator\.buildStructuredTaskPayload\(/,
+      label: 'phase4 should move domain-specific projection emission behind adapter buildProjectionPatch',
+      pattern: /const patch = selectedDomainAdapter\.buildProjectionPatch\(/,
     },
   ])
 })

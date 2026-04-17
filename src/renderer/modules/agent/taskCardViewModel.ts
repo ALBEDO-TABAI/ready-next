@@ -14,6 +14,7 @@ export interface TaskCardRunLike {
   scopeId: string
   taskId?: string | null
   phase: ScopeRunState['phase']
+  status?: TaskProjectionRecordData['status']
   title: string
   taskTitle?: string | null
   taskSummary?: string | null
@@ -93,6 +94,16 @@ function taskPhaseLabel(phase: ScopeRunState['phase']): string {
   if (phase === 'error') return '失败'
   if (phase === 'cancelled') return '已停止'
   return '待处理'
+}
+
+function taskStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string | null {
+  if (status === 'queued') return '排队中'
+  if (status === 'running') return '进行中'
+  if (status === 'blocked') return '等待继续'
+  if (status === 'done') return '已完成'
+  if (status === 'failed') return '失败'
+  if (status === 'cancelled') return '已停止'
+  return null
 }
 
 function normalizeTaskFamily(title: string): string {
@@ -179,7 +190,7 @@ export function buildTaskCardViewModel(
     key: run.scopeId,
     title: run.taskTitle || run.title || '任务',
     phase: run.phase,
-    statusLabel: taskPhaseLabel(run.phase),
+    statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase),
     summary,
     currentStep,
     sections: {

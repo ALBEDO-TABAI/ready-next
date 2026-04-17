@@ -258,6 +258,27 @@ function recoveryKindLabel(kind: RecoveryRecordData['kind']): string {
   }
 }
 
+function resolveActiveProjection(
+  taskProjections: TaskProjectionRecordData[],
+  activeRun: ScopeRunState | null,
+): TaskProjectionRecordData | null {
+  const candidateIds = [
+    activeRun?.taskId,
+    activeRun?.taskContinuation?.taskId,
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+
+  for (const candidateId of candidateIds) {
+    const matched = taskProjections.find((item) => item.taskId === candidateId)
+    if (matched) return matched
+  }
+
+  return taskProjections.find((item) =>
+    item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
+  ) || taskProjections[0] || null
+}
+
 export default function TaskPanel() {
   const {
     inputValue,
@@ -272,8 +293,8 @@ export default function TaskPanel() {
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
   const activeProjection = useMemo(() => {
-    return taskProjections[0] || null
-  }, [taskProjections])
+    return resolveActiveProjection(taskProjections, activeRun)
+  }, [taskProjections, activeRun])
   const fallbackTasks = useMemo(() => {
     const extracted = extractTasksFromMessages(messages)
     if (extracted.length > 0) return extracted
@@ -364,7 +385,8 @@ export default function TaskPanel() {
         : null,
       activeProjection?.continuationRef?.stepId
         ? `Step ID: ${activeProjection.continuationRef.stepId}`
-        : null
+        : null,
+      activeProjection?.blockedReason ? `继续前上下文：${activeProjection.blockedReason}` : null,
     ]
       .filter(Boolean)
       .join('\n')
@@ -448,11 +470,11 @@ export default function TaskPanel() {
               <span
                 className="rounded-full px-2 py-1 text-[10px] font-semibold"
                 style={{
-                  background: activeRun ? phaseColors.bg : projectionColors.bg,
-                  color: activeRun ? phaseColors.color : projectionColors.color
+                  background: activeProjection ? projectionColors.bg : phaseColors.bg,
+                  color: activeProjection ? projectionColors.color : phaseColors.color
                 }}
               >
-                {activeRun ? phaseLabel(activeRun.phase) : projectionStatusLabel(activeProjection?.status)}
+                {activeProjection ? projectionStatusLabel(activeProjection?.status) : phaseLabel(activeRun?.phase)}
               </span>
               {activeRun ? (
                 <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>

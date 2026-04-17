@@ -10,18 +10,30 @@ export class TurnTranscript {
   private readonly usedTools = new Set<string>()
 
   constructor(private readonly emitters: {
-    emitOutput: (chunk: string, type: string) => void
+    emitOutput: (
+      chunk: string,
+      type: string,
+      options?: {
+        projectionPatch?: Record<string, unknown> | null
+      },
+    ) => void
     emitStatus: (status: string) => void
     emitRuntimeError: (error: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
   }) {}
 
-  emitOutput(chunk: string, type: string): void {
+  emitOutput(
+    chunk: string,
+    type: string,
+    options?: {
+      projectionPatch?: Record<string, unknown> | null
+    },
+  ): void {
     this.events.push({ kind: 'output', chunk, type })
     if (type === 'text' && chunk) {
       this.finalChunks.push(chunk)
     }
-    this.emitters.emitOutput(chunk, type)
+    this.emitters.emitOutput(chunk, type, options)
   }
 
   emitToolUse(tool: string, args: Record<string, unknown>): void {
@@ -30,9 +42,13 @@ export class TurnTranscript {
   }
 
   emitStructuredPayload(payload: unknown): void {
+    const projectionPatch = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null
+    this.events.push({ kind: 'structured_payload', projectionPatch })
     this.emitOutput(serializeToolExecutionOutput(createToolExecutionOutput('', {
-      projectionPatch: payload && typeof payload === 'object' ? payload as Record<string, unknown> : null,
-    })), 'tool_result')
+      projectionPatch,
+    })), 'tool_result', {
+      projectionPatch,
+    })
   }
 
   emitStatus(status: string): void {

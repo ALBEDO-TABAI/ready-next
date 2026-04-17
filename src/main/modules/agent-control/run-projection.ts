@@ -6,7 +6,7 @@ import type {
   ScopeRunTaskStep,
 } from './types'
 import { logAgentMetric } from './metrics'
-import type { RunProjectionPatch } from './run-contracts'
+import type { ProjectionTruthSnapshot, RunProjectionPatch } from './run-contracts'
 
 function browserStepTitle(id: string): string {
   const titles: Record<string, string> = {
@@ -31,6 +31,25 @@ function skillStepStatus(value: string): ScopeRunTaskStep['status'] {
   return 'pending'
 }
 
+function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): RunProjectionPatch {
+  let patch: Record<string, unknown> | null = null
+  for (const event of projectionTruth?.transcriptEvents || []) {
+    if (event.kind !== 'structured_payload' || !event.projectionPatch) continue
+    patch = {
+      ...(patch || {}),
+      ...event.projectionPatch,
+    }
+  }
+  if (projectionTruth?.projectionPatch) {
+    patch = {
+      ...(patch || {}),
+      ...projectionTruth.projectionPatch,
+    }
+  }
+  if (!patch) return {}
+  return patch as RunProjectionPatch
+}
+
 export class RunProjection {
   constructor(private readonly deps: {
     getScope: (scopeId: string) => ConversationScope | null
@@ -39,10 +58,11 @@ export class RunProjection {
     toChannelKey: (scope: ConversationScope) => string
   }) {}
 
-  recordEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
+  recordEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
     const scope = this.deps.getScope(payload.scopeId)
     if (!scope) return null
     const previous = this.deps.getPrevious(payload.scopeId)
+    const truthPatch = readProjectionTruthPatch(projectionTruth)
     const derivedTask = this.deriveTaskSummaryPatch(previous, payload)
     const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
     const summary: ScopeRunSummary = {
@@ -57,16 +77,16 @@ export class RunProjection {
       taskId: payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null,
       parentTaskId: payload.parentTaskId ?? previous?.parentTaskId ?? null,
       parentStepId: payload.parentStepId ?? previous?.parentStepId ?? null,
-      taskTitle: payload.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
-      taskSummary: payload.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
+      taskTitle: payload.taskTitle ?? truthPatch.taskTitle ?? derivedTask.taskTitle ?? previous?.taskTitle ?? null,
+      taskSummary: payload.taskSummary ?? truthPatch.taskSummary ?? derivedTask.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
       taskType: payload.taskType ?? previous?.taskType,
       interactionState: payload.interactionState ?? previous?.interactionState,
-      steps: payload.steps ?? derivedTask.steps ?? previous?.steps ?? [],
-      currentStepId: payload.currentStepId ?? derivedTask.currentStepId ?? previous?.currentStepId ?? null,
-      waitingFor: payload.waitingFor ?? derivedTask.waitingFor ?? previous?.waitingFor ?? 'none',
-      resumableActions: payload.resumableActions ?? derivedTask.resumableActions ?? previous?.resumableActions ?? [],
+      steps: payload.steps ?? truthPatch.steps ?? derivedTask.steps ?? previous?.steps ?? [],
+      currentStepId: payload.currentStepId ?? truthPatch.currentStepId ?? derivedTask.currentStepId ?? previous?.currentStepId ?? null,
+      waitingFor: payload.waitingFor ?? truthPatch.waitingFor ?? derivedTask.waitingFor ?? previous?.waitingFor ?? 'none',
+      resumableActions: payload.resumableActions ?? truthPatch.resumableActions ?? derivedTask.resumableActions ?? previous?.resumableActions ?? [],
       recentArtifacts,
-      taskContinuation: payload.taskContinuation ?? derivedTask.taskContinuation ?? previous?.taskContinuation ?? null,
+      taskContinuation: payload.taskContinuation ?? truthPatch.taskContinuation ?? derivedTask.taskContinuation ?? previous?.taskContinuation ?? null,
       memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
       executionDiagnostics: payload.executionDiagnostics ?? previous?.executionDiagnostics ?? null,
       budgetUsagePercent:
@@ -101,7 +121,7 @@ export class RunProjection {
         ?? previous?.taskProjectionId
         ?? payload.runId
         ?? null,
-      blockedReason: payload.blockedReason ?? derivedTask.blockedReason ?? previous?.blockedReason ?? null,
+      blockedReason: payload.blockedReason ?? truthPatch.blockedReason ?? derivedTask.blockedReason ?? previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
       updatedAt: payload.timestamp,
     }

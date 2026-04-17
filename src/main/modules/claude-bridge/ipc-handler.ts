@@ -926,32 +926,26 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  // Forward Claude SDK orchestrator events to renderer
-  const parseStructuredScopeProjection = (text: string): Record<string, unknown> | null => {
-    try {
-      const parsed = JSON.parse(String(text || ''))
-      if (!parsed || typeof parsed !== 'object') return null
-      const module = (parsed as Record<string, unknown>).module
-      if (module !== 'browser' && module !== 'document' && module !== 'design' && module !== 'skill') return null
-      return parsed as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-
   orchestrator.on('output', (data) => {
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:stream', data)
       if (data.sessionId) {
         const timestamp = new Date().toISOString()
         if (data.type === 'tool_use' || data.type === 'tool_result') {
-          const structured = data.type === 'tool_result' ? parseStructuredScopeProjection(data.chunk || '') : null
+          const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
+            ? data.projectionPatch as Record<string, unknown>
+            : null
           const toolText = typeof structured?.message === 'string' ? structured.message : (data.chunk || '')
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
             agent: data.agent,
             runId: data.runId,
+            taskId: typeof data.taskId === 'string'
+              ? data.taskId
+              : structured?.taskContinuation && typeof structured.taskContinuation === 'object' && typeof (structured.taskContinuation as Record<string, unknown>).taskId === 'string'
+                ? (structured.taskContinuation as Record<string, unknown>).taskId as string
+                : undefined,
             phase: 'tool_running',
             latestText: toolText,
             module: structured?.module === 'browser' || structured?.module === 'document' || structured?.module === 'design' || structured?.module === 'skill'
@@ -974,7 +968,15 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             },
             timestamp,
           } as const
-          runtime?.recordScopeRunEvent(payload)
+          runtime?.recordScopeRunEvent(
+            payload,
+            structured
+              ? {
+                projectionPatch: structured,
+                transcriptEvents: [{ kind: 'structured_payload', projectionPatch: structured }],
+              }
+              : null,
+          )
           mainWindow.webContents.send('agent:scopeRunEvent', payload)
         } else if (data.type === 'done') {
           const payload = {

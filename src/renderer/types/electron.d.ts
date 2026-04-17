@@ -418,6 +418,7 @@ interface ScopeRunSummaryData {
   channelKey: string
   threadKey: string
   phase: ScopeRunEventData['phase']
+  taskId?: string | null
   taskTitle?: string | null
   taskSummary?: string | null
   steps?: ScopeRunTaskStepData[]

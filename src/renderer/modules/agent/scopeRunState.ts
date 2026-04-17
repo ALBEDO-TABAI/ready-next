@@ -773,6 +773,7 @@ export function createEmptyScopeRunState(params: {
 export function deriveScopeRunStatePatch(
   event: {
     phase: ScopeRunState['phase']
+    module?: AgentModuleKind | string | null
     latestText?: string
     taskTitle?: string | null
     taskSummary?: string | null
@@ -801,8 +802,8 @@ export function deriveScopeRunStatePatch(
         ? parseStructuredToolPayload(event.latestText)
         : null
   const structuredModule = toAgentModule(structuredPayload?.module)
-  const artifactInputs = Array.isArray(structuredPayload?.artifactRefs)
-    ? (structuredPayload.artifactRefs as Array<Record<string, unknown>>)
+  const artifactInputs = Array.isArray(event.recentArtifacts)
+    ? event.recentArtifacts
     : []
   const structuredArtifacts = artifactInputs
     .map((item) =>
@@ -825,78 +826,29 @@ export function deriveScopeRunStatePatch(
     .filter(Boolean) as AgentTriggerHit[]
   const structuredBudget = parseContextBudget(structuredPayload?.contextBudget)
   const structuredTaskTitle =
-    typeof structuredPayload?.taskTitle === 'string'
-      ? structuredPayload.taskTitle
-      : typeof event.taskTitle === 'string'
-        ? event.taskTitle
-        : null
+    typeof event.taskTitle === 'string'
+      ? event.taskTitle
+      : null
   const structuredTaskSummary =
-    typeof structuredPayload?.taskSummary === 'string'
-      ? structuredPayload.taskSummary
-      : typeof event.taskSummary === 'string'
-        ? event.taskSummary
-        : null
+    typeof event.taskSummary === 'string'
+      ? event.taskSummary
+      : null
   const structuredSteps = normalizeTaskSteps(
-    Array.isArray(structuredPayload?.steps) ? structuredPayload.steps : event.steps,
+    event.steps,
     event.timestamp
   )
-  const structuredWaitingFor = normalizeWaitingFor(
-    structuredPayload?.waitingFor !== undefined ? structuredPayload.waitingFor : event.waitingFor
-  )
-  const structuredResumableActions = normalizeResumableActions(
-    Array.isArray(structuredPayload?.resumableActions)
-      ? structuredPayload.resumableActions
-      : event.resumableActions
-  )
-  const structuredRecentArtifacts = Array.isArray(structuredPayload?.recentArtifacts)
-    ? ((structuredPayload.recentArtifacts as Array<Record<string, unknown>>)
-        .map((item) =>
-          createAgentArtifact(
-            item,
-            structuredModule || previous?.module || 'system',
-            previous?.requestId || null
-          )
-        )
-        .filter(Boolean) as AgentArtifact[])
-    : Array.isArray(event.recentArtifacts)
-      ? (event.recentArtifacts
-          .map((item) =>
-            createAgentArtifact(
-              item as Record<string, unknown>,
-              structuredModule || previous?.module || 'system',
-              previous?.requestId || null
-            )
-          )
-          .filter(Boolean) as AgentArtifact[])
-      : []
-  const structuredContinuation = parseTaskContinuation(
-    structuredPayload?.taskContinuation || event.taskContinuation
-  )
-  const structuredMemoryCapture = parseMemoryCapture(
-    structuredPayload?.memoryCapture || event.memoryCapture
-  )
-  const structuredExecutionDiagnostics = parseExecutionDiagnostics(
-    structuredPayload?.executionDiagnostics || event.executionDiagnostics
-  )
-  const browserTaskPatch =
-    event.toolEvent?.kind === 'result' && event.toolEvent.text
-      ? parseBrowserWorkflowTask(event.toolEvent.text, previous, event.timestamp)
-      : null
-  const skillTaskPatch =
-    event.toolEvent?.kind === 'result' && event.toolEvent.text
-      ? parseSkillExecutionTaskFromText(event.toolEvent.text, previous, event.timestamp)
-      : event.latestText
-        ? parseSkillExecutionTaskFromText(event.latestText, previous, event.timestamp)
-        : null
+  const structuredWaitingFor = event.waitingFor ? normalizeWaitingFor(event.waitingFor) : null
+  const structuredResumableActions = event.resumableActions
+    ? normalizeResumableActions(event.resumableActions)
+    : []
+  const structuredRecentArtifacts = structuredArtifacts
+  const structuredContinuation = parseTaskContinuation(event.taskContinuation)
+  const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
+  const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
-    latestText:
-      (typeof structuredPayload?.message === 'string'
-        ? structuredPayload.message
-        : event.latestText) ??
-      previous?.latestText ??
-      null,
-    module: structuredModule || previous?.module || null,
+    latestText: event.latestText ?? previous?.latestText ?? null,
+    module: toAgentModule(event.module) || structuredModule || previous?.module || null,
     intent:
       typeof structuredPayload?.intent === 'string'
         ? structuredPayload.intent
@@ -926,9 +878,7 @@ export function deriveScopeRunStatePatch(
         ? event.timestamp
         : previous?.lastEvidenceAt || null,
     blockedReason:
-      typeof structuredPayload?.blockedReason === 'string'
-        ? structuredPayload.blockedReason
-        : (event.blockedReason ?? previous?.blockedReason ?? null),
+      event.blockedReason ?? previous?.blockedReason ?? null,
     controllerId: previous?.controllerId ?? null,
     ownerTabId: previous?.ownerTabId ?? null,
     checkpointExpiresAt: previous?.checkpointExpiresAt ?? null,
@@ -978,46 +928,26 @@ export function deriveScopeRunStatePatch(
         ? structuredPayload.lastAcceptedScreenshot
         : previous?.lastAcceptedScreenshot || null,
     taskTitle:
-      structuredTaskTitle ||
-      skillTaskPatch?.taskTitle ||
-      browserTaskPatch?.taskTitle ||
-      previous?.taskTitle ||
-      null,
+      structuredTaskTitle ?? null,
     taskSummary:
-      structuredTaskSummary ||
-      skillTaskPatch?.taskSummary ||
-      browserTaskPatch?.taskSummary ||
-      previous?.taskSummary ||
-      null,
+      structuredTaskSummary ?? null,
     steps: mergeTaskSteps(
       previous?.steps,
       structuredSteps.length > 0
         ? structuredSteps
-        : skillTaskPatch?.steps || browserTaskPatch?.steps
+        : undefined
     ),
     currentStepId:
-      (typeof structuredPayload?.currentStepId === 'string'
-        ? structuredPayload.currentStepId
-        : typeof event.currentStepId === 'string'
-          ? event.currentStepId
-          : null) ||
-      skillTaskPatch?.currentStepId ||
-      browserTaskPatch?.currentStepId ||
+      (typeof event.currentStepId === 'string'
+        ? event.currentStepId
+        : null) ||
       previous?.currentStepId ||
       null,
-    waitingFor:
-      structuredWaitingFor !== 'none'
-        ? structuredWaitingFor
-        : skillTaskPatch?.waitingFor ||
-          browserTaskPatch?.waitingFor ||
-          previous?.waitingFor ||
-          'none',
+    waitingFor: structuredWaitingFor || previous?.waitingFor || 'none',
     resumableActions:
       structuredResumableActions.length > 0
         ? structuredResumableActions
-        : skillTaskPatch?.resumableActions ||
-          browserTaskPatch?.resumableActions ||
-          previous?.resumableActions ||
+        : previous?.resumableActions ||
           [],
     recentArtifacts: buildRecentArtifacts(
       mergeArtifacts(
@@ -1027,7 +957,6 @@ export function deriveScopeRunStatePatch(
     ),
     taskContinuation:
       structuredContinuation ||
-      skillTaskPatch?.taskContinuation ||
       previous?.taskContinuation ||
       null,
     memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,

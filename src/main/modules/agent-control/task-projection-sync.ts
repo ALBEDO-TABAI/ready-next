@@ -1,6 +1,32 @@
-import type { TaskInteractionState, TaskProjectionRecord, TaskProjectionStore, TaskStep } from './run-contracts'
+import type {
+  ProjectionTruthSnapshot,
+  TaskInteractionState,
+  TaskProjectionRecord,
+  TaskProjectionStore,
+  TaskStep,
+} from './run-contracts'
+import { buildContinuationStateFromProjection } from './continuation-state'
+import { clearContinuationState, rememberContinuationState } from './session-continuity'
 import type { ScopeRunEventPayload, ScopeRunSummary } from './types'
 import type { RecoveryRecord } from './run-contracts'
+
+function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): Record<string, unknown> | null {
+  let patch: Record<string, unknown> | null = null
+  for (const event of projectionTruth?.transcriptEvents || []) {
+    if (event.kind !== 'structured_payload' || !event.projectionPatch) continue
+    patch = {
+      ...(patch || {}),
+      ...event.projectionPatch,
+    }
+  }
+  if (projectionTruth?.projectionPatch) {
+    patch = {
+      ...(patch || {}),
+      ...projectionTruth.projectionPatch,
+    }
+  }
+  return patch
+}
 
 function resolveTaskId(summary: ScopeRunSummary, payload: ScopeRunEventPayload): string | null {
   return summary.taskId || payload.taskId || summary.taskProjectionId || payload.taskProjectionId || payload.runId || null
@@ -206,35 +232,90 @@ export function buildTaskProjectionRecord(
   summary: ScopeRunSummary,
   payload: ScopeRunEventPayload,
   previous?: TaskProjectionRecord | null,
+  projectionTruth?: ProjectionTruthSnapshot | null,
 ): TaskProjectionRecord | null {
   const taskId = resolveTaskId(summary, payload)
   if (!taskId) return null
+  const truthPatch = readProjectionTruthPatch(projectionTruth)
+  const effectiveSummary: ScopeRunSummary = {
+    ...summary,
+    taskType: (
+      truthPatch?.taskType === 'direct_answer'
+      || truthPatch?.taskType === 'short_task'
+      || truthPatch?.taskType === 'multi_step_task'
+      || truthPatch?.taskType === 'media_task'
+      || truthPatch?.taskType === 'continuation'
+    )
+      ? truthPatch.taskType
+      : summary.taskType,
+    taskTitle: typeof truthPatch?.taskTitle === 'string' ? truthPatch.taskTitle : summary.taskTitle,
+    taskSummary: typeof truthPatch?.taskSummary === 'string' ? truthPatch.taskSummary : summary.taskSummary,
+    interactionState: (
+      truthPatch?.interactionState === 'running'
+      || truthPatch?.interactionState === 'awaiting_clarification'
+      || truthPatch?.interactionState === 'awaiting_confirmation'
+      || truthPatch?.interactionState === 'human_takeover'
+      || truthPatch?.interactionState === 'suspended'
+      || truthPatch?.interactionState === 'resuming'
+    )
+      ? truthPatch.interactionState
+      : summary.interactionState,
+    steps: Array.isArray(truthPatch?.steps) ? truthPatch.steps as ScopeRunSummary['steps'] : summary.steps,
+    currentStepId: typeof truthPatch?.currentStepId === 'string' ? truthPatch.currentStepId : summary.currentStepId,
+    waitingFor: (
+      truthPatch?.waitingFor === 'input'
+      || truthPatch?.waitingFor === 'confirmation'
+      || truthPatch?.waitingFor === 'agent_result'
+      || truthPatch?.waitingFor === 'background'
+      || truthPatch?.waitingFor === 'none'
+    )
+      ? truthPatch.waitingFor
+      : summary.waitingFor,
+    resumableActions: Array.isArray(truthPatch?.resumableActions)
+      ? truthPatch.resumableActions as ScopeRunSummary['resumableActions']
+      : summary.resumableActions,
+    taskContinuation: truthPatch?.taskContinuation && typeof truthPatch.taskContinuation === 'object'
+      ? truthPatch.taskContinuation as ScopeRunSummary['taskContinuation']
+      : summary.taskContinuation,
+    blockedReason: typeof truthPatch?.blockedReason === 'string'
+      ? truthPatch.blockedReason
+      : truthPatch?.blockedReason === null
+        ? null
+        : summary.blockedReason,
+    recentArtifacts: Array.isArray(truthPatch?.recentArtifacts)
+      ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
+      : summary.recentArtifacts,
+  }
 
   return {
     taskId,
-    scopeId: summary.scopeId,
+    scopeId: effectiveSummary.scopeId,
     runId: payload.runId || previous?.runId || taskId,
-    parentTaskId: summary.parentTaskId ?? payload.parentTaskId ?? previous?.parentTaskId ?? null,
-    parentStepId: summary.parentStepId ?? payload.parentStepId ?? previous?.parentStepId ?? null,
-    taskType: summary.taskType || 'short_task',
-    module: payload.module || previous?.module || 'system',
-    taskTitle: summary.taskTitle ?? previous?.taskTitle ?? null,
-    taskSummary: summary.taskSummary ?? previous?.taskSummary ?? null,
-    status: resolveStatus(summary),
-    interactionState: resolveInteractionState(summary),
-    steps: mapSteps(summary, previous),
-    currentStepId: summary.currentStepId || null,
-    budget: resolveTaskBudget(summary),
-    budgetUsagePercent: summary.budgetUsagePercent ?? summary.executionDiagnostics?.budgetUsagePercent ?? null,
-    budgetWarningLevel: summary.budgetWarningLevel ?? summary.executionDiagnostics?.budgetWarningLevel ?? null,
-    recoveryHistory: mapRecoveryHistory(summary),
-    degradationReason: summary.degradationReason ?? summary.executionDiagnostics?.degradationReason ?? null,
-    blockedReason: summary.blockedReason || null,
-    resumableActions: summary.resumableActions || [],
-    continuationRef: summary.taskContinuation || null,
-    recentArtifacts: summary.recentArtifacts || previous?.recentArtifacts || [],
+    parentTaskId: effectiveSummary.parentTaskId ?? payload.parentTaskId ?? previous?.parentTaskId ?? null,
+    parentStepId: effectiveSummary.parentStepId ?? payload.parentStepId ?? previous?.parentStepId ?? null,
+    taskType: effectiveSummary.taskType || 'short_task',
+    module:
+      (typeof truthPatch?.module === 'string' ? truthPatch.module : null)
+      || payload.module
+      || previous?.module
+      || 'system',
+    taskTitle: effectiveSummary.taskTitle ?? previous?.taskTitle ?? null,
+    taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
+    status: resolveStatus(effectiveSummary),
+    interactionState: resolveInteractionState(effectiveSummary),
+    steps: mapSteps(effectiveSummary, previous),
+    currentStepId: effectiveSummary.currentStepId || null,
+    budget: resolveTaskBudget(effectiveSummary),
+    budgetUsagePercent: effectiveSummary.budgetUsagePercent ?? effectiveSummary.executionDiagnostics?.budgetUsagePercent ?? null,
+    budgetWarningLevel: effectiveSummary.budgetWarningLevel ?? effectiveSummary.executionDiagnostics?.budgetWarningLevel ?? null,
+    recoveryHistory: mapRecoveryHistory(effectiveSummary),
+    degradationReason: effectiveSummary.degradationReason ?? effectiveSummary.executionDiagnostics?.degradationReason ?? null,
+    blockedReason: effectiveSummary.blockedReason || null,
+    resumableActions: effectiveSummary.resumableActions || [],
+    continuationRef: effectiveSummary.taskContinuation || null,
+    recentArtifacts: effectiveSummary.recentArtifacts || previous?.recentArtifacts || [],
     createdAt: previous?.createdAt || payload.timestamp,
-    updatedAt: summary.updatedAt,
+    updatedAt: effectiveSummary.updatedAt,
   }
 }
 
@@ -242,17 +323,28 @@ export async function syncTaskProjection(
   store: TaskProjectionStore,
   summary: ScopeRunSummary,
   payload: ScopeRunEventPayload,
+  projectionTruth?: ProjectionTruthSnapshot | null,
 ): Promise<TaskProjectionRecord | null> {
   const taskId = resolveTaskId(summary, payload)
   if (!taskId) return null
   const previous = await store.get(taskId)
-  const next = buildTaskProjectionRecord(summary, payload, previous)
+  const next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)
   if (!next) return null
 
   if (previous) {
     await store.update(taskId, next)
   } else {
     await store.create(next)
+  }
+  if (
+    next.status === 'blocked'
+    || next.status === 'running'
+    || next.interactionState === 'resuming'
+    || next.taskType === 'continuation'
+  ) {
+    rememberContinuationState(next.scopeId, buildContinuationStateFromProjection(next))
+  } else {
+    clearContinuationState(next.scopeId)
   }
   await syncParentProjectionFromChild(store, next)
   return next

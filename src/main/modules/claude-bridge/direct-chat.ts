@@ -11,12 +11,18 @@ import { AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabi
 import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import { BrowserDomainOrchestrator } from '../agent-control/browser-domain-orchestrator'
+import { BrowserDomainAdapter } from '../agent-control/browser-domain-adapter'
 import { BrowserTaskPlanner } from '../agent-control/browser-task-planner'
+import type { DomainAdapter } from '../agent-control/domain-adapter'
 import { DesignToolLoopOrchestrator } from '../agent-control/design-tool-loop-orchestrator'
+import { FeishuDomainAdapter } from '../agent-control/feishu-domain-adapter'
 import { DocumentDomainOrchestrator } from '../agent-control/document-domain-orchestrator'
+import { DocumentDomainAdapter } from '../agent-control/document-domain-adapter'
 import { DocumentToolLoopOrchestrator } from '../agent-control/document-tool-loop-orchestrator'
 import { ExecutionLoopOrchestrator } from '../agent-control/execution-loop-orchestrator'
 import { HostCapabilityDispatcher } from '../agent-control/host-capability-dispatcher'
+import { CalendarDomainAdapter } from '../agent-control/calendar-domain-adapter'
+import { RSSDomainAdapter } from '../agent-control/rss-domain-adapter'
 import {
   DocumentTaskPipeline,
   type ActiveDocumentSnapshot,
@@ -30,7 +36,14 @@ import { DocumentInsightCache } from '../agent-control/document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from '../agent-control/document-source-materials'
 import { buildDocumentTaskStepCacheKey } from '../agent-control/document-task-cache-key'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from '../agent-control/document-task-plan'
+import {
+  buildContinuationStateFromProjection,
+  parseContinuationControlText,
+  selectContinuationProjection,
+  type ContinuationState,
+} from '../agent-control/continuation-state'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
+import { SkillDomainAdapter } from '../agent-control/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
 import { TurnEngine } from '../agent-control/turn-engine'
@@ -53,6 +66,7 @@ import {
   getBudgetUsagePercent,
   getRemainingToolCallBudget,
   rebindTaskBudgetRuntime,
+  restoreContinuationTaskBudgetRuntime,
 } from '../agent-control/run-budget-policy'
 import {
   buildTextToolBridgeCorrectionMessage,
@@ -81,10 +95,12 @@ import type {
   BrowserTaskPlanContinuity,
 } from '../../../shared/browser-agent-task'
 import {
+  getContinuationState,
   domainsLikelyMatch,
   getBrowserWorkflowState,
   getLatestSkillRun,
   getRecentBrowserActions,
+  rememberContinuationState,
   type BrowserActionRecord,
   type BrowserWorkflowState,
   type SkillRunRecord,
@@ -122,11 +138,6 @@ import {
   initializeTaskStepProgress,
 } from '../agent-control/task-step-runtime'
 import { resolveTaskType } from '../agent-control/task-type-resolver'
-import {
-  buildExecutorRuntimePolicy,
-  resolveTaskExecutionRoute,
-  selectExecutorAllowedToolNames,
-} from '../agent-control/task-execution-router'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
@@ -272,6 +283,7 @@ export class DirectChatEngine extends EventEmitter {
   private readonly documentDomainOrchestrator: DocumentDomainOrchestrator
   private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator
   private readonly hostCapabilityDispatcher: HostCapabilityDispatcher
+  private readonly domainAdapters: DomainAdapter[]
   private readonly turnEngine: TurnEngine
   private sidecarManager: SidecarManager | null = null
   private runtime: import('../agent-control/runtime').AgentControlRuntime | null = null
@@ -374,9 +386,18 @@ export class DirectChatEngine extends EventEmitter {
     this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log })
     this.hostCapabilityDispatcher = new HostCapabilityDispatcher({
       executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
-      tryDeterministicSectionFormatFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionFormatFlow(params),
-      tryDeterministicSectionRewriteFlow: (params) => this.documentDomainOrchestrator.tryDeterministicSectionRewriteFlow(params),
     })
+    this.domainAdapters = [
+      new BrowserDomainAdapter(this.browserDomainOrchestrator as never),
+      new DocumentDomainAdapter({
+        orchestrator: this.documentDomainOrchestrator as never,
+        toolLoopOrchestrator: this.documentToolLoopOrchestrator as never,
+      }),
+      new SkillDomainAdapter(),
+      new RSSDomainAdapter(),
+      new CalendarDomainAdapter(),
+      new FeishuDomainAdapter(),
+    ]
     this.turnEngine = new TurnEngine()
   }
 
@@ -605,6 +626,7 @@ export class DirectChatEngine extends EventEmitter {
       budget?: RunBudgetSeed
       budgetState?: RunBudgetUsage
       taskBudgetRuntime?: TaskBudgetRuntime
+      continuationState?: ContinuationState | null
     },
   ): Promise<ExecutionTurnResult> {
     const contentPreview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} blocks]`
@@ -615,6 +637,28 @@ export class DirectChatEngine extends EventEmitter {
     }
     const session = this.sessions.get(name)!
     const taskId = executionOptions?.taskId || `task-${runId}`
+    const sessionId = this.extractSessionIdFromInternalName(name)
+    const parsedContinuationControl = typeof content === 'string'
+      ? parseContinuationControlText(content)
+      : null
+    const resolvedContinuationState = executionOptions?.continuationState
+      || (
+        typeof content === 'string'
+          ? this.resolveContinuationState(sessionId, content, {
+            parsedControl: parsedContinuationControl || undefined,
+            explicitTaskId: parsedContinuationControl?.explicitTaskId || null,
+            allowImplicitContinuation: parsedContinuationControl?.shouldResolveContinuation,
+          })
+          : null
+      )
+    const normalizedContent: string | MultimodalBlock[] =
+      typeof content === 'string' && parsedContinuationControl?.hasControlLines
+        ? parsedContinuationControl.sanitizedUserText
+        : content
+    const normalizedRequestEnvelope =
+      typeof normalizedContent === 'string' && parsedContinuationControl?.hasControlLines
+        ? buildRequestEnvelope({ userText: normalizedContent })
+        : executionOptions?.requestEnvelope
     if (session.abortController) {
       session.generation += 1
       session.abortController.abort()
@@ -629,9 +673,22 @@ export class DirectChatEngine extends EventEmitter {
       return !!latest && latest.generation === runGeneration && latest.activeRunId === runId
     }
 
-    const emitOutput = (chunk: string, type: string): void => {
+    const emitOutput = (
+      chunk: string,
+      type: string,
+      options?: {
+        projectionPatch?: Record<string, unknown> | null
+      },
+    ): void => {
       if (!isCurrentRun()) return
-      this.emit('output', { agent: name, runId, chunk, type })
+      this.emit('output', {
+        agent: name,
+        runId,
+        taskId,
+        chunk,
+        type,
+        projectionPatch: options?.projectionPatch || null,
+      })
     }
     const emitStatus = (status: string): void => {
       if (!isCurrentRun()) return
@@ -673,13 +730,13 @@ export class DirectChatEngine extends EventEmitter {
     const isKimiCoding = !!capabilities?.isKimiCoding
     const useAnthropicProtocol = capabilities?.agentProtocol === 'anthropic'
     const supportsVideoBlock = capabilities?.supportsNativeVideo ?? (!normalizedBaseUrl.includes('/coding'))
-    const hasRawVideoInIncoming = Array.isArray(content) && content.some((block) => block.type === 'video')
+    const hasRawVideoInIncoming = Array.isArray(normalizedContent) && normalizedContent.some((block) => block.type === 'video')
 
     // Build message content — support multimodal blocks
-    if (Array.isArray(content)) {
+    if (Array.isArray(normalizedContent)) {
       // Convert MultimodalBlock[] to provider-internal format.
       const blocks: Array<Record<string, unknown>> = []
-      for (const b of content) {
+      for (const b of normalizedContent) {
         if (b.type === 'image') {
           blocks.push({ type: 'image', source: { type: 'base64', media_type: b.mimeType || 'image/png', data: b.base64 || '' } })
           continue
@@ -700,7 +757,7 @@ export class DirectChatEngine extends EventEmitter {
       log(`normalized multimodal blocks: text=${blocks.length - imageCount - videoCount}, image=${imageCount}, video=${videoCount}`)
       session.messages.push({ role: 'user', content: blocks })
     } else {
-      session.messages.push({ role: 'user', content })
+      session.messages.push({ role: 'user', content: normalizedContent })
     }
 
     const abortController = new AbortController()
@@ -719,7 +776,6 @@ export class DirectChatEngine extends EventEmitter {
       const provider = capabilities?.provider || getProviderDef(config.provider, normalizedBaseUrl)
       const baseUrl = normalizedBaseUrl
       const isKimi = isKimiCoding || (!useAnthropicProtocol && (baseUrl.includes('kimi') || baseUrl.includes('moonshot')))
-      const sessionId = this.extractSessionIdFromInternalName(name)
       const publicAgentName = name.includes('::') ? name.slice(0, name.indexOf('::')) : name
       const requestModuleToolAction = this.rendererToolActionRequester
         ? (tool: string, args: Record<string, unknown>) => this.rendererToolActionRequester!({
@@ -737,12 +793,13 @@ export class DirectChatEngine extends EventEmitter {
         agentName: name,
         sessionId,
         session,
-        content,
-        requestEnvelope: executionOptions?.requestEnvelope,
+        content: normalizedContent,
+        requestEnvelope: normalizedRequestEnvelope,
         intentClassification: executionOptions?.intentClassification,
         budget: executionOptions?.budget,
         budgetState: executionOptions?.budgetState,
         taskBudgetRuntime: executionOptions?.taskBudgetRuntime || null,
+        continuationState: resolvedContinuationState,
         abortSignal: abortController.signal,
         ensureNotAborted,
         emitters: {
@@ -854,6 +911,7 @@ export class DirectChatEngine extends EventEmitter {
       sessionHasVideoInputs: (messages: ChatMessage[]) => this.sessionHasVideoInputs(messages),
       maybeRunDocumentTaskPlan: async (raw: Record<string, unknown>) => this.maybeRunDocumentTaskPlanShortcut(raw as any),
       maybeRunDocumentWidgetPipeline: async (raw: Record<string, unknown>) => this.maybeRunDocumentWidgetPipelineShortcut(raw as any),
+      domainAdapters: this.domainAdapters,
       skillContextOrchestrator: this.skillContextOrchestrator,
       browserDomainOrchestrator: this.browserDomainOrchestrator,
       documentToolLoopOrchestrator: this.documentToolLoopOrchestrator,
@@ -1316,20 +1374,96 @@ export class DirectChatEngine extends EventEmitter {
   ): TaskProjectionRecord | null {
     const runtime = this.runtime
     if (!runtime || !sessionId) return null
-    const explicitTaskId = options?.explicitTaskId ?? this.extractTaskIdFromText(userText)
-    if (explicitTaskId) {
-      return runtime.getTaskProjection(explicitTaskId)
+    const projections = runtime.listTaskProjections(sessionId)
+    return selectContinuationProjection({
+      projections,
+      userText,
+      explicitTaskId: options?.explicitTaskId ?? this.extractTaskIdFromText(userText),
+      allowImplicitContinuation: options?.allowImplicitContinuation,
+    })
+  }
+
+  private resolveContinuationState(
+    sessionId: string | undefined,
+    userText: string,
+    options?: {
+      parsedControl?: ReturnType<typeof parseContinuationControlText>
+      explicitTaskId?: string | null
+      allowImplicitContinuation?: boolean
+    },
+  ): ContinuationState | null {
+    const parsedControl = options?.parsedControl || parseContinuationControlText(userText)
+    const projection = this.resolveContinuationProjection(sessionId, userText, {
+      explicitTaskId: options?.explicitTaskId ?? parsedControl.explicitTaskId,
+      allowImplicitContinuation: options?.allowImplicitContinuation ?? parsedControl.shouldResolveContinuation,
+    })
+
+    if (projection) {
+      const baseState = buildContinuationStateFromProjection(projection, {
+        executionId: parsedControl.executionId,
+        stepId: parsedControl.stepId,
+        blockedReason: parsedControl.blockedReason ?? projection.blockedReason ?? null,
+      })
+      const restoredBudget = restoreContinuationTaskBudgetRuntime({
+        taskType: 'continuation',
+        continuationState: baseState,
+      })
+      const resolvedState: ContinuationState = {
+        ...baseState,
+        budgetRuntime: restoredBudget.runtime || null,
+        restoreDiagnostics: restoredBudget.diagnostics,
+      }
+      if (sessionId) {
+        rememberContinuationState(sessionId, resolvedState)
+      }
+      return resolvedState
     }
-    if (!options?.allowImplicitContinuation) {
+
+    const persistedState = getContinuationState(sessionId)
+    if (!persistedState) return null
+    const explicitTaskId = options?.explicitTaskId ?? parsedControl.explicitTaskId
+    if (explicitTaskId && persistedState.taskId !== explicitTaskId) {
       return null
     }
-    const projections = runtime.listTaskProjections(sessionId)
-    return projections.find((item) =>
-      item.status === 'blocked'
-      || item.status === 'running'
-      || item.interactionState === 'resuming'
-      || item.taskType === 'continuation',
-    ) || projections[0] || null
+    if (!(options?.allowImplicitContinuation ?? parsedControl.shouldResolveContinuation)) {
+      return null
+    }
+
+    const restoredBudget = restoreContinuationTaskBudgetRuntime({
+      taskType: 'continuation',
+      continuationState: {
+        ...persistedState,
+        currentStepId: parsedControl.stepId || persistedState.currentStepId || null,
+        blockedReason: parsedControl.blockedReason ?? persistedState.blockedReason ?? null,
+        continuationRef: persistedState.continuationRef
+          ? {
+            ...persistedState.continuationRef,
+            taskId: persistedState.taskId,
+            executionId: parsedControl.executionId || persistedState.continuationRef.executionId,
+            stepId: parsedControl.stepId || persistedState.continuationRef.stepId || persistedState.currentStepId || null,
+          }
+          : persistedState.continuationRef,
+      },
+    })
+    const resolvedState: ContinuationState = {
+      ...persistedState,
+      currentStepId: parsedControl.stepId || persistedState.currentStepId || null,
+      blockedReason: parsedControl.blockedReason ?? persistedState.blockedReason ?? null,
+      continuationRef: persistedState.continuationRef
+        ? {
+          ...persistedState.continuationRef,
+          taskId: persistedState.taskId,
+          executionId: parsedControl.executionId || persistedState.continuationRef.executionId,
+          stepId: parsedControl.stepId || persistedState.continuationRef.stepId || persistedState.currentStepId || null,
+        }
+        : persistedState.continuationRef,
+      budgetRuntime: restoredBudget.runtime || persistedState.budgetRuntime || null,
+      restoreDiagnostics: restoredBudget.diagnostics,
+    }
+    if (sessionId) {
+      rememberContinuationState(sessionId, resolvedState)
+    }
+    return resolvedState
   }
 
   private extractPrimaryUserInstruction(raw: string): string {

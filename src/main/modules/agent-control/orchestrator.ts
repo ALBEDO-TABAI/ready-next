@@ -7,6 +7,7 @@ import type { AgentControlRuntime } from './runtime'
 import type { ExecutionHostRequest, ExecutionHostResult } from './run-contracts'
 import type { IntentClassification } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
+import type { ContinuationState } from './continuation-state'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
@@ -161,15 +162,17 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
+    continuationState?: ContinuationState | null,
   ): Promise<{
     success: boolean
     error?: string
     taskId?: ExecutionHostResult['taskId']
     taskType?: ExecutionHostResult['taskType']
     interactionState?: ExecutionHostResult['interactionState']
-      taskProjectionId?: ExecutionHostResult['taskProjectionId']
-      executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
-    }> {
+    taskProjectionId?: ExecutionHostResult['taskProjectionId']
+    executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
+    projectionTruth?: ExecutionHostResult['projectionTruth']
+  }> {
     const effectiveRequestId = requestId || randomUUID()
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     const taskKey = this.toTaskKey(agent, sessionId)
@@ -187,6 +190,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
         budget,
         budgetState,
         taskBudgetRuntime,
+        continuationState,
       })
       if (!result.success) {
         this.sessions.setState(taskKey, 'failed', result.error)
@@ -212,6 +216,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
+    continuationState?: ContinuationState | null,
   ): Promise<SendAndCollectResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -228,6 +233,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     let taskType: ExecutionHostResult['taskType']
     let interactionState: ExecutionHostResult['interactionState']
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
+    let projectionTruth: ExecutionHostResult['projectionTruth']
     void this.send(
       agent,
       message,
@@ -240,12 +246,14 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       budget,
       budgetState,
       taskBudgetRuntime,
+      continuationState,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       resolvedTaskId = result.taskId
       taskType = result.taskType
       interactionState = result.interactionState
       taskProjectionId = result.taskProjectionId
+      projectionTruth = result.projectionTruth
       if (!result.success) {
         collector.handleError({
           agent,
@@ -271,6 +279,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
         interactionState,
         taskProjectionId,
         executionDiagnostics,
+        projectionTruth,
       }
     } finally {
       while (cleanupFns.length > 0) {
@@ -292,6 +301,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       request.budget,
       request.budgetState,
       request.taskBudgetRuntime,
+      request.continuationState,
     )
     return {
       success: result.success,
@@ -306,6 +316,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       interactionState: result.interactionState,
       taskProjectionId: result.taskProjectionId,
       executionDiagnostics: result.executionDiagnostics || null,
+      projectionTruth: result.projectionTruth || null,
     }
   }
 

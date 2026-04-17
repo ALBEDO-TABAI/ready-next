@@ -1,7 +1,14 @@
 import { buildRequestEnvelope } from './request-envelope'
+import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
+import {
+  selectDomainAdapter,
+  type DomainAdapter,
+  type DomainAdapterApplyResult,
+  type DomainAdapterPrepareResult,
+} from './domain-adapter'
 import {
   applyRunBudgetHint,
   consumeIterationBudget,
@@ -12,16 +19,13 @@ import {
   getRemainingToolCallBudget,
   refundIterationBudget,
 } from './run-budget-policy'
-import {
-  buildExecutorRuntimePolicy,
-  resolveTaskExecutionRoute,
-  selectExecutorAllowedToolNames,
-} from './task-execution-router'
+import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskType } from './task-type-resolver'
 import { buildToolRuntimeContext } from './tool-runtime-context-builder'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
+  type ToolPolicy,
 } from './execution-tool-config'
 import {
   buildTextToolResultMessage,
@@ -48,6 +52,7 @@ import type {
   RunBudgetHint,
   StepBudgetState,
   TurnEngineRequest,
+  TurnEngineHost,
   TurnEngineSession,
   TurnEngineSessionMessage,
   TurnModelResponse,
@@ -55,46 +60,8 @@ import type {
   TurnToolBatchResult,
   TurnToolCall,
   TurnToolExecutionResult,
+  TurnTranscriptEvent,
 } from './run-contracts'
-
-interface BrowserDomainOrchestratorLike {
-  prepareBrowserExecution: (params: Record<string, unknown>) => Promise<{
-    browserDecision: { mode: string; reason: string; plan?: { steps?: Array<Record<string, unknown>>; targetUrl?: string; resources?: { links?: Array<{ url?: string }> } } }
-    browserContinuityInstruction: string | null
-    clarifyText: string | null
-    canUseDeterministicBrowserRunner: boolean
-    shouldInspectAmbiguousModeEntry: boolean
-  }>
-  resolveExecutionDispatch: (params: Record<string, unknown>) => {
-    kind: 'none' | 'clarify' | 'deterministic' | 'tool_loop'
-    continuityInstruction: string | null
-    responseText: string | null
-    toolLoopMessage: string | null
-    fallbackLog: string | null
-  }
-  runDeterministicExecution: (params: Record<string, unknown>) => Promise<{
-    handled: boolean
-    state: 'done' | 'failed' | 'cancelled' | 'partial'
-    message: string
-  }>
-  createToolLoopState: (decision: unknown) => {
-    isBrowserTask: boolean
-    steps: Array<unknown>
-    stepIndex: number
-  }
-  recordToolLoopProgress: (params: Record<string, unknown>) => {
-    state: {
-      isBrowserTask: boolean
-      steps: Array<unknown>
-      stepIndex: number
-    }
-    advancedStepIndex: number | null
-    checkpointMessage: string | null
-  }
-  buildToolLoopLimitMessage: (state: unknown) => string | null
-  getBudgetHint: (params: Record<string, unknown>) => RunBudgetHint | null
-  getRecommendedToolLoopIterations: (userText: string, decision: unknown, baseMaxToolIterations: number) => number
-}
 
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
@@ -102,24 +69,6 @@ interface SkillContextOrchestratorLike {
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
-}
-
-interface DocumentToolLoopOrchestratorLike {
-  createState: () => any
-  getBudgetHint: (params: Record<string, unknown>) => RunBudgetHint | null
-  handleNoToolCall: (params: Record<string, unknown>) => {
-    state: any
-    nextUserMessage: string | null
-    finalText: string | null
-    preserveAssistantText?: boolean
-  }
-  applyToolInspection: (state: any, inspection: unknown) => any
-  handleIterationResult: (params: Record<string, unknown>) => {
-    state: any
-    nextUserMessage: string | null
-    completionText: string | null
-  }
-  buildStructuredTaskPayload: (payload: Record<string, unknown>) => Record<string, unknown>
 }
 
 interface DesignToolLoopOrchestratorLike {
@@ -226,6 +175,29 @@ function applyRuntimeBudgetHint(runtime: NonNullable<ReturnType<TurnState['syncT
   return applyRunBudgetHint(runtime, hint) as NonNullable<ReturnType<TurnState['syncTaskBudgetRuntime']>>
 }
 
+function appendSessionMessages<TSession extends TurnEngineSession>(
+  session: TSession,
+  messages: TurnEngineSessionMessage[] | null | undefined,
+): void {
+  if (!messages || messages.length === 0) return
+  session.messages.push(...messages)
+}
+
+function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
+  let projectionPatch: Record<string, unknown> | null = null
+  for (const event of events) {
+    if (event.kind !== 'structured_payload' || !event.projectionPatch) continue
+    projectionPatch = {
+      ...(projectionPatch || {}),
+      ...event.projectionPatch,
+    }
+  }
+  return {
+    projectionPatch,
+    transcriptEvents: events.slice(),
+  }
+}
+
 export class TurnEngine {
   async execute<TSession extends TurnEngineSession>(request: TurnEngineRequest<TSession>) {
     const host = request.host
@@ -237,10 +209,11 @@ export class TurnEngine {
       budgetState: request.budgetState,
     })
     const skillContextOrchestrator = host.skillContextOrchestrator as SkillContextOrchestratorLike
-    const browserDomainOrchestrator = host.browserDomainOrchestrator as BrowserDomainOrchestratorLike
-    const documentToolLoopOrchestrator = host.documentToolLoopOrchestrator as DocumentToolLoopOrchestratorLike
     const designToolLoopOrchestrator = host.designToolLoopOrchestrator as DesignToolLoopOrchestratorLike
     const hostCapabilityDispatcher = host.hostCapabilityDispatcher as HostCapabilityDispatcherLike
+    const domainAdapters = Array.isArray(host.domainAdapters) ? host.domainAdapters as DomainAdapter[] : []
+    const requestForAdapters = request as unknown as TurnEngineRequest
+    const hostForAdapters = host as unknown as TurnEngineHost
 
     const emitStructuredTaskPayload = (payload: unknown): void => {
       transcript.emitStructuredPayload(payload)
@@ -270,15 +243,19 @@ export class TurnEngine {
       status?: 'done' | 'error' | 'cancelled'
       doneEventType?: 'done' | 'error'
     }) => {
+      const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents())
       transcript.emitOutput('', params.doneEventType || 'done')
       transcript.emitStatus(params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error'))
-      return state.buildResult({
-        success: params.success,
-        error: params.error,
-        cancelled: params.cancelled,
-        finalText: transcript.getFinalText(),
-        usedTools: transcript.getUsedTools(),
-      })
+      return {
+        ...state.buildResult({
+          success: params.success,
+          error: params.error,
+          cancelled: params.cancelled,
+          finalText: transcript.getFinalText(),
+          usedTools: transcript.getUsedTools(),
+        }),
+        projectionTruth,
+      }
     }
 
     try {
@@ -338,15 +315,21 @@ export class TurnEngine {
         executionIntentContext.requestEnvelope.primaryInstruction
         || executionIntentContext.requestEnvelope.pureUserText
         || userText
-      const explicitTaskId = extractTaskIdFromText(userText)
+      const providedContinuationState = request.continuationState || null
+      const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(userText)
       const shouldResolveContinuation =
-        Boolean(explicitTaskId)
+        Boolean(providedContinuationState)
+        || Boolean(explicitTaskId)
         || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
-      const continuationProjection = host.resolveContinuationProjection(request.sessionId, userText, {
-        explicitTaskId,
-        allowImplicitContinuation: shouldResolveContinuation,
-      })
-      const continuationTaskId = continuationProjection?.taskId || null
+      const continuationProjection = providedContinuationState
+        ? null
+        : host.resolveContinuationProjection(request.sessionId, userText, {
+          explicitTaskId,
+          allowImplicitContinuation: shouldResolveContinuation,
+        })
+      const continuationState = providedContinuationState
+        || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
+      const continuationTaskId = continuationState?.taskId || continuationProjection?.taskId || null
       const initialTaskTypeResolution = resolveTaskType({
         intent: executionIntentContext.intentClassification as IntentClassification,
         envelope: executionIntentContext.requestEnvelope,
@@ -362,64 +345,10 @@ export class TurnEngine {
           ? {
             continuationTaskId,
             continuationProjection,
+            continuationState,
           }
           : null,
       })
-
-      const documentTaskPlanResult = await host.maybeRunDocumentTaskPlan({
-        initialTaskExecutionRoute,
-        executionIntentContext,
-        hasTools,
-        requestModuleToolAction: host.requestModuleToolAction,
-        signal: request.abortSignal,
-        session,
-        providerContext: host.providerContext,
-        emitStructuredTaskPayload,
-      })
-      if (documentTaskPlanResult) {
-        if (documentTaskPlanResult.interactionState) {
-          state.interactionState = documentTaskPlanResult.interactionState
-        }
-        if (documentTaskPlanResult.finalText) {
-          transcript.emitOutput(documentTaskPlanResult.finalText, 'text')
-          session.messages.push({ role: 'assistant', content: documentTaskPlanResult.finalText })
-        }
-        return finish({
-          success: documentTaskPlanResult.success ?? (documentTaskPlanResult.status !== 'error'),
-          error: documentTaskPlanResult.error,
-          cancelled: documentTaskPlanResult.status === 'cancelled',
-          status: documentTaskPlanResult.status || 'done',
-          doneEventType: documentTaskPlanResult.status === 'error' ? 'done' : 'done',
-        })
-      }
-
-      const documentPipelineResult = await host.maybeRunDocumentWidgetPipeline({
-        initialTaskExecutionRoute,
-        executionIntentContext,
-        hasTools,
-        requestModuleToolAction: host.requestModuleToolAction,
-        signal: request.abortSignal,
-        session,
-        providerContext: host.providerContext,
-        emitStructuredTaskPayload,
-        setPipelineDiagnostics: (pipeline: unknown) => state.setPipelineDiagnostics(pipeline as any),
-      })
-      if (documentPipelineResult) {
-        if (documentPipelineResult.interactionState) {
-          state.interactionState = documentPipelineResult.interactionState
-        }
-        if (documentPipelineResult.finalText) {
-          transcript.emitOutput(documentPipelineResult.finalText, 'text')
-          session.messages.push({ role: 'assistant', content: documentPipelineResult.finalText })
-        }
-        return finish({
-          success: documentPipelineResult.success ?? (documentPipelineResult.status !== 'error'),
-          error: documentPipelineResult.error,
-          cancelled: documentPipelineResult.status === 'cancelled',
-          status: documentPipelineResult.status || 'done',
-          doneEventType: documentPipelineResult.status === 'error' ? 'done' : 'done',
-        })
-      }
 
       if (hasTools) {
         const preparedToolContext = buildHostToolContext(preparedRunCapabilities.allowedToolNames)
@@ -433,26 +362,27 @@ export class TurnEngine {
         })
       }
 
-      const preparedBrowserExecution = await browserDomainOrchestrator.prepareBrowserExecution({
-        hasTools,
-        browserControllerAvailable: Boolean(host.browserController),
-        browserAgentEnabled: host.isBrowserAgentV3Enabled(),
-        userText,
-        pureUserInput,
-        sessionMessages: session.messages,
-        sessionId: request.sessionId,
-        refineDecision: async (decision: unknown) => browserDomainOrchestrator.prepareBrowserExecution({
-          hasTools,
-          browserControllerAvailable: Boolean(host.browserController),
-          browserAgentEnabled: host.isBrowserAgentV3Enabled(),
+      const browserDomainAdapter = domainAdapters.find((adapter) => adapter.id === 'browser') || null
+      const browserPrepareResult = browserDomainAdapter
+        ? await browserDomainAdapter.prepare({
+          route: initialTaskExecutionRoute,
+          request: requestForAdapters,
+          host: hostForAdapters,
+          session,
           userText,
           pureUserInput,
-          sessionMessages: session.messages,
-          sessionId: request.sessionId,
-          decision,
-        }),
-      })
-      browserDecision = preparedBrowserExecution.browserDecision
+          requestEnvelope,
+          executionIntentContext,
+          hasTools,
+          toolPolicy,
+          allowedToolNames: preparedRunCapabilities.allowedToolNames,
+        })
+        : null
+      browserDecision = {
+        mode: String((browserPrepareResult?.domainState as { preparedBrowserExecution?: { browserDecision?: { mode?: string } } } | undefined)
+          ?.preparedBrowserExecution?.browserDecision?.mode || 'free_tool_loop'),
+        reason: 'domain_adapter',
+      }
       const reconciledRunCapabilities = reconcileAfterBrowserDecision({
         prepared: preparedRunCapabilities,
         browserDecisionMode: browserDecision.mode as any,
@@ -474,10 +404,36 @@ export class TurnEngine {
           ? {
             continuationTaskId,
             continuationProjection,
+            continuationState,
           }
           : null,
       })
       state.continuationBudgetRestore = taskExecutionRoute.continuation?.budgetRestore || null
+      const selectedDomainAdapter = selectDomainAdapter(domainAdapters, {
+        route: taskExecutionRoute,
+        userText,
+        hasTools,
+        executionIntentContext,
+      })
+      const selectedDomainPrepareResult: DomainAdapterPrepareResult | null =
+        selectedDomainAdapter?.id === 'browser'
+          ? browserPrepareResult
+          : selectedDomainAdapter
+            ? await selectedDomainAdapter.prepare({
+              route: taskExecutionRoute,
+              request: requestForAdapters,
+              host: hostForAdapters,
+              session,
+              userText,
+              pureUserInput,
+              requestEnvelope,
+              executionIntentContext,
+              hasTools,
+              toolPolicy,
+              allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+            })
+            : null
+
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation?.budgetRuntime) {
         state.taskBudgetRuntime = {
           ...taskExecutionRoute.continuation.budgetRuntime,
@@ -497,19 +453,14 @@ export class TurnEngine {
       const alignedRunBudget = state.effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
-      const executorRuntimePolicy = buildExecutorRuntimePolicy(taskExecutionRoute.executor)
-      const executorAllowedToolNames = selectExecutorAllowedToolNames(
-        taskExecutionRoute.executor,
-        reconciledRunCapabilities.allowedToolNames,
-      )
-      const routedAllowedToolNames = executorAllowedToolNames || reconciledRunCapabilities.allowedToolNames
-      if (executorRuntimePolicy.instruction) {
-        session.messages.push({ role: 'user', content: executorRuntimePolicy.instruction })
-      }
+      const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      appendSessionMessages(session, selectedDomainPrepareResult?.sessionMessages)
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
         state.interactionState = 'resuming'
       }
       state.stepBudgetState = normalizeStepBudgetState(taskExecutionRoute.continuation?.budgetRuntime?.stepBudget)
+        || normalizeStepBudgetState(continuationState?.budgetRuntime?.stepBudget)
+        || normalizeStepBudgetState(continuationState?.budget?.stepBudget)
         || normalizeStepBudgetState(continuationProjection?.budget?.stepBudget)
         || (
           taskExecutionRoute.steps.length > 0
@@ -526,7 +477,7 @@ export class TurnEngine {
             })
         )
       state.runtimeTaskSteps = taskExecutionRoute.steps.map((step) => ({ ...step }))
-      state.runtimeCurrentStepId = taskExecutionRoute.steps[0]?.id || null
+      state.runtimeCurrentStepId = taskExecutionRoute.currentStepId || taskExecutionRoute.steps[0]?.id || null
       if (taskExecutionRoute.chain === 'planner') {
         const initialPlannerProgress = initializeTaskStepProgress(taskExecutionRoute.steps)
         state.runtimeTaskSteps = initialPlannerProgress.steps
@@ -592,6 +543,21 @@ export class TurnEngine {
         })
         return true
       }
+      let activeDomainState = selectedDomainPrepareResult?.domainState
+      const emitDomainProjection = (projection: DomainAdapterApplyResult['projection'], domainStateForProjection: unknown): void => {
+        if (!selectedDomainAdapter || !projection) return
+        const patch = selectedDomainAdapter.buildProjectionPatch({
+          route: taskExecutionRoute,
+          request: requestForAdapters,
+          executionIntentContext,
+          toolPolicy,
+          domainState: domainStateForProjection,
+          projection,
+        })
+        if (patch) {
+          emitStructuredTaskPayload(patch)
+        }
+      }
       state.syncBudgetWarning()
       if (taskExecutionRoute.chain === 'planner' && taskExecutionRoute.steps.length > 0) {
         emitRuntimeTaskPayload({ summary: '已拆分任务步骤，开始逐步执行' })
@@ -606,7 +572,7 @@ export class TurnEngine {
           ].join('\n'),
         })
       }
-      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
+      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation && !providedContinuationState) {
         session.messages.push({
           role: 'user',
           content: [
@@ -617,81 +583,11 @@ export class TurnEngine {
             taskExecutionRoute.continuation.continuationRef?.stepId
               ? `Step ID: ${taskExecutionRoute.continuation.continuationRef.stepId}`
               : null,
-            continuationProjection?.blockedReason
-              ? `继续前上下文：${continuationProjection.blockedReason}`
+            taskExecutionRoute.continuation.blockedReason
+              ? `继续前上下文：${taskExecutionRoute.continuation.blockedReason}`
               : null,
           ].filter(Boolean).join('\n'),
         })
-      }
-
-      const allowBrowserDispatch =
-        taskExecutionRoute.executor === 'browser'
-        || taskExecutionRoute.executor === 'tool_loop'
-        || taskExecutionRoute.executor === 'planner'
-      const browserExecutionDispatch = allowBrowserDispatch
-        ? browserDomainOrchestrator.resolveExecutionDispatch({
-          hasTools,
-          browserControllerAvailable: Boolean(host.browserController),
-          browserDecision,
-          browserContinuityInstruction: preparedBrowserExecution.browserContinuityInstruction,
-          clarifyText: preparedBrowserExecution.clarifyText,
-          canUseDeterministicBrowserRunner: preparedBrowserExecution.canUseDeterministicBrowserRunner,
-          shouldInspectAmbiguousModeEntry: preparedBrowserExecution.shouldInspectAmbiguousModeEntry,
-        })
-        : {
-          kind: 'none' as const,
-          continuityInstruction: null,
-          responseText: null,
-          toolLoopMessage: null,
-          fallbackLog: null,
-        }
-
-      if (browserExecutionDispatch.continuityInstruction) {
-        session.messages.push({ role: 'user', content: browserExecutionDispatch.continuityInstruction })
-      }
-
-      if (browserExecutionDispatch.kind === 'clarify' && browserExecutionDispatch.responseText) {
-        state.interactionState = 'awaiting_clarification'
-        transcript.emitOutput(browserExecutionDispatch.responseText, 'text')
-        session.messages.push({ role: 'assistant', content: browserExecutionDispatch.responseText })
-        return finish({ success: true, status: 'done' })
-      }
-
-      if (browserExecutionDispatch.fallbackLog) {
-        host.log(browserExecutionDispatch.fallbackLog)
-      }
-
-      if (browserExecutionDispatch.kind === 'deterministic' && host.browserController) {
-        const browserResult = await browserDomainOrchestrator.runDeterministicExecution({
-          browserController: host.browserController,
-          abortSignal: request.abortSignal,
-          sessionId: request.sessionId,
-          decision: browserDecision,
-          userText,
-          emitToolEvent: (type: string, text: string) => {
-            transcript.emitOutput(text, type)
-          },
-        })
-        if (browserResult.handled) {
-          if (browserResult.state === 'partial' && /(人工|手动|验证码|接管)/.test(browserResult.message)) {
-            state.interactionState = 'human_takeover'
-          }
-          transcript.emitOutput(browserResult.message, 'text')
-          session.messages.push({ role: 'assistant', content: browserResult.message })
-          return finish({
-            success: true,
-            cancelled: browserResult.state === 'cancelled',
-            status: browserResult.state === 'failed'
-              ? 'error'
-              : browserResult.state === 'cancelled'
-                ? 'cancelled'
-                : 'done',
-          })
-        }
-      }
-
-      if (browserExecutionDispatch.kind === 'tool_loop' && browserExecutionDispatch.toolLoopMessage) {
-        session.messages.push({ role: 'user', content: browserExecutionDispatch.toolLoopMessage })
       }
 
       const hostToolContext = buildHostToolContext(routedAllowedToolNames)
@@ -724,6 +620,43 @@ export class TurnEngine {
         return finish({ success: true, status: 'done' })
       }
 
+      if (selectedDomainAdapter && taskExecutionRoute.chain !== 'direct') {
+        const domainDispatchResult = await selectedDomainAdapter.dispatch({
+          route: taskExecutionRoute,
+          request: requestForAdapters,
+          host: hostForAdapters,
+          session,
+          userText,
+          pureUserInput,
+          requestEnvelope,
+          executionIntentContext,
+          hasTools,
+          toolPolicy,
+          allowedToolNames: routedAllowedToolNames,
+          domainState: activeDomainState,
+          emitStructuredTaskPayload,
+        })
+        activeDomainState = typeof domainDispatchResult.domainState === 'undefined'
+          ? activeDomainState
+          : domainDispatchResult.domainState
+        appendSessionMessages(session, domainDispatchResult.sessionMessages)
+        emitDomainProjection(domainDispatchResult.projection || null, activeDomainState)
+        if (domainDispatchResult.interactionState) {
+          state.interactionState = domainDispatchResult.interactionState
+        }
+        if (domainDispatchResult.finalText) {
+          transcript.emitOutput(domainDispatchResult.finalText, 'text')
+          session.messages.push({ role: 'assistant', content: domainDispatchResult.finalText })
+        }
+        if (domainDispatchResult.finish) {
+          return finish({
+            success: domainDispatchResult.finish.success,
+            cancelled: domainDispatchResult.finish.cancelled,
+            status: domainDispatchResult.finish.status,
+          })
+        }
+      }
+
       if (!state.resolvedTaskType) {
         state.resolvedTaskType = hasTools ? 'short_task' : 'direct_answer'
       }
@@ -754,7 +687,6 @@ export class TurnEngine {
         return finish({ success: true, status: 'done' })
       }
 
-      let documentToolLoopState = documentToolLoopOrchestrator.createState()
       let designToolLoopState = designToolLoopOrchestrator.createState()
       const hintedRuntimeBase = state.syncTaskBudgetRuntime() || state.taskBudgetRuntime
       if (!hintedRuntimeBase) {
@@ -762,18 +694,7 @@ export class TurnEngine {
       }
       state.taskBudgetRuntime = applyRuntimeBudgetHint(
         hintedRuntimeBase,
-        browserDomainOrchestrator.getBudgetHint({
-          userText,
-          decision: browserDecision,
-          baseMaxToolIterations: host.maxToolIterations,
-        }),
-      )
-      state.taskBudgetRuntime = applyRuntimeBudgetHint(
-        state.taskBudgetRuntime,
-        documentToolLoopOrchestrator.getBudgetHint({
-          forceDocumentTool: (toolPolicy as any).forceDocumentTool,
-          state: documentToolLoopState,
-        }),
+        selectedDomainPrepareResult?.budgetHint || null,
       )
       state.taskBudgetRuntime = applyRuntimeBudgetHint(
         state.taskBudgetRuntime,
@@ -787,23 +708,14 @@ export class TurnEngine {
         ? { ...state.taskBudgetRuntime.stepBudget }
         : null
       state.budgetWarningLevel = state.taskBudgetRuntime.warningLevel
-      const baseMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
+      const effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
         ? state.effectiveRunBudget.maxIterations
         : host.maxToolIterations
-      const recommendedMaxToolIterations = browserDomainOrchestrator.getRecommendedToolLoopIterations(
-        userText,
-        browserDecision,
-        baseMaxToolIterations,
-      )
-      const effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
-        ? Math.min(recommendedMaxToolIterations, state.effectiveRunBudget.maxIterations)
-        : recommendedMaxToolIterations
       let iterations = 0
       let finishedBeforeLimit = false
       let textToolBridgeNudges = 0
       let budgetLimitedBeforeCompletion = false
       let convergencePromptInjected = false
-      let browserToolLoopState = browserDomainOrchestrator.createToolLoopState(browserDecision)
       const toolGuidance = buildToolGuidance(toolPolicy as any)
       const toolLoopSession = toolGuidance
         ? {
@@ -862,8 +774,10 @@ export class TurnEngine {
         state.appendRecoveryHistory(response.recoveryHistory)
 
         if (response.toolCalls.length === 0) {
+          const activeBrowserToolLoopState = (activeDomainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
+            ?.browserToolLoopState
           const browserToolRetryNeeded = shouldEnforceBrowserToolRetry({
-            isBrowserTask: browserToolLoopState.isBrowserTask,
+            isBrowserTask: Boolean(activeBrowserToolLoopState?.isBrowserTask),
             toolCallsCount: response.toolCalls.length,
             toolTransport: response.toolTransport,
             responseText: response.text || response.rawText || '',
@@ -896,56 +810,52 @@ export class TurnEngine {
               continue
             }
           }
-          const documentNoToolDecision = documentToolLoopOrchestrator.handleNoToolCall({
-            state: documentToolLoopState,
-            forceDocumentTool: (toolPolicy as any).forceDocumentTool,
-            responseText: response.text,
-            toolTransport: response.toolTransport,
-          })
-          documentToolLoopState = documentNoToolDecision.state
           const plannerStepCompleted = response.text
             ? detectTaskStepCompletionCue(response.text, state.runtimeTaskSteps.find((step) => step.id === state.runtimeCurrentStepId))
             : false
-          if (documentNoToolDecision.nextUserMessage) {
-            emitStructuredTaskPayload(documentToolLoopOrchestrator.buildStructuredTaskPayload({
-              taskTitle: (toolPolicy as any).documentWidgetTaskKind
-                ? '文档组件操作'
-                : (toolPolicy as any).preferFormatOnly
-                  ? '文档格式优化'
-                  : (toolPolicy as any).preferSectionRewrite
-                    ? '章节改写'
-                    : '文档修改',
-              taskSummary: documentNoToolDecision.nextUserMessage,
-              state: documentToolLoopState,
-              phase: 'blocked',
-            }))
-            if (documentNoToolDecision.preserveAssistantText && response.text && response.toolTransport !== 'text') {
-              session.messages.push({ role: 'assistant', content: response.text })
-            }
-            session.messages.push({
-              role: 'user',
-              content: documentNoToolDecision.nextUserMessage,
+          if (selectedDomainAdapter) {
+            const domainApplyResult = await selectedDomainAdapter.applyResult({
+              route: taskExecutionRoute,
+              request: requestForAdapters,
+              host: hostForAdapters,
+              session,
+              userText,
+              pureUserInput,
+              requestEnvelope,
+              executionIntentContext,
+              hasTools,
+              toolPolicy,
+              allowedToolNames: routedAllowedToolNames,
+              emitStructuredTaskPayload,
+              domainState: activeDomainState,
+              phase: 'no_tool_call',
+              responseText: response.text,
+              toolTransport: response.toolTransport,
             })
-            continue
-          }
-          if (documentNoToolDecision.finalText) {
-            emitStructuredTaskPayload(documentToolLoopOrchestrator.buildStructuredTaskPayload({
-              taskTitle: (toolPolicy as any).documentWidgetTaskKind
-                ? '文档组件操作'
-                : (toolPolicy as any).preferFormatOnly
-                  ? '文档格式优化'
-                  : (toolPolicy as any).preferSectionRewrite
-                    ? '章节改写'
-                    : '文档修改',
-              taskSummary: documentNoToolDecision.finalText,
-              state: documentToolLoopState,
-              phase: 'done',
-            }))
-            transcript.emitOutput(documentNoToolDecision.finalText, 'text')
-            session.messages.push({ role: 'assistant', content: documentNoToolDecision.finalText })
-            advancePlannerStep(documentNoToolDecision.finalText)
-            finishedBeforeLimit = true
-            break
+            activeDomainState = typeof domainApplyResult.domainState === 'undefined'
+              ? activeDomainState
+              : domainApplyResult.domainState
+            emitDomainProjection(domainApplyResult.projection || null, activeDomainState)
+            if (domainApplyResult.interactionState) {
+              state.interactionState = domainApplyResult.interactionState
+            }
+            if (domainApplyResult.nextUserMessage) {
+              if (domainApplyResult.preserveAssistantText && response.text && response.toolTransport !== 'text') {
+                session.messages.push({ role: 'assistant', content: response.text })
+              }
+              session.messages.push({
+                role: 'user',
+                content: domainApplyResult.nextUserMessage,
+              })
+              continue
+            }
+            if (domainApplyResult.finalText) {
+              transcript.emitOutput(domainApplyResult.finalText, 'text')
+              session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+              advancePlannerStep(domainApplyResult.finalText)
+              finishedBeforeLimit = true
+              break
+            }
           }
           if (response.text) {
             const genericInteractionDetected = syncInteractionStateFromAssistantText(response.text)
@@ -1006,6 +916,7 @@ export class TurnEngine {
         let executedBrowserToolsThisIteration = 0
         let executedPrimaryDesignToolThisIteration = false
         let documentToolResultsThisIteration: string[] = []
+        let documentToolInspectionsThisIteration: unknown[] = []
 
         const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
           toolCalls: toolCallsForIteration,
@@ -1046,15 +957,12 @@ export class TurnEngine {
             const toolName = executedTool.name
             const documentToolInspection = inspectDocumentToolCall(toolName, resultText)
             if (documentToolInspection.isDocumentTool) {
+              documentToolInspectionsThisIteration.push(documentToolInspection)
               documentToolResultsThisIteration.push(resultText)
               executedDocActionCount += documentToolInspection.executedDocActionCount
               executedMutatingDocActionCount += documentToolInspection.executedMutatingDocActionCount
               executedInspectionDocActionCount += documentToolInspection.executedInspectionDocActionCount
               executedSaveDocActionCount += documentToolInspection.executedSaveDocActionCount
-              documentToolLoopState = documentToolLoopOrchestrator.applyToolInspection(
-                documentToolLoopState,
-                documentToolInspection,
-              )
             }
             if (toolName.startsWith('browser_')) {
               executedBrowserToolsThisIteration += 1
@@ -1074,7 +982,11 @@ export class TurnEngine {
               executedPrimaryDesignToolThisIteration = true
               designToolLoopState = designResult.state
             }
-            transcript.emitOutput(serializedResult.slice(0, 200), 'tool_result')
+            if (result.projectionPatch) {
+              transcript.emitStructuredPayload(result.projectionPatch)
+            } else {
+              transcript.emitOutput(serializedResult.slice(0, 200), 'tool_result')
+            }
             params.onResult({
               executedTool,
               serializedResult,
@@ -1171,18 +1083,6 @@ export class TurnEngine {
           state.syncBudgetWarning()
         }
 
-        if (browserToolLoopState.isBrowserTask && executedBrowserToolsThisIteration > 0) {
-          const progress = browserDomainOrchestrator.recordToolLoopProgress({
-            state: browserToolLoopState,
-            responseText: response.text,
-            executedBrowserToolsThisIteration,
-          })
-          browserToolLoopState = progress.state
-          if (progress.checkpointMessage) {
-            session.messages.push({ role: 'user', content: progress.checkpointMessage })
-          }
-        }
-
         if (response.text) {
           const plannerStepCompleted = detectTaskStepCompletionCue(
             response.text,
@@ -1205,55 +1105,56 @@ export class TurnEngine {
           }
         }
 
-        const documentIterationDecision = documentToolLoopOrchestrator.handleIterationResult({
-          state: documentToolLoopState,
-          forceDocumentTool: (toolPolicy as any).forceDocumentTool,
-          documentWidgetTaskKind: (toolPolicy as any).documentWidgetTaskKind,
-          executedDocActionCount,
-          executedMutatingDocActionCount,
-          executedInspectionDocActionCount,
-          executedSaveDocActionCount,
-          documentToolResultsThisIteration,
-        })
-        documentToolLoopState = documentIterationDecision.state
-        if (documentIterationDecision.nextUserMessage) {
-          emitStructuredTaskPayload(documentToolLoopOrchestrator.buildStructuredTaskPayload({
-            taskTitle: (toolPolicy as any).documentWidgetTaskKind
-              ? '文档组件操作'
-              : (toolPolicy as any).preferFormatOnly
-                ? '文档格式优化'
-                : (toolPolicy as any).preferSectionRewrite
-                  ? '章节改写'
-                  : '文档修改',
-            taskSummary: documentIterationDecision.nextUserMessage,
-            state: documentToolLoopState,
-            phase: 'blocked',
-          }))
-          session.messages.push({
-            role: 'user',
-            content: documentIterationDecision.nextUserMessage,
+        if (selectedDomainAdapter) {
+          const domainApplyResult = await selectedDomainAdapter.applyResult({
+                route: taskExecutionRoute,
+                request: requestForAdapters,
+                host: hostForAdapters,
+                session,
+            userText,
+            pureUserInput,
+            requestEnvelope,
+            executionIntentContext,
+            hasTools,
+            toolPolicy,
+            allowedToolNames: routedAllowedToolNames,
+            emitStructuredTaskPayload,
+            domainState: activeDomainState,
+            phase: 'tool_batch',
+            responseText: response.text,
+            toolTransport: response.toolTransport,
+            toolBatch: {
+              executedDocActionCount,
+              executedMutatingDocActionCount,
+              executedInspectionDocActionCount,
+              executedSaveDocActionCount,
+              executedBrowserToolsThisIteration,
+              documentToolResultsThisIteration,
+              documentToolInspections: documentToolInspectionsThisIteration,
+            },
           })
-          continue
-        }
-
-        if (documentIterationDecision.completionText) {
-          emitStructuredTaskPayload(documentToolLoopOrchestrator.buildStructuredTaskPayload({
-            taskTitle: (toolPolicy as any).documentWidgetTaskKind
-              ? '文档组件操作'
-              : (toolPolicy as any).preferFormatOnly
-                ? '文档格式优化'
-                : (toolPolicy as any).preferSectionRewrite
-                  ? '章节改写'
-                  : '文档修改',
-            taskSummary: documentIterationDecision.completionText,
-            state: documentToolLoopState,
-            phase: 'done',
-          }))
-          transcript.emitOutput(documentIterationDecision.completionText, 'text')
-          session.messages.push({ role: 'assistant', content: documentIterationDecision.completionText })
-          advancePlannerStep(documentIterationDecision.completionText)
-          finishedBeforeLimit = true
-          break
+          activeDomainState = typeof domainApplyResult.domainState === 'undefined'
+            ? activeDomainState
+            : domainApplyResult.domainState
+          appendSessionMessages(session, domainApplyResult.sessionMessages)
+          emitDomainProjection(domainApplyResult.projection || null, activeDomainState)
+          if (domainApplyResult.interactionState) {
+            state.interactionState = domainApplyResult.interactionState
+          }
+          if (domainApplyResult.nextUserMessage) {
+            session.messages.push({
+              role: 'user',
+              content: domainApplyResult.nextUserMessage,
+            })
+            continue
+          }
+          if (domainApplyResult.finalText) {
+            transcript.emitOutput(domainApplyResult.finalText, 'text')
+            session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+            advancePlannerStep(domainApplyResult.finalText)
+            finishedBeforeLimit = true
+            break
+          }
         }
 
         if ((toolPolicy as any).forceDesignTool && !(toolPolicy as any).allowMultipleDesignArtifacts && executedPrimaryDesignToolThisIteration) {
@@ -1283,12 +1184,27 @@ export class TurnEngine {
       }
 
       if (!finishedBeforeLimit && (iterations >= effectiveMaxToolIterations || budgetLimitedBeforeCompletion)) {
-        const browserLimitMessage = browserDomainOrchestrator.buildToolLoopLimitMessage(browserToolLoopState)
-        if (browserLimitMessage) {
-          session.messages.push({
-            role: 'user',
-            content: browserLimitMessage,
+        if (selectedDomainAdapter) {
+          const limitResult = await selectedDomainAdapter.applyResult({
+                route: taskExecutionRoute,
+                request: requestForAdapters,
+                host: hostForAdapters,
+                session,
+            userText,
+            pureUserInput,
+            requestEnvelope,
+            executionIntentContext,
+            hasTools,
+            toolPolicy,
+            allowedToolNames: routedAllowedToolNames,
+            emitStructuredTaskPayload,
+            domainState: activeDomainState,
+            phase: 'budget_limit',
           })
+          activeDomainState = typeof limitResult.domainState === 'undefined'
+            ? activeDomainState
+            : limitResult.domainState
+          appendSessionMessages(session, limitResult.sessionMessages)
         }
         transcript.emitOutput(
           budgetLimitedBeforeCompletion

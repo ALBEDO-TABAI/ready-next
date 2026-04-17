@@ -6,6 +6,9 @@
 
 0. Agent 核心重构已先落地第一段可上线基础层。
 
+- 已完成一轮针对 `CC-Source` 的 Claude Code agent 对照研究，并新增四份文档沉淀架构研究、交叉缺陷分析、目标设计与分阶段整改路线；后续 agent 整改将以这四份文档为统一底稿，而不再继续只靠零散口头判断推进。
+- agent runtime realignment phase4 已完成第一轮 domain adapter 收口：`TurnEngine` 不再继续硬编码 Browser / Document 的专属执行分支，六个域已统一接入同一套 adapter 生命周期，`task-execution-router` 也已回到只负责 route 解析。
+
 - 已补齐统一任务状态/恢复记录/任务投影的类型契约，后续阶段不再需要各长一套字段。
 - 运行时恢复现已正式接入工具循环：限流、模型超时、上下文过长会先走恢复，再回到原有协议降级。
 - 工具超时已统一进入主分发层，超时型工具结果不再直接打崩整轮执行。
@@ -190,7 +193,7 @@
   - 已新增 Stage 5 预备文档，先把共享 iteration budget、并发非交互工具、context compression、provider fallback 统一化的入口和边界讲清楚
   - Anthropic 请求主链已迁到 `anthropic-execution-client`，Kimi Coding 请求与视频上传已迁到 `kimi-coding-client`
   - 视频提帧回退已迁到 `video-fallback-service`，`DirectChatEngine` 不再内联持有 ffmpeg 查找与视频拆帧逻辑
-  - tool 执行上下文现在统一通过 `tool-runtime-context-builder` 组装，主循环不再在多个分支里手写局部上下文对象
+- tool 执行上下文现在统一通过 `tool-runtime-context-builder` 组装，主循环不再在多个分支里手写局部上下文对象
   - 浏览器连续性注入、澄清短路、deterministic/tool-loop 分发与 fallback 文案现已通过 `BrowserDomainOrchestrator.resolveExecutionDispatch` 统一收口，浏览器域只剩固定分发挂在主循环上
   - 主进程结构化任务白名单已补进 `skill`，skill 正式任务状态现在也能走和 browser/document/design 一样的前台通路
   - 阶段 5 已开始落地：新增 `run-budget-policy`，`RunCoordinator` 现在会给单轮执行补上统一预算 seed，并把预算状态带进 execution host
@@ -216,6 +219,31 @@
 - 新增 `session_recall_vectors`，历史会话现在会为会话胶囊生成本地持久化向量，`session_search` 会在关键词命中之外追加向量相似度补召回。
 - 主进程新增 `searchSessionRecall / listRecentSessions / getSessionRecallCapsule / attachSessionRecallContext / detachSessionRecallContext / resumeSessionCandidate`。
 - 新增模型工具 `session_search`，无 query 返回最近会话，有 query 走历史会话搜索；默认排除当前 scope 所在 lineage，并把 `semantic` 命中并回结果。
+
+13. Agent runtime realignment phase4 已完成 domain adapter 接线（2026-04-17）。
+
+- 新增统一 `DomainAdapter` 合同，Browser / Document / Skill / RSS / Calendar / Feishu 六个域现在都通过 `shouldHandle / prepare / dispatch / applyResult / buildProjectionPatch` 五段生命周期接入主链。
+- `TurnEngine` 已改成“先 resolve route，再选 adapter，再走 prepare/dispatch/applyResult/buildProjectionPatch”的单一路径；Browser / Document 的域内特判不再直接写在主循环里。
+- Browser adapter 已组合现有 `BrowserDomainOrchestrator`，浏览器澄清、确定性执行、tool-loop 启动、步骤推进与超限收尾继续沿用原有行为，但挂接位置已迁到 adapter 生命周期。
+- Document adapter 已组合现有 `DocumentDomainOrchestrator` 与 `DocumentToolLoopOrchestrator`；文档格式整理 / 章节改写 / widget pipeline 这类确定性捷径现已从 host shortcut 挪回 document 域内接管。
+- Skill / RSS / Calendar / Feishu 本轮先落薄适配：各自提供工具白名单、域内提示和任务投影模块信息，暂不额外引入新产品行为。
+- `task-execution-router` 已移除 executor 级工具过滤与提示语拼装，职责收口为 route 解析；域内工具可见性现在由 adapter 在 `prepare()` 阶段给出。
+- `host-capability-dispatcher` 现阶段只保留 `openclaw` 宿主快捷执行，document deterministic shortcut 不再继续挂在 host-only 特判里。
+- 已新增 `domain-adapter-contract.test.ts`，并更新 `turn-engine-route.test.ts`、`direct-chat-executor-routing.test.ts`、`agent-runtime-host-contract.test.ts`，冻结 phase4 接线方式。
+- 本轮验收已通过：
+  - `npx tsx --test src/__tests__/domain-adapter-contract.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/document-tool-loop-orchestrator.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/agent-runtime-host-contract.test.ts`
+  - `npm run typecheck`
+
+14. Agent runtime realignment phase5 已完成第一轮真相收口（2026-04-17）。
+
+- 工具返回的 `projectionPatch` 现在会被正式写入 turn transcript，并继续流入 `RunCoordinator / RunProjection / task-projection-sync`；结构化任务补丁已不再只是 `tool_result` 文本。
+- 主进程桥接层不再从 `tool_result` 文本里 `JSON.parse` 任务状态，结构化任务信息改为直接透传到 scope run event。
+- skill workflow 现在会直接返回结构化任务标题、步骤、当前 blocker、继续动作和最近产物；浏览器链继续保留单点 legacy 兜底，但主链已优先消费结构化补丁。
+- renderer 运行态已收缩到流式文本、工具轨迹和显示时序；任务标题、步骤、阻塞原因、继续动作改为优先使用 projection 真相，不再额外从旧文本推任务。
+- 聊天任务卡、任务面板和暂停/继续/补充信息动作现已优先按 `taskId` 匹配 projection；暂停任务不再把标题污染成 taskId。
+- 本轮验收已通过：
+  - `npx tsx --test src/__tests__/domain-adapter-contract.test.ts src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/turn-engine-projection.test.ts src/__tests__/task-projection-truth-contract.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/task-projection-bridge-contract.test.ts src/__tests__/task-run-control-ipc.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-card-view-model-contract.test.ts src/__tests__/skill-task-projection-contract.test.ts src/__tests__/tool-runtime-contract.test.ts`
+  - `npm run typecheck`
 - `RunProjection` 写出的新任务摘要现在会同步持久化到 session recall metadata，不再只留在运行时内存 Map。
 - `PromptAssemblyService` 已补上独立的“跨会话回看”注入段，当前 scope 显式挂入的旧会话胶囊会在当前轮进入 prompt。
 - `PromptAssemblyService` 现已开始做保守自动跨会话召回：默认只在当前频道内挑 1 到 2 条高相关旧会话，自动注入到当前轮 prompt，但不写回会话引用列表。

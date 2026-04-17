@@ -391,7 +391,7 @@ export interface ScopeRunEventPayload {
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItem
   error?: string
-  blockedReason?: string
+  blockedReason?: string | null
   controllerId?: string
   ownerTabId?: string
   checkpointExpiresAt?: number

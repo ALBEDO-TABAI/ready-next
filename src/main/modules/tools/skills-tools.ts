@@ -1,5 +1,6 @@
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
 import type {
   SkillActionDefinition,
   SkillExecutionDetail,
@@ -198,6 +199,83 @@ function formatExecutionDetail(detail: SkillExecutionDetail): string {
   ].filter(Boolean).join('\n')
 }
 
+function toSkillStepStatus(status: string): 'pending' | 'running' | 'blocked' | 'done' | 'error' {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'done' || normalized === 'completed' || normalized === 'success') return 'done'
+  if (normalized === 'running' || normalized === 'active' || normalized === 'in_progress') return 'running'
+  if (normalized === 'waiting' || normalized === 'blocked' || normalized === 'paused') return 'blocked'
+  if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'error') return 'error'
+  return 'pending'
+}
+
+function toSkillWaitingFor(blockerType?: string | null): 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' {
+  if (blockerType === 'need_input') return 'input'
+  if (blockerType === 'need_confirmation') return 'confirmation'
+  if (blockerType === 'need_agent_result') return 'agent_result'
+  return blockerType ? 'background' : 'none'
+}
+
+function toSkillInteractionHint(blockerType?: string | null): 'awaiting_confirmation' | 'awaiting_clarification' | null {
+  if (blockerType === 'need_confirmation') return 'awaiting_confirmation'
+  if (blockerType === 'need_input' || blockerType === 'need_agent_result') {
+    return 'awaiting_clarification'
+  }
+  return null
+}
+
+function buildSkillProjectionPatch(detail: SkillExecutionDetail): Record<string, unknown> {
+  const waitingFor = toSkillWaitingFor(detail.blocker?.type || null)
+  const resumableActions: Array<'continue' | 'retry' | 'open_artifact' | 'cancel'> = []
+  if (waitingFor !== 'none') resumableActions.push('continue')
+  if ((detail.artifacts || []).length > 0) resumableActions.push('open_artifact')
+  if (detail.status === 'failed' || detail.status === 'cancelled') resumableActions.push('retry')
+  resumableActions.push('cancel')
+
+  return {
+    module: 'skill',
+    message: detail.blocker?.message || `当前步骤：${detail.currentStepId || '进行中'}`,
+    taskTitle: `技能执行 · ${detail.skillId}`,
+    taskSummary: detail.blocker?.message || `当前步骤：${detail.currentStepId || '进行中'}`,
+    taskType: 'multi_step_task',
+    interactionState:
+      waitingFor === 'confirmation'
+        ? 'awaiting_confirmation'
+        : waitingFor === 'input' || waitingFor === 'agent_result'
+          ? 'awaiting_clarification'
+          : 'running',
+    steps: detail.steps.map((step) => ({
+      id: step.stepId,
+      title: step.stepId,
+      status: toSkillStepStatus(step.status),
+      updatedAt: detail.updatedAt,
+    })),
+    currentStepId: detail.currentStepId || null,
+    waitingFor,
+    resumableActions,
+    blockedReason: detail.blocker?.message || null,
+    taskContinuation: {
+      executionId: detail.id,
+      stepId: detail.currentStepId || null,
+      blockerType: detail.blocker?.type || null,
+    },
+    recentArtifacts: detail.artifacts.slice(-4).map((artifact) => ({
+      id: artifact.id,
+      module: 'skill',
+      kind: 'skill-artifact',
+      label: artifact.label || artifact.path || artifact.id || 'artifact',
+      path: artifact.path || null,
+      createdAt: detail.updatedAt,
+    })),
+  }
+}
+
+function createSkillExecutionOutput(detail: SkillExecutionDetail): ToolExecutionOutput {
+  return createToolExecutionOutput(formatExecutionDetail(detail), {
+    projectionPatch: buildSkillProjectionPatch(detail),
+    interactionHint: toSkillInteractionHint(detail.blocker?.type || null),
+  })
+}
+
 function formatRunResult(result: {
   success: boolean
   stdout: string
@@ -274,7 +352,7 @@ export async function executeSkillTool(
   args: Record<string, unknown>,
   sessionId?: string,
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void,
-): Promise<string> {
+): Promise<string | ToolExecutionOutput> {
   const tool = findSkillToolByName(toolName)
   if (!tool) {
     return `Unknown skill tool: ${toolName}`
@@ -286,11 +364,11 @@ export async function executeSkillTool(
     switch (tool.name) {
       case 'skill_get_state': {
         const detail = findExecutionForSession(sessionId, asString(args.executionId), asString(args.skillId))
-        return detail ? formatExecutionDetail(detail) : 'No active skill execution found.'
+        return detail ? createSkillExecutionOutput(detail) : 'No active skill execution found.'
       }
       case 'skill_submit_input': {
         const detail = await manager.submitExecutionInput(asString(args.executionId), asRecord(args.inputs))
-        return formatExecutionDetail(detail)
+        return createSkillExecutionOutput(detail)
       }
       case 'skill_submit_confirmation': {
         const detail = await manager.submitExecutionConfirmation(
@@ -298,7 +376,7 @@ export async function executeSkillTool(
           asString(args.stepId),
           asBoolean(args.confirmed),
         )
-        return formatExecutionDetail(detail)
+        return createSkillExecutionOutput(detail)
       }
       case 'skill_submit_agent_result': {
         const detail = await manager.submitExecutionAgentResult({
@@ -307,7 +385,7 @@ export async function executeSkillTool(
           textContent: typeof args.textContent === 'string' ? args.textContent : undefined,
           outputs: asRecord(args.outputs),
         })
-        return formatExecutionDetail(detail)
+        return createSkillExecutionOutput(detail)
       }
       case 'skill_restart_from_step': {
         const detail = await manager.restartExecutionFromStep(
@@ -315,11 +393,11 @@ export async function executeSkillTool(
           asString(args.stepId),
           asRecord(args.inputs),
         )
-        return formatExecutionDetail(detail)
+        return createSkillExecutionOutput(detail)
       }
       case 'skill_cancel_execution': {
         const detail = manager.cancelExecution(asString(args.executionId))
-        return detail ? formatExecutionDetail(detail) : 'Execution not found.'
+        return detail ? createSkillExecutionOutput(detail) : 'Execution not found.'
       }
       default:
         return `Unknown skill tool: ${toolName}`
@@ -356,7 +434,9 @@ export async function executeSkillTool(
     success: result.success,
     summary: formatted.slice(0, 240),
   })
-  return formatted
+  return result.mode === 'workflow' && result.execution
+    ? createSkillExecutionOutput(result.execution)
+    : formatted
 }
 
 export type { SkillToolDef, ToolParam, SkillActionDefinition }

@@ -73,3 +73,25 @@ test('task card view model keeps structured summary primary even when execution 
   assert.equal(vm.title, '浏览器上传流程')
   assert.equal(vm.summary, '准备开始浏览器上传流程')
 })
+
+test('task card view model prefers projection status and steps when available', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-document-2',
+    phase: 'done',
+    status: 'blocked',
+    title: '文档会话',
+    taskTitle: '章节改写',
+    taskSummary: '等待确认后继续',
+    currentStepId: 'execute',
+    waitingFor: 'none',
+    resumableActions: ['continue', 'cancel'],
+    steps: [
+      { id: 'execute', title: '章节改写', status: 'blocked', updatedAt: '2026-04-17T10:00:00.000Z' },
+    ],
+    updatedAt: '2026-04-17T10:00:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.statusLabel, '等待继续')
+  assert.equal(vm.currentStep?.status, 'blocked')
+  assert.equal(vm.sections.plan.summary, '当前：章节改写')
+})

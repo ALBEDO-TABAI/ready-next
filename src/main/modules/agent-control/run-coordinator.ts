@@ -2,6 +2,7 @@ import type { ScopeRunMemoryCapture, ScopeRunEventPayload, ConversationScope } f
 import type {
   ExecutionHostRequest,
   ExecutionHostResult,
+  ProjectionTruthSnapshot,
   PreparedRunPayload,
   ReflectionResultHook,
   RunCompletionHooks,
@@ -27,7 +28,7 @@ export class RunCoordinator {
       recordRunOutcome: (payload: { scope: ConversationScope; finalText: string; usedTools: string[]; success: boolean }) => void
     }
     executeAndCollect: (request: ExecutionHostRequest) => Promise<ExecutionHostResult>
-    emitScopeRunEvent: (payload: ScopeRunEventPayload) => void
+    emitScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void
     reflectOnConversation: (scope: ConversationScope, usedTools: string[]) => Promise<ScopeRunMemoryCapture | null>
   }) {}
 
@@ -142,6 +143,36 @@ export class RunCoordinator {
       success: result.success,
     })
 
+    const projectionPatch = result.projectionTruth?.projectionPatch
+    const projectionTaskTitle =
+      typeof projectionPatch?.taskTitle === 'string' ? projectionPatch.taskTitle : undefined
+    const projectionTaskSummary =
+      typeof projectionPatch?.taskSummary === 'string' ? projectionPatch.taskSummary : undefined
+    const projectionSteps = Array.isArray(projectionPatch?.steps) ? projectionPatch.steps : undefined
+    const projectionCurrentStepId =
+      typeof projectionPatch?.currentStepId === 'string' ? projectionPatch.currentStepId : undefined
+    const projectionWaitingFor =
+      projectionPatch?.waitingFor === 'input'
+      || projectionPatch?.waitingFor === 'confirmation'
+      || projectionPatch?.waitingFor === 'agent_result'
+      || projectionPatch?.waitingFor === 'background'
+      || projectionPatch?.waitingFor === 'none'
+        ? projectionPatch.waitingFor
+        : undefined
+    const projectionResumableActions = Array.isArray(projectionPatch?.resumableActions)
+      ? projectionPatch.resumableActions
+      : undefined
+    const projectionBlockedReason =
+      typeof projectionPatch?.blockedReason === 'string'
+        ? projectionPatch.blockedReason
+        : projectionPatch?.blockedReason === null
+          ? null
+          : undefined
+    const projectionTaskContinuation =
+      projectionPatch?.taskContinuation && typeof projectionPatch.taskContinuation === 'object'
+        ? projectionPatch.taskContinuation as ScopeRunEventPayload['taskContinuation']
+        : undefined
+
     this.deps.emitScopeRunEvent({
       type: 'updated',
       scopeId: request.scope.id,
@@ -153,6 +184,14 @@ export class RunCoordinator {
       phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
       taskType: result.taskType,
       interactionState: result.interactionState,
+      taskTitle: projectionTaskTitle,
+      taskSummary: projectionTaskSummary,
+      steps: projectionSteps as ScopeRunEventPayload['steps'],
+      currentStepId: projectionCurrentStepId,
+      waitingFor: projectionWaitingFor,
+      resumableActions: projectionResumableActions as ScopeRunEventPayload['resumableActions'],
+      blockedReason: projectionBlockedReason,
+      taskContinuation: projectionTaskContinuation,
       taskProjectionId: result.taskProjectionId || result.taskId || taskId,
       executionDiagnostics: {
         taskId: result.taskId || taskId,
@@ -168,7 +207,7 @@ export class RunCoordinator {
         pipeline: result.executionDiagnostics?.pipeline ?? null,
       },
       timestamp: new Date().toISOString(),
-    })
+    }, result.projectionTruth || null)
 
     if (!result.success) {
       await hooks?.onFailure?.(result.error || 'Agent execution failed', result)

@@ -3,6 +3,7 @@ import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
+import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 
@@ -215,13 +216,175 @@ test('TurnTranscript preserves tool/text event order and aggregates final text p
     events.events.filter((event) => event.kind === 'output').map((event) => event.type),
     ['tool_use', 'tool_result', 'tool_result', 'text'],
   )
+  assert.deepEqual(
+    transcript.listEvents().filter((event) => event.kind === 'structured_payload').map((event) => event.projectionPatch),
+    [{ module: 'document', taskSummary: '需要确认目标段落' }],
+  )
   assert.equal(transcript.getFinalText(), '文档已完成')
   assert.deepEqual(transcript.getUsedTools(), ['document_replace_exact'])
+})
+
+test('TurnEngine returns projection truth aggregated from structured transcript payloads', async () => {
+  const engine = new TurnEngine()
+  const documentAdapter = {
+    id: 'document',
+    shouldHandle: () => true,
+    prepare: () => ({
+      allowedToolNames: ['document_replace_exact'],
+      sessionMessages: [],
+      domainState: {
+        taskTitle: '章节改写',
+        toolLoopState: {
+          phase: 'drafting',
+        },
+      },
+    }),
+    dispatch: async () => ({
+      domainState: {
+        taskTitle: '章节改写',
+        toolLoopState: {
+          phase: 'drafting',
+        },
+      },
+      projection: {
+        phase: 'blocked',
+        summary: '请先确认要替换的段落',
+      },
+    }),
+    applyResult: () => ({
+      domainState: null,
+    }),
+    buildProjectionPatch: () => ({
+      module: 'document',
+      taskTitle: '章节改写',
+      taskSummary: '请先确认要替换的段落',
+      steps: [{
+        id: 'execute',
+        title: '章节改写',
+        status: 'blocked',
+        updatedAt: '2026-04-17T10:00:00.000Z',
+      }],
+      currentStepId: 'execute',
+      blockedReason: '请先确认要替换的段落',
+      resumableActions: ['continue', 'cancel'],
+    }),
+  }
+  const { request } = createRequest({
+    userText: '帮我改文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      domainAdapters: [documentAdapter],
+      providerContext: {
+        ...createHost().providerContext,
+        supportsToolCalls: true,
+      },
+      requestToolLoopResponse: async () => ({
+        text: '',
+        toolCalls: [],
+        stopReason: 'stop',
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '章节改写')
+  assert.equal(result.projectionTruth?.projectionPatch?.taskSummary, '请先确认要替换的段落')
+  assert.equal(result.projectionTruth?.transcriptEvents?.some((event) => event.kind === 'structured_payload'), true)
 })
 
 test('TurnEngine emits blocked and done document payloads before finishing the turn', async () => {
   const engine = new TurnEngine()
   let noToolCalls = 0
+  const documentToolLoopOrchestrator = {
+    ...createHost().documentToolLoopOrchestrator,
+    handleNoToolCall: ({ state }: { state: { iteration?: number } }) => {
+      noToolCalls += 1
+      if (noToolCalls === 1) {
+        return {
+          state: { iteration: 1 },
+          nextUserMessage: '请先确认要修改的段落',
+          finalText: null,
+          preserveAssistantText: false,
+        }
+      }
+      return {
+        state: { iteration: 2 },
+        nextUserMessage: null,
+        finalText: '文档已更新',
+        preserveAssistantText: false,
+      }
+    },
+  }
+  const documentAdapter: DomainAdapter = {
+    id: 'document',
+    shouldHandle: () => true,
+    prepare: () => ({
+      allowedToolNames: ['document_replace_exact'],
+      sessionMessages: [],
+      domainState: {
+        taskTitle: '文档修改',
+        toolLoopState: documentToolLoopOrchestrator.createState(),
+      },
+    }),
+    dispatch: async ({ domainState }) => ({
+      domainState,
+    }),
+    applyResult: ({ domainState, phase, responseText, toolTransport, toolPolicy }) => {
+      if (phase !== 'no_tool_call') {
+        return {
+          domainState,
+        }
+      }
+      const state = domainState as { taskTitle: string; toolLoopState: { iteration?: number } }
+      const decision = documentToolLoopOrchestrator.handleNoToolCall({
+        state: state.toolLoopState,
+        forceDocumentTool: toolPolicy.forceDocumentTool,
+        responseText: responseText || undefined,
+        toolTransport,
+      })
+      const nextState = {
+        ...state,
+        toolLoopState: decision.state,
+      }
+      if (decision.nextUserMessage) {
+        return {
+          domainState: nextState,
+          nextUserMessage: decision.nextUserMessage,
+          preserveAssistantText: decision.preserveAssistantText,
+          projection: {
+            phase: 'blocked',
+            summary: decision.nextUserMessage,
+          },
+        }
+      }
+      if (decision.finalText) {
+        return {
+          domainState: nextState,
+          finalText: decision.finalText,
+          projection: {
+            phase: 'done',
+            summary: decision.finalText,
+          },
+        }
+      }
+      return {
+        domainState: nextState,
+      }
+    },
+    buildProjectionPatch: ({ domainState, projection }) => documentToolLoopOrchestrator.buildStructuredTaskPayload({
+      taskTitle: (domainState as { taskTitle: string }).taskTitle,
+      taskSummary: projection.summary,
+      state: (domainState as { toolLoopState: unknown }).toolLoopState as any,
+      phase: projection.phase,
+    }),
+  }
   const { request, events } = createRequest({
     userText: '帮我改一下这段文档',
     intentClassification: createIntent({
@@ -232,26 +395,8 @@ test('TurnEngine emits blocked and done document payloads before finishing the t
       confidence: 'high',
     }),
     host: {
-      documentToolLoopOrchestrator: {
-        ...createHost().documentToolLoopOrchestrator,
-        handleNoToolCall: ({ state }: { state: { iteration?: number } }) => {
-          noToolCalls += 1
-          if (noToolCalls === 1) {
-            return {
-              state: { iteration: 1 },
-              nextUserMessage: '请先确认要修改的段落',
-              finalText: null,
-              preserveAssistantText: false,
-            }
-          }
-          return {
-            state: { iteration: 2 },
-            nextUserMessage: null,
-            finalText: '文档已更新',
-            preserveAssistantText: false,
-          }
-        },
-      },
+      documentToolLoopOrchestrator,
+      domainAdapters: [documentAdapter],
       requestToolLoopResponse: async () => ({
         text: '',
         toolCalls: [],
@@ -268,6 +413,88 @@ test('TurnEngine emits blocked and done document payloads before finishing the t
   assert.equal(toolResults.length, 2)
   assert.match(toolResults[0].chunk || '', /请先确认要修改的段落/)
   assert.match(toolResults[1].chunk || '', /文档已更新/)
+})
+
+test('TurnEngine promotes tool projection patches into structured transcript truth', async () => {
+  const engine = new TurnEngine()
+  let toolLoopCalls = 0
+  const { request, events } = createRequest({
+    userText: '继续执行 skill workflow',
+    intentClassification: createIntent({
+      primaryDomain: 'skill',
+      mentionedDomains: ['skill'],
+      actionSignals: ['skill-action'],
+      confidence: 'high',
+    }),
+    host: {
+      requestToolLoopResponse: async () => {
+        toolLoopCalls += 1
+        if (toolLoopCalls === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'skill_get_state', input: {} }],
+            stopReason: 'tool_use',
+          }
+        }
+        return {
+          text: '已记录当前 blocker',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [
+          {
+            id: 'tool-1',
+            name: 'skill_get_state',
+            input: {},
+            result: {
+              text: '请选择视频风格',
+              shape: 'projection_patch',
+              data: null,
+              projectionPatch: {
+                module: 'skill',
+                message: '请选择视频风格',
+                taskTitle: '技能执行 · video-copy-analyzer',
+                taskSummary: '请选择视频风格',
+                steps: [
+                  {
+                    id: 'collect_input',
+                    title: 'collect_input',
+                    status: 'blocked',
+                    updatedAt: '2026-04-17T11:00:00.000Z',
+                  },
+                ],
+                currentStepId: 'collect_input',
+                waitingFor: 'input',
+                resumableActions: ['continue', 'cancel'],
+                blockedReason: '请选择视频风格',
+                taskContinuation: {
+                  executionId: 'exec-1',
+                  stepId: 'collect_input',
+                  blockerType: 'need_input',
+                },
+              },
+              interactionHint: 'awaiting_clarification',
+            },
+            recoveryHistory: [],
+          },
+        ],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+  const structuredEvents = result.projectionTruth?.transcriptEvents?.filter((event) => event.kind === 'structured_payload') || []
+  const toolResults = events.filter((event) => event.kind === 'output' && event.type === 'tool_result')
+
+  assert.equal(structuredEvents.length > 0, true)
+  assert.equal(result.projectionTruth?.projectionPatch?.module, 'skill')
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '技能执行 · video-copy-analyzer')
+  assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'input')
+  assert.equal(toolResults.some((event) => /"module":"skill"/.test(event.chunk || '')), true)
 })
 
 test('TurnEngine surfaces budget-limit text and diagnostics when tool-call budget is exhausted', async () => {

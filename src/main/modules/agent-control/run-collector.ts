@@ -65,6 +65,7 @@ export interface SendAndCollectResult {
     recoveryHistory?: import('./run-contracts').RecoveryRecord[] | null
     degradationReason?: string | null
   } | null
+  projectionTruth?: import('./run-contracts').ProjectionTruthSnapshot | null
 }
 
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {

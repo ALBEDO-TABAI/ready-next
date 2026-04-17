@@ -87,9 +87,8 @@ test('browser agent runtime is split into planner, runtime adapter, page-state s
   assert.match(browserTools, /import \{ BrowserPageStateService \} from '\.\.\/browser-engine\/page-state-service'/)
   assert.match(browserTools, /import \{ BrowserEvidenceService \} from '\.\.\/browser-engine\/evidence-service'/)
 
-  assert.match(ipcHandler, /const parseStructuredScopeProjection = \(text: string\): Record<string, unknown> \| null =>/)
-  assert.match(ipcHandler, /const module = \(parsed as Record<string, unknown>\)\.module/)
-  assert.match(ipcHandler, /if \(module !== 'browser' && module !== 'document' && module !== 'design' && module !== 'skill'\) return null/)
+  assert.doesNotMatch(ipcHandler, /const parseStructuredScopeProjection = \(text: string\): Record<string, unknown> \| null =>/)
+  assert.match(ipcHandler, /const structured = data\.projectionPatch && typeof data\.projectionPatch === 'object'/)
   assert.match(ipcHandler, /taskTitle: typeof structured\?\.taskTitle === 'string' \? structured\.taskTitle : undefined/)
   assert.match(ipcHandler, /taskSummary: typeof structured\?\.taskSummary === 'string' \? structured\.taskSummary : undefined/)
   assert.match(ipcHandler, /blockedReason: typeof structured\?\.blockedReason === 'string' \? structured\.blockedReason : undefined/)

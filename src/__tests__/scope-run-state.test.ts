@@ -107,27 +107,23 @@ describe('scope run state helpers', () => {
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
   })
 
-  it('parses document pipeline diagnostics from structured payloads', () => {
+  it('reads document pipeline diagnostics from structured scope run events', () => {
     const patch = deriveScopeRunStatePatch(
       {
         phase: 'tool_running',
         timestamp: '2026-04-16T10:00:00.000Z',
-        latestText: JSON.stringify({
-          module: 'document',
-          taskTitle: '文档信息卡',
-          taskSummary: '已完成文档重点提炼 · 共 12 段，使用 4 段 · 章节切分',
-          executionDiagnostics: {
-            pipeline: {
-              document: {
-                phase: 'building_insight',
-                chunkCount: 12,
-                selectedChunkCount: 4,
-                cacheHit: false,
-                usedSectionAnchors: true,
-              },
+        latestText: '已完成文档重点提炼 · 共 12 段，使用 4 段 · 章节切分',
+        executionDiagnostics: {
+          pipeline: {
+            document: {
+              phase: 'building_insight',
+              chunkCount: 12,
+              selectedChunkCount: 4,
+              cacheHit: false,
+              usedSectionAnchors: true,
             },
           },
-        }),
+        },
       },
       null,
     )
@@ -138,7 +134,7 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.usedSectionAnchors, true)
   })
 
-  it('derives browser workflow task metadata from plan and stage tool events', () => {
+  it('does not derive browser workflow task metadata from legacy text-only events', () => {
     const planningPatch = deriveScopeRunStatePatch(
       {
         phase: 'tool_running',
@@ -152,16 +148,8 @@ describe('scope run state helpers', () => {
       null
     )
 
-    assert.strictEqual(planningPatch.taskTitle, '在目标页面上传素材并提交任务')
-    assert.deepStrictEqual(
-      planningPatch.steps?.map((item) => ({ id: item.id, status: item.status })),
-      [
-        { id: 'resolve_target_page', status: 'pending' },
-        { id: 'resolve_attachment', status: 'pending' },
-        { id: 'ensure_upload', status: 'pending' },
-        { id: 'final_reconcile', status: 'pending' }
-      ]
-    )
+    assert.strictEqual(planningPatch.taskTitle, null)
+    assert.deepStrictEqual(planningPatch.steps, [])
 
     const stagePatch = deriveScopeRunStatePatch(
       {
@@ -246,20 +234,12 @@ describe('scope run state helpers', () => {
       }
     )
 
-    assert.strictEqual(stagePatch.currentStepId, 'ensure_upload')
-    assert.strictEqual(stagePatch.taskSummary, '上传附件：页面已出现上传卡片')
-    assert.deepStrictEqual(
-      stagePatch.steps?.map((item) => ({ id: item.id, status: item.status })),
-      [
-        { id: 'resolve_target_page', status: 'done' },
-        { id: 'resolve_attachment', status: 'done' },
-        { id: 'ensure_upload', status: 'running' },
-        { id: 'final_reconcile', status: 'pending' }
-      ]
-    )
+    assert.strictEqual(stagePatch.currentStepId, null)
+    assert.strictEqual(stagePatch.taskSummary, null)
+    assert.deepStrictEqual(stagePatch.steps?.map((item) => item.status), ['pending', 'pending', 'pending', 'pending'])
   })
 
-  it('parses skill execution details into resumable workflow task metadata', () => {
+  it('does not derive skill workflow task metadata from legacy text-only events', () => {
     const patch = deriveScopeRunStatePatch(
       {
         phase: 'tool_running',
@@ -277,19 +257,12 @@ describe('scope run state helpers', () => {
       null
     )
 
-    assert.strictEqual(patch.taskTitle, '技能执行 · video-copy-analyzer')
-    assert.strictEqual(patch.currentStepId, 'collect_input')
-    assert.strictEqual(patch.waitingFor, 'input')
-    assert.deepStrictEqual(patch.resumableActions, ['continue', 'open_artifact', 'cancel'])
-    assert.strictEqual(patch.taskContinuation?.executionId, 'exec-1')
-    assert.strictEqual(patch.taskContinuation?.stepId, 'collect_input')
-    assert.deepStrictEqual(
-      patch.steps?.map((item) => ({ id: item.id, status: item.status })),
-      [
-        { id: 'prepare', status: 'done' },
-        { id: 'collect_input', status: 'blocked' }
-      ]
-    )
+    assert.strictEqual(patch.taskTitle, null)
+    assert.strictEqual(patch.currentStepId, null)
+    assert.strictEqual(patch.waitingFor, 'none')
+    assert.deepStrictEqual(patch.resumableActions, [])
+    assert.strictEqual(patch.taskContinuation, null)
+    assert.deepStrictEqual(patch.steps, [])
   })
 
   it('prefers structured browser task fields from the scope run event over text parsing', () => {
@@ -351,32 +324,26 @@ describe('scope run state helpers', () => {
     )
   })
 
-  it('prefers structured document task fields over text parsing', () => {
+  it('uses structured document task fields from scope run events', () => {
     const patch = deriveScopeRunStatePatch(
       {
         phase: 'tool_running',
         timestamp: '2026-04-09T10:20:00.000Z',
-        toolEvent: {
-          kind: 'result',
-          timestamp: '2026-04-09T10:20:00.000Z',
-          text: JSON.stringify({
-            module: 'document',
-            message: '已完成：章节改写',
-            taskTitle: '章节改写',
-            taskSummary: '已完成：第一部分',
-            steps: [
-              {
-                id: 'execute',
-                title: '章节改写',
-                status: 'done',
-                updatedAt: '2026-04-09T10:20:00.000Z'
-              }
-            ],
-            currentStepId: 'execute',
-            waitingFor: 'none',
-            resumableActions: ['cancel']
-          })
-        }
+        module: 'document',
+        latestText: '已完成：章节改写',
+        taskTitle: '章节改写',
+        taskSummary: '已完成：第一部分',
+        steps: [
+          {
+            id: 'execute',
+            title: '章节改写',
+            status: 'done',
+            updatedAt: '2026-04-09T10:20:00.000Z'
+          }
+        ],
+        currentStepId: 'execute',
+        waitingFor: 'none',
+        resumableActions: ['cancel'],
       },
       null
     )
@@ -391,32 +358,26 @@ describe('scope run state helpers', () => {
     )
   })
 
-  it('prefers structured design task fields over text parsing', () => {
+  it('uses structured design task fields from scope run events', () => {
     const patch = deriveScopeRunStatePatch(
       {
         phase: 'tool_running',
         timestamp: '2026-04-09T10:25:00.000Z',
-        toolEvent: {
-          kind: 'result',
-          timestamp: '2026-04-09T10:25:00.000Z',
-          text: JSON.stringify({
-            module: 'design',
-            message: '主版式已生成',
-            taskTitle: '设计任务',
-            taskSummary: '主版式已生成',
-            steps: [
-              {
-                id: 'execute',
-                title: '设计任务',
-                status: 'done',
-                updatedAt: '2026-04-09T10:25:00.000Z'
-              }
-            ],
-            currentStepId: 'execute',
-            waitingFor: 'none',
-            resumableActions: ['cancel']
-          })
-        }
+        module: 'design',
+        latestText: '主版式已生成',
+        taskTitle: '设计任务',
+        taskSummary: '主版式已生成',
+        steps: [
+          {
+            id: 'execute',
+            title: '设计任务',
+            status: 'done',
+            updatedAt: '2026-04-09T10:25:00.000Z'
+          }
+        ],
+        currentStepId: 'execute',
+        waitingFor: 'none',
+        resumableActions: ['cancel'],
       },
       null
     )

@@ -73,6 +73,7 @@ interface PersistedScopeRunSummary {
   channelKey: string
   threadKey: string
   phase: ScopeRunState['phase']
+  taskId?: string | null
   taskTitle?: string | null
   taskSummary?: string | null
   steps?: ScopeRunState['steps']
@@ -97,6 +98,7 @@ interface TaskCardRun extends TaskCardRunLike {
 interface SerializedTaskSnapshot {
   scopeId: string
   agent: string
+  taskId?: string | null
   title: string
   phase: ScopeRunState['phase']
   taskTitle?: string | null
@@ -125,6 +127,42 @@ interface SerializedToolTraceSnapshotItem {
   kind: 'call' | 'result'
   text: string
   timestamp: string
+}
+
+function normalizeProjectionSteps(
+  steps: TaskProjectionRecordData['steps'] | undefined,
+): ScopeRunState['steps'] {
+  return (steps || []).map((step) => ({
+    id: step.id,
+    title: step.title || step.description || step.id,
+    status: step.status || 'pending',
+    detail: step.detail,
+    updatedAt: step.updatedAt || new Date(0).toISOString(),
+  }))
+}
+
+function resolveProjectionForTaskRun(
+  projections: PersistedTaskProjection[] | undefined,
+  run: Pick<TaskCardRun, 'taskId' | 'taskContinuation'>,
+  persistedRun?: Pick<PersistedScopeRunSummary, 'taskId' | 'taskContinuation'> | null,
+): PersistedTaskProjection | null {
+  const items = projections || []
+  const candidateIds = [
+    run.taskId,
+    run.taskContinuation?.taskId,
+    persistedRun?.taskId,
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+
+  for (const candidateId of candidateIds) {
+    const matched = items.find((item) => item.taskId === candidateId)
+    if (matched) return matched
+  }
+
+  return items.find((item) =>
+    item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
+  ) || items[0] || null
 }
 
 function memoryCaptureSourceLabel(
@@ -1902,6 +1940,7 @@ export default function ChatPanel() {
         }
         return {
           scopeId: scope.id,
+          taskId: run.taskId || run.taskContinuation?.taskId || null,
           phase: run.phase,
           title: scope.title,
           taskTitle: run.taskTitle,
@@ -1925,17 +1964,28 @@ export default function ChatPanel() {
   }, [filteredScopes, scopeRunStates])
 
   const mergedTaskRuns = useMemo<TaskCardRun[]>(() => {
+    const persistedScopeRunByScopeId = new Map(
+      persistedScopeRuns.map((persistedRun) => [persistedRun.scopeId, persistedRun] as const),
+    )
     const mappedPersisted = persistedScopeRuns.map((run) => {
-      const projection = persistedTaskProjections[run.scopeId]?.[0]
+      const projection = resolveProjectionForTaskRun(
+        persistedTaskProjections[run.scopeId],
+        run,
+        run,
+      )
       return {
         scopeId: run.scopeId,
-        taskId: projection?.taskId || run.taskContinuation?.taskId || null,
+        taskId: projection?.taskId || run.taskId || run.taskContinuation?.taskId || null,
         phase: run.phase,
+        status: projection?.status,
         title: run.title,
         taskTitle: projection?.taskTitle || run.taskTitle,
         taskSummary: projection?.taskSummary || run.taskSummary,
-        steps: run.steps,
-        currentStepId: run.currentStepId,
+        steps:
+          (projection?.steps && projection.steps.length > 0)
+            ? normalizeProjectionSteps(projection.steps)
+            : (run.steps || []),
+        currentStepId: projection?.currentStepId || run.currentStepId,
         waitingFor: run.waitingFor,
         resumableActions:
           (run.resumableActions && run.resumableActions.length > 0)
@@ -1963,12 +2013,23 @@ export default function ChatPanel() {
     const merged = new Map<string, TaskCardRun>()
     for (const run of mappedPersisted) merged.set(run.scopeId, run)
     for (const run of inMemoryTaskRuns) {
-      const projection = persistedTaskProjections[run.scopeId]?.[0]
+      const persistedRun = persistedScopeRunByScopeId.get(run.scopeId) || null
+      const projection = resolveProjectionForTaskRun(
+        persistedTaskProjections[run.scopeId],
+        run,
+        persistedRun,
+      )
       merged.set(run.scopeId, {
         ...run,
-        taskId: projection?.taskId || run.executionDiagnostics?.taskId || run.taskContinuation?.taskId || run.taskId || null,
+        taskId: projection?.taskId || run.taskId || persistedRun?.taskId || run.taskContinuation?.taskId || null,
+        status: projection?.status,
         taskTitle: projection?.taskTitle || run.taskTitle,
         taskSummary: projection?.taskSummary || run.taskSummary,
+        steps:
+          (projection?.steps && projection.steps.length > 0)
+            ? normalizeProjectionSteps(projection.steps)
+            : (run.steps || []),
+        currentStepId: projection?.currentStepId || run.currentStepId,
         resumableActions:
           (run.resumableActions && run.resumableActions.length > 0)
             ? run.resumableActions
@@ -2014,6 +2075,7 @@ export default function ChatPanel() {
     if (!snapshot.scopeId || !snapshot.updatedAt) return null
     return {
       scopeId: snapshot.scopeId,
+      taskId: snapshot.taskId || snapshot.taskContinuation?.taskId || null,
       phase: snapshot.phase,
       title: snapshot.title || '任务',
       taskTitle: snapshot.taskTitle,
@@ -2458,6 +2520,7 @@ export default function ChatPanel() {
         taskId ? `Task ID: ${taskId}` : null,
         continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
         continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
+        run?.blockedReason ? `继续前上下文：${run.blockedReason}` : null,
       ].filter(Boolean).join('\n'))
       focusInputWithResize()
     },

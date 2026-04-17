@@ -3,6 +3,7 @@ import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
+import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type { RunBudgetSeed, RunBudgetUsage, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 
 function createSession(userText: string): TurnEngineSession {
@@ -87,6 +88,7 @@ function createHost(overrides?: Record<string, unknown>) {
     sessionHasVideoInputs: () => false,
     maybeRunDocumentTaskPlan: async () => null,
     maybeRunDocumentWidgetPipeline: async () => null,
+    domainAdapters: [] as DomainAdapter[],
     skillContextOrchestrator: {
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
@@ -225,6 +227,21 @@ test('TurnEngine short-circuits browser deterministic work before the model tool
   const engine = new TurnEngine()
   let deterministicRuns = 0
   let simpleRequests = 0
+  const browserAdapter: DomainAdapter = {
+    id: 'browser',
+    shouldHandle: () => true,
+    prepare: () => ({ allowedToolNames: null, sessionMessages: [], domainState: { mode: 'deterministic' } }),
+    dispatch: async () => {
+      deterministicRuns += 1
+      return {
+        domainState: { mode: 'done' },
+        finalText: 'browser deterministic result',
+        finish: { status: 'done', success: true },
+      }
+    },
+    applyResult: () => ({ domainState: null }),
+    buildProjectionPatch: () => null,
+  }
   const { request } = createRequest({
     userText: '打开网页并点击发送',
     intentClassification: createIntent({
@@ -252,24 +269,7 @@ test('TurnEngine short-circuits browser deterministic work before the model tool
         supportsVideoBlock: true,
         hasRawVideoInIncoming: false,
       },
-      browserDomainOrchestrator: {
-        ...createHost().browserDomainOrchestrator,
-        resolveExecutionDispatch: () => ({
-          kind: 'deterministic',
-          continuityInstruction: null,
-          responseText: null,
-          toolLoopMessage: null,
-          fallbackLog: null,
-        }),
-        runDeterministicExecution: async () => {
-          deterministicRuns += 1
-          return {
-            handled: true,
-            state: 'done',
-            message: 'browser deterministic result',
-          }
-        },
-      },
+      domainAdapters: [browserAdapter],
       requestSimpleText: async () => {
         simpleRequests += 1
         return { text: 'should not be used' }
@@ -282,6 +282,99 @@ test('TurnEngine short-circuits browser deterministic work before the model tool
   assert.equal(result.finalText, 'browser deterministic result')
   assert.equal(deterministicRuns, 1)
   assert.equal(simpleRequests, 0)
+})
+
+test('TurnEngine lets a domain adapter block once and then finish a document tool loop', async () => {
+  const engine = new TurnEngine()
+  let toolLoopRequests = 0
+  const phases: string[] = []
+  const documentAdapter: DomainAdapter = {
+    id: 'document',
+    shouldHandle: ({ route }) => route.executor === 'document',
+    prepare: () => ({ allowedToolNames: ['document_replace_text'], sessionMessages: [], domainState: { nudged: false } }),
+    dispatch: async () => ({ domainState: { nudged: false } }),
+    applyResult: ({ phase, domainState }) => {
+      phases.push(phase)
+      if (phase !== 'no_tool_call') {
+        return { domainState }
+      }
+      if (!(domainState as { nudged?: boolean }).nudged) {
+        return {
+          domainState: { nudged: true },
+          nextUserMessage: '系统检查：请继续执行真实文档修改。',
+          projection: { phase: 'blocked', summary: '系统检查：请继续执行真实文档修改。' },
+        }
+      }
+      return {
+        domainState,
+        finalText: '文档任务已完成',
+        projection: { phase: 'done', summary: '文档任务已完成' },
+      }
+    },
+    buildProjectionPatch: ({ projection }) => ({
+      module: 'document',
+      message: projection.summary,
+      taskTitle: '文档修改',
+      taskSummary: projection.summary,
+      steps: [{
+        id: 'execute',
+        title: '文档修改',
+        status: projection.phase === 'done' ? 'done' : 'blocked',
+        updatedAt: '2026-04-17T00:00:00.000Z',
+      }],
+      currentStepId: 'execute',
+      waitingFor: 'none',
+      resumableActions: projection.phase === 'done' ? ['cancel'] : ['retry', 'cancel'],
+      blockedReason: projection.phase === 'blocked' ? projection.summary : null,
+    }),
+  }
+  const { request, events } = createRequest({
+    userText: '帮我修改这段文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      domainAdapters: [documentAdapter],
+      requestToolLoopResponse: async () => {
+        toolLoopRequests += 1
+        return {
+          text: `document response ${toolLoopRequests}`,
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(toolLoopRequests, 2)
+  assert.equal(result.finalText, '文档任务已完成')
+  assert.deepEqual(phases, ['no_tool_call', 'no_tool_call'])
+  assert.equal(
+    events.some((event) => event.kind === 'output' && /文档任务已完成/.test(String(event.chunk || ''))),
+    true,
+  )
 })
 
 test('TurnEngine short-circuits host shortcuts and returns their output text', async () => {
@@ -376,6 +469,66 @@ test('TurnEngine restores continuation budgets before running the resumed turn',
   assert.equal(result.interactionState, 'resuming')
   assert.equal(result.executionDiagnostics?.continuationBudgetRestore?.inheritedBudget, true)
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.budget.maxIterations, 12)
+  assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.usage.iterationsUsed, 3)
+})
+
+test('TurnEngine prefers the provided continuation state over legacy prompt-based continuation lookup', async () => {
+  const engine = new TurnEngine()
+  const { request } = createRequest({
+    userText: '继续当前任务',
+    host: {
+      resolveContinuationProjection: () => {
+        throw new Error('legacy continuation lookup should not run when continuationState is already provided')
+      },
+    },
+  })
+
+  ;(request as unknown as {
+    continuationState?: Record<string, unknown>
+  }).continuationState = {
+    taskId: 'task-prev',
+    scopeId: 'scope-test',
+    runId: 'run-prev',
+    module: 'system',
+    taskType: 'short_task',
+    interactionState: 'awaiting_confirmation',
+    steps: [
+      {
+        id: 'approve',
+        title: '确认继续执行',
+        description: '等待确认',
+        status: 'running',
+        updatedAt: '2026-04-17T00:00:00.000Z',
+      },
+    ],
+    currentStepId: 'approve',
+    blockedReason: '等待确认',
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: {
+      taskId: 'task-prev',
+      executionId: 'exec-prev',
+      stepId: 'approve',
+      blockerType: 'need_confirmation',
+    },
+    budget: {
+      taskType: 'short_task',
+      maxIterations: 12,
+      maxToolCalls: 6,
+      maxParallelToolGroups: 2,
+      iterationsUsed: 3,
+      toolCallsUsed: 1,
+      parallelToolGroupsUsed: 0,
+      stepBudget: {
+        stepId: 'approve',
+        maxIterations: 4,
+        remainingIterations: 2,
+      },
+    },
+  }
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.taskType, 'continuation')
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.usage.iterationsUsed, 3)
 })
 

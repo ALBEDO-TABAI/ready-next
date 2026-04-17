@@ -18,6 +18,10 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(runtime, /async suspendRun\(/)
   assert.match(runtime, /async resumeRun\(/)
   assert.match(runtime, /async respondToInteraction\(/)
+  assert.match(runtime, /scopeRunSummary\?\.taskId/)
+  assert.match(runtime, /scopeRunSummary\?\.taskContinuation\?\.taskId/)
+  assert.match(runtime, /taskTitle:\s*target\.projection\?\.taskTitle/)
+  assert.doesNotMatch(runtime, /taskTitle:\s*target\.projection\?\.taskId/)
 
   assert.match(ipcHandler, /ipcMain\.handle\('agent:suspendRun'/)
   assert.match(ipcHandler, /ipcMain\.handle\('agent:resumeRun'/)

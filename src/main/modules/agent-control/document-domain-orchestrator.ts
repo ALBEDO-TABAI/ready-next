@@ -19,7 +19,12 @@ export class DocumentDomainOrchestrator {
   constructor(private readonly deps: {
     log: (message: string) => void
     executeToolCall: (name: string, input: Record<string, unknown>, context: ToolContext) => Promise<ToolExecutionOutput>
-    emitOutput: (payload: { agent: string; chunk: string; type: 'text' | 'tool_use' | 'tool_result' }) => void
+    emitOutput: (payload: {
+      agent: string
+      chunk: string
+      type: 'text' | 'tool_use' | 'tool_result'
+      projectionPatch?: Record<string, unknown> | null
+    }) => void
     emitToolAction: (payload: { agent: string; tool: string; args: Record<string, unknown> }) => void
     extractPrimaryUserInstruction: (raw: string) => string
     extractSectionTitleFromUserText: (raw: string) => string | null
@@ -75,6 +80,7 @@ export class DocumentDomainOrchestrator {
       agent: params.agentName,
       type: 'tool_result',
       chunk: serializeToolExecutionOutput(result),
+      projectionPatch: result.projectionPatch,
     })
   }
 

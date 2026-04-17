@@ -21,6 +21,7 @@ test('agent task projections are exposed through main IPC, preload, and renderer
   assert.match(preload, /getTaskProjection:\s*\(taskId: string\)\s*=>\s*ipcRenderer\.invoke\('agent:getTaskProjection', \{ taskId \}\)/)
 
   assert.match(rendererTypes, /interface TaskProjectionRecordData \{/)
+  assert.match(rendererTypes, /interface ScopeRunSummaryData \{[\s\S]*taskId\?: string \| null/)
   assert.match(rendererTypes, /listTaskProjections:\s*\(scopeId: string\)\s*=>\s*Promise<IPCResponse<TaskProjectionRecordData\[]>>/)
   assert.match(rendererTypes, /getTaskProjection:\s*\(taskId: string\)\s*=>\s*Promise<IPCResponse<TaskProjectionRecordData>>/)
 })

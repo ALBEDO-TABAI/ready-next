@@ -25,7 +25,7 @@ import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
-import type { TaskProjectionRecord } from './run-contracts'
+import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
@@ -186,7 +186,7 @@ export class AgentControlRuntime extends EventEmitter {
     this.runCoordinator = new RunCoordinator({
       promptAssembly: this.promptAssembly,
       executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
-      emitScopeRunEvent: (payload) => this.emitScopeRunEvent(payload),
+      emitScopeRunEvent: (payload, projectionTruth) => this.emitScopeRunEvent(payload, projectionTruth),
       reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools)
     })
     this.runProjection = new RunProjection({
@@ -672,27 +672,30 @@ export class AgentControlRuntime extends EventEmitter {
         frozen: true,
       }
       : null
+    const resolvedTaskId = target.projection?.taskId || target.scopeRunSummary?.taskId || payload.taskId
+    const resolvedTaskType = target.projection?.taskType || target.scopeRunSummary?.taskType || 'short_task'
     const timestamp = new Date().toISOString()
     this.emitScopeRunEvent({
       type: 'updated',
       scopeId: target.scope.id,
       agent: target.scope.agent,
       runId: target.projection?.runId,
-      taskId: target.projection?.taskId || payload.taskId,
+      taskId: resolvedTaskId,
       phase: 'takeover',
-      taskType: target.projection?.taskType || 'short_task',
+      taskType: resolvedTaskType,
       interactionState: 'suspended',
-      taskTitle: target.projection?.taskId ? target.projection.taskId : undefined,
-      taskSummary: '任务已暂停，等待继续。',
-      steps: target.projection?.steps as any,
-      currentStepId: target.projection?.currentStepId || null,
+      taskTitle: target.projection?.taskTitle || target.scopeRunSummary?.taskTitle || undefined,
+      taskSummary: target.projection?.taskSummary || target.scopeRunSummary?.taskSummary || undefined,
+      steps: (target.projection?.steps || target.scopeRunSummary?.steps || []) as any,
+      currentStepId: target.projection?.currentStepId || target.scopeRunSummary?.currentStepId || null,
       waitingFor: 'none',
       resumableActions: ['continue', 'cancel'],
       blockedReason: '任务已暂停，等待继续。',
-      taskProjectionId: target.projection?.taskId || payload.taskId,
+      taskContinuation: target.projection?.continuationRef || target.scopeRunSummary?.taskContinuation || undefined,
+      taskProjectionId: resolvedTaskId,
       executionDiagnostics: runtime
         ? {
-          taskId: target.projection?.taskId || payload.taskId,
+          taskId: resolvedTaskId,
           taskBudgetRuntime: runtime,
           budget: {
             ...runtime.budget,
@@ -1402,35 +1405,61 @@ export class AgentControlRuntime extends EventEmitter {
     this.emit('conversationEvent', payload)
   }
 
-  private emitScopeRunEvent(payload: ScopeRunEventPayload): void {
-    this.recordScopeRunEvent(payload)
+  private emitScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
+    this.recordScopeRunEvent(payload, projectionTruth)
     this.emit('scopeRunEvent', payload)
   }
 
-  recordScopeRunEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
-    const summary = this.recordRunProjectionEvent(payload)
+  recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
+    const summary = this.recordRunProjectionEvent(payload, projectionTruth)
     if (summary) {
-      void syncTaskProjection(this.taskProjectionStore, summary, payload).catch((error) => {
+      void syncTaskProjection(this.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
         console.error('[AgentControlRuntime] Failed to sync task projection:', error)
       })
     }
     return summary
   }
 
-  private recordRunProjectionEvent(payload: ScopeRunEventPayload): ScopeRunSummary | null {
-    return this.runProjection.recordEvent(payload)
+  private recordRunProjectionEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
+    return this.runProjection.recordEvent(payload, projectionTruth)
   }
 
   private resolveTaskControlTarget(
     scopeId: string,
     taskId?: string,
-  ): { scope: ConversationScope; projection: TaskProjectionRecord | null } | null {
+  ): {
+    scope: ConversationScope
+    projection: TaskProjectionRecord | null
+    scopeRunSummary: ScopeRunSummary | null
+  } | null {
     const scope = this.getConversationScope(scopeId)
     if (!scope) return null
-    const projection = taskId
-      ? this.getTaskProjection(taskId)
-      : this.listTaskProjections(scopeId)[0] || null
-    return { scope, projection }
+    const scopeRunSummary = this.scopeRunSummaries.get(scopeId) || null
+    if (taskId) {
+      return {
+        scope,
+        projection: this.getTaskProjection(taskId),
+        scopeRunSummary,
+      }
+    }
+
+    const projections = this.listTaskProjections(scopeId)
+    const matchedProjection = [
+      scopeRunSummary?.taskId || null,
+      scopeRunSummary?.taskContinuation?.taskId || null,
+    ]
+      .filter(Boolean)
+      .map((candidateTaskId) => this.getTaskProjection(candidateTaskId as string))
+      .find((item) => Boolean(item)) || null
+    const activeProjection = projections.find((item) =>
+      item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
+    ) || null
+
+    return {
+      scope,
+      projection: matchedProjection || activeProjection || projections[0] || null,
+      scopeRunSummary,
+    }
   }
 
   private buildContinuationControlMessage(params: {
