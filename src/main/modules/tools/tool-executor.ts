@@ -23,7 +23,6 @@ import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
-import { withToolExecutionTimeout } from './tool-execution-timeout-policy'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -69,12 +68,13 @@ export async function executeToolCall(
     })
   }
 
-  const rawResult = await withToolExecutionTimeout(toolName, async () => {
-    if (context.abortSignal?.aborted) {
-      const error = new Error('Operation aborted')
-      error.name = 'AbortError'
-      throw error
-    }
+  if (context.abortSignal?.aborted) {
+    const error = new Error('Operation aborted')
+    error.name = 'AbortError'
+    throw error
+  }
+
+  const rawResult = await (async () => {
     switch (definition.domain) {
       case 'browser':
         if (!context.browserController) {
@@ -112,7 +112,7 @@ export async function executeToolCall(
       default:
         return `Unknown tool: ${toolName}`
     }
-  })
+  })()
 
   return toStructuredToolResult(toolName, rawResult)
 }

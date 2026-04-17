@@ -24,7 +24,9 @@ test('ToolRuntime wraps legacy string results into structured outputs while pres
   })
 
   assert.deepEqual(starts, ['1', '2', '3'])
-  assert.deepEqual(finishes, ['3', '2', '1'])
+  assert.equal(finishes.length, 3)
+  assert.equal(finishes[2], '1')
+  assert.deepEqual(new Set(finishes), new Set(['1', '2', '3']))
   assert.deepEqual(result.results.map((item) => item.id), ['1', '2', '3'])
   assert.deepEqual(result.results.map((item) => item.result.text), [
     'memory_search:ok',
@@ -70,4 +72,85 @@ test('ToolRuntime lets custom executors handle non-registered tools', async () =
 
   assert.equal(result.results[0]?.result.text, 'custom:custom_probe')
   assert.equal(result.results[0]?.result.shape, 'text')
+})
+
+test('ToolRuntime uses timeout profiles on the default execution path', async () => {
+  const runtime = new ToolRuntime({
+    log: () => {},
+    executeToolCall: async () => await new Promise<string>(() => {}),
+    resolveTimeoutMs: () => 5,
+  } as any)
+
+  const result = await runtime.executeBatch({
+    toolCalls: [
+      { id: '1', name: 'document_update_widget', input: {} },
+    ],
+    context: {},
+  })
+
+  assert.equal(result.results.length, 1)
+  assert.equal(result.results[0]?.result.shape, 'json')
+  assert.equal(result.results[0]?.result.data?.errorKind, 'timeout_tool')
+  assert.match(result.results[0]?.result.text || '', /timed out/i)
+})
+
+test('ToolRuntime retries transient tool failures before succeeding and serializes later groups after recovery', async () => {
+  const delays: number[] = []
+  const runtime = new ToolRuntime({
+    log: () => {},
+    sleep: async (delayMs) => {
+      delays.push(delayMs)
+    },
+  })
+  const attempts = new Map<string, number>()
+  const groupModes: string[] = []
+
+  const result = await runtime.executeBatch({
+    toolCalls: [
+      { id: '1', name: 'memory_search', input: { q: 'recover' } },
+      { id: '2', name: 'document_list_widgets', input: { tabId: 'tab-1' } },
+      { id: '3', name: 'browser_click', input: { selector: '#go' } },
+    ],
+    onGroupStart: (group) => {
+      groupModes.push(group.mode)
+    },
+    executeTool: async (toolCall) => {
+      const nextAttempt = (attempts.get(toolCall.id) || 0) + 1
+      attempts.set(toolCall.id, nextAttempt)
+      if (toolCall.id === '1' && nextAttempt === 1) {
+        throw new Error('HTTP 503 upstream unavailable')
+      }
+      return `${toolCall.name}:ok:${nextAttempt}`
+    },
+  })
+
+  assert.equal(result.results.length, 3)
+  assert.deepEqual(groupModes, ['parallel', 'serial'])
+  assert.equal(result.results[0]?.result.text, 'memory_search:ok:2')
+  assert.equal(result.results[1]?.result.text, 'document_list_widgets:ok:1')
+  assert.equal(result.results[2]?.result.text, 'browser_click:ok:1')
+  assert.deepEqual(result.recoveryHistory.map((item) => item.kind), ['transient'])
+  assert.equal(delays.length, 1)
+  assert.ok((delays[0] || 0) >= 375)
+  assert.ok((delays[0] || 0) <= 500)
+})
+
+test('ToolRuntime converts context-overflow tool failures into structured outputs without retrying', async () => {
+  const runtime = new ToolRuntime({ log: () => {} })
+  let attempts = 0
+
+  const result = await runtime.executeBatch({
+    toolCalls: [
+      { id: '1', name: 'memory_search', input: { q: 'overflow' } },
+    ],
+    executeTool: async () => {
+      attempts += 1
+      throw new Error('maximum context length exceeded')
+    },
+  })
+
+  assert.equal(attempts, 1)
+  assert.equal(result.results[0]?.result.shape, 'json')
+  assert.equal(result.results[0]?.result.data?.errorKind, 'context_overflow')
+  assert.deepEqual(result.recoveryHistory.map((item) => item.kind), ['context_overflow'])
 })

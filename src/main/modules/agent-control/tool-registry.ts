@@ -3,9 +3,11 @@ import { getToolResourceTag } from './tool-parallelism-policy'
 import type {
   ToolConcurrency,
   ToolDefinition,
+  ToolDefinitionSchema,
   ToolDomain,
   ToolInterruptBehavior,
   ToolKind,
+  ToolProjectionHint,
   ToolTimeoutProfile,
 } from './tool-definition'
 import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
@@ -20,6 +22,7 @@ import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-t
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
+import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import { createRequire } from 'node:module'
 
 export type ToolSchemaFormat = 'anthropic' | 'openai'
@@ -142,6 +145,7 @@ const BROWSER_READ_TOOL_NAMES = new Set([
 ])
 
 const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls'])
+const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill'])
 
 function getOpenAIToolName(tool: Record<string, unknown>): string | null {
   const fn = tool.function && typeof tool.function === 'object'
@@ -226,7 +230,11 @@ function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: T
   return 'default'
 }
 
-function buildToolDefinition(groupId: CapabilityGroupId, toolName: string): ToolDefinition {
+function buildToolDefinition(
+  groupId: CapabilityGroupId,
+  toolName: string,
+  metadata?: ToolDefinitionMetadata | null,
+): ToolDefinition {
   const tag = getToolResourceTag(toolName)
   const domain = tag.domain as ToolDomain
   const kind = resolveToolKind(toolName, domain)
@@ -243,12 +251,21 @@ function buildToolDefinition(groupId: CapabilityGroupId, toolName: string): Tool
     concurrency,
     interruptBehavior,
     timeoutProfile: resolveToolTimeoutProfile(toolName, domain, kind),
-    resultShape: 'text',
+    supportsTextBridge: resolveSupportsTextBridge(toolName, domain),
+    projectionHint: resolveToolProjectionHint(toolName, domain, kind),
+    description: metadata?.description || toolName,
+    schema: metadata?.schema || null,
+    resultShape: resolveToolResultShape(toolName, domain),
   }
 }
 
-function buildToolDefinitions(groupId: CapabilityGroupId, toolNames: readonly string[]): ToolDefinition[] {
-  return Array.from(new Set(toolNames)).map((toolName) => buildToolDefinition(groupId, toolName))
+function buildToolDefinitions(
+  groupId: CapabilityGroupId,
+  toolNames: readonly string[],
+  metadata?: Map<string, ToolDefinitionMetadata>,
+): ToolDefinition[] {
+  return Array.from(new Set(toolNames)).map((toolName) =>
+    buildToolDefinition(groupId, toolName, metadata?.get(toolName) || null))
 }
 
 function filterBrowserAnthropicTools(toolNames: readonly string[]): Array<Record<string, unknown>> {
@@ -269,6 +286,99 @@ function filterBrowserOpenAITools(toolNames: readonly string[]): Array<Record<st
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+interface ToolDefinitionMetadata {
+  description: string
+  schema: ToolDefinitionSchema | null
+}
+
+function toToolDefinitionSchema(schema: unknown): ToolDefinitionSchema | null {
+  const normalized = normalizeToolJsonSchema(schema)
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+    return null
+  }
+  return normalized as ToolDefinitionSchema
+}
+
+function readToolMetadata(
+  tool: Record<string, unknown>,
+  format: ToolSchemaFormat,
+): { name: string; metadata: ToolDefinitionMetadata } | null {
+  if (format === 'anthropic') {
+    const name = getAnthropicToolName(tool)
+    if (!name) return null
+    return {
+      name,
+      metadata: {
+        description: typeof tool.description === 'string' ? tool.description : name,
+        schema: toToolDefinitionSchema(tool.input_schema),
+      },
+    }
+  }
+
+  const name = getOpenAIToolName(tool)
+  if (!name) return null
+  const fn = tool.function && typeof tool.function === 'object'
+    ? tool.function as Record<string, unknown>
+    : {}
+  return {
+    name,
+    metadata: {
+      description: typeof fn.description === 'string' ? fn.description : name,
+      schema: toToolDefinitionSchema(fn.parameters),
+    },
+  }
+}
+
+function buildToolMetadataMap(
+  tools: Array<Record<string, unknown>>,
+  format: ToolSchemaFormat,
+): Map<string, ToolDefinitionMetadata> {
+  const metadata = new Map<string, ToolDefinitionMetadata>()
+  for (const tool of tools) {
+    const resolved = readToolMetadata(tool, format)
+    if (!resolved) continue
+    metadata.set(resolved.name, resolved.metadata)
+  }
+  return metadata
+}
+
+function mergeToolMetadata(
+  primary: Map<string, ToolDefinitionMetadata>,
+  fallback: Map<string, ToolDefinitionMetadata>,
+): Map<string, ToolDefinitionMetadata> {
+  const merged = new Map<string, ToolDefinitionMetadata>(fallback)
+  for (const [toolName, metadata] of primary.entries()) {
+    merged.set(toolName, metadata)
+  }
+  return merged
+}
+
+function resolveSupportsTextBridge(_toolName: string, domain: ToolDomain): boolean {
+  return domain !== 'browser'
+}
+
+function resolveToolProjectionHint(
+  toolName: string,
+  domain: ToolDomain,
+  kind: ToolKind,
+): ToolProjectionHint | null {
+  const hint: ToolProjectionHint = {}
+  if (kind === 'write') {
+    hint.mutating = true
+  }
+  if (PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')) {
+    hint.emitsProjectionPatch = true
+  }
+  return Object.keys(hint).length > 0 ? hint : null
+}
+
+function resolveToolResultShape(toolName: string, domain: ToolDomain): ToolDefinition['resultShape'] {
+  if (PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')) {
+    return 'projection_patch'
+  }
+  return 'text'
 }
 
 function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution {
@@ -405,23 +515,23 @@ export class ToolRegistry implements ToolRegistryReader {
       return { definitions: [] }
     }
     if (provider.getToolDefinitionsDetailed) {
-      return provider.getToolDefinitionsDetailed()
+      return this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed())
     }
     if (provider.getToolDefinitions) {
       try {
-        return { definitions: provider.getToolDefinitions() }
+        return this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() })
       } catch (error) {
-        return {
+        return this.enrichToolDefinitions(groupId, {
           definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
           error: getErrorMessage(error),
           usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-        }
+        })
       }
     }
-    return {
+    return this.enrichToolDefinitions(groupId, {
       definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
       usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-    }
+    })
   }
 
   getToolSchemasResolutionForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): ToolSchemaResolution {
@@ -473,6 +583,42 @@ export class ToolRegistry implements ToolRegistryReader {
 
   getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
     return this.getToolSchemasResolutionForGroup(groupId, format).tools
+  }
+
+  private enrichToolDefinitions(
+    groupId: CapabilityGroupId,
+    resolution: ToolDefinitionResolution,
+  ): ToolDefinitionResolution {
+    if (resolution.definitions.length === 0) {
+      return resolution
+    }
+
+    const metadata = mergeToolMetadata(
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'openai').tools, 'openai'),
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'anthropic').tools, 'anthropic'),
+    )
+
+    return {
+      ...resolution,
+      definitions: resolution.definitions.map((definition) => {
+        const fallback = buildToolDefinition(groupId, definition.name, metadata.get(definition.name) || null)
+        return {
+          ...fallback,
+          ...definition,
+          supportsTextBridge:
+            typeof definition.supportsTextBridge === 'boolean'
+              ? definition.supportsTextBridge
+              : fallback.supportsTextBridge,
+          projectionHint: definition.projectionHint ?? fallback.projectionHint,
+          description:
+            definition.description && definition.description !== definition.name
+              ? definition.description
+              : fallback.description,
+          schema: definition.schema || fallback.schema,
+          resultShape: definition.resultShape || fallback.resultShape,
+        }
+      }),
+    }
   }
 }
 

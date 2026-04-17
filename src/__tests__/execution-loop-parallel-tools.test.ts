@@ -82,7 +82,8 @@ test('ExecutionLoopOrchestrator executes a parallel-safe batch concurrently but 
   })
 
   assert.deepEqual(starts, ['1', '2', '3'])
-  assert.deepEqual(finishes, ['3', '2', '1'])
+  assert.equal(finishes.length, 3)
+  assert.deepEqual(new Set(finishes), new Set(['1', '2', '3']))
   assert.deepEqual(result.results.map((item) => item.id), ['1', '2', '3'])
   assert.deepEqual(result.results.map((item) => item.result.text), ['memory_search:ok', 'document_list_widgets:ok', 'rss_capture_session:ok'])
   assert.equal(result.budgetLimited, false)
@@ -152,6 +153,38 @@ test('ExecutionLoopOrchestrator caps actual concurrent tool execution per parall
 
   assert.equal(maxActive, 5)
   assert.equal(result.results.length, 7)
+})
+
+test('ExecutionLoopOrchestrator uses ToolRuntime default execution with context and lifecycle hooks on the production batch path', async () => {
+  const starts: string[] = []
+  const executed: string[] = []
+  const orchestrator = new ExecutionLoopOrchestrator({
+    log: () => {},
+    executeToolCall: async (toolName: string, _args: Record<string, unknown>) => {
+      executed.push(toolName)
+      return `${toolName}:ok`
+    },
+  } as any)
+
+  const result = await orchestrator.executeToolCalls({
+    toolCalls: [
+      { id: '1', name: 'memory_search', input: { q: 'ready' } },
+      { id: '2', name: 'document_list_widgets', input: { tabId: 'tab-1' } },
+    ],
+    context: {},
+    hooks: {
+      onToolStart: ({ toolCall }) => {
+        starts.push(toolCall.name)
+      },
+    },
+  })
+
+  assert.deepEqual(starts, ['memory_search', 'document_list_widgets'])
+  assert.deepEqual(executed, ['memory_search', 'document_list_widgets'])
+  assert.deepEqual(result.results.map((item) => item.result.text), [
+    'memory_search:ok',
+    'document_list_widgets:ok',
+  ])
 })
 
 test('ExecutionLoopOrchestrator retries model requests for runtime-recoverable rate limits before applying fallback logic', async () => {

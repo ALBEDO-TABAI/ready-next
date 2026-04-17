@@ -1,8 +1,10 @@
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
+import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
 import type { BrowserController } from '../browser-engine/ipc-handler'
+import type { ToolDefinition } from './tool-definition'
 import { defaultToolGateway } from './tool-gateway'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
@@ -20,6 +22,7 @@ import {
   type ToolExecutionResultLike,
 } from './tool-result-types'
 import { toToolExecutorContext } from './tool-runtime-context-builder'
+import { resolveToolExecutionTimeoutMsForProfile } from '../tools/tool-execution-timeout-policy'
 
 export interface ToolRuntimeContext {
   browserController?: BrowserController | null
@@ -51,11 +54,26 @@ type KnownExecutionErrorResult = ErrorClassifierResult & {
   kind: Exclude<ErrorClassifierResult['kind'], 'unknown'>
 }
 
+interface TrackedCleanup {
+  drained: boolean
+  run: () => Promise<void>
+}
+
+interface ToolRuntimeAttemptContext extends ToolRuntimeContext {
+  __trackedCleanups: TrackedCleanup[]
+}
+
 export class ToolRuntime {
   constructor(private readonly deps: {
     log: (message: string) => void
     sleep?: (delayMs: number) => Promise<void>
     now?: () => string
+    executeToolCall?: (
+      toolName: string,
+      args: Record<string, unknown>,
+      context: ReturnType<typeof toToolExecutorContext>,
+    ) => Promise<ToolExecutionResultLike>
+    resolveTimeoutMs?: (definition: ToolDefinition | null, toolCall: ParallelToolCall) => number
   }) {}
 
   async executeBatch(params: {
@@ -71,6 +89,7 @@ export class ToolRuntime {
     const groups = groupParallelSafeToolCalls(params.toolCalls)
     const results: ToolRuntimeExecutionResult[] = []
     const recoveryHistory: RecoveryRecord[] = []
+    const batchCleanups: TrackedCleanup[] = []
     const startedToolCallIds: string[] = []
     let budgetLimited = false
     let shouldSerializeRemainingGroups = false
@@ -85,10 +104,11 @@ export class ToolRuntime {
       })
     }
 
-    const throwIfAborted = (skippedToolCalls: ParallelToolCall[] = []): void => {
+    const throwIfAborted = async (skippedToolCalls: ParallelToolCall[] = []): Promise<void> => {
       const signal = params.signal || params.context?.abortSignal
       if (!signal?.aborted) return
       notifyInterrupted(skippedToolCalls)
+      await this.drainRegisteredCleanups(batchCleanups)
       const error = new Error('Operation aborted')
       error.name = 'AbortError'
       throw error
@@ -97,7 +117,7 @@ export class ToolRuntime {
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
       const group = groups[groupIndex]
       const futureGroupCalls = groups.slice(groupIndex + 1).flatMap((item) => item.toolCalls)
-      throwIfAborted([...group.toolCalls, ...futureGroupCalls])
+      await throwIfAborted([...group.toolCalls, ...futureGroupCalls])
 
       const remainingToolCalls = params.budget && params.budgetState
         ? getRemainingToolCallBudget(params.budget, params.budgetState)
@@ -128,12 +148,19 @@ export class ToolRuntime {
         const maxConcurrentTools = Math.max(1, params.budget?.maxParallelToolGroups || 5)
         for (let index = 0; index < limitedToolCalls.length; index += maxConcurrentTools) {
           const pendingToolCalls = limitedToolCalls.slice(index)
-          throwIfAborted([...pendingToolCalls, ...futureGroupCalls])
+          await throwIfAborted([...pendingToolCalls, ...futureGroupCalls])
           const chunk = limitedToolCalls.slice(index, index + maxConcurrentTools)
           const settled = await Promise.allSettled(chunk.map((toolCall) =>
-            this.executeToolCallWithRecovery(toolCall, params, startedToolCallIds)))
+            this.executeToolCallWithRecovery(toolCall, params, startedToolCallIds, batchCleanups)))
           const firstRejected = settled.find((item) => item.status === 'rejected')
           if (firstRejected?.status === 'rejected') {
+            if (this.isAbortError(firstRejected.reason)) {
+              notifyInterrupted([
+                ...limitedToolCalls.slice(index + maxConcurrentTools),
+                ...futureGroupCalls,
+              ])
+            }
+            await this.drainRegisteredCleanups(batchCleanups)
             throw firstRejected.reason
           }
           for (const item of settled as Array<PromiseFulfilledResult<ToolRuntimeExecutionResult & { recoveryHistory: RecoveryRecord[] }>>) {
@@ -149,8 +176,25 @@ export class ToolRuntime {
 
       for (let toolIndex = 0; toolIndex < limitedToolCalls.length; toolIndex += 1) {
         const remainingCurrentCalls = limitedToolCalls.slice(toolIndex)
-        throwIfAborted([...remainingCurrentCalls, ...futureGroupCalls])
-        const executedTool = await this.executeToolCallWithRecovery(limitedToolCalls[toolIndex], params, startedToolCallIds)
+        await throwIfAborted([...remainingCurrentCalls, ...futureGroupCalls])
+        let executedTool: ToolRuntimeExecutionResult & { recoveryHistory: RecoveryRecord[] }
+        try {
+          executedTool = await this.executeToolCallWithRecovery(
+            limitedToolCalls[toolIndex],
+            params,
+            startedToolCallIds,
+            batchCleanups,
+          )
+        } catch (error) {
+          if (this.isAbortError(error)) {
+            notifyInterrupted([
+              ...remainingCurrentCalls.slice(1),
+              ...futureGroupCalls,
+            ])
+          }
+          await this.drainRegisteredCleanups(batchCleanups)
+          throw error
+        }
         results.push(executedTool)
         recoveryHistory.push(...executedTool.recoveryHistory)
         if (executedTool.recoveryHistory.length > 0) {
@@ -172,8 +216,10 @@ export class ToolRuntime {
       context?: ToolRuntimeContext
       executeTool?: (toolCall: ParallelToolCall) => Promise<ToolExecutionResultLike>
       hooks?: ToolExecutionHooks
+      signal?: AbortSignal
     },
     startedToolCallIds: string[],
+    batchCleanups: TrackedCleanup[],
   ): Promise<ToolRuntimeExecutionResult & { recoveryHistory: RecoveryRecord[] }> {
     const preflight = this.resolvePreflightResult(toolCall.name, {
       context: params.context,
@@ -191,34 +237,31 @@ export class ToolRuntime {
 
     startedToolCallIds.push(toolCall.id)
     params.hooks?.onToolStart?.({ toolCall })
+    const toolDefinition = defaultToolGateway.getToolDefinition(toolCall.name)
+    const timeoutMs = this.resolveTimeoutMs(toolDefinition, toolCall)
+    const pendingRecoveries: Array<{ result: KnownExecutionErrorResult; attempt: number }> = []
+    let attempt = 0
 
-    try {
-      const rawResult = params.executeTool
-        ? await params.executeTool(toolCall)
-        : await this.executeDefaultToolCall(toolCall, params.context)
-      const result = normalizeToolExecutionOutput(rawResult)
-      params.hooks?.onToolResult?.({ toolCall, result })
-      return {
-        id: toolCall.id,
-        name: toolCall.name,
-        input: toolCall.input,
-        result,
-        recoveryHistory: [],
-      }
-    } catch (error) {
-      const classified = classifyExecutionError(error, { source: 'tool_execution' })
-      if (classified.kind === 'timeout_tool' || classified.kind === 'host_unavailable' || classified.kind === 'auth') {
-        const recoveryHistory = [this.buildRecoveryRecord(classified as KnownExecutionErrorResult, 1, true)]
-        const result = createToolExecutionOutput(classified.message, {
-          shape: 'json',
-          data: {
-            errorKind: classified.kind,
-            recovered: true,
-            source: classified.source,
-            toolName: toolCall.name,
-          },
-        })
-        params.hooks?.onToolRecovered?.({ toolCall, result, recoveryHistory })
+    while (true) {
+      attempt += 1
+      const attemptGuard = this.createAttemptGuard({
+        toolName: toolCall.name,
+        timeoutMs,
+        signals: [params.signal, params.context?.abortSignal],
+      })
+      const attemptContext = this.createAttemptContext(params.context, attemptGuard.signal, batchCleanups)
+
+      try {
+        const rawResult = params.executeTool
+          ? await this.runGuardedOperation(attemptGuard, () => params.executeTool?.(toolCall) as Promise<ToolExecutionResultLike>)
+          : await this.runGuardedOperation(attemptGuard, () =>
+            this.executeDefaultToolCall(toolCall, params.context, attemptContext))
+        const result = normalizeToolExecutionOutput(rawResult)
+        const recoveryHistory = pendingRecoveries.map(({ result: pendingResult, attempt: pendingAttempt }) =>
+          this.buildRecoveryRecord(pendingResult, pendingAttempt, true))
+        if (recoveryHistory.length > 0) {
+          params.hooks?.onToolRecovered?.({ toolCall, result, recoveryHistory })
+        }
         params.hooks?.onToolResult?.({ toolCall, result })
         return {
           id: toolCall.id,
@@ -227,8 +270,53 @@ export class ToolRuntime {
           result,
           recoveryHistory,
         }
+      } catch (error) {
+        const classified = classifyExecutionError(error, { source: 'tool_execution' })
+        const plan = buildRecoveryPlan(classified)
+        const nextAttempt = attempt
+
+        if (plan.shouldRetry && nextAttempt <= plan.maxAttempts && classified.kind !== 'context_overflow') {
+          await this.drainRegisteredCleanups(attemptContext.__trackedCleanups)
+          pendingRecoveries.push({ result: classified as KnownExecutionErrorResult, attempt: nextAttempt })
+          const retryDelayMs = Math.max(0, this.resolveRetryDelayMs(plan, nextAttempt))
+          if (retryDelayMs > 0) {
+            await this.sleep(retryDelayMs)
+          }
+          continue
+        }
+
+        await this.drainRegisteredCleanups(attemptContext.__trackedCleanups)
+        const recoveredKinds = new Set<ErrorClassifierResult['kind']>(['timeout_tool', 'host_unavailable', 'auth'])
+        if (classified.kind !== 'unknown') {
+          const recovered = recoveredKinds.has(classified.kind)
+          const recoveryHistory = pendingRecoveries.map(({ result: pendingResult, attempt: pendingAttempt }) =>
+            this.buildRecoveryRecord(pendingResult, pendingAttempt, false))
+          recoveryHistory.push(this.buildRecoveryRecord(classified as KnownExecutionErrorResult, nextAttempt, recovered))
+          const result = createToolExecutionOutput(classified.message, {
+            shape: 'json',
+            data: {
+              errorKind: classified.kind,
+              recovered,
+              source: classified.source,
+              toolName: toolCall.name,
+            },
+          })
+          if (recoveryHistory.length > 0) {
+            params.hooks?.onToolRecovered?.({ toolCall, result, recoveryHistory })
+          }
+          params.hooks?.onToolResult?.({ toolCall, result })
+          return {
+            id: toolCall.id,
+            name: toolCall.name,
+            input: toolCall.input,
+            result,
+            recoveryHistory,
+          }
+        }
+        throw error
+      } finally {
+        attemptGuard.dispose()
       }
-      throw error
     }
   }
 
@@ -271,12 +359,151 @@ export class ToolRuntime {
   private async executeDefaultToolCall(
     toolCall: ParallelToolCall,
     context?: ToolRuntimeContext,
+    attemptContext?: ToolRuntimeAttemptContext,
   ): Promise<ToolExecutionResultLike> {
-    if (!context) {
+    const effectiveContext = attemptContext || context
+    if (!effectiveContext) {
       throw new Error(`Tool runtime context is required for ${toolCall.name}`)
     }
+    if (this.deps.executeToolCall) {
+      return await this.deps.executeToolCall(toolCall.name, toolCall.input, toToolExecutorContext(effectiveContext))
+    }
     const { executeToolCall } = await import('../tools/tool-executor')
-    return await executeToolCall(toolCall.name, toolCall.input, toToolExecutorContext(context))
+    return await executeToolCall(toolCall.name, toolCall.input, toToolExecutorContext(effectiveContext))
+  }
+
+  private createAttemptContext(
+    context: ToolRuntimeContext | undefined,
+    abortSignal: AbortSignal,
+    batchCleanups: TrackedCleanup[],
+  ): ToolRuntimeAttemptContext {
+    const trackedCleanups: TrackedCleanup[] = []
+
+    return {
+      ...(context || {}),
+      abortSignal,
+      registerRunCleanup: (cleanup) => {
+        const trackedCleanup = this.trackCleanup(cleanup)
+        trackedCleanups.push(trackedCleanup)
+        batchCleanups.push(trackedCleanup)
+        context?.registerRunCleanup?.(trackedCleanup.run)
+      },
+      __trackedCleanups: trackedCleanups,
+    }
+  }
+
+  private trackCleanup(cleanup: () => void | Promise<void>): TrackedCleanup {
+    const entry: TrackedCleanup = {
+      drained: false,
+      run: async () => {
+        if (entry.drained) return
+        entry.drained = true
+        await Promise.resolve(cleanup())
+      },
+    }
+    return entry
+  }
+
+  private async drainRegisteredCleanups(cleanups: TrackedCleanup[]): Promise<void> {
+    if (cleanups.length === 0) return
+    await Promise.allSettled(cleanups.map((cleanup) => cleanup.run()))
+  }
+
+  private createAttemptGuard(params: {
+    toolName: string
+    timeoutMs: number
+    signals: Array<AbortSignal | undefined>
+  }): {
+    signal: AbortSignal
+    abortPromise: Promise<never>
+    dispose: () => void
+  } {
+    const controller = new AbortController()
+    const cleanupFns: Array<() => void> = []
+    const timeoutMs = Math.max(1, params.timeoutMs)
+    let timedOut = false
+
+    const abortWith = (reason?: unknown): void => {
+      if (controller.signal.aborted) return
+      controller.abort(reason)
+    }
+
+    for (const signal of params.signals) {
+      if (!signal) continue
+      if (signal.aborted) {
+        abortWith(signal.reason)
+        continue
+      }
+      const handleAbort = (): void => {
+        abortWith(signal.reason)
+      }
+      signal.addEventListener('abort', handleAbort, { once: true })
+      cleanupFns.push(() => signal.removeEventListener('abort', handleAbort))
+    }
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      abortWith(this.buildToolTimeoutError(timeoutMs, params.toolName))
+    }, timeoutMs)
+
+    const abortPromise = new Promise<never>((_, reject) => {
+      const rejectOnAbort = (): void => {
+        if (timedOut) {
+          reject(this.buildToolTimeoutError(timeoutMs, params.toolName))
+          return
+        }
+        const error = new Error('Operation aborted')
+        error.name = 'AbortError'
+        reject(error)
+      }
+      if (controller.signal.aborted) {
+        rejectOnAbort()
+        return
+      }
+      controller.signal.addEventListener('abort', rejectOnAbort, { once: true })
+      cleanupFns.push(() => controller.signal.removeEventListener('abort', rejectOnAbort))
+    })
+
+    return {
+      signal: controller.signal,
+      abortPromise,
+      dispose: () => {
+        clearTimeout(timeoutId)
+        while (cleanupFns.length > 0) {
+          cleanupFns.pop()?.()
+        }
+      },
+    }
+  }
+
+  private async runGuardedOperation<T>(
+    guard: {
+      signal: AbortSignal
+      abortPromise: Promise<never>
+    },
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (guard.signal.aborted) {
+      return await guard.abortPromise
+    }
+    return await Promise.race([
+      operation(),
+      guard.abortPromise,
+    ])
+  }
+
+  private buildToolTimeoutError(timeoutMs: number, toolName: string): Error {
+    return new Error(`Tool execution timed out after ${timeoutMs}ms (${toolName})`)
+  }
+
+  private resolveTimeoutMs(
+    definition: ToolDefinition | null,
+    toolCall: ParallelToolCall,
+  ): number {
+    if (this.deps.resolveTimeoutMs) {
+      return Math.max(1, this.deps.resolveTimeoutMs(definition, toolCall))
+    }
+    return resolveToolExecutionTimeoutMsForProfile(definition?.timeoutProfile || 'default')
   }
 
   private buildRecoveryRecord(
@@ -296,5 +523,33 @@ export class ToolRuntime {
 
   private now(): string {
     return this.deps.now ? this.deps.now() : new Date().toISOString()
+  }
+
+  private async sleep(delayMs: number): Promise<void> {
+    if (delayMs <= 0) return
+    if (this.deps.sleep) {
+      await this.deps.sleep(delayMs)
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
+
+  private resolveRetryDelayMs(
+    plan: ReturnType<typeof buildRecoveryPlan>,
+    attempt: number,
+  ): number {
+    const baseDelayMs = Math.max(0, plan.retryDelayMs || 0)
+    if (baseDelayMs <= 0) return 0
+    if (plan.backoff !== 'exponential_jitter') {
+      return baseDelayMs
+    }
+    const exponential = Math.min(8_000, baseDelayMs * Math.pow(2, Math.max(0, attempt - 1)))
+    const jitterFloor = Math.max(350, Math.round(exponential * 0.75))
+    const jitterRange = Math.max(1, exponential - jitterFloor)
+    return Math.min(8_000, jitterFloor + Math.floor(Math.random() * jitterRange))
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError'
   }
 }

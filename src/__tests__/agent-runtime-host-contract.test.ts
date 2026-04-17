@@ -336,15 +336,15 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
     },
     {
       label: 'phase3 should move model tool-loop requests into TurnEngine',
-      pattern: /const response = await host\.requestToolLoopResponse\(/,
+      pattern: /await host\.requestToolLoopResponse\(/,
     },
     {
       label: 'phase3 should move batch tool execution into TurnEngine',
-      pattern: /const executeBatch = async \(\) => normalizeToolBatchResult\(await host\.executeToolBatch\(/,
+      pattern: /await host\.executeToolBatch\(/,
     },
     {
       label: 'phase3 should move direct host tool execution into TurnEngine',
-      pattern: /const result = await host\.executeToolCall\(toolCall\.name, toolCall\.input, toolContext\)/,
+      pattern: /await host\.executeToolCall\(toolCall\.name,\s*toolCall\.input,\s*toolContext\)/,
     },
     {
       label: 'phase4 should move domain-specific projection emission behind adapter buildProjectionPatch',

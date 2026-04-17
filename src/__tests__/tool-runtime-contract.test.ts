@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -51,6 +53,22 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
     {
       label: 'tool definition should export ToolDefinition during phase1',
       pattern: /export interface ToolDefinition \{/,
+    },
+    {
+      label: 'tool definition should include text-bridge support metadata during phase1',
+      pattern: /supportsTextBridge:\s*boolean/,
+    },
+    {
+      label: 'tool definition should include projection hint metadata during phase1',
+      pattern: /projectionHint:\s*ToolProjectionHint \| null/,
+    },
+    {
+      label: 'tool definition should include unified description metadata during phase1',
+      pattern: /description:\s*string/,
+    },
+    {
+      label: 'tool definition should include unified neutral schema metadata during phase1',
+      pattern: /schema:\s*ToolDefinitionSchema \| null/,
     },
   ])
 
@@ -151,7 +169,19 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
     },
     {
       label: 'tool runtime should recover timeout and host failures into structured results during phase2',
-      pattern: /classified\.kind === 'timeout_tool' \|\| classified\.kind === 'host_unavailable' \|\| classified\.kind === 'auth'/,
+      pattern: /timeout_tool[\s\S]*host_unavailable[\s\S]*auth/,
+    },
+    {
+      label: 'tool runtime should derive timeout behavior from tool definitions during phase2',
+      pattern: /timeoutProfile/,
+    },
+    {
+      label: 'tool runtime should run default tool execution through the runtime context during phase2',
+      pattern: /executeDefaultToolCall\(toolCall, params\.context, attemptContext\)/,
+    },
+    {
+      label: 'tool runtime should keep cleanup ownership inside the batch runtime during phase2',
+      pattern: /drainRegisteredCleanups\(/,
     },
   ])
 
@@ -193,6 +223,7 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
     },
   ])
   assert.doesNotMatch(toolExecutor, /toolName\.startsWith\('browser_'\)/)
+  assert.doesNotMatch(toolExecutor, /withToolExecutionTimeout/)
 
   assertMatchesAll(executionLoopOrchestrator, [
     {
@@ -201,11 +232,19 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
     },
     {
       label: 'execution loop should return structured tool results during phase2',
-      pattern: /executeTool: \(toolCall: ParallelToolCall\) => Promise<ToolExecutionOutput \| string>/,
+      pattern: /executeTool\?: \(toolCall: ParallelToolCall\) => Promise<ToolExecutionOutput \| string>/,
     },
     {
       label: 'execution loop should delegate batch execution into ToolRuntime during phase2',
       pattern: /return this\.toolRuntime\.executeBatch\(/,
+    },
+    {
+      label: 'execution loop should forward runtime context into ToolRuntime during phase2',
+      pattern: /context:\s*params\.context/,
+    },
+    {
+      label: 'execution loop should forward lifecycle hooks into ToolRuntime during phase2',
+      pattern: /hooks:\s*params\.hooks/,
     },
   ])
 })
@@ -250,7 +289,7 @@ test('phase0 freezes the target ToolRuntime contract in design docs', () => {
     },
     {
       label: 'design should freeze formal tool definition fields for later phases',
-      pattern: /- `name`[\s\S]*- `domain`[\s\S]*- `kind: read \| write \| interactive \| job`[\s\S]*- `isConcurrencySafe`[\s\S]*- `interruptBehavior`[\s\S]*- `supportsTextBridge`[\s\S]*- `resultShape`[\s\S]*- `projectionHint`[\s\S]*- `timeoutProfile`/,
+      pattern: /- `name`[\s\S]*- `domain`[\s\S]*- `kind: read \| write \| interactive \| job`[\s\S]*- `concurrency`[\s\S]*- `interruptBehavior`[\s\S]*- `supportsTextBridge`[\s\S]*- `resultShape`[\s\S]*- `projectionHint`[\s\S]*- `timeoutProfile`/,
     },
     {
       label: 'design should require upgrading from string prefix dispatch to behavior contracts',
@@ -279,8 +318,30 @@ test('phase0 freezes the target ToolRuntime contract in design docs', () => {
       pattern: /- `interruptBehavior`/,
     },
     {
-      label: 'study should freeze concurrency safety inside the tool contract',
-      pattern: /- `isConcurrencySafe`/,
+      label: 'study should freeze concurrency semantics inside the tool contract',
+      pattern: /- `concurrency`/,
     },
   ])
+})
+
+test('phase0 keeps a minimal executable ToolRuntime contract in addition to source-level regex checks', async () => {
+  const runtime = new ToolRuntime({ log: () => {} })
+
+  const result = await runtime.executeBatch({
+    toolCalls: [
+      { id: 'tool-1', name: 'memory_search', input: { query: 'ready' } },
+    ],
+    executeTool: async () => createToolExecutionOutput('structured ok', {
+      shape: 'json',
+      data: { ok: true },
+    }),
+  })
+
+  assert.equal(result.results.length, 1)
+  assert.equal(result.results[0]?.id, 'tool-1')
+  assert.equal(result.results[0]?.name, 'memory_search')
+  assert.equal(result.results[0]?.result.shape, 'json')
+  assert.deepEqual(result.results[0]?.result.data, { ok: true })
+  assert.equal(result.budgetLimited, false)
+  assert.deepEqual(result.recoveryHistory, [])
 })

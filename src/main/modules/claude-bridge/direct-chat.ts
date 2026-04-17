@@ -971,7 +971,9 @@ export class DirectChatEngine extends EventEmitter {
       }) => this.requestToolLoopResponse(raw),
       executeToolBatch: async (raw: {
         toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>
-        executeTool: (toolCall: { id: string; name: string; input: Record<string, unknown> }) => Promise<unknown>
+        context: import('../agent-control/tool-runtime').ToolRuntimeContext
+        executeTool?: (toolCall: { id: string; name: string; input: Record<string, unknown> }) => Promise<unknown>
+        hooks?: import('../agent-control/tool-execution-hooks').ToolExecutionHooks
         onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }) => void
         budget?: RunBudgetSeed
         budgetState?: RunBudgetUsage

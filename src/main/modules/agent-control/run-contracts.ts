@@ -12,6 +12,8 @@ import type { PromptAssemblyResult } from './prompt-assembly'
 import type { RequestEnvelope } from './request-envelope'
 import type { ContinuationState } from './continuation-state'
 import type { DomainAdapter } from './domain-adapter'
+import type { ToolExecutionHooks } from './tool-execution-hooks'
+import type { ToolRuntimeContext } from './tool-runtime'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 
@@ -586,7 +588,9 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   }) => Promise<TurnModelResponse>
   executeToolBatch: (params: {
     toolCalls: TurnToolCall[]
-    executeTool: (toolCall: TurnToolCall) => Promise<unknown>
+    context: ToolRuntimeContext
+    executeTool?: (toolCall: TurnToolCall) => Promise<unknown>
+    hooks?: ToolExecutionHooks
     onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: TurnToolCall[] }) => void
     budget?: RunBudgetSeed
     budgetState?: RunBudgetUsage

@@ -22,6 +22,20 @@ export type ToolTimeoutProfile =
   | 'skill'
   | 'feishu'
 
+export interface ToolProjectionHint {
+  mutating?: boolean
+  emitsProjectionPatch?: boolean
+}
+
+export interface ToolDefinitionSchema {
+  type: string
+  properties?: Record<string, unknown>
+  required?: string[]
+  items?: unknown
+  additionalProperties?: unknown
+  [key: string]: unknown
+}
+
 export interface ToolDefinition {
   name: string
   groupId: CapabilityGroupId
@@ -30,5 +44,9 @@ export interface ToolDefinition {
   concurrency: ToolConcurrency
   interruptBehavior: ToolInterruptBehavior
   timeoutProfile: ToolTimeoutProfile
+  supportsTextBridge: boolean
+  projectionHint: ToolProjectionHint | null
+  description: string
+  schema: ToolDefinitionSchema | null
   resultShape: ToolResultShape
 }

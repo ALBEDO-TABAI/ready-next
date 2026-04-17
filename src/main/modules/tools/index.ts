@@ -42,9 +42,11 @@ export type { ToolContext } from './tool-executor'
 export type {
   ToolConcurrency,
   ToolDefinition,
+  ToolDefinitionSchema,
   ToolDomain,
   ToolInterruptBehavior,
   ToolKind,
+  ToolProjectionHint,
   ToolTimeoutProfile,
 } from '../agent-control/tool-definition'
 export type {

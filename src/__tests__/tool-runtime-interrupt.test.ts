@@ -74,3 +74,43 @@ test('ToolRuntime interruption hook only fires once for a cancelled parallel bat
 
   assert.equal(interruptCount, 1)
 })
+
+test('ToolRuntime drains batch cleanups immediately when cancellation interrupts the default execution path', async () => {
+  let cleanupCount = 0
+  const registeredCleanups: Array<() => void | Promise<void>> = []
+  const controller = new AbortController()
+  const runtime = new ToolRuntime({
+    log: () => {},
+    executeToolCall: async (_toolName: string, _args: Record<string, unknown>, context: {
+      registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+    }) => {
+      context.registerRunCleanup?.(() => {
+        cleanupCount += 1
+      })
+      controller.abort()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return 'ok'
+    },
+  } as any)
+
+  await assert.rejects(
+    () => runtime.executeBatch({
+      signal: controller.signal,
+      context: {
+        registerRunCleanup: (cleanup) => {
+          registeredCleanups.push(cleanup)
+        },
+      },
+      toolCalls: [
+        { id: '1', name: 'browser_click', input: {} },
+        { id: '2', name: 'document_update_widget', input: {} },
+      ],
+    }),
+    { name: 'AbortError' },
+  )
+
+  assert.equal(cleanupCount, 1)
+  assert.equal(registeredCleanups.length, 1)
+  await Promise.resolve(registeredCleanups[0]?.())
+  assert.equal(cleanupCount, 1)
+})

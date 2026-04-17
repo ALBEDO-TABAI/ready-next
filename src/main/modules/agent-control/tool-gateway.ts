@@ -21,6 +21,8 @@ export interface ToolDescriptor {
   concurrency?: ToolDefinition['concurrency']
   interruptBehavior?: ToolDefinition['interruptBehavior']
   timeoutProfile?: ToolDefinition['timeoutProfile']
+  supportsTextBridge?: ToolDefinition['supportsTextBridge']
+  projectionHint?: ToolDefinition['projectionHint']
   resultShape?: ToolDefinition['resultShape']
 }
 
@@ -120,7 +122,7 @@ export class ToolGateway {
         return {
           id: toolName,
           group: group.id,
-          description: group.description,
+          description: definition?.description || group.description,
           module: group.id,
           executionKind: group.executionKinds[0] === 'job'
             ? 'job'
@@ -135,6 +137,8 @@ export class ToolGateway {
           concurrency: definition?.concurrency,
           interruptBehavior: definition?.interruptBehavior,
           timeoutProfile: definition?.timeoutProfile,
+          supportsTextBridge: definition?.supportsTextBridge,
+          projectionHint: definition?.projectionHint,
           resultShape: definition?.resultShape,
         }
       }),

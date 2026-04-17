@@ -117,7 +117,7 @@ Ready 下一版 agent 建议收口为六层：
 - `name`
 - `domain`
 - `kind: read | write | interactive | job`
-- `isConcurrencySafe`
+- `concurrency`
 - `interruptBehavior`
 - `supportsTextBridge`
 - `resultShape`

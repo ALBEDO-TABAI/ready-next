@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -13,6 +15,168 @@ function assertMatchesAll(
 ): void {
   for (const expectation of expectations) {
     assert.match(content, expectation.pattern, expectation.label)
+  }
+}
+
+function createContractTurnRequest(userText: string) {
+  const events: Array<Record<string, unknown>> = []
+  return {
+    events,
+    request: {
+      runId: 'run-contract',
+      taskId: 'task-contract',
+      agentName: 'agent-contract',
+      sessionId: 'scope-contract',
+      session: {
+        messages: [{ role: 'user', content: userText }],
+        abortController: null,
+        systemPrompt: 'system',
+        generation: 1,
+        activeRunId: 'run-contract',
+        preferTextToolBridge: false,
+        lastDocumentContextInput: null,
+      },
+      content: userText,
+      requestEnvelope: buildRequestEnvelope({ userText }),
+      abortSignal: new AbortController().signal,
+      ensureNotAborted: () => undefined,
+      emitters: {
+        emitOutput: (chunk: string, type: string) => {
+          events.push({ kind: 'output', chunk, type })
+        },
+        emitStatus: (status: string) => {
+          events.push({ kind: 'status', status })
+        },
+        emitRuntimeError: (error: string) => {
+          events.push({ kind: 'error', error })
+        },
+        emitToolAction: (tool: string, args: Record<string, unknown>) => {
+          events.push({ kind: 'tool_action', tool, args })
+        },
+      },
+      host: {
+        log: () => undefined,
+        maxToolIterations: 4,
+        browserController: null,
+        sidecarManager: null,
+        runtime: {
+          isChannelTypeAvailable: () => false,
+          getConversationScope: () => null,
+        },
+        requestModuleToolAction: undefined,
+        registerRunCleanup: () => undefined,
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: false,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        isBrowserAgentV3Enabled: () => false,
+        resolveContinuationProjection: () => null,
+        getIncomingAttachmentHints: () => ({ count: 0 }),
+        collectRecentPureUserInputs: () => [],
+        sessionHasMediaInputs: () => false,
+        sessionHasVideoInputs: () => false,
+        maybeRunDocumentTaskPlan: async () => null,
+        maybeRunDocumentWidgetPipeline: async () => null,
+        domainAdapters: [],
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          buildPreferredSkillToolNames: () => null,
+          maybeInjectExplicitSkillContext: async () => undefined,
+        },
+        browserDomainOrchestrator: {
+          prepareBrowserExecution: async () => ({
+            browserDecision: { mode: 'free_tool_loop', reason: 'browser_disabled' },
+            browserContinuityInstruction: null,
+            clarifyText: null,
+            canUseDeterministicBrowserRunner: false,
+            shouldInspectAmbiguousModeEntry: false,
+          }),
+          resolveExecutionDispatch: () => ({
+            kind: 'none',
+            continuityInstruction: null,
+            responseText: null,
+            toolLoopMessage: null,
+            fallbackLog: null,
+          }),
+          runDeterministicExecution: async () => ({
+            handled: false,
+            state: 'done',
+            message: '',
+          }),
+          createToolLoopState: () => ({ isBrowserTask: false, steps: [], stepIndex: 0 }),
+          recordToolLoopProgress: ({ state }: { state: unknown }) => ({
+            state,
+            advancedStepIndex: null,
+            checkpointMessage: null,
+          }),
+          buildToolLoopLimitMessage: () => null,
+          getBudgetHint: () => null,
+          getRecommendedToolLoopIterations: (_userText: string, _decision: unknown, base: number) => base,
+        },
+        documentToolLoopOrchestrator: {
+          createState: () => ({}),
+          getBudgetHint: () => null,
+          handleNoToolCall: ({ state }: { state: unknown }) => ({
+            state,
+            nextUserMessage: null,
+            finalText: null,
+            preserveAssistantText: false,
+          }),
+          applyToolInspection: (state: unknown) => state,
+          handleIterationResult: ({ state }: { state: unknown }) => ({
+            state,
+            nextUserMessage: null,
+            completionText: null,
+          }),
+          buildStructuredTaskPayload: (payload: Record<string, unknown>) => payload,
+        },
+        designToolLoopOrchestrator: {
+          createState: () => ({ primaryArtifactProduced: false }),
+          getBudgetHint: () => null,
+          filterToolCalls: ({ toolCalls }: { toolCalls: unknown[] }) => ({
+            toolCalls,
+            droppedCount: 0,
+            nextUserMessage: null,
+          }),
+          applySourceInput: (toolCall: unknown) => toolCall,
+          recordToolResult: ({ state }: { state: Record<string, unknown> }) => ({
+            state,
+            isPrimaryArtifact: false,
+          }),
+          buildCompletionText: () => null,
+          buildStructuredTaskPayload: (payload: Record<string, unknown>) => payload,
+        },
+        hostCapabilityDispatcher: {
+          dispatch: async () => ({ handled: false }),
+        },
+        executeToolCall: async () => ({ text: 'ok' }),
+        requestSimpleText: async () => ({ text: 'simple result' }),
+        requestToolLoopResponse: async () => ({
+          text: 'tool loop result',
+          toolCalls: [],
+          stopReason: 'stop',
+        }),
+        executeToolBatch: async () => ({
+          results: [],
+          budgetLimited: false,
+          recoveryHistory: [],
+        }),
+      },
+    } as any,
   }
 }
 
@@ -58,7 +222,7 @@ test('phase3 shrinks DirectChatEngine.sendMessage into a TurnEngine host-shell e
     },
     {
       label: 'turn engine should now own browser deterministic dispatch',
-      pattern: /browserDomainOrchestrator\.resolveExecutionDispatch\(/,
+      pattern: /const browserPrepareResult = browserDomainAdapter/,
     },
     {
       label: 'turn engine should now own host shortcuts',
@@ -246,4 +410,18 @@ test('phase3 routes single-turn execution through TurnEngine and shrinks DirectC
 
   assert.doesNotMatch(directChat, /const executionIntentContext = resolveExecutionIntentContext\(/)
   assert.doesNotMatch(directChat, /const initialTaskExecutionRoute = resolveTaskExecutionRoute\(/)
+})
+
+test('phase0 keeps a minimal executable TurnEngine contract in addition to source-level regex checks', async () => {
+  const engine = new TurnEngine()
+  const { request, events } = createContractTurnRequest('解释一下 ready agent runtime')
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, 'simple result')
+  assert.equal(result.interactionState, 'running')
+  assert.ok(result.projectionTruth)
+  assert.ok(Array.isArray(result.projectionTruth?.transcriptEvents))
+  assert.ok(events.some((event) => event.kind === 'output'))
 })

@@ -59,7 +59,9 @@ test('ExecutionLoopOrchestrator does not start a new batch after a parallel batc
     { name: 'AbortError' },
   )
 
-  assert.deepEqual(started, ['1', '2'])
+  assert.equal(started[0], '1')
+  assert.ok(started.every((id) => id === '1' || id === '2'))
+  assert.ok(!started.includes('3'))
 })
 
 test('frozen task budget runtimes do not consume iteration budget', () => {

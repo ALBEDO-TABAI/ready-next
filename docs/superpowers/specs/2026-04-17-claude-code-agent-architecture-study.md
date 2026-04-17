@@ -80,7 +80,7 @@ Claude Code 最关键的抽象不是 capability group，也不是 domain executo
 
 - `inputSchema`
 - `outputSchema`
-- `isConcurrencySafe`
+- `concurrency`（Claude Code 原字段语义对应 `isConcurrencySafe`）
 - `isReadOnly`
 - `isDestructive`
 - `interruptBehavior`
@@ -128,7 +128,7 @@ Claude Code 的工具执行至少拆成三层：
 
 2. `toolOrchestration.ts`
    - 非流式场景下的批量调度。
-   - 根据 `isConcurrencySafe` 把工具调用分为并发组和串行组。
+   - 根据 `concurrency`（Claude Code 原字段语义对应 `isConcurrencySafe`）把工具调用分为并发组和串行组。
 
 3. `StreamingToolExecutor.ts`
    - 流式响应期间边收 `tool_use` 边执行。
@@ -232,7 +232,7 @@ Claude Code 之所以复杂却还能稳，很重要的一点是：
 
 Claude Code 的批量调度策略核心依据是工具上的这些声明：
 
-- `isConcurrencySafe`
+- `concurrency`（Claude Code 原字段语义对应 `isConcurrencySafe`）
 - `isReadOnly`
 - `interruptBehavior`
 - `checkPermissions`

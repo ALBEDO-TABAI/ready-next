@@ -4,8 +4,9 @@ import { classifyExecutionError, type ErrorClassifierResult } from '../claude-br
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot } from './run-contracts'
 import type { ParallelToolCall } from './tool-parallelism-policy'
-import { ToolRuntime, type ToolRuntimeBatchResult } from './tool-runtime'
-import type { ToolExecutionOutput } from './tool-result-types'
+import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from './tool-runtime'
+import type { ToolExecutionHooks } from './tool-execution-hooks'
+import type { ToolExecutionOutput, ToolExecutionResultLike } from './tool-result-types'
 
 interface APIResponseLike {
   text: string
@@ -30,11 +31,22 @@ export class ExecutionLoopOrchestrator {
     log: (message: string) => void
     sleep?: (delayMs: number) => Promise<void>
     now?: () => string
+    executeToolCall?: (
+      toolName: string,
+      args: Record<string, unknown>,
+      context: import('../tools/tool-executor').ToolContext,
+    ) => Promise<ToolExecutionResultLike>
+    resolveTimeoutMs?: (
+      definition: import('./tool-definition').ToolDefinition | null,
+      toolCall: ParallelToolCall,
+    ) => number
   }) {
     this.toolRuntime = new ToolRuntime({
       log: deps.log,
       sleep: deps.sleep,
       now: deps.now,
+      executeToolCall: deps.executeToolCall,
+      resolveTimeoutMs: deps.resolveTimeoutMs,
     })
   }
 
@@ -113,7 +125,9 @@ export class ExecutionLoopOrchestrator {
 
   async executeToolCalls(params: {
     toolCalls: ParallelToolCall[]
-    executeTool: (toolCall: ParallelToolCall) => Promise<ToolExecutionOutput | string>
+    context?: ToolRuntimeContext
+    executeTool?: (toolCall: ParallelToolCall) => Promise<ToolExecutionOutput | string>
+    hooks?: ToolExecutionHooks
     onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: ParallelToolCall[] }) => void
     budget?: RunBudgetSeed
     budgetState?: RunBudgetUsage
@@ -121,7 +135,9 @@ export class ExecutionLoopOrchestrator {
   }): Promise<ToolRuntimeBatchResult> {
     return this.toolRuntime.executeBatch({
       toolCalls: params.toolCalls,
+      context: params.context,
       executeTool: params.executeTool,
+      hooks: params.hooks,
       onGroupStart: params.onGroupStart,
       budget: params.budget,
       budgetState: params.budgetState,

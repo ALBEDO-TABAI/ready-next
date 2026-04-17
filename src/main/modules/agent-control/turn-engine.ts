@@ -1158,21 +1158,27 @@ export class TurnEngine {
 
         const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
           toolCalls: toolCallsForIteration,
+          context: toolContext,
           budget: state.effectiveRunBudget || undefined,
           budgetState: state.runBudgetState,
           signal: request.abortSignal,
+          hooks: {
+            onToolStart: ({ toolCall }) => {
+              transcript.emitToolUse(toolCall.name, toolCall.input)
+            },
+            onToolRecovered: ({ toolCall, recoveryHistory }) => {
+              const lastRecovery = recoveryHistory[recoveryHistory.length - 1]
+              if (!lastRecovery) return
+              host.log(`tool recover: ${toolCall.name}, kind=${lastRecovery.kind}, recovered=${lastRecovery.recovered}`)
+            },
+            onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
+              host.log(`tool batch interrupted: started=${startedToolCallIds.join('|') || 'none'}, skipped=${skippedToolCalls.map((toolCall) => toolCall.name).join('|') || 'none'}`)
+            },
+          },
           onGroupStart: (group) => {
             if (group.mode === 'parallel') {
               Object.assign(state.runBudgetState, consumeParallelGroupBudget(state.runBudgetState))
             }
-          },
-          executeTool: async (toolCall) => {
-            request.ensureNotAborted()
-            transcript.emitToolUse(toolCall.name, toolCall.input)
-            const result = await host.executeToolCall(toolCall.name, toolCall.input, toolContext)
-            request.ensureNotAborted()
-            host.log(`tool execute: ${toolCall.name}, result=${result.text.slice(0, 140)}`)
-            return result
           },
         }))
 
@@ -1193,6 +1199,7 @@ export class TurnEngine {
             const resultText = result.text
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
+            host.log(`tool execute: ${toolName}, result=${resultText.slice(0, 140)}`)
             const documentToolInspection = inspectDocumentToolCall(toolName, resultText)
             if (documentToolInspection.isDocumentTool) {
               documentToolInspectionsThisIteration.push(documentToolInspection)
