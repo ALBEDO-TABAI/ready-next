@@ -643,6 +643,15 @@ export class TurnEngine {
         }
       }
 
+      const shouldHideBrowserProcessText =
+        selectedDomainAdapter?.id === 'browser'
+        && taskExecutionRoute.chain !== 'direct'
+        && (
+          taskExecutionRoute.executor === 'browser'
+          || Boolean((selectedDomainPrepareResult?.domainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
+            ?.browserToolLoopState?.isBrowserTask)
+        )
+
       if (!state.resolvedTaskType) {
         state.resolvedTaskType = hasTools ? 'short_task' : 'direct_answer'
       }
@@ -845,7 +854,9 @@ export class TurnEngine {
           }
           if (response.text) {
             const genericInteractionDetected = syncInteractionStateFromAssistantText(response.text)
-            transcript.emitOutput(response.text, 'text')
+            if (!shouldHideBrowserProcessText || genericInteractionDetected) {
+              transcript.emitOutput(response.text, 'text')
+            }
             if (plannerStepCompleted) {
               const advanced = advancePlannerStep(response.text)
               if (advanced) {
@@ -862,7 +873,7 @@ export class TurnEngine {
               break
             }
           }
-          if (response.text && response.toolTransport !== 'text') {
+          if (response.text && response.toolTransport !== 'text' && !shouldHideBrowserProcessText) {
             session.messages.push({ role: 'assistant', content: response.text })
           }
           finishedBeforeLimit = true
@@ -900,6 +911,7 @@ export class TurnEngine {
         let executedInspectionDocActionCount = 0
         let executedSaveDocActionCount = 0
         let executedBrowserToolsThisIteration = 0
+        let browserToolResultsThisIteration: Array<{ toolName: string; resultText: string }> = []
         let executedPrimaryDesignToolThisIteration = false
         let documentToolResultsThisIteration: string[] = []
         let documentToolInspectionsThisIteration: unknown[] = []
@@ -952,6 +964,10 @@ export class TurnEngine {
             }
             if (toolName.startsWith('browser_')) {
               executedBrowserToolsThisIteration += 1
+              browserToolResultsThisIteration.push({
+                toolName,
+                resultText,
+              })
             }
             const designResult = designToolLoopOrchestrator.recordToolResult({
               state: designToolLoopState,
@@ -983,7 +999,9 @@ export class TurnEngine {
         if (host.providerContext.useAnthropicProtocol) {
           const assistantContent: Array<Record<string, unknown>> = []
           if (response.text) {
-            transcript.emitOutput(response.text, 'text')
+            if (!shouldHideBrowserProcessText) {
+              transcript.emitOutput(response.text, 'text')
+            }
             assistantContent.push({ type: 'text', text: response.text })
           }
           for (const toolCall of toolCallsForIteration) {
@@ -1023,7 +1041,9 @@ export class TurnEngine {
             session.messages.push({ role: 'assistant', content: historyText })
           }
           if (response.text) {
-            transcript.emitOutput(response.text, 'text')
+            if (!shouldHideBrowserProcessText) {
+              transcript.emitOutput(response.text, 'text')
+            }
           }
           const textBridgeResults: Array<{ id: string; name: string; result: ToolExecutionOutput }> = []
           const executedToolBatch = await executeBatch()
@@ -1054,7 +1074,9 @@ export class TurnEngine {
           }
           session.messages.push(assistantMsg as any)
           if (response.text) {
-            transcript.emitOutput(response.text, 'text')
+            if (!shouldHideBrowserProcessText) {
+              transcript.emitOutput(response.text, 'text')
+            }
           }
           const executedToolBatch = await executeBatch()
           consumeExecutedToolBatch(executedToolBatch, {
@@ -1115,6 +1137,7 @@ export class TurnEngine {
               executedInspectionDocActionCount,
               executedSaveDocActionCount,
               executedBrowserToolsThisIteration,
+              browserToolResultsThisIteration,
               documentToolResultsThisIteration,
               documentToolInspections: documentToolInspectionsThisIteration,
             },

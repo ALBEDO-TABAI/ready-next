@@ -313,9 +313,16 @@
   - 新增 `worker-session / subtask-runtime / worker-projection`，child task 现在会生成独立 `workerSessionId + taskId`，父任务只通过 `parentTaskId / parentStepId` 关联，不再和父任务抢同一个执行会话键。
   - 文档 `DocumentTaskPlan` 的多 job 路径现已切到“父任务总览 + 每个 job 一个 child task”的正式链路；单 job 继续走原内联执行，避免无谓放大改动面。
   - `run-projection` 已修正父子任务串线时的关联继承条件：切回父任务摘要时，不会再误把上一个 child 的 `parentTaskId / parentStepId` 挂到新的 task 上。
+- **Batch G：浏览器结果收口 + 最终快照同步**
+  - `browser-domain-orchestrator` 已补上统一的浏览器任务结构化 payload builder；浏览器域现在会持续投影真实步骤，不再让任务卡沿用最初的 planning 标题/摘要。
+  - 实时外部信息查询现已改成“浏览器证据收集 -> 宿主最终答复整理”的正式链路；天气、新闻、股价、比分等浏览器查询不再把过程播报或纠偏文本直接当成最终回复。
+  - `turn-engine` 已把浏览器工具循环里的过程播报从 `finalText` 中剥离，保留在任务卡和工具轨迹；`runtimeDriver` 在收到最终 `done / error / cancelled` 事件后会再次持久化 assistant 快照，消息上的任务卡会跟随真实最终态收口。
 
 ## 最近一次有效校验
 
+- `npx tsx --test src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/agent-stream-segmentation.test.ts` 通过
+- `npx tsx --test src/__tests__/domain-adapter-contract.test.ts src/__tests__/turn-engine-projection.test.ts src/__tests__/run-coordinator.test.ts` 通过
+- `npm run typecheck` 通过
 - `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/turn-engine-route.test.ts` 通过
 - `npm run typecheck` 通过
 - `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts` 通过

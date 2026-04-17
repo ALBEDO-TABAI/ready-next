@@ -17,6 +17,9 @@ export type DomainAdapterApplyPhase = 'no_tool_call' | 'tool_batch' | 'budget_li
 export interface DomainAdapterProjection {
   phase: DomainAdapterProjectionPhase
   summary: string
+  waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background'
+  resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
+  blockedReason?: string | null
 }
 
 export interface DomainAdapterToolBatchSummary {
@@ -25,6 +28,10 @@ export interface DomainAdapterToolBatchSummary {
   executedInspectionDocActionCount?: number
   executedSaveDocActionCount?: number
   executedBrowserToolsThisIteration?: number
+  browserToolResultsThisIteration?: Array<{
+    toolName: string
+    resultText: string
+  }>
   documentToolResultsThisIteration?: string[]
   documentToolInspections?: unknown[]
 }

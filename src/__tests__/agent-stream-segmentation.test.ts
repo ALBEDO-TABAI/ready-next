@@ -191,4 +191,168 @@ describe('agent stream segmentation', () => {
 
     cleanup()
   })
+
+  it('re-persists the assistant message snapshot after the final scope run state arrives', async () => {
+    const listeners: {
+      onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
+      onStatusChange?: (data: unknown) => void
+      onError?: (data: unknown) => void
+      onToolAction?: (data: unknown) => void
+      onScopeRunEvent?: (data: unknown) => void
+      onConversationEvent?: (data: unknown) => void
+    } = {}
+    const savedMessages: Array<Record<string, any>> = []
+
+    ;(globalThis as any).window.electronAPI = {
+      agent: {
+        onStream: (cb: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
+          listeners.onStream = cb
+          return () => { listeners.onStream = undefined }
+        },
+        onStatusChange: (cb: (data: unknown) => void) => {
+          listeners.onStatusChange = cb
+          return () => { listeners.onStatusChange = undefined }
+        },
+        onError: (cb: (data: unknown) => void) => {
+          listeners.onError = cb
+          return () => { listeners.onError = undefined }
+        },
+        onToolAction: (cb: (data: unknown) => void) => {
+          listeners.onToolAction = cb
+          return () => { listeners.onToolAction = undefined }
+        },
+        onScopeRunEvent: (cb: (data: unknown) => void) => {
+          listeners.onScopeRunEvent = cb
+          return () => { listeners.onScopeRunEvent = undefined }
+        },
+        onConversationEvent: (cb: (data: unknown) => void) => {
+          listeners.onConversationEvent = cb
+          return () => { listeners.onConversationEvent = undefined }
+        },
+      },
+      chat: {
+        saveMessage: async (payload: Record<string, any>) => {
+          savedMessages.push(payload)
+          return { success: true }
+        },
+      },
+      settings: {
+        get: async () => ({ success: false }),
+      },
+    }
+
+    const { initAgentListeners } = await import('../renderer/stores/useAgent')
+    const cleanup = initAgentListeners()
+
+    useAgent.setState({
+      currentScopeId: 'scope-a',
+      currentScope: {
+        id: 'scope-a',
+        agent: 'butler',
+        title: 'Scope A',
+        sourceKind: 'local',
+        sourceId: 'app',
+        threadKey: 'scope-a',
+        meta: {},
+        createdAt: '2026-03-07T09:00:00.000Z',
+        updatedAt: '2026-03-07T09:00:00.000Z',
+      },
+      scopes: [
+        {
+          id: 'scope-a',
+          agent: 'butler',
+          title: 'Scope A',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: 'scope-a',
+          meta: {},
+          createdAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:00.000Z',
+        },
+      ],
+      messages: [
+        {
+          id: 'msg-a',
+          agent: 'butler',
+          content: '广州明天雷阵雨转多云，28/24℃。',
+          type: 'agent',
+          timestamp: new Date('2026-03-07T09:00:01.000Z'),
+          meta: {},
+        },
+      ],
+      scopeRunStates: {
+        'scope-a': {
+          scopeId: 'scope-a',
+          agent: 'butler',
+          requestId: 'req-a',
+          phase: 'responding',
+          toolTrace: [],
+          startedAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:01.000Z',
+          latestText: '广州明天雷阵雨转多云，28/24℃。',
+          blockedReason: null,
+          controllerId: null,
+          ownerTabId: null,
+          checkpointExpiresAt: null,
+          responseMessageId: 'msg-a',
+          responseBuffer: '广州明天雷阵雨转多云，28/24℃。',
+          responseSegmentBreakPending: false,
+          responseSegmentToolTraceStart: 0,
+          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+          taskTitle: '正在理解需求',
+          taskSummary: '正在整理任务边界、上下文与可用能力',
+          steps: [],
+          currentStepId: null,
+          waitingFor: 'none',
+          resumableActions: [],
+          recentArtifacts: [],
+          taskContinuation: null,
+          memoryCapture: null,
+          error: null,
+        },
+      },
+    })
+
+    listeners.onStream?.({
+      agent: 'butler',
+      sessionId: 'scope-a',
+      runId: 'req-a',
+      chunk: '',
+      type: 'done',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    listeners.onScopeRunEvent?.({
+      scopeId: 'scope-a',
+      agent: 'butler',
+      runId: 'req-a',
+      phase: 'done',
+      taskTitle: '最新信息查询',
+      taskSummary: '已完成网页查询',
+      currentStepId: 'final_reconcile',
+      waitingFor: 'none',
+      resumableActions: ['none'],
+      steps: [
+        {
+          id: 'final_reconcile',
+          title: '结果复核',
+          status: 'done',
+          updatedAt: '2026-03-07T09:00:03.000Z',
+        },
+      ],
+      timestamp: '2026-03-07T09:00:03.000Z',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.ok(savedMessages.length >= 2)
+    assert.strictEqual(savedMessages[0]?.meta?.taskSnapshot?.phase, 'responding')
+    const lastSaved = savedMessages.at(-1)
+    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.phase, 'done')
+    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.taskTitle, '最新信息查询')
+    assert.strictEqual(lastSaved?.meta?.taskSnapshot?.taskSummary, '已完成网页查询')
+
+    cleanup()
+  })
 })

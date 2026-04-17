@@ -31,11 +31,23 @@ interface BrowserDomainOrchestratorLike {
   }
   buildToolLoopLimitMessage: (state: BrowserToolLoopState) => string | null
   getBudgetHint: (params: Record<string, unknown>) => { maxIterations?: number; reserveToolCalls?: number } | null
+  buildStructuredTaskPayload: (params: {
+    decision: any
+    state: BrowserToolLoopState
+    phase: 'blocked' | 'done'
+    summary: string
+    blockedReason?: string | null
+    waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background'
+    resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
+    recentEvidence?: string[] | null
+  }) => Record<string, unknown>
 }
 
 interface BrowserAdapterState {
   preparedBrowserExecution: BrowserExecutionPreparation
   browserToolLoopState: BrowserToolLoopState
+  recentEvidence: string[]
+  liveInfoEnabled: boolean
 }
 
 interface SkillContextOrchestratorLike {
@@ -44,6 +56,69 @@ interface SkillContextOrchestratorLike {
 
 function buildUserMessage(content: string | null | undefined) {
   return content ? [{ role: 'user' as const, content }] : []
+}
+
+function isLiveInfoDecision(decision: BrowserExecutionPreparation['browserDecision']): boolean {
+  return decision.reason === 'live_information_lookup'
+    || /最新外部信息|最新结果页|最新信息/.test(String(decision.plan?.taskGoal || ''))
+}
+
+function normalizeBrowserEvidenceSnippet(toolName: string, resultText: string): string | null {
+  const normalized = String(resultText || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  if (/^(Error:|Search failed|Page content is empty|Skipped duplicate)/i.test(normalized)) {
+    return null
+  }
+  const limit = toolName === 'browser_read_page' ? 420 : toolName === 'browser_search' ? 320 : 220
+  return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized
+}
+
+function mergeRecentEvidence(
+  previous: string[],
+  nextItems: Array<{ toolName: string; resultText: string }> | null | undefined,
+): string[] {
+  const merged = [...previous]
+  for (const item of nextItems || []) {
+    const snippet = normalizeBrowserEvidenceSnippet(item.toolName, item.resultText)
+    if (!snippet) continue
+    if (merged.includes(snippet)) continue
+    merged.push(snippet)
+  }
+  return merged.slice(-6)
+}
+
+function buildProgressSummary(state: BrowserAdapterState, fallback?: string | null): string {
+  if (fallback) return fallback
+  const currentStep = state.browserToolLoopState.steps[state.browserToolLoopState.stepIndex]
+  const latestEvidence = state.recentEvidence.at(-1)
+  if (state.browserToolLoopState.stepIndex >= state.browserToolLoopState.steps.length) {
+    return state.liveInfoEnabled
+      ? '已完成网页核对，正在整理最终答复'
+      : (latestEvidence || '已完成网页核对')
+  }
+  if (currentStep) {
+    return latestEvidence ? `${currentStep.goal}：${latestEvidence}` : `正在执行：${currentStep.goal}`
+  }
+  return latestEvidence || '正在执行浏览器任务'
+}
+
+function buildLiveInfoSynthesisPrompt(params: {
+  userText: string
+  recentEvidence: string[]
+}): string {
+  return [
+    '你现在只负责把浏览器已经核对到的网页事实，整理成最终回复。',
+    '要求：',
+    '1. 只能根据下面的网页证据回答，不要补充猜测。',
+    '2. 不要复述步骤、工具、系统提醒或纠偏信息。',
+    '3. 先直接回答用户问题，再补最关键的日期/时间/来源线索。',
+    '4. 如果证据不足，就明确说证据不足，不要编造。',
+    '',
+    `用户问题：${params.userText}`,
+    '',
+    '网页证据：',
+    ...params.recentEvidence.map((item, index) => `${index + 1}. ${item}`),
+  ].join('\n')
 }
 
 export class BrowserDomainAdapter implements DomainAdapter {
@@ -116,6 +191,8 @@ export class BrowserDomainAdapter implements DomainAdapter {
       domainState: {
         preparedBrowserExecution,
         browserToolLoopState: this.orchestrator.createToolLoopState(preparedBrowserExecution.browserDecision),
+        recentEvidence: [],
+        liveInfoEnabled: isLiveInfoDecision(preparedBrowserExecution.browserDecision),
       } satisfies BrowserAdapterState,
     }
   }
@@ -147,6 +224,13 @@ export class BrowserDomainAdapter implements DomainAdapter {
         domainState: state,
         interactionState: 'awaiting_clarification',
         finalText: executionDispatch.responseText,
+        projection: {
+          phase: 'blocked',
+          summary: executionDispatch.responseText,
+          waitingFor: 'input',
+          resumableActions: ['continue', 'cancel'],
+          blockedReason: executionDispatch.responseText,
+        },
         finish: {
           status: 'done',
           success: true,
@@ -166,13 +250,27 @@ export class BrowserDomainAdapter implements DomainAdapter {
         },
       })
       if (browserResult.handled) {
+        const interactionState = browserResult.state === 'partial' && /(人工|手动|验证码|接管)/.test(browserResult.message)
+          ? 'human_takeover'
+          : null
         return {
           sessionMessages,
           domainState: state,
-          interactionState: browserResult.state === 'partial' && /(人工|手动|验证码|接管)/.test(browserResult.message)
-            ? 'human_takeover'
-            : null,
+          interactionState,
           finalText: browserResult.message,
+          projection: browserResult.state === 'done'
+            ? {
+              phase: 'done',
+              summary: browserResult.message,
+              resumableActions: ['none'],
+            }
+            : {
+              phase: 'blocked',
+              summary: browserResult.message,
+              waitingFor: interactionState === 'human_takeover' ? 'confirmation' : 'none',
+              resumableActions: interactionState === 'human_takeover' ? ['continue', 'cancel'] : ['retry', 'cancel'],
+              blockedReason: interactionState === 'human_takeover' ? browserResult.message : null,
+            },
           finish: {
             status: browserResult.state === 'failed'
               ? 'error'
@@ -189,10 +287,19 @@ export class BrowserDomainAdapter implements DomainAdapter {
     return {
       sessionMessages,
       domainState: state,
+      projection: executionDispatch.kind === 'tool_loop'
+        ? {
+          phase: 'blocked',
+          summary: buildProgressSummary(state, '已建立浏览器任务计划，开始分步执行'),
+          waitingFor: 'none',
+          resumableActions: ['cancel'],
+          blockedReason: null,
+        }
+        : null,
     }
   }
 
-  applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): DomainAdapterApplyResult {
+  async applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): Promise<DomainAdapterApplyResult> {
     const state = params.domainState as BrowserAdapterState
     if (params.phase === 'tool_batch' && (params.toolBatch?.executedBrowserToolsThisIteration || 0) > 0) {
       const progress = this.orchestrator.recordToolLoopProgress({
@@ -200,19 +307,70 @@ export class BrowserDomainAdapter implements DomainAdapter {
         responseText: params.responseText,
         executedBrowserToolsThisIteration: params.toolBatch?.executedBrowserToolsThisIteration || 0,
       })
+      const nextState = {
+        ...state,
+        browserToolLoopState: progress.state,
+        recentEvidence: mergeRecentEvidence(state.recentEvidence, params.toolBatch?.browserToolResultsThisIteration),
+      } satisfies BrowserAdapterState
       return {
-        domainState: {
-          ...state,
-          browserToolLoopState: progress.state,
-        } satisfies BrowserAdapterState,
+        domainState: nextState,
         sessionMessages: buildUserMessage(progress.checkpointMessage),
+        projection: {
+          phase: 'blocked',
+          summary: buildProgressSummary(nextState),
+          waitingFor: 'none',
+          resumableActions: ['cancel'],
+          blockedReason: null,
+        },
+      }
+    }
+
+    if (params.phase === 'no_tool_call' && state.liveInfoEnabled && state.recentEvidence.length > 0) {
+      const synthesisSession = {
+        ...params.session,
+        systemPrompt: `${params.session.systemPrompt}\n\n你当前只负责整理已核对的网页事实，不要输出工具过程。`,
+        messages: [
+          {
+            role: 'user' as const,
+            content: buildLiveInfoSynthesisPrompt({
+              userText: params.userText,
+              recentEvidence: state.recentEvidence,
+            }),
+          },
+        ],
+      }
+      const synthesis = await params.host.requestSimpleText({
+        session: synthesisSession,
+        signal: params.request.abortSignal,
+        providerContext: params.host.providerContext,
+        timeoutMs: 20_000,
+      })
+      const finalText = String(synthesis.text || '').trim() || state.recentEvidence.at(-1) || '已完成网页查询'
+      return {
+        domainState: state,
+        finalText,
+        projection: {
+          phase: 'done',
+          summary: '已完成网页查询',
+          waitingFor: 'none',
+          resumableActions: ['none'],
+          blockedReason: null,
+        },
       }
     }
 
     if (params.phase === 'budget_limit') {
+      const limitMessage = this.orchestrator.buildToolLoopLimitMessage(state.browserToolLoopState)
       return {
         domainState: state,
-        sessionMessages: buildUserMessage(this.orchestrator.buildToolLoopLimitMessage(state.browserToolLoopState)),
+        sessionMessages: buildUserMessage(limitMessage),
+        projection: {
+          phase: 'blocked',
+          summary: buildProgressSummary(state, limitMessage || '已达到本轮执行上限'),
+          waitingFor: 'none',
+          resumableActions: ['retry', 'cancel'],
+          blockedReason: limitMessage || '已达到本轮执行上限',
+        },
       }
     }
 
@@ -221,7 +379,17 @@ export class BrowserDomainAdapter implements DomainAdapter {
     }
   }
 
-  buildProjectionPatch(): Record<string, unknown> | null {
-    return null
+  buildProjectionPatch(params: Parameters<DomainAdapter['buildProjectionPatch']>[0]): Record<string, unknown> | null {
+    const state = params.domainState as BrowserAdapterState
+    return this.orchestrator.buildStructuredTaskPayload({
+      decision: state.preparedBrowserExecution.browserDecision,
+      state: state.browserToolLoopState,
+      phase: params.projection.phase,
+      summary: params.projection.summary,
+      blockedReason: params.projection.blockedReason,
+      waitingFor: params.projection.waitingFor,
+      resumableActions: params.projection.resumableActions,
+      recentEvidence: state.recentEvidence,
+    })
   }
 }

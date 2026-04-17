@@ -107,6 +107,43 @@ test('BrowserDomainOrchestrator exposes budget hints for upload workflows withou
   assert.deepEqual(hint, { maxIterations: 36 })
 })
 
+test('BrowserDomainOrchestrator builds structured browser task payloads for running and done states', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const decision = createDecision()
+  const state = {
+    isBrowserTask: true,
+    steps: decision.plan?.steps || [],
+    stepIndex: 1,
+    browserToolCallCount: 0,
+  }
+
+  const runningPayload = orchestrator.buildStructuredTaskPayload({
+    decision,
+    state,
+    phase: 'blocked',
+    summary: '正在核对上传结果',
+    recentEvidence: ['附件已出现'],
+  })
+  const donePayload = orchestrator.buildStructuredTaskPayload({
+    decision,
+    state,
+    phase: 'done',
+    summary: '已完成网页任务',
+    recentEvidence: ['附件已出现', '页面进入运行态'],
+  })
+
+  assert.equal(runningPayload.module, 'browser')
+  assert.equal(runningPayload.currentStepId, 'ensure_upload')
+  assert.equal(runningPayload.steps[0]?.status, 'done')
+  assert.equal(runningPayload.steps[1]?.status, 'running')
+  assert.deepEqual(runningPayload.recentEvidence, ['附件已出现'])
+
+  assert.equal(donePayload.currentStepId, 'ensure_upload')
+  assert.equal(donePayload.steps.every((step) => step.status === 'done'), true)
+  assert.equal(donePayload.blockedReason, null)
+  assert.deepEqual(donePayload.resumableActions, ['none'])
+})
+
 test('BrowserDomainOrchestrator refines upload decisions through planner callbacks', async () => {
   const planner = {
     rebuildPlan: (decision: BrowserTaskDecision) => ({ ...(decision.plan || {}), promptIntent: decision.promptIntent }),

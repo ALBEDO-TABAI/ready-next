@@ -120,6 +120,19 @@ test('browser domain adapter preserves upload prompt refinement before building 
     getBudgetHint() {
       return null
     },
+    buildStructuredTaskPayload() {
+      return {
+        module: 'browser',
+        taskTitle: '浏览器任务',
+        taskSummary: '执行中',
+        steps: [],
+        currentStepId: null,
+        waitingFor: 'none',
+        resumableActions: ['cancel'],
+        recentArtifacts: [],
+        message: '执行中',
+      }
+    },
   } as never)
 
   const result = await adapter.prepare({

@@ -656,6 +656,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             store.setState({ streamingRequestId: null })
           }
         }
+        if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
+          void persistAssistantMessageForRun(event.scopeId, store.getState().scopeRunStates[event.scopeId] || null)
+        }
       })
       : () => { /* older test stubs */ }
 

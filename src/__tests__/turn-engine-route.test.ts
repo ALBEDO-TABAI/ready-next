@@ -284,6 +284,136 @@ test('TurnEngine short-circuits browser deterministic work before the model tool
   assert.equal(simpleRequests, 0)
 })
 
+test('TurnEngine keeps browser process narration out of final text when the browser adapter finalizes the answer', async () => {
+  const engine = new TurnEngine()
+  let loopPasses = 0
+  const browserAdapter: DomainAdapter = {
+    id: 'browser',
+    shouldHandle: ({ route }) => route.executor === 'browser',
+    prepare: () => ({
+      allowedToolNames: ['browser_read_page'],
+      sessionMessages: [],
+      domainState: {
+        evidence: [] as string[],
+      },
+    }),
+    dispatch: async ({ domainState }) => ({ domainState }),
+    applyResult: ({ phase, domainState, toolBatch }) => {
+      if (phase === 'tool_batch') {
+        return {
+          domainState: {
+            evidence: (toolBatch?.browserToolResultsThisIteration || []).map((item) => item.resultText),
+          },
+          projection: { phase: 'blocked', summary: '已读取网页结果，正在整理最终答复' },
+        }
+      }
+      if (phase === 'no_tool_call') {
+        return {
+          domainState,
+          finalText: '广州明天雷阵雨转多云，28/24℃。',
+          projection: { phase: 'done', summary: '已完成网页查询' },
+        }
+      }
+      return { domainState }
+    },
+    buildProjectionPatch: ({ projection }) => ({
+      module: 'browser',
+      message: projection.summary,
+      taskTitle: '最新信息查询',
+      taskSummary: projection.summary,
+      steps: [
+        {
+          id: 'resolve_target_page',
+          title: '确认目标页',
+          status: projection.phase === 'done' ? 'done' : 'running',
+          updatedAt: '2026-04-17T11:30:00.000Z',
+        },
+      ],
+      currentStepId: 'resolve_target_page',
+      waitingFor: 'none',
+      resumableActions: projection.phase === 'done' ? ['none'] : ['cancel'],
+      blockedReason: null,
+    }),
+  }
+  const { request, events } = createRequest({
+    userText: '明天广州天气怎么样',
+    intentClassification: createIntent({
+      primaryDomain: 'browser',
+      mentionedDomains: ['browser'],
+      objectSignals: ['browser-object'],
+      actionSignals: ['browser-action'],
+      confidence: 'high',
+    }),
+    host: {
+      browserController: {},
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      domainAdapters: [browserAdapter],
+      requestToolLoopResponse: async () => {
+        loopPasses += 1
+        if (loopPasses === 1) {
+          return {
+            text: '第 1 步：先读取页面确认天气信息。',
+            toolCalls: [
+              {
+                id: 'call-1',
+                name: 'browser_read_page',
+                input: {},
+              },
+            ],
+            stopReason: 'tool_calls',
+            toolTransport: 'native',
+          }
+        }
+        return {
+          text: '收到。后续我会直接按文本桥接格式调用真实工具，不再重复说“没有工具”。',
+          toolCalls: [],
+          stopReason: 'stop',
+          toolTransport: 'native',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [
+          {
+            id: 'call-1',
+            name: 'browser_read_page',
+            input: {},
+            result: {
+              text: '18日（明天）雷阵雨转多云 28/24℃ <3级',
+            },
+          },
+        ],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.finalText, '广州明天雷阵雨转多云，28/24℃。')
+  assert.deepEqual(
+    events
+      .filter((event) => event.kind === 'output' && event.type === 'text')
+      .map((event) => event.chunk),
+    ['广州明天雷阵雨转多云，28/24℃。'],
+  )
+})
+
 test('TurnEngine lets a domain adapter block once and then finish a document tool loop', async () => {
   const engine = new TurnEngine()
   let toolLoopRequests = 0

@@ -375,6 +375,7 @@ Ready 采用 Electron 三层架构：
 - 浏览器 runner 现在支持输出结构化浏览器任务 payload。
 - 主进程会把结构化字段映射进 `scopeRunEvent.taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / blockedReason / taskContinuation`。
 - renderer 侧 `scopeRunState` 已优先消费这些显式字段，减少对阶段文本解析的依赖。
+- 浏览器 domain adapter 现在也会直接产出这套结构化 payload：tool loop 进行中、实时查询结果已核对、最终 `done` 收口都走同一条 projection 真值通道，不再只靠最早那条 planning 文案撑满整轮任务卡。
 
 ### 6.7 浏览器诊断入口
 - 浏览器诊断不再只有 host / preview / recent log 这类底层状态。
@@ -394,6 +395,7 @@ Ready 采用 Electron 三层架构：
 - 主进程会为最近 scope run 维护任务摘要，供聊天面板刷新后恢复最近任务。
 - 统一任务字段包括：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
 - Browser Agent V7 阶段会直接投影成步骤；workflow skill blocker 会映射成 `input / confirmation / agent_result` 等等待态。
+- renderer 在收到最终 `done / error / cancelled` scope run 事件后，会再次回写 assistant 消息快照，确保消息上的任务卡不会冻结在较早的运行中状态。
 
 ### 7.1c 会话回看主链
 - 当前已补上独立的 session recall 主链，和 memory 系统分开。
@@ -477,6 +479,7 @@ Ready 采用 Electron 三层架构：
 - `intent-classifier` 现已把实时外部信息查询视作高优先级 browser intent；文档上下文、最近 widget 历史或其它环境噪声不应再把这类请求误导到 document/design 路由
 - `browser-task-planner` 现在允许这类请求走“先搜索、再锁定可靠结果页”的计划路径：没有显式 URL 时会优先生成 `targetSearchQuery`，再去权威或最新页面完成读取与核对
 - 实时查询的浏览器工作流当前会把成功标准收口成“已锁定可靠结果页 + 已读取与问题匹配的最新信息”，而不是泛化成“页面做过某个动作”
+- 浏览器实时查询现在会先收集 `browser_*` 工具读到的网页证据，再由宿主做一次最终答复整理；最终回复只允许基于已核对的网页事实，不再把步骤播报、文本桥接纠偏或“工具缺失”解释混进最后答案
 - OpenAI 原生工具回复如果出现“没有可调用的浏览器工具组结果返回”这类新变体，当前也会被识别成缺失工具回复并自动进入现有纠偏链，而不是直接把这段借口当最终答复
 - 仅仅在文本里提到“浏览器工具/网页工具”但没有具体网页动作、链接、附件或实时查询信号时，任务路由现在会回到普通回答路径；这类 meta 追问不再误落到 browser executor
 - 站点名直达型请求现在也会进入浏览器计划层：当用户说“打开 pinterest / 去即梦 / 进入 Gemini”但没有附带 URL 时，planner 会先生成 `targetSearchQuery` 再锁定目标站点，而不是继续停在 `no_browser_intent`

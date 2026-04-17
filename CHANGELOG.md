@@ -39,6 +39,12 @@
 - 新增 `docs/superpowers/specs/2026-04-17-ready-agent-runtime-realignment-design.md`，定义 Ready 下一版 agent 的目标分层：`AgentRuntimeFacade / TurnEngine / ToolRuntime / DomainAdapter / Transcript+Projection / Session+Continuation`
 - 新增 `docs/superpowers/plans/2026-04-17-ready-agent-runtime-realignment-roadmap.md`，给出不做 big bang 的七阶段整改路线，后续 agent 主链收口改为按该路线推进
 
+#### Browser 实时查询结果收口
+- 浏览器实时查询现在会在浏览器域内收集网页证据，再由宿主发起一次“最终答复整理”请求；最终回复不再直接依赖工具循环里那段过程话术
+- 浏览器工具循环里的步骤播报、文本桥接纠偏和其它过程性说明，不再默认混入最终 `finalText`；这些内容继续留在任务卡/工具轨迹里
+- 浏览器域现在会稳定输出结构化任务投影，最终 `done` 事件也会带上浏览器任务标题、摘要和步骤状态，避免任务卡停留在“正在理解需求”
+- renderer 在收到最终 `done / error / cancelled` 事件后会重新持久化一次 assistant 消息快照，消息上的任务卡不再冻结在较早的运行中状态
+
 #### 文档深读后制卡 MVP
 - 新增结构化文档意图 `document_read_then_widget_create`：像“先阅读当前文档，再做一个信息卡”这类请求不再只靠前 1200 字摘要和单轮大 prompt
 - 新增 `DocumentTaskPipeline`，把这类请求拆成“读取文档 -> 提炼 insight -> 生成 componentSpec -> 写入 widget -> 保存文档”五段执行，并把阶段状态映射回现有任务卡

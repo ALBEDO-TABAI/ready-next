@@ -1,6 +1,7 @@
 import type {
   BrowserPlanStep,
   BrowserTaskDecision,
+  BrowserTaskProjectionPayload,
   BrowserTaskPlanContinuity,
 } from '../../../shared/browser-agent-task'
 import type { RunBudgetHint } from './run-contracts'
@@ -36,6 +37,32 @@ export interface BrowserExecutionDispatch {
   responseText: string | null
   toolLoopMessage: string | null
   fallbackLog: string | null
+}
+
+function resolveBrowserTaskTitle(decision: BrowserTaskDecision): string {
+  if (decision.reason === 'live_information_lookup') {
+    return '最新信息查询'
+  }
+  if (decision.mode === 'browser_upload_workflow') {
+    return decision.plan?.taskGoal || '浏览器上传流程'
+  }
+  return decision.plan?.taskGoal || '浏览器任务'
+}
+
+function resolveBrowserStepTitle(step: BrowserPlanStep): string {
+  return String(step.goal || step.id || '执行步骤').trim()
+}
+
+function compactRecentEvidence(recentEvidence: string[] | null | undefined): string[] {
+  const deduped: string[] = []
+  for (const item of recentEvidence || []) {
+    const normalized = String(item || '').replace(/\s+/g, ' ').trim()
+    if (!normalized) continue
+    if (deduped.includes(normalized)) continue
+    deduped.push(normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized)
+    if (deduped.length >= 4) break
+  }
+  return deduped
 }
 
 export class BrowserDomainOrchestrator {
@@ -195,6 +222,52 @@ export class BrowserDomainOrchestrator {
       return null
     }
     return { maxIterations: recommended }
+  }
+
+  buildStructuredTaskPayload(params: {
+    decision: BrowserTaskDecision
+    state: BrowserToolLoopState
+    phase: 'blocked' | 'done'
+    summary: string
+    blockedReason?: string | null
+    waitingFor?: BrowserTaskProjectionPayload['waitingFor']
+    resumableActions?: BrowserTaskProjectionPayload['resumableActions']
+    recentEvidence?: string[] | null
+  }): BrowserTaskProjectionPayload {
+    const steps = (params.state.steps || []).map((step, index) => {
+      let status: BrowserTaskProjectionPayload['steps'][number]['status'] = 'pending'
+      if (params.phase === 'done') {
+        status = 'done'
+      } else if (index < params.state.stepIndex) {
+        status = 'done'
+      } else if (index === params.state.stepIndex) {
+        status = 'running'
+      }
+      return {
+        id: step.id,
+        title: resolveBrowserStepTitle(step),
+        status,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+
+    const currentStepId = params.phase === 'done'
+      ? steps[steps.length - 1]?.id || params.state.steps[params.state.stepIndex]?.id || null
+      : steps[params.state.stepIndex]?.id || params.state.steps[params.state.stepIndex]?.id || null
+
+    return {
+      module: 'browser',
+      taskTitle: resolveBrowserTaskTitle(params.decision),
+      taskSummary: params.summary,
+      steps,
+      currentStepId,
+      waitingFor: params.waitingFor || 'none',
+      resumableActions: params.resumableActions || (params.phase === 'done' ? ['none'] : ['cancel']),
+      recentArtifacts: [],
+      blockedReason: params.phase === 'done' ? null : (params.blockedReason || null),
+      recentEvidence: compactRecentEvidence(params.recentEvidence),
+      message: params.summary,
+    }
   }
 
   resolveExecutionDispatch(params: {
