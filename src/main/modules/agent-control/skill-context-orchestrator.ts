@@ -1,4 +1,5 @@
 import type { SkillState } from '../skills-runtime/runtime-manager'
+import type { ToolExecutionOutput } from './tool-result-types'
 
 interface SkillToolRef {
   name?: string
@@ -95,7 +96,7 @@ export class SkillContextOrchestrator {
     sessionId?: string
     emitOutput: (chunk: string, type: string) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
-    executeTool: (tool: string, args: Record<string, unknown>) => Promise<string>
+    executeTool: (tool: string, args: Record<string, unknown>) => Promise<ToolExecutionOutput>
   }): Promise<void> {
     const explicitSkills = this.findExplicitlyRequestedSkills(params.userText)
     if (explicitSkills.length === 0) return
@@ -109,13 +110,13 @@ export class SkillContextOrchestrator {
         params.emitToolAction('skill_get_state', args)
         params.emitOutput(`skill_get_state(${JSON.stringify(args)})`, 'tool_use')
         const result = await params.executeTool('skill_get_state', args)
-        params.emitOutput(result.slice(0, 600), 'tool_result')
+        params.emitOutput(result.text.slice(0, 600), 'tool_result')
         params.session.messages.push({
           role: 'user',
           content: [
             `系统补充：技能 "${skill.name}" 在当前会话已有活跃 execution。`,
             '必须先基于以下 execution 状态继续推进，而不是重新启动一个新的 workflow：',
-            result,
+            result.text,
           ].join('\n'),
         })
         continue
@@ -141,8 +142,8 @@ export class SkillContextOrchestrator {
       params.emitToolAction(tool.name || '', args)
       params.emitOutput(`${tool.name}(${JSON.stringify(args)})`, 'tool_use')
       const result = await params.executeTool(tool.name || '', args)
-      params.emitOutput(result.slice(0, 600), 'tool_result')
-      const skillContent = this.extractSkillReferenceContent(result).slice(0, 6_000)
+      params.emitOutput(result.text.slice(0, 600), 'tool_result')
+      const skillContent = this.extractSkillReferenceContent(result.text).slice(0, 6_000)
       params.session.messages.push({
         role: 'user',
         content: [
@@ -155,8 +156,8 @@ export class SkillContextOrchestrator {
     }
   }
 
-  private extractSkillReferenceContent(result: string): string {
-    const text = String(result || '').trim()
+  private extractSkillReferenceContent(resultText: string): string {
+    const text = String(resultText || '').trim()
     const stdoutMarker = 'STDOUT:\n'
     const stdoutIndex = text.indexOf(stdoutMarker)
     if (stdoutIndex >= 0) {

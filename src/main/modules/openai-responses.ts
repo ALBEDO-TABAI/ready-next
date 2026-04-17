@@ -1,9 +1,38 @@
-export async function parseJsonOrEventStreamResponse(response: Response): Promise<unknown> {
-  const raw = await response.text()
-  return parseJsonOrEventStreamText(raw)
+interface JsonResponseParseOptions {
+  requestUrl?: string
 }
 
-export function parseJsonOrEventStreamText(raw: string): unknown {
+export async function parseJsonResponse(
+  response: Response,
+  options: JsonResponseParseOptions = {},
+): Promise<unknown> {
+  const raw = await response.text()
+  return parseJsonText(raw, options)
+}
+
+export async function parseJsonOrEventStreamResponse(
+  response: Response,
+  options: JsonResponseParseOptions = {},
+): Promise<unknown> {
+  const raw = await response.text()
+  return parseJsonOrEventStreamText(raw, options)
+}
+
+export function parseJsonText(raw: string, options: JsonResponseParseOptions = {}): unknown {
+  const trimmed = raw.trim()
+  if (!trimmed) return {}
+
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    throw buildJsonParseError(trimmed, options.requestUrl)
+  }
+}
+
+export function parseJsonOrEventStreamText(
+  raw: string,
+  options: JsonResponseParseOptions = {},
+): unknown {
   const trimmed = raw.trim()
   if (!trimmed) return {}
 
@@ -12,7 +41,37 @@ export function parseJsonOrEventStreamText(raw: string): unknown {
   } catch {
     const ssePayload = parseEventStreamPayload(trimmed)
     if (typeof ssePayload !== 'undefined') return ssePayload
-    throw new Error(`Unable to parse response body: ${trimmed.slice(0, 120)}`)
+    throw buildJsonParseError(trimmed, options.requestUrl)
+  }
+}
+
+function buildJsonParseError(raw: string, requestUrl?: string): Error {
+  const snippet = raw.slice(0, 120)
+  if (looksLikeHtml(raw)) {
+    const v1Hint = shouldSuggestV1(requestUrl)
+      ? ' 如果这是 OpenAI 兼容服务，API 地址通常要写成带 /v1 的形式。'
+      : ''
+    return new Error(`API 返回了网页内容，不是 JSON。请检查 API 地址是否填成了官网页或登录页。${v1Hint}`)
+  }
+  return new Error(`API 返回了无法解析的内容: ${snippet}`)
+}
+
+function looksLikeHtml(raw: string): boolean {
+  const normalized = raw.trimStart().slice(0, 64).toLowerCase()
+  return normalized.startsWith('<!doctype html')
+    || normalized.startsWith('<html')
+    || normalized.startsWith('<head')
+    || normalized.startsWith('<body')
+}
+
+function shouldSuggestV1(requestUrl?: string): boolean {
+  if (!requestUrl) return false
+  try {
+    const url = new URL(requestUrl)
+    const segments = url.pathname.split('/').filter(Boolean)
+    return segments.length > 0 && segments[0] !== 'v1'
+  } catch {
+    return false
   }
 }
 

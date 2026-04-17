@@ -22,6 +22,7 @@ import {
 import { resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
 import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-task-types'
+import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-task-plan'
 
 export interface ExecutionIntentContext {
   requestEnvelope: RequestEnvelope
@@ -34,6 +35,8 @@ export interface ExecutionIntentContext {
   documentWidgetTaskKind: DocumentWidgetTaskKind
   documentWidgetProfile: DocumentWidgetProfile | null
   structuredDocumentIntent: StructuredDocumentIntent
+  documentTaskPlan: DocumentTaskPlan | null
+  shouldUseDocumentTaskPlan: boolean
 }
 
 export function resolveExecutionIntentContext(params: {
@@ -58,6 +61,13 @@ export function resolveExecutionIntentContext(params: {
   const effectiveEnvelope = contextualUserInput === (params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText)
     ? params.requestEnvelope
     : buildRequestEnvelope({ userText: contextualUserInput })
+  const documentTaskPlan = buildDocumentTaskPlan({
+    requestEnvelope: effectiveEnvelope,
+    userInstructionText,
+  })
+  const shouldUseDocumentTaskPlan = Boolean(
+    documentTaskPlan.blockedReason || (documentTaskPlan.requiresStructuredPlan && documentTaskPlan.jobs.length > 0),
+  )
 
   return {
     requestEnvelope: effectiveEnvelope,
@@ -70,6 +80,8 @@ export function resolveExecutionIntentContext(params: {
     documentWidgetTaskKind,
     documentWidgetProfile: inferDocumentWidgetProfile(contextualUserInput),
     structuredDocumentIntent: classifyStructuredDocumentIntent(userInstructionText),
+    documentTaskPlan,
+    shouldUseDocumentTaskPlan,
   }
 }
 

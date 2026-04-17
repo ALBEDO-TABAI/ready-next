@@ -84,7 +84,7 @@ test('ExecutionLoopOrchestrator executes a parallel-safe batch concurrently but 
   assert.deepEqual(starts, ['1', '2', '3'])
   assert.deepEqual(finishes, ['3', '2', '1'])
   assert.deepEqual(result.results.map((item) => item.id), ['1', '2', '3'])
-  assert.deepEqual(result.results.map((item) => item.result), ['memory_search:ok', 'document_list_widgets:ok', 'rss_capture_session:ok'])
+  assert.deepEqual(result.results.map((item) => item.result.text), ['memory_search:ok', 'document_list_widgets:ok', 'rss_capture_session:ok'])
   assert.equal(result.budgetLimited, false)
 })
 
@@ -336,6 +336,8 @@ test('ExecutionLoopOrchestrator converts tool timeouts into tool results instead
 
   assert.equal(result.budgetLimited, false)
   assert.deepEqual(result.results.map((item) => item.id), ['1', '2'])
-  assert.match(result.results[0].result, /timed out/i)
-  assert.equal(result.results[1].result, 'memory_search:ok')
+  assert.equal(result.results[0].result.shape, 'json')
+  assert.match(result.results[0].result.text, /timed out/i)
+  assert.equal(result.results[0].result.data?.errorKind, 'timeout_tool')
+  assert.equal(result.results[1].result.text, 'memory_search:ok')
 })

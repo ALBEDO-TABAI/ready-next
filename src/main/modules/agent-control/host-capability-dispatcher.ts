@@ -3,9 +3,10 @@ import type { ToolContext } from '../tools/tool-executor'
 import type { DocumentChatSessionLike } from './document-domain-helpers'
 import type { HostShortcutDecision } from './run-capability-controller'
 import { logAgentMetric } from './metrics'
+import type { ToolExecutionOutput } from './tool-result-types'
 
 interface HostCapabilityDispatcherDeps {
-  executeHostTool: (toolName: string, args: Record<string, unknown>, toolContext: ToolContext) => Promise<string>
+  executeHostTool: (toolName: string, args: Record<string, unknown>, toolContext: ToolContext) => Promise<ToolExecutionOutput>
   tryDeterministicSectionFormatFlow: (params: {
     agentName: string
     userText: string
@@ -83,7 +84,7 @@ export class HostCapabilityDispatcher {
       )
       return {
         handled: true,
-        outputText: result,
+        outputText: result.text,
         toolUseText: `system_run_openclaw(${JSON.stringify({ command: params.decision.command }).slice(0, 120)})`,
       }
     }

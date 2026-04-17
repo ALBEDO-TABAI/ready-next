@@ -5,7 +5,9 @@ import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
   parseTextToolBridgeResponse,
+  shouldEnforceBrowserToolRetry,
 } from '../main/modules/claude-bridge/tool-bridge'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 describe('parseTextToolBridgeResponse', () => {
   it('extracts tool_call blocks and keeps visible text', () => {
@@ -32,8 +34,45 @@ describe('looksLikeMissingNativeToolsReply', () => {
   it('detects missing tool availability replies in multiple languages', () => {
     assert.strictEqual(looksLikeMissingNativeToolsReply('没有可用工具，当前无法执行浏览器操作。'), true)
     assert.strictEqual(looksLikeMissingNativeToolsReply('当前通道没有网页操作工具。'), true)
+    assert.strictEqual(
+      looksLikeMissingNativeToolsReply('我这边当前消息里虽然写了“浏览器任务执行计划”，但实际没有可调用的浏览器工具组结果返回给我。'),
+      true,
+    )
+    assert.strictEqual(
+      looksLikeMissingNativeToolsReply('我现在还是不能真的执行这份浏览器计划，因为这轮实际开放给我的工具里，没有 browser_* 工具。'),
+      true,
+    )
     assert.strictEqual(looksLikeMissingNativeToolsReply("I don’t have a ping tool available in this session."), true)
     assert.strictEqual(looksLikeMissingNativeToolsReply('我现在就去读取页面并继续操作。'), false)
+  })
+})
+
+describe('shouldEnforceBrowserToolRetry', () => {
+  it('forces a retry when a browser task receives a native zero-tool reply', () => {
+    assert.strictEqual(shouldEnforceBrowserToolRetry({
+      isBrowserTask: true,
+      toolCallsCount: 0,
+      toolTransport: 'native',
+      responseText: '我先解释一下当前情况。',
+    }), true)
+    assert.strictEqual(shouldEnforceBrowserToolRetry({
+      isBrowserTask: true,
+      toolCallsCount: 0,
+      toolTransport: 'text',
+      responseText: '这轮实际开放给我的工具里，没有 browser_* 工具。',
+    }), true)
+    assert.strictEqual(shouldEnforceBrowserToolRetry({
+      isBrowserTask: true,
+      toolCallsCount: 1,
+      toolTransport: 'native',
+      responseText: '我已经开始执行。',
+    }), false)
+    assert.strictEqual(shouldEnforceBrowserToolRetry({
+      isBrowserTask: false,
+      toolCallsCount: 0,
+      toolTransport: 'native',
+      responseText: '我先解释一下当前情况。',
+    }), false)
   })
 })
 
@@ -46,5 +85,24 @@ describe('buildTextToolResultMessage', () => {
     assert.match(message, /\[tool_result\]/)
     assert.match(message, /browser_read_page/)
     assert.match(message, /page ok/)
+  })
+
+  it('keeps structured tool payloads in the text bridge transcript', () => {
+    const message = buildTextToolResultMessage([
+      {
+        id: 'call_2',
+        name: 'document_task_patch',
+        result: createToolExecutionOutput('', {
+          projectionPatch: {
+            module: 'document',
+            taskTitle: '文档信息卡',
+          },
+        }),
+      },
+    ])
+
+    assert.match(message, /document_task_patch/)
+    assert.match(message, /"module":"document"/)
+    assert.match(message, /"taskTitle":"文档信息卡"/)
   })
 })

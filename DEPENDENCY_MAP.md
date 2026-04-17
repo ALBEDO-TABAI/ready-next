@@ -1,6 +1,6 @@
 # Module Dependency Map
 
-> Updated: 2026-04-13
+> Updated: 2026-04-17
 
 ## 总体依赖链
 ```text
@@ -64,12 +64,15 @@ Renderer (React / Zustand)
 -> `electronAPI.agent.*`
 -> `src/main/modules/claude-bridge/*`
 -> `src/main/modules/agent-control/*`
+-> `ToolRuntime`
 -> `src/main/modules/tools/*`
 -> Browser / Document / Skill / System / Memory executor
 
 附加依赖：
 - `src/main/modules/openai-responses.ts`：SSE / JSON 兼容解析
 - `src/main/modules/claude-bridge/tool-bridge.ts`：文本工具桥接
+- `src/main/modules/agent-control/tool-runtime.ts`：工具批执行真相、并发分组、恢复结果归一化、cleanup 生命周期
+- `src/main/modules/agent-control/tool-result-types.ts`：结构化工具结果契约；主链内部统一消费结构化结果，最后一公里仍序列化为兼容现有 `tool_result` 的文本/JSON
 - `src/main/modules/repositories/memory-repository.ts`：长期记忆存取
 - `src/main/modules/repositories/task-projection-repository.ts`：任务投影、父子任务关联、projection-first 真值
 - `src/main/modules/agent-control/run-cleanup-registry.ts`：run-scoped cleanup 注册与统一回收

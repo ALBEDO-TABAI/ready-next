@@ -21,11 +21,42 @@ export interface RequestEnvelopeResourceRef {
   value: string
 }
 
+export type RequestEnvelopeResourceKind =
+  | 'attachment'
+  | 'document_context'
+  | 'document_quote'
+  | 'browser_reference'
+  | 'folder_reference'
+  | 'widget_target'
+
+export type RequestEnvelopeResourceSource =
+  | 'user_attachment'
+  | 'explicit_reference'
+  | 'current_document'
+  | 'document_quote'
+  | 'browser_context'
+  | 'folder_reference'
+  | 'widget_target'
+
+export interface RequestEnvelopeResource {
+  id: string
+  kind: RequestEnvelopeResourceKind
+  source: RequestEnvelopeResourceSource
+  name: string
+  path: string | null
+  text: string
+  summary: string | null
+  order: number
+  canRead: boolean
+  canWrite: boolean
+}
+
 export interface RequestEnvelope {
   rawUserText: string
   pureUserText: string
   primaryInstruction: string
   chunks: InputChunk[]
+  resources: RequestEnvelopeResource[]
   referencedResources: RequestEnvelopeResourceRef[]
   environmentHints: {
     hasDocumentContext: boolean
@@ -87,6 +118,45 @@ const USER_CONTROLLABLE_SOURCES = new Set<InputChunkSource>([
   'environment_hint',
 ])
 
+const WRITABLE_DOCUMENT_PATTERN = /\.(md|markdown|txt|docx?)$/i
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function collectMarkerStarts(raw: string, marker: string): number[] {
+  const starts: number[] = []
+  const pattern = new RegExp(`(^|\\n)${escapeRegExp(marker)}`, 'g')
+  let match = pattern.exec(raw)
+  while (match) {
+    starts.push(match.index + match[1].length)
+    match = pattern.exec(raw)
+  }
+  return starts
+}
+
+interface StructuredBlock {
+  marker: string
+  source: InputChunkSource
+  text: string
+  index: number
+}
+
+function collectStructuredBlocks(raw: string): StructuredBlock[] {
+  const markers = STRUCTURED_MARKERS
+    .flatMap((entry) => collectMarkerStarts(raw, entry.marker).map((index) => ({
+      marker: entry.marker,
+      source: entry.source,
+      index,
+    })))
+    .sort((left, right) => left.index - right.index)
+
+  return markers.map((entry, index) => ({
+    ...entry,
+    text: raw.slice(entry.index, markers[index + 1]?.index ?? raw.length).trim(),
+  }))
+}
+
 function stripLeadingBootstrapSections(raw: string): string {
   let remaining = String(raw || '').trim()
   while (remaining.startsWith('## ')) {
@@ -120,16 +190,146 @@ export function extractPureUserInput(userText: string): string {
   return pureInput.trim()
 }
 
-function extractStructuredChunk(raw: string, marker: string): string | null {
-  const start = raw.indexOf(marker)
-  if (start === -1) return null
-  const nextMarkers = STRUCTURED_MARKERS
-    .map((item) => item.marker)
-    .filter((candidate) => candidate !== marker)
-    .map((candidate) => raw.indexOf(candidate, start + marker.length))
-    .filter((index) => index >= 0)
-  const end = nextMarkers.length > 0 ? Math.min(...nextMarkers) : raw.length
-  return raw.slice(start, end).trim()
+function stripStructuredResourceBoilerplate(text: string): string {
+  return String(text || '')
+    .replace(/^---\s*(引用文件|附件):[^\n]*\n?/gm, '')
+    .replace(/^(###\s*当前文档上下文|###\s*文档引用|###\s*浏览页面引用|###\s*文件夹引用|###\s*Widget 更新上下文)\s*\n?/gm, '')
+    .replace(/(?:^|\n)-\s*(标题|文档|路径|类型|字符数|链接|主标题|当前选中文本|页面摘要|名称|用途|目标 widget|当前模式|约束):\s*[^\n]*/g, '')
+    .replace(/---\s*文档(摘要|内容)开始\s*---/g, '')
+    .replace(/---\s*文档(摘要|内容)结束\s*---/g, '')
+    .replace(/```(?:show-widget|quote)?[\s\S]*?```/g, '')
+    .trim()
+}
+
+function extractNamedBlockValue(text: string, label: string): string | null {
+  const match = text.match(new RegExp(`(?:^|\\n)-\\s*${escapeRegExp(label)}:\\s*([^\\n]+)`))
+  return match?.[1]?.trim() || null
+}
+
+function isWritableDocumentResource(name: string, path: string | null, kind: RequestEnvelopeResourceKind): boolean {
+  if (kind === 'document_context' || kind === 'widget_target') return true
+  const identity = `${path || ''}\n${name}`.trim()
+  return WRITABLE_DOCUMENT_PATTERN.test(identity)
+}
+
+function summarizeResourceText(text: string): string | null {
+  const normalized = String(text || '').trim().replace(/\s+/g, ' ')
+  return normalized ? normalized.slice(0, 240) : null
+}
+
+function buildResourceFromBlock(block: StructuredBlock, order: number): RequestEnvelopeResource | null {
+  if (block.marker === '--- 附件:' || block.marker === '--- 引用文件:') {
+    const name = block.text.match(/^---\s*(?:引用文件|附件):\s*(.+?)\s*---/m)?.[1]?.trim()
+    if (!name) return null
+    const path = extractNamedBlockValue(block.text, '路径')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'attachment',
+      source: block.marker === '--- 附件:' ? 'user_attachment' : 'explicit_reference',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: isWritableDocumentResource(name, path, 'attachment'),
+    }
+  }
+
+  if (block.marker === '### 当前文档上下文') {
+    const name = extractNamedBlockValue(block.text, '标题')
+      || extractNamedBlockValue(block.text, '路径')
+      || '当前文档'
+    const path = extractNamedBlockValue(block.text, '路径')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'document_context',
+      source: 'current_document',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: isWritableDocumentResource(name, path, 'document_context'),
+    }
+  }
+
+  if (block.marker === '### 文档引用') {
+    const name = extractNamedBlockValue(block.text, '文档') || '文档引用'
+    const path = extractNamedBlockValue(block.text, '路径')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'document_quote',
+      source: 'document_quote',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: false,
+    }
+  }
+
+  if (block.marker === '### 浏览页面引用') {
+    const name = extractNamedBlockValue(block.text, '标题') || '浏览页面'
+    const path = extractNamedBlockValue(block.text, '链接')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'browser_reference',
+      source: 'browser_context',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: false,
+    }
+  }
+
+  if (block.marker === '### 文件夹引用') {
+    const name = extractNamedBlockValue(block.text, '名称') || '文件夹引用'
+    const path = extractNamedBlockValue(block.text, '路径')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'folder_reference',
+      source: 'folder_reference',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: false,
+    }
+  }
+
+  if (block.marker === '### Widget 更新上下文') {
+    const name = extractNamedBlockValue(block.text, '目标 widget') || '当前 widget'
+    const path = extractNamedBlockValue(block.text, '路径')
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'widget_target',
+      source: 'widget_target',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: true,
+    }
+  }
+
+  return null
 }
 
 function buildReferencedResources(raw: string): RequestEnvelopeResourceRef[] {
@@ -158,6 +358,7 @@ export function buildRequestEnvelope(params: { userText: string }): RequestEnvel
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
   const primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
+  const structuredBlocks = collectStructuredBlocks(rawUserText)
 
   const chunks: InputChunk[] = []
   if (pureUserText) {
@@ -168,15 +369,17 @@ export function buildRequestEnvelope(params: { userText: string }): RequestEnvel
     })
   }
 
-  for (const entry of STRUCTURED_MARKERS) {
-    const text = extractStructuredChunk(rawUserText, entry.marker)
-    if (!text) continue
+  for (const block of structuredBlocks) {
     chunks.push({
-      source: entry.source,
-      text,
-      participatesInFirstPassIntent: USER_CONTROLLABLE_SOURCES.has(entry.source),
+      source: block.source,
+      text: block.text,
+      participatesInFirstPassIntent: USER_CONTROLLABLE_SOURCES.has(block.source),
     })
   }
+
+  const resources = structuredBlocks
+    .map((block, index) => buildResourceFromBlock(block, index))
+    .filter(Boolean) as RequestEnvelopeResource[]
 
   const countsBySource = {
     user_message: 0,
@@ -198,6 +401,7 @@ export function buildRequestEnvelope(params: { userText: string }): RequestEnvel
     pureUserText,
     primaryInstruction,
     chunks,
+    resources,
     referencedResources: buildReferencedResources(rawUserText),
     environmentHints: {
       hasDocumentContext: rawUserText.includes('### 当前文档上下文') || rawUserText.includes('### 文档引用'),

@@ -1,3 +1,5 @@
+import { serializeToolExecutionOutput, type ToolExecutionResultLike } from '../agent-control/tool-result-types'
+
 export interface TextToolBridgeCall {
   name: string
   args: Record<string, unknown>
@@ -125,14 +127,14 @@ export function parseTextToolBridgeResponse(text: string): ParsedTextToolBridgeR
 }
 
 export function buildTextToolResultMessage(
-  results: Array<{ id: string; name: string; result: string }>,
+  results: Array<{ id: string; name: string; result: ToolExecutionResultLike }>,
 ): string {
   const blocks = results.map((item) => [
     '[tool_result]',
     `call_id: ${item.id}`,
     `tool: ${item.name}`,
     'result:',
-    item.result,
+    serializeToolExecutionOutput(item.result),
     '[/tool_result]',
   ].join('\n'))
 
@@ -148,6 +150,10 @@ export function looksLikeMissingNativeToolsReply(text: string): boolean {
 
   const patterns = [
     /没有可用工具/i,
+    /没有可调用的.*工具/i,
+    /工具列表.*没有.*browser_/i,
+    /开放给我的工具里.*没有.*browser_/i,
+    /没有\s*`?browser_\*?`?\s*工具/i,
     /当前通道.*没有.*网页操作工具/i,
     /没有.*网页操作工具/i,
     /当前.*工具.*不可用/i,
@@ -162,4 +168,16 @@ export function looksLikeMissingNativeToolsReply(text: string): boolean {
   ]
 
   return patterns.some((pattern) => pattern.test(normalized))
+}
+
+export function shouldEnforceBrowserToolRetry(params: {
+  isBrowserTask: boolean
+  toolCallsCount: number
+  toolTransport?: 'native' | 'text'
+  responseText?: string | null
+}): boolean {
+  if (!params.isBrowserTask) return false
+  if (params.toolCallsCount > 0) return false
+  if (params.toolTransport === 'native') return true
+  return looksLikeMissingNativeToolsReply(params.responseText || '')
 }

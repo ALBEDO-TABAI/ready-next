@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-16
+> 更新时间: 2026-04-17
 
 ## 当前真值摘要
 
@@ -10,6 +10,10 @@
 - 运行时恢复现已正式接入工具循环：限流、模型超时、上下文过长会先走恢复，再回到原有协议降级。
 - 工具超时已统一进入主分发层，超时型工具结果不再直接打崩整轮执行。
 - 工具并行策略已从白名单切到粗粒度资源域分组，并行上限默认收口为 `5`。
+- agent runtime realignment phase2 已落地第一版：新增 `ToolRuntime` 接管工具批执行真相，allowlist、分组调度、超时恢复、cleanup 与结果归一化不再散在主循环里。
+- 工具结果契约已升级为结构化 `ToolExecutionOutput`，主链现在统一消费 `text / shape / data / projectionPatch / interactionHint`，旧字符串工具结果会自动包装兼容。
+- `ExecutionLoopOrchestrator` 现已缩责：模型请求恢复与 fallback 还留在这里，但工具批执行本身已改为委托 `ToolRuntime.executeBatch()`。
+- `direct-chat` 里 Anthropic / OpenAI / 文本桥接三条工具结果后处理已收成共享逻辑，预算、文档/设计状态、interaction state 与 `tool_result` 回写不再各写一套。
 - 默认预算已开始按任务类型分层，主控和运行态事件也开始透传任务类型、交互状态、预算占用和恢复记录。
 - `TaskTypeResolver` 已接入主链第一版：低信号通用问题会优先直答，浏览器/文档/跨域任务会走不同执行路径。
 - `task_projections` 轻量任务看板层已落地到主进程数据库：scope run 摘要会同步写入独立任务投影，不再只能存在运行时内存里。

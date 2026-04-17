@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
+
+test('ToolRuntime notifies interruption hooks when cancellation stops the batch', async () => {
+  const runtime = new ToolRuntime({ log: () => {} })
+  const controller = new AbortController()
+  const interrupted: Array<{ startedIds: string[]; skippedIds: string[] }> = []
+  const started: string[] = []
+
+  await assert.rejects(
+    () => runtime.executeBatch({
+      signal: controller.signal,
+      toolCalls: [
+        { id: '1', name: 'skill_video_expert_ai_analyze', input: {} },
+        { id: '2', name: 'document_update_widget', input: {} },
+      ],
+      hooks: {
+        onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
+          interrupted.push({
+            startedIds: startedToolCallIds,
+            skippedIds: skippedToolCalls.map((toolCall) => toolCall.id),
+          })
+        },
+      },
+      executeTool: async (toolCall) => {
+        started.push(toolCall.id)
+        if (toolCall.id === '1') {
+          controller.abort()
+        }
+        return `${toolCall.name}:ok`
+      },
+    }),
+    { name: 'AbortError' },
+  )
+
+  assert.deepEqual(started, ['1'])
+  assert.deepEqual(interrupted, [
+    {
+      startedIds: ['1'],
+      skippedIds: ['2'],
+    },
+  ])
+})
+
+test('ToolRuntime interruption hook only fires once for a cancelled parallel batch', async () => {
+  const runtime = new ToolRuntime({ log: () => {} })
+  const controller = new AbortController()
+  let interruptCount = 0
+
+  await assert.rejects(
+    () => runtime.executeBatch({
+      signal: controller.signal,
+      toolCalls: [
+        { id: '1', name: 'memory_search', input: {} },
+        { id: '2', name: 'document_list_widgets', input: {} },
+        { id: '3', name: 'browser_click', input: {} },
+      ],
+      hooks: {
+        onBatchInterrupted: () => {
+          interruptCount += 1
+        },
+      },
+      executeTool: async (toolCall) => {
+        if (toolCall.id === '1') {
+          controller.abort()
+        }
+        return `${toolCall.name}:ok`
+      },
+    }),
+    { name: 'AbortError' },
+  )
+
+  assert.equal(interruptCount, 1)
+})

@@ -9,6 +9,10 @@
 - 保留原有 `execution-fallback-policy` 处理协议/通道不兼容，同时把运行时恢复拆成独立组件，避免两类问题继续混用
 - 工具执行新增统一超时预算：查询、文档写入、浏览器交互、Skill、飞书分别走不同超时配置
 - 工具并行策略从只读白名单升级为资源域标签分组，同域写入与交互型工具保持串行，跨域只读可并行
+- 新增 `ToolRuntime`，把工具批执行的 allowlist 校验、资源域分组、超时恢复、cleanup 回收与结果归一化统一收口到单一运行时层
+- 工具结果契约升级为 `ToolExecutionOutput`：主链统一消费 `text / shape / data / projectionPatch / interactionHint`，旧字符串工具结果由 `tool-executor` 自动包装兼容
+- `ExecutionLoopOrchestrator.executeToolCalls()` 缩成薄代理，保留模型请求恢复；`direct-chat` 的 Anthropic / OpenAI / 文本桥接三条工具结果后处理改为共享批次消费逻辑
+- runtime 产出的 `timeout / host_unavailable / auth` 恢复结果与文档 projection patch 都开始走结构化工具结果，但对 renderer / preload 仍保持现有 `tool_result` 兼容协议
 - 预算默认值开始按任务类型分层：直答、短任务、多步任务、媒体任务不再共用同一轮次模板
 - 主控事件链开始透传 `taskType / interactionState / budgetUsagePercent / recoveryHistory / degradationReason`
 - 新增 `TaskTypeResolver`，并把它接入主链：低信号通用问题可直接走直答，不再一律落入工具循环

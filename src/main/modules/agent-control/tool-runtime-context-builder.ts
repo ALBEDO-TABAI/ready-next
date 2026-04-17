@@ -3,6 +3,7 @@ import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
 import type { ToolContext } from '../tools/tool-executor'
+import type { ToolRuntimeContext } from './tool-runtime'
 
 export function buildToolRuntimeContext(params: {
   browserController: BrowserController | null
@@ -15,7 +16,7 @@ export function buildToolRuntimeContext(params: {
   abortSignal: AbortSignal
   sessionId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
-}): ToolContext {
+}): ToolRuntimeContext {
   return {
     browserController: params.browserController,
     sidecarManager: params.sidecarManager,
@@ -27,5 +28,20 @@ export function buildToolRuntimeContext(params: {
     abortSignal: params.abortSignal,
     sessionId: params.sessionId,
     registerRunCleanup: params.registerRunCleanup,
+  }
+}
+
+export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext {
+  return {
+    browserController: context.browserController,
+    sidecarManager: context.sidecarManager,
+    runtime: context.runtime,
+    scope: context.scope,
+    allowedToolNames: context.allowedToolNames || null,
+    emitToolAction: context.emitToolAction,
+    requestModuleToolAction: context.requestModuleToolAction,
+    abortSignal: context.abortSignal,
+    sessionId: context.sessionId,
+    registerRunCleanup: context.registerRunCleanup,
   }
 }

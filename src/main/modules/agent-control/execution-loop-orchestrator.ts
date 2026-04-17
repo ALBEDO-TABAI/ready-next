@@ -2,14 +2,10 @@ import type { ExecutionFallbackInfo } from '../claude-bridge/execution-fallback-
 import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/execution-fallback-policy'
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
-import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
-import {
-  canUseParallelToolGroup,
-  getBudgetUsagePercent,
-  getBudgetWarningLevel,
-  getRemainingToolCallBudget,
-} from './run-budget-policy'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage } from './run-contracts'
+import type { ParallelToolCall } from './tool-parallelism-policy'
+import { ToolRuntime, type ToolRuntimeBatchResult } from './tool-runtime'
+import type { ToolExecutionOutput } from './tool-result-types'
 
 interface APIResponseLike {
   text: string
@@ -22,29 +18,24 @@ interface APIResponseLike {
   fallback?: ExecutionFallbackInfo
 }
 
-interface ToolExecutionResult {
-  id: string
-  name: string
-  input: Record<string, unknown>
-  result: string
-}
-
-interface ExecuteToolCallsResult {
-  results: ToolExecutionResult[]
-  budgetLimited: boolean
-  recoveryHistory: RecoveryRecord[]
-}
-
 type KnownExecutionErrorResult = ErrorClassifierResult & {
   kind: Exclude<ErrorClassifierResult['kind'], 'unknown'>
 }
 
 export class ExecutionLoopOrchestrator {
+  private readonly toolRuntime: ToolRuntime
+
   constructor(private readonly deps: {
     log: (message: string) => void
     sleep?: (delayMs: number) => Promise<void>
     now?: () => string
-  }) {}
+  }) {
+    this.toolRuntime = new ToolRuntime({
+      log: deps.log,
+      sleep: deps.sleep,
+      now: deps.now,
+    })
+  }
 
   async requestToolLoopResponse(params: {
     useAnthropicProtocol: boolean
@@ -121,89 +112,20 @@ export class ExecutionLoopOrchestrator {
 
   async executeToolCalls(params: {
     toolCalls: ParallelToolCall[]
-    executeTool: (toolCall: ParallelToolCall) => Promise<string>
+    executeTool: (toolCall: ParallelToolCall) => Promise<ToolExecutionOutput | string>
     onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: ParallelToolCall[] }) => void
     budget?: RunBudgetSeed
     budgetState?: RunBudgetUsage
     signal?: AbortSignal
-  }): Promise<ExecuteToolCallsResult> {
-    const groups = groupParallelSafeToolCalls(params.toolCalls)
-    const results: ToolExecutionResult[] = []
-    const recoveryHistory: RecoveryRecord[] = []
-    let budgetLimited = false
-    let shouldSerializeRemainingGroups = false
-
-    for (const group of groups) {
-      this.throwIfAborted(params.signal)
-      const remainingToolCalls = params.budget && params.budgetState
-        ? getRemainingToolCallBudget(params.budget, params.budgetState)
-        : group.toolCalls.length
-      if (remainingToolCalls <= 0) {
-        budgetLimited = true
-        break
-      }
-      const limitedToolCalls = group.toolCalls.slice(0, remainingToolCalls)
-      if (limitedToolCalls.length < group.toolCalls.length) {
-        budgetLimited = true
-      }
-      const budgetWarningLevel = params.budget && params.budgetState
-        ? getBudgetWarningLevel(getBudgetUsagePercent(params.budget, params.budgetState))
-        : 'none'
-      const effectiveMode = group.mode === 'parallel'
-        && !shouldSerializeRemainingGroups
-        && budgetWarningLevel === 'none'
-        && !(params.budget && params.budgetState && !canUseParallelToolGroup(params.budget, params.budgetState))
-        ? 'parallel'
-        : 'serial'
-      params.onGroupStart?.({ mode: effectiveMode, toolCalls: limitedToolCalls })
-      if (effectiveMode === 'parallel') {
-        const maxConcurrentTools = Math.max(1, params.budget?.maxParallelToolGroups || 5)
-        for (let index = 0; index < limitedToolCalls.length; index += maxConcurrentTools) {
-          this.throwIfAborted(params.signal)
-          const chunk = limitedToolCalls.slice(index, index + maxConcurrentTools)
-          const settled = await Promise.allSettled(chunk.map((toolCall) =>
-            this.executeToolCallWithRecovery(toolCall, params.executeTool)))
-          const firstRejected = settled.find((item) => item.status === 'rejected')
-          if (firstRejected?.status === 'rejected') {
-            throw firstRejected.reason
-          }
-          for (const item of settled as Array<PromiseFulfilledResult<ToolExecutionResult & { recoveryHistory: RecoveryRecord[] }>>) {
-            results.push({
-              id: item.value.id,
-              name: item.value.name,
-              input: item.value.input,
-              result: item.value.result,
-            })
-            recoveryHistory.push(...item.value.recoveryHistory)
-            if (item.value.recoveryHistory.length > 0) {
-              shouldSerializeRemainingGroups = true
-            }
-          }
-        }
-        continue
-      }
-
-      for (const toolCall of limitedToolCalls) {
-        this.throwIfAborted(params.signal)
-        const executedTool = await this.executeToolCallWithRecovery(toolCall, params.executeTool)
-        results.push({
-          id: executedTool.id,
-          name: executedTool.name,
-          input: executedTool.input,
-          result: executedTool.result,
-        })
-        recoveryHistory.push(...executedTool.recoveryHistory)
-        if (executedTool.recoveryHistory.length > 0) {
-          shouldSerializeRemainingGroups = true
-        }
-      }
-    }
-
-    return {
-      results,
-      budgetLimited,
-      recoveryHistory,
-    }
+  }): Promise<ToolRuntimeBatchResult> {
+    return this.toolRuntime.executeBatch({
+      toolCalls: params.toolCalls,
+      executeTool: params.executeTool,
+      onGroupStart: params.onGroupStart,
+      budget: params.budget,
+      budgetState: params.budgetState,
+      signal: params.signal,
+    })
   }
 
   private async runModelRequestWithRecovery<T>(params: {
@@ -258,33 +180,6 @@ export class ExecutionLoopOrchestrator {
         }
         return { error, recoveryHistory }
       }
-    }
-  }
-
-  private async executeToolCallWithRecovery(
-    toolCall: ParallelToolCall,
-    executeTool: (toolCall: ParallelToolCall) => Promise<string>,
-  ): Promise<ToolExecutionResult & { recoveryHistory: RecoveryRecord[] }> {
-    try {
-      return {
-        id: toolCall.id,
-        name: toolCall.name,
-        input: toolCall.input,
-        result: await executeTool(toolCall),
-        recoveryHistory: [],
-      }
-    } catch (error) {
-      const classified = classifyExecutionError(error, { source: 'tool_execution' })
-      if (classified.kind === 'timeout_tool' || classified.kind === 'host_unavailable' || classified.kind === 'auth') {
-          return {
-            id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.input,
-            result: classified.message,
-            recoveryHistory: [this.buildRecoveryRecord(classified as KnownExecutionErrorResult, 1, true)],
-          }
-      }
-      throw error
     }
   }
 
@@ -344,10 +239,4 @@ export class ExecutionLoopOrchestrator {
     return Math.min(8_000, jitterFloor + Math.floor(Math.random() * jitterRange))
   }
 
-  private throwIfAborted(signal?: AbortSignal): void {
-    if (!signal?.aborted) return
-    const error = new Error('Operation aborted')
-    error.name = 'AbortError'
-    throw error
-  }
 }

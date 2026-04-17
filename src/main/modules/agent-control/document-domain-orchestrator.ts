@@ -1,6 +1,11 @@
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import type { ToolContext } from '../tools/tool-executor'
 import {
+  createToolExecutionOutput,
+  serializeToolExecutionOutput,
+  type ToolExecutionOutput,
+} from './tool-result-types'
+import {
   applyFormatSectionByPath,
   applyRewriteSectionByPath,
   buildSectionRewriteDraft,
@@ -13,7 +18,7 @@ import {
 export class DocumentDomainOrchestrator {
   constructor(private readonly deps: {
     log: (message: string) => void
-    executeToolCall: (name: string, input: Record<string, unknown>, context: ToolContext) => Promise<string>
+    executeToolCall: (name: string, input: Record<string, unknown>, context: ToolContext) => Promise<ToolExecutionOutput>
     emitOutput: (payload: { agent: string; chunk: string; type: 'text' | 'tool_use' | 'tool_result' }) => void
     emitToolAction: (payload: { agent: string; tool: string; args: Record<string, unknown> }) => void
     extractPrimaryUserInstruction: (raw: string) => string
@@ -49,10 +54,8 @@ export class DocumentDomainOrchestrator {
     detailTitle: string
   }): void {
     const timestamp = new Date().toISOString()
-    this.deps.emitOutput({
-      agent: params.agentName,
-      type: 'tool_result',
-      chunk: JSON.stringify({
+    const result = createToolExecutionOutput(params.taskSummary, {
+      projectionPatch: {
         module: 'document',
         message: params.taskSummary,
         taskTitle: params.taskTitle,
@@ -66,7 +69,12 @@ export class DocumentDomainOrchestrator {
         currentStepId: 'execute',
         waitingFor: 'none',
         resumableActions: ['cancel'],
-      }),
+      },
+    })
+    this.deps.emitOutput({
+      agent: params.agentName,
+      type: 'tool_result',
+      chunk: serializeToolExecutionOutput(result),
     })
   }
 
@@ -115,8 +123,8 @@ export class DocumentDomainOrchestrator {
           type: 'tool_use',
         })
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
-        this.deps.emitOutput({ agent: agentName, chunk: openResult.slice(0, 200), type: 'tool_result' })
-        this.deps.log(`deterministic section format open result=${openResult.slice(0, 180)}`)
+        this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
+        this.deps.log(`deterministic section format open result=${openResult.text.slice(0, 180)}`)
       }
 
       const formatArgs = { sectionTitle: sectionTitle || '第一部分', style: 'readable' }
@@ -126,8 +134,8 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const formatResult = await this.deps.executeToolCall('document_format_section', formatArgs, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: formatResult.slice(0, 200), type: 'tool_result' })
-      this.deps.log(`deterministic section format result=${formatResult.slice(0, 180)}`)
+      this.deps.emitOutput({ agent: agentName, chunk: formatResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.log(`deterministic section format result=${formatResult.text.slice(0, 180)}`)
 
       this.deps.emitOutput({
         agent: agentName,
@@ -135,14 +143,14 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: saveResult.slice(0, 200), type: 'tool_result' })
-      this.deps.log(`deterministic section format save result=${saveResult.slice(0, 180)}`)
+      this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.log(`deterministic section format save result=${saveResult.text.slice(0, 180)}`)
 
       const summary = [
         `已执行格式优化：${targetScope}`,
         '- 已保持原意，仅调整排版结构',
-        `- ${formatResult}`,
-        `- ${saveResult}`,
+        `- ${formatResult.text}`,
+        `- ${saveResult.text}`,
       ].join('\n')
       this.emitStructuredTaskPatch({
         agentName,
@@ -254,8 +262,8 @@ export class DocumentDomainOrchestrator {
           type: 'tool_use',
         })
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
-        this.deps.emitOutput({ agent: agentName, chunk: openResult.slice(0, 200), type: 'tool_result' })
-        this.deps.log(`deterministic section rewrite open result=${openResult.slice(0, 180)}`)
+        this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
+        this.deps.log(`deterministic section rewrite open result=${openResult.text.slice(0, 180)}`)
       }
 
       const rewriteArgs: Record<string, unknown> = {
@@ -268,8 +276,8 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const rewriteResult = await this.deps.executeToolCall('document_rewrite_section', rewriteArgs, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: rewriteResult.slice(0, 200), type: 'tool_result' })
-      this.deps.log(`deterministic section rewrite tool result=${rewriteResult.slice(0, 180)}`)
+      this.deps.emitOutput({ agent: agentName, chunk: rewriteResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.log(`deterministic section rewrite tool result=${rewriteResult.text.slice(0, 180)}`)
 
       this.deps.emitOutput({
         agent: agentName,
@@ -277,13 +285,13 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: saveResult.slice(0, 200), type: 'tool_result' })
-      this.deps.log(`deterministic section rewrite save result=${saveResult.slice(0, 180)}`)
+      this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.log(`deterministic section rewrite save result=${saveResult.text.slice(0, 180)}`)
 
       const summary = [
         `已执行章节改写：${finalPlan.sectionTitle}`,
-        `- ${rewriteResult}`,
-        `- ${saveResult}`,
+        `- ${rewriteResult.text}`,
+        `- ${saveResult.text}`,
       ].join('\n')
       this.emitStructuredTaskPatch({
         agentName,

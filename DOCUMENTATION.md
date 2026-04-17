@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-04-16
+> 更新时间: 2026-04-17
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -273,6 +273,9 @@ Ready 采用 Electron 三层架构：
   - 全 `read` 时可并行
   - 全局并行上限 `5`
 - `ExecutionLoopOrchestrator.executeToolCalls()` 已开始按资源域批次执行工具，并保持结果回收顺序稳定。
+- 新增 `ToolRuntime` 作为工具批执行的唯一真相层：allowlist 校验、`ToolDefinition` 查询、并发分组、超时恢复、cleanup 回收与结果归一化都统一在这里完成。
+- `ExecutionLoopOrchestrator.executeToolCalls()` 现已缩成对 `ToolRuntime.executeBatch()` 的薄代理；模型请求恢复与 fallback 仍保留在 orchestrator，不和工具执行真相再混在一起。
+- 工具结果契约现已升级为 `ToolExecutionOutput`：主链统一拿到 `text / shape / data / projectionPatch / interactionHint`，旧工具返回的字符串会先被包装后再进入主链。
 - 连续恢复或运行时压力升高时，执行层会主动降为串行批，避免工具批次继续放大抖动。
 - 当本轮剩余工具预算不足时，执行层会在边界处停下，并把“预算已达上限”的状态留给主流程统一收尾。
 - 当某个工具批次已经把本轮预算打满时，主流程会在这一轮末尾直接停下，不再继续请求下一轮模型响应。
@@ -469,7 +472,8 @@ Ready 采用 Electron 三层架构：
 - `RunCoordinator -> ClaudeSdkOrchestrator -> DirectChatEngine` 现已开始透传 `TaskBudgetRuntime`：任务预算、当前步骤预算、warning level 和 frozen state 会统一进入 `executionDiagnostics`，供 `ScopeRunSummary / task_projections / ChatPanel / TaskPanel` 共用
 - `intent-classifier` 与 `task-type-resolver` 已补齐 `skill` 域：显式 skill / workflow / blocker 请求会进入正式 skill executor 路径，不再只靠 skill tool allowlist 在通用循环里碰运气
 - `direct-chat` 里的文档深读后制卡 pipeline 已开始受正式任务路由约束：只有 document executor 路径命中时才会进入这条 deterministic pipeline，避免继续漂成主循环前置特例
-- `RecoveryRouter` 现在会产出稳定的重试元数据：`rate_limit / transient` 使用 `350ms` 起步、最大 `8s`、最多 `3` 次的指数抖动退避；一旦出现恢复记录或预算进入 warning，`ExecutionLoopOrchestrator` 会把后续工具批次自动降为串行
+- `RecoveryRouter` 现在会产出稳定的重试元数据：`rate_limit / transient` 使用 `350ms` 起步、最大 `8s`、最多 `3` 次的指数抖动退避；一旦出现恢复记录或预算进入 warning，`ToolRuntime` 会把后续工具批次自动降为串行，`ExecutionLoopOrchestrator` 只继续保留模型请求恢复。
+- `tool_result` 发往 renderer / provider transcript 前，主进程最后一公里仍会序列化成兼容旧通道的文本或 JSON 字符串；本期没有改 preload / renderer 协议。
 
 ## 9. 开发约定
 ### 9.1 新增跨进程功能的最小闭环
