@@ -10,6 +10,11 @@ import { clearContinuationState, rememberContinuationState } from './session-con
 import type { ScopeRunEventPayload, ScopeRunSummary } from './types'
 import type { RecoveryRecord } from './run-contracts'
 
+function toContinuationUpdatedAt(value: string | null | undefined): number {
+  const parsed = Date.parse(String(value || ''))
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
 function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): Record<string, unknown> | null {
   let patch: Record<string, unknown> | null = null
   for (const event of projectionTruth?.transcriptEvents || []) {
@@ -342,9 +347,11 @@ export async function syncTaskProjection(
     || next.interactionState === 'resuming'
     || next.taskType === 'continuation'
   ) {
-    rememberContinuationState(next.scopeId, buildContinuationStateFromProjection(next))
+    rememberContinuationState(next.scopeId, buildContinuationStateFromProjection(next), {
+      updatedAt: toContinuationUpdatedAt(next.updatedAt),
+    })
   } else {
-    clearContinuationState(next.scopeId)
+    clearContinuationState(next.scopeId, next.taskId)
   }
   await syncParentProjectionFromChild(store, next)
   return next

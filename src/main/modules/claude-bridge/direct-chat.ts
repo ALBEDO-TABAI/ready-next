@@ -39,6 +39,7 @@ import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from '../age
 import {
   buildContinuationStateFromProjection,
   parseContinuationControlText,
+  sanitizeContinuationRequest,
   selectContinuationProjection,
   type ContinuationState,
 } from '../agent-control/continuation-state'
@@ -153,6 +154,11 @@ const chatRepository = new ChatRepository()
 
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+}
+
+function toContinuationUpdatedAt(value?: string | null): number {
+  const parsed = Date.parse(String(value || ''))
+  return Number.isFinite(parsed) ? parsed : Date.now()
 }
 
 interface ChatMessage {
@@ -638,27 +644,35 @@ export class DirectChatEngine extends EventEmitter {
     const session = this.sessions.get(name)!
     const taskId = executionOptions?.taskId || `task-${runId}`
     const sessionId = this.extractSessionIdFromInternalName(name)
-    const parsedContinuationControl = typeof content === 'string'
-      ? parseContinuationControlText(content)
+    const rawContinuationUserText = typeof content === 'string'
+      ? executionOptions?.requestEnvelope?.rawUserText || content
+      : null
+    const parsedContinuationControl = typeof rawContinuationUserText === 'string'
+      ? parseContinuationControlText(rawContinuationUserText)
       : null
     const resolvedContinuationState = executionOptions?.continuationState
       || (
-        typeof content === 'string'
-          ? this.resolveContinuationState(sessionId, content, {
+        typeof rawContinuationUserText === 'string'
+          ? this.resolveContinuationState(sessionId, rawContinuationUserText, {
             parsedControl: parsedContinuationControl || undefined,
             explicitTaskId: parsedContinuationControl?.explicitTaskId || null,
             allowImplicitContinuation: parsedContinuationControl?.shouldResolveContinuation,
           })
           : null
       )
-    const normalizedContent: string | MultimodalBlock[] =
-      typeof content === 'string' && parsedContinuationControl?.hasControlLines
-        ? parsedContinuationControl.sanitizedUserText
-        : content
-    const normalizedRequestEnvelope =
-      typeof normalizedContent === 'string' && parsedContinuationControl?.hasControlLines
-        ? buildRequestEnvelope({ userText: normalizedContent })
-        : executionOptions?.requestEnvelope
+    const sanitizedContinuationRequest = typeof content === 'string' && parsedContinuationControl?.hasControlLines
+      ? sanitizeContinuationRequest({
+        content,
+        rawUserText: rawContinuationUserText,
+        requestEnvelope: executionOptions?.requestEnvelope || null,
+      })
+      : null
+    const normalizedContent: string | MultimodalBlock[] = sanitizedContinuationRequest
+      ? sanitizedContinuationRequest.content
+      : content
+    const normalizedRequestEnvelope = sanitizedContinuationRequest
+      ? sanitizedContinuationRequest.requestEnvelope
+      : executionOptions?.requestEnvelope
     if (session.abortController) {
       session.generation += 1
       session.abortController.abort()
@@ -1414,17 +1428,16 @@ export class DirectChatEngine extends EventEmitter {
         restoreDiagnostics: restoredBudget.diagnostics,
       }
       if (sessionId) {
-        rememberContinuationState(sessionId, resolvedState)
+        rememberContinuationState(sessionId, resolvedState, {
+          updatedAt: toContinuationUpdatedAt(projection.updatedAt),
+        })
       }
       return resolvedState
     }
 
-    const persistedState = getContinuationState(sessionId)
-    if (!persistedState) return null
     const explicitTaskId = options?.explicitTaskId ?? parsedControl.explicitTaskId
-    if (explicitTaskId && persistedState.taskId !== explicitTaskId) {
-      return null
-    }
+    const persistedState = getContinuationState(sessionId, explicitTaskId ? { taskId: explicitTaskId } : undefined)
+    if (!persistedState) return null
     if (!(options?.allowImplicitContinuation ?? parsedControl.shouldResolveContinuation)) {
       return null
     }

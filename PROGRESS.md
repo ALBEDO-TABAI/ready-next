@@ -32,6 +32,7 @@
 - 本轮继续把 7 个剩余缺口往主链里收口：`skill` 已正式进入意图识别与任务路由；文档深读后制卡只会在 document executor 路径下触发，不再作为长期前置特例漂在主循环外。
 - `RunCoordinator -> execution host -> DirectChatEngine` 现已开始透传统一 `TaskBudgetRuntime`；旧 `budget / budgetState` 仍保留兼容，但主链诊断与任务投影已经能读到当前任务预算、步骤预算和 warning level 的单一真相。
 - continuation 入口已不再强依赖“继续/恢复”关键词：显式 `Task ID` 会优先命中任务投影恢复；恢复或宿主不可用时也会把降级原因与恢复记录显式写回任务诊断。
+- phase6 的 continuation 收口已补完最后一段：控制行现在按原始用户文本清洗，bootstrap 前缀不会被压平；`session-continuity` 也已切到 task-keyed snapshots，同一 scope 的多个待继续任务不会再互相覆盖，turn engine 不再回写 continuation 控制文本来补 prompt。
 - 恢复策略本轮补齐了 `350ms -> 8s` 的指数抖动退避元数据，并在出现恢复记录或预算进入 warning 后把后续工具批次自动降为串行，避免继续并行放大抖动。
 
 1. 当前基线是本地 `main`。

@@ -177,9 +177,9 @@ Ready 的 `TaskProjection` 很强，但还没有完全成为 execution truth 的
 - Test: `src/__tests__/task-continuation-budget.test.ts`
 - Add: `src/__tests__/continuation-state-contract.test.ts`
 
-- [ ] 让 continuation 尽量恢复结构化 turn state，而不是再靠 prompt 补足缺口。
-- [ ] 把 budget / step / blockedReason / resumableActions 的恢复统一接到 continuation state。
-- [ ] 让 projection 和 continuation 引用同一份 task identity，不再在 UI、runtime、prompt 三层分别猜。
+- [x] 让 continuation 尽量恢复结构化 turn state，而不是再靠 prompt 补足缺口。
+- [x] 把 budget / step / blockedReason / resumableActions 的恢复统一接到 continuation state。
+- [x] 让 projection 和 continuation 引用同一份 task identity，不再在 UI、runtime、prompt 三层分别猜。
 - [ ] 运行验证：
   `npx tsx --test src/__tests__/session-continuity.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/continuation-state-contract.test.ts`
 

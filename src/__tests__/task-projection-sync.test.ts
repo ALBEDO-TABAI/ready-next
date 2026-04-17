@@ -1,9 +1,30 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, test } from 'node:test'
 
+import {
+  __resetSessionContinuityForTests,
+  __setSessionContinuityStoragePathForTests,
+  getContinuationState,
+} from '../main/modules/agent-control/session-continuity'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
+
+const TEST_STORAGE_PATH = join(tmpdir(), 'ready-task-projection-sync-continuity.json')
+
+beforeEach(() => {
+  __setSessionContinuityStoragePathForTests(TEST_STORAGE_PATH)
+  __resetSessionContinuityForTests()
+})
+
+afterEach(() => {
+  __resetSessionContinuityForTests()
+  __setSessionContinuityStoragePathForTests(null)
+  rmSync(TEST_STORAGE_PATH, { force: true })
+})
 
 function createSummary(): ScopeRunSummary {
   return {
@@ -140,4 +161,84 @@ test('syncTaskProjection creates and then updates projection records from scope 
   assert.equal(updated?.blockedReason, '等待用户输入验证码')
   assert.equal(updated?.createdAt, '2026-04-16T11:00:00.000Z')
   assert.equal(updated?.updatedAt, '2026-04-16T11:01:00.000Z')
+})
+
+test('syncTaskProjection keeps older blocked continuation snapshots when a newer task finishes', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const blockedTask1: ScopeRunSummary = {
+    ...createSummary(),
+    taskId: 'task-1',
+    taskProjectionId: 'run-1',
+    phase: 'takeover',
+    interactionState: 'awaiting_confirmation',
+    blockedReason: '等待第一个任务继续',
+    taskSummary: '任务一待继续',
+    updatedAt: '2026-04-16T11:01:00.000Z',
+  }
+  await syncTaskProjection(store, blockedTask1, {
+    ...createPayload(),
+    taskId: 'task-1',
+    runId: 'run-1',
+    phase: 'takeover',
+    timestamp: '2026-04-16T11:01:00.000Z',
+  })
+
+  const blockedTask2: ScopeRunSummary = {
+    ...createSummary(),
+    taskId: 'task-2',
+    taskProjectionId: 'run-2',
+    phase: 'takeover',
+    interactionState: 'awaiting_confirmation',
+    blockedReason: '等待第二个任务继续',
+    taskSummary: '任务二待继续',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }
+  await syncTaskProjection(store, blockedTask2, {
+    ...createPayload(),
+    taskId: 'task-2',
+    runId: 'run-2',
+    phase: 'takeover',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+
+  assert.equal(getContinuationState('scope-1')?.taskId, 'task-2')
+
+  const doneTask2: ScopeRunSummary = {
+    ...blockedTask2,
+    phase: 'done',
+    interactionState: 'running',
+    blockedReason: null,
+    taskSummary: '任务二已完成',
+    updatedAt: '2026-04-16T11:03:00.000Z',
+  }
+  await syncTaskProjection(store, doneTask2, {
+    ...createPayload(),
+    taskId: 'task-2',
+    runId: 'run-2',
+    phase: 'done',
+    timestamp: '2026-04-16T11:03:00.000Z',
+  })
+
+  assert.equal(getContinuationState('scope-1')?.taskId, 'task-1')
 })

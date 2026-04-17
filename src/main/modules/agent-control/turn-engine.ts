@@ -315,15 +315,19 @@ export class TurnEngine {
         executionIntentContext.requestEnvelope.primaryInstruction
         || executionIntentContext.requestEnvelope.pureUserText
         || userText
+      const continuationLookupText =
+        requestEnvelope.rawUserText
+        || requestEnvelope.pureUserText
+        || userText
       const providedContinuationState = request.continuationState || null
-      const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(userText)
+      const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
       const shouldResolveContinuation =
         Boolean(providedContinuationState)
         || Boolean(explicitTaskId)
         || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
       const continuationProjection = providedContinuationState
         ? null
-        : host.resolveContinuationProjection(request.sessionId, userText, {
+        : host.resolveContinuationProjection(request.sessionId, continuationLookupText, {
           explicitTaskId,
           allowImplicitContinuation: shouldResolveContinuation,
         })
@@ -572,24 +576,6 @@ export class TurnEngine {
           ].join('\n'),
         })
       }
-      if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation && !providedContinuationState) {
-        session.messages.push({
-          role: 'user',
-          content: [
-            `Task ID: ${taskExecutionRoute.continuation.taskId}`,
-            taskExecutionRoute.continuation.continuationRef?.executionId
-              ? `Execution ID: ${taskExecutionRoute.continuation.continuationRef.executionId}`
-              : null,
-            taskExecutionRoute.continuation.continuationRef?.stepId
-              ? `Step ID: ${taskExecutionRoute.continuation.continuationRef.stepId}`
-              : null,
-            taskExecutionRoute.continuation.blockedReason
-              ? `继续前上下文：${taskExecutionRoute.continuation.blockedReason}`
-              : null,
-          ].filter(Boolean).join('\n'),
-        })
-      }
-
       const hostToolContext = buildHostToolContext(routedAllowedToolNames)
       const hostShortcutResult = await hostCapabilityDispatcher.dispatch({
         decision: reconciledRunCapabilities.hostShortcutDecision,

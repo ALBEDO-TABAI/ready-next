@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
+import type { ContinuationState } from './continuation-state'
+import { normalizeContinuationState } from './continuation-state'
 
 function normalizeWhitespace(value: string): string {
   return String(value || '').trim().replace(/\s+/g, ' ')
@@ -46,9 +48,15 @@ export interface SkillRunRecord {
   updatedAt: number
 }
 
+interface ContinuationStateRecord {
+  updatedAt: number
+  state: ContinuationState
+}
+
 const recentBrowserActions = new Map<string, BrowserActionRecord[]>()
 const browserWorkflowStates = new Map<string, BrowserWorkflowState>()
 const recentSkillRuns = new Map<string, SkillRunRecord[]>()
+const recentContinuationStates = new Map<string, ContinuationStateRecord[]>()
 let continuityHydrated = false
 let continuityStoragePathOverride: string | null = null
 
@@ -60,10 +68,15 @@ function pruneToRecent<T extends { updatedAt: number }>(items: T[], limit: numbe
 }
 
 interface PersistedSessionContinuity {
-  version: 1
+  version: 1 | 2 | 3
   recentBrowserActions: Array<{ sessionId: string; records: BrowserActionRecord[] }>
   browserWorkflowStates: BrowserWorkflowState[]
   recentSkillRuns: Array<{ sessionId: string; records: SkillRunRecord[] }>
+  recentContinuationStates?: Array<{
+    sessionId: string
+    state?: ContinuationState
+    states?: Array<{ updatedAt: number; state: ContinuationState }>
+  }>
 }
 
 function resolveContinuityStoragePath(): string {
@@ -74,10 +87,17 @@ function resolveContinuityStoragePath(): string {
 
 function toPersistedPayload(): PersistedSessionContinuity {
   return {
-    version: 1,
+    version: 3,
     recentBrowserActions: Array.from(recentBrowserActions.entries()).map(([sessionId, records]) => ({ sessionId, records })),
     browserWorkflowStates: Array.from(browserWorkflowStates.values()),
     recentSkillRuns: Array.from(recentSkillRuns.entries()).map(([sessionId, records]) => ({ sessionId, records })),
+    recentContinuationStates: Array.from(recentContinuationStates.entries()).map(([sessionId, states]) => ({
+      sessionId,
+      states: states.map((item) => ({
+        updatedAt: item.updatedAt,
+        state: item.state,
+      })),
+    })),
   }
 }
 
@@ -85,6 +105,7 @@ function clearInMemoryState(): void {
   recentBrowserActions.clear()
   browserWorkflowStates.clear()
   recentSkillRuns.clear()
+  recentContinuationStates.clear()
 }
 
 function hydrateFromDisk(): void {
@@ -171,6 +192,30 @@ function hydrateFromDisk(): void {
         }
       }
     }
+    if (Array.isArray(parsed.recentContinuationStates)) {
+      for (const item of parsed.recentContinuationStates) {
+        if (!item || typeof item !== 'object') continue
+        const sessionId = normalizeWhitespace((item as { sessionId?: string }).sessionId || '')
+        const states = Array.isArray((item as { states?: Array<{ updatedAt: number; state: ContinuationState }> }).states)
+          ? pruneContinuationStateRecords(
+            ((item as { states: Array<{ updatedAt: number; state: ContinuationState }> }).states || [])
+              .map((record) => ({
+                updatedAt: Number(record.updatedAt || 0),
+                state: record.state,
+              })),
+          )
+          : (() => {
+            const state = normalizeContinuationState((item as { state?: ContinuationState }).state || null)
+            return state ? [{
+              updatedAt: 0,
+              state,
+            }] : []
+          })()
+        if (sessionId && states.length > 0) {
+          recentContinuationStates.set(sessionId, states)
+        }
+      }
+    }
   } catch {
     clearInMemoryState()
   }
@@ -199,6 +244,37 @@ function normalizeBrowserActionValue(kind: BrowserActionKind, value: string): st
   } catch {
     return normalized
   }
+}
+
+function pruneContinuationStateRecords(records: ContinuationStateRecord[]): ContinuationStateRecord[] {
+  const deduped = new Map<string, ContinuationStateRecord>()
+  for (const record of records) {
+    const state = normalizeContinuationState(record.state)
+    if (!state) continue
+    const existing = deduped.get(state.taskId)
+    if (!existing || Number(record.updatedAt || 0) >= existing.updatedAt) {
+      deduped.set(state.taskId, {
+        updatedAt: Number(record.updatedAt || 0),
+        state,
+      })
+    }
+  }
+  return Array.from(deduped.values())
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 8)
+}
+
+function cloneContinuationStateRecords(records: ContinuationStateRecord[] | null | undefined): ContinuationStateRecord[] {
+  return (records || [])
+    .map((record) => {
+      const state = normalizeContinuationState(record.state)
+      if (!state) return null
+      return {
+        updatedAt: Number(record.updatedAt || 0),
+        state,
+      }
+    })
+    .filter((record): record is ContinuationStateRecord => Boolean(record))
 }
 
 export function normalizeDomain(url: string): string {
@@ -330,6 +406,64 @@ export function getLatestSkillRun(sessionId: string | undefined): SkillRunRecord
   hydrateFromDisk()
   if (!sessionId) return null
   return (recentSkillRuns.get(sessionId) || [])[0] || null
+}
+
+export function rememberContinuationState(
+  sessionId: string | undefined,
+  payload: ContinuationState,
+  options?: { updatedAt?: number },
+): ContinuationState | null {
+  hydrateFromDisk()
+  if (!sessionId) return null
+  const normalized = normalizeContinuationState(payload)
+  if (!normalized) return null
+  const existing = recentContinuationStates.get(sessionId) || []
+  recentContinuationStates.set(sessionId, pruneContinuationStateRecords([
+    {
+      updatedAt: Number(options?.updatedAt || Date.now()),
+      state: normalized,
+    },
+    ...existing.filter((record) => record.state.taskId !== normalized.taskId),
+  ]))
+  persistToDisk()
+  return normalizeContinuationState(normalized)
+}
+
+export function getContinuationState(
+  sessionId: string | undefined,
+  options?: { taskId?: string | null },
+): ContinuationState | null {
+  hydrateFromDisk()
+  if (!sessionId) return null
+  const records = recentContinuationStates.get(sessionId) || []
+  if (options?.taskId) {
+    return normalizeContinuationState(records.find((record) => record.state.taskId === options.taskId)?.state || null)
+  }
+  return normalizeContinuationState(records[0]?.state || null)
+}
+
+export function listContinuationStates(sessionId: string | undefined): ContinuationState[] {
+  hydrateFromDisk()
+  if (!sessionId) return []
+  return cloneContinuationStateRecords(recentContinuationStates.get(sessionId)).map((record) => record.state)
+}
+
+export function clearContinuationState(sessionId: string | undefined, taskId?: string | null): void {
+  hydrateFromDisk()
+  if (!sessionId) return
+  if (!recentContinuationStates.has(sessionId)) return
+  if (!taskId) {
+    recentContinuationStates.delete(sessionId)
+    persistToDisk()
+    return
+  }
+  const next = (recentContinuationStates.get(sessionId) || []).filter((record) => record.state.taskId !== taskId)
+  if (next.length === 0) {
+    recentContinuationStates.delete(sessionId)
+  } else {
+    recentContinuationStates.set(sessionId, pruneContinuationStateRecords(next))
+  }
+  persistToDisk()
 }
 
 export function __setSessionContinuityStoragePathForTests(path: string | null): void {

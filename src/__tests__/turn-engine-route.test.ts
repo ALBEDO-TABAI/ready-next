@@ -532,6 +532,76 @@ test('TurnEngine prefers the provided continuation state over legacy prompt-base
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.usage.iterationsUsed, 3)
 })
 
+test('TurnEngine legacy continuation lookup uses requestEnvelope user text and does not inject control prompt lines back into session history', async () => {
+  const engine = new TurnEngine()
+  let capturedUserText = ''
+  let capturedExplicitTaskId: string | null | undefined
+  const { request } = createRequest({
+    userText: '## L1 会话上下文\n- 已注入上下文\n\n继续当前任务',
+    host: {
+      resolveContinuationProjection: (_sessionId: string | undefined, userText: string, options?: { explicitTaskId?: string | null }) => {
+        capturedUserText = userText
+        capturedExplicitTaskId = options?.explicitTaskId
+        return {
+          taskId: 'task-prev',
+          scopeId: 'scope-test',
+          runId: 'run-prev',
+          taskType: 'short_task',
+          module: 'system',
+          status: 'blocked',
+          interactionState: 'awaiting_confirmation',
+          steps: [
+            { id: 'step-1', description: '继续执行', title: '继续执行', status: 'running' },
+          ],
+          budget: {
+            taskType: 'short_task',
+            maxIterations: 12,
+            maxToolCalls: 6,
+            maxParallelToolGroups: 2,
+            iterationsUsed: 3,
+            toolCallsUsed: 1,
+            parallelToolGroupsUsed: 0,
+            stepBudget: {
+              stepId: 'step-1',
+              maxIterations: 4,
+              remainingIterations: 2,
+            },
+          },
+          budgetUsagePercent: 30,
+          resumableActions: ['continue'],
+          continuationRef: {
+            taskId: 'task-prev',
+            executionId: 'exec-prev',
+            stepId: 'step-1',
+            blockerType: 'need_confirmation',
+          },
+          recentArtifacts: [],
+          createdAt: '2026-04-17T00:00:00.000Z',
+          updatedAt: '2026-04-17T00:00:00.000Z',
+        }
+      },
+    },
+  })
+  request.requestEnvelope = buildRequestEnvelope({
+    userText: [
+      'Task ID: task-prev',
+      '继续当前任务',
+    ].join('\n'),
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.taskType, 'continuation')
+  assert.equal(capturedExplicitTaskId, 'task-prev')
+  assert.equal(capturedUserText.includes('## L1 会话上下文'), false)
+  assert.equal(
+    request.session.messages.some((message) =>
+      message.role === 'user' && /Task ID:|Execution ID:|Step ID:|继续前上下文：/.test(String(message.content))
+    ),
+    false,
+  )
+})
+
 test('TurnEngine enters the model tool-loop path when route and capability policy allow tools', async () => {
   const engine = new TurnEngine()
   let toolLoopRequests = 0
