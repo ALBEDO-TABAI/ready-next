@@ -80,6 +80,10 @@
 - 浏览器能力追问也已从执行链里剥离：像“你不能调用浏览器工具吗？”这类只是在问工具可用性的 meta 追问，不再误走 browser executor 并把 `memory_* / session_*` 当成“这轮唯一工具列表”念给用户
 - 显式站点打开请求现已补齐到浏览器决策层：像“帮我打开 pinterest”这类没有直接 URL、但明确点名站点的请求，也会进入浏览器工作流并先解析官方入口
 - 浏览器任务在原生 tools 回包里如果出现“零工具调用”，现在会强制进入一次纠偏重试；不会再把“这轮没有 browser_* 工具”这种解释性文本直接当成最终结果
+- 浏览器工具发现链路已补结构化快照与分组诊断：每轮运行都会记录宿主可见工具组、实际下发名单、provider 请求/响应快照，以及逐组 `toolCount / schemaError / static fallback`，方便直接区分“宿主没给”“schema 掉光”还是“模型没调”
+- OpenAI 文本工具桥接降级已改成“单次请求生效”：当轮 native tools 掉线时允许内部改走 text bridge 救场，但不会再把整段会话永久黏在文本桥接上
+- 浏览器 schema 现已从执行器模块中拆到纯目录模块，`tool-registry` 不再通过 `browser-tools.ts` 反取 schema；技能组在 runtime 未就绪时会退回静态 execution-control schema，并把 fallback 原因写入运行诊断
+- 当浏览器组被判定为可见、但最终工具名单里没有任何 `browser_*` 时，主链现在会显式记为 `tool_resolution_error` 并停止继续向模型发送假工具名单
 
 #### 模型预设工作区与聊天快速切换
 - 设置页的模型配置收敛为 `OpenAI / Anthropic / Gemini / 自定义` 四个入口，不再把 Moonshot、Fox、火山方舟等单独铺成一排

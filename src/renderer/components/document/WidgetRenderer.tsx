@@ -232,7 +232,7 @@ export default function WidgetRenderer({
             <div className="document-widget-fallback-note">
               当前组件暂时无法展示静态回退内容。
             </div>
-          ) : null}
+          )}
         </div>
       ) : null}
     </div>

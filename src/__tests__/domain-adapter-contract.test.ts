@@ -169,3 +169,96 @@ test('browser domain adapter preserves upload prompt refinement before building 
     '更具体的提示词',
   )
 })
+
+test('document domain adapter still handles deterministic format and rewrite flows after host shortcut cleanup', async () => {
+  const calls: string[] = []
+  const adapter = new DocumentDomainAdapter({
+    orchestrator: {
+      async tryDeterministicSectionFormatFlow() {
+        calls.push('format')
+        return true
+      },
+      async tryDeterministicSectionRewriteFlow() {
+        calls.push('rewrite')
+        return true
+      },
+    },
+    toolLoopOrchestrator: {
+      createState: () => ({ stepId: null }),
+      applyToolInspection: (state: unknown) => state,
+      handleNoToolCall: () => ({ state: { stepId: null } }),
+      handleIterationResult: () => ({ state: { stepId: null } }),
+      buildStructuredTaskPayload: () => ({}),
+      getBudgetHint: () => null,
+    },
+  } as never)
+
+  const baseParams = {
+    route: createRoute('document'),
+    request: {
+      agentName: 'ready',
+      sessionId: 'scope-doc',
+      abortSignal: new AbortController().signal,
+    },
+    host: {
+      browserController: null,
+      sidecarManager: null,
+      runtime: {
+        getConversationScope: () => null,
+      },
+      requestModuleToolAction: async () => ({}),
+      providerContext: {
+        config: {},
+        baseUrl: 'https://example.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+      },
+      maybeRunDocumentTaskPlan: async () => null,
+      maybeRunDocumentWidgetPipeline: async () => null,
+    },
+    session: {
+      messages: [],
+    },
+    userText: '把第一段排版一下',
+    pureUserInput: '把第一段排版一下',
+    requestEnvelope: {} as never,
+    executionIntentContext: {
+      hasDocumentEnvironment: true,
+    } as never,
+    hasTools: true,
+    allowedToolNames: ['document_format_section', 'document_rewrite_section'],
+    emitStructuredTaskPayload: () => undefined,
+    domainState: {
+      toolLoopState: { stepId: null },
+      taskTitle: '文档修改',
+    },
+  } as const
+
+  const formatResult = await adapter.dispatch({
+    ...baseParams,
+    toolPolicy: {
+      forceDocumentTool: true,
+      preferFormatOnly: true,
+      preferSectionRewrite: false,
+      documentWidgetTaskKind: null,
+    } as never,
+  } as never)
+
+  const rewriteResult = await adapter.dispatch({
+    ...baseParams,
+    toolPolicy: {
+      forceDocumentTool: true,
+      preferFormatOnly: false,
+      preferSectionRewrite: true,
+      documentWidgetTaskKind: null,
+    } as never,
+    userText: '把这一节改写成更正式的版本',
+    pureUserInput: '把这一节改写成更正式的版本',
+  } as never)
+
+  assert.deepEqual(calls, ['format', 'rewrite'])
+  assert.equal(formatResult.finish?.success, true)
+  assert.equal(rewriteResult.finish?.success, true)
+})

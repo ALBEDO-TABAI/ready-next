@@ -58,7 +58,7 @@ test('prepareInitialRun centralizes initial capability resolution, allowlist, an
   assert.equal(prepared.toolPolicy.preferFormatOnly, true)
   assert.ok(prepared.allowedToolNames.includes('document_format_section'))
   assert.ok(!prepared.allowedToolNames.includes('browser_click'))
-  assert.equal(prepared.hostShortcutDecision.kind, 'document_format')
+  assert.equal(prepared.hostShortcutDecision.kind, 'none')
   assert.equal(prepared.runtimeSnapshot.groups.document.status, 'available')
   assert.equal(prepared.runtimeSnapshot.groups.channel_feishu.reason, 'environment_unavailable')
 })

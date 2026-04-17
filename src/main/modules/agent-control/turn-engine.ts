@@ -806,19 +806,6 @@ export class TurnEngine {
       const hostShortcutResult = await hostCapabilityDispatcher.dispatch({
         decision: reconciledRunCapabilities.hostShortcutDecision,
         toolContext: hostToolContext,
-        agentName: request.agentName,
-        userText,
-        session,
-        config: host.providerContext.config,
-        baseUrl: host.providerContext.baseUrl,
-        provider: host.providerContext.provider,
-        signal: request.abortSignal,
-        isKimi: host.providerContext.isKimi,
-        isKimiCoding: host.providerContext.isKimiCoding,
-        useAnthropicProtocol: host.providerContext.useAnthropicProtocol,
-        onAssistantSummary: (summary: string) => {
-          session.messages.push({ role: 'assistant', content: summary })
-        },
       })
       if (hostShortcutResult.handled) {
         if (hostShortcutResult.toolUseText) {

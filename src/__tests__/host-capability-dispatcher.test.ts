@@ -2,16 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { HostCapabilityDispatcher } from '../main/modules/agent-control/host-capability-dispatcher'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 test('dispatcher executes openclaw as a host-only shortcut outside the normal tool loop', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const dispatcher = new HostCapabilityDispatcher({
     executeHostTool: async (toolName, args) => {
       calls.push({ name: toolName, args })
-      return '配对已批准'
+      return createToolExecutionOutput('配对已批准')
     },
-    tryDeterministicSectionFormatFlow: async () => false,
-    tryDeterministicSectionRewriteFlow: async () => false,
   })
 
   const result = await dispatcher.dispatch({
@@ -36,40 +35,13 @@ test('dispatcher executes openclaw as a host-only shortcut outside the normal to
   ])
 })
 
-test('dispatcher runs deterministic document formatting via host shortcut decisions', async () => {
-  const dispatcher = new HostCapabilityDispatcher({
-    executeHostTool: async () => {
-      throw new Error('should not execute system tool for document formatting')
-    },
-    tryDeterministicSectionFormatFlow: async ({ userText }) => userText.includes('排版'),
-    tryDeterministicSectionRewriteFlow: async () => false,
-  })
-
-  const result = await dispatcher.dispatch({
-    decision: {
-      kind: 'document_format',
-      reason: 'prefer_format_only',
-    },
-    agentName: 'ready',
-    userText: '把第一段排版一下',
-    toolContext: {
-      allowedToolNames: ['document_open_tab', 'document_format_section', 'document_save_tab'],
-    },
-  })
-
-  assert.equal(result.handled, true)
-  assert.equal(result.outputText, null)
-})
-
 test('dispatcher refuses openclaw host shortcuts without explicit authorization source', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const dispatcher = new HostCapabilityDispatcher({
     executeHostTool: async (toolName, args) => {
       calls.push({ name: toolName, args })
-      return 'should not run'
+      return createToolExecutionOutput('should not run')
     },
-    tryDeterministicSectionFormatFlow: async () => false,
-    tryDeterministicSectionRewriteFlow: async () => false,
   })
 
   const result = await dispatcher.dispatch({

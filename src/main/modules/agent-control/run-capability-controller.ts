@@ -3,14 +3,14 @@ import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task
 import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import type { ToolPolicy } from './execution-tool-config'
-import { collectAllowedToolNames } from './execution-tool-config'
+import { getPolicyOpenAIToolBundle } from './execution-tool-config'
 import type { ToolVisibilityPlan } from './run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { buildExecutionToolState, type ExecutionIntentContext } from './execution-intent-resolver'
 
 export interface HostShortcutDecision {
-  kind: 'none' | 'openclaw' | 'document_format' | 'document_rewrite'
+  kind: 'none' | 'openclaw'
   reason: string
   command?: string
   authorizationSource: 'explicit_user_command' | 'ui_action' | 'none'
@@ -42,6 +42,7 @@ export interface PreparedRunCapabilities {
   hostShortcutDecision: HostShortcutDecision
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
+  toolResolution: import('./run-contracts').ToolResolutionDiagnostics
   _baseParams: RunCapabilityBaseParams
 }
 
@@ -53,6 +54,7 @@ export interface ReconciledRunCapabilities {
   hostShortcutDecision: HostShortcutDecision
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
+  toolResolution: import('./run-contracts').ToolResolutionDiagnostics
 }
 
 function extractOpenclawPairingCommand(userText: string): string | null {
@@ -65,8 +67,6 @@ function extractOpenclawPairingCommand(userText: string): string | null {
 
 function resolveHostShortcutDecision(params: {
   visibilityPlan: ToolVisibilityPlan
-  toolPolicy: ToolPolicy
-  executionIntentContext: ExecutionIntentContext
   hostContext: RunCapabilityBaseParams['hostContext']
 }): HostShortcutDecision {
   const openclawCommand = extractOpenclawPairingCommand(params.hostContext.userText)
@@ -76,32 +76,6 @@ function resolveHostShortcutDecision(params: {
       reason: 'pairing_command',
       command: openclawCommand,
       authorizationSource: 'explicit_user_command',
-    }
-  }
-
-  if (
-    params.visibilityPlan.hasTools &&
-    params.executionIntentContext.hasDocumentEnvironment &&
-    params.toolPolicy.forceDocumentTool &&
-    params.toolPolicy.preferFormatOnly
-  ) {
-    return {
-      kind: 'document_format',
-      reason: 'prefer_format_only',
-      authorizationSource: 'none',
-    }
-  }
-
-  if (
-    params.visibilityPlan.hasTools &&
-    params.executionIntentContext.hasDocumentEnvironment &&
-    params.toolPolicy.forceDocumentTool &&
-    params.toolPolicy.preferSectionRewrite
-  ) {
-    return {
-      kind: 'document_rewrite',
-      reason: 'prefer_section_rewrite',
-      authorizationSource: 'none',
     }
   }
 
@@ -174,15 +148,15 @@ function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<Prepa
     connectedChannelTypes: baseParams.hostContext.connectedChannelTypes,
   })
 
+  const toolBundle = getPolicyOpenAIToolBundle(toolPolicy)
+
   return {
     visibilityPlan,
     capabilityResolution,
     toolPolicy,
-    allowedToolNames: collectAllowedToolNames(toolPolicy),
+    allowedToolNames: toolBundle.toolNames,
     hostShortcutDecision: resolveHostShortcutDecision({
       visibilityPlan,
-      toolPolicy,
-      executionIntentContext: baseParams.executionIntentContext,
       hostContext: baseParams.hostContext,
     }),
     runtimeSnapshot,
@@ -193,6 +167,7 @@ function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<Prepa
       hasVideoInputs: baseParams.hasVideoInputs,
       hasIncomingVideo: baseParams.hasIncomingVideo,
     }),
+    toolResolution: toolBundle.toolResolution,
   }
 }
 

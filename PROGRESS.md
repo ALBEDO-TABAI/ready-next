@@ -66,12 +66,13 @@
 - runtime routing、message composition、module execution、scope-run patching 已拆入独立模块。
 - AI 能力控制现已开始从“provider 兼容开关 + 主循环内零散特判”过渡到“正式能力分组 + 运行前解析”：
   - 新增 capability group 真相层，固定收口 `browser_interaction / browser_content_tasks / document / rss / calendar / skills / memory / session_recall / channel_feishu / system_host / design_reserved`
-  - `ToolGateway` 已升级为正式分组注册表，不再只是元数据目录
-  - `buildExecutionToolState` 已开始消费 capability resolution，把浏览器分组暴露、飞书环境可用性和宿主内部能力边界显式化
-  - 新增 `run-capability-controller`：`direct-chat` 现在改为消费运行前 capability 结果，不再自己重复拼 allowlist、环境判断和宿主捷径前置分支
-  - 新增 `host-capability-dispatcher`：openclaw 与文档 deterministic 直通已迁出主循环，`system_host` 正式只走宿主快捷执行
-  - `ToolGateway` 已补上 dynamic source / group schema 查询；`skills` 组现在同时覆盖 execution control 和运行期可枚举 skill action
-  - AI 设置页已接上主进程 capability runtime snapshot，当前状态不再靠 renderer 轻量推断
+- `ToolGateway` 已升级为正式分组注册表，不再只是元数据目录
+- `buildExecutionToolState` 已开始消费 capability resolution，把浏览器分组暴露、飞书环境可用性和宿主内部能力边界显式化
+- 新增 `run-capability-controller`：`direct-chat` 现在改为消费运行前 capability 结果，不再自己重复拼 allowlist、环境判断和宿主捷径前置分支
+- 新增 `host-capability-dispatcher`：openclaw 与文档 deterministic 直通已迁出主循环，`system_host` 正式只走宿主快捷执行
+- `ToolGateway` 已补上 dynamic source / group schema 查询；`skills` 组现在同时覆盖 execution control 和运行期可枚举 skill action
+- AI 设置页已接上主进程 capability runtime snapshot，当前状态不再靠 renderer 轻量推断
+- 最新一轮继续补齐了浏览器工具丢失排障链：浏览器 schema 已从执行器模块剥离成纯目录，运行态会记录每轮真实工具快照和逐组解析诊断，文本桥接降级也改成单轮生效；当浏览器组可见但最终名单里没有 `browser_*` 时，主链会直接中止而不是继续把假名单发给模型
 
 5. Browser 主干已经完成第一轮架构收口。
 
