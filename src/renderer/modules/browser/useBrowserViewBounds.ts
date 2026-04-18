@@ -225,6 +225,7 @@ export function useBrowserViewBounds({
     if (!element) return
 
     const handleBoundsShift = () => {
+      if (panelResizingRef.current && frameSyncRequestRef.current !== null) return
       sendBounds({
         forceExact: panelResizingRef.current,
       })
@@ -248,6 +249,8 @@ export function useBrowserViewBounds({
       clearSettleSyncTimeout()
       return
     }
+
+    if (panelResizingRef.current) return
 
     sendBounds({ forceExact: true })
   }, [

@@ -7,20 +7,6 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('TopBar right padding follows the chat panel gutter via CSS variable, not a fixed 14px', () => {
-  const topbar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
-  const workbench = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
-
-  assert.match(
-    topbar,
-    /paddingRight:\s*`calc\(var\(--workbench-right-gutter, 0px\) \+ \$\{WORKBENCH_TOPBAR_PADDING_RIGHT\}px\)`/,
-  )
-  assert.match(
-    workbench,
-    /'--workbench-right-gutter'[^}]*\$\{chatShellWidth\}px/,
-  )
-})
-
 test('overlayLockCount self-heals after 1000ms so a leaked lock cannot strand the BrowserView hidden and the theme-transition finishes first', () => {
   const source = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 

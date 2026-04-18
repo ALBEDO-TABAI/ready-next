@@ -13,6 +13,7 @@ test('useTogglePanelWithResize dispatches resizing:true before toggle and resizi
   assert.match(source, /PANEL_RESIZE_STATE_EVENT/)
   assert.match(source, /dispatchPanelResize\(true\)/)
   assert.match(source, /dispatchPanelResize\(false\)/)
+  assert.match(source, /reason:\s*'click-toggle'/)
   assert.match(source, /transitionend/)
   assert.match(source, /propertyName !== 'width'/)
   assert.match(source, /setTimeout\(\s*\(\)\s*=>\s*\{/)

@@ -175,6 +175,7 @@ export function useBrowserResizeFreeze({
     const handleResizeState = (event: Event) => {
       const detail = (event as CustomEvent<PanelResizeStateDetail>).detail
       if (!detail) return
+      if (detail.reason !== 'drag') return
       if (detail.resizing) {
         handleResizeStart()
         return

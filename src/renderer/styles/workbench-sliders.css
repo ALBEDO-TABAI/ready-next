@@ -332,3 +332,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs {
   backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(calc(var(--surface-saturate) - 20%));
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(calc(var(--surface-saturate) - 20%));
 }
+
+html[data-mode-switching='true'] .draggable-mode-tabs__thumb {
+  transition: none;
+}

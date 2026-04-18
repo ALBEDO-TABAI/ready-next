@@ -15,6 +15,7 @@ export function RitualOverlay() {
         maskActiveRef.current = false
       }
       lastStageRef.current = null
+      document.documentElement.removeAttribute('data-mode-switching')
       return
     }
 
@@ -28,6 +29,16 @@ export function RitualOverlay() {
       void endBrowserMask()
       maskActiveRef.current = false
     }
+
+    const inModeSwitch =
+      session.stage === 'mode-switch' &&
+      (session.phase === 'entering' || session.phase === 'holding' || session.phase === 'leaving')
+    if (inModeSwitch) {
+      document.documentElement.setAttribute('data-mode-switching', 'true')
+    } else {
+      document.documentElement.removeAttribute('data-mode-switching')
+    }
+
     lastStageRef.current = session.stage
   }, [session])
 

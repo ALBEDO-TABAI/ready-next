@@ -10,7 +10,7 @@ function dispatchPanelResize(resizing: boolean): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
     new CustomEvent<PanelResizeStateDetail>(PANEL_RESIZE_STATE_EVENT, {
-      detail: { resizing },
+      detail: { resizing, reason: 'click-toggle' },
     }),
   )
 }

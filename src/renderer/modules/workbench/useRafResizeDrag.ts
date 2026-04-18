@@ -69,7 +69,7 @@ export function useRafResizeDrag(options: UseRafResizeDragOptions) {
       onResizeStateChange?.(false)
       if (dispatchPanelResizeEvent) {
         window.dispatchEvent(
-          new CustomEvent(PANEL_RESIZE_STATE_EVENT, { detail: { resizing: false } }),
+          new CustomEvent(PANEL_RESIZE_STATE_EVENT, { detail: { resizing: false, reason: 'drag' } }),
         )
       }
     }
@@ -82,7 +82,7 @@ export function useRafResizeDrag(options: UseRafResizeDragOptions) {
     onResizeStateChange?.(true)
     if (dispatchPanelResizeEvent) {
       window.dispatchEvent(
-        new CustomEvent(PANEL_RESIZE_STATE_EVENT, { detail: { resizing: true } }),
+        new CustomEvent(PANEL_RESIZE_STATE_EVENT, { detail: { resizing: true, reason: 'drag' } }),
       )
     }
   }, [])

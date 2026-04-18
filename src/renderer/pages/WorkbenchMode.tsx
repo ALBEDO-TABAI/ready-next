@@ -14,6 +14,7 @@ import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-tra
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
 import { useTogglePanelWithResize } from '../modules/workbench/useTogglePanelWithResize'
+import { resolveModeTransitionStrategy } from '../modules/workbench/modeTransitionStrategy'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
@@ -184,9 +185,16 @@ export default function WorkbenchMode() {
   }, [])
 
   const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
-    if (nextMode === workbenchMode) return
+    const strategy = resolveModeTransitionStrategy(workbenchMode, nextMode)
+    if (strategy === 'same-mode') return
 
     if (splitMode) {
+      setWorkbenchMode(nextMode)
+      return
+    }
+
+    if (strategy === 'dom-only') {
+      transitionTargetModeRef.current = nextMode
       setWorkbenchMode(nextMode)
       return
     }
@@ -269,7 +277,6 @@ export default function WorkbenchMode() {
       <div
         ref={sceneRef}
         className="workbench-mode-root relative flex h-full flex-col overflow-hidden"
-        style={{ ['--workbench-right-gutter' as string]: `${chatShellWidth}px` }}
       >
         <div className="relative z-10 flex h-full flex-col">
           {workspaceInitError && (
