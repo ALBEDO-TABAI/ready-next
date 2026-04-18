@@ -286,7 +286,7 @@ export default function AddSourceModal({
             <button
               onClick={handleSubmit}
               disabled={loading || !url.trim()}
-              className="flex items-center justify-center gap-1.5 text-[12px] text-white transition-all disabled:opacity-50"
+              className="flex items-center justify-center gap-1.5 text-[12px] text-white transition-[background-color,opacity] duration-200 disabled:opacity-50"
               style={{
                 ...SETTINGS_PRIMARY_BUTTON_STYLE,
                 minWidth: 96,

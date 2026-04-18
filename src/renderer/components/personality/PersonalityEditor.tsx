@@ -277,7 +277,7 @@ export default function PersonalityEditor() {
                 <button
                   key={personality.id}
                   onClick={() => setSelectedAgent(personality.agentName)}
-                  className="text-left transition-all hover:-translate-y-[1px]"
+                  className="text-left transition-[transform,background-color,border-color] duration-200 hover:-translate-y-[1px]"
                   style={settingsListItemStyle(isActive)}
                 >
                   <div className="flex items-start justify-between gap-3">

@@ -286,6 +286,7 @@ export default function TaskPanel() {
     messages,
     currentScopeId,
     scopeRunStates,
+    setComposerDraft,
     setInputValue,
     sendMessage
   } = useAgent()
@@ -345,6 +346,14 @@ export default function TaskPanel() {
     await window.electronAPI.agent.resumeRun({
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
+      continuationIntent: activeProjection.taskId
+        ? {
+          taskId: activeProjection.taskId,
+          executionId: activeProjection.continuationRef?.executionId || undefined,
+          stepId: activeProjection.continuationRef?.stepId || undefined,
+          blockedReason: activeProjection.blockedReason || undefined,
+        }
+        : undefined,
     })
   }, [activeProjection])
 
@@ -372,26 +381,32 @@ export default function TaskPanel() {
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
       responseText: trimmed,
+      continuationIntent: activeProjection.taskId
+        ? {
+          taskId: activeProjection.taskId,
+          executionId: activeProjection.continuationRef?.executionId || undefined,
+          stepId: activeProjection.continuationRef?.stepId || undefined,
+          blockedReason: activeProjection.blockedReason || undefined,
+          responseText: trimmed,
+        }
+        : undefined,
     })
   }, [activeProjection])
 
   const handleRetryProjection = useCallback(() => {
     if (!(activeProjection?.resumableActions || []).includes('retry')) return
-    const draft = [
+    setComposerDraft(
       '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
-      activeProjection?.taskId ? `Task ID: ${activeProjection.taskId}` : null,
-      activeProjection?.continuationRef?.executionId
-        ? `Execution ID: ${activeProjection.continuationRef.executionId}`
+      activeProjection?.taskId
+        ? {
+          taskId: activeProjection.taskId,
+          executionId: activeProjection.continuationRef?.executionId || undefined,
+          stepId: activeProjection.continuationRef?.stepId || undefined,
+          blockedReason: activeProjection.blockedReason || undefined,
+        }
         : null,
-      activeProjection?.continuationRef?.stepId
-        ? `Step ID: ${activeProjection.continuationRef.stepId}`
-        : null,
-      activeProjection?.blockedReason ? `继续前上下文：${activeProjection.blockedReason}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
-    setInputValue(draft)
-  }, [activeProjection, setInputValue])
+    )
+  }, [activeProjection, setComposerDraft])
 
   const phaseColors = phaseTone(activeRun?.phase)
   const projectionColors = projectionStatusTone(activeProjection?.status)
@@ -1002,7 +1017,7 @@ export default function TaskPanel() {
             <input
               type="text"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => setInputValue(e.target.value, { preserveContinuationIntent: true })}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="给 Agent 发指令..."
               className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
@@ -1012,7 +1027,7 @@ export default function TaskPanel() {
           <button
             onClick={handleSend}
             disabled={!inputValue.trim() || isStreaming}
-            className="flex items-center justify-center text-white hover:brightness-95 disabled:opacity-40 transition-all"
+            className="flex items-center justify-center text-white hover:brightness-95 disabled:opacity-40 transition-[filter,opacity,background-color] duration-200"
             style={{
               width: 26,
               height: 26,

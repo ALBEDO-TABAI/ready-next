@@ -696,7 +696,7 @@ function AISettingsPanel() {
                   value={selectedProfile.name}
                   onChange={(event) => renameProfile(selectedProfile.id, event.target.value)}
                   placeholder="给这个预设起个容易识别的名字"
-                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                   style={stackedInputStyle}
                 />
               )}
@@ -732,7 +732,7 @@ function AISettingsPanel() {
                     value={selectedConfig.baseUrl}
                     onChange={(event) => updateField('baseUrl', event.target.value)}
                     placeholder={currentProvider?.baseUrl || 'https://...'}
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                     style={stackedInputStyle}
                   />
                 )}
@@ -750,7 +750,7 @@ function AISettingsPanel() {
                     value={selectedConfig.apiKey}
                     onChange={(event) => updateField('apiKey', event.target.value)}
                     placeholder={currentProvider?.apiKeyPlaceholder || 'sk-...'}
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 font-mono min-w-0 flex-1"
                     style={stackedInputStyle}
                   />
                   <button
@@ -774,7 +774,7 @@ function AISettingsPanel() {
                     value={selectedConfig.model === '__custom__' ? '' : selectedConfig.model}
                     onChange={(event) => updateField('model', event.target.value)}
                     placeholder="模型 ID，如 gpt-5.4 / kimi-for-coding"
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 font-mono min-w-0 flex-1"
                     style={stackedInputStyle}
                   />
                   {selectedProfile.category !== 'custom' && models.length > 0 && (
@@ -797,7 +797,7 @@ function AISettingsPanel() {
                       updateField('model', event.target.value)
                     }
                   }}
-                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                  className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                   style={stackedSelectStyle}
                 >
                   {models.map((model) => (
@@ -859,7 +859,7 @@ function AISettingsPanel() {
                       value={pendingModelId}
                       onChange={(event) => setPendingModelId(event.target.value)}
                       placeholder="添加模型 ID，例如 k2.6-code-preview"
-                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono min-w-0 flex-1"
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 font-mono min-w-0 flex-1"
                       style={stackedInputStyle}
                     />
                     <button
@@ -892,7 +892,7 @@ function AISettingsPanel() {
                     value={selectedConfig.baseUrl}
                     onChange={(event) => updateField('baseUrl', event.target.value)}
                     placeholder={currentProvider?.baseUrl || 'https://...'}
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                     style={stackedInputStyle}
                   />
                 )}
@@ -909,7 +909,7 @@ function AISettingsPanel() {
                     value={selectedConfig.endpointId || ''}
                     onChange={(event) => updateField('endpointId', event.target.value)}
                     placeholder="ep-20250101xxxxx"
-                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all font-mono"
+                    className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 font-mono"
                     style={stackedInputStyle}
                   />
                 )}
@@ -953,7 +953,7 @@ function AISettingsPanel() {
                     <select
                       value={selectedConfig.agentProtocol || 'auto'}
                       onChange={(event) => updateField('agentProtocol', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.agentProtocol)}
-                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                       style={stackedSelectStyle}
                     >
                       <option value="auto">自动</option>
@@ -971,7 +971,7 @@ function AISettingsPanel() {
                       <select
                         value={selectedConfig.wireApi || 'auto'}
                         onChange={(event) => updateField('wireApi', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.wireApi)}
-                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                         style={stackedSelectStyle}
                       >
                         <option value="auto">自动</option>
@@ -989,7 +989,7 @@ function AISettingsPanel() {
                     <select
                       value={selectedConfig.toolUseMode || 'auto'}
                       onChange={(event) => updateField('toolUseMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.toolUseMode)}
-                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                       style={stackedSelectStyle}
                     >
                       <option value="auto">自动</option>
@@ -1006,7 +1006,7 @@ function AISettingsPanel() {
                     <select
                       value={selectedConfig.visionMode || 'auto'}
                       onChange={(event) => updateField('visionMode', (event.target.value === 'auto' ? undefined : event.target.value) as typeof selectedConfig.visionMode)}
-                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                       style={stackedSelectStyle}
                     >
                       <option value="auto">自动</option>
@@ -1024,7 +1024,7 @@ function AISettingsPanel() {
                       <select
                         value={selectedConfig.reasoningEffort || 'high'}
                         onChange={(event) => updateField('reasoningEffort', event.target.value as typeof selectedConfig.reasoningEffort)}
-                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                         style={stackedSelectStyle}
                       >
                         <option value="minimal">minimal</option>
@@ -1072,7 +1072,7 @@ function AISettingsPanel() {
                       <select
                         value={getCapabilityModeValue(group.id)}
                         onChange={(event) => updateCapabilityMode(group.id, event.target.value as 'auto' | 'on' | 'off')}
-                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                        className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                         style={{
                           ...compactSelectStyle,
                           width: 112,
@@ -1118,7 +1118,7 @@ function AISettingsPanel() {
                 <button
                   onClick={() => testConnection(selectedProfile.id)}
                   disabled={testStatus === 'testing'}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                   style={{
                     ...SETTINGS_PRIMARY_BUTTON_STYLE,
                     padding: '7px 16px',
@@ -1408,7 +1408,7 @@ function RSSDraftStoreSettingsPanel() {
           <button
             onClick={() => void handleClear()}
             disabled={busyKey !== null}
-            className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
             style={SETTINGS_DANGER_BUTTON_STYLE}
           >
             {busyKey === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
@@ -1448,7 +1448,7 @@ function RSSDraftStoreSettingsPanel() {
                 <button
                   onClick={() => void handleClear(source.sourceId, source.sourceName)}
                   disabled={busyKey !== null}
-                  className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                   style={SETTINGS_DANGER_BUTTON_STYLE}
                 >
                   {busyKey === source.sourceId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
@@ -1577,7 +1577,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 <button
                   key={section.id}
                   onClick={() => setActiveSection(section.id)}
-                  className="flex items-center gap-3 rounded-[18px] transition-all duration-200 text-left group"
+                  className="flex items-center gap-3 rounded-[18px] transition-[background-color,border-color,color] duration-200 text-left group"
                   style={settingsListItemStyle(isActive)}
                 >
                   <div
@@ -1842,7 +1842,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                           }}
                         >
                           <span
-                            className="absolute bg-white rounded-full shadow-sm transition-all duration-200"
+                            className="absolute bg-white rounded-full shadow-sm transition-[transform,left,right] duration-200"
                             style={{
                               top: 3,
                               width: 22,
@@ -1858,7 +1858,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                         <select
                           value={setting.value as string}
                           onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
-                          className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all cursor-pointer"
+                          className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                           style={{
                             ...SETTINGS_INPUT_STYLE,
                             padding: '9px 32px 9px 14px',
@@ -1879,7 +1879,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                           type={setting.id === 'apiKey' ? 'password' : 'text'}
                           value={setting.value as string}
                           onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
-                          className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-all"
+                          className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                           style={{
                             ...SETTINGS_INPUT_STYLE,
                             padding: '9px 14px',
@@ -1909,7 +1909,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {/* Button */}
                       {setting.type === 'button' && (
                         <button
-                          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-all hover:brightness-95 active:scale-[0.98]"
+                          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
                           style={{
                             ...(setting.buttonVariant === 'primary'
                               ? SETTINGS_PRIMARY_BUTTON_STYLE

@@ -122,7 +122,7 @@ export default function LiquidTest() {
                       <button
                         key={item.label}
                         type="button"
-                        className="flex w-full items-center gap-3 rounded-[24px] border px-3 py-3 text-left transition-all duration-200 hover:bg-white/7"
+                        className="flex w-full items-center gap-3 rounded-[24px] border px-3 py-3 text-left transition-[background-color,border-color,color] duration-200 hover:bg-white/7"
                         style={LIQUID_INACTIVE_CHROME_STYLE}
                       >
                         {content}

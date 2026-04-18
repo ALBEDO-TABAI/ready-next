@@ -247,7 +247,7 @@ export default function MemoryStatsCard() {
             <button
               onClick={() => void handleRunMaintenance()}
               disabled={maintenanceRunning}
-              className="w-full border rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+              className="w-full border rounded-xl transition-[opacity,background-color,border-color] duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
               style={{
                 ...primaryButtonStyle,
                 padding: '10px 16px',

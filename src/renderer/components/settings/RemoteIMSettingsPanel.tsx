@@ -287,7 +287,7 @@ export default function RemoteIMSettingsPanel() {
           <button
             key={item.key}
             onClick={() => setTab(item.key)}
-            className="text-[13px] transition-all"
+            className="text-[13px] transition-[background-color,color] duration-200"
             style={{
               color: tab === item.key ? 'var(--color-blue)' : 'var(--text-muted)',
               background: tab === item.key ? 'var(--color-blue-light)' : 'transparent',

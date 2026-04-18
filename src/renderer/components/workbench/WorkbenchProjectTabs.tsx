@@ -93,7 +93,7 @@ export default function WorkbenchProjectTabs({
                 onDragEnd={onTabDragEnd}
                 onClick={(event) => onTabClick(tab.id, event)}
                 suppressLiquidPill={isActive}
-                className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-all duration-150"
+                className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-t-[8px] px-[10px] text-[12px] transition-[background-color,color,border-color] duration-150"
                 style={{
                   gap: 6,
                   height: isActive ? activeTabHeight : inactiveTabHeight,
@@ -132,7 +132,7 @@ export default function WorkbenchProjectTabs({
                         event.stopPropagation()
                         onTabClose(tab.id, event)
                       }}
-                      className="rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer flex-shrink-0 flex items-center justify-center"
+                      className="rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-[background-color,opacity] duration-200 cursor-pointer flex-shrink-0 flex items-center justify-center"
                       style={{ width: 18, height: 18 }}
                       title="Close"
                     >

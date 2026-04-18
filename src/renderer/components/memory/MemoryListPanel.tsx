@@ -81,7 +81,7 @@ export default function MemoryListPanel() {
         }}
       >
         <select
-          className="text-[13px] border rounded-lg transition-all"
+          className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
           style={{
             ...fieldStyle,
             padding: '8px 12px'
@@ -98,7 +98,7 @@ export default function MemoryListPanel() {
           <option value="trigger_rule">触发规则</option>
         </select>
         <select
-          className="text-[13px] border rounded-lg transition-all"
+          className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
           style={{
             ...fieldStyle,
             padding: '8px 12px'
@@ -112,7 +112,7 @@ export default function MemoryListPanel() {
           <option value="l2">L2 - 触发器</option>
         </select>
         <select
-          className="text-[13px] border rounded-lg transition-all"
+          className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
           style={{
             ...fieldStyle,
             padding: '8px 12px'
@@ -255,7 +255,7 @@ export default function MemoryListPanel() {
                       e.stopPropagation()
                       void handleDelete(memory.id)
                     }}
-                    className="border rounded-lg transition-all hover:opacity-70"
+                    className="border rounded-lg transition-[opacity,background-color] duration-200 hover:opacity-70"
                     style={{
                       ...secondaryButtonStyle,
                       padding: '6px 10px'

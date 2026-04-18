@@ -90,7 +90,7 @@ export default function ReadyMode() {
             onClick={() => setIsFollowMode(!isFollowMode)}
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.985, y: 0 }}
-            className="flex items-center transition-all duration-200"
+            className="flex items-center transition-[background-color,color] duration-200"
             style={{
               padding: '4px 10px',
               borderRadius: 10,
