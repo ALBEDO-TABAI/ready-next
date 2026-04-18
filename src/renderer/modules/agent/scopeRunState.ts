@@ -20,15 +20,19 @@ function generateArtifactId(): string {
   return `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function generateMemoryRefId(): string {
-  return `memory-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function parseStructuredToolPayload(text: string): Record<string, unknown> | null {
+function readHumanTakeoverSignal(text: string): Record<string, unknown> | null {
+  // Narrow fallback: only used for `browser_ask_user_takeover` tool output.
+  // Main process does not yet surface human_required / takeover_state through
+  // ScopeRunEventPayload; once it does, this parser can be deleted entirely.
+  if (!text) return null
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return null
   try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === 'object') {
-      return parsed as Record<string, unknown>
+    const parsed = JSON.parse(trimmed)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    if (record.phase === 'human_required' || record.takeover_state === 'submitted') {
+      return record
     }
   } catch {
     // ignore parse errors
@@ -121,45 +125,6 @@ export function createAgentArtifact(
   }
 }
 
-function createMemoryRef(input: Record<string, unknown>): AgentMemoryRef | null {
-  const title = String(input.title || input.path || input.id || '').trim()
-  const layer = String(input.layer || '').trim()
-  const sourceType = String(input.sourceType || '').trim()
-  if (!title || !['l0', 'l1', 'l2', 'recall'].includes(layer)) return null
-  if (
-    !['resident_agent', 'resident_user', 'scope_memory', 'trigger_rule', 'session_recall'].includes(
-      sourceType
-    )
-  )
-    return null
-  return {
-    id: String(input.id || generateMemoryRefId()),
-    layer: layer as AgentMemoryRef['layer'],
-    sourceType: sourceType as AgentMemoryRef['sourceType'],
-    title,
-    summary: typeof input.summary === 'string' ? input.summary : null,
-    path: typeof input.path === 'string' ? input.path : null,
-    triggerId: typeof input.triggerId === 'string' ? input.triggerId : null,
-    sensitive: Boolean(input.sensitive),
-    loadedAt: typeof input.loadedAt === 'string' ? input.loadedAt : new Date().toISOString()
-  }
-}
-
-function createTriggerHit(input: Record<string, unknown>): AgentTriggerHit | null {
-  const id = String(input.id || '').trim()
-  const label = String(input.label || '').trim()
-  if (!id || !label) return null
-  return {
-    id,
-    label,
-    module: toAgentModule(input.module),
-    blocking: input.blocking !== false,
-    refs: Array.isArray(input.refs)
-      ? input.refs.map((item) => String(item || '').trim()).filter(Boolean)
-      : []
-  }
-}
-
 function mergeMemoryRefs(
   previous: AgentMemoryRef[] | undefined,
   nextRefs: AgentMemoryRef[] | undefined
@@ -190,20 +155,6 @@ function mergeTriggerHits(
     if (!duplicate) merged.push(hit)
   }
   return merged
-}
-
-function parseContextBudget(input: unknown): AgentContextBudget | null {
-  if (!input || typeof input !== 'object') return null
-  const record = input as Record<string, unknown>
-  return {
-    totalChars: Number(record.totalChars || 0),
-    l0Chars: Number(record.l0Chars || 0),
-    l1Chars: Number(record.l1Chars || 0),
-    l2Chars: Number(record.l2Chars || 0),
-    droppedRefs: Array.isArray(record.droppedRefs)
-      ? record.droppedRefs.map((item) => String(item || '').trim()).filter(Boolean)
-      : []
-  }
 }
 
 function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics | null {
@@ -619,6 +570,12 @@ export function deriveScopeRunStatePatch(
   event: {
     phase: ScopeRunState['phase']
     module?: AgentModuleKind | string | null
+    intent?: string | null
+    executionKind?: ModuleExecutionKind | string | null
+    jobId?: string | null
+    ownerResourceId?: string | null
+    controllerId?: string | null
+    ownerTabId?: string | null
     latestText?: string
     taskTitle?: string | null
     taskSummary?: string | null
@@ -640,13 +597,13 @@ export function deriveScopeRunStatePatch(
   },
   previous: ScopeRunState | null
 ): Partial<ScopeRunState> {
-  const structuredPayload =
+  const takeoverSignal =
     event.toolEvent?.kind === 'result' && event.toolEvent.text
-      ? parseStructuredToolPayload(event.toolEvent.text)
+      ? readHumanTakeoverSignal(event.toolEvent.text)
       : event.latestText
-        ? parseStructuredToolPayload(event.latestText)
+        ? readHumanTakeoverSignal(event.latestText)
         : null
-  const structuredModule = toAgentModule(structuredPayload?.module)
+  const eventModule = toAgentModule(event.module)
   const artifactInputs = Array.isArray(event.recentArtifacts)
     ? event.recentArtifacts
     : []
@@ -654,22 +611,11 @@ export function deriveScopeRunStatePatch(
     .map((item) =>
       createAgentArtifact(
         item,
-        structuredModule || previous?.module || 'system',
+        eventModule || previous?.module || 'system',
         previous?.requestId || null
       )
     )
     .filter(Boolean) as AgentArtifact[]
-  const memoryInputs = Array.isArray(structuredPayload?.memoryRefs)
-    ? (structuredPayload.memoryRefs as Array<Record<string, unknown>>)
-    : []
-  const structuredMemoryRefs = memoryInputs.map(createMemoryRef).filter(Boolean) as AgentMemoryRef[]
-  const triggerInputs = Array.isArray(structuredPayload?.triggerHits)
-    ? (structuredPayload.triggerHits as Array<Record<string, unknown>>)
-    : []
-  const structuredTriggerHits = triggerInputs
-    .map(createTriggerHit)
-    .filter(Boolean) as AgentTriggerHit[]
-  const structuredBudget = parseContextBudget(structuredPayload?.contextBudget)
   const structuredTaskTitle =
     typeof event.taskTitle === 'string'
       ? event.taskTitle
@@ -686,40 +632,26 @@ export function deriveScopeRunStatePatch(
   const structuredResumableActions = event.resumableActions
     ? normalizeResumableActions(event.resumableActions)
     : []
-  const structuredRecentArtifacts = structuredArtifacts
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
     latestText: event.latestText ?? previous?.latestText ?? null,
-    module: toAgentModule(event.module) || structuredModule || previous?.module || null,
-    intent:
-      typeof structuredPayload?.intent === 'string'
-        ? structuredPayload.intent
-        : previous?.intent || null,
-    executionKind:
-      toModuleExecutionKind(structuredPayload?.executionKind) || previous?.executionKind || null,
-    jobId:
-      typeof structuredPayload?.jobId === 'string'
-        ? structuredPayload.jobId
-        : previous?.jobId || null,
+    module: eventModule || previous?.module || null,
+    intent: typeof event.intent === 'string' ? event.intent : previous?.intent || null,
+    executionKind: toModuleExecutionKind(event.executionKind) || previous?.executionKind || null,
+    jobId: typeof event.jobId === 'string' ? event.jobId : previous?.jobId || null,
     artifactRefs: mergeArtifacts(previous?.artifactRefs, structuredArtifacts),
-    memoryRefs: mergeMemoryRefs(
-      previous?.memoryRefs,
-      structuredMemoryRefs.length > 0 ? structuredMemoryRefs : event.memoryRefs
-    ),
-    triggerHits: mergeTriggerHits(
-      previous?.triggerHits,
-      structuredTriggerHits.length > 0 ? structuredTriggerHits : event.triggerHits
-    ),
-    contextBudget: structuredBudget || event.contextBudget || previous?.contextBudget || null,
+    memoryRefs: mergeMemoryRefs(previous?.memoryRefs, event.memoryRefs),
+    triggerHits: mergeTriggerHits(previous?.triggerHits, event.triggerHits),
+    contextBudget: event.contextBudget || previous?.contextBudget || null,
     ownerResourceId:
-      typeof structuredPayload?.ownerResourceId === 'string'
-        ? structuredPayload.ownerResourceId
+      typeof event.ownerResourceId === 'string'
+        ? event.ownerResourceId
         : previous?.ownerResourceId || null,
     lastEvidenceAt:
-      structuredArtifacts.length > 0 || structuredPayload
+      structuredArtifacts.length > 0
         ? event.timestamp
         : previous?.lastEvidenceAt || null,
     blockedReason:
@@ -735,43 +667,16 @@ export function deriveScopeRunStatePatch(
       lastToolAt: null
     },
     error: event.error || previous?.error || null,
-    designPhase:
-      typeof structuredPayload?.designPhase === 'string'
-        ? (structuredPayload.designPhase as ScopeRunState['designPhase'])
-        : previous?.designPhase || null,
-    designTodo: Array.isArray(structuredPayload?.designTodo)
-      ? (structuredPayload.designTodo as ScopeRunState['designTodo'])
-      : previous?.designTodo || [],
-    designReviewSummary:
-      typeof structuredPayload?.designReviewSummary === 'string'
-        ? structuredPayload.designReviewSummary
-        : previous?.designReviewSummary || null,
-    ownedNodeIds: Array.isArray(structuredPayload?.ownedNodeIds)
-      ? structuredPayload.ownedNodeIds.map((item) => String(item || '').trim()).filter(Boolean)
-      : previous?.ownedNodeIds || [],
-    repairScope:
-      typeof structuredPayload?.repairScope === 'string'
-        ? (structuredPayload.repairScope as ScopeRunState['repairScope'])
-        : previous?.repairScope || null,
-    scenePlanId:
-      typeof structuredPayload?.scenePlanId === 'string'
-        ? structuredPayload.scenePlanId
-        : previous?.scenePlanId || null,
-    boardId:
-      typeof structuredPayload?.boardId === 'string'
-        ? structuredPayload.boardId
-        : previous?.boardId || null,
-    styleSystem:
-      structuredPayload?.styleSystem && typeof structuredPayload.styleSystem === 'object'
-        ? (structuredPayload.styleSystem as ScopeRunState['styleSystem'])
-        : previous?.styleSystem || null,
-    reviewFailures: Array.isArray(structuredPayload?.reviewFailures)
-      ? structuredPayload.reviewFailures.map((item) => String(item || '').trim()).filter(Boolean)
-      : previous?.reviewFailures || [],
-    lastAcceptedScreenshot:
-      typeof structuredPayload?.lastAcceptedScreenshot === 'string'
-        ? structuredPayload.lastAcceptedScreenshot
-        : previous?.lastAcceptedScreenshot || null,
+    designPhase: previous?.designPhase || null,
+    designTodo: previous?.designTodo || [],
+    designReviewSummary: previous?.designReviewSummary || null,
+    ownedNodeIds: previous?.ownedNodeIds || [],
+    repairScope: previous?.repairScope || null,
+    scenePlanId: previous?.scenePlanId || null,
+    boardId: previous?.boardId || null,
+    styleSystem: previous?.styleSystem || null,
+    reviewFailures: previous?.reviewFailures || [],
+    lastAcceptedScreenshot: previous?.lastAcceptedScreenshot || null,
     taskTitle:
       structuredTaskTitle ?? null,
     taskSummary:
@@ -795,10 +700,7 @@ export function deriveScopeRunStatePatch(
         : previous?.resumableActions ||
           [],
     recentArtifacts: buildRecentArtifacts(
-      mergeArtifacts(
-        previous?.recentArtifacts,
-        structuredRecentArtifacts.length > 0 ? structuredRecentArtifacts : structuredArtifacts
-      )
+      mergeArtifacts(previous?.recentArtifacts, structuredArtifacts)
     ),
     taskContinuation:
       structuredContinuation ||
@@ -819,22 +721,17 @@ export function deriveScopeRunStatePatch(
     patch.stepMetrics = nextMetrics
   }
 
-  if (
-    structuredPayload?.phase === 'human_required' ||
-    structuredPayload?.takeover_state === 'submitted'
-  ) {
+  if (takeoverSignal) {
     patch.phase = 'takeover'
     patch.blockedReason =
       [
-        typeof structuredPayload.call_to_action === 'string'
-          ? structuredPayload.call_to_action
-          : '',
-        typeof structuredPayload.details === 'string' ? structuredPayload.details : ''
+        typeof takeoverSignal.call_to_action === 'string' ? takeoverSignal.call_to_action : '',
+        typeof takeoverSignal.details === 'string' ? takeoverSignal.details : ''
       ]
         .filter(Boolean)
         .join(' · ') || '需要人工接管'
-    if (Number.isFinite(Number(structuredPayload.timeout_sec || 0))) {
-      patch.checkpointExpiresAt = Date.now() + Number(structuredPayload.timeout_sec || 0) * 1000
+    if (Number.isFinite(Number(takeoverSignal.timeout_sec || 0))) {
+      patch.checkpointExpiresAt = Date.now() + Number(takeoverSignal.timeout_sec || 0) * 1000
     }
   } else if (previous?.phase === 'takeover' && event.phase === 'tool_running') {
     patch.phase = 'resuming'
@@ -849,11 +746,11 @@ export function deriveScopeRunStatePatch(
     patch.blockedReason = event.error
   }
 
-  if (typeof structuredPayload?.controllerId === 'string') {
-    patch.controllerId = structuredPayload.controllerId
+  if (typeof event.controllerId === 'string') {
+    patch.controllerId = event.controllerId
   }
-  if (typeof structuredPayload?.ownerTabId === 'string') {
-    patch.ownerTabId = structuredPayload.ownerTabId
+  if (typeof event.ownerTabId === 'string') {
+    patch.ownerTabId = event.ownerTabId
   }
 
   finalizeTaskState(patch.phase || event.phase, previous, patch, event.timestamp)

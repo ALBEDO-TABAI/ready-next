@@ -650,3 +650,47 @@ test('rss, calendar, and feishu domain adapters defer finalization across multip
     assert.equal((secondBatch.domainState as { steps: Array<{ id: string }> }).steps.length, 2)
   }
 })
+
+test('phase4 channel adapters short-circuit dispatch when no domain tool is available', () => {
+  const cases = [
+    { adapter: new SkillDomainAdapter(), executor: 'skill' as const, allowed: ['memory_recall'] },
+    { adapter: new RSSDomainAdapter(), executor: 'rss' as const, allowed: ['memory_recall'] },
+    { adapter: new CalendarDomainAdapter(), executor: 'calendar' as const, allowed: ['memory_recall'] },
+    { adapter: new FeishuDomainAdapter(), executor: 'feishu' as const, allowed: ['memory_recall'] },
+  ]
+
+  for (const item of cases) {
+    const result = item.adapter.dispatch({
+      ...createAdapterApplyParams(item.executor),
+      allowedToolNames: item.allowed,
+      domainState: null,
+    } as never) as Awaited<ReturnType<typeof item.adapter.dispatch>>
+
+    assert.equal(result.finish?.status, 'done', `${item.executor} dispatch 应返回 finish`)
+    assert.equal(result.finish?.success, false, `${item.executor} dispatch 应以未成功结束`)
+    assert.equal(result.projection?.phase, 'blocked')
+    assert.match(String(result.projection?.blockedReason || ''), /未解析到可用的/)
+  }
+})
+
+test('phase4 channel adapters record dispatchedAt when at least one domain tool is available', () => {
+  const cases = [
+    { adapter: new SkillDomainAdapter(), executor: 'skill' as const, allowed: ['skill_weather_lookup'] },
+    { adapter: new RSSDomainAdapter(), executor: 'rss' as const, allowed: ['rss_fetch_updates'] },
+    { adapter: new CalendarDomainAdapter(), executor: 'calendar' as const, allowed: ['calendar_create_event'] },
+    { adapter: new FeishuDomainAdapter(), executor: 'feishu' as const, allowed: ['feishu_message_send'] },
+  ]
+
+  for (const item of cases) {
+    const result = item.adapter.dispatch({
+      ...createAdapterApplyParams(item.executor),
+      allowedToolNames: item.allowed,
+      domainState: null,
+    } as never) as Awaited<ReturnType<typeof item.adapter.dispatch>>
+
+    assert.equal(result.finish, undefined, `${item.executor} dispatch 在有工具时不应 finish`)
+    const dispatchedAt = (result.domainState as { dispatchedAt?: string } | null | undefined)?.dispatchedAt
+    assert.equal(typeof dispatchedAt, 'string', `${item.executor} 应记录 dispatchedAt`)
+    assert.ok(Number.isFinite(Date.parse(String(dispatchedAt))), `${item.executor} dispatchedAt 应为 ISO 字符串`)
+  }
+})

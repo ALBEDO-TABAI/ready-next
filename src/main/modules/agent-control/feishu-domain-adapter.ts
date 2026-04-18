@@ -13,6 +13,7 @@ interface FeishuAdapterState {
   steps: ScopeRunTaskStep[]
   taskSummary: string | null
   currentStepId: string | null
+  dispatchedAt: string | null
 }
 
 function createState(domainState: unknown): FeishuAdapterState {
@@ -22,13 +23,25 @@ function createState(domainState: unknown): FeishuAdapterState {
     && 'steps' in domainState
     && Array.isArray((domainState as FeishuAdapterState).steps)
   ) {
-    return domainState as FeishuAdapterState
+    const record = domainState as FeishuAdapterState
+    return {
+      steps: record.steps,
+      taskSummary: record.taskSummary ?? null,
+      currentStepId: record.currentStepId ?? null,
+      dispatchedAt: record.dispatchedAt ?? null,
+    }
   }
   return {
     steps: [],
     taskSummary: null,
     currentStepId: null,
+    dispatchedAt: null,
   }
+}
+
+function hasAnyDomainTool(allowedToolNames: string[] | null | undefined): boolean {
+  if (!allowedToolNames || allowedToolNames.length === 0) return false
+  return allowedToolNames.some((name) => name.startsWith('feishu_'))
 }
 
 function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): string {
@@ -61,7 +74,26 @@ export class FeishuDomainAdapter implements DomainAdapter {
   }
 
   dispatch(params: Parameters<DomainAdapter['dispatch']>[0]): ReturnType<DomainAdapter['dispatch']> {
-    return { domainState: params.domainState }
+    const state = createState(params.domainState)
+    if (params.hasTools && !hasAnyDomainTool(params.allowedToolNames)) {
+      return {
+        domainState: state,
+        projection: {
+          phase: 'blocked',
+          summary: '本轮没有可用的飞书工具',
+          waitingFor: 'none',
+          resumableActions: ['retry', 'cancel'],
+          blockedReason: '未解析到可用的 feishu_* 工具',
+        },
+        finish: { status: 'done', success: false },
+      }
+    }
+    return {
+      domainState: {
+        ...state,
+        dispatchedAt: state.dispatchedAt || new Date().toISOString(),
+      },
+    }
   }
 
   applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): ReturnType<DomainAdapter['applyResult']> {
@@ -85,6 +117,7 @@ export class FeishuDomainAdapter implements DomainAdapter {
           ],
           currentStepId: stepId,
           taskSummary: buildSummary(record, executedTool.name, executedTool.input),
+          dispatchedAt: nextState.dispatchedAt,
         }
       }
       return { domainState: nextState }

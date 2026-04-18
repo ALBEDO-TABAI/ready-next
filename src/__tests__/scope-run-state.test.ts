@@ -56,19 +56,19 @@ describe('scope run state helpers', () => {
       const patch = deriveScopeRunStatePatch(
         {
           phase: 'tool_running',
+          module: 'browser',
+          intent: 'browser_ask_user_takeover',
+          controllerId: 'controller-1',
+          ownerTabId: 'tab-9',
           timestamp: '2026-03-07T00:00:00.000Z',
           toolEvent: {
             kind: 'result',
             timestamp: '2026-03-07T00:00:00.000Z',
             text: JSON.stringify({
               phase: 'human_required',
-              module: 'browser',
-              intent: 'browser_ask_user_takeover',
               call_to_action: '请检查登录状态',
               details: '页面出现验证码',
-              timeout_sec: 30,
-              controllerId: 'controller-1',
-              ownerTabId: 'tab-9'
+              timeout_sec: 30
             })
           }
         },

@@ -12,13 +12,23 @@ const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使�
 
 interface SkillAdapterState {
   latestProjectionPatch: Record<string, unknown> | null
+  dispatchedAt: string | null
 }
 
 function createState(domainState: unknown): SkillAdapterState {
   if (domainState && typeof domainState === 'object' && 'latestProjectionPatch' in domainState) {
-    return domainState as SkillAdapterState
+    const record = domainState as SkillAdapterState
+    return {
+      latestProjectionPatch: record.latestProjectionPatch ?? null,
+      dispatchedAt: record.dispatchedAt ?? null,
+    }
   }
-  return { latestProjectionPatch: null }
+  return { latestProjectionPatch: null, dispatchedAt: null }
+}
+
+function hasAnyDomainTool(allowedToolNames: string[] | null | undefined): boolean {
+  if (!allowedToolNames || allowedToolNames.length === 0) return false
+  return allowedToolNames.some((name) => name.startsWith('skill_'))
 }
 
 function normalizeWaitingFor(value: unknown): RunProjectionPatch['waitingFor'] {
@@ -76,12 +86,31 @@ export class SkillDomainAdapter implements DomainAdapter {
     return {
       allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
-      domainState: { latestProjectionPatch: null } satisfies SkillAdapterState,
+      domainState: { latestProjectionPatch: null, dispatchedAt: null } satisfies SkillAdapterState,
     }
   }
 
   dispatch(params: Parameters<DomainAdapter['dispatch']>[0]): ReturnType<DomainAdapter['dispatch']> {
-    return { domainState: params.domainState }
+    const state = createState(params.domainState)
+    if (params.hasTools && !hasAnyDomainTool(params.allowedToolNames)) {
+      return {
+        domainState: state,
+        projection: {
+          phase: 'blocked',
+          summary: '本轮没有可用的 skill 工具',
+          waitingFor: 'none',
+          resumableActions: ['retry', 'cancel'],
+          blockedReason: '未解析到可用的 skill_* 工具',
+        },
+        finish: { status: 'done', success: false },
+      }
+    }
+    return {
+      domainState: {
+        ...state,
+        dispatchedAt: state.dispatchedAt || new Date().toISOString(),
+      },
+    }
   }
 
   applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): ReturnType<DomainAdapter['applyResult']> {
