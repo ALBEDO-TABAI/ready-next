@@ -22,7 +22,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ icon, onClick, title, disabled, active, size = 'md', variant = 'ghost', className = '', style }, ref) => {
     const sizes = sizeMap[size]
 
-    const baseClasses = 'flex items-center justify-center rounded transition-all duration-200 ease-out'
+    const baseClasses = 'flex items-center justify-center rounded transition-[background-color,color,opacity,transform] duration-200 ease-out'
     const variantClasses = {
       ghost: 'hover:bg-black/5 active:scale-[0.98]',
       solid: 'bg-[var(--color-blue-light)] active:scale-[0.98]',

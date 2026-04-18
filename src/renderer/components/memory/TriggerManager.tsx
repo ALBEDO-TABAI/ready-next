@@ -68,7 +68,7 @@ export default function TriggerManager() {
             {triggers.map((trigger) => (
               <div
                 key={trigger.id}
-                className="glass-surface-card border transition-all"
+                className="glass-surface-card border transition-[background-color,border-color,color] duration-200"
                 style={{
                   ...panelCardStyle,
                   borderRadius: 16,

@@ -540,7 +540,7 @@ function AISettingsPanel() {
               <button
                 key={tab.id}
                 onClick={() => selectCategory(tab.id)}
-                className="glass-surface-card rounded-2xl border text-left transition-all duration-200"
+                className="glass-surface-card rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
                 style={{
                   padding: '12px 14px',
                   ...(isActive ? {
@@ -593,7 +593,7 @@ function AISettingsPanel() {
                 <button
                   key={profile.id}
                   onClick={() => selectProfile(profile.id)}
-                  className="glass-surface-card rounded-xl border text-left transition-all duration-200"
+                  className="glass-surface-card rounded-xl border text-left transition-[background-color,border-color,color] duration-200"
                   style={{
                     padding: '12px 14px',
                     ...(isSelected ? {
@@ -1702,7 +1702,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             <button
                               key={opt.value}
                               onClick={() => setTheme(opt.value)}
-                              className="glass-surface-card flex-1 flex flex-col items-center gap-2.5 rounded-[24px] border transition-all duration-200"
+                              className="glass-surface-card flex-1 flex flex-col items-center gap-2.5 rounded-[24px] border transition-[background-color,border-color,color] duration-200"
                               style={{
                                 padding: '22px 18px',
                                 ...(isActive ? {
@@ -1756,7 +1756,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             <button
                               key={opt.value}
                               onClick={() => setSkin(opt.value)}
-                              className="glass-surface-card flex items-center gap-3 rounded-[24px] border text-left transition-all duration-200"
+                              className="glass-surface-card flex items-center gap-3 rounded-[24px] border text-left transition-[background-color,border-color,color] duration-200"
                               style={{
                                 padding: '16px 16px',
                                 ...(isActive ? {

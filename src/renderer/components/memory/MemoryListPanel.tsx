@@ -159,7 +159,7 @@ export default function MemoryListPanel() {
             {memories.map((memory) => (
               <div
                 key={memory.id}
-                className="glass-surface-card border mb-3 cursor-pointer transition-all"
+                className="glass-surface-card border mb-3 cursor-pointer transition-[background-color,border-color,color] duration-200"
                 style={{
                   ...panelCardStyle,
                   borderRadius: 16,
