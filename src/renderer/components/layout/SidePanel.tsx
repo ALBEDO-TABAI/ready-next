@@ -5,6 +5,12 @@ import FilesPanel from './FilesPanel'
 import GlobalSearchPanel from './GlobalSearchPanel'
 import SkillsCenterPanel from './SkillsCenterPanel'
 import { FILES_PANEL_DIMENSIONS } from './panelTokens'
+import {
+  WORKBENCH_PANEL_MOTION_DURATION_S,
+  WORKBENCH_PANEL_MOTION_EASE,
+  WORKBENCH_PANEL_MOTION_OFFSET_PX,
+  WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S,
+} from '../../modules/workbench/panel-motion'
 
 export type SidePanelVariant = 'files' | 'search' | 'skills' | 'hidden'
 
@@ -23,38 +29,49 @@ interface AnimatedPanelSlots {
 
 type PanelDirection = -1 | 0 | 1
 
-const STREAM_EASE = [0.22, 1, 0.36, 1] as const
 const PANEL_STACK_ORDER: Record<RenderableSidePanelVariant, number> = {
   files: 0,
   search: 1,
   skills: 2,
 }
-const HEADER_STREAM_DURATION = 0.32
-const CONTENT_STREAM_DURATION = 0.4
-const REDUCED_STREAM_DURATION = 0.12
 
 function AnimatedPanelLayer({
   body,
   header,
-  panelKey,
-  panelWidth,
   direction,
   reduceMotion,
-}: AnimatedPanelSlots & { panelKey: string; panelWidth: number; direction: PanelDirection; reduceMotion: boolean }) {
+}: AnimatedPanelSlots & { direction: PanelDirection; reduceMotion: boolean }) {
   const isPresent = useIsPresent()
   const presenceDirection = usePresenceData() as PanelDirection | undefined
   const resolvedDirection = ((presenceDirection ?? direction) as PanelDirection) || 1
   const layerZIndex = isPresent ? 1 : 2
 
   return (
-    <div
+    <motion.div
       className="absolute inset-0 overflow-hidden"
+      custom={resolvedDirection}
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
-        width: panelWidth,
-        minWidth: panelWidth,
+        willChange: reduceMotion ? 'auto' : 'transform, opacity',
       }}
+      initial={reduceMotion ? false : { x: resolvedDirection > 0 ? WORKBENCH_PANEL_MOTION_OFFSET_PX : -WORKBENCH_PANEL_MOTION_OFFSET_PX, opacity: 0.01 }}
+      animate={{
+        x: 0,
+        opacity: 1,
+        transition: reduceMotion
+          ? { duration: WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S }
+          : { duration: WORKBENCH_PANEL_MOTION_DURATION_S, ease: WORKBENCH_PANEL_MOTION_EASE },
+      }}
+      exit={
+        reduceMotion
+          ? { opacity: 0, transition: { duration: WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S } }
+          : {
+              x: resolvedDirection > 0 ? -WORKBENCH_PANEL_MOTION_OFFSET_PX : WORKBENCH_PANEL_MOTION_OFFSET_PX,
+              opacity: 0.01,
+              transition: { duration: WORKBENCH_PANEL_MOTION_DURATION_S, ease: WORKBENCH_PANEL_MOTION_EASE },
+            }
+      }
     >
       <div
         className="grid h-full min-h-0"
@@ -63,62 +80,14 @@ function AnimatedPanelLayer({
         }}
       >
         <div className="relative overflow-hidden">
-          <motion.div
-            key={`${panelKey}-header`}
-            custom={resolvedDirection}
-            className="absolute inset-0"
-            style={{
-              willChange: 'transform',
-            }}
-            initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '72%' : '-72%' }}
-            animate={{
-              y: 0,
-              transition: reduceMotion
-                ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
-            }}
-            exit={
-              reduceMotion
-                ? undefined
-                : {
-                    y: resolvedDirection > 0 ? '-72%' : '72%',
-                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE },
-                  }
-            }
-          >
-            {header}
-          </motion.div>
+          {header}
         </div>
 
-        <div className="relative min-h-0 overflow-hidden">
-          <motion.div
-            key={`${panelKey}-body`}
-            custom={resolvedDirection}
-            className="absolute inset-0 flex min-h-0 flex-col"
-            style={{
-              willChange: 'transform',
-            }}
-            initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '100%' : '-100%' }}
-            animate={{
-              y: 0,
-              transition: reduceMotion
-                ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
-            }}
-            exit={
-              reduceMotion
-                ? undefined
-                : {
-                    y: resolvedDirection > 0 ? '-100%' : '100%',
-                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE },
-                  }
-            }
-          >
-            {body}
-          </motion.div>
+        <div className="relative min-h-0 overflow-hidden flex flex-col">
+          {body}
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -150,8 +119,6 @@ export default function SidePanel({
         <GlobalSearchPanel key={panelKey}>
           {(slots) => (
             <AnimatedPanelLayer
-              panelKey={panelKey}
-              panelWidth={panelWidth}
               direction={transitionDirection}
               reduceMotion={!!reduceMotion}
               header={slots.header}
@@ -167,8 +134,6 @@ export default function SidePanel({
         <SkillsCenterPanel key={panelKey}>
           {(slots) => (
             <AnimatedPanelLayer
-              panelKey={panelKey}
-              panelWidth={panelWidth}
               direction={transitionDirection}
               reduceMotion={!!reduceMotion}
               header={slots.header}
@@ -183,8 +148,6 @@ export default function SidePanel({
       <FilesPanel key={panelKey} isVisible={isVisible}>
         {(slots) => (
           <AnimatedPanelLayer
-            panelKey={panelKey}
-            panelWidth={panelWidth}
             direction={transitionDirection}
             reduceMotion={!!reduceMotion}
             header={slots.header}
@@ -209,7 +172,7 @@ export default function SidePanel({
       }}
     >
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-        <AnimatePresence initial={false} mode="sync" custom={contentVisible ? transitionDirection : 1}>
+        <AnimatePresence initial={false} mode="wait" custom={contentVisible ? transitionDirection : 1}>
           {isVisible ? renderAnimatedPanel(variant as RenderableSidePanelVariant) : null}
         </AnimatePresence>
       </div>

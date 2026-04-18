@@ -35,6 +35,12 @@ import {
   WORKBENCH_TOPBAR_HEIGHT,
   WORKBENCH_TOPBAR_PADDING_RIGHT
 } from '../../modules/workbench/chrome'
+import {
+  WORKBENCH_PANEL_MOTION_DURATION_S,
+  WORKBENCH_PANEL_MOTION_EASE,
+  WORKBENCH_PANEL_MOTION_OFFSET_PX,
+  WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S,
+} from '../../modules/workbench/panel-motion'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
 import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
@@ -987,131 +993,67 @@ const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   cursor: 'pointer'
 }
 
-const STREAM_EASE = [0.22, 1, 0.36, 1] as const
-const HEADER_STREAM_DURATION = 0.22
-const CONTENT_STREAM_DURATION = 0.26
-const REDUCED_STREAM_DURATION = 0.12
-const HEADER_STREAM_OFFSET = 18
-const CONTENT_STREAM_OFFSET = 26
 export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapsed'
 
 function ChatPanelMotionLayer({
   header,
   body,
   children,
-  motionState = 'idle'
 }: {
   header?: React.ReactNode
   body?: React.ReactNode
   children?: React.ReactNode
-  motionState: 'enter' | 'idle' | 'exit'
 }) {
   const isPresent = useIsPresent()
   const layerZIndex = isPresent ? 1 : 2
   const reduceMotion = useReducedMotion()
-  const isExiting = motionState === 'exit'
+  const content = !header || !body
+    ? children
+    : (
+        <div
+          className="grid h-full min-h-0"
+          style={{
+            gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`
+          }}
+        >
+          <div className="relative overflow-visible" style={{ zIndex: 4 }}>
+            {header}
+          </div>
 
-  if (!header || !body) {
-    return (
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{
-          zIndex: layerZIndex,
-          pointerEvents: isPresent ? 'auto' : 'none',
-          opacity: 1
-        }}
-      >
-        {children}
-      </div>
-    )
-  }
+          <div className="relative min-h-0 overflow-hidden" style={{ zIndex: 1 }}>
+            {body}
+          </div>
+        </div>
+      )
 
   return (
-    <div
+    <motion.div
       className="absolute inset-0 overflow-hidden"
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
-        opacity: 1
+        willChange: reduceMotion ? 'auto' : 'transform, opacity'
       }}
+      initial={reduceMotion ? false : { x: WORKBENCH_PANEL_MOTION_OFFSET_PX, opacity: 0.01 }}
+      animate={{
+        x: 0,
+        opacity: 1,
+        transition: reduceMotion
+          ? { duration: WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S }
+          : { duration: WORKBENCH_PANEL_MOTION_DURATION_S, ease: WORKBENCH_PANEL_MOTION_EASE }
+      }}
+      exit={
+        reduceMotion
+          ? { opacity: 0, transition: { duration: WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S } }
+          : {
+              x: WORKBENCH_PANEL_MOTION_OFFSET_PX,
+              opacity: 0.01,
+              transition: { duration: WORKBENCH_PANEL_MOTION_DURATION_S, ease: WORKBENCH_PANEL_MOTION_EASE }
+            }
+      }
     >
-      <div
-        className="grid h-full min-h-0"
-        style={{
-          gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`
-        }}
-      >
-        <div className="relative overflow-visible" style={{ zIndex: 4 }}>
-          <motion.div
-            className="absolute inset-0"
-            style={{
-              willChange: 'transform',
-              backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)'
-            }}
-            initial={
-              reduceMotion
-                ? false
-                : { y: HEADER_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(12% 0 0 0)' }
-            }
-            animate={isExiting
-              ? {
-                  y: -HEADER_STREAM_OFFSET,
-                  opacity: 0.01,
-                  clipPath: 'inset(28% 0 0 0)',
-                  transition: reduceMotion
-                    ? { duration: REDUCED_STREAM_DURATION }
-                    : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
-                }
-              : {
-                  y: 0,
-                  opacity: 1,
-                  clipPath: 'inset(0% 0 0 0)',
-                  transition: reduceMotion
-                    ? { duration: REDUCED_STREAM_DURATION }
-                    : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
-                }}
-          >
-            {header}
-          </motion.div>
-        </div>
-
-        <div className="relative min-h-0 overflow-hidden" style={{ zIndex: 1 }}>
-          <motion.div
-            className="absolute inset-0 flex min-h-0 flex-col"
-            style={{
-              willChange: 'transform',
-              backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)'
-            }}
-            initial={
-              reduceMotion
-                ? false
-                : { y: CONTENT_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(10% 0 0 0)' }
-            }
-            animate={isExiting
-              ? {
-                  y: -CONTENT_STREAM_OFFSET,
-                  opacity: 0.01,
-                  clipPath: 'inset(22% 0 0 0)',
-                  transition: reduceMotion
-                    ? { duration: REDUCED_STREAM_DURATION }
-                    : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
-                }
-              : {
-                  y: 0,
-                  opacity: 1,
-                  clipPath: 'inset(0% 0 0 0)',
-                  transition: reduceMotion
-                    ? { duration: REDUCED_STREAM_DURATION }
-                    : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
-                }}
-          >
-            {body}
-          </motion.div>
-        </div>
-      </div>
-    </div>
+      {content}
+    </motion.div>
   )
 }
 
@@ -3282,7 +3224,6 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
   )
 
   const showExpandedPanel = panelState !== 'collapsed'
-  const motionState = panelState === 'collapsing' ? 'exit' : panelState === 'expanding' ? 'enter' : 'idle'
 
   return (
     <div
@@ -3302,7 +3243,7 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     >
       <AnimatePresence initial={false} mode="wait">
         {panelState === 'collapsed' ? (
-          <ChatPanelMotionLayer key="collapsed-chat-panel" motionState="idle">
+          <ChatPanelMotionLayer key="collapsed-chat-panel">
             <CollapsedChatRail
               onTogglePanel={toggleChatPanel}
               onHistoryOpen={() => {
@@ -3320,7 +3261,6 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
             key="expanded-chat-panel"
             header={expandedPanelHeader}
             body={expandedPanelBody}
-            motionState={motionState}
           />
         ) : null}
       </AnimatePresence>

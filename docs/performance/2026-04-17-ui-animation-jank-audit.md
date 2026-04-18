@@ -32,6 +32,11 @@
   - 文档定位高亮不再通过 `box-shadow` 闪烁做强调，改成更短的底色 + `outline` 提示；高亮停留时间同步缩短。
   - `EventModal` / `NewEventMenu` 剩余的 `transition-all` 与 `transition: all` 已改成属性白名单。
   - `P2` 里关于 `WorkbenchModeOutlet` 冗余隐藏方式和 `tiptap.css` 的 `transition: all`，当前已通过代码与测试双重锁定，作为回归保护保留。
+- `P3` 第三轮面板内容动效收口已补上以下条目：
+  - `SidePanel` 与 `ChatPanel` 的内容切换已改成单层 `transform + opacity` 过渡，不再把 header / body 拆成两段纵向瀑布，也不再继续使用 `clipPath`。
+  - 左右面板的内容交接已统一改成串行等待；旧的 `mode="sync"` 双层并存已移除，避免重内容面板切换时同帧挂两层。
+  - renderer 新增共享 `panel-motion` 动效常量；`WorkbenchMode` 的面板内容等待时间已回到和左右面板同一节奏，不再出现“内容已经切完、壳层还留一小截”的拖尾。
+  - `side-panel-waterfall-contract` 与 `chat-panel-waterfall-contract` 已同步改写，当前用契约测试锁定新单层结构。
 - `O13`（BrowserView overlay 额外 fade）在这轮复查后**主动跳过**：
   - 当前浏览器模式已经同时具备缓存静帧、冻结帧淡出和过渡遮罩接管；
   - 本轮未再追加新的遮罩淡出逻辑，避免对现有稳定链路做无收益扰动。
@@ -403,4 +408,4 @@ t=350-900ms  liquid-glass-react 内部 mouse tracker 继续 per-frame 重算 dis
 3. 最后再做 **O4 / O5 / O9** 这类需要广泛接触组件的改动；
 4. 建议在 PR 中加入 before/after 的 DevTools Performance 轨迹截图，直接量化改善。
 
-> **本报告仅为审计输出，未修改任何源代码。**
+> **本报告初稿仅为审计输出。当前版本已补充实施状态，代码真相以仓库现状为准。**

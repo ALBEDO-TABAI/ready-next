@@ -11,6 +11,7 @@ import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
+import { WORKBENCH_PANEL_MOTION_DURATION_MS } from '../modules/workbench/panel-motion'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { readStorage } from '../utils/storage'
@@ -96,8 +97,8 @@ function ResizeHandle({
 
 // D方案：简单的过渡状态管理
 const MODE_TRANSITION_DURATION_MS = 350
-const PANEL_CONTENT_TRANSITION_MS = 260
-const SIDEBAR_CONTENT_TRANSITION_MS = 300
+const PANEL_CONTENT_TRANSITION_MS = WORKBENCH_PANEL_MOTION_DURATION_MS
+const SIDEBAR_CONTENT_TRANSITION_MS = WORKBENCH_PANEL_MOTION_DURATION_MS
 
 export default function WorkbenchMode() {
   const {

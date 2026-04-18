@@ -27,6 +27,12 @@
   - 文档标签、RSS 列表/预览、聊天输入/消息、文件树这些工作台热路径已清掉 `transition-all`，不再把 `width / min-width / flex` 这类布局属性误带进动画。
   - 已新增 `workbench-window-resize-contract` 与 `workbench-hot-path-transition-contract`，并更新 keep-alive / browser resize contracts；`npx tsx@^4.19.2 --test src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/browser-resize-stability-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-window-resize-contract.test.ts src/__tests__/workbench-hot-path-transition-contract.test.ts src/__tests__/chat-panel-collapsed-rail-contract.test.ts src/__tests__/side-panel-waterfall-contract.test.ts` 和 `npm run typecheck` 已通过。
 
+- `2026-04-18` 已完成一轮 `P3` 面板内容动效收口，重点从“分段表演式瀑布切换”改成“整块内容轻量交接”：
+  - `SidePanel` 与 `ChatPanel` 现已统一改成单层 `transform + opacity` 过渡，不再把 header / body 拆成两段纵向滑入，也不再使用 `clipPath`、`translateZ(0)`、`backfaceVisibility` 这类额外合成层提示。
+  - 左右面板的内容交接现已统一为串行等待，不再让离场层和入场层在同一帧重叠驻留；重内容面板切换时的双层合成压力被一起压掉。
+  - renderer 新增共享 `panel-motion` 常量，`SidePanel`、`ChatPanel` 与 `WorkbenchMode` 的等待时长已回到同一节奏，壳层不再比内容切换多挂一截。
+  - `side-panel-waterfall-contract` 与 `chat-panel-waterfall-contract` 已改成锁定新单层结构；Browser host visibility / resize stability / icon alignment 回归继续通过，确保这轮没有把 BrowserView 跟随链路带回旧问题。
+
 - 已完成一轮针对 `CC-Source` 的 Claude Code agent 对照研究，并新增四份文档沉淀架构研究、交叉缺陷分析、目标设计与分阶段整改路线；后续 agent 整改将以这四份文档为统一底稿，而不再继续只靠零散口头判断推进。
 - agent runtime realignment phase4 已完成第一轮 domain adapter 收口：`TurnEngine` 不再继续硬编码 Browser / Document 的专属执行分支，六个域已统一接入同一套 adapter 生命周期，`task-execution-router` 也已回到只负责 route 解析。
 
