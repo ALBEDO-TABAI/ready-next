@@ -16,7 +16,7 @@ describe('document pipeline widget draft reprompt contract', () => {
       source,
       /const firstAttempt = this\.evaluateWidgetDraftAttempt\(firstParsed,/,
     )
-    assert.match(source, /if \(firstAttempt\.errors\.length === 0\) \{\s*return firstAttempt\.draft/)
+    assert.match(source, /if \(firstAttempt\.errors\.length === 0\) \{\s*return \{ draft: firstAttempt\.draft, cacheable: true \}/)
   })
 
   it('builds a 3-turn reprompt message sequence when the first attempt fails', () => {
@@ -44,7 +44,7 @@ describe('document pipeline widget draft reprompt contract', () => {
       source,
       /const secondAttempt = this\.evaluateWidgetDraftAttempt\(secondParsed,/,
     )
-    assert.match(source, /if \(secondAttempt\.errors\.length === 0\) \{\s*return secondAttempt\.draft/)
+    assert.match(source, /if \(secondAttempt\.errors\.length === 0\) \{\s*return \{ draft: secondAttempt\.draft, cacheable: true \}/)
   })
 
   it('treats null-parsed JSON as a validation failure so retry still fires', () => {

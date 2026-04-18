@@ -862,7 +862,7 @@ export class DocumentTaskPipelineExecutor {
     providerContext: TurnProviderContext
     signal: AbortSignal
     preferredTargetWidgetTitle?: string
-  }): Promise<DocumentWidgetDraft> {
+  }): Promise<{ draft: DocumentWidgetDraft; cacheable: boolean }> {
     const existingWidgets = params.plan.operation === 'update'
       ? this.collectExistingWidgetsForPrompt(params.snapshot, 32)
       : []
@@ -906,7 +906,7 @@ export class DocumentTaskPipelineExecutor {
       preferredTarget: preferredTargetResolved,
     })
     if (firstAttempt.errors.length === 0) {
-      return firstAttempt.draft
+      return { draft: firstAttempt.draft, cacheable: true }
     }
     this.deps.log(`document pipeline widget draft attempt=1 invalid errors=${firstAttempt.errors.join('；')}`)
 
@@ -942,7 +942,7 @@ export class DocumentTaskPipelineExecutor {
       preferredTarget: preferredTargetResolved,
     })
     if (secondAttempt.errors.length === 0) {
-      return secondAttempt.draft
+      return { draft: secondAttempt.draft, cacheable: true }
     }
     this.deps.log(`document pipeline widget draft attempt=2 invalid errors=${secondAttempt.errors.join('；')}`)
 
@@ -964,7 +964,7 @@ export class DocumentTaskPipelineExecutor {
       `已使用兜底摘要卡（原因：componentSpec 两次校验失败 · ${lastErrors.join('；')}）`,
     )
     this.deps.log('document pipeline widget draft fallback=applied mode=create')
-    return fallbackDraft
+    return { draft: fallbackDraft, cacheable: false }
   }
 
   private doesListWidgetsSummaryContainTarget(summary: string, target: string): boolean {
@@ -1252,32 +1252,48 @@ export class DocumentTaskPipelineExecutor {
       )
       const planTaskType = classifyStructuredDocumentIntent(params.job.instruction) || 'document_read_then_widget_create'
       const envelopeWidgetTarget = params.requestEnvelope.resources.find((resource) => resource.kind === 'widget_target')
-      currentDraft = cachedDraft || await this.buildDocumentPipelineWidgetDraft({
-        question: params.job.instruction,
-        snapshot: targetSnapshot,
-        insight: currentInsight,
-        plan: {
-          taskType: planTaskType,
-          operation: planTaskType === 'document_read_then_widget_update' ? 'update' : 'create',
-          question: params.job.instruction,
-          documentPath: targetSnapshot.path,
-          deepRead: false,
-          preferredWidget: currentInsight.recommendedWidget,
-          maxChars: 16_000,
-        },
-        timeoutMs: 60_000,
-        providerContext: params.providerContext,
-        signal: params.signal,
-        preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
-      })
-      if (!cachedDraft) {
-        this.storeCachedDocumentWidgetDraft(
-          params.sessionId,
-          params.job.instruction,
-          params.job,
-          targetSnapshot,
-          currentDraft,
-        )
+      if (cachedDraft) {
+        currentDraft = cachedDraft
+      } else {
+        try {
+          const built = await this.buildDocumentPipelineWidgetDraft({
+            question: params.job.instruction,
+            snapshot: targetSnapshot,
+            insight: currentInsight,
+            plan: {
+              taskType: planTaskType,
+              operation: planTaskType === 'document_read_then_widget_update' ? 'update' : 'create',
+              question: params.job.instruction,
+              documentPath: targetSnapshot.path,
+              deepRead: false,
+              preferredWidget: currentInsight.recommendedWidget,
+              maxChars: 16_000,
+            },
+            timeoutMs: 60_000,
+            providerContext: params.providerContext,
+            signal: params.signal,
+            preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
+          })
+          currentDraft = built.draft
+          if (built.cacheable) {
+            this.storeCachedDocumentWidgetDraft(
+              params.sessionId,
+              params.job.instruction,
+              params.job,
+              targetSnapshot,
+              built.draft,
+            )
+          }
+        } catch (err) {
+          this.deleteCachedWidgetDraft(
+            params.sessionId,
+            params.job.instruction,
+            params.job,
+            targetSnapshot,
+            'build-failed',
+          )
+          throw err
+        }
       }
       emitStepUpdate({
         job: params.job,
@@ -1749,6 +1765,31 @@ export class DocumentTaskPipelineExecutor {
     this.deps.log(`document widget draft cache store key=${key}`)
   }
 
+  private deleteCachedWidgetDraft(
+    sessionId: string,
+    question: string,
+    job: DocumentTaskJob,
+    snapshot: ActiveDocumentSnapshot,
+    reason: string,
+  ): void {
+    const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
+    const sessionEntries = this.sessionWidgetDraftCaches.get(sessionId)
+    const hadSessionEntry = Array.isArray(sessionEntries)
+      && sessionEntries.some((entry) => entry.key === key)
+    if (hadSessionEntry) {
+      const filtered = (sessionEntries || []).filter((entry) => entry.key !== key)
+      if (filtered.length > 0) {
+        this.sessionWidgetDraftCaches.set(sessionId, filtered)
+      } else {
+        this.sessionWidgetDraftCaches.delete(sessionId)
+      }
+    }
+    const hadSharedEntry = this.documentWidgetDraftCache.delete(key)
+    if (hadSessionEntry || hadSharedEntry) {
+      this.deps.log(`document widget draft cache invalidated key=${key} reason=${reason}`)
+    }
+  }
+
   private normalizeDocumentTargetPath(path: string): string {
     const trimmed = path.trim()
     const autosaveMatch = trimmed.match(/^(.*\.docx)\.autosave-\d{8}-\d{6}\.bak\.docx$/i)
@@ -1942,16 +1983,19 @@ export class DocumentTaskPipelineExecutor {
       storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
         this.storeCachedDocumentInsight(params.sessionId, question, snapshot, insight, metrics)
       },
-      buildWidgetDraft: async ({ question, snapshot, insight, plan, signal }) => await this.buildDocumentPipelineWidgetDraft({
-        question,
-        snapshot,
-        insight,
-        plan,
-        timeoutMs: 60_000,
-        providerContext: params.providerContext,
-        signal,
-        preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
-      }),
+      buildWidgetDraft: async ({ question, snapshot, insight, plan, signal }) => {
+        const built = await this.buildDocumentPipelineWidgetDraft({
+          question,
+          snapshot,
+          insight,
+          plan,
+          timeoutMs: 60_000,
+          providerContext: params.providerContext,
+          signal,
+          preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
+        })
+        return built.draft
+      },
       writeWidget: async ({ draft, snapshot, stage, signal }) => await this.writeDocumentWidget({
         draft,
         snapshot,
