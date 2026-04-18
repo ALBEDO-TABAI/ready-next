@@ -15,7 +15,7 @@
 }
 
 [data-ritual-overlay][data-stage='theme-transition'] {
-  background: var(--bg-primary, #ffffff);
+  background: var(--ritual-overlay-bg);
 }
 
 [data-ritual-overlay][data-phase='entering'],
@@ -35,9 +35,9 @@
 }
 
 @keyframes ritual-reduce-flash {
-  0% { background-color: var(--bg-primary); }
+  0% { background-color: var(--ritual-overlay-bg); }
   50% { background-color: var(--bg-panel); }
-  100% { background-color: var(--bg-primary); }
+  100% { background-color: var(--ritual-overlay-bg); }
 }
 
 .ritual-theme-choreography {

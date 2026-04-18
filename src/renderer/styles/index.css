@@ -5,6 +5,9 @@
    Keep shared colors, surfaces, shadows, and shell classes here; component files should only override when behavior requires it. */
 /* Custom CSS Variables */
 :root {
+  color-scheme: light dark;
+  /* Overlay background used by the theme-transition ritual; tracks the actual canvas color per theme/skin. */
+  --ritual-overlay-bg: var(--workbench-mode-bg);
   /* Colors from UI-SPEC-V5.md — Light Mode (default) */
   --bg-primary: #FFFFFF;
   --bg-panel: #F6F5F1;
@@ -143,6 +146,7 @@
 
 /* Dark Mode */
 html[data-theme='dark'] {
+  color-scheme: dark;
   --bg-primary: #1A1B1E;
   --bg-panel: #202124;
   --bg-content: #1E1F22;

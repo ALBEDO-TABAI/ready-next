@@ -92,7 +92,9 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(mainIndex, /nativeTheme\.themeSource = resolveStoredThemeSource\(\)/)
   assert.match(mainIndex, /getDatabase\(\)\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)
   // Theme transitions are now orchestrated by the shared ritual overlay; see theme-ritual-orchestration-contract.test.ts.
-  assert.match(themeStore, /const THEME_TRANSITION_ATTRIBUTE = 'data-theme-transitioning'/)
+  // Legacy data-theme-transitioning attribute is fully removed (store no longer defines or touches it).
+  assert.doesNotMatch(themeStore, /THEME_TRANSITION_ATTRIBUTE/)
+  assert.doesNotMatch(themeStore, /data-theme-transitioning/)
   assert.match(themeStore, /root\.setAttribute\('data-theme', resolved\)/)
   assert.match(themeStore, /window\.electronAPI\.theme\.set\(option\)/)
 })

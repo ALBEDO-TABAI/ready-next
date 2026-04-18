@@ -155,6 +155,8 @@ function setupApplicationMenu(): void {
 
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
+  // Pick a first-frame background that matches the resolved theme so non-macOS platforms don't flash white.
+  const nonMacFirstFrameBg = nativeTheme.shouldUseDarkColors ? '#1A1B1E' : '#F7F9FC'
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -163,7 +165,7 @@ async function createWindow(): Promise<void> {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: process.platform === 'darwin' ? '#00000000' : undefined,
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : nonMacFirstFrameBg,
     visualEffectState: process.platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),

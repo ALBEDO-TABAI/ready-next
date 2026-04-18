@@ -1,10 +1,19 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-18
+> 更新时间: 2026-04-19
 
 ## 当前真值摘要
 
 0. Agent 核心重构已先落地第一段可上线基础层。
+
+- `2026-04-19` 已完成主题启动白屏与昼夜切换过渡偏色双修复（计划 `plans/proud-painting-karp.md`，审计 `docs/performance/2026-04-19-theme-startup-transition-gap-audit.md`）：
+  - `index.html` `<head>` 内联 bootstrap 同步落 `data-theme` + `data-skin`，不再等 IPC 才写入；`:root` 加 `color-scheme: light dark`，dark 覆盖为 `dark`。
+  - Ritual overlay 换 token：引入 `--ritual-overlay-bg: var(--workbench-mode-bg)`，`ritual-overlay.css` 的 theme-transition 背景与 reduce-flash keyframe 同步迁移；过渡中途色与画布对齐（light 暖米、dark 深蓝），消灭 `#F7F9FC` 冷白一闪。
+  - `main/index.ts` 非 macOS 平台按 `nativeTheme.shouldUseDarkColors` 给窗口预先定主题化 `backgroundColor`；macOS 透明 + vibrancy 不动。
+  - `renderer/main.tsx` `hydrateStartupTheme` → `reconcileStartupTheme`，只在与 main 不一致时纠正 DOM；fatal error 配色跟随当前 `data-theme`。
+  - `stores/useTheme.ts` 移除从未被写入的 `THEME_TRANSITION_ATTRIBUTE` 死代码。
+  - 合同测试：更新 `browser-startup-theme-contract` 与 `theme-ritual-orchestration-contract`；新增 `renderer-startup-fouc-contract`；`theme-transition-backdrop-contract` 与 `theme-liquid-default` 无需改动。
+  - 本轮不做项（审计 §3 其余）：SQLite↔localStorage 源收口、`setSkin` 单值化、`handleSystemChange` 动画化（被合同测试强制）、`panelResizing` 跳过路径、BrowserView mask 异常路径，各自另立计划。
 
 - `2026-04-18` 已完成文档信息卡修改链路 `P2` 四项（Gap G / I / J / N），计划文件 `plans/starry-purring-gosling.md`：
   - `list_widgets` 输出结构化 JSON 清单（`summarizeDocumentWidgets`）：带 componentHint / preview / hasState，让 LLM 拿到清晰候选集再做定位。

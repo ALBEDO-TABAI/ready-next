@@ -1,5 +1,18 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-04-19
+
+### 修复
+
+#### 主题启动 FOUC 与昼夜切换过渡偏色双收口
+- `index.html` `<head>` 新增内联 bootstrap 脚本：在 CSS 解析之前同步从 `localStorage` 读 `ready-theme` / `ready-theme-skin` 并落到 `<html>` 的 `data-theme` + `data-skin`，消灭"首帧命中 `:root` 纯白 + 无 liquid-glass token"的调试态白屏；CSP 维持 `'unsafe-inline'`
+- `styles/index.css` `:root` 追加 `color-scheme: light dark`（dark 主题下覆盖为 `dark`），让原生滚动条 / 表单控件在首帧就按正确配色渲染
+- 引入 `--ritual-overlay-bg` 代理 `--workbench-mode-bg`，`ritual-overlay.css` 的 theme-transition 背景与 `ritual-reduce-flash` keyframe 改用这一 token；过渡中途色从与画布冷暖不一致的 `--bg-primary`（liquid-glass+light 下为 `#F7F9FC` 冷白）修正为实际画布色（light 暖米 `#F6F1E7`、dark `#192131`）
+- `main/index.ts` 在非 macOS 平台依据 `nativeTheme.shouldUseDarkColors` 给 `BrowserWindow.backgroundColor` 上深/浅色，避免 Windows / Linux 窗口外壳先白一闪
+- `renderer/main.tsx` 把启动主题写入从"主写入"降级为 `reconcileStartupTheme`：只在和 main 进程值不一致时才纠正 `data-theme`；fatal bootstrap 错误态改为按当前 `data-theme` 走深/浅两套 palette，不再暗模式下白底刺眼
+- `stores/useTheme.ts` 删除从未被 setAttribute 的 `THEME_TRANSITION_ATTRIBUTE` 死代码
+- 合同测试同步：`browser-startup-theme-contract` 放宽对旧常量的断言并反向断言其被移除；`theme-ritual-orchestration-contract` 新增 `--ritual-overlay-bg` 与 `color-scheme` 断言；新增 `renderer-startup-fouc-contract` 守住 head 内联脚本与 non-macOS 首帧色
+
 ## [Unreleased] - 2026-04-18
 
 ### 修复

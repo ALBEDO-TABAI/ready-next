@@ -1,6 +1,21 @@
 # Ready 经验文档
 
-> 更新时间: 2026-04-15
+> 更新时间: 2026-04-19
+
+## 0. 视觉主题与启动
+
+### 0.0 CSS 变量主题系统必须在首帧落 `data-theme` / `data-skin`，异步 IPC 不是可行路径
+- 现象：Ready 用 `html[data-theme][data-skin]` 的属性选择器组合喂 CSS 变量，但启动期是先 `await window.electronAPI.theme.get()` 再写属性，IPC 抖动 / SQLite 延迟期间 `<html>` 上没有任何标记，CSS 只能命中 `:root` 的亮色默认值，而 liquid-glass 皮肤的 `--lg-material-*` / `--surface-blur` 等 token 全部缺席，用户看到"纯白平面调试态"。
+- 固化规则：
+  - 任何"用属性选择器切多套 CSS 变量"的方案，必须在 `index.html` `<head>` 里放同步 `<script>` 先从 `localStorage` 读并 `setAttribute`，再让 CSS 解析；IPC 只能作为后续"对齐"而不是"主写入"。
+  - 同时在 `:root` 声明 `color-scheme: light dark`（并在 dark 主题覆盖为 `dark`），让原生滚动条/表单控件首帧就走正确配色。
+  - Electron 的 `BrowserWindow.backgroundColor` 在非 macOS 平台不要留 `undefined`，必须按持久化的主题值给深/浅色，否则 mica/vibrancy 就绪前会先白一闪。
+
+### 0.1 演出层背景色要独立于内容层 token
+- 现象：主题切换过渡用 `background: var(--bg-primary)`；在 liquid-glass+light 下 `--bg-primary = #F7F9FC`（冷白微蓝），但用户日常感知的画布是 `--workbench-mode-bg = #F6F1E7`（暖米）。过渡中途出现的冷白与画布色温不符，被直接当成"既不是亮也不是暗"的 bug。
+- 固化规则：
+  - ritual / overlay / mask 这类演出层要有专门的语义 token（如 `--ritual-overlay-bg`），并通过 `:root` 间接层代理到"画布色"而不是内容色，未来改画布不会顺带改演出、反之亦然。
+  - 切换演出不仅要关心"颜色正不正"，还要关心"与用户当前视野里那块主色的色温是否一致"；肉眼层级的差别比十六进制差别更重要。
 
 ## 1. 架构经验
 ### 1.0 Electron 开发态里，原生依赖 ABI 不匹配会把“设置丢失 / 历史空白 / scope not found”伪装成前端问题

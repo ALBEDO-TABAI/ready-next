@@ -6,8 +6,6 @@ export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
 export type ThemeSkin = 'liquid-glass'
 
-const THEME_TRANSITION_ATTRIBUTE = 'data-theme-transitioning'
-
 interface ThemeState {
     theme: ThemeOption
     resolvedTheme: ResolvedTheme
@@ -49,7 +47,6 @@ const syncNativeTheme = (option: ThemeOption) => {
 const applyThemeImmediate = (resolved: ResolvedTheme, option: ThemeOption) => {
     if (typeof document === 'undefined') return
     const root = document.documentElement
-    root.removeAttribute(THEME_TRANSITION_ATTRIBUTE)
     root.setAttribute('data-theme', resolved)
     syncNativeTheme(option)
 }

@@ -45,6 +45,16 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.match(ritualCss, /\[data-direction='to-light'\]/)
   assert.match(ritualCss, /@media \(prefers-reduced-motion: reduce\)/)
 
+  // The theme-transition overlay uses the dedicated --ritual-overlay-bg token so the mid-state
+  // color tracks the actual workbench canvas (warm beige in light / deep navy in dark) instead
+  // of the cool-blue --bg-primary that clashed with the liquid-glass canvas.
+  assert.match(ritualCss, /\[data-ritual-overlay\]\[data-stage='theme-transition'\]\s*\{[\s\S]*background:\s*var\(--ritual-overlay-bg\)/)
+  assert.doesNotMatch(ritualCss, /\[data-ritual-overlay\]\[data-stage='theme-transition'\]\s*\{[\s\S]*var\(--bg-primary/)
+  assert.match(styles, /:root\s*\{[\s\S]*--ritual-overlay-bg:\s*var\(--workbench-mode-bg\)/)
+  // color-scheme hint is present so native form controls/scrollbars render in the right scheme from the first frame.
+  assert.match(styles, /:root\s*\{[\s\S]*color-scheme:\s*light dark/)
+  assert.match(styles, /html\[data-theme='dark'\]\s*\{[\s\S]*color-scheme:\s*dark/)
+
   // Theme glyph uses lucide-matching outline style.
   assert.match(themeChoreography, /viewBox="0 0 48 48"/)
   assert.match(themeChoreography, /stroke="var\(--color-blue\)"/)
