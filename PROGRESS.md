@@ -6,6 +6,14 @@
 
 0. Agent 核心重构已先落地第一段可上线基础层。
 
+- `2026-04-18` 已完成 agent runtime realignment phase4 的第二轮“实质收口”，这轮不再只满足“有 adapter 文件”：
+  - `skill / rss / calendar / feishu` 四个 domain adapter 现在都会从统一 `executedTools` 批次摘要里接住本轮工具结果，再由 adapter 自己生成任务卡 patch。
+  - `TurnEngine` 已补通用工具结果明细：会把工具名、标准化结果、原始文本和可选 JSON 一起传给 adapter，Browser / Document 原有专项统计不回退。
+  - `SkillDomainAdapter` 现已正式接住 skill workflow 的执行状态、阻塞信息、当前步骤和继续引用；skill 工具的结构化结果不再直接绕过 adapter 进入任务卡真相。
+  - `RSS / Calendar / Feishu` 三个 adapter 已补最小状态机：成功会稳定输出标题/摘要/步骤，缺参数或校验失败会进入 blocked，而不是继续只剩最后一条助手文本。
+  - `run-projection` 已删除 skill 专属 regex 恢复分支；skill 任务状态现在只认结构化 projection patch，不再从 `Execution ID / Current step / Blocker` 文本反推。
+  - 本轮已通过 `npm run typecheck`，并回归 `turn-engine-projection / domain-adapter-contract / agent-runtime-host-contract / direct-chat-executor-routing / task-projection-truth-contract`。
+
 - `2026-04-18` 已完成一轮 `P0` 流畅性基建收口，重点不再是“补几个动画”，而是把工作台壳层、BrowserView 跟随和主题切换的基础节奏一起改正：
   - 左侧栏和聊天栏现已改成“壳层占位 + 内容位移动画”，不再让面板组件自己持续做宽度补间；聊天栏收起后保留窄边栏形态。
   - 面板拖拽现已按帧合并宽度更新；BrowserView bounds 新增 `transient / settled` 两段同步语义，拖拽中可合并，最终落点立即精确。
