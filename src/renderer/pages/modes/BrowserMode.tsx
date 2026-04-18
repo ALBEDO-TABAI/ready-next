@@ -59,7 +59,6 @@ export default function BrowserMode({
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
-  const startupHostResyncTimerRef = useRef<number | null>(null)
   const stableFrameRefreshTimerRef = useRef<number | null>(null)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
@@ -282,13 +281,6 @@ export default function BrowserMode({
     }
   }, [])
 
-  const clearStartupHostResyncTimer = useCallback(() => {
-    if (startupHostResyncTimerRef.current) {
-      window.clearTimeout(startupHostResyncTimerRef.current)
-      startupHostResyncTimerRef.current = null
-    }
-  }, [])
-
   const clearStableFrameRefreshTimer = useCallback(() => {
     if (stableFrameRefreshTimerRef.current) {
       window.clearTimeout(stableFrameRefreshTimerRef.current)
@@ -336,18 +328,6 @@ export default function BrowserMode({
       await sendBoundsImmediate({ forceExact: true })
       await syncBrowserVisibility({ forceExact: true })
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
-      clearStartupHostResyncTimer()
-      startupHostResyncTimerRef.current = window.setTimeout(() => {
-        startupHostResyncTimerRef.current = null
-        if (cancelled) return
-        void (async () => {
-          if (activeTabId) {
-            await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
-          }
-          await sendBoundsImmediate({ forceExact: true })
-          await syncBrowserVisibility({ forceExact: true })
-        })().catch(() => undefined)
-      }, 180)
       if (cancelled) return
       const hostHasVisibleFrame = await captureStableFrame()
       if (cancelled) return
@@ -367,18 +347,25 @@ export default function BrowserMode({
 
     return () => {
       cancelled = true
-      clearStartupHostResyncTimer()
       clearSurfaceReadyTimer()
     }
-  }, [activeTabId, browserRuntimeReady, clearStartupHostResyncTimer, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+  }, [activeTabId, browserRuntimeReady, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+
+  // Trailing settle: when motion finishes (layoutPhase flips to idle) and the browser is active,
+  // sync once more so the host bounds match the final settled layout. Replaces the 180ms setTimeout
+  // re-sync that used to fire on every browser entry.
+  useEffect(() => {
+    if (!isElectron || !isActive) return
+    if (layoutPhase !== 'idle') return
+    void syncBrowserVisibility({ forceExact: true })
+  }, [isActive, isElectron, layoutPhase, syncBrowserVisibility])
 
   useEffect(() => {
     return () => {
       clearStableFrameRefreshTimer()
-      clearStartupHostResyncTimer()
       clearSurfaceReadyTimer()
     }
-  }, [clearStableFrameRefreshTimer, clearStartupHostResyncTimer, clearSurfaceReadyTimer])
+  }, [clearStableFrameRefreshTimer, clearSurfaceReadyTimer])
 
   // 冻结帧高级淡出动画状态（模糊 + 缩放 + 透明度）
   const [freezeFrameStyle, setFreezeFrameStyle] = useState({

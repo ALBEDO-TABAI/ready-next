@@ -62,8 +62,9 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(browserMode, /await sendBoundsImmediate\(\{ forceExact: true \}\)[\s\S]*if \(activeTabId\) \{[\s\S]*fitActiveTabToBounds\(activeTabId\)[\s\S]*await sendBoundsImmediate\(\{ forceExact: true \}\)[\s\S]*await syncBrowserVisibility\(\{ forceExact: true \}\)/)
   assert.match(browserMode, /if \(activeTabId\) \{[\s\S]*fitActiveTabToBounds\(activeTabId\)/)
   assert.match(browserMode, /await sendBoundsImmediate\(\{ forceExact: true \}\)/)
-  assert.match(browserMode, /startupHostResyncTimerRef/)
-  assert.match(browserMode, /window\.setTimeout\(\(\) => \{[\s\S]*fitActiveTabToBounds\(activeTabId\)[\s\S]*syncBrowserVisibility\(\{ forceExact: true \}\)/)
+  // Trailing resync is now driven reactively by layoutPhase === 'idle' instead of a 180ms setTimeout chain.
+  assert.doesNotMatch(browserMode, /startupHostResyncTimerRef/)
+  assert.match(browserMode, /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true \}\)/)
   assert.match(browserMode, /const hostVisibleRef = useRef\(false\)/)
   assert.match(browserMode, /hostVisibleRef\.current = browserRuntimeReady && tabs\.length > 0/)
   assert.match(browserMode, /if \(!browserRuntimeReady \|\| tabs\.length === 0\)/)
