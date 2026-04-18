@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
@@ -10,7 +10,7 @@ type ModeComponentProps = {
 }
 
 type ModeVisualState = 'current' | 'entering' | 'leaving' | 'hidden'
-type TransitionStage = 'settled' | 'preparing' | 'animating'
+type TransitionStage = 'settled' | 'preparing' | 'animating' | 'finishing'
 
 interface ModeTransitionState {
   activeMode: WorkbenchMode
@@ -26,9 +26,14 @@ interface ModeSceneProps {
   direction: -1 | 0 | 1
   isMotionSettled: boolean
   browserLayoutPhase: BrowserHostLayoutPhase | null
+  onLeavingTransformEnd?: () => void
 }
 
-const MODE_SCENE_TRANSITION = 'transform 0.35s cubic-bezier(0.24, 1, 0.36, 1), opacity 0.22s ease-out'
+const MODE_SCENE_TRANSITION = 'transform 0.35s cubic-bezier(0.24, 1, 0.36, 1), opacity 0.32s ease-out'
+const MODE_LEAVING_OFFSET_PERCENT = 32
+const MODE_ENTERING_OFFSET_PERCENT = 32
+const MODE_LEAVING_FADE_OPACITY = 0.4
+const MODE_FINISHING_SAFETY_MS = 420
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
 const loadDocumentMode = () => import('../../pages/modes/DocumentMode')
@@ -61,16 +66,15 @@ function resolveModeDirection(from: WorkbenchMode, to: WorkbenchMode): -1 | 0 | 
 function resolveModeVisualState(
   modeKey: WorkbenchMode,
   transitionState: ModeTransitionState,
-  isMotionSettled: boolean,
 ): ModeVisualState {
   if (modeKey === transitionState.activeMode) {
-    if (transitionState.leavingMode && !isMotionSettled) {
+    if (transitionState.leavingMode && transitionState.stage !== 'settled') {
       return 'entering'
     }
     return 'current'
   }
 
-  if (modeKey === transitionState.leavingMode && !isMotionSettled) {
+  if (modeKey === transitionState.leavingMode && transitionState.stage !== 'settled') {
     return 'leaving'
   }
 
@@ -88,7 +92,8 @@ function resolveSceneTransform(
 
   if (visualState === 'entering') {
     if (transitionStage === 'preparing') {
-      return direction > 0 ? 'translate3d(22%, 0, 0)' : 'translate3d(-22%, 0, 0)'
+      const offset = MODE_ENTERING_OFFSET_PERCENT
+      return direction > 0 ? `translate3d(${offset}%, 0, 0)` : `translate3d(-${offset}%, 0, 0)`
     }
     return 'translate3d(0, 0, 0)'
   }
@@ -97,12 +102,15 @@ function resolveSceneTransform(
     return 'translate3d(0, 0, 0)'
   }
 
-  return direction > 0 ? 'translate3d(-16%, 0, 0)' : 'translate3d(16%, 0, 0)'
+  const offset = MODE_LEAVING_OFFSET_PERCENT
+  return direction > 0 ? `translate3d(-${offset}%, 0, 0)` : `translate3d(${offset}%, 0, 0)`
 }
 
 function resolveSceneOpacity(visualState: ModeVisualState, transitionStage: TransitionStage): number {
   if (visualState === 'hidden') return 0
-  if (visualState === 'leaving' && transitionStage === 'animating') return 0.82
+  if (visualState === 'leaving' && (transitionStage === 'animating' || transitionStage === 'finishing')) {
+    return MODE_LEAVING_FADE_OPACITY
+  }
   return 1
 }
 
@@ -126,6 +134,7 @@ function areModeScenePropsEqual(previous: ModeSceneProps, next: ModeSceneProps) 
     && previous.direction === next.direction
     && previous.isMotionSettled === next.isMotionSettled
     && previous.browserLayoutPhase === next.browserLayoutPhase
+    && previous.onLeavingTransformEnd === next.onLeavingTransformEnd
   )
 }
 
@@ -136,11 +145,20 @@ const ModeScene = memo(function ModeScene({
   direction,
   isMotionSettled,
   browserLayoutPhase,
+  onLeavingTransformEnd,
 }: ModeSceneProps) {
   const ModeComponent = MODE_COMPONENTS[modeKey]
   const isVisible = visualState !== 'hidden'
   const isInteractive = visualState === 'current' || visualState === 'entering'
   const isTransitioning = transitionStage !== 'settled' && visualState !== 'hidden'
+
+  const handleTransitionEnd = visualState === 'leaving' && onLeavingTransformEnd
+    ? (event: React.TransitionEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) return
+        if (event.propertyName !== 'transform') return
+        onLeavingTransformEnd()
+      }
+    : undefined
 
   return (
     <div
@@ -155,7 +173,9 @@ const ModeScene = memo(function ModeScene({
       }}
       data-workbench-mode-panel={modeKey}
       data-mode-visual-state={visualState}
+      data-mode-transition-stage={transitionStage}
       aria-hidden={!isInteractive}
+      onTransitionEnd={handleTransitionEnd}
     >
       <Suspense fallback={<ModeFallback mode={modeKey} />}>
         <ModeComponent
@@ -180,6 +200,7 @@ export default function WorkbenchModeOutlet({
 }) {
   const previousModeRef = useRef(mode)
   const prepareAnimationFrameRef = useRef<number | null>(null)
+  const finishingSafetyTimerRef = useRef<number | null>(null)
   const [transitionState, setTransitionState] = useState<ModeTransitionState>({
     activeMode: mode,
     leavingMode: null,
@@ -235,7 +256,49 @@ export default function WorkbenchModeOutlet({
   }, [transitionState.stage])
 
   useEffect(() => {
+    if (finishingSafetyTimerRef.current !== null) {
+      window.clearTimeout(finishingSafetyTimerRef.current)
+      finishingSafetyTimerRef.current = null
+    }
+
+    if (transitionState.stage !== 'animating' && transitionState.stage !== 'finishing') return
+
+    finishingSafetyTimerRef.current = window.setTimeout(() => {
+      finishingSafetyTimerRef.current = null
+      setTransitionState((previous) => {
+        if (previous.stage === 'settled') return previous
+        return {
+          activeMode: previous.activeMode,
+          leavingMode: null,
+          direction: 0,
+          stage: 'settled',
+        }
+      })
+    }, MODE_FINISHING_SAFETY_MS)
+
+    return () => {
+      if (finishingSafetyTimerRef.current !== null) {
+        window.clearTimeout(finishingSafetyTimerRef.current)
+        finishingSafetyTimerRef.current = null
+      }
+    }
+  }, [transitionState.stage])
+
+  const handleLeavingTransformEnd = useCallback(() => {
+    setTransitionState((previous) => {
+      if (previous.stage === 'settled') return previous
+      return {
+        activeMode: previous.activeMode,
+        leavingMode: null,
+        direction: 0,
+        stage: 'settled',
+      }
+    })
+  }, [])
+
+  useEffect(() => {
     if (!isMotionSettled) return
+    if (transitionState.stage !== 'settled' && transitionState.leavingMode !== null) return
 
     setTransitionState((previous) => {
       if (previous.leavingMode === null && previous.stage === 'settled') {
@@ -249,7 +312,7 @@ export default function WorkbenchModeOutlet({
         stage: 'settled',
       }
     })
-  }, [isMotionSettled])
+  }, [isMotionSettled, transitionState.stage, transitionState.leavingMode])
 
   return (
     <div
@@ -259,7 +322,7 @@ export default function WorkbenchModeOutlet({
       }}
     >
       {ALL_WORKBENCH_MODES.map((modeKey) => {
-        const visualState = resolveModeVisualState(modeKey, transitionState, isMotionSettled)
+        const visualState = resolveModeVisualState(modeKey, transitionState)
 
         return (
           <ModeScene
@@ -270,6 +333,7 @@ export default function WorkbenchModeOutlet({
             direction={transitionState.direction}
             isMotionSettled={isMotionSettled}
             browserLayoutPhase={browserLayoutPhase}
+            onLeavingTransformEnd={handleLeavingTransformEnd}
           />
         )
       })}

@@ -23,7 +23,7 @@ test('workbench outlet keeps all modes mounted but only paints the current trans
   assert.match(outlet, /const ModeScene = memo\(function ModeScene/)
   assert.match(outlet, /const previousModeRef = useRef\(mode\)/)
   assert.match(outlet, /const \[transitionState, setTransitionState\] = useState<ModeTransitionState>\(/)
-  assert.match(outlet, /const visualState = resolveModeVisualState\(modeKey, transitionState, isMotionSettled\)/)
+  assert.match(outlet, /const visualState = resolveModeVisualState\(modeKey, transitionState\)/)
   assert.match(outlet, /display: isVisible \? 'block' : 'none'/)
   assert.match(outlet, /pointerEvents: isInteractive \? 'auto' : 'none'/)
   assert.match(outlet, /aria-hidden=\{!isInteractive\}/)
