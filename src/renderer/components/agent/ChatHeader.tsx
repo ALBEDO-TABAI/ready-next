@@ -199,7 +199,7 @@ export default function ChatHeader({
               setShowHistory(false)
               setHistoryMenuPosition(null)
             }}
-            className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
+            className="flex items-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
             style={{
               gap: 6,
               padding: '6px 10px 6px 2px',
@@ -284,7 +284,7 @@ export default function ChatHeader({
                     setShowScopeSelect(false)
                     setScopeMenuPosition(null)
                   }}
-                  className={`chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-all duration-150 ${currentChannel.key === channel.key ? 'is-selected' : ''}`}
+                  className={`chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-3 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150 ${currentChannel.key === channel.key ? 'is-selected' : ''}`}
                   style={buildChatHeaderMenuItemStyle({ selected: currentChannel.key === channel.key })}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -372,7 +372,7 @@ export default function ChatHeader({
               <button
                 type="button"
                 onClick={onSessionRecallSearch}
-                className="rounded-[10px] border transition-all"
+                className="rounded-[10px] border transition-[background-color,border-color,color]"
                 style={{
                   width: 44,
                   height: 32,
@@ -419,7 +419,7 @@ export default function ChatHeader({
                 return (
                   <div
                     key={conv.conversationId}
-                    className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-start gap-3 active:scale-[0.98] transition-all duration-150 group"
+                    className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-start gap-3 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150 group"
                     style={{
                       ...buildChatHeaderMenuItemStyle(),
                       display: 'grid',
@@ -523,7 +523,7 @@ export default function ChatHeader({
                           onAttachSessionRecall(conv.conversationId)
                         }}
                         disabled={attached}
-                        className="rounded-[10px] border transition-all"
+                        className="rounded-[10px] border transition-[background-color,border-color,color,opacity]"
                         style={{
                           width: 44,
                           height: 32,
@@ -543,7 +543,7 @@ export default function ChatHeader({
                           event.stopPropagation()
                           onDeleteConversation(conv.conversationId)
                         }}
-                        className="chat-header-menu-delete-button group-hover:opacity-100 transition-all"
+                        className="chat-header-menu-delete-button group-hover:opacity-100 transition-[background-color,opacity]"
                         style={CHAT_HEADER_MENU_DELETE_BUTTON_STYLE}
                         title="删除对话"
                       >

@@ -1,5 +1,6 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
+import type { BrowserBoundsSyncMode } from '../../shared/browser-view-layout'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type {
   RSSBenchmarkResultData,
@@ -890,6 +891,7 @@ interface ElectronBrowserAPI {
     y: number
     width: number
     height: number
+    syncMode?: BrowserBoundsSyncMode
   }) => Promise<{ success: boolean }>
   hideAll: () => Promise<{ success: boolean }>
   hideActiveHost: () => Promise<{ success: boolean }>

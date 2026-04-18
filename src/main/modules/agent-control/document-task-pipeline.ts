@@ -10,6 +10,12 @@ export type DocumentWidgetPipelinePhase =
   | 'completed'
   | 'failed'
 
+export type DocumentStructuredTaskType =
+  | 'document_read_then_widget_create'
+  | 'document_read_then_widget_update'
+
+export type DocumentWidgetOperation = 'create' | 'update'
+
 export interface ActiveDocumentSnapshot {
   title: string
   path: string | null
@@ -19,7 +25,8 @@ export interface ActiveDocumentSnapshot {
 }
 
 export interface DocumentReadPlan {
-  taskType: 'document_read_then_widget_create'
+  taskType: DocumentStructuredTaskType
+  operation: DocumentWidgetOperation
   question: string
   documentPath: string | null
   deepRead: boolean
@@ -128,9 +135,10 @@ interface DocumentTaskPipelineDeps {
     plan: DocumentReadPlan
     signal: AbortSignal
   }) => Promise<DocumentWidgetDraft>
-  insertWidget: (params: {
+  writeWidget: (params: {
     draft: DocumentWidgetDraft
     snapshot: ActiveDocumentSnapshot
+    plan: DocumentReadPlan
     signal: AbortSignal
   }) => Promise<string>
   saveDocument: (params: {
@@ -167,7 +175,13 @@ export class DocumentTaskPipeline {
     return this.deps.now ? this.deps.now() : new Date()
   }
 
-  private createReadPlan(question: string, snapshot?: ActiveDocumentSnapshot): DocumentReadPlan {
+  private createReadPlan(
+    question: string,
+    snapshot?: ActiveDocumentSnapshot,
+    taskType: DocumentStructuredTaskType = 'document_read_then_widget_create',
+  ): DocumentReadPlan {
+    const operation: DocumentWidgetOperation =
+      taskType === 'document_read_then_widget_update' ? 'update' : 'create'
     const preferredWidget =
       /stats card|指标卡|统计卡/i.test(question)
         ? 'stats_card'
@@ -180,7 +194,8 @@ export class DocumentTaskPipeline {
               : 'info_card'
 
     return {
-      taskType: 'document_read_then_widget_create',
+      taskType,
+      operation,
       question,
       documentPath: snapshot?.path || null,
       deepRead: (snapshot?.charCount || 0) > 4000 || /(先阅读|看完|通读|根据全文|根据当前文档)/i.test(question),
@@ -231,7 +246,7 @@ export class DocumentTaskPipeline {
     const normalized: DocumentWidgetDraft = {
       ...draft,
       title: draft.title?.trim() || 'document_summary_card',
-      insertionMode: draft.insertionMode || 'append_end',
+      insertionMode: draft.insertionMode || (plan.operation === 'update' ? 'update_existing' : 'append_end'),
     }
 
     if (normalized.componentSpec) {
@@ -368,6 +383,7 @@ export class DocumentTaskPipeline {
     question: string
     signal: AbortSignal
     budget?: Partial<DocumentTaskPipelineBudget>
+    taskType?: DocumentStructuredTaskType
   }): Promise<DocumentTaskPipelineResult> {
     const budget: DocumentTaskPipelineBudget = {
       ...DEFAULT_BUDGET,
@@ -375,7 +391,7 @@ export class DocumentTaskPipeline {
     }
     const totalStartedAtMs = Date.now()
 
-    let plan = this.createReadPlan(params.question)
+    let plan = this.createReadPlan(params.question, undefined, params.taskType)
     let snapshot: ActiveDocumentSnapshot | undefined
     let insight: DocumentInsight | undefined
     let widgetDraft: DocumentWidgetDraft | undefined
@@ -393,7 +409,7 @@ export class DocumentTaskPipeline {
           signal: params.signal,
         }),
       })
-      plan = this.createReadPlan(params.question, snapshot)
+      plan = this.createReadPlan(params.question, snapshot, params.taskType)
       const cachedInsight = await this.deps.getCachedInsight?.({
         question: params.question,
         snapshot,
@@ -447,16 +463,17 @@ export class DocumentTaskPipeline {
         }), plan),
       })
 
-      const insertSummary = await this.runPhase({
+      const writeSummary = await this.runPhase({
         phase: 'writing_widget',
-        summary: '正在写入信息卡',
+        summary: plan.operation === 'update' ? '正在定位并更新现有信息卡' : '正在写入信息卡',
         budgetMs: budget.writeWidgetMs,
         totalStartedAtMs,
         totalBudgetMs: budget.totalMs,
         signal: params.signal,
-        fn: async () => await this.deps.insertWidget({
+        fn: async () => await this.deps.writeWidget({
           draft: widgetDraft!,
           snapshot: snapshot!,
+          plan,
           signal: params.signal,
         }),
       })
@@ -488,7 +505,7 @@ export class DocumentTaskPipeline {
         snapshot,
         insight,
         widgetDraft,
-        finalText: [insertSummary, saveSummary].filter(Boolean).join('\n'),
+        finalText: [writeSummary, saveSummary].filter(Boolean).join('\n'),
       }
     } catch (error) {
       if (!isAbortError(error)) {

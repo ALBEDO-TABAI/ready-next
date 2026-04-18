@@ -37,7 +37,14 @@ import {
   type BrowserTaskDiagnosticsSnapshot,
 } from './diagnostics-service'
 import { BrowserHostLayoutService } from './host-layout-service'
-import { type BrowserHostKind, type BrowserHostView, type BrowserRect, type PreviewTabState } from './host-types'
+import {
+  type BrowserBoundsSyncMode,
+  type BrowserHostKind,
+  type BrowserHostView,
+  type BrowserRect,
+  type BrowserViewBoundsUpdate,
+  type PreviewTabState,
+} from './host-types'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { BrowserPreviewService } from './preview-service'
@@ -218,7 +225,7 @@ export class BrowserController {
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
-      applyBounds: (view) => this.applyBounds(view),
+      applyBounds: (view) => this.applyBounds(view, 'settled'),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
@@ -248,7 +255,7 @@ export class BrowserController {
       createTab: (url) => this.createTab(url),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
-      applyBounds: (view) => this.applyBounds(view),
+      applyBounds: (view, syncMode) => this.applyBounds(view, syncMode),
       hideHost: (view) => this.hideHost(view),
       detachPreviewView: () => this.detachPreviewView(),
       restoreActiveTabHost: () => this.restoreActiveTabHost(),
@@ -380,12 +387,12 @@ export class BrowserController {
     }
   }
 
-  applyBounds(view: BrowserHostView): void {
-    this.hostLayoutService.applyBounds(view, this.viewBounds)
+  applyBounds(view: BrowserHostView, syncMode: BrowserBoundsSyncMode = 'settled'): void {
+    this.hostLayoutService.applyBounds(view, this.viewBounds, syncMode)
   }
 
   applyPreviewBounds(view: BrowserHostView): void {
-    this.hostLayoutService.applyBounds(view, this.previewBounds)
+    this.hostLayoutService.applyBounds(view, this.previewBounds, 'settled')
   }
 
   private hideActiveTabHost(): boolean {
@@ -402,7 +409,7 @@ export class BrowserController {
     const activeTab = this.tabs.get(this.activeTabId)
     if (activeTab?.view) {
       this.showHost(activeTab.view, this.viewBounds)
-      this.applyBounds(activeTab.view)
+      this.applyBounds(activeTab.view, 'settled')
     }
   }
 
@@ -1206,7 +1213,7 @@ export class BrowserController {
     return this.tabShellService.switchTab(tabId)
   }
 
-  updateViewBounds(bounds: BrowserRect): { success: boolean } {
+  updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
     return this.tabShellService.updateViewBounds(bounds)
   }
 

@@ -1,4 +1,4 @@
-import type { BrowserHostView, BrowserRect } from './host-types'
+import type { BrowserBoundsSyncMode, BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
 
 interface BrowserShellNavigationHistory {
   canGoBack(): boolean
@@ -64,7 +64,7 @@ interface BrowserTabShellHost {
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
   detachHost(view: BrowserShellView): void
   showHost(view: BrowserShellView, bounds: BrowserRect): void
-  applyBounds(view: BrowserShellView): void
+  applyBounds(view: BrowserShellView, syncMode?: BrowserBoundsSyncMode): void
   hideHost(view: BrowserShellView): void
   detachPreviewView(): void
   restoreActiveTabHost(): void
@@ -177,8 +177,9 @@ export class BrowserTabShellService {
     }
   }
 
-  updateViewBounds(bounds: BrowserRect): { success: boolean } {
-    this.host.setViewBounds(bounds)
+  updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
+    const { syncMode = 'settled', ...nextBounds } = bounds
+    this.host.setViewBounds(nextBounds)
     if (!this.host.shouldPresentHosts()) {
       return { success: true }
     }
@@ -186,7 +187,7 @@ export class BrowserTabShellService {
     if (activeTabId) {
       const activeTab = this.host.tabs.get(activeTabId)
       if (activeTab?.view) {
-        this.host.applyBounds(activeTab.view)
+        this.host.applyBounds(activeTab.view, syncMode)
       }
     }
     return { success: true }

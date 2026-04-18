@@ -90,7 +90,7 @@ export default function ActiveTabSurface({
         onDragStart?.(event)
       }}
       onDragEnd={onDragEnd}
-      className="group relative flex min-w-0 items-center rounded-[14px] border transition-all duration-200"
+      className="group relative flex min-w-0 items-center rounded-[14px] border"
       style={{
         height: 34,
         width,
@@ -108,6 +108,7 @@ export default function ActiveTabSurface({
         boxShadow: mode === 'primed' || mode === 'expanded' || mode === 'editing'
           ? 'var(--input-slot-shadow-focus)'
           : 'none',
+        transition: 'background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease',
       }}
     >
       {tabIcon}

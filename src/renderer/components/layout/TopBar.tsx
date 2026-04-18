@@ -64,7 +64,7 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
           title="用户设置"
           aria-label="用户设置"
           onClick={() => showAlert('用户菜单即将推出', '提示')}
-          className="flex h-6 w-6 items-center justify-center rounded-xl active:scale-[0.98] transition-all duration-200 ease-out hover:bg-[var(--bg-hover)]"
+          className="flex h-6 w-6 items-center justify-center rounded-xl active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out hover:bg-[var(--bg-hover)]"
           style={{
             flexShrink: 0,
             padding: 0,

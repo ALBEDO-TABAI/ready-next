@@ -1,7 +1,6 @@
 import { AnimatePresence, motion, useIsPresent, usePresenceData, useReducedMotion } from 'framer-motion'
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 
-import { useWorkspace } from '../../stores/useWorkspace'
 import FilesPanel from './FilesPanel'
 import GlobalSearchPanel from './GlobalSearchPanel'
 import SkillsCenterPanel from './SkillsCenterPanel'
@@ -13,6 +12,8 @@ type RenderableSidePanelVariant = Exclude<SidePanelVariant, 'hidden'>
 
 interface SidePanelProps {
   variant?: SidePanelVariant
+  panelWidth: number
+  contentVisible?: boolean
 }
 
 interface AnimatedPanelSlots {
@@ -125,14 +126,15 @@ function AnimatedPanelLayer({
   )
 }
 
-export default function SidePanel({ variant = 'files' }: SidePanelProps) {
-  const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
-  const sidePanelWidths = useWorkspace((state) => state.sidePanelWidths)
+export default function SidePanel({
+  variant = 'files',
+  panelWidth,
+  contentVisible = true,
+}: SidePanelProps) {
   const reduceMotion = useReducedMotion()
   const lastVisibleVariantRef = useRef<RenderableSidePanelVariant>('files')
 
-  const isVisible = variant !== 'hidden' && sidebarVisible
-  const panelWidth = sidePanelWidths.shared
+  const isVisible = variant !== 'hidden' && contentVisible
   const transitionDirection = useMemo<PanelDirection>(() => {
     if (!isVisible) return 0
     if (lastVisibleVariantRef.current === variant) return 0
@@ -200,19 +202,18 @@ export default function SidePanel({ variant = 'files' }: SidePanelProps) {
   return (
     <div
       data-liquid-shell="side-panel"
-      data-side-panel-variant={isVisible ? variant : 'hidden'}
+      data-side-panel-variant={panelWidth > 0 ? variant : 'hidden'}
       className="workbench-panel-frame flex-shrink-0 flex flex-col select-none overflow-hidden"
       style={{
-        width: isVisible ? panelWidth : 0,
-        minWidth: isVisible ? panelWidth : 0,
+        width: panelWidth,
+        minWidth: panelWidth,
         background: 'transparent',
         boxShadow: 'none',
         fontFamily: 'Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-        transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out',
       }}
     >
       <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-        <AnimatePresence initial={false} mode="sync" custom={sidebarVisible ? transitionDirection : 1}>
+        <AnimatePresence initial={false} mode="sync" custom={contentVisible ? transitionDirection : 1}>
           {isVisible ? renderAnimatedPanel(variant as RenderableSidePanelVariant) : null}
         </AnimatePresence>
       </div>

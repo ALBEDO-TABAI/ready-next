@@ -1,10 +1,17 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-17
+> 更新时间: 2026-04-18
 
 ## 当前真值摘要
 
 0. Agent 核心重构已先落地第一段可上线基础层。
+
+- `2026-04-18` 已完成一轮 `P0` 流畅性基建收口，重点不再是“补几个动画”，而是把工作台壳层、BrowserView 跟随和主题切换的基础节奏一起改正：
+  - 左侧栏和聊天栏现已改成“壳层占位 + 内容位移动画”，不再让面板组件自己持续做宽度补间；聊天栏收起后保留窄边栏形态。
+  - 面板拖拽现已按帧合并宽度更新；BrowserView bounds 新增 `transient / settled` 两段同步语义，拖拽中可合并，最终落点立即精确。
+  - Browser 模式切入切出不再在第一帧硬抓图；当前会优先接管最近稳定静帧，等原生层恢复稳定后再刷新缓存，减少中途闪露。
+  - 主题切换已改成根节点过渡标记 + 下一帧切 DOM 主题 + 再下一帧同步原生主题的两段式流程；工作台主链路关键节点和 `tiptap.css` 已开始去掉 `transition-all / transition: all`。
+  - 本轮已通过定向合同回归与 `npm run typecheck:web`，作为 P0 收口基线。
 
 - 已完成一轮针对 `CC-Source` 的 Claude Code agent 对照研究，并新增四份文档沉淀架构研究、交叉缺陷分析、目标设计与分阶段整改路线；后续 agent 整改将以这四份文档为统一底稿，而不再继续只靠零散口头判断推进。
 - agent runtime realignment phase4 已完成第一轮 domain adapter 收口：`TurnEngine` 不再继续硬编码 Browser / Document 的专属执行分支，六个域已统一接入同一套 adapter 生命周期，`task-execution-router` 也已回到只负责 route 解析。
@@ -154,12 +161,14 @@
 11. 文档“先读再制卡”链路已落下第一版结构化执行（2026-04-16）。
 
 - 新增 `document_read_then_widget_create` 结构化意图，像“先阅读当前文档，再做一个信息卡”这类请求开始从通用单轮聊天链中分流。
-- `DirectChatEngine` 现已接入 `DocumentTaskPipeline` MVP：读取活动文档快照、生成 `DocumentInsight`、再生成 `componentSpec` 并用现有文档工具确定性写回。
+- 现在由 `DocumentTaskPipelineExecutor + DocumentDomainAdapter` 接管文档制卡主线：读取活动文档快照、生成 `DocumentInsight`、再生成 `componentSpec` 并用现有文档工具确定性写回；`DirectChatEngine` 不再持有这条链路的入口和共享缓存真相。
+- 新增 `document_read_then_widget_update` 结构化意图；像“把这个信息卡改成极简风格”这类请求现在会进入结构化文档链路，而不是掉回自由工具循环。
 - renderer 文档模块新增 host-only `document.inspectActive`，主进程第一次能直接拿到当前活动文档全文，而不再只能依赖 1200 字上下文摘要或已落盘路径。
 - 两轮模型请求现在有独立阶段超时，文档深读场景不再完全受 simple request 默认 45 秒限制。
-- 同一会话内已补上 `DocumentInsight` 短期缓存：相同文档内容和相同问题重复触发时，会直接复用上次提炼结果，不再重新跑第一轮 insight 生成。
+- 同一会话内已补上 `DocumentInsight` 短期缓存：相同文档内容和相同问题重复触发时，会直接复用上次提炼结果，不再重新跑第一轮 insight 生成；共享缓存和 draft 缓存现已迁到 `DocumentTaskPipelineExecutor` 统一持有。
 - 已补上 `document-sectioning` 深读前置：长文档现在会先按章节/段落切块，再挑最相关的片段进入 insight 阶段，第一轮不再默认整篇截断后硬塞给模型。
 - 文档 pipeline 现已支持“部分成功先返回”：若卡片阶段或保存阶段失败，前面已完成的 insight / widget draft 不会丢，用户仍能先拿到可继续推进的结果。
+- 当 draft 判定为 `update_existing` 时，流水线现在会先定位目标信息卡，再走 `document.updateWidget`；如果找不到目标，会明确阻塞，不会再静默退化成追加新卡。
 - `document-engine` 深读热路径已先改成异步读取：`readDocxRawText` 与 `readDocumentEditableText` 不再同步读文件，先把 pipeline 常用读取路径的主线程阻塞风险压下一层。
 - 文档 pipeline 当前阶段文案已开始带可见指标：会显示本轮共拆多少段、使用多少段、是否命中缓存，现有任务卡不用进日志也能看到这轮深读是怎么跑的。
 - 文档深读指标现已进入正式 `executionDiagnostics.pipeline.document`，前台状态层和 TaskPanel 都能稳定读到，不再只靠自然语言摘要硬猜。
@@ -227,7 +236,7 @@
 - 新增统一 `DomainAdapter` 合同，Browser / Document / Skill / RSS / Calendar / Feishu 六个域现在都通过 `shouldHandle / prepare / dispatch / applyResult / buildProjectionPatch` 五段生命周期接入主链。
 - `TurnEngine` 已改成“先 resolve route，再选 adapter，再走 prepare/dispatch/applyResult/buildProjectionPatch”的单一路径；Browser / Document 的域内特判不再直接写在主循环里。
 - Browser adapter 已组合现有 `BrowserDomainOrchestrator`，浏览器澄清、确定性执行、tool-loop 启动、步骤推进与超限收尾继续沿用原有行为，但挂接位置已迁到 adapter 生命周期。
-- Document adapter 已组合现有 `DocumentDomainOrchestrator` 与 `DocumentToolLoopOrchestrator`；文档格式整理 / 章节改写 / widget pipeline 这类确定性捷径现已从 host shortcut 挪回 document 域内接管。
+- Document adapter 已组合现有 `DocumentDomainOrchestrator`、`DocumentToolLoopOrchestrator` 与 `DocumentTaskPipelineExecutor`；文档格式整理 / 章节改写继续走原有 orchestrator，结构化制卡与更新链路则由 document 域直接接管，host shortcut 已移除。
 - Skill / RSS / Calendar / Feishu 本轮先落薄适配：各自提供工具白名单、域内提示和任务投影模块信息，暂不额外引入新产品行为。
 - `task-execution-router` 已移除 executor 级工具过滤与提示语拼装，职责收口为 route 解析；域内工具可见性现在由 adapter 在 `prepare()` 阶段给出。
 - `host-capability-dispatcher` 现阶段只保留 `openclaw` 宿主快捷执行，document deterministic shortcut 不再继续挂在 host-only 特判里。
@@ -270,7 +279,7 @@
 - Browser orchestration 已基本收口，剩余主要是尾部 helper 清理与阶段 5 前的边界复核。
 - Browser unified header 还需要一轮实机动效与窄宽度体验微调，但结构性切换已完成。
 - skill workflow 仍缺少更细的 execution UX 打磨与更多样例 skill 迁移。
-- Agent 主控 ownership 虽已开始收口，但 `DirectChatEngine` 仍然偏大，browser/document/design 的域策略还没有完全退出主循环主体。
+- Agent 主控 ownership 虽已开始收口，但 `DirectChatEngine` 仍然偏大；document pipeline 主线已迁出，剩余主要是 browser / design / provider 组装层还要继续收口。
 - 跨会话回看第一版已能搜索和回灌，但仍缺：
   - 老会话任务摘要的完整历史回填
   - 独立搜索面板入口

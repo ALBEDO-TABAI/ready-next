@@ -87,8 +87,6 @@ function createHost(overrides?: Record<string, unknown>) {
     collectRecentPureUserInputs: () => [],
     sessionHasMediaInputs: () => false,
     sessionHasVideoInputs: () => false,
-    maybeRunDocumentTaskPlan: async () => null,
-    maybeRunDocumentWidgetPipeline: async () => null,
     skillContextOrchestrator: {
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],

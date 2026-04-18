@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
 
@@ -6,6 +7,7 @@ interface UseBrowserViewBoundsParams {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
   isActive: boolean
+  layoutPhase: BrowserHostLayoutPhase
   isVisibleAllowed?: boolean // D方案：水平滚动动画期间设为 false
   hostVisibleRef: RefObject<boolean>
   topInset: number
@@ -22,6 +24,7 @@ export function useBrowserViewBounds({
   isElectron,
   contentRef,
   isActive,
+  layoutPhase,
   isVisibleAllowed = true, // 默认为 true，保持向后兼容
   hostVisibleRef,
   topInset,
@@ -40,13 +43,15 @@ export function useBrowserViewBounds({
   const overlayLockCountRef = useRef(0)
   const visibilitySyncTokenRef = useRef(0)
   const isActiveRef = useRef(isActive)
+  const layoutPhaseRef = useRef(layoutPhase)
   const isVisibleAllowedRef = useRef(isVisibleAllowed)
   const hasErrorRef = useRef(hasError)
   isActiveRef.current = isActive
+  layoutPhaseRef.current = layoutPhase
   isVisibleAllowedRef.current = isVisibleAllowed
   hasErrorRef.current = hasError
 
-  const sendBoundsImmediate = useCallback(async (_options?: { forceExact?: boolean }) => {
+  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
     if (!isElectron || !contentRef.current) return
     const rect = contentRef.current.getBoundingClientRect()
     const x = Math.round(rect.left)
@@ -61,7 +66,8 @@ export function useBrowserViewBounds({
     if (lastBoundsKeyRef.current === boundsKey) return
 
     lastBoundsKeyRef.current = boundsKey
-    await window.electronAPI?.browser?.updateBounds({ x, y, width, height })
+    const resolvedSyncMode = options?.syncMode ?? (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
+    await window.electronAPI?.browser?.updateBounds({ x, y, width, height, syncMode: resolvedSyncMode })
   }, [contentRef, isElectron, topInset])
 
   const stopBoundsTracking = useCallback(() => {
@@ -89,10 +95,12 @@ export function useBrowserViewBounds({
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
 
     const tick = () => {
-      void sendBoundsImmediate({ forceExact: true })
-
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const isManualResizing = document.body.classList.contains('resizing')
+      void sendBoundsImmediate({
+        forceExact: true,
+        syncMode: isManualResizing ? 'transient' : undefined,
+      })
       if (isManualResizing || now - startedAt < durationMs) {
         boundsTrackingRafRef.current = requestAnimationFrame(tick)
         return
@@ -100,7 +108,7 @@ export function useBrowserViewBounds({
 
       boundsTrackingRafRef.current = null
       boundsTrackingTimeoutRef.current = window.setTimeout(() => {
-        void sendBoundsImmediate({ forceExact: true })
+        void sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
         boundsTrackingTimeoutRef.current = null
       }, 48)
     }
@@ -108,9 +116,9 @@ export function useBrowserViewBounds({
     boundsTrackingRafRef.current = requestAnimationFrame(tick)
   }, [isActive, isElectron, isVisibleAllowed, sendBoundsImmediate, stopBoundsTracking])
 
-  const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
+  const sendBounds = useCallback((options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
     if (document.body.classList.contains('resizing')) {
-      void sendBoundsImmediate({ forceExact: true })
+      void sendBoundsImmediate({ forceExact: true, syncMode: 'transient' })
       return
     }
     if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
@@ -120,7 +128,7 @@ export function useBrowserViewBounds({
     })
   }, [sendBoundsImmediate])
 
-  const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean }) => {
+  const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
     if (!isElectron) return
     const requestToken = ++visibilitySyncTokenRef.current
     if (!isActiveRef.current) return
@@ -139,7 +147,10 @@ export function useBrowserViewBounds({
       return
     }
 
-    await sendBoundsImmediate({ forceExact: options?.forceExact ?? true })
+    await sendBoundsImmediate({
+      forceExact: options?.forceExact ?? true,
+      syncMode: options?.syncMode ?? 'settled',
+    })
     if (requestToken !== visibilitySyncTokenRef.current) return
 
     const shouldStillShowBrowserView =
@@ -160,7 +171,9 @@ export function useBrowserViewBounds({
       if (document.body.classList.contains('resizing') && boundsTrackingRafRef.current === null) {
         startBoundsTracking(160)
       }
-      sendBounds()
+      sendBounds({
+        syncMode: document.body.classList.contains('resizing') ? 'transient' : undefined,
+      })
     }
 
     const observer = new ResizeObserver(handleBoundsShift)

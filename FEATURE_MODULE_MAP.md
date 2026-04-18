@@ -1,6 +1,6 @@
 # Feature Module Map
 
-> Updated: 2026-04-17
+> Updated: 2026-04-18
 
 ## 模块清单
 | 模块 | 前端入口 | 主进程模块 | 状态 |
@@ -37,7 +37,8 @@
 - Agent Control 现已新增 `ToolRuntime`：工具批执行、恢复结果包装、cleanup 回收与结构化工具结果真相都收口在这一层
 - Agent Control 的域内编排现已进入统一 adapter 生命周期：`TurnEngine` 只对接 `DomainAdapter` 合同，Browser / Document / Skill / RSS / Calendar / Feishu 各自通过 adapter 提供工具白名单、域内提示、前置接管和任务投影补丁
 - `task-execution-router` 现已只负责 route 解析，不再混带 executor 级工具过滤或提示语；这些域内策略已迁到各自 adapter 的 `prepare()` 阶段
-- `host-capability-dispatcher` 现阶段只保留 `openclaw` 宿主快捷执行，文档格式整理 / 改写这类确定性捷径已回收到 document adapter
+- `host-capability-dispatcher` 现阶段只保留 `openclaw` 宿主快捷执行，文档格式整理 / 改写 / 结构化制卡更新这类确定性链路已回收到 document 域
+- 文档“先读再制卡 / 先读再更新卡片”的共享缓存、快照读取、draft 写回与 task-plan 编排现已集中在 `DocumentTaskPipelineExecutor`，不再由 `DirectChatEngine` 直接持有
 - AI 配置已从“按 provider 写死”过渡到“工作区预设 + 当前生效配置 + 能力层解析”
 - 设置页模型入口已收敛为 `OpenAI / Anthropic / Gemini / 自定义`
 - 聊天区模型切换只展示 `showInChatSwitcher = true` 的预设
@@ -45,11 +46,12 @@
 - `src/main/modules/tools` 继续只负责各 domain tool dispatch；旧字符串结果会在 executor 层统一包装成结构化结果后再回到主链
 
 ## Agent Control 当前分层
-- `src/main/modules/claude-bridge/direct-chat.ts`：组装执行宿主、注册各 domain adapter，把运行时入口接到 `TurnEngine`
+- `src/main/modules/claude-bridge/direct-chat.ts`：组装 provider / session / run cleanup 宿主，注册各 domain adapter，把运行时入口接到 `TurnEngine`
 - `src/main/modules/agent-control/turn-engine.ts`：统一执行主链，按 route 选 adapter，再推进 prepare / dispatch / applyResult / buildProjectionPatch
 - `src/main/modules/agent-control/domain-adapter.ts`：adapter 合同、薄注册 helper、工具名前缀过滤
 - `src/main/modules/agent-control/browser-domain-adapter.ts`：浏览器域接线层，复用既有 browser orchestrator
-- `src/main/modules/agent-control/document-domain-adapter.ts`：文档域接线层，复用既有 document orchestrator 与 tool-loop orchestrator
+- `src/main/modules/agent-control/document-domain-adapter.ts`：文档域接线层，复用既有 document orchestrator、tool-loop orchestrator，并直连文档 pipeline 执行器
+- `src/main/modules/agent-control/document-task-pipeline-executor.ts`：文档制卡 / 更新链路执行器，统一承接快照读取、insight 与 widget draft 缓存、task-plan 编排和最终写回
 - `src/main/modules/agent-control/skill-domain-adapter.ts`
 - `src/main/modules/agent-control/rss-domain-adapter.ts`
 - `src/main/modules/agent-control/calendar-domain-adapter.ts`

@@ -12,11 +12,15 @@ test('browser host bounds are applied immediately during layout updates so DOM c
 
   assert.match(
     hostLayout,
-    /applyBounds\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.setHostBoundsNow\(view, bounds\)/,
+    /applyBounds\(view: BrowserHostView, bounds: BrowserRect, syncMode: BrowserBoundsSyncMode = 'settled'\): void \{/,
   )
-  assert.doesNotMatch(
+  assert.match(
     hostLayout,
-    /applyBounds\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.scheduleHostBounds\(view, bounds\)/,
+    /if \(syncMode === 'transient'\) \{[\s\S]*this\.scheduleHostBounds\(view, bounds\)/,
+  )
+  assert.match(
+    hostLayout,
+    /this\.clearScheduledBounds\(view\)[\s\S]*this\.setHostBoundsNow\(view, bounds\)/,
   )
 })
 
@@ -25,7 +29,7 @@ test('browser bounds syncing does not skip fine-grained drag updates and bypasse
 
   assert.match(
     boundsHook,
-    /if \(document\.body\.classList\.contains\('resizing'\)\) \{[\s\S]*sendBoundsImmediate\(\{ forceExact: true \}\)/,
+    /if \(document\.body\.classList\.contains\('resizing'\)\) \{[\s\S]*sendBoundsImmediate\(\{ forceExact: true, syncMode: 'transient' \}\)/,
   )
   assert.doesNotMatch(boundsHook, /widthDelta < 4/)
   assert.doesNotMatch(boundsHook, /xDelta < 4/)
@@ -34,12 +38,14 @@ test('browser bounds syncing does not skip fine-grained drag updates and bypasse
 test('high-frequency browser bounds syncing uses a fire-and-forget IPC path instead of waiting on invoke round-trips', () => {
   const preload = readWorkspaceFile('src/preload/index.ts')
   const ipcShell = readWorkspaceFile('src/main/modules/browser-engine/ipc-shell.ts')
+  const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
 
-  assert.match(preload, /updateBounds:\s*\(bounds: \{ x: number; y: number; width: number; height: number \}\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\('browser:updateBounds', bounds\)/)
-  assert.match(ipcShell, /ipcMain\.on\('browser:updateBounds', \(_, bounds: \{ x: number; y: number; width: number; height: number \}\) => \{/)
+  assert.match(preload, /updateBounds:\s*\(bounds: \{ x: number; y: number; width: number; height: number; syncMode\?: BrowserBoundsSyncMode \}\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\('browser:updateBounds', bounds\)/)
+  assert.match(electronTypes, /syncMode\?: BrowserBoundsSyncMode/)
+  assert.match(ipcShell, /ipcMain\.on\('browser:updateBounds', \(_, bounds: \{ x: number; y: number; width: number; height: number; syncMode\?: BrowserBoundsSyncMode \}\) => \{/)
 })
 
-test('browser mode can freeze the live page into a DOM snapshot during panel drags so native content does not visibly jitter under the shell', () => {
+test('browser mode prefers cached stable frames during workbench motion and refreshes them after the live host settles', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
@@ -58,6 +64,8 @@ test('browser mode can freeze the live page into a DOM snapshot during panel dra
   assert.match(browserMode, /const visibleFreezeFrame = freezeFrame \?\? cachedFreezeFrame/)
   assert.match(browserMode, /const shouldUseNeutralFreezeFrameExit = !freezeFrame && Boolean\(cachedFreezeFrame\?\.src\)/)
   assert.match(browserMode, /const \[isBrowserSurfaceReady, setIsBrowserSurfaceReady\] = useState\(false\)/)
+  assert.match(browserMode, /const stableFrameRefreshTimerRef = useRef<number \| null>\(null\)/)
+  assert.match(browserMode, /layoutPhase !== 'idle'/)
   assert.match(browserMode, /if \(tabs\.length === 0\) \{/)
   assert.match(browserMode, /const modeRootRef = useRef<HTMLDivElement>\(null\)/)
   assert.match(browserMode, /surfaceRef:\s*contentRef/)
@@ -74,12 +82,15 @@ test('browser mode can freeze the live page into a DOM snapshot during panel dra
   assert.match(browserMode, /if \(hostHasVisibleFrame\) \{[\s\S]*setIsBrowserSurfaceReady\(true\)/)
   assert.doesNotMatch(browserMode, /const BROWSER_SURFACE_READY_DELAY_MS = 16/)
   assert.match(browserMode, /return \(\) => \{[\s\S]*clearSurfaceReadyTimer\(\)[\s\S]*\}/)
-  assert.match(browserMode, /const shouldShowFreezeFrame = Boolean\(visibleFreezeFrame\?\.src\) && \(!isMotionSettled \|\| !isBrowserSurfaceReady \|\| Boolean\(freezeFrame\)\)/)
+  assert.match(browserMode, /const shouldShowFreezeFrame = Boolean\(visibleFreezeFrame\?\.src\) && \(layoutPhase !== 'idle' \|\| !isBrowserSurfaceReady \|\| Boolean\(freezeFrame\)\)/)
   assert.match(browserMode, /const targetBlur = shouldUseNeutralFreezeFrameExit \? 0 : FREEZE_FRAME_CONFIG\.blurEndPx/)
   assert.match(browserMode, /const targetScale = shouldUseNeutralFreezeFrameExit \? 1 : FREEZE_FRAME_CONFIG\.scaleEnd/)
   assert.match(browserMode, /const handleCaptureFreeze = \(\) => \{\s*if \(!isActive\) return\s*void captureStableFrame\(\)\s*\}/)
   assert.match(browserMode, /useEffect\(\(\) => \{\s*if \(!isElectron \|\| isMotionSettled\) return/)
   assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*void window\.electronAPI\?\.browser\?\.hideAll\?\.\(\)[\s\S]*\}, \[isElectron, isMotionSettled\]\)/)
+  assert.match(browserMode, /if \(!isActive \|\| layoutPhase !== 'idle' \|\| !isBrowserHostFullyVisible \|\| activeTab\?\.loading\) return/)
+  assert.doesNotMatch(browserMode, /if \(previousShouldPrepareBrowserHostRef\.current && !shouldPrepareBrowserHost\) \{[\s\S]*captureStableFrame\(\)/)
+  assert.doesNotMatch(workbenchMode, /window\.dispatchEvent\(new CustomEvent\('ready:browser-capture-freeze'\)\)/)
   assert.doesNotMatch(browserMode, /if \(!shouldRevealBrowserHost \|\| !browserRuntimeReady \|\| !activeTabId \|\| activeTab\?\.loading\) return[\s\S]*captureStableFrame\(\)/)
   assert.doesNotMatch(browserMode, /window\.setInterval\(\(\) => \{[\s\S]*captureStableFrame\(\)[\s\S]*\}, 30000\)/)
   assert.doesNotMatch(browserMode, /if \(!isMotionSettled\) \{[\s\S]*captureStableFrame\(\)\.then\(\(\) => \{/)

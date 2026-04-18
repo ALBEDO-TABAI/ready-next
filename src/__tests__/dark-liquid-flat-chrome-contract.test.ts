@@ -24,7 +24,7 @@ test('files side panel advertises its variant and stays fused with surrounding d
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(sidePanel, /data-side-panel-variant=\{isVisible \? variant : 'hidden'\}/)
+  assert.match(sidePanel, /data-side-panel-variant=\{panelWidth > 0 \? variant : 'hidden'\}/)
   assert.match(
     styles,
     /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/,

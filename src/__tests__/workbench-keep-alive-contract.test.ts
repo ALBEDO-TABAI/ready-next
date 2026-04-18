@@ -53,7 +53,7 @@ test('workbench outlet keeps all modes mounted in one horizontal strip and gates
   assert.match(workbenchMode, /if \(transitionTimerRef\.current\) \{[\s\S]*window\.clearTimeout\(transitionTimerRef\.current\)/)
   assert.match(workbenchMode, /READY_WORKBENCH_MODE_CHANGE_EVENT/)
   assert.match(workbenchMode, /window\.addEventListener\(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener\)/)
-  assert.match(workbenchMode, /<WorkbenchModeOutlet mode=\{workbenchMode\} isMotionSettled=\{isMotionSettled\} \/>/)
+  assert.match(workbenchMode, /<WorkbenchModeOutlet[\s\S]*mode=\{workbenchMode\}[\s\S]*isMotionSettled=\{isMotionSettled\}[\s\S]*browserLayoutPhase=\{browserLayoutPhase\}[\s\S]*\/>/)
   assert.match(modeTransition, /export const READY_WORKBENCH_MODE_CHANGE_EVENT = 'ready:workbench-mode-change-request'/)
   assert.match(modeTransition, /requestWorkbenchModeChange/)
   assert.match(keyboardShortcuts, /requestWorkbenchModeChange\(mode\)/)

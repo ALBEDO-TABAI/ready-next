@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import BrowserHeader from '../../components/browser/BrowserHeader'
@@ -18,6 +18,7 @@ import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { toFileUrl } from '../../utils/dragDrop'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
+import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
@@ -40,11 +41,13 @@ const FREEZE_FRAME_CONFIG = {
 interface BrowserModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
+  layoutPhase?: BrowserHostLayoutPhase
 }
 
 export default function BrowserMode({
   isActive = true,
   isMotionSettled = true,
+  layoutPhase = 'idle',
 }: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
   const {
@@ -57,6 +60,7 @@ export default function BrowserMode({
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
   const startupHostResyncTimerRef = useRef<number | null>(null)
+  const stableFrameRefreshTimerRef = useRef<number | null>(null)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -91,11 +95,11 @@ export default function BrowserMode({
   // Level 3: 就绪层 - 浏览器 surface 已准备好
   const isBrowserHostFullyVisible = shouldRevealBrowserHost && isBrowserSurfaceReady
 
-  const previousShouldPrepareBrowserHostRef = useRef(shouldPrepareBrowserHost)
   const { sendBoundsImmediate, syncBrowserVisibility } = useBrowserViewBounds({
     isElectron,
     contentRef,
     isActive: shouldPrepareBrowserHost,
+    layoutPhase,
     isVisibleAllowed: isMotionSettled, // D方案：水平滚动动画期间禁止 BrowserView 显示
     hostVisibleRef,
     topInset: 0,
@@ -248,8 +252,7 @@ export default function BrowserMode({
   })
   const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
   const shouldUseNeutralFreezeFrameExit = !freezeFrame && Boolean(cachedFreezeFrame?.src)
-  // 关键修复：在切换动画期间（!isMotionSettled）或浏览器未准备好时，显示冻结帧
-  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (!isMotionSettled || !isBrowserSurfaceReady || Boolean(freezeFrame))
+  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (layoutPhase !== 'idle' || !isBrowserSurfaceReady || Boolean(freezeFrame))
 
   // 监听离开浏览器模式前的截图请求
   useEffect(() => {
@@ -265,19 +268,6 @@ export default function BrowserMode({
       window.removeEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
     }
   }, [isActive, isElectron, captureStableFrame])
-
-  // 关键修复：在 isActive 变为 false 前（离开浏览器模式前）捕获截图
-  // 使用 useLayoutEffect 确保在 DOM 变化前执行
-  useLayoutEffect(() => {
-    if (!isElectron) return
-
-    // 只有当从 active 变为 inactive 时才捕获
-    if (previousShouldPrepareBrowserHostRef.current && !shouldPrepareBrowserHost) {
-      // 立即捕获截图，此时 BrowserView 还在显示
-      void captureStableFrame()
-    }
-    previousShouldPrepareBrowserHostRef.current = shouldPrepareBrowserHost
-  }, [captureStableFrame, isElectron, shouldPrepareBrowserHost])
 
   // Startup placeholder: 有过冻结帧时显示冻结帧，而不是 loading
   const shouldShowStartupPlaceholder =
@@ -299,6 +289,13 @@ export default function BrowserMode({
     }
   }, [])
 
+  const clearStableFrameRefreshTimer = useCallback(() => {
+    if (stableFrameRefreshTimerRef.current) {
+      window.clearTimeout(stableFrameRefreshTimerRef.current)
+      stableFrameRefreshTimerRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!isElectron || isMotionSettled) return
 
@@ -313,6 +310,20 @@ export default function BrowserMode({
       setIsBrowserSurfaceReady(false)
     }
   }, [browserRuntimeReady, clearSurfaceReadyTimer, shouldRevealBrowserHost])
+
+  useEffect(() => {
+    clearStableFrameRefreshTimer()
+    if (!isActive || layoutPhase !== 'idle' || !isBrowserHostFullyVisible || activeTab?.loading) return
+
+    stableFrameRefreshTimerRef.current = window.setTimeout(() => {
+      stableFrameRefreshTimerRef.current = null
+      void captureStableFrame()
+    }, 180)
+
+    return () => {
+      clearStableFrameRefreshTimer()
+    }
+  }, [activeTab?.loading, captureStableFrame, clearStableFrameRefreshTimer, isActive, isBrowserHostFullyVisible, layoutPhase])
 
   useEffect(() => {
     if (!isElectron) return
@@ -371,10 +382,11 @@ export default function BrowserMode({
 
   useEffect(() => {
     return () => {
+      clearStableFrameRefreshTimer()
       clearStartupHostResyncTimer()
       clearSurfaceReadyTimer()
     }
-  }, [clearStartupHostResyncTimer, clearSurfaceReadyTimer])
+  }, [clearStableFrameRefreshTimer, clearStartupHostResyncTimer, clearSurfaceReadyTimer])
 
   // 冻结帧高级淡出动画状态（模糊 + 缩放 + 透明度）
   const [freezeFrameStyle, setFreezeFrameStyle] = useState({

@@ -993,22 +993,23 @@ const CONTENT_STREAM_DURATION = 0.26
 const REDUCED_STREAM_DURATION = 0.12
 const HEADER_STREAM_OFFSET = 18
 const CONTENT_STREAM_OFFSET = 26
+export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapsed'
 
 function ChatPanelMotionLayer({
   header,
   body,
   children,
-  hideWhenExiting = false
+  motionState = 'idle'
 }: {
   header?: React.ReactNode
   body?: React.ReactNode
   children?: React.ReactNode
-  hideWhenExiting?: boolean
+  motionState: 'enter' | 'idle' | 'exit'
 }) {
   const isPresent = useIsPresent()
   const layerZIndex = isPresent ? 1 : 2
   const reduceMotion = useReducedMotion()
-  const shouldSuppressExitFrame = !isPresent && hideWhenExiting
+  const isExiting = motionState === 'exit'
 
   if (!header || !body) {
     return (
@@ -1017,7 +1018,7 @@ function ChatPanelMotionLayer({
         style={{
           zIndex: layerZIndex,
           pointerEvents: isPresent ? 'auto' : 'none',
-          opacity: shouldSuppressExitFrame ? 0 : 1
+          opacity: 1
         }}
       >
         {children}
@@ -1031,7 +1032,7 @@ function ChatPanelMotionLayer({
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
-        opacity: shouldSuppressExitFrame ? 0 : 1
+        opacity: 1
       }}
     >
       <div
@@ -1053,24 +1054,23 @@ function ChatPanelMotionLayer({
                 ? false
                 : { y: HEADER_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(12% 0 0 0)' }
             }
-            animate={{
-              y: 0,
-              opacity: 1,
-              clipPath: 'inset(0% 0 0 0)',
-              transition: reduceMotion
-                ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
-            }}
-            exit={
-              reduceMotion
-                ? undefined
-                : {
-                    y: -HEADER_STREAM_OFFSET,
-                    opacity: 0.01,
-                    clipPath: 'inset(28% 0 0 0)',
-                    transition: { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
-                  }
-            }
+            animate={isExiting
+              ? {
+                  y: -HEADER_STREAM_OFFSET,
+                  opacity: 0.01,
+                  clipPath: 'inset(28% 0 0 0)',
+                  transition: reduceMotion
+                    ? { duration: REDUCED_STREAM_DURATION }
+                    : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
+                }
+              : {
+                  y: 0,
+                  opacity: 1,
+                  clipPath: 'inset(0% 0 0 0)',
+                  transition: reduceMotion
+                    ? { duration: REDUCED_STREAM_DURATION }
+                    : { duration: HEADER_STREAM_DURATION, ease: STREAM_EASE }
+                }}
           >
             {header}
           </motion.div>
@@ -1089,24 +1089,23 @@ function ChatPanelMotionLayer({
                 ? false
                 : { y: CONTENT_STREAM_OFFSET, opacity: 0.01, clipPath: 'inset(10% 0 0 0)' }
             }
-            animate={{
-              y: 0,
-              opacity: 1,
-              clipPath: 'inset(0% 0 0 0)',
-              transition: reduceMotion
-                ? { duration: REDUCED_STREAM_DURATION }
-                : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
-            }}
-            exit={
-              reduceMotion
-                ? undefined
-                : {
-                    y: -CONTENT_STREAM_OFFSET,
-                    opacity: 0.01,
-                    clipPath: 'inset(22% 0 0 0)',
-                    transition: { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
-                  }
-            }
+            animate={isExiting
+              ? {
+                  y: -CONTENT_STREAM_OFFSET,
+                  opacity: 0.01,
+                  clipPath: 'inset(22% 0 0 0)',
+                  transition: reduceMotion
+                    ? { duration: REDUCED_STREAM_DURATION }
+                    : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
+                }
+              : {
+                  y: 0,
+                  opacity: 1,
+                  clipPath: 'inset(0% 0 0 0)',
+                  transition: reduceMotion
+                    ? { duration: REDUCED_STREAM_DURATION }
+                    : { duration: CONTENT_STREAM_DURATION, ease: STREAM_EASE }
+                }}
           >
             {body}
           </motion.div>
@@ -1220,7 +1219,7 @@ function ModelSelector() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
+        className="flex items-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
         style={{
           padding: '3px 8px',
           borderRadius: 8,
@@ -1632,7 +1631,12 @@ function formatFolderAttachmentSummary(attachment: ChatAttachment): string {
 // ChatPanel Component
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel() {
+interface ChatPanelProps {
+  shellWidth: number
+  panelState: ChatPanelState
+}
+
+export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
   const {
     agents,
     messages,
@@ -1672,7 +1676,7 @@ export default function ChatPanel() {
     setTaskSectionExpanded
   } = useAgent()
 
-  const { chatPanelVisible, chatPanelWidth, toggleChatPanel } = useWorkspace()
+  const { toggleChatPanel } = useWorkspace()
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
@@ -3206,7 +3210,7 @@ export default function ChatPanel() {
                     onClick={() => {
                       void handleDetachSessionRecall(capsule.conversationId)
                     }}
-                    className="rounded-[10px] border transition-all"
+                    className="rounded-[10px] border transition-[background-color,border-color]"
                     style={{
                       flexShrink: 0,
                       width: 28,
@@ -3277,34 +3281,28 @@ export default function ChatPanel() {
     </>
   )
 
+  const showExpandedPanel = panelState !== 'collapsed'
+  const motionState = panelState === 'collapsing' ? 'exit' : panelState === 'expanding' ? 'enter' : 'idle'
+
   return (
     <div
       data-chat-panel-root="true"
       data-liquid-shell="chat-panel"
       className="workbench-panel-frame relative flex-shrink-0 flex flex-col overflow-hidden"
       style={{
-        width: chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE,
-        minWidth: chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE,
+        width: shellWidth,
+        minWidth: shellWidth,
         background: 'transparent',
         boxShadow: 'none',
-        border: chatPanelVisible ? '1px solid transparent' : '1px solid transparent',
-        transition:
-          'width 260ms cubic-bezier(0.22, 1, 0.36, 1), min-width 260ms cubic-bezier(0.22, 1, 0.36, 1)'
+        border: '1px solid transparent',
       }}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
       <AnimatePresence initial={false} mode="wait">
-        {chatPanelVisible ? (
-          <ChatPanelMotionLayer
-            key="expanded-chat-panel"
-            header={expandedPanelHeader}
-            body={expandedPanelBody}
-            hideWhenExiting={!chatPanelVisible}
-          />
-        ) : (
-          <ChatPanelMotionLayer key="collapsed-chat-panel" hideWhenExiting={chatPanelVisible}>
+        {panelState === 'collapsed' ? (
+          <ChatPanelMotionLayer key="collapsed-chat-panel" motionState="idle">
             <CollapsedChatRail
               onTogglePanel={toggleChatPanel}
               onHistoryOpen={() => {
@@ -3317,7 +3315,14 @@ export default function ChatPanel() {
               }}
             />
           </ChatPanelMotionLayer>
-        )}
+        ) : showExpandedPanel ? (
+          <ChatPanelMotionLayer
+            key="expanded-chat-panel"
+            header={expandedPanelHeader}
+            body={expandedPanelBody}
+            motionState={motionState}
+          />
+        ) : null}
       </AnimatePresence>
 
       {activeAttachmentPreview && (

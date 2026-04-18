@@ -1,7 +1,6 @@
 import type { ToolPolicy } from './execution-tool-config'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
 import type { DocumentToolLoopState } from './document-tool-loop-orchestrator'
-import type { TurnShortcutResult } from './run-contracts'
 import type { DocumentChatSessionLike } from './document-domain-helpers'
 
 interface DocumentDomainOrchestratorLike {
@@ -72,6 +71,27 @@ interface DocumentAdapterState {
   taskTitle: string
 }
 
+interface DocumentTaskPipelineExecutorLike {
+  tryExecute: (params: {
+    route: Parameters<DomainAdapter['dispatch']>[0]['route']
+    executionIntentContext: Parameters<DomainAdapter['dispatch']>[0]['executionIntentContext']
+    hasTools: boolean
+    requestModuleToolAction?: Parameters<DomainAdapter['dispatch']>[0]['host']['requestModuleToolAction']
+    signal: Parameters<DomainAdapter['dispatch']>[0]['request']['abortSignal']
+    session: Parameters<DomainAdapter['dispatch']>[0]['session']
+    providerContext: Parameters<DomainAdapter['dispatch']>[0]['host']['providerContext']
+    emitStructuredTaskPayload: Parameters<DomainAdapter['dispatch']>[0]['emitStructuredTaskPayload']
+    scopeId?: Parameters<DomainAdapter['dispatch']>[0]['request']['sessionId']
+    parentTaskId?: Parameters<DomainAdapter['dispatch']>[0]['request']['taskId']
+    parentRunId?: Parameters<DomainAdapter['dispatch']>[0]['request']['runId']
+    toolPolicy: Parameters<DomainAdapter['dispatch']>[0]['toolPolicy']
+    domainState?: unknown
+  }) => Promise<{
+    handled: boolean
+    result?: DomainAdapterDispatchResult
+  }>
+}
+
 function resolveDocumentTaskTitle(toolPolicy: ToolPolicy): string {
   if (toolPolicy.documentWidgetTaskKind) return '文档组件操作'
   if (toolPolicy.preferFormatOnly) return '文档格式优化'
@@ -89,6 +109,7 @@ export class DocumentDomainAdapter implements DomainAdapter {
   constructor(private readonly deps: {
     orchestrator: DocumentDomainOrchestratorLike
     toolLoopOrchestrator: DocumentToolLoopOrchestratorLike
+    pipelineExecutor?: DocumentTaskPipelineExecutorLike
   }) {}
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
@@ -126,49 +147,29 @@ export class DocumentDomainAdapter implements DomainAdapter {
       },
     }
 
-    const finalizeShortcut = (shortcut: TurnShortcutResult | null): DomainAdapterDispatchResult | null => {
-      if (!shortcut) return null
-      return {
+    if (this.deps.pipelineExecutor) {
+      const pipelineExecution = await this.deps.pipelineExecutor.tryExecute({
+        route: params.route,
+        executionIntentContext: params.executionIntentContext,
+        hasTools: params.hasTools,
+        requestModuleToolAction: params.host.requestModuleToolAction,
+        signal: params.request.abortSignal,
+        session: params.session,
+        providerContext: params.host.providerContext,
+        emitStructuredTaskPayload: params.emitStructuredTaskPayload,
+        scopeId: params.request.sessionId,
+        parentTaskId: params.request.taskId,
+        parentRunId: params.request.runId,
+        toolPolicy: params.toolPolicy,
         domainState: params.domainState,
-        interactionState: shortcut.interactionState || null,
-        finalText: shortcut.finalText || null,
-        finish: {
-          status: shortcut.status || 'done',
-          success: shortcut.success ?? (shortcut.status !== 'error'),
-          cancelled: shortcut.status === 'cancelled',
-        },
+      })
+      if (pipelineExecution.handled) {
+        return {
+          ...(pipelineExecution.result || {}),
+          domainState: pipelineExecution.result?.domainState ?? params.domainState,
+        }
       }
     }
-
-    const taskPlanShortcut = await params.host.maybeRunDocumentTaskPlan({
-      scopeId: params.request.sessionId,
-      parentTaskId: params.request.taskId,
-      parentRunId: params.request.runId,
-      initialTaskExecutionRoute: params.route,
-      executionIntentContext: params.executionIntentContext,
-      hasTools: params.hasTools,
-      requestModuleToolAction: params.host.requestModuleToolAction,
-      signal: params.request.abortSignal,
-      session: params.session,
-      providerContext: params.host.providerContext,
-      emitStructuredTaskPayload: params.emitStructuredTaskPayload,
-    })
-    const taskPlanResult = finalizeShortcut(taskPlanShortcut)
-    if (taskPlanResult) return taskPlanResult
-
-    const widgetPipelineShortcut = await params.host.maybeRunDocumentWidgetPipeline({
-      initialTaskExecutionRoute: params.route,
-      executionIntentContext: params.executionIntentContext,
-      hasTools: params.hasTools,
-      requestModuleToolAction: params.host.requestModuleToolAction,
-      signal: params.request.abortSignal,
-      session: params.session,
-      providerContext: params.host.providerContext,
-      emitStructuredTaskPayload: params.emitStructuredTaskPayload,
-      setPipelineDiagnostics: () => undefined,
-    })
-    const widgetPipelineResult = finalizeShortcut(widgetPipelineShortcut)
-    if (widgetPipelineResult) return widgetPipelineResult
 
     if (params.hasTools && params.executionIntentContext.hasDocumentEnvironment && params.toolPolicy.forceDocumentTool && params.toolPolicy.preferFormatOnly) {
       const handled = await this.deps.orchestrator.tryDeterministicSectionFormatFlow({

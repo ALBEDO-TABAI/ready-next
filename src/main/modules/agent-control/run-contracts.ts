@@ -542,8 +542,6 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   collectRecentPureUserInputs: (messages: TurnEngineSessionMessage[], limit?: number) => string[]
   sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean
   sessionHasVideoInputs: (messages: TurnEngineSessionMessage[]) => boolean
-  maybeRunDocumentTaskPlan: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
-  maybeRunDocumentWidgetPipeline: (params: Record<string, unknown>) => Promise<TurnShortcutResult | null>
   domainAdapters?: DomainAdapter[]
   skillContextOrchestrator: unknown
   browserDomainOrchestrator: unknown

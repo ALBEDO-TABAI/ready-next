@@ -407,7 +407,7 @@ export default function TabRail({
                       void onTabClick(tab.id)
                     }}
                     onAuxClick={isStarterTab ? undefined : (event) => handleAuxClick(event, tab.id)}
-                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-all duration-150"
+                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-150"
                     style={{
                       gap: 6,
                       height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
@@ -533,7 +533,7 @@ export default function TabRail({
                             event.stopPropagation()
                             void onTabClose(tab.id)
                           }}
-                          className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-all hover:bg-[var(--bg-hover)] hover:opacity-100"
+                          className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded opacity-75 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] hover:opacity-100"
                           title="Close tab"
                         >
                           <X style={{ width: 10, height: 10 }} strokeWidth={2} />

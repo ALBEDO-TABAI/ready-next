@@ -215,8 +215,6 @@ test('document domain adapter still handles deterministic format and rewrite flo
         isKimiCoding: false,
         useAnthropicProtocol: false,
       },
-      maybeRunDocumentTaskPlan: async () => null,
-      maybeRunDocumentWidgetPipeline: async () => null,
     },
     session: {
       messages: [],
@@ -261,4 +259,103 @@ test('document domain adapter still handles deterministic format and rewrite flo
   assert.deepEqual(calls, ['format', 'rewrite'])
   assert.equal(formatResult.finish?.success, true)
   assert.equal(rewriteResult.finish?.success, true)
+})
+
+test('document domain adapter dispatches structured widget pipeline through the extracted executor without host shortcuts', async () => {
+  const adapter = new DocumentDomainAdapter({
+    orchestrator: {
+      async tryDeterministicSectionFormatFlow() {
+        return false
+      },
+      async tryDeterministicSectionRewriteFlow() {
+        return false
+      },
+    },
+    toolLoopOrchestrator: {
+      createState: () => ({ stepId: null }),
+      applyToolInspection: (state: unknown) => state,
+      handleNoToolCall: () => ({ state: { stepId: null } }),
+      handleIterationResult: () => ({ state: { stepId: null } }),
+      buildStructuredTaskPayload: () => ({}),
+      getBudgetHint: () => null,
+    },
+    pipelineExecutor: {
+      async tryExecute() {
+        return {
+          handled: true,
+          result: {
+            domainState: {
+              toolLoopState: { stepId: null },
+              taskTitle: '文档组件操作',
+            },
+            finalText: '已更新现有信息卡',
+            finish: {
+              status: 'done',
+              success: true,
+            },
+          },
+        }
+      },
+    },
+  } as never)
+
+  const result = await adapter.dispatch({
+    route: createRoute('document'),
+    request: {
+      agentName: 'ready',
+      sessionId: 'scope-doc',
+      runId: 'run-doc',
+      taskId: 'task-doc',
+      abortSignal: new AbortController().signal,
+      emitters: {
+        emitOutput: () => undefined,
+        emitStatus: () => undefined,
+        emitRuntimeError: () => undefined,
+        emitToolAction: () => undefined,
+      },
+    },
+    host: {
+      browserController: null,
+      sidecarManager: null,
+      runtime: {
+        getConversationScope: () => null,
+      },
+      requestModuleToolAction: async () => ({}),
+      providerContext: {
+        config: {},
+        baseUrl: 'https://example.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+      },
+    },
+    session: {
+      messages: [],
+    },
+    userText: '把这个信息卡改成极简风格',
+    pureUserInput: '把这个信息卡改成极简风格',
+    requestEnvelope: {} as never,
+    executionIntentContext: {
+      hasDocumentEnvironment: true,
+      structuredDocumentIntent: 'document_read_then_widget_update',
+      userInstructionText: '把这个信息卡改成极简风格',
+    } as never,
+    hasTools: true,
+    toolPolicy: {
+      forceDocumentTool: true,
+      preferFormatOnly: false,
+      preferSectionRewrite: false,
+      documentWidgetTaskKind: 'update',
+    } as never,
+    allowedToolNames: ['document_list_widgets', 'document_update_widget'],
+    emitStructuredTaskPayload: () => undefined,
+    domainState: {
+      toolLoopState: { stepId: null },
+      taskTitle: '文档组件操作',
+    },
+  } as never)
+
+  assert.equal(result.finish?.success, true)
+  assert.equal(result.finalText, '已更新现有信息卡')
 })

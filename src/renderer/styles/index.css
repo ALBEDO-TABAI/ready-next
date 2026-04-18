@@ -414,6 +414,33 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html[data-theme-transitioning='true'] {
+  transition:
+    background-color 220ms ease,
+    color 220ms ease,
+    border-color 220ms ease;
+}
+
+html[data-theme-transitioning='true'] body,
+html[data-theme-transitioning='true'] .ready-app-bg,
+html[data-theme-transitioning='true'] .workbench-mode-root,
+html[data-theme-transitioning='true'] .workbench-canvas-shell,
+html[data-theme-transitioning='true'] .workbench-panel-frame,
+html[data-theme-transitioning='true'] .glass-surface-panel,
+html[data-theme-transitioning='true'] .glass-surface-floating,
+html[data-theme-transitioning='true'] .browser-header-surface,
+html[data-theme-transitioning='true'] .document-editor-surface,
+html[data-theme-transitioning='true'] .document-preview-surface,
+html[data-theme-transitioning='true'] .document-path-bar {
+  transition:
+    background-color 220ms ease,
+    color 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    backdrop-filter 220ms ease,
+    -webkit-backdrop-filter 220ms ease;
+}
+
 html[data-skin='liquid-glass'],
 html[data-skin='liquid-glass'] body,
 html[data-skin='liquid-glass'] #root,

@@ -87,8 +87,6 @@ function createContractTurnRequest(userText: string) {
         collectRecentPureUserInputs: () => [],
         sessionHasMediaInputs: () => false,
         sessionHasVideoInputs: () => false,
-        maybeRunDocumentTaskPlan: async () => null,
-        maybeRunDocumentWidgetPipeline: async () => null,
         domainAdapters: [],
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,

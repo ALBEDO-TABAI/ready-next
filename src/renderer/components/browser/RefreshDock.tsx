@@ -53,7 +53,7 @@ export default function RefreshDock({
         type="button"
         onClick={onGoBack}
         disabled={!canGoBack}
-        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
+        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-[background-color,opacity] duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
         style={{ opacity: refreshDockMode === 'revealed' ? 1 : 0.001 }}
         title="后退"
       >
@@ -64,7 +64,7 @@ export default function RefreshDock({
         type="button"
         onClick={onGoForward}
         disabled={!canGoForward}
-        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-all duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
+        className="flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full transition-[background-color,opacity] duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-30"
         style={{ opacity: refreshDockMode === 'revealed' ? 1 : 0.001 }}
         title="前进"
       >

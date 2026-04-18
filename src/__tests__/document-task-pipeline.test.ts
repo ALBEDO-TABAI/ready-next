@@ -46,7 +46,7 @@ describe('DocumentTaskPipeline', () => {
           },
         },
       }),
-      insertWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
+      writeWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
       saveDocument: async () => '已另存文档：/tmp/需求文档.md',
       emitPhase: (phase) => {
         phases.push({ phase: phase.phase, status: phase.status, summary: phase.summary })
@@ -134,7 +134,7 @@ describe('DocumentTaskPipeline', () => {
           },
         },
       }),
-      insertWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
+      writeWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
       saveDocument: async () => '已另存文档：/tmp/需求文档.md',
       emitPhase: (phase) => {
         phases.push({ phase: phase.phase, status: phase.status, summary: phase.summary })
@@ -191,7 +191,7 @@ describe('DocumentTaskPipeline', () => {
       buildWidgetDraft: async () => {
         throw new Error('widget stage timeout')
       },
-      insertWidget: async () => 'unused',
+      writeWidget: async () => 'unused',
       saveDocument: async () => 'unused',
     })
 
@@ -247,7 +247,7 @@ describe('DocumentTaskPipeline', () => {
           },
         },
       }),
-      insertWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
+      writeWidget: async () => '已在文档尾部插入 widget（需求文档.md）',
       saveDocument: async () => {
         throw new Error('save failed')
       },
@@ -262,5 +262,145 @@ describe('DocumentTaskPipeline', () => {
     assert.equal(result.widgetDraft?.title, 'ready_positioning_card')
     assert.match(result.finalText || '', /卡片草稿已生成/)
     assert.match(result.finalText || '', /ready_positioning_card/)
+  })
+
+  it('routes update_existing drafts to widget update instead of append insert', async () => {
+    const writes: Array<{ kind: 'update' | 'insert'; title: string; target?: string }> = []
+    const phases: Array<{ phase: string; summary: string }> = []
+    const pipeline = new DocumentTaskPipeline({
+      now: () => new Date('2026-04-16T10:00:00.000Z'),
+      log: () => undefined,
+      loadDocumentSnapshot: async () => ({
+        title: '需求文档.md',
+        path: '/tmp/需求文档.md',
+        content: 'Ready 是一个集成式创作工作台。',
+        isDirty: true,
+        charCount: 16,
+      }),
+      buildInsight: async ({ question, snapshot }) => ({
+        insight: {
+          question,
+          documentPath: snapshot.path,
+          documentTitle: snapshot.title,
+          summary: 'Ready 是一个集成式创作工作台。',
+          keyPoints: ['统一工作台', '多模式切换'],
+          evidence: [{ quote: '集成式创作工作台' }],
+          recommendedWidget: 'info_card',
+        },
+      }),
+      buildWidgetDraft: async () => ({
+        title: 'ready_positioning_card',
+        insertionMode: 'update_existing',
+        targetWidgetTitle: 'ready_positioning_card',
+        componentSpec: {
+          component: 'info_card',
+          props: {
+            heading: 'Ready 项目定位',
+            body: '更简洁的内容',
+            tone: 'warning',
+          },
+        },
+      }),
+      writeWidget: async ({ draft }) => {
+        writes.push({
+          kind: draft.insertionMode === 'update_existing' ? 'update' : 'insert',
+          title: draft.title,
+          target: draft.targetWidgetTitle,
+        })
+        return '已更新现有信息卡（需求文档.md）'
+      },
+      insertWidget: async ({ draft }) => {
+        writes.push({ kind: 'insert', title: draft.title })
+        return '不应走到追加路径'
+      },
+      saveDocument: async () => '已保存文档：/tmp/需求文档.md',
+      emitPhase: (phase) => {
+        phases.push({ phase: phase.phase, summary: phase.summary })
+      },
+    } as any)
+
+    const result = await pipeline.run({
+      question: '把这个信息卡改成极简风格',
+      signal: new AbortController().signal,
+      taskType: 'document_read_then_widget_update',
+    })
+
+    assert.equal(result.success, true)
+    assert.deepEqual(writes, [{
+      kind: 'update',
+      title: 'ready_positioning_card',
+      target: 'ready_positioning_card',
+    }])
+    assert.ok(
+      phases.some((phase) => phase.phase === 'writing_widget' && /定位|更新现有信息卡/.test(phase.summary)),
+      'expected task progress to describe locating/updating the existing widget',
+    )
+    assert.match(result.finalText || '', /已更新现有信息卡/)
+  })
+
+  it('fails update_existing writes when the target widget cannot be found instead of appending a new card', async () => {
+    const writes: Array<{ kind: 'update' | 'insert'; title: string; target?: string }> = []
+    const pipeline = new DocumentTaskPipeline({
+      now: () => new Date('2026-04-16T10:00:00.000Z'),
+      log: () => undefined,
+      loadDocumentSnapshot: async () => ({
+        title: '需求文档.md',
+        path: '/tmp/需求文档.md',
+        content: 'Ready 是一个集成式创作工作台。',
+        isDirty: true,
+        charCount: 16,
+      }),
+      buildInsight: async ({ question, snapshot }) => ({
+        insight: {
+          question,
+          documentPath: snapshot.path,
+          documentTitle: snapshot.title,
+          summary: 'Ready 是一个集成式创作工作台。',
+          keyPoints: ['统一工作台', '多模式切换'],
+          evidence: [{ quote: '集成式创作工作台' }],
+          recommendedWidget: 'info_card',
+        },
+      }),
+      buildWidgetDraft: async () => ({
+        title: 'ready_positioning_card',
+        insertionMode: 'update_existing',
+        targetWidgetTitle: 'missing_widget',
+        componentSpec: {
+          component: 'info_card',
+          props: {
+            heading: 'Ready 项目定位',
+            body: '更简洁的内容',
+            tone: 'warning',
+          },
+        },
+      }),
+      writeWidget: async ({ draft }) => {
+        writes.push({
+          kind: draft.insertionMode === 'update_existing' ? 'update' : 'insert',
+          title: draft.title,
+          target: draft.targetWidgetTitle,
+        })
+        throw new Error('未找到可更新的信息卡：missing_widget')
+      },
+      insertWidget: async ({ draft }) => {
+        writes.push({ kind: 'insert', title: draft.title })
+        return '不应回退到追加路径'
+      },
+      saveDocument: async () => '已保存文档：/tmp/需求文档.md',
+    } as any)
+
+    const result = await pipeline.run({
+      question: '把这个信息卡改成极简风格',
+      signal: new AbortController().signal,
+    })
+
+    assert.equal(result.success, false)
+    assert.deepEqual(writes, [{
+      kind: 'update',
+      title: 'ready_positioning_card',
+      target: 'missing_widget',
+    }])
+    assert.match(result.error || '', /未找到可更新的信息卡/)
+    assert.match(result.finalText || '', /卡片草稿已生成/)
   })
 })

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 
 const storage = new Map<string, string>()
 const documentAttributes = new Map<string, string>()
+const queuedAnimationFrames: FrameRequestCallback[] = []
+const queuedTimeouts: Array<() => void> = []
 
 const localStorageMock = {
   getItem: (key: string): string | null => storage.get(key) ?? null,
@@ -36,6 +38,9 @@ const documentMock = {
       documentAttributes.set(name, value)
     },
     getAttribute: (name: string) => documentAttributes.get(name) ?? null,
+    removeAttribute: (name: string) => {
+      documentAttributes.delete(name)
+    },
   },
 }
 
@@ -56,13 +61,43 @@ if (typeof testWindow.window === 'undefined') {
 testWindow.window.matchMedia = matchMediaMock
 testWindow.window.electronAPI = undefined
 testWindow.matchMedia = matchMediaMock
+testWindow.window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+  queuedAnimationFrames.push(callback)
+  return queuedAnimationFrames.length
+}) as typeof requestAnimationFrame
+testWindow.window.cancelAnimationFrame = ((id: number) => {
+  queuedAnimationFrames.splice(id - 1, 1)
+}) as typeof cancelAnimationFrame
+testWindow.requestAnimationFrame = testWindow.window.requestAnimationFrame
+testWindow.cancelAnimationFrame = testWindow.window.cancelAnimationFrame
+testWindow.window.setTimeout = ((callback: () => void) => {
+  queuedTimeouts.push(callback)
+  return queuedTimeouts.length as unknown as ReturnType<typeof setTimeout>
+}) as typeof setTimeout
+testWindow.window.clearTimeout = ((id: ReturnType<typeof setTimeout>) => {
+  const index = Number(id) - 1
+  if (index >= 0) queuedTimeouts.splice(index, 1)
+}) as typeof clearTimeout
 
 const { useTheme } = await import('../renderer/stores/useTheme')
+
+function flushAnimationFrame() {
+  const callback = queuedAnimationFrames.shift()
+  callback?.(0)
+}
+
+function flushTimeout() {
+  const callback = queuedTimeouts.shift()
+  callback?.()
+}
 
 describe('useTheme liquid default', () => {
   beforeEach(() => {
     storage.clear()
     documentAttributes.clear()
+    queuedAnimationFrames.length = 0
+    queuedTimeouts.length = 0
+    documentAttributes.set('data-theme', 'light')
     useTheme.setState({
       theme: 'light',
       resolvedTheme: 'light',
@@ -82,5 +117,19 @@ describe('useTheme liquid default', () => {
     useTheme.getState().setSkin('liquid-glass')
     assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
     assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
+  })
+
+  it('stages theme changes through a temporary root transition flag', () => {
+    useTheme.getState().setTheme('dark')
+
+    assert.strictEqual(documentAttributes.get('data-theme-transitioning'), 'true')
+    assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+
+    flushAnimationFrame()
+    assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
+
+    flushAnimationFrame()
+    flushTimeout()
+    assert.strictEqual(documentAttributes.get('data-theme-transitioning'), undefined)
   })
 })

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 
 // Agent API
@@ -187,7 +188,7 @@ const browserAPI = {
   goBack: (tabId: string) => ipcRenderer.invoke('browser:goBack', tabId),
   goForward: (tabId: string) => ipcRenderer.invoke('browser:goForward', tabId),
   reload: (tabId: string) => ipcRenderer.invoke('browser:reload', tabId),
-  updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => {
+  updateBounds: (bounds: { x: number; y: number; width: number; height: number; syncMode?: BrowserBoundsSyncMode }) => {
     ipcRenderer.send('browser:updateBounds', bounds)
     return Promise.resolve({ success: true })
   },

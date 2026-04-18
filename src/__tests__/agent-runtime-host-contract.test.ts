@@ -99,6 +99,10 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(documentDomainOrchestrator, /export class DocumentDomainOrchestrator/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionFormatFlow\(/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionRewriteFlow\(/)
+  assert.match(
+    readWorkspaceFile('src/main/modules/agent-control/document-task-pipeline-executor.ts'),
+    /export class DocumentTaskPipelineExecutor/,
+  )
   assert.match(documentDomainHelpers, /export function parseSectionRewritePlan\(/)
   assert.match(documentDomainHelpers, /export function stripCodeFence\(/)
   assert.match(documentDomainHelpers, /export async function applyFormatSectionByPath\(/)
@@ -200,11 +204,15 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /private readonly designToolLoopOrchestrator: DesignToolLoopOrchestrator/)
   assert.match(directChat, /private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator/)
   assert.match(directChat, /private readonly documentDomainOrchestrator: DocumentDomainOrchestrator/)
+  assert.match(directChat, /private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor/)
   assert.match(directChat, /private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator/)
   assert.match(directChat, /private readonly hostCapabilityDispatcher: HostCapabilityDispatcher/)
   assert.match(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
   assert.match(directChat, /private readonly turnEngine: TurnEngine/)
   assert.match(directChat, /return await this\.turnEngine\.execute\(/)
+  assert.doesNotMatch(directChat, /private async maybeRunDocumentTaskPlanShortcut\(/)
+  assert.doesNotMatch(directChat, /private async maybeRunDocumentWidgetPipelineShortcut\(/)
+  assert.doesNotMatch(directChat, /private readonly documentInsightCache = new DocumentInsightCache\(\)/)
   assert.match(directChat, /import \{[\s\S]*buildTextToolBridgeCorrectionMessage[\s\S]*buildToolGuidance[\s\S]*\} from '\.\.\/agent-control\/execution-tool-config'/)
   assert.doesNotMatch(directChat, /import \{ buildToolVisibilityPlan \} from '\.\.\/agent-control\/execution-tool-policy'/)
   assert.doesNotMatch(directChat, /await this\.browserTaskPlanner\.buildContinuityContext\(/)
@@ -344,7 +352,7 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
     },
     {
       label: 'phase3 should move direct host tool execution into TurnEngine',
-      pattern: /await host\.executeToolCall\(toolCall\.name,\s*toolCall\.input,\s*toolContext\)/,
+      pattern: /executeTool:\s*async \(tool: string,\s*args: Record<string, unknown>\) => host\.executeToolCall\(tool,\s*args,\s*preparedToolContext\)/,
     },
     {
       label: 'phase4 should move domain-specific projection emission behind adapter buildProjectionPatch',

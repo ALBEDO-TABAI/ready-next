@@ -10,16 +10,20 @@ import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
+import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { readStorage } from '../utils/storage'
+import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 
 function ResizeHandle({
   onResize,
-  direction = 'right'
+  direction = 'right',
+  onResizeStateChange,
 }: {
   onResize: (delta: number) => void
   direction?: 'right' | 'left'
+  onResizeStateChange?: (resizing: boolean) => void
 }) {
   const onResizeRef = useRef(onResize)
   onResizeRef.current = onResize
@@ -29,21 +33,39 @@ function ResizeHandle({
     e.stopPropagation()
     const startX = e.clientX
     let lastX = startX
+    let pendingDelta = 0
+    let rafId: number | null = null
+
+    const flushPendingDelta = () => {
+      rafId = null
+      if (pendingDelta === 0) return
+      const delta = pendingDelta
+      pendingDelta = 0
+      onResizeRef.current(direction === 'right' ? delta : -delta)
+    }
 
     const handleMouseMove = (ev: MouseEvent) => {
       const delta = ev.clientX - lastX
       lastX = ev.clientX
       if (delta !== 0) {
-        onResizeRef.current(direction === 'right' ? delta : -delta)
+        pendingDelta += delta
+        if (rafId === null) {
+          rafId = window.requestAnimationFrame(flushPendingDelta)
+        }
       }
     }
 
     const handleMouseUp = () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        flushPendingDelta()
+      }
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
       document.body.classList.remove('resizing')
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      onResizeStateChange?.(false)
       window.dispatchEvent(
         new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
           detail: { resizing: false },
@@ -56,12 +78,13 @@ function ResizeHandle({
     document.body.classList.add('resizing')
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    onResizeStateChange?.(true)
     window.dispatchEvent(
       new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
         detail: { resizing: true },
       }),
     )
-  }, [direction])
+  }, [direction, onResizeStateChange])
 
   return (
     <div
@@ -73,6 +96,8 @@ function ResizeHandle({
 
 // D方案：简单的过渡状态管理
 const MODE_TRANSITION_DURATION_MS = 350
+const PANEL_CONTENT_TRANSITION_MS = 260
+const SIDEBAR_CONTENT_TRANSITION_MS = 300
 
 export default function WorkbenchMode() {
   const {
@@ -82,6 +107,7 @@ export default function WorkbenchMode() {
     sidePanelWidths,
     sidebarVisible,
     chatPanelVisible,
+    chatPanelWidth,
     sidePanelVariant,
     setSidePanelVariant,
     renamingPath,
@@ -94,20 +120,86 @@ export default function WorkbenchMode() {
   const [workspaceInitError, setWorkspaceInitError] = useState<string | null>(null)
   // D方案：仅用于控制 BrowserView 的显示时机
   const [isMotionSettled, setIsMotionSettled] = useState(true)
+  const [isPanelResizing, setIsPanelResizing] = useState(false)
+  const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
+  const [shouldRenderSidebarShell, setShouldRenderSidebarShell] = useState(sidebarVisible)
+  const [isSidebarContentVisible, setIsSidebarContentVisible] = useState(sidebarVisible)
+  const [chatPanelState, setChatPanelState] = useState<'expanding' | 'expanded' | 'collapsing' | 'collapsed'>(
+    chatPanelVisible ? 'expanded' : 'collapsed',
+  )
   const transitionTimerRef = useRef<number | null>(null)
+  const sidebarShellTimerRef = useRef<number | null>(null)
+  const sidebarEnterFrameRef = useRef<number | null>(null)
+  const chatPanelStateTimerRef = useRef<number | null>(null)
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
+  const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
 
   useEffect(() => {
     transitionTargetModeRef.current = workbenchMode
   }, [workbenchMode])
+
+  useEffect(() => {
+    if (sidebarShellTimerRef.current) {
+      window.clearTimeout(sidebarShellTimerRef.current)
+      sidebarShellTimerRef.current = null
+    }
+    if (sidebarEnterFrameRef.current !== null) {
+      window.cancelAnimationFrame(sidebarEnterFrameRef.current)
+      sidebarEnterFrameRef.current = null
+    }
+
+    if (sidebarVisible) {
+      setShouldRenderSidebarShell(true)
+      sidebarEnterFrameRef.current = window.requestAnimationFrame(() => {
+        sidebarEnterFrameRef.current = null
+        setIsSidebarContentVisible(true)
+      })
+      return
+    }
+
+    setIsSidebarContentVisible(false)
+    sidebarShellTimerRef.current = window.setTimeout(() => {
+      sidebarShellTimerRef.current = null
+      setShouldRenderSidebarShell(false)
+    }, SIDEBAR_CONTENT_TRANSITION_MS)
+  }, [sidebarVisible])
+
+  useEffect(() => {
+    if (chatPanelStateTimerRef.current) {
+      window.clearTimeout(chatPanelStateTimerRef.current)
+      chatPanelStateTimerRef.current = null
+    }
+
+    if (chatPanelVisible) {
+      setChatPanelState((previous) => {
+        if (previous === 'expanded') return previous
+        return 'expanding'
+      })
+      chatPanelStateTimerRef.current = window.setTimeout(() => {
+        chatPanelStateTimerRef.current = null
+        setChatPanelState('expanded')
+      }, PANEL_CONTENT_TRANSITION_MS)
+      return
+    }
+
+    setChatPanelState((previous) => {
+      if (previous === 'collapsed') return previous
+      return 'collapsing'
+    })
+    chatPanelStateTimerRef.current = window.setTimeout(() => {
+      chatPanelStateTimerRef.current = null
+      setChatPanelState('collapsed')
+    }, PANEL_CONTENT_TRANSITION_MS)
+  }, [chatPanelVisible])
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    setWorkbenchSplitRatio(workbenchSplitRatio + deltaPercent)
-  }, [workbenchSplitRatio, setWorkbenchSplitRatio])
+    const currentRatio = useMode.getState().workbenchSplitRatio
+    setWorkbenchSplitRatio(currentRatio + deltaPercent)
+  }, [setWorkbenchSplitRatio])
 
   const initializeWorkspace = useCallback(async () => {
     try {
@@ -170,9 +262,9 @@ export default function WorkbenchMode() {
 
   const handleSidebarResize = useCallback((delta: number) => {
     if (!['files', 'search', 'skills'].includes(sidePanelVariant)) return
-    const current = sidePanelWidths.shared
+    const current = useWorkspace.getState().sidePanelWidths.shared
     setSidePanelWidth(sidePanelVariant as 'files' | 'search' | 'skills', current + delta)
-  }, [setSidePanelWidth, sidePanelVariant, sidePanelWidths])
+  }, [setSidePanelWidth, sidePanelVariant])
 
   const handleChatResize = useCallback((delta: number) => {
     useWorkspace.setState((state) => ({
@@ -186,6 +278,10 @@ export default function WorkbenchMode() {
     if (sidePanelVariant === 'skills') return 'skills'
     return 'folder'
   }, [sidePanelVariant])
+  const sidebarShellWidth = shouldRenderSidebarShell ? sidePanelWidths.shared : 0
+  const showSidebarResizeHandle = shouldRenderSidebarShell
+  const chatShellWidth = chatPanelState === 'collapsed' ? WORKBENCH_EDGE_RAIL_SIZE : chatPanelWidth
+  const showChatResizeHandle = chatPanelState !== 'collapsed'
 
   // D方案：简化的模式切换处理
   const handleWorkbenchModeChange = useCallback(function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
@@ -203,9 +299,13 @@ export default function WorkbenchMode() {
       transitionTimerRef.current = null
     }
 
-    // 关键修复：如果当前是 browser 模式，先触发截图保存当前画面
     if (!isRedirectingDuringMotion && transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
-      window.dispatchEvent(new CustomEvent('ready:browser-capture-freeze'))
+      setBrowserLayoutMotionPhase('leaving')
+      void window.electronAPI?.browser.hideAll()
+    } else if (!isRedirectingDuringMotion && transitionTargetModeRef.current !== 'browser' && nextMode === 'browser') {
+      setBrowserLayoutMotionPhase('entering')
+    } else if (transitionTargetModeRef.current === nextMode) {
+      setBrowserLayoutMotionPhase('idle')
     }
 
     // 开始过渡：先标记为未稳定（BrowserView 等需要暂停更新）
@@ -220,6 +320,7 @@ export default function WorkbenchMode() {
     // 过渡结束后标记为稳定
     transitionTimerRef.current = window.setTimeout(() => {
       setIsMotionSettled(true)
+      setBrowserLayoutMotionPhase('idle')
       transitionTimerRef.current = null
     }, MODE_TRANSITION_DURATION_MS)
   }, [isMotionSettled, setWorkbenchMode, splitMode, workbenchMode])
@@ -229,6 +330,15 @@ export default function WorkbenchMode() {
     return () => {
       if (transitionTimerRef.current) {
         window.clearTimeout(transitionTimerRef.current)
+      }
+      if (sidebarShellTimerRef.current) {
+        window.clearTimeout(sidebarShellTimerRef.current)
+      }
+      if (sidebarEnterFrameRef.current !== null) {
+        window.cancelAnimationFrame(sidebarEnterFrameRef.current)
+      }
+      if (chatPanelStateTimerRef.current) {
+        window.clearTimeout(chatPanelStateTimerRef.current)
       }
     }
   }, [])
@@ -324,10 +434,14 @@ export default function WorkbenchMode() {
 
           <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
             <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} expanded={sidebarVisible} />
-            <SidePanel variant={sidePanelVariant} />
+            <SidePanel
+              variant={sidePanelVariant}
+              panelWidth={sidebarShellWidth}
+              contentVisible={isSidebarContentVisible}
+            />
 
-            {sidebarVisible && (
-              <ResizeHandle onResize={handleSidebarResize} direction="right" />
+            {showSidebarResizeHandle && (
+              <ResizeHandle onResize={handleSidebarResize} direction="right" onResizeStateChange={setIsPanelResizing} />
             )}
 
             {splitMode ? (
@@ -341,11 +455,19 @@ export default function WorkbenchMode() {
                     background: 'transparent',
                   }}
                 >
-                  <WorkbenchModeOutlet mode={workbenchMode} isMotionSettled={isMotionSettled} />
+                  <WorkbenchModeOutlet
+                    mode={workbenchMode}
+                    isMotionSettled={isMotionSettled}
+                    browserLayoutPhase={browserLayoutPhase}
+                  />
                 </div>
-                <ResizeHandle onResize={handleSplitResize} direction="right" />
+                <ResizeHandle onResize={handleSplitResize} direction="right" onResizeStateChange={setIsPanelResizing} />
                 <div className="flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
-                  <WorkbenchModeOutlet mode={splitMode} isMotionSettled={isMotionSettled} />
+                  <WorkbenchModeOutlet
+                    mode={splitMode}
+                    isMotionSettled={isMotionSettled}
+                    browserLayoutPhase={browserLayoutPhase}
+                  />
                 </div>
               </div>
             ) : (
@@ -356,15 +478,16 @@ export default function WorkbenchMode() {
                 <WorkbenchModeOutlet
                   mode={workbenchMode}
                   isMotionSettled={isMotionSettled}
+                  browserLayoutPhase={browserLayoutPhase}
                 />
               </div>
             )}
 
-            {chatPanelVisible && (
-              <ResizeHandle onResize={handleChatResize} direction="left" />
+            {showChatResizeHandle && (
+              <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={setIsPanelResizing} />
             )}
 
-            <ChatPanel />
+            <ChatPanel shellWidth={chatShellWidth} panelState={chatPanelState} />
           </div>
 
           <StatusBar />

@@ -1,11 +1,20 @@
 export type StructuredDocumentIntent =
   | 'document_read_then_widget_create'
+  | 'document_read_then_widget_update'
   | null
 
 const READ_DOCUMENT_PATTERNS = [
   /(先|请先|先去)?(阅读|读一下|读完|读懂|看完|通读|理解)\s*(当前|这份|这个)?(文档|文稿|文章|项目文档)/i,
   /(根据|围绕|基于|从)\s*(当前|这份|这个)?(文档|文稿|文章|项目文档)/i,
   /(看完|阅读完)\s*(当前|这份|这个)?(文档|文稿|文章|项目文档)/i,
+] as const
+
+const DOCUMENT_SOURCE_PATTERNS = [
+  /(当前|这份|这个)?(文档|文稿|文章|项目文档)/i,
+  /\.md\b/i,
+  /\.txt\b/i,
+  /\.docx?\b/i,
+  /\.pdf\b/i,
 ] as const
 
 const CREATE_WIDGET_PATTERNS = [
@@ -16,6 +25,9 @@ const CREATE_WIDGET_PATTERNS = [
 const EXISTING_WIDGET_UPDATE_PATTERNS = [
   /(更新|修改|调整|优化|重做|替换|改成|改为).*(这个|当前|已有|现有|上面).*(widget|卡片|信息卡)/i,
   /(把|将).*(这个|当前|已有|现有).*(信息卡|卡片|widget).*(改成|改为|换成)/i,
+] as const
+
+const EXISTING_WIDGET_NON_CREATE_PATTERNS = [
   /(查看|列出|看看).*(widget|卡片)/i,
   /(删除|删掉|移除).*(widget|卡片)/i,
 ] as const
@@ -25,13 +37,18 @@ export function classifyStructuredDocumentIntent(userText: string): StructuredDo
   if (!text) return null
 
   if (EXISTING_WIDGET_UPDATE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'document_read_then_widget_update'
+  }
+
+  if (EXISTING_WIDGET_NON_CREATE_PATTERNS.some((pattern) => pattern.test(text))) {
     return null
   }
 
   const wantsReadDocument = READ_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text))
   const wantsWidgetCreate = CREATE_WIDGET_PATTERNS.some((pattern) => pattern.test(text))
+  const mentionsDocumentSource = DOCUMENT_SOURCE_PATTERNS.some((pattern) => pattern.test(text))
 
-  return wantsReadDocument && wantsWidgetCreate
+  return wantsWidgetCreate && (wantsReadDocument || mentionsDocumentSource)
     ? 'document_read_then_widget_create'
     : null
 }

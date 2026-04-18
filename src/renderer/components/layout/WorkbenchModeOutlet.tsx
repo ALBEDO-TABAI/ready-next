@@ -1,9 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
+import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
 type ModeComponentProps = {
   isActive?: boolean
   isMotionSettled?: boolean
+  browserLayoutPhase?: BrowserHostLayoutPhase | null
+  layoutPhase?: BrowserHostLayoutPhase
 }
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
@@ -41,9 +44,11 @@ function ModeFallback({ mode }: { mode: WorkbenchMode }) {
 export default function WorkbenchModeOutlet({
   mode,
   isMotionSettled = true,
+  browserLayoutPhase = null,
 }: {
   mode: WorkbenchMode
   isMotionSettled?: boolean
+  browserLayoutPhase?: BrowserHostLayoutPhase | null
 }) {
   // Eager load all modes on mount
   useEffect(() => {
@@ -104,6 +109,8 @@ export default function WorkbenchModeOutlet({
                 <ModeComponent
                   isActive={isActive}
                   isMotionSettled={isActive ? isMotionSettled : false}
+                  browserLayoutPhase={modeKey === 'browser' ? browserLayoutPhase : null}
+                  layoutPhase={modeKey === 'browser' ? browserLayoutPhase ?? undefined : undefined}
                 />
               </Suspense>
             </div>
