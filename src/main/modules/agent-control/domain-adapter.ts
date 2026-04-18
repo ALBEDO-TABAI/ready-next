@@ -1,6 +1,7 @@
 import type { RequestEnvelope } from './request-envelope'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
+import { normalizeToolExecutionOutput, type ToolExecutionOutput } from './tool-result-types'
 import type {
   RunBudgetHint,
   TaskExecutionRoute,
@@ -23,6 +24,12 @@ export interface DomainAdapterProjection {
 }
 
 export interface DomainAdapterToolBatchSummary {
+  executedTools?: Array<{
+    id: string
+    name: string
+    input: Record<string, unknown>
+    result: ToolExecutionOutput
+  }>
   executedDocActionCount?: number
   executedMutatingDocActionCount?: number
   executedInspectionDocActionCount?: number
@@ -34,6 +41,36 @@ export interface DomainAdapterToolBatchSummary {
   }>
   documentToolResultsThisIteration?: string[]
   documentToolInspections?: unknown[]
+}
+
+function parseStructuredToolText(text: string): Record<string, unknown> | null {
+  const trimmed = String(text || '').trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function readToolProjectionPatch(result: ToolExecutionOutput | null | undefined): Record<string, unknown> | null {
+  if (!result) return null
+  const normalized = normalizeToolExecutionOutput(result)
+  return normalized.projectionPatch && typeof normalized.projectionPatch === 'object'
+    ? normalized.projectionPatch
+    : null
+}
+
+export function readStructuredToolResultRecord(result: ToolExecutionOutput | null | undefined): Record<string, unknown> | null {
+  if (!result) return null
+  const normalized = normalizeToolExecutionOutput(result)
+  if (normalized.data && typeof normalized.data === 'object') {
+    return normalized.data
+  }
+  return parseStructuredToolText(normalized.text)
 }
 
 export interface DomainAdapterSelectionContext {

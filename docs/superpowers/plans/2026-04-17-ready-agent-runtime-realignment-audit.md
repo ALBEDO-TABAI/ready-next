@@ -3,6 +3,8 @@
 > 审核日期: 2026-04-17
 > 审核对象: `codex/document-widget-pipeline-cache` 分支对 `docs/superpowers/plans/2026-04-17-ready-agent-runtime-realignment-roadmap.md` 七阶段计划的落地情况
 > 关联文档: `2026-04-17-ready-agent-runtime-realignment-info-card-gap-trace.md`（已有信息卡修改链路专项追踪）
+>
+> 2026-04-18 补充状态：本文保留 2026-04-17 的审核快照。与 phase5 直接相关的缺口已经在 2026-04-18 收口：`Skill / RSS / Calendar / Feishu` adapter 已补最小结构化 patch，`RunProjection` 与 renderer `scopeRunState` 的 browser / skill 文本兜底已清理；continuation 的文本控制协议仍留在 phase6，未并入本轮完成项。
 
 ## 1. 结论速览
 

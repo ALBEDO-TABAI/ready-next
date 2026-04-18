@@ -8,6 +8,7 @@ import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapt
 import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
 import { selectDomainAdapter, type DomainAdapter } from '../main/modules/agent-control/domain-adapter'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu') {
   return {
@@ -18,6 +19,40 @@ function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calen
     steps: [],
     continuation: null,
   }
+}
+
+function createAdapterApplyParams(executor: 'skill' | 'rss' | 'calendar' | 'feishu') {
+  return {
+    route: createRoute(executor),
+    request: {
+      sessionId: 'scope-1',
+      runId: 'run-1',
+      taskId: 'task-1',
+      agentName: 'ready',
+      abortSignal: new AbortController().signal,
+      emitters: {
+        emitOutput: () => undefined,
+        emitStatus: () => undefined,
+        emitRuntimeError: () => undefined,
+        emitToolAction: () => undefined,
+      },
+    } as never,
+    host: {
+      providerContext: {},
+      log: () => undefined,
+    } as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: `${executor} task`,
+    pureUserInput: `${executor} task`,
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: null,
+    emitStructuredTaskPayload: () => undefined,
+  } as const
 }
 
 test('every phase4 domain adapter implements the unified lifecycle contract', () => {
@@ -358,4 +393,162 @@ test('document domain adapter dispatches structured widget pipeline through the 
 
   assert.equal(result.finish?.success, true)
   assert.equal(result.finalText, '已更新现有信息卡')
+})
+
+test('skill domain adapter reuses the latest structured skill patch when the turn stops before a new tool result arrives', () => {
+  const adapter = new SkillDomainAdapter()
+  const prepared = adapter.prepare({
+    route: createRoute('skill'),
+    allowedToolNames: ['skill_get_state'],
+    hasTools: true,
+    userText: '继续 skill workflow',
+    executionIntentContext: {} as never,
+  } as never)
+
+  const toolBatchResult = adapter.applyResult({
+    ...createAdapterApplyParams('skill'),
+    domainState: prepared.domainState,
+    phase: 'tool_batch',
+    toolBatch: {
+      executedTools: [
+        {
+          id: 'tool-1',
+          name: 'skill_get_state',
+          input: {},
+          result: createToolExecutionOutput('请选择视频风格', {
+            projectionPatch: {
+              module: 'skill',
+              taskTitle: '技能执行 · video-copy-analyzer',
+              taskSummary: '请选择视频风格',
+              steps: [
+                {
+                  id: 'collect_input',
+                  title: 'collect_input',
+                  status: 'blocked',
+                  updatedAt: '2026-04-18T00:00:00.000Z',
+                },
+              ],
+              currentStepId: 'collect_input',
+              waitingFor: 'input',
+              resumableActions: ['continue', 'cancel'],
+              blockedReason: '请选择视频风格',
+              taskContinuation: {
+                executionId: 'exec-1',
+                stepId: 'collect_input',
+                blockerType: 'need_input',
+              },
+            },
+            interactionHint: 'awaiting_clarification',
+          }),
+        },
+      ],
+    } as never,
+  } as never)
+
+  const limitResult = adapter.applyResult({
+    ...createAdapterApplyParams('skill'),
+    domainState: toolBatchResult.domainState,
+    phase: 'budget_limit',
+  } as never)
+
+  const patch = adapter.buildProjectionPatch({
+    route: createRoute('skill'),
+    request: {} as never,
+    executionIntentContext: {} as never,
+    toolPolicy: {} as never,
+    domainState: limitResult.domainState,
+    projection: limitResult.projection || null,
+  } as never)
+
+  assert.equal(patch?.taskTitle, '技能执行 · video-copy-analyzer')
+  assert.equal(patch?.taskSummary, '请选择视频风格')
+  assert.equal(patch?.currentStepId, 'collect_input')
+  assert.equal(patch?.waitingFor, 'input')
+  assert.deepEqual(patch?.resumableActions, ['continue', 'cancel'])
+  assert.equal((patch?.taskContinuation as { executionId?: string } | undefined)?.executionId, 'exec-1')
+})
+
+test('rss, calendar, and feishu domain adapters mirror executed tools into structured task projection patches', () => {
+  const cases = [
+    {
+      adapter: new RSSDomainAdapter(),
+      executor: 'rss' as const,
+      toolName: 'rss_fetch_updates',
+      resultText: JSON.stringify({
+        module: 'rss',
+        action: 'rss.fetchUpdates',
+        message: 'rss.fetchUpdates 已排队执行。',
+      }),
+      expectedModule: 'rss',
+      expectedTitle: 'RSS 任务',
+    },
+    {
+      adapter: new CalendarDomainAdapter(),
+      executor: 'calendar' as const,
+      toolName: 'calendar_create_event',
+      resultText: JSON.stringify({
+        module: 'calendar',
+        action: 'calendar.createEvent',
+        message: 'calendar.createEvent 已排队执行。',
+      }),
+      expectedModule: 'calendar',
+      expectedTitle: '日程任务',
+    },
+    {
+      adapter: new FeishuDomainAdapter(),
+      executor: 'feishu' as const,
+      toolName: 'feishu_message_send',
+      resultText: JSON.stringify({
+        module: 'feishu',
+        action: 'feishu.messageSend',
+        message: 'Success',
+        message_id: 'om_123',
+      }),
+      expectedModule: 'feishu',
+      expectedTitle: '飞书任务',
+    },
+  ]
+
+  for (const item of cases) {
+    const prepared = item.adapter.prepare({
+      route: createRoute(item.executor),
+      allowedToolNames: [item.toolName],
+      hasTools: true,
+      userText: `${item.executor} task`,
+      executionIntentContext: {} as never,
+    } as never)
+
+    const applied = item.adapter.applyResult({
+      ...createAdapterApplyParams(item.executor),
+      domainState: prepared.domainState,
+      phase: 'tool_batch',
+      toolBatch: {
+        executedTools: [
+          {
+            id: 'tool-1',
+            name: item.toolName,
+            input: item.executor === 'calendar' ? { title: '周会' } : {},
+            result: createToolExecutionOutput(item.resultText),
+          },
+        ],
+      } as never,
+    } as never)
+
+    const patch = item.adapter.buildProjectionPatch({
+      route: createRoute(item.executor),
+      request: {} as never,
+      executionIntentContext: {} as never,
+      toolPolicy: {} as never,
+      domainState: applied.domainState,
+      projection: applied.projection || null,
+    } as never)
+
+    assert.equal(patch?.module, item.expectedModule)
+    assert.equal(patch?.taskTitle, item.expectedTitle)
+    assert.equal(patch?.currentStepId, item.toolName)
+    assert.equal(Array.isArray(patch?.steps), true)
+    assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.id, item.toolName)
+    assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.status, 'done')
+    assert.match(String(patch?.taskSummary || ''), /已排队执行|Success/)
+  }
 })

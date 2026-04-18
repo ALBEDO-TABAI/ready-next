@@ -1,7 +1,49 @@
-import { filterAllowedToolNamesByPrefixes, type DomainAdapter, type DomainAdapterPrepareResult } from './domain-adapter'
+import {
+  filterAllowedToolNamesByPrefixes,
+  readStructuredToolResultRecord,
+  type DomainAdapter,
+  type DomainAdapterPrepareResult,
+} from './domain-adapter'
+import type { ScopeRunTaskStep } from './types'
 
 const TOOL_PREFIXES = ['feishu_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走飞书执行路径。优先使用 feishu_* 工具完成任务，不要改走无关工具。'
+
+interface FeishuAdapterState {
+  steps: ScopeRunTaskStep[]
+  taskSummary: string | null
+  currentStepId: string | null
+}
+
+function createState(domainState: unknown): FeishuAdapterState {
+  if (
+    domainState
+    && typeof domainState === 'object'
+    && 'steps' in domainState
+    && Array.isArray((domainState as FeishuAdapterState).steps)
+  ) {
+    return domainState as FeishuAdapterState
+  }
+  return {
+    steps: [],
+    taskSummary: null,
+    currentStepId: null,
+  }
+}
+
+function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): string {
+  const repeats = existingSteps.filter((step) => step.id === toolName || step.id.startsWith(`${toolName}#`)).length
+  return repeats === 0 ? toolName : `${toolName}#${repeats + 1}`
+}
+
+function buildSummary(record: Record<string, unknown> | null, toolName: string, input: Record<string, unknown>): string {
+  const action = typeof record?.action === 'string' && record.action.trim() ? record.action.trim() : toolName
+  const message = typeof record?.message === 'string' && record.message.trim() ? record.message.trim() : '已执行'
+  const target = ['chat_id', 'doc_token', 'event_id', 'file_token']
+    .map((key) => input[key])
+    .find((value) => typeof value === 'string' && value.trim().length > 0)
+  return typeof target === 'string' ? `${action}（${target.trim()}）：${message}` : `${action}：${message}`
+}
 
 export class FeishuDomainAdapter implements DomainAdapter {
   readonly id = 'feishu'
@@ -14,19 +56,80 @@ export class FeishuDomainAdapter implements DomainAdapter {
     return {
       allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
-      domainState: null,
+      domainState: createState(null),
     }
   }
 
-  dispatch(): ReturnType<DomainAdapter['dispatch']> {
-    return { domainState: null }
+  dispatch(params: Parameters<DomainAdapter['dispatch']>[0]): ReturnType<DomainAdapter['dispatch']> {
+    return { domainState: params.domainState }
   }
 
-  applyResult(): ReturnType<DomainAdapter['applyResult']> {
-    return { domainState: null }
+  applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): ReturnType<DomainAdapter['applyResult']> {
+    const state = createState(params.domainState)
+    if (params.phase === 'tool_batch') {
+      let nextState = state
+      for (const executedTool of params.toolBatch?.executedTools || []) {
+        if (!executedTool.name.startsWith('feishu_')) continue
+        const record = readStructuredToolResultRecord(executedTool.result)
+        const stepId = buildStepId(nextState.steps, executedTool.name)
+        nextState = {
+          steps: [
+            ...nextState.steps,
+            {
+              id: stepId,
+              title: executedTool.name,
+              status: 'done',
+              detail: buildSummary(record, executedTool.name, executedTool.input),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          currentStepId: stepId,
+          taskSummary: buildSummary(record, executedTool.name, executedTool.input),
+        }
+      }
+      if (nextState.currentStepId) {
+        return {
+          domainState: nextState,
+          projection: {
+            phase: 'done',
+            summary: nextState.taskSummary || '飞书任务已执行',
+            waitingFor: 'none',
+            resumableActions: ['cancel'],
+            blockedReason: null,
+          },
+        }
+      }
+      return { domainState: nextState }
+    }
+
+    if (params.phase === 'budget_limit' && state.currentStepId) {
+      return {
+        domainState: state,
+        projection: {
+          phase: 'blocked',
+          summary: state.taskSummary || '飞书任务达到本轮执行上限',
+          waitingFor: 'none',
+          resumableActions: ['retry', 'cancel'],
+          blockedReason: '已达到本轮执行上限',
+        },
+      }
+    }
+
+    return { domainState: state }
   }
 
-  buildProjectionPatch(): Record<string, unknown> | null {
-    return null
+  buildProjectionPatch(params: Parameters<DomainAdapter['buildProjectionPatch']>[0]): Record<string, unknown> | null {
+    const state = createState(params.domainState)
+    if (!state.currentStepId) return null
+    return {
+      module: 'feishu',
+      taskTitle: '飞书任务',
+      taskSummary: params.projection.summary,
+      steps: state.steps,
+      currentStepId: state.currentStepId,
+      waitingFor: params.projection.waitingFor ?? 'none',
+      resumableActions: params.projection.resumableActions ?? ['cancel'],
+      blockedReason: typeof params.projection.blockedReason === 'undefined' ? null : params.projection.blockedReason,
+    }
   }
 }

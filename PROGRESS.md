@@ -251,15 +251,16 @@
   - `npx tsx --test src/__tests__/domain-adapter-contract.test.ts src/__tests__/browser-domain-orchestrator.test.ts src/__tests__/document-tool-loop-orchestrator.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/agent-runtime-host-contract.test.ts`
   - `npm run typecheck`
 
-14. Agent runtime realignment phase5 已完成第一轮真相收口（2026-04-17）。
+14. Agent runtime realignment phase5 已完成 projection 真相收口（2026-04-18）。
 
-- 工具返回的 `projectionPatch` 现在会被正式写入 turn transcript，并继续流入 `RunCoordinator / RunProjection / task-projection-sync`；结构化任务补丁已不再只是 `tool_result` 文本。
-- 主进程桥接层不再从 `tool_result` 文本里 `JSON.parse` 任务状态，结构化任务信息改为直接透传到 scope run event。
-- skill workflow 现在会直接返回结构化任务标题、步骤、当前 blocker、继续动作和最近产物；浏览器链继续保留单点 legacy 兜底，但主链已优先消费结构化补丁。
-- renderer 运行态已收缩到流式文本、工具轨迹和显示时序；任务标题、步骤、阻塞原因、继续动作改为优先使用 projection 真相，不再额外从旧文本推任务。
+- `TurnEngine` 现在会把每轮真实执行过的工具批结果透传给 domain adapter；adapter 收口任务状态时优先读 `projectionPatch`，否则才读结构化 JSON 结果，不再从正文文本猜状态。
+- `SkillDomainAdapter` 已补最小状态桥接：会缓存最近一次 skill 结构化 patch，在 `budget_limit / no_tool_call` 这类场景继续补齐摘要、阻塞原因和继续动作。`RSS / Calendar / Feishu` 三个 adapter 也已开始把真实工具轨迹镜像成稳定步骤与摘要，不再是空壳。
+- `RunProjection` 已删除 browser / skill 的 regex 兜底；`recordEvent` 现在只按显式事件字段、projection truth patch 和上一轮状态合成，legacy `[计划]`、`[阶段]`、`Execution ID` 文本不会再重建任务状态。
+- renderer `scopeRunState` 已清掉 browser / skill 旧文本解析死代码；前台继续只消费结构化任务字段，保留的 `createTaskPatchFromSkillExecutionDetail` 仅服务 `restartFromStep` 这类正式结构化入口。
 - 聊天任务卡、任务面板和暂停/继续/补充信息动作现已优先按 `taskId` 匹配 projection；暂停任务不再把标题污染成 taskId。
-- 本轮验收已通过：
-  - `npx tsx --test src/__tests__/domain-adapter-contract.test.ts src/__tests__/agent-runtime-host-contract.test.ts src/__tests__/browser-agent-runtime-contract.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/turn-engine-projection.test.ts src/__tests__/task-projection-truth-contract.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts src/__tests__/task-projection-bridge-contract.test.ts src/__tests__/task-run-control-ipc.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-card-view-model-contract.test.ts src/__tests__/skill-task-projection-contract.test.ts src/__tests__/tool-runtime-contract.test.ts`
+- `Task ID / Execution ID` 那套 continuation 文本控制协议仍留在 phase6，本轮没有把它提前算成 phase5 已完成项。
+- 本轮补充验收已通过：
+  - `npx tsx --test src/__tests__/run-projection.test.ts src/__tests__/domain-adapter-contract.test.ts src/__tests__/turn-engine-projection.test.ts src/__tests__/scope-run-state.test.ts src/__tests__/task-projection-truth-contract.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/agent-runtime-host-contract.test.ts`
   - `npm run typecheck`
 - `RunProjection` 写出的新任务摘要现在会同步持久化到 session recall metadata，不再只留在运行时内存 Map。
 - `PromptAssemblyService` 已补上独立的“跨会话回看”注入段，当前 scope 显式挂入的旧会话胶囊会在当前轮进入 prompt。

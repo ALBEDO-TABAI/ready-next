@@ -290,6 +290,7 @@ Ready 采用 Electron 三层架构：
 - 新增 `ToolRuntime` 作为工具批执行的唯一真相层：allowlist 校验、`ToolDefinition` 查询、并发分组、超时恢复、cleanup 回收与结果归一化都统一在这里完成。
 - `ExecutionLoopOrchestrator.executeToolCalls()` 现已缩成对 `ToolRuntime.executeBatch()` 的薄代理；模型请求恢复与 fallback 仍保留在 orchestrator，不和工具执行真相再混在一起。
 - 工具结果契约现已升级为 `ToolExecutionOutput`：主链统一拿到 `text / shape / data / projectionPatch / interactionHint`，旧工具返回的字符串会先被包装后再进入主链。
+- `TurnEngine` 现在会把每轮真实执行过的工具结果一并透传给 domain adapter；adapter 读取任务状态时优先用 `projectionPatch`，其次才读结构化 JSON 结果，不再从正文文本里做 regex 回推。
 - 连续恢复或运行时压力升高时，执行层会主动降为串行批，避免工具批次继续放大抖动。
 - 当本轮剩余工具预算不足时，执行层会在边界处停下，并把“预算已达上限”的状态留给主流程统一收尾。
 - 当某个工具批次已经把本轮预算打满时，主流程会在这一轮末尾直接停下，不再继续请求下一轮模型响应。
@@ -374,8 +375,10 @@ Ready 采用 Electron 三层架构：
 ### 6.6 浏览器任务结构化投影
 - 浏览器 runner 现在支持输出结构化浏览器任务 payload。
 - 主进程会把结构化字段映射进 `scopeRunEvent.taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / blockedReason / taskContinuation`。
-- renderer 侧 `scopeRunState` 已优先消费这些显式字段，减少对阶段文本解析的依赖。
+- `RunProjection` 现在只按显式事件字段、projection truth patch 和上一轮状态做合成；旧的 `[计划]`、`[阶段]`、`Execution ID` 这类文本不再用于重建任务状态。
+- renderer 侧 `scopeRunState` 已收口为消费结构化任务字段；browser / skill 的旧文本兜底已从主路径移除，只保留结构化 skill detail 给 `restartFromStep` 这类正式入口使用。
 - 浏览器 domain adapter 现在也会直接产出这套结构化 payload：tool loop 进行中、实时查询结果已核对、最终 `done` 收口都走同一条 projection 真值通道，不再只靠最早那条 planning 文案撑满整轮任务卡。
+- Skill / RSS / Calendar / Feishu 四个域现在也会沿同一条 projection 真值通道补状态：skill 复用工具自带的结构化 patch，RSS / Calendar / Feishu 则把本轮真实执行过的工具轨迹镜像成步骤与摘要，不再只剩最后一条 assistant 文本。
 
 ### 6.7 浏览器诊断入口
 - 浏览器诊断不再只有 host / preview / recent log 这类底层状态。

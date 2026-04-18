@@ -309,21 +309,6 @@ export function mergeArtifacts(
   return merged
 }
 
-const BROWSER_STEP_TITLES: Record<string, string> = {
-  resolve_target_page: '确认目标页',
-  resolve_attachment: '确认附件',
-  navigate_target: '进入目标页',
-  ensure_upload: '上传附件',
-  ensure_prompt: '填写提示词',
-  submit: '提交执行',
-  final_reconcile: '结果复核',
-  recover: '恢复页面'
-}
-
-const BROWSER_STEP_IDS_BY_TITLE = Object.fromEntries(
-  Object.entries(BROWSER_STEP_TITLES).map(([id, title]) => [title, id])
-) as Record<string, string>
-
 function toTaskStepStatus(value: string): ScopeRunTaskStepStatus {
   const normalized = String(value || '')
     .trim()
@@ -452,98 +437,11 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   }
 }
 
-function parseBrowserWorkflowTask(
-  text: string,
-  previous: ScopeRunState | null,
-  timestamp: string
-): Partial<ScopeRunState> | null {
-  const planTargetMatch = text.match(/\[计划\]\s*目标：([^\n]+)/)
-  const planOrderMatch = text.match(/\[计划\]\s*顺序：([^\n]+)/)
-  if (planTargetMatch && planOrderMatch) {
-    const stepIds = planOrderMatch[1]
-      .split('->')
-      .map((item) => item.trim())
-      .filter(Boolean)
-    return {
-      taskTitle: planTargetMatch[1].trim(),
-      taskSummary: '准备开始浏览器任务',
-      steps: stepIds.map((id) => ({
-        id,
-        title: BROWSER_STEP_TITLES[id] || id,
-        status: 'pending' as const,
-        updatedAt: timestamp
-      })),
-      currentStepId: null,
-      waitingFor: 'none',
-      resumableActions: ['cancel']
-    }
-  }
-
-  const stageMatch = text.match(/\[阶段\]\s*步骤\s*(\d+)\/(\d+)\s*([^：:]+)[：:]\s*(.+)$/)
-  if (!stageMatch) return null
-  const currentIndex = Math.max(0, Number(stageMatch[1]) - 1)
-  const title = stageMatch[3].trim()
-  const detail = stageMatch[4].trim()
-  const previousSteps = previous?.steps || []
-  const nextSteps =
-    previousSteps.length > 0
-      ? previousSteps.map((step, index) => ({
-          ...step,
-          status: (index < currentIndex
-            ? 'done'
-            : index === currentIndex
-              ? 'running'
-              : 'pending') as ScopeRunTaskStepStatus,
-          detail: index === currentIndex ? detail : step.detail || null,
-          updatedAt: index <= currentIndex ? timestamp : step.updatedAt
-        }))
-      : Array.from({ length: Number(stageMatch[2]) || currentIndex + 1 }).map((_, index) => {
-          const id =
-            index === currentIndex
-              ? BROWSER_STEP_IDS_BY_TITLE[title] || `step_${index + 1}`
-              : `step_${index + 1}`
-          return {
-            id,
-            title: index === currentIndex ? title : `步骤 ${index + 1}`,
-            status: index < currentIndex ? 'done' : index === currentIndex ? 'running' : 'pending',
-            detail: index === currentIndex ? detail : null,
-            updatedAt: timestamp
-          } satisfies ScopeRunTaskStep
-        })
-
-  return {
-    taskTitle: previous?.taskTitle || '浏览器任务',
-    taskSummary: `${title}：${detail}`,
-    steps: nextSteps,
-    currentStepId: nextSteps[currentIndex]?.id || null,
-    waitingFor: 'none',
-    resumableActions: ['cancel']
-  }
-}
-
 function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
   if (blockerType === 'need_input') return 'input'
   if (blockerType === 'need_confirmation') return 'confirmation'
   if (blockerType === 'need_agent_result') return 'agent_result'
   return blockerType ? 'background' : 'none'
-}
-
-function createArtifactFromPath(
-  pathOrLabel: string,
-  fallbackRunId: string | null,
-  timestamp: string
-): AgentArtifact {
-  return {
-    id: generateArtifactId(),
-    module: 'system',
-    kind: 'artifact',
-    label: pathOrLabel,
-    path: pathOrLabel.startsWith('/') ? pathOrLabel : null,
-    url: null,
-    mimeType: null,
-    sourceRunId: fallbackRunId,
-    createdAt: timestamp
-  }
 }
 
 interface SkillExecutionTaskInput {
@@ -619,59 +517,6 @@ export function createTaskPatchFromSkillExecutionDetail(
       sourceRunId: detail.id,
       createdAt: timestamp
     }))
-  })
-}
-
-function parseSkillExecutionTaskFromText(
-  text: string,
-  previous: ScopeRunState | null,
-  timestamp: string
-): Partial<ScopeRunState> | null {
-  if (!/Execution ID:\s*/.test(text) || !/Skill:\s*/.test(text)) return null
-  const executionId = text.match(/^Execution ID:\s*(.+)$/m)?.[1]?.trim() || ''
-  const skillId = text.match(/^Skill:\s*(.+)$/m)?.[1]?.trim() || ''
-  if (!executionId || !skillId) return null
-  const status = text.match(/^Status:\s*(.+)$/m)?.[1]?.trim() || 'running'
-  const currentStepId =
-    text.match(/^Current step:\s*(.+)$/m)?.[1]?.trim() || previous?.currentStepId || null
-  const blockerMatch = text.match(/^Blocker:\s*([^-\n]+)-\s*(.+)$/m)
-  const blockerType = blockerMatch?.[1]?.trim() || null
-  const blockerMessage = blockerMatch?.[2]?.trim() || null
-  const recentSteps = text.match(/^Recent steps:\s*(.+)$/m)?.[1]?.trim() || ''
-  const steps = recentSteps
-    ? recentSteps
-        .split(',')
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .map((part) => {
-          const match = part.match(/^(.+)\((.+)\)$/)
-          const id = (match?.[1] || part).trim()
-          return {
-            id,
-            title: id,
-            status: toTaskStepStatus((match?.[2] || 'pending').trim()),
-            updatedAt: timestamp
-          } satisfies ScopeRunTaskStep
-        })
-    : previous?.steps || []
-  const recentArtifactsLine = text.match(/^Recent artifacts:\s*(.+)$/m)?.[1]?.trim() || ''
-  const artifacts = recentArtifactsLine
-    ? recentArtifactsLine
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((item) => createArtifactFromPath(item, previous?.requestId || null, timestamp))
-    : previous?.recentArtifacts || []
-
-  return buildTaskPatchFromSkillExecutionTask({
-    executionId,
-    skillId,
-    status,
-    currentStepId,
-    blockerType,
-    blockerMessage,
-    steps,
-    artifacts
   })
 }
 

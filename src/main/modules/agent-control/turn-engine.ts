@@ -1155,6 +1155,12 @@ export class TurnEngine {
         let executedPrimaryDesignToolThisIteration = false
         let documentToolResultsThisIteration: string[] = []
         let documentToolInspectionsThisIteration: unknown[] = []
+        let executedToolsThisIteration: Array<{
+          id: string
+          name: string
+          input: Record<string, unknown>
+          result: ToolExecutionOutput
+        }> = []
 
         const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
           toolCalls: toolCallsForIteration,
@@ -1199,6 +1205,12 @@ export class TurnEngine {
             const resultText = result.text
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
+            executedToolsThisIteration.push({
+              id: executedTool.id,
+              name: executedTool.name,
+              input: executedTool.input,
+              result,
+            })
             host.log(`tool execute: ${toolName}, result=${resultText.slice(0, 140)}`)
             const documentToolInspection = inspectDocumentToolCall(toolName, resultText)
             if (documentToolInspection.isDocumentTool) {
@@ -1379,6 +1391,7 @@ export class TurnEngine {
             responseText: response.text,
             toolTransport: response.toolTransport,
             toolBatch: {
+              executedTools: executedToolsThisIteration,
               executedDocActionCount,
               executedMutatingDocActionCount,
               executedInspectionDocActionCount,

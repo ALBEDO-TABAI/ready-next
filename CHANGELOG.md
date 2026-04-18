@@ -4,6 +4,12 @@
 
 ### 新增
 
+#### Agent runtime phase5 projection 真相收口
+- `TurnEngine` 现在会把每轮真实执行过的工具结果透传给 domain adapter；adapter 优先读取 `projectionPatch`，否则才消费结构化 JSON 结果，不再从正文文本反推任务状态
+- `SkillDomainAdapter` 已接住 skill 工具自带的结构化 patch；`RSS / Calendar / Feishu` 三个 adapter 也会把已执行工具轨迹转成稳定步骤与摘要
+- `RunProjection` 已删除 browser / skill 文本 regex 兜底，renderer `scopeRunState` 也同步清掉 browser / skill 旧文本解析主路径；任务卡与任务面板继续统一以 projection truth 为准
+- continuation 的 `Task ID / Execution ID` 文本控制协议仍留在 phase6，本次未改
+
 #### Agent 运行时恢复与任务分层骨架
 - Agent 主循环新增运行时恢复链路：模型请求现在会先走错误分类，再决定退避重试、上下文压缩重试或继续进入原有通道降级
 - 保留原有 `execution-fallback-policy` 处理协议/通道不兼容，同时把运行时恢复拆成独立组件，避免两类问题继续混用

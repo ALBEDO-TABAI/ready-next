@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapter'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
@@ -493,6 +494,68 @@ test('TurnEngine promotes tool projection patches into structured transcript tru
   assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '技能执行 · video-copy-analyzer')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'input')
   assert.equal(toolResults.some((event) => /"module":"skill"/.test(event.chunk || '')), true)
+})
+
+test('TurnEngine lets rss domain adapters turn executed tool batches into structured projection truth', async () => {
+  const engine = new TurnEngine()
+  let toolLoopCalls = 0
+  const { request } = createRequest({
+    userText: '刷新 RSS 最新内容',
+    intentClassification: createIntent({
+      primaryDomain: 'rss',
+      mentionedDomains: ['rss'],
+      actionSignals: ['rss-action'],
+      confidence: 'high',
+    }),
+    host: {
+      domainAdapters: [new RSSDomainAdapter()],
+      requestToolLoopResponse: async () => {
+        toolLoopCalls += 1
+        if (toolLoopCalls === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'rss_fetch_updates', input: {} }],
+            stopReason: 'tool_use',
+          }
+        }
+        return {
+          text: 'RSS 已刷新',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [
+          {
+            id: 'tool-1',
+            name: 'rss_fetch_updates',
+            input: {},
+            result: {
+              text: JSON.stringify({
+                module: 'rss',
+                action: 'rss.fetchUpdates',
+                message: 'rss.fetchUpdates 已排队执行。',
+              }),
+              shape: 'text',
+              data: null,
+              projectionPatch: null,
+              interactionHint: null,
+            },
+            recoveryHistory: [],
+          },
+        ],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.projectionTruth?.projectionPatch?.module, 'rss')
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, 'RSS 任务')
+  assert.equal(result.projectionTruth?.projectionPatch?.currentStepId, 'rss_fetch_updates')
+  assert.equal(Array.isArray(result.projectionTruth?.projectionPatch?.steps), true)
 })
 
 test('TurnEngine surfaces budget-limit text and diagnostics when tool-call budget is exhausted', async () => {
