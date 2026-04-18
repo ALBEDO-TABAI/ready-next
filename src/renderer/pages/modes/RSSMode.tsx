@@ -689,7 +689,7 @@ export default function RSSMode({
             onClick={() => {
               void loadRSSData()
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[13px] hover:brightness-95 transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[13px] hover:brightness-95 transition-[filter]"
           >
             <RefreshCw className="w-4 h-4" />
             重试
@@ -713,7 +713,7 @@ export default function RSSMode({
         >
           {/* Feed list (shrinks when preview is open) */}
           <div
-            className={`rss-feed-sheet content-surface-panel flex-shrink-0 overflow-hidden flex flex-col transition-all duration-300 relative ${
+            className={`rss-feed-sheet content-surface-panel flex-shrink-0 overflow-hidden flex flex-col relative ${
               selectedItem ? 'border-r border-[var(--border-default)]' : 'flex-1'
             }`}
             style={{

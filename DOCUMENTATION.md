@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-04-17
+> 更新时间: 2026-04-18
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -526,6 +526,9 @@ Ready 采用 Electron 三层架构：
 - 需要展示纯 DOM 覆盖层时，先 `hideAll()`
 - 恢复浏览内容时，再 `showActive()` 并更新 bounds
 - 工作台切到非 browser 可见态时，优先由壳层统一调用 `browser.hideAll()`，不要只隐藏 active tab host；否则 RSS preview / popup 这类原生子视图可能残留在前台
+- `useBrowserViewBounds` 现已统一为“一帧最多一次”的 renderer 调度路径：容器 `ResizeObserver`、共享窗口 resize hub、面板拖拽事件都只进入同一个调度器，不再并行叠加多条 tracking 链
+- Browser bounds 去重键必须同时包含几何值和 `syncMode`；最后那次 `settled` 落点不能因为坐标没变就被前一帧 `transient` 吞掉
+- 面板拖拽期间只发送逐帧 `transient` 更新；拖拽结束后必须补一条强制 `settled` 更新，确保主进程拿到最终精确落点
 - Browser 运行态初始化要尽量做到“一次准备，多次复用”：已有 tab 可在后台预热恢复，但不要因为后台预热强行新建空白页
 - 浏览器冷启动若后端当前没有 tab，应先展示空状态；首个 tab 只在用户或任务主动触发时创建，不要把默认外部页当成启动必经步骤
 - 空状态必须沿用真实地址栏交互：输入网址后直接走同一套导航逻辑创建首个 tab，而不是挂一套只会显示 UI、不会真正跳转的占位 header
@@ -533,8 +536,11 @@ Ready 采用 Electron 三层架构：
 
 ### 9.3 Workbench Keep-Alive 约定
 - `src/renderer/components/layout/WorkbenchModeOutlet.tsx` 负责 browser / document / rss / calendar 四个主模式的常驻挂载
-- 模式切换仍保持四模块常驻，不回退到“切一次挂一次”；但共享壳层现在会额外编排左右切页，让当前页和离场页短时并存后再收口
+- 模式切换仍保持四模块常驻，不回退到“切一次挂一次”；但共享壳层现已改为分层场景，只让 `current / entering / leaving` 三个槽位短时参与过场，其余模式统一停画但不丢状态
 - 左右切页只发生在共享壳层，不要把整区重动画重新下放到各模块内部
+- 非参与过场的模式必须同时退出布局与交互：统一 `display: none`、`pointer-events: none`、`aria-hidden`
+- 模式切换不再依赖 `contentVisibility + visibility + adjacent prepare` 这一套预热逻辑；方向仍固定按 `browser -> document -> rss -> calendar` 决定
+- 模式槽位需要稳定 memo 边界，避免父壳层切换时把未参与过场的重模块一起重新渲染
 - 动效语言固定为三类：
   - document / rss / calendar 之间：整块水平切换，旧页完整横向离场，新页从反侧完整进入
   - browser -> 非 browser：browser 保持原位不动，目标模块横向进入并覆盖它
@@ -545,6 +551,8 @@ Ready 采用 Electron 三层架构：
 - RSS：隐藏时暂停 analysis polling / auto refresh，可见时再做一次数据同步
 - Calendar：重量级 Schedule-X 初始化延后到首次激活，隐藏时不继续做 UI 同步
 - RSS preview：模式隐藏时必须关闭 preview host，重新显示时再按当前 item 恢复
+- RSS preview bounds 现已与主 BrowserView 共用同一收口思路：每帧至多一条更新，布局稳定后补一条最终确认，不再自带长时间 RAF 追踪循环
+- 工作台级窗口 resize 订阅已统一走 `src/renderer/modules/workbench/windowResize.ts`；像 `ChatHeader`、`FilesPanel` 这类只需要重新定位浮层的组件，不再各自挂原生 `window.resize`
 - 顶栏四模块切换器使用稳定最小宽度，避免 active/hover 状态引发布局抖动
 - 切换方向按 `browser -> document -> rss -> calendar` 的顺序决定：向右切时旧页向左出、新页从右入；向左切时严格镜像
 - browser/rss/calendar 的内部 header rail 需要和 document 模式共享左边界；`workbench-canvas-shell` 负责统一圆角矩形轮廓，子模块不要再各自切半圆角壳
@@ -585,5 +593,9 @@ npm run verify
 - `rss-analysis-manager.test.ts`
 - `stores.test.ts`
 - `tool-bridge.test.ts`
+- `browser-resize-stability-contract.test.ts`
+- `browser-host-visibility-contract.test.ts`
 - `workbench-keep-alive-contract.test.ts`
+- `workbench-window-resize-contract.test.ts`
+- `workbench-hot-path-transition-contract.test.ts`
 - `workbench-shell-alignment-contract.test.ts`

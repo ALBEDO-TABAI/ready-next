@@ -55,7 +55,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(boundsHook, /const y = Math\.round\(rect\.top - topInset\)/)
   assert.match(boundsHook, /const height = Math\.round\(rect\.height \+ topInset\)/)
   assert.match(boundsHook, /const exactWidth = Math\.round\(rect\.width\)/)
-  assert.match(boundsHook, /if \(!isActive\) return/)
+  assert.match(boundsHook, /if \(!isActive\) \{[\s\S]*clearFrameSync\(\)[\s\S]*clearSettleSyncTimeout\(\)[\s\S]*return/)
   assert.match(boundsHook, /const visibilitySyncTokenRef = useRef\(0\)/)
   assert.match(boundsHook, /const resolvedSyncMode = options\?\.syncMode \?\? \(layoutPhaseRef\.current === 'idle' \? 'settled' : 'transient'\)/)
   assert.match(boundsHook, /const shouldShowBrowserView =\s*!hasError(?:Ref\.current)? && overlayLockCountRef\.current === 0/)

@@ -164,7 +164,7 @@ export default function DocumentTabRail({
                       onClick={(event) => onTabClick(tab.id, event)}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-all duration-150"
+                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
                       style={{
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
@@ -213,7 +213,7 @@ export default function DocumentTabRail({
                               event.stopPropagation()
                               onTabClose(tab.id, event)
                             }}
-                            className="absolute right-[8px] top-1/2 flex items-center justify-center rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
+                            className="absolute right-[8px] top-1/2 flex items-center justify-center rounded opacity-70 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-[opacity,background-color] cursor-pointer"
                             style={{ width: 18, height: 18, transform: 'translateY(-50%)' }}
                             title="Close"
                           >

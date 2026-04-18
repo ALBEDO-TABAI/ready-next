@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo } from 'react'
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
@@ -8,6 +8,27 @@ type ModeComponentProps = {
   browserLayoutPhase?: BrowserHostLayoutPhase | null
   layoutPhase?: BrowserHostLayoutPhase
 }
+
+type ModeVisualState = 'current' | 'entering' | 'leaving' | 'hidden'
+type TransitionStage = 'settled' | 'preparing' | 'animating'
+
+interface ModeTransitionState {
+  activeMode: WorkbenchMode
+  leavingMode: WorkbenchMode | null
+  direction: -1 | 0 | 1
+  stage: TransitionStage
+}
+
+interface ModeSceneProps {
+  modeKey: WorkbenchMode
+  visualState: ModeVisualState
+  transitionStage: TransitionStage
+  direction: -1 | 0 | 1
+  isMotionSettled: boolean
+  browserLayoutPhase: BrowserHostLayoutPhase | null
+}
+
+const MODE_SCENE_TRANSITION = 'transform 0.35s cubic-bezier(0.24, 1, 0.36, 1), opacity 0.22s ease-out'
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
 const loadDocumentMode = () => import('../../pages/modes/DocumentMode')
@@ -27,9 +48,63 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
 }
 
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
-const ALWAYS_PREPARED_WORKBENCH_MODES: WorkbenchMode[] = ['rss']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
 let hasPreloadedWorkbenchModes = false
+
+function resolveModeDirection(from: WorkbenchMode, to: WorkbenchMode): -1 | 0 | 1 {
+  const fromIndex = ALL_WORKBENCH_MODES.indexOf(from)
+  const toIndex = ALL_WORKBENCH_MODES.indexOf(to)
+  if (fromIndex === toIndex) return 0
+  return toIndex > fromIndex ? 1 : -1
+}
+
+function resolveModeVisualState(
+  modeKey: WorkbenchMode,
+  transitionState: ModeTransitionState,
+  isMotionSettled: boolean,
+): ModeVisualState {
+  if (modeKey === transitionState.activeMode) {
+    if (transitionState.leavingMode && !isMotionSettled) {
+      return 'entering'
+    }
+    return 'current'
+  }
+
+  if (modeKey === transitionState.leavingMode && !isMotionSettled) {
+    return 'leaving'
+  }
+
+  return 'hidden'
+}
+
+function resolveSceneTransform(
+  visualState: ModeVisualState,
+  transitionStage: TransitionStage,
+  direction: -1 | 0 | 1,
+): string {
+  if (visualState === 'hidden' || visualState === 'current') {
+    return 'translate3d(0, 0, 0)'
+  }
+
+  if (visualState === 'entering') {
+    if (transitionStage === 'preparing') {
+      return direction > 0 ? 'translate3d(22%, 0, 0)' : 'translate3d(-22%, 0, 0)'
+    }
+    return 'translate3d(0, 0, 0)'
+  }
+
+  if (transitionStage === 'preparing') {
+    return 'translate3d(0, 0, 0)'
+  }
+
+  return direction > 0 ? 'translate3d(-16%, 0, 0)' : 'translate3d(16%, 0, 0)'
+}
+
+function resolveSceneOpacity(visualState: ModeVisualState, transitionStage: TransitionStage): number {
+  if (visualState === 'hidden') return 0
+  if (visualState === 'leaving' && transitionStage === 'animating') return 0.82
+  return 1
+}
 
 function ModeFallback({ mode }: { mode: WorkbenchMode }) {
   return (
@@ -41,6 +116,59 @@ function ModeFallback({ mode }: { mode: WorkbenchMode }) {
   )
 }
 
+function areModeScenePropsEqual(previous: ModeSceneProps, next: ModeSceneProps) {
+  if (previous.modeKey !== next.modeKey) return false
+  if (previous.visualState === 'hidden' && next.visualState === 'hidden') return true
+
+  return (
+    previous.visualState === next.visualState
+    && previous.transitionStage === next.transitionStage
+    && previous.direction === next.direction
+    && previous.isMotionSettled === next.isMotionSettled
+    && previous.browserLayoutPhase === next.browserLayoutPhase
+  )
+}
+
+const ModeScene = memo(function ModeScene({
+  modeKey,
+  visualState,
+  transitionStage,
+  direction,
+  isMotionSettled,
+  browserLayoutPhase,
+}: ModeSceneProps) {
+  const ModeComponent = MODE_COMPONENTS[modeKey]
+  const isVisible = visualState !== 'hidden'
+  const isInteractive = visualState === 'current' || visualState === 'entering'
+  const isTransitioning = transitionStage !== 'settled' && visualState !== 'hidden'
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={{
+        display: isVisible ? 'block' : 'none',
+        pointerEvents: isInteractive ? 'auto' : 'none',
+        transform: resolveSceneTransform(visualState, transitionStage, direction),
+        opacity: resolveSceneOpacity(visualState, transitionStage),
+        transition: isTransitioning ? MODE_SCENE_TRANSITION : 'none',
+        willChange: isTransitioning ? 'transform, opacity' : 'auto',
+      }}
+      data-workbench-mode-panel={modeKey}
+      data-mode-visual-state={visualState}
+      aria-hidden={!isInteractive}
+    >
+      <Suspense fallback={<ModeFallback mode={modeKey} />}>
+        <ModeComponent
+          isActive={visualState === 'current' || visualState === 'entering'}
+          isMotionSettled={visualState === 'current' ? isMotionSettled : false}
+          browserLayoutPhase={modeKey === 'browser' ? browserLayoutPhase : null}
+          layoutPhase={modeKey === 'browser' ? browserLayoutPhase ?? undefined : undefined}
+        />
+      </Suspense>
+    </div>
+  )
+}, areModeScenePropsEqual)
+
 export default function WorkbenchModeOutlet({
   mode,
   isMotionSettled = true,
@@ -50,7 +178,15 @@ export default function WorkbenchModeOutlet({
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
 }) {
-  // Eager load all modes on mount
+  const previousModeRef = useRef(mode)
+  const prepareAnimationFrameRef = useRef<number | null>(null)
+  const [transitionState, setTransitionState] = useState<ModeTransitionState>({
+    activeMode: mode,
+    leavingMode: null,
+    direction: 0,
+    stage: 'settled',
+  })
+
   useEffect(() => {
     if (hasPreloadedWorkbenchModes) return
     hasPreloadedWorkbenchModes = true
@@ -59,9 +195,61 @@ export default function WorkbenchModeOutlet({
     })
   }, [])
 
-  const activeIndex = useMemo(() => {
-    return ALL_WORKBENCH_MODES.indexOf(mode)
+  useEffect(() => {
+    if (mode === previousModeRef.current) return
+
+    setTransitionState({
+      activeMode: mode,
+      leavingMode: previousModeRef.current,
+      direction: resolveModeDirection(previousModeRef.current, mode),
+      stage: 'preparing',
+    })
+    previousModeRef.current = mode
   }, [mode])
+
+  useEffect(() => {
+    if (prepareAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(prepareAnimationFrameRef.current)
+      prepareAnimationFrameRef.current = null
+    }
+
+    if (transitionState.stage !== 'preparing') return
+
+    prepareAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      prepareAnimationFrameRef.current = null
+      setTransitionState((previous) => {
+        if (previous.stage !== 'preparing') return previous
+        return {
+          ...previous,
+          stage: 'animating',
+        }
+      })
+    })
+
+    return () => {
+      if (prepareAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(prepareAnimationFrameRef.current)
+        prepareAnimationFrameRef.current = null
+      }
+    }
+  }, [transitionState.stage])
+
+  useEffect(() => {
+    if (!isMotionSettled) return
+
+    setTransitionState((previous) => {
+      if (previous.leavingMode === null && previous.stage === 'settled') {
+        return previous
+      }
+
+      return {
+        activeMode: previous.activeMode,
+        leavingMode: null,
+        direction: 0,
+        stage: 'settled',
+      }
+    })
+  }, [isMotionSettled])
 
   return (
     <div
@@ -70,53 +258,21 @@ export default function WorkbenchModeOutlet({
         background: 'transparent',
       }}
     >
-      {/* 水平滚动容器 - 所有模式常驻 */}
-      <div
-        className="flex h-full w-full"
-        style={{
-          transform: `translateX(-${activeIndex * 100}%)`,
-          transition: isMotionSettled
-            ? 'none'
-            : 'transform 0.35s cubic-bezier(0.24, 1, 0.36, 1)',
-          willChange: isMotionSettled ? 'auto' : 'transform',
-        }}
-      >
-        {ALL_WORKBENCH_MODES.map((modeKey, index) => {
-          const ModeComponent = MODE_COMPONENTS[modeKey]
-          const isActive = index === activeIndex
+      {ALL_WORKBENCH_MODES.map((modeKey) => {
+        const visualState = resolveModeVisualState(modeKey, transitionState, isMotionSettled)
 
-          // 相邻模式视为"即将激活"，提前准备
-          const isAdjacent = Math.abs(index - activeIndex) <= 1
-          const shouldKeepPrepared = ALWAYS_PREPARED_WORKBENCH_MODES.includes(modeKey)
-          const shouldPrepare = isAdjacent || shouldKeepPrepared
-
-          return (
-            <div
-              key={modeKey}
-              className="h-full w-full flex-shrink-0 flex-grow-0 overflow-hidden"
-              style={{
-                // 非当前模式降低渲染优先级
-                contentVisibility: shouldPrepare ? 'auto' : 'hidden',
-                contain: 'strict',
-                // 关键修复：非激活模式完全隐藏，防止视觉残留（如 document-path-bar）
-                visibility: shouldPrepare ? 'visible' : 'hidden',
-                pointerEvents: isActive ? 'auto' : 'none',
-              }}
-              data-workbench-mode-panel={modeKey}
-              aria-hidden={!isActive}
-            >
-              <Suspense fallback={<ModeFallback mode={modeKey} />}>
-                <ModeComponent
-                  isActive={isActive}
-                  isMotionSettled={isActive ? isMotionSettled : false}
-                  browserLayoutPhase={modeKey === 'browser' ? browserLayoutPhase : null}
-                  layoutPhase={modeKey === 'browser' ? browserLayoutPhase ?? undefined : undefined}
-                />
-              </Suspense>
-            </div>
-          )
-        })}
-      </div>
+        return (
+          <ModeScene
+            key={modeKey}
+            modeKey={modeKey}
+            visualState={visualState}
+            transitionStage={transitionState.stage}
+            direction={transitionState.direction}
+            isMotionSettled={isMotionSettled}
+            browserLayoutPhase={browserLayoutPhase}
+          />
+        )
+      })}
     </div>
   )
 }

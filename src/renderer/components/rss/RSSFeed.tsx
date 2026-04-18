@@ -579,7 +579,7 @@ export default function RSSFeed({
 
       {/* Item List */}
       <div
-        className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"
+        className="rss-feed-list rss-feed-scroll flex-1 overflow-auto"
         style={{ background: 'transparent' }}
       >
         <div className="flex flex-col gap-2 px-2 py-3">

@@ -29,10 +29,22 @@ test('browser bounds syncing does not skip fine-grained drag updates and bypasse
 
   assert.match(
     boundsHook,
-    /if \(document\.body\.classList\.contains\('resizing'\)\) \{[\s\S]*sendBoundsImmediate\(\{ forceExact: true, syncMode: 'transient' \}\)/,
+    /const buildBoundsSignature = \(bounds: MeasuredBounds, syncMode: BrowserBoundsSyncMode\) =>/,
   )
-  assert.doesNotMatch(boundsHook, /widthDelta < 4/)
-  assert.doesNotMatch(boundsHook, /xDelta < 4/)
+  assert.match(
+    boundsHook,
+    /`\$\{syncMode\}:\$\{bounds\.x\}:\$\{bounds\.y\}:\$\{bounds\.width\}:\$\{bounds\.height\}`/,
+  )
+  assert.match(boundsHook, /const frameSyncRequestRef = useRef<PendingBoundsSyncRequest \| null>\(null\)/)
+  assert.match(boundsHook, /const panelResizingRef = useRef\(false\)/)
+  assert.match(boundsHook, /const scheduleBoundsSync = useCallback\(/)
+  assert.match(boundsHook, /window\.addEventListener\(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener\)/)
+  assert.match(boundsHook, /if \(detail\.resizing\) \{[\s\S]*panelResizingRef\.current = true/)
+  assert.match(boundsHook, /panelResizingRef\.current = false[\s\S]*void scheduleBoundsSync\('settled', \{ force: true \}\)/)
+  assert.match(boundsHook, /subscribeWorkbenchWindowResize/)
+  assert.doesNotMatch(boundsHook, /const startBoundsTracking = useCallback/)
+  assert.doesNotMatch(boundsHook, /boundsTrackingRafRef/)
+  assert.doesNotMatch(boundsHook, /window\.addEventListener\('resize', handleResize\)/)
 })
 
 test('high-frequency browser bounds syncing uses a fire-and-forget IPC path instead of waiting on invoke round-trips', () => {
@@ -50,6 +62,7 @@ test('browser mode prefers cached stable frames during workbench motion and refr
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
   const freezeHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserResizeFreeze.ts')
+  const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const ipcShell = readWorkspaceFile('src/main/modules/browser-engine/ipc-shell.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/browser-engine/ipc-handler.ts')
@@ -126,4 +139,14 @@ test('browser mode prefers cached stable frames during workbench motion and refr
   assert.match(preload, /captureWindowSnapshot:\s*\(bounds: \{ x: number; y: number; width: number; height: number \}\)\s*=>\s*ipcRenderer\.invoke\('browser:captureWindowSnapshot', bounds\)/)
   assert.match(ipcShell, /ipcMain\.handle\('browser:captureWindowSnapshot', async \(_, bounds: \{ x: number; y: number; width: number; height: number \}\) => \{/)
   assert.match(ipcHandler, /async captureWindowSnapshot\(bounds: BrowserRect\): Promise<\{ success: boolean; data\?: string; error\?: string \}>/)
+
+  assert.match(previewBrowser, /const frameSyncRafRef = useRef<number \| null>\(null\)/)
+  assert.match(previewBrowser, /const finalSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> \| null>\(null\)/)
+  assert.match(previewBrowser, /const panelResizingRef = useRef\(false\)/)
+  assert.match(previewBrowser, /const scheduleBoundsSync = useCallback\(/)
+  assert.match(previewBrowser, /window\.addEventListener\(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener\)/)
+  assert.match(previewBrowser, /subscribeWorkbenchWindowResize/)
+  assert.doesNotMatch(previewBrowser, /const startBoundsTracking = useCallback/)
+  assert.doesNotMatch(previewBrowser, /const trackDuration = 400/)
+  assert.doesNotMatch(previewBrowser, /window\.addEventListener\('resize', onResize\)/)
 })

@@ -12,6 +12,12 @@
   - Browser 模式切入切出不再在第一帧硬抓图；当前会优先接管最近稳定静帧，等原生层恢复稳定后再刷新缓存，减少中途闪露。
   - 主题切换已改成根节点过渡标记 + 下一帧切 DOM 主题 + 再下一帧同步原生主题的两段式流程；工作台主链路关键节点和 `tiptap.css` 已开始去掉 `transition-all / transition: all`。
   - 本轮已通过定向合同回归与 `npm run typecheck:web`，作为 P0 收口基线。
+- `2026-04-18` 已完成一轮 `P1` 工作台卡顿收口，重点从“让页面看起来在动”转成“只让该动的东西动”：
+  - `WorkbenchModeOutlet` 已从“四联横带一起平移”改成分层场景；四个主模式继续常驻，但只有当前页、进入页、离开页会参与过场，其余模式统一停画且保留状态。
+  - renderer 新增共享窗口 resize hub；`ChatHeader`、`FilesPanel`、主 BrowserView bounds、RSS preview 不再各自并行挂原生 `window.resize`。
+  - `useBrowserViewBounds` 与 RSS `PreviewBrowser` 已统一成“一帧一条变化 + 收尾一条最终落点”的同步模型；拖拽期间逐帧发 `transient`，结束后强制补 `settled`，并修正了“同几何值吞掉最终落点”的去重问题。
+  - 文档标签、RSS 列表/预览、聊天输入/消息、文件树这些工作台热路径已清掉 `transition-all`，不再把 `width / min-width / flex` 这类布局属性误带进动画。
+  - 已新增 `workbench-window-resize-contract` 与 `workbench-hot-path-transition-contract`，并更新 keep-alive / browser resize contracts；`npx tsx@^4.19.2 --test src/__tests__/workbench-keep-alive-contract.test.ts src/__tests__/browser-resize-stability-contract.test.ts src/__tests__/browser-host-visibility-contract.test.ts src/__tests__/workbench-window-resize-contract.test.ts src/__tests__/workbench-hot-path-transition-contract.test.ts src/__tests__/chat-panel-collapsed-rail-contract.test.ts src/__tests__/side-panel-waterfall-contract.test.ts` 和 `npm run typecheck` 已通过。
 
 - 已完成一轮针对 `CC-Source` 的 Claude Code agent 对照研究，并新增四份文档沉淀架构研究、交叉缺陷分析、目标设计与分阶段整改路线；后续 agent 整改将以这四份文档为统一底稿，而不再继续只靠零散口头判断推进。
 - agent runtime realignment phase4 已完成第一轮 domain adapter 收口：`TurnEngine` 不再继续硬编码 Browser / Document 的专属执行分支，六个域已统一接入同一套 adapter 生命周期，`task-execution-router` 也已回到只负责 route 解析。

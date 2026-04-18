@@ -293,6 +293,14 @@
 - 浏览器拖拽态冻结方案改为直接抓取“整块浏览器区域”的可见画面，而不再只抓内部网页视口；拖拽时展示的是完整区域快照，所以圆角、顶部与边缘不会再因为分层拼接反复出现白块、缺角或被咬一口
 - 新增 `browser-resize-stability-contract`，把“宽度变化时浏览器 chrome 与网页表面必须同步”固化为回归检查
 
+#### Workbench P1 卡顿收口
+- `WorkbenchModeOutlet` 已从“四联横带平移”改成分层 keep-alive 场景：四个主模式继续常驻，但只有当前页、进入页、离开页短时参与过场，其余模式统一停画且保留本地状态
+- 新增共享 `windowResize` hub，`ChatHeader`、`FilesPanel`、主 BrowserView bounds 和 RSS preview 不再各自重复监听 `window.resize`
+- BrowserView 与 RSS preview 的边界同步现已统一为“一帧最多一次 + 收尾强制最终落点”；拖拽中的逐帧更新继续走 `transient`，结束后一定补 `settled`
+- Browser bounds 去重现已区分 `transient / settled`，不会再因为几何值相同把最终精确落点跳过
+- 工作台热路径里的 `transition-all` 已从文档标签、RSS 列表与预览、聊天输入与消息、文件树这些高频交互面清掉，避免把宽度、最小宽度、`flex` 等布局属性一起拖进动画
+- 新增 `workbench-window-resize-contract` 与 `workbench-hot-path-transition-contract`，并同步更新 keep-alive / browser visibility / browser resize 稳定性契约
+
 #### 文件管理下拉菜单完整显示
 - 文件管理顶部的“筛选 / 更多”菜单改为顶层弹层渲染，不再挂在左侧栏裁切层内部
 - 菜单位置改为按左侧文件面板的真实矩形计算，保持在左栏附近展开，但不再被 `overflow-hidden` 截掉

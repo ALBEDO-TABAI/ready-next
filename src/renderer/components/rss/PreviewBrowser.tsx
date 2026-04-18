@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
+import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from '../../modules/browser/resize-events'
+import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode } from '../../stores/useMode'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
@@ -32,8 +34,11 @@ const defaultPreviewState: PreviewState = {
 export default function PreviewBrowser({ item, onClose, isActive = true }: PreviewBrowserProps) {
   const [previewState, setPreviewState] = useState<PreviewState>(defaultPreviewState)
   const contentRef = useRef<HTMLDivElement>(null)
-  const rafRef = useRef<number | null>(null)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const frameSyncRafRef = useRef<number | null>(null)
+  const finalSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const panelResizingRef = useRef(false)
+  const lastBoundsKeyRef = useRef('')
+  const pendingSyncOptionsRef = useRef<{ force: boolean; trailingFinal: boolean } | null>(null)
 
   const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
   const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
@@ -43,41 +48,69 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   const chatPanelWidth = useWorkspace((state) => state.chatPanelWidth)
   const effectiveSidePanelWidth = sidePanelWidths.shared
 
-  const sendBoundsImmediate = useCallback(() => {
+  const clearFrameSync = useCallback(() => {
+    if (frameSyncRafRef.current !== null) {
+      cancelAnimationFrame(frameSyncRafRef.current)
+      frameSyncRafRef.current = null
+    }
+    pendingSyncOptionsRef.current = null
+  }, [])
+
+  const clearFinalSyncTimeout = useCallback(() => {
+    if (finalSyncTimeoutRef.current !== null) {
+      clearTimeout(finalSyncTimeoutRef.current)
+      finalSyncTimeoutRef.current = null
+    }
+  }, [])
+
+  const sendBoundsImmediate = useCallback((options?: { force?: boolean }) => {
     const container = contentRef.current
     if (!container) return
     const rect = container.getBoundingClientRect()
     const width = Math.round(rect.width)
     const height = Math.round(rect.height)
     if (width <= 0 || height <= 0) return
+    const x = Math.round(rect.left)
+    const y = Math.round(rect.top)
+    const boundsKey = `${x}:${y}:${width}:${height}`
+    if (!options?.force && lastBoundsKeyRef.current === boundsKey) return
+
+    lastBoundsKeyRef.current = boundsKey
     void window.electronAPI?.browser?.previewUpdateBounds({
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
+      x,
+      y,
       width,
       height,
     })
   }, [])
 
-  const startBoundsTracking = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+  const scheduleBoundsSync = useCallback((options?: { force?: boolean; trailingFinal?: boolean }) => {
+    if (!isActive) return
 
-    const started = Date.now()
-    const trackDuration = 400
-    const tick = () => {
-      sendBoundsImmediate()
-      if (Date.now() - started < trackDuration) {
-        rafRef.current = requestAnimationFrame(tick)
-      } else {
-        rafRef.current = null
-        timeoutRef.current = setTimeout(() => {
-          sendBoundsImmediate()
-          timeoutRef.current = null
-        }, 50)
-      }
+    const previousOptions = pendingSyncOptionsRef.current
+    pendingSyncOptionsRef.current = {
+      force: previousOptions?.force || options?.force || false,
+      trailingFinal: previousOptions?.trailingFinal || options?.trailingFinal || false,
     }
-    rafRef.current = requestAnimationFrame(tick)
-  }, [sendBoundsImmediate])
+
+    if (frameSyncRafRef.current !== null) return
+
+    frameSyncRafRef.current = requestAnimationFrame(() => {
+      frameSyncRafRef.current = null
+      const pendingOptions = pendingSyncOptionsRef.current
+      pendingSyncOptionsRef.current = null
+      if (!pendingOptions) return
+
+      sendBoundsImmediate({ force: pendingOptions.force })
+      if (!pendingOptions.trailingFinal || panelResizingRef.current) return
+
+      clearFinalSyncTimeout()
+      finalSyncTimeoutRef.current = setTimeout(() => {
+        finalSyncTimeoutRef.current = null
+        sendBoundsImmediate({ force: true })
+      }, 64)
+    })
+  }, [clearFinalSyncTimeout, isActive, sendBoundsImmediate])
 
   useEffect(() => {
     const unsubscribe = window.electronAPI?.browser?.onPreviewUpdate((state) => {
@@ -98,55 +131,85 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
     }
     setPreviewState((prev) => ({ ...prev, loading: true, error: undefined }))
     void window.electronAPI?.browser?.previewOpen({ url: item.link })
-    requestAnimationFrame(() => sendBoundsImmediate())
-  }, [isActive, item.id, item.link, sendBoundsImmediate])
+    requestAnimationFrame(() => {
+      scheduleBoundsSync({ force: true, trailingFinal: true })
+    })
+  }, [isActive, item.id, item.link, scheduleBoundsSync])
 
   useEffect(() => {
     const el = contentRef.current
     if (!el) return
 
-    const observer = new ResizeObserver(() => sendBoundsImmediate())
+    const handleBoundsShift = () => {
+      scheduleBoundsSync({
+        force: panelResizingRef.current,
+        trailingFinal: !panelResizingRef.current,
+      })
+    }
+
+    const observer = new ResizeObserver(handleBoundsShift)
     observer.observe(el)
-    const onResize = () => sendBoundsImmediate()
-    window.addEventListener('resize', onResize)
+    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(handleBoundsShift)
 
     return () => {
       observer.disconnect()
-      window.removeEventListener('resize', onResize)
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      unsubscribeWindowResize()
+      clearFrameSync()
+      clearFinalSyncTimeout()
     }
-  }, [sendBoundsImmediate])
+  }, [clearFinalSyncTimeout, clearFrameSync, scheduleBoundsSync])
 
   useEffect(() => {
     if (!isActive) {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
+      clearFrameSync()
+      clearFinalSyncTimeout()
       return
     }
-    startBoundsTracking()
+
+    scheduleBoundsSync({ force: true, trailingFinal: !panelResizingRef.current })
   }, [
-    sidebarVisible,
-    sidePanelVariant,
-    effectiveSidePanelWidth,
-    skillsSplitRatio,
     chatPanelVisible,
     chatPanelWidth,
+    clearFinalSyncTimeout,
+    clearFrameSync,
+    effectiveSidePanelWidth,
+    sidebarVisible,
+    sidePanelVariant,
+    skillsSplitRatio,
     isActive,
-    startBoundsTracking,
+    scheduleBoundsSync,
   ])
 
   useEffect(() => {
+    const handlePanelResizeState = (event: Event) => {
+      const detail = (event as CustomEvent<PanelResizeStateDetail>).detail
+      if (!detail) return
+
+      if (detail.resizing) {
+        panelResizingRef.current = true
+        clearFinalSyncTimeout()
+        scheduleBoundsSync({ force: true })
+        return
+      }
+
+      panelResizingRef.current = false
+      clearFinalSyncTimeout()
+      scheduleBoundsSync({ force: true, trailingFinal: true })
+    }
+
+    window.addEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
     return () => {
+      window.removeEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
+    }
+  }, [clearFinalSyncTimeout, scheduleBoundsSync])
+
+  useEffect(() => {
+    return () => {
+      clearFrameSync()
+      clearFinalSyncTimeout()
       void window.electronAPI?.browser?.previewClose()
     }
-  }, [])
+  }, [clearFinalSyncTimeout, clearFrameSync])
 
   const handleClose = useCallback(() => {
     void window.electronAPI?.browser?.previewClose()
@@ -259,7 +322,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
               <p className="text-[14px] text-[var(--text-body)] leading-relaxed mb-6">{item.summary}</p>
               <button
                 onClick={handleOpenBrowserMode}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[12px] hover:brightness-95 transition-all"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-blue)] text-white text-[12px] hover:brightness-95 transition-[filter]"
               >
                 <ExternalLink className="w-4 h-4" />
                 在浏览器模式中打开

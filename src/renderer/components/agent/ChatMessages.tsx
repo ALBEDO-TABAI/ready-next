@@ -113,7 +113,7 @@ export default function ChatMessages({
           <div className="flex w-full" style={{ gap: 8 }}>
             <button
               onClick={() => onSetInputSuggestion('帮我分析最近的热门视频趋势')}
-              className="flex-1 text-left hover:border-[var(--color-blue)] transition-all duration-200 ease-out active:scale-[0.98]"
+              className="flex-1 text-left hover:border-[var(--color-blue)] transition-[border-color,transform] duration-200 ease-out active:scale-[0.98]"
               style={{
                 padding: 12, borderRadius: 8,
                 border: '1px solid var(--border-default)',
@@ -125,7 +125,7 @@ export default function ChatMessages({
             </button>
             <button
               onClick={() => onSetInputSuggestion('帮我写一篇关于 AI 创作的文案')}
-              className="flex-1 text-left hover:border-[var(--color-blue)] transition-all duration-200 ease-out active:scale-[0.98]"
+              className="flex-1 text-left hover:border-[var(--color-blue)] transition-[border-color,transform] duration-200 ease-out active:scale-[0.98]"
               style={{
                 padding: 12, borderRadius: 8,
                 border: '1px solid var(--border-default)',
@@ -172,7 +172,7 @@ export default function ChatMessages({
                             }
                             void onAttachmentPreview(att)
                           }}
-                          className="flex items-center gap-1.5 rounded-md text-left transition-all duration-150 hover:border-[var(--color-blue)]"
+                          className="flex items-center gap-1.5 rounded-md text-left transition-[background-color,border-color,color] duration-150 hover:border-[var(--color-blue)]"
                           style={{
                             padding: '5px 8px',
                             background: att.source === 'document-quote'
@@ -264,7 +264,7 @@ export default function ChatMessages({
                     <button
                       type="button"
                       onClick={() => { void onCopyMessage(msg.id, msg.content) }}
-                      className={`absolute transition-all duration-160 ease-out ${
+                      className={`absolute transition-[opacity,transform] duration-160 ease-out ${
                         copiedMessageId === msg.id
                           ? 'opacity-100 pointer-events-auto'
                           : 'opacity-0 pointer-events-none group-hover/agentmsg:opacity-100 group-hover/agentmsg:pointer-events-auto'

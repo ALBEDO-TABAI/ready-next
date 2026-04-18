@@ -339,7 +339,7 @@ function FileTreeItem({
       onContextMenu={onContextMenu}
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
-        transition-all duration-200 ease-out group
+        transition-[background-color,box-shadow,outline-color] duration-200 ease-out group
       `}
       style={{
         position: 'relative',
@@ -527,7 +527,7 @@ function GridItemCard({
       onClick={onOpen}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      className="content-surface-card rounded-[10px] border text-left transition-all hover:bg-[var(--bg-hover)]"
+      className="content-surface-card rounded-[10px] border text-left transition-[background-color,border-color] hover:bg-[var(--bg-hover)]"
       style={{
         padding: '8px 8px 10px',
         borderColor: isDropTarget ? 'var(--color-blue)' : isActive ? 'var(--color-blue)' : 'var(--border-default)',
@@ -1250,7 +1250,7 @@ export default function FileTree({
           <span style={{ fontSize: 13 }} className="text-[var(--text-light)] mb-4 text-center">拖入文件夹或点击下方按钮打开</span>
           <button
             onClick={openFolderDialog}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-white text-[13px] font-medium active:scale-[0.98] transition-all duration-200 ease-out"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-white text-[13px] font-medium active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
             style={{ background: 'var(--color-blue)' }}
           >
             <FolderOpen style={{ width: 14, height: 14 }} strokeWidth={2} />

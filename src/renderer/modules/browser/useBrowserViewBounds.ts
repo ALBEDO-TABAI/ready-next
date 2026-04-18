@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
 import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
+import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
 
@@ -8,7 +10,7 @@ interface UseBrowserViewBoundsParams {
   contentRef: RefObject<HTMLDivElement | null>
   isActive: boolean
   layoutPhase: BrowserHostLayoutPhase
-  isVisibleAllowed?: boolean // D方案：水平滚动动画期间设为 false
+  isVisibleAllowed?: boolean
   hostVisibleRef: RefObject<boolean>
   topInset: number
   sidebarVisible: boolean
@@ -20,12 +22,28 @@ interface UseBrowserViewBoundsParams {
   hasError: boolean
 }
 
+interface MeasuredBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface PendingBoundsSyncRequest {
+  syncMode: BrowserBoundsSyncMode
+  force?: boolean
+  trailingSettled?: boolean
+}
+
+const buildBoundsSignature = (bounds: MeasuredBounds, syncMode: BrowserBoundsSyncMode) =>
+  `${syncMode}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+
 export function useBrowserViewBounds({
   isElectron,
   contentRef,
   isActive,
   layoutPhase,
-  isVisibleAllowed = true, // 默认为 true，保持向后兼容
+  isVisibleAllowed = true,
   hostVisibleRef,
   topInset,
   sidebarVisible,
@@ -36,104 +54,115 @@ export function useBrowserViewBounds({
   chatPanelWidth,
   hasError,
 }: UseBrowserViewBoundsParams) {
-  const boundsRafRef = useRef<number | null>(null)
-  const boundsTrackingRafRef = useRef<number | null>(null)
-  const boundsTrackingTimeoutRef = useRef<number | null>(null)
+  const frameSyncRafRef = useRef<number | null>(null)
+  const frameSyncRequestRef = useRef<PendingBoundsSyncRequest | null>(null)
+  const settleSyncTimeoutRef = useRef<number | null>(null)
   const lastBoundsKeyRef = useRef('')
   const overlayLockCountRef = useRef(0)
   const visibilitySyncTokenRef = useRef(0)
+  const panelResizingRef = useRef(false)
   const isActiveRef = useRef(isActive)
   const layoutPhaseRef = useRef(layoutPhase)
   const isVisibleAllowedRef = useRef(isVisibleAllowed)
   const hasErrorRef = useRef(hasError)
+
   isActiveRef.current = isActive
   layoutPhaseRef.current = layoutPhase
   isVisibleAllowedRef.current = isVisibleAllowed
   hasErrorRef.current = hasError
 
-  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
-    if (!isElectron || !contentRef.current) return
+  const measureBounds = useCallback((): MeasuredBounds | null => {
+    if (!isElectron || !contentRef.current) return null
+
     const rect = contentRef.current.getBoundingClientRect()
     const x = Math.round(rect.left)
     const y = Math.round(rect.top - topInset)
     const exactWidth = Math.round(rect.width)
     const height = Math.round(rect.height + topInset)
+    if (exactWidth <= 0 || height <= 0) return null
 
-    if (exactWidth <= 0 || height <= 0) return
-
-    const width = exactWidth
-    const boundsKey = `${x}:${y}:${width}:${height}`
-    if (lastBoundsKeyRef.current === boundsKey) return
-
-    lastBoundsKeyRef.current = boundsKey
-    const resolvedSyncMode = options?.syncMode ?? (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
-    await window.electronAPI?.browser?.updateBounds({ x, y, width, height, syncMode: resolvedSyncMode })
+    return { x, y, width: exactWidth, height }
   }, [contentRef, isElectron, topInset])
 
-  const stopBoundsTracking = useCallback(() => {
-    if (boundsTrackingRafRef.current) {
-      cancelAnimationFrame(boundsTrackingRafRef.current)
-      boundsTrackingRafRef.current = null
+  const clearFrameSync = useCallback(() => {
+    if (frameSyncRafRef.current !== null) {
+      window.cancelAnimationFrame(frameSyncRafRef.current)
+      frameSyncRafRef.current = null
     }
-    if (boundsTrackingTimeoutRef.current) {
-      window.clearTimeout(boundsTrackingTimeoutRef.current)
-      boundsTrackingTimeoutRef.current = null
+    frameSyncRequestRef.current = null
+  }, [])
+
+  const clearSettleSyncTimeout = useCallback(() => {
+    if (settleSyncTimeoutRef.current !== null) {
+      window.clearTimeout(settleSyncTimeoutRef.current)
+      settleSyncTimeoutRef.current = null
     }
   }, [])
 
-  const startBoundsTracking = useCallback((durationMs = 420) => {
-    if (!isElectron || !isActive) return
+  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
+    const bounds = measureBounds()
+    if (!bounds) return
 
-    // D方案：水平滚动动画期间不进行 bounds tracking
-    // 防止 BrowserView 在滚动过程中更新位置造成"滑入"观感
-    if (!isVisibleAllowed) {
-      stopBoundsTracking()
-      return
+    const resolvedSyncMode = options?.syncMode ?? (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
+    const boundsKey = buildBoundsSignature(bounds, resolvedSyncMode)
+    if (!options?.forceExact && lastBoundsKeyRef.current === boundsKey) return
+
+    lastBoundsKeyRef.current = boundsKey
+    await window.electronAPI?.browser?.updateBounds({ ...bounds, syncMode: resolvedSyncMode })
+  }, [measureBounds])
+
+  const scheduleBoundsSync = useCallback((syncMode: BrowserBoundsSyncMode = 'settled', options?: {
+    force?: boolean
+    trailingSettled?: boolean
+  }) => {
+    if (!isElectron || !isActiveRef.current || !isVisibleAllowedRef.current) return
+
+    const previousRequest = frameSyncRequestRef.current
+    frameSyncRequestRef.current = {
+      syncMode:
+        previousRequest?.syncMode === 'settled' || syncMode === 'settled'
+          ? 'settled'
+          : 'transient',
+      force: previousRequest?.force || options?.force,
+      trailingSettled: previousRequest?.trailingSettled || options?.trailingSettled,
     }
 
-    stopBoundsTracking()
-    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    if (frameSyncRafRef.current !== null) return
 
-    const tick = () => {
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const isManualResizing = document.body.classList.contains('resizing')
+    frameSyncRafRef.current = window.requestAnimationFrame(() => {
+      frameSyncRafRef.current = null
+      const request = frameSyncRequestRef.current
+      frameSyncRequestRef.current = null
+      if (!request) return
+
       void sendBoundsImmediate({
-        forceExact: true,
-        syncMode: isManualResizing ? 'transient' : undefined,
+        forceExact: request.force,
+        syncMode: request.syncMode,
+      }).then(() => {
+        if (!request.trailingSettled || panelResizingRef.current || request.syncMode === 'settled') return
+
+        clearSettleSyncTimeout()
+        settleSyncTimeoutRef.current = window.setTimeout(() => {
+          settleSyncTimeoutRef.current = null
+          void sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
+        }, 64)
       })
-      if (isManualResizing || now - startedAt < durationMs) {
-        boundsTrackingRafRef.current = requestAnimationFrame(tick)
-        return
-      }
-
-      boundsTrackingRafRef.current = null
-      boundsTrackingTimeoutRef.current = window.setTimeout(() => {
-        void sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
-        boundsTrackingTimeoutRef.current = null
-      }, 48)
-    }
-
-    boundsTrackingRafRef.current = requestAnimationFrame(tick)
-  }, [isActive, isElectron, isVisibleAllowed, sendBoundsImmediate, stopBoundsTracking])
+    })
+  }, [clearSettleSyncTimeout, isElectron, sendBoundsImmediate])
 
   const sendBounds = useCallback((options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
-    if (document.body.classList.contains('resizing')) {
-      void sendBoundsImmediate({ forceExact: true, syncMode: 'transient' })
-      return
-    }
-    if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
-    boundsRafRef.current = requestAnimationFrame(() => {
-      boundsRafRef.current = null
-      void sendBoundsImmediate(options)
+    const effectiveSyncMode = options?.syncMode ?? (panelResizingRef.current ? 'transient' : (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient'))
+    scheduleBoundsSync(effectiveSyncMode, {
+      force: options?.forceExact,
+      trailingSettled: !panelResizingRef.current && effectiveSyncMode === 'transient',
     })
-  }, [sendBoundsImmediate])
+  }, [scheduleBoundsSync])
 
   const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
     if (!isElectron) return
     const requestToken = ++visibilitySyncTokenRef.current
     if (!isActiveRef.current) return
 
-    // D方案关键：水平滚动动画期间不允许显示 BrowserView
     if (!isVisibleAllowedRef.current) {
       window.electronAPI?.browser?.hideAll()
       return
@@ -168,46 +197,66 @@ export function useBrowserViewBounds({
     if (!element) return
 
     const handleBoundsShift = () => {
-      if (document.body.classList.contains('resizing') && boundsTrackingRafRef.current === null) {
-        startBoundsTracking(160)
-      }
       sendBounds({
-        syncMode: document.body.classList.contains('resizing') ? 'transient' : undefined,
+        forceExact: panelResizingRef.current,
       })
     }
 
     const observer = new ResizeObserver(handleBoundsShift)
     observer.observe(element)
-
-    const handleResize = () => handleBoundsShift()
-    window.addEventListener('resize', handleResize)
+    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(handleBoundsShift)
 
     return () => {
       observer.disconnect()
-      window.removeEventListener('resize', handleResize)
-      if (boundsRafRef.current) cancelAnimationFrame(boundsRafRef.current)
-      stopBoundsTracking()
+      unsubscribeWindowResize()
+      clearFrameSync()
+      clearSettleSyncTimeout()
     }
-  }, [contentRef, sendBounds, startBoundsTracking, stopBoundsTracking])
+  }, [clearFrameSync, clearSettleSyncTimeout, contentRef, sendBounds])
 
   useEffect(() => {
-    if (!isActive) return
-    startBoundsTracking()
-
-    return () => {
-      stopBoundsTracking()
+    if (!isActive) {
+      clearFrameSync()
+      clearSettleSyncTimeout()
+      return
     }
+
+    sendBounds({ forceExact: true })
   }, [
     chatPanelVisible,
     chatPanelWidth,
+    clearFrameSync,
+    clearSettleSyncTimeout,
     effectiveSidePanelWidth,
+    isActive,
+    sendBounds,
     sidebarVisible,
     sidePanelVariant,
     skillsSplitRatio,
-    isActive,
-    startBoundsTracking,
-    stopBoundsTracking,
   ])
+
+  useEffect(() => {
+    const handlePanelResizeState = (event: Event) => {
+      const detail = (event as CustomEvent<PanelResizeStateDetail>).detail
+      if (!detail) return
+
+      if (detail.resizing) {
+        panelResizingRef.current = true
+        clearSettleSyncTimeout()
+        void scheduleBoundsSync('transient', { force: true })
+        return
+      }
+
+      panelResizingRef.current = false
+      clearSettleSyncTimeout()
+      void scheduleBoundsSync('settled', { force: true })
+    }
+
+    window.addEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
+    return () => {
+      window.removeEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
+    }
+  }, [clearSettleSyncTimeout, scheduleBoundsSync])
 
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })

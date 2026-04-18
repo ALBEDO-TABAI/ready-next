@@ -270,7 +270,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <button
                   key={file.id}
                   onClick={() => insertAtReference(file)}
-                  className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-all duration-150"
+                  className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-150"
                   style={{
                     padding: '6px 10px',
                     borderRadius: 6,
@@ -331,7 +331,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <button
             onClick={onPickFiles}
             title="添加文件"
-            className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-all duration-200 ease-out"
+            className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
             style={{ width: 24, height: 24, borderRadius: 8, border: '1px solid transparent', background: 'transparent' }}
           >
             <Plus style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
@@ -342,7 +342,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <button
               disabled={isChannelScope}
               onClick={() => setShowAgentSelect(!showAgentSelect)}
-              className="flex items-center active:scale-[0.98] transition-all duration-200 ease-out"
+              className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
               style={{
                 padding: '3px 8px',
                 borderRadius: 8,
@@ -389,7 +389,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       onAgentSelect(agent.name)
                       setShowAgentSelect(false)
                     }}
-                    className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-all duration-150"
+                    className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-150"
                     style={{
                       padding: '6px 10px',
                       borderRadius: 6,
@@ -442,7 +442,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <button
               onClick={onStop}
               title="停止生成"
-              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-all duration-200 ease-out"
+              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
               style={{
                 width: 26,
                 height: 26,
@@ -456,7 +456,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <button
               onClick={onSend}
               disabled={!inputValue.trim() && attachmentsCount === 0}
-              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out"
+              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
               style={{
                 width: 26,
                 height: 26,

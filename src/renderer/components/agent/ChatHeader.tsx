@@ -10,6 +10,7 @@ import {
   buildChatHeaderFloatingMenuStyle,
   buildChatHeaderMenuItemStyle,
 } from './chatHeaderMenuStyles'
+import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
 
 interface ConversationChannelOption {
   key: string
@@ -150,10 +151,10 @@ export default function ChatHeader({
     }
 
     syncMenuPositions()
-    window.addEventListener('resize', syncMenuPositions)
+    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(syncMenuPositions)
     window.addEventListener('scroll', syncMenuPositions, true)
     return () => {
-      window.removeEventListener('resize', syncMenuPositions)
+      unsubscribeWindowResize()
       window.removeEventListener('scroll', syncMenuPositions, true)
     }
   }, [computeMenuPosition, historyMenuWidth, showHistory, showScopeSelect])

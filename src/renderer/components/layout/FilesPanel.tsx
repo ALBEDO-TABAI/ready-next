@@ -23,6 +23,7 @@ import {
   buildFloatingMenuItemStyle,
   buildFloatingMenuSurfaceStyle,
 } from '../ui/floatingMenuStyles'
+import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
 import './filesPanelFloatingMenu.css'
 
 interface FilesPanelProps {
@@ -187,10 +188,10 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       }
     }
 
-    window.addEventListener('resize', syncMenuPositions)
+    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(syncMenuPositions)
     window.addEventListener('scroll', syncMenuPositions, true)
     return () => {
-      window.removeEventListener('resize', syncMenuPositions)
+      unsubscribeWindowResize()
       window.removeEventListener('scroll', syncMenuPositions, true)
     }
   }, [computeMenuPosition, showFilterMenu, showMoreMenu])
