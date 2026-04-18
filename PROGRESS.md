@@ -6,6 +6,14 @@
 
 0. Agent 核心重构已先落地第一段可上线基础层。
 
+- `2026-04-18` 已完成文档信息卡修改链路 `P2` 四项（Gap G / I / J / N），计划文件 `plans/starry-purring-gosling.md`：
+  - `list_widgets` 输出结构化 JSON 清单（`summarizeDocumentWidgets`）：带 componentHint / preview / hasState，让 LLM 拿到清晰候选集再做定位。
+  - `show-widget` fence 扩展可选 `component_spec` 字段（`tryParseWidgetPayload` / `buildShowWidgetFence` / `updateWidgetInDocument` 透传），老 widget 无该字段时解析仍返回 `componentSpec === null`，向后兼容。
+  - Widget draft `targetWidgetTitle` 走受控枚举（`resolveControlledWidgetTarget`）：优先消费 `requestEnvelope.resources[widget_target]`；LLM 输出大小写/子串归一，未命中进 reprompt 错误；fallback 也首选 preferred 目标。
+  - `buildDocumentPipelineInsight` 对 update 分支按目标 widget 做段落窗口化（`selectWidgetCenteredChunks` + chunk `startOffset/endOffset`），命中失败自动回退原 focused 读取。
+  - `update_widget` 支持 `componentSpecPatch` 字段级合并（`mergeComponentSpecPatch`：对象递归、数组整体替换、null 视为删除）；老 widget 无 componentSpec 时给出明确拒绝文本而非静默失败。
+  - 契约 & 单测：`document-list-widgets-structured / document-widget-fence-component-spec / document-widget-target-controlled-selection / document-insight-widget-window / document-update-widget-patch`；回归 `document-task-pipeline-widget-fallback / document-task-pipeline-widget-prompt / document-task-pipeline-widget-reprompt` 全绿，`npm run typecheck` 无新增错误。
+
 - `2026-04-18` 已完成一轮 `P1` 文档信息卡修改链路结构性收口，重点是“把已有但被短路的路径连起来”而不是新增能力：
   - `DocumentTaskPipelineExecutor.tryExecute` 当前已把 `document_list_widgets` / `document_remove_widget` 两种结构化意图也路由进 `runDocumentWidgetPipeline`；list / remove 请求不再回落普通工具循环，会产出结构化步骤与诊断，并在构造 `DocumentTaskPipeline` 时注入对应 `listWidgets` / `removeWidget` deps 桥接到 renderer `document.listWidgets` / `document.removeWidget` 动作。
   - `DocumentInsight.recommendedWidget` 类型与 insight / widget 两段 system prompt 已从 5 种 info-card 字面量放开到 `documentWidgetCatalog` 全集；新增共享 `WIDGET_COMPONENT_IDS` 单一事实源，`normalizePipelineInsight` 与 `approvedWidgetComponentNames` 都从该常量派生，未来 catalog 变更无需再多点同步。
@@ -346,7 +354,7 @@
   - `ChatPanel` 与 `TaskPanel` 已改成优先消费 projection 真值，再回退到 scope run 摘要。
   - 协作文档已同步补齐预算、子任务、清理注册表和 projection-first 的当前口径。
 - **Batch F：worker session 真隔离 + 文档多 job 子任务接线**
-  - 新增 `worker-session / subtask-runtime / worker-projection`，child task 现在会生成独立 `workerSessionId + taskId`，父任务只通过 `parentTaskId / parentStepId` 关联，不再和父任务抢同一个执行会话键。
+  - 新增 `worker-session / subtask-runtime / worker-projection`，child task 现在会生成独立 `workerSessionId + taskId`，父任务只通过 `parentTaskId / parentStepId` 关联，不再和父任务抢同一个执行会话键；`SubtaskRuntime` 现已收口为 inline worker 专用生命周期，不再对外保留未接完结果的 scoped-turn 半成品入口。
   - 文档 `DocumentTaskPlan` 的多 job 路径现已切到“父任务总览 + 每个 job 一个 child task”的正式链路；单 job 继续走原内联执行，避免无谓放大改动面。
   - `run-projection` 已修正父子任务串线时的关联继承条件：切回父任务摘要时，不会再误把上一个 child 的 `parentTaskId / parentStepId` 挂到新的 task 上。
 - **Batch G：浏览器结果收口 + 最终快照同步**
@@ -362,6 +370,7 @@
 - `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts src/__tests__/run-projection.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/turn-engine-route.test.ts` 通过
 - `npm run typecheck` 通过
 - `npx tsx --test src/__tests__/worker-session-contract.test.ts src/__tests__/subtask-runtime-contract.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/document-task-plan-subtask.test.ts` 通过
+- `npx tsx --test src/__tests__/subtask-runtime-contract.test.ts src/__tests__/document-task-plan-subtask.test.ts` 通过
 - `npm run typecheck` 通过
 - `npm run typecheck` 通过
 - `npx tsx --test src/__tests__/run-coordinator-budget.test.ts src/__tests__/task-budget-runtime-alignment.test.ts src/__tests__/execution-loop-parallel-tools.test.ts src/__tests__/execution-loop-cancellation.test.ts src/__tests__/task-continuation-budget.test.ts src/__tests__/task-type-resolver.test.ts src/__tests__/task-execution-router.test.ts src/__tests__/direct-chat-executor-routing.test.ts src/__tests__/task-step-progression.test.ts src/__tests__/interaction-state-detection.test.ts src/__tests__/task-run-control-ipc.test.ts src/__tests__/task-projection-repository.test.ts src/__tests__/task-projection-sync.test.ts src/__tests__/task-subtask-runtime.test.ts src/__tests__/run-resource-reaper.test.ts src/__tests__/chat-task-projection-contract.test.ts src/__tests__/task-panel-task-projection-contract.test.ts` 通过

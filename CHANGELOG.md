@@ -1,5 +1,16 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-04-18
+
+### 修复
+
+#### Agent 文档 widget 修改链路 P2 四项收口
+- `list_widgets` 输出升级为结构化 JSON 清单：含 `index / title / mode / componentHint / preview / hasState`；原有人类可读首行保留，方便 LLM 直接解析候选集
+- `show-widget` fence 扩展可选 `component_spec` 字段：write 路径透传、parse 路径向后兼容，老 widget 无该字段时 `componentSpec === null`，不崩溃
+- Widget draft 的 `targetWidgetTitle` 改为受控枚举：优先消费 `requestEnvelope` 里的 `widget_target` 资源；LLM 输出经 `resolveControlledWidgetTarget` 做大小写/子串归一，命中则落候选、未命中则进 reprompt 错误
+- `buildDocumentPipelineInsight` 新增 `targetWidgetTitle` 窗口化：update 分支以目标 widget 所在段落为中心抽 ±2 chunk 作为 insight 上下文，未命中自动回退老 `buildFocusedDocumentContext` 路径
+- `update_widget` 支持字段级 `componentSpecPatch`：pipeline 向 LLM 引导"小改动请输出 patch"；renderer 端读取目标 widget 现有 componentSpec → deepMerge（对象递归、数组整体替换、null 视为删除）→ 重编译 → 写回，老 widget 无 componentSpec 时给出明确拒绝消息
+
 ## [Unreleased] - 2026-03-15
 
 ### 新增

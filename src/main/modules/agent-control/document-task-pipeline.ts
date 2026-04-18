@@ -72,9 +72,16 @@ export interface DocumentInsightStageResult {
   metrics?: DocumentInsightMetrics
 }
 
+export interface DocumentWidgetComponentSpecPatch {
+  component?: string
+  props?: Record<string, unknown>
+  dataSource?: Record<string, unknown>
+}
+
 export interface DocumentWidgetDraft {
   title: string
   componentSpec?: DocumentWidgetComponentSpec
+  componentSpecPatch?: DocumentWidgetComponentSpecPatch
   widgetCode?: string
   insertionMode: 'append_end' | 'after_section' | 'update_existing'
   targetSectionTitle?: string
@@ -295,8 +302,19 @@ export class DocumentTaskPipeline {
       }
     }
 
-    if (!normalized.componentSpec && !(normalized.widgetCode && normalized.widgetCode.trim())) {
-      throw new Error('Widget draft 缺少 componentSpec 或 widgetCode')
+    const hasPatch = normalized.componentSpecPatch
+      && typeof normalized.componentSpecPatch === 'object'
+      && Object.keys(normalized.componentSpecPatch).length > 0
+    if (
+      !normalized.componentSpec
+      && !(normalized.widgetCode && normalized.widgetCode.trim())
+      && !hasPatch
+    ) {
+      throw new Error('Widget draft 缺少 componentSpec/componentSpecPatch/widgetCode')
+    }
+
+    if (hasPatch && plan.operation !== 'update') {
+      delete normalized.componentSpecPatch
     }
 
     return normalized

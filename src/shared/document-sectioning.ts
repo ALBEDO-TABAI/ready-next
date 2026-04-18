@@ -6,6 +6,8 @@ export interface DocumentChunk {
   charCount: number
   startLine?: number
   endLine?: number
+  startOffset?: number
+  endOffset?: number
 }
 
 export interface FocusedDocumentContext {
@@ -208,6 +210,7 @@ export function buildDocumentChunks(
         })
       })
     }
+    attachOffsetsToChunks(chunks, normalized)
     return { chunks, usedSectionAnchors: true }
   }
 
@@ -217,7 +220,21 @@ export function buildDocumentChunks(
       pushChunk(chunks, { content: piece })
     })
   })
+  attachOffsetsToChunks(chunks, normalized)
   return { chunks, usedSectionAnchors: false }
+}
+
+function attachOffsetsToChunks(chunks: DocumentChunk[], normalized: string): void {
+  let cursor = 0
+  for (const chunk of chunks) {
+    const probe = chunk.content.slice(0, Math.min(60, chunk.content.length))
+    const found = normalized.indexOf(probe, cursor)
+    if (found >= 0) {
+      chunk.startOffset = found
+      chunk.endOffset = found + chunk.content.length
+      cursor = Math.max(cursor, found + probe.length)
+    }
+  }
 }
 
 function tokenizeQuestion(question: string): string[] {
@@ -275,6 +292,63 @@ export function selectRelevantDocumentChunks(
 
   if (matched.length > 0) return matched
   return chunks.slice(0, Math.min(maxSelectedChunks, chunks.length))
+}
+
+export function selectWidgetCenteredChunks(
+  content: string,
+  chunks: DocumentChunk[],
+  widgetTitle: string,
+  occurrence: number | undefined,
+  opts: { windowChunks?: number } = {},
+): DocumentChunk[] | null {
+  if (chunks.length === 0) return null
+  const trimmedTitle = String(widgetTitle || '').trim()
+  if (!trimmedTitle) return null
+
+  const normalized = normalizeLineEnding(content)
+  const widgetRegex = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
+  const matches: Array<{ start: number; title: string }> = []
+  for (const match of normalized.matchAll(widgetRegex)) {
+    try {
+      const body = match[1] || ''
+      const parsed = JSON.parse(body) as Record<string, unknown>
+      const title = typeof parsed.title === 'string' ? parsed.title.trim() : ''
+      if (!title) continue
+      matches.push({ start: match.index ?? 0, title })
+    } catch {
+      continue
+    }
+  }
+
+  const filtered = matches.filter((item) => item.title === trimmedTitle)
+  if (filtered.length === 0) return null
+  const occurrenceIndex = typeof occurrence === 'number' && occurrence > 0
+    ? Math.min(occurrence - 1, filtered.length - 1)
+    : 0
+  const target = filtered[occurrenceIndex]
+  if (!target) return null
+
+  const window = Math.max(0, opts.windowChunks ?? 2)
+  const chunkIndex = chunks.findIndex((chunk) => {
+    if (typeof chunk.startOffset !== 'number' || typeof chunk.endOffset !== 'number') return false
+    return chunk.startOffset <= target.start && target.start <= chunk.endOffset
+  })
+  if (chunkIndex < 0) {
+    let fallback = -1
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index]
+      if (typeof chunk.startOffset !== 'number') continue
+      if (chunk.startOffset <= target.start) fallback = index
+    }
+    if (fallback < 0) return null
+    const start = Math.max(0, fallback - window)
+    const end = Math.min(chunks.length, fallback + window + 1)
+    return chunks.slice(start, end)
+  }
+
+  const start = Math.max(0, chunkIndex - window)
+  const end = Math.min(chunks.length, chunkIndex + window + 1)
+  return chunks.slice(start, end)
 }
 
 export function buildFocusedDocumentContext(params: BuildFocusedDocumentContextParams): FocusedDocumentContext {

@@ -1,7 +1,12 @@
 import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { getProviderDef, type AIModelConfig } from '../../../shared/ai-providers'
-import { buildFocusedDocumentContext } from '../../../shared/document-sectioning'
+import {
+  buildDocumentChunks,
+  buildFocusedDocumentContext,
+  selectWidgetCenteredChunks,
+  type DocumentChunk,
+} from '../../../shared/document-sectioning'
 import {
   describeApprovedWidgetProps,
   validateDocumentWidgetComponentSpec,
@@ -13,6 +18,7 @@ import {
   collectDocumentWidgets,
   type DocumentWidgetRecord,
 } from '../../../shared/document-widget-parse'
+import { resolveControlledWidgetTarget } from '../../../shared/document-widget-target'
 import { readDocumentEditableText } from '../document-engine/ipc-handler'
 import { type DomainAdapterDispatchResult } from './domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
@@ -502,7 +508,34 @@ export class DocumentTaskPipelineExecutor {
     const componentSpec = raw.componentSpec && typeof raw.componentSpec === 'object'
       ? raw.componentSpec as Record<string, unknown>
       : null
+    const rawPatch = raw.componentSpecPatch && typeof raw.componentSpecPatch === 'object' && !Array.isArray(raw.componentSpecPatch)
+      ? raw.componentSpecPatch as Record<string, unknown>
+      : null
+    const normalizedPatch = rawPatch && params.plan.operation === 'update'
+      ? {
+          component: typeof rawPatch.component === 'string' && rawPatch.component.trim().length > 0
+            ? rawPatch.component.trim()
+            : undefined,
+          props: rawPatch.props && typeof rawPatch.props === 'object' && !Array.isArray(rawPatch.props)
+            ? rawPatch.props as Record<string, unknown>
+            : undefined,
+          dataSource: rawPatch.dataSource && typeof rawPatch.dataSource === 'object' && !Array.isArray(rawPatch.dataSource)
+            ? rawPatch.dataSource as Record<string, unknown>
+            : undefined,
+        }
+      : null
+    const hasMeaningfulPatch = normalizedPatch
+      && (normalizedPatch.component || normalizedPatch.props || normalizedPatch.dataSource)
     if (!componentSpec) {
+      if (hasMeaningfulPatch) {
+        return {
+          title: this.slugifyWidgetTitle(title),
+          insertionMode: 'update_existing',
+          targetSectionTitle: typeof raw.targetSectionTitle === 'string' ? raw.targetSectionTitle.trim() : undefined,
+          targetWidgetTitle: rawTargetWidgetTitle,
+          componentSpecPatch: normalizedPatch!,
+        }
+      }
       return {
         ...fallback,
         title: this.slugifyWidgetTitle(title),
@@ -530,6 +563,7 @@ export class DocumentTaskPipelineExecutor {
       targetSectionTitle: typeof raw.targetSectionTitle === 'string' ? raw.targetSectionTitle.trim() : undefined,
       targetWidgetTitle: rawTargetWidgetTitle,
       componentSpec: normalizedComponentSpec,
+      componentSpecPatch: hasMeaningfulPatch ? normalizedPatch! : undefined,
     }
   }
 
@@ -560,6 +594,8 @@ export class DocumentTaskPipelineExecutor {
     timeoutMs: number
     providerContext: TurnProviderContext
     signal: AbortSignal
+    targetWidgetTitle?: string
+    targetWidgetOccurrence?: number
   }): Promise<DocumentInsightStageResult> {
     const focusedContext = buildFocusedDocumentContext({
       question: params.question,
@@ -568,7 +604,30 @@ export class DocumentTaskPipelineExecutor {
       maxSelectedChunks: params.sourceText.length > 4000 ? 4 : 6,
       maxPromptChars: 12_000,
     })
-    const promptBody = focusedContext.promptText || this.clipDocumentForInsight(params.snapshot.content, 12_000)
+    let effectiveChunks: DocumentChunk[] = focusedContext.selectedChunks
+    let windowedPromptText: string | null = null
+    if (params.targetWidgetTitle) {
+      const allChunks = buildDocumentChunks(params.sourceText, { maxCharsPerChunk: 2200 }).chunks
+      const centered = selectWidgetCenteredChunks(
+        params.sourceText,
+        allChunks,
+        params.targetWidgetTitle,
+        params.targetWidgetOccurrence,
+        { windowChunks: 2 },
+      )
+      if (centered && centered.length > 0) {
+        effectiveChunks = centered
+        const sections: string[] = []
+        for (const [index, chunk] of centered.entries()) {
+          const heading = chunk.sectionTitle
+            ? `### 目标卡片窗口片段 ${index + 1}｜${chunk.sectionTitle}`
+            : `### 目标卡片窗口片段 ${index + 1}`
+          sections.push([heading, chunk.content].join('\n'))
+        }
+        windowedPromptText = sections.join('\n\n')
+      }
+    }
+    const promptBody = windowedPromptText || focusedContext.promptText || this.clipDocumentForInsight(params.snapshot.content, 12_000)
     const systemPrompt = [
       '你是 Ready 的文档 insight 阶段。',
       '你只负责阅读文档并提炼和问题最相关的结构化结果，不要生成 widget，不要写回文档。',
@@ -584,20 +643,25 @@ export class DocumentTaskPipelineExecutor {
       `来源类型：${params.sourceKind}`,
       `来源字数：${params.sourceText.length}`,
       `文档片段数：${focusedContext.chunks.length}`,
-      `本次使用片段数：${focusedContext.selectedChunks.length}`,
+      `本次使用片段数：${effectiveChunks.length}`,
+      windowedPromptText && params.targetWidgetTitle
+        ? `目标卡片：${params.targetWidgetTitle}`
+        : '',
       '',
       '请围绕这个问题提炼可直接用于制作信息卡的 insight。',
       '只返回 JSON。',
       '',
-      focusedContext.warnings.length > 0
-        ? `系统提示：${focusedContext.warnings.join(' ')}`
-        : '系统提示：当前已挑选与问题最相关的文档片段。',
+      windowedPromptText
+        ? '系统提示：已按目标卡片周围段落窗口化，聚焦卡片所在上下文。'
+        : focusedContext.warnings.length > 0
+          ? `系统提示：${focusedContext.warnings.join(' ')}`
+          : '系统提示：当前已挑选与问题最相关的文档片段。',
       '',
       '相关文档片段：',
       promptBody,
-    ].join('\n')
+    ].filter(Boolean).join('\n')
     this.deps.log(
-      `document insight focused read chunks=${focusedContext.chunks.length}, selected=${focusedContext.selectedChunks.length}, sectioned=${focusedContext.usedSectionAnchors}`,
+      `document insight focused read chunks=${focusedContext.chunks.length}, selected=${effectiveChunks.length}, sectioned=${focusedContext.usedSectionAnchors}, windowed=${Boolean(windowedPromptText)}`,
     )
     const raw = await this.requestDocumentPipelineSimpleText({
       systemPrompt,
@@ -625,7 +689,7 @@ export class DocumentTaskPipelineExecutor {
       insight,
       metrics: {
         chunkCount: focusedContext.chunks.length,
-        selectedChunkCount: focusedContext.selectedChunks.length,
+        selectedChunkCount: effectiveChunks.length,
         promptChars: promptBody.length,
         usedSectionAnchors: focusedContext.usedSectionAnchors,
       },
@@ -679,6 +743,10 @@ export class DocumentTaskPipelineExecutor {
     if (params.plan.operation === 'update' && params.hasExistingWidgets) {
       lines.push('')
       lines.push('注意：文档里已有 widget。若待更新 widget 已确定组件类型，**必须沿用同一组件**，不要换类别；改动只作用于 props 内容。')
+      lines.push('')
+      lines.push('【字段级 patch（优先）】若用户需求只涉及一两个字段的微调（例如仅改 tone/color/heading 或替换一条 point），请只输出 `componentSpecPatch`（仅含变更字段路径的对象），不要重新输出完整 componentSpec。')
+      lines.push('仅当用户要求"整张卡片重写/彻底换内容/换组件类型"时才输出完整 componentSpec。patch 和 componentSpec 二选一。')
+      lines.push('componentSpecPatch 字段结构：{ "component"?: string, "props"?: { ...只写变更字段 }, "dataSource"?: { ... } }。props 内对象会按字段合并，数组字段会整体替换，设为 null 表示删除该字段。')
     }
     return lines.join('\n')
   }
@@ -689,11 +757,23 @@ export class DocumentTaskPipelineExecutor {
     insight: DocumentInsight
     plan: DocumentReadPlan
     existingWidgets: DocumentWidgetRecord[]
+    targetCandidates?: string[]
+    preferredTarget?: string
   }): string {
     const segments: string[] = []
     if (params.plan.operation === 'update' && params.existingWidgets.length > 0) {
       segments.push('现有 widget（update 候选，必须优先以此为改动基线）：')
       segments.push(this.serializeExistingWidgetsForPrompt(params.existingWidgets))
+      segments.push('')
+    }
+    if (params.plan.operation === 'update' && params.targetCandidates && params.targetCandidates.length > 0) {
+      segments.push('targetWidgetTitle 必须严格等于下列候选之一（大小写敏感）：')
+      params.targetCandidates.forEach((title) => {
+        segments.push(`- ${title}`)
+      })
+      if (params.preferredTarget) {
+        segments.push(`上下文已指明目标 widget：${params.preferredTarget}。若无相反证据，请直接选它。`)
+      }
       segments.push('')
     }
     segments.push(`用户问题：${params.question}`)
@@ -704,6 +784,13 @@ export class DocumentTaskPipelineExecutor {
     segments.push('insight JSON：')
     segments.push(JSON.stringify(params.insight, null, 2))
     return segments.join('\n')
+  }
+
+  private resolveControlledWidgetTarget(
+    raw: string | undefined,
+    candidates: string[],
+  ): { resolved?: string; unresolvedReason?: string } {
+    return resolveControlledWidgetTarget(raw, candidates)
   }
 
   private appendInsightWarning(insight: DocumentInsight, warning: string): void {
@@ -724,6 +811,8 @@ export class DocumentTaskPipelineExecutor {
       insight: DocumentInsight
       snapshot: ActiveDocumentSnapshot
       plan: DocumentReadPlan
+      targetCandidates?: string[]
+      preferredTarget?: string
     },
   ): { draft: DocumentWidgetDraft; errors: string[] } {
     if (!parsed) {
@@ -734,11 +823,33 @@ export class DocumentTaskPipelineExecutor {
       && typeof parsed.componentSpec === 'object'
       && typeof (parsed.componentSpec as Record<string, unknown>).component === 'string'
       && String((parsed.componentSpec as Record<string, unknown>).component).trim().length > 0
+    const patchCandidate = parsed.componentSpecPatch && typeof parsed.componentSpecPatch === 'object' && !Array.isArray(parsed.componentSpecPatch)
+      ? parsed.componentSpecPatch as Record<string, unknown>
+      : null
+    const hasMeaningfulPatch = Boolean(patchCandidate && (
+      (typeof patchCandidate.component === 'string' && patchCandidate.component.trim().length > 0)
+      || (patchCandidate.props && typeof patchCandidate.props === 'object')
+      || (patchCandidate.dataSource && typeof patchCandidate.dataSource === 'object')
+    ))
     const draft = this.normalizePipelineWidgetDraft(parsed, params)
-    if (!hasComponentSpec) {
-      return { draft, errors: ['Widget 草稿缺少 componentSpec.component'] }
+    const errors: string[] = []
+    if (params.plan.operation === 'update' && hasMeaningfulPatch && !hasComponentSpec) {
+      // patch-only update is valid; renderer will merge with existing spec
+    } else if (!hasComponentSpec) {
+      errors.push('Widget 草稿缺少 componentSpec.component')
+    } else {
+      errors.push(...this.validateDraftComponentSpec(draft))
     }
-    const errors = this.validateDraftComponentSpec(draft)
+    if (params.plan.operation === 'update' && params.targetCandidates && params.targetCandidates.length > 0) {
+      const resolution = this.resolveControlledWidgetTarget(draft.targetWidgetTitle, params.targetCandidates)
+      if (resolution.resolved) {
+        draft.targetWidgetTitle = resolution.resolved
+      } else if (params.preferredTarget && params.targetCandidates.includes(params.preferredTarget)) {
+        draft.targetWidgetTitle = params.preferredTarget
+      } else if (resolution.unresolvedReason) {
+        errors.push(resolution.unresolvedReason)
+      }
+    }
     return { draft, errors }
   }
 
@@ -750,10 +861,20 @@ export class DocumentTaskPipelineExecutor {
     timeoutMs: number
     providerContext: TurnProviderContext
     signal: AbortSignal
+    preferredTargetWidgetTitle?: string
   }): Promise<DocumentWidgetDraft> {
     const existingWidgets = params.plan.operation === 'update'
-      ? this.collectExistingWidgetsForPrompt(params.snapshot)
+      ? this.collectExistingWidgetsForPrompt(params.snapshot, 32)
       : []
+    const allUpdateWidgets = params.plan.operation === 'update'
+      ? collectDocumentWidgets(params.snapshot.content)
+      : []
+    const targetCandidates = params.plan.operation === 'update'
+      ? Array.from(new Set(allUpdateWidgets.map((record) => record.title).filter((title) => title && title.length > 0)))
+      : []
+    const preferredTargetResolved = params.preferredTargetWidgetTitle
+      ? this.resolveControlledWidgetTarget(params.preferredTargetWidgetTitle, targetCandidates).resolved
+      : undefined
     const systemPrompt = this.buildWidgetDraftSystemPrompt({
       plan: params.plan,
       hasExistingWidgets: existingWidgets.length > 0,
@@ -764,6 +885,8 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       plan: params.plan,
       existingWidgets,
+      targetCandidates,
+      preferredTarget: preferredTargetResolved,
     })
 
     const firstRaw = await this.requestDocumentPipelineSimpleText({
@@ -779,6 +902,8 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
+      targetCandidates,
+      preferredTarget: preferredTargetResolved,
     })
     if (firstAttempt.errors.length === 0) {
       return firstAttempt.draft
@@ -813,6 +938,8 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
+      targetCandidates,
+      preferredTarget: preferredTargetResolved,
     })
     if (secondAttempt.errors.length === 0) {
       return secondAttempt.draft
@@ -828,7 +955,9 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
-      targetWidgetTitle: secondAttempt.draft.targetWidgetTitle || firstAttempt.draft.targetWidgetTitle,
+      targetWidgetTitle: preferredTargetResolved
+        || secondAttempt.draft.targetWidgetTitle
+        || firstAttempt.draft.targetWidgetTitle,
     })
     this.appendInsightWarning(
       params.insight,
@@ -880,6 +1009,7 @@ export class DocumentTaskPipelineExecutor {
         target,
         title: params.draft.title,
         componentSpec: params.draft.componentSpec,
+        componentSpecPatch: params.draft.componentSpecPatch,
         widgetCode: params.draft.widgetCode,
       })
       return typeof payload.summary === 'string' ? payload.summary : `已更新信息卡：${target}`
@@ -1067,6 +1197,9 @@ export class DocumentTaskPipelineExecutor {
           cacheKeyOverride: insightCacheKey,
         },
       )
+      const envelopeWidgetTargetForInsight = params.requestEnvelope.resources.find(
+        (resource) => resource.kind === 'widget_target',
+      )
       const insightResult = cachedInsight || await this.buildDocumentPipelineInsight({
         question: params.job.instruction,
         snapshot: targetSnapshot,
@@ -1077,6 +1210,7 @@ export class DocumentTaskPipelineExecutor {
         timeoutMs: 60_000,
         providerContext: params.providerContext,
         signal: params.signal,
+        targetWidgetTitle: envelopeWidgetTargetForInsight?.name,
       })
       currentInsight = ('insight' in insightResult ? insightResult.insight : insightResult)
       if (!cachedInsight) {
@@ -1117,6 +1251,7 @@ export class DocumentTaskPipelineExecutor {
         targetSnapshot,
       )
       const planTaskType = classifyStructuredDocumentIntent(params.job.instruction) || 'document_read_then_widget_create'
+      const envelopeWidgetTarget = params.requestEnvelope.resources.find((resource) => resource.kind === 'widget_target')
       currentDraft = cachedDraft || await this.buildDocumentPipelineWidgetDraft({
         question: params.job.instruction,
         snapshot: targetSnapshot,
@@ -1133,6 +1268,7 @@ export class DocumentTaskPipelineExecutor {
         timeoutMs: 60_000,
         providerContext: params.providerContext,
         signal: params.signal,
+        preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
       })
       if (!cachedDraft) {
         this.storeCachedDocumentWidgetDraft(
@@ -1695,6 +1831,9 @@ export class DocumentTaskPipelineExecutor {
       requestEnvelope: params.executionIntentContext.requestEnvelope,
       snapshotContent: '',
     })
+    const envelopeWidgetTarget = params.executionIntentContext.requestEnvelope.resources.find(
+      (resource) => resource.kind === 'widget_target',
+    )
     const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = buildPipelinePhaseOrder(params.structuredIntent)
     const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
       loading_document: '读取文档',
@@ -1798,6 +1937,7 @@ export class DocumentTaskPipelineExecutor {
         timeoutMs: 60_000,
         providerContext: params.providerContext,
         signal: params.signal,
+        targetWidgetTitle: envelopeWidgetTarget?.name,
       }),
       storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
         this.storeCachedDocumentInsight(params.sessionId, question, snapshot, insight, metrics)
@@ -1810,6 +1950,7 @@ export class DocumentTaskPipelineExecutor {
         timeoutMs: 60_000,
         providerContext: params.providerContext,
         signal,
+        preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
       }),
       writeWidget: async ({ draft, snapshot, stage, signal }) => await this.writeDocumentWidget({
         draft,

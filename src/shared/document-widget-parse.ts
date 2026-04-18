@@ -16,12 +16,19 @@ export interface DocumentWidgetPersistedState {
   activeTargets?: WidgetPersistedActiveTargetState[]
 }
 
+export interface DocumentWidgetComponentSpecSummary {
+  component: string
+  props?: Record<string, unknown>
+  dataSource?: Record<string, unknown>
+}
+
 export interface DocumentWidgetData {
   id?: string
   title?: string
   widgetCode: string
   rawFence: string
   widgetState?: DocumentWidgetPersistedState | null
+  componentSpec?: DocumentWidgetComponentSpecSummary | null
 }
 
 export type DocumentWidgetSegment =
@@ -38,6 +45,17 @@ export interface DocumentWidgetRecord {
   start: number
   end: number
   mode: WidgetRenderMode
+  componentSpec?: DocumentWidgetComponentSpecSummary | null
+  widgetState?: DocumentWidgetPersistedState | null
+}
+
+export interface DocumentWidgetSummary {
+  index: number
+  title: string
+  mode: WidgetRenderMode
+  componentHint: string | null
+  preview: string
+  hasState: boolean
 }
 
 const SHOW_WIDGET_FENCE_REGEX = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
@@ -59,11 +77,17 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
     const widgetState = record.widget_state && typeof record.widget_state === 'object'
       ? record.widget_state as DocumentWidgetPersistedState
       : null
+    const rawComponentSpec = record.component_spec ?? record.componentSpec
+    const componentSpec = rawComponentSpec && typeof rawComponentSpec === 'object' && !Array.isArray(rawComponentSpec)
+      ? (rawComponentSpec as DocumentWidgetComponentSpecSummary)
+      : null
+    const componentSpecIsValid = componentSpec && typeof componentSpec.component === 'string' && componentSpec.component.trim().length > 0
     return {
       title,
       widgetCode,
       rawFence,
       widgetState,
+      componentSpec: componentSpecIsValid ? componentSpec : null,
     }
   } catch {
     return null
@@ -165,8 +189,37 @@ export function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
       start,
       end: start + fullMatch.length,
       mode: getWidgetRenderMode(parsed.widgetCode),
+      componentSpec: parsed.componentSpec ?? null,
+      widgetState: parsed.widgetState ?? null,
     })
   }
 
   return widgets
+}
+
+export function summarizeWidgetRecord(record: DocumentWidgetRecord): DocumentWidgetSummary {
+  const stripped = record.widgetCode
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const preview = stripped.length > 120 ? `${stripped.slice(0, 120)}…` : stripped
+  const componentHint = typeof record.componentSpec?.component === 'string' && record.componentSpec.component.trim().length > 0
+    ? record.componentSpec.component.trim()
+    : null
+  return {
+    index: record.index,
+    title: record.title,
+    mode: record.mode,
+    componentHint,
+    preview,
+    hasState: Boolean(record.widgetState && typeof record.widgetState === 'object' && Object.keys(record.widgetState).length > 0),
+  }
+}
+
+export function summarizeDocumentWidgets(source: string): DocumentWidgetSummary[] {
+  return collectDocumentWidgets(source).map(summarizeWidgetRecord)
 }

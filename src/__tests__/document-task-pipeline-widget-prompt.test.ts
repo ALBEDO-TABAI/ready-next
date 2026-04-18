@@ -41,7 +41,7 @@ describe('document pipeline widget draft prompt contract', () => {
   it('only collects existing widgets for update mode', () => {
     assert.match(
       source,
-      /params\.plan\.operation === 'update'\s*\?\s*this\.collectExistingWidgetsForPrompt\(params\.snapshot\)/,
+      /params\.plan\.operation === 'update'\s*\?\s*this\.collectExistingWidgetsForPrompt\(params\.snapshot,\s*\d+\)/,
     )
   })
 

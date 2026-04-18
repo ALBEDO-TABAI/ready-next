@@ -187,7 +187,7 @@ Ready 采用 Electron 三层架构：
 - 现在每轮启动时都会先生成稳定 `taskId`；`RunCoordinator -> execution host -> RunProjection -> TaskProjectionStore` 已统一按 `taskId` 串联，`runId` 只保留单次执行实例语义
 - 受控 child task 现在继续复用这条链：`runtime.sendScoped` 可选透传 `parentTaskId / parentStepId`，`RunCoordinator` 负责带着父任务关联启动子任务，而不是再起第二套外层循环
 - `runtime.sendScoped` / `RunCoordinator` 现已额外支持 `sessionIdOverride`：子任务可以沿用原 scope 发事件与写 projection，但执行宿主会切到独立 worker session，不再和父任务共用同一个 `agent + scopeId` 会话键
-- `worker-session.ts` / `subtask-runtime.ts` 现已作为正式 child run 底座：子任务永远使用自己的 `taskId` 做 projection identity，父任务只通过 `parentTaskId / parentStepId` 建关联，不再复用父任务 id
+- `worker-session.ts` / `subtask-runtime.ts` 现已作为 child task 底座：子任务永远使用自己的 `taskId` 做 projection identity，父任务只通过 `parentTaskId / parentStepId` 建关联，不再复用父任务 id；其中 `SubtaskRuntime` 当前只承载 inline worker 生命周期，不对外暴露“再起一轮独立子对话”的半成品入口
 - `worker-projection.ts` 现已统一产出父步骤等待态、child 占位摘要和 child 完成回填补丁；前台继续沿用现有 `scopeRunEvent + task projection` 通道，本期没有新增第二套 renderer 事件链
 - 阶段 5 第二轮已落地：`RunCoordinator` 现在会为每轮执行创建统一任务预算，并把 `budget / budgetState / taskId` 一起传给 execution host
 - execution host 当前已开始累积 `iterationsUsed / toolCallsUsed / parallelToolGroupsUsed`，并能带回步骤预算、预算预警和降级原因
@@ -517,6 +517,11 @@ Ready 采用 Electron 三层架构：
 - `DocumentTaskPipelineExecutor.tryExecute` 当前已把 `document_list_widgets` 与 `document_remove_widget` 两种结构化意图也接入文档信息卡 pipeline；list / remove 请求不再回落到普通工具循环，会产出结构化步骤、进度与诊断，并复用 renderer 侧 `document.listWidgets` / `document.removeWidget` 动作桥接。
 - `DocumentInsight.recommendedWidget` 类型以及 insight / widget 两段 system prompt 现已从 5 种 info-card 家族字面量放开到 `documentWidgetCatalog` 全集（20 种组件）；新增共享 `WIDGET_COMPONENT_IDS` 导出作为单一事实源，未来新增组件无需再同步改 prompt 文本与归一化 switch。
 - `pipelinePhaseOrder` 不再硬编码成 create 专用的 5 步；executor 现会按 `structuredIntent` 调用 `buildPipelinePhaseOrder(taskType)` 动态派生 phase 序列，UI 步骤列表与实际发出的 phase 集合一一对齐：update 补齐“定位/更新”，list 呈现“读取文档 → 列出文档卡片”，remove 呈现“读取文档 → 定位目标卡片 → 删除信息卡 → 保存文档”。
+- `list_widgets` 现在返回结构化 JSON 清单（`summarizeDocumentWidgets`，含 `index / title / mode / componentHint / preview / hasState`），首行保留人类可读摘要；LLM 通过这份受控清单定位目标 widget，不再只靠 `summary.includes(title)` 模糊匹配。
+- `show-widget` fence 现在可选持久化 `component_spec` 字段；`tryParseWidgetPayload` 解析老格式仍返回 `componentSpec === null`，向后兼容；所有 `buildShowWidgetFence` 写入入口都会把新生成或合并后的 componentSpec 写回，update 路径默认读取既有 spec 再做 merge。
+- Widget draft 的 `targetWidgetTitle` 走受控枚举：`resolveControlledWidgetTarget` 会做大小写/子串归一，优先消费 `requestEnvelope.resources[widget_target]` 指定的 preferred 目标；两次校验仍失败时 fallback 优先选 preferred 目标而不是 LLM 自由文本。
+- Update 分支的 `buildDocumentPipelineInsight` 现在接收 `targetWidgetTitle`：命中时用 `selectWidgetCenteredChunks`（chunks 带 `startOffset/endOffset`）抽 ±2 chunk 窗口作为上下文，聚焦目标卡片周围段落；未命中自动回退 `buildFocusedDocumentContext`。
+- `update_widget` 支持字段级 `componentSpecPatch`：LLM 只需输出变更字段；renderer 端读取目标 widget 当前 componentSpec → 走 `mergeComponentSpecPatch`（对象递归、数组整体替换、null 视为删除）→ 重编译 widgetCode → 写回。老 widget 若没有 componentSpec，会给出明确拒绝文本而不是静默失败。
 
 ## 9. 开发约定
 ### 9.1 新增跨进程功能的最小闭环

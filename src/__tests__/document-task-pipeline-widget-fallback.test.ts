@@ -21,7 +21,7 @@ describe('document pipeline widget draft fallback contract', () => {
   it('produces the summary-card fallback draft for create mode only', () => {
     assert.match(
       source,
-      /const fallbackDraft = this\.buildFallbackDocumentWidgetDraft\(\{[\s\S]*?targetWidgetTitle: secondAttempt\.draft\.targetWidgetTitle \|\| firstAttempt\.draft\.targetWidgetTitle/,
+      /const fallbackDraft = this\.buildFallbackDocumentWidgetDraft\(\{[\s\S]*?targetWidgetTitle: preferredTargetResolved[\s\S]*?secondAttempt\.draft\.targetWidgetTitle[\s\S]*?firstAttempt\.draft\.targetWidgetTitle/,
     )
     assert.match(source, /document pipeline widget draft fallback=applied mode=create/)
   })
