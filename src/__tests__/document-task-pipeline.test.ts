@@ -74,6 +74,7 @@ describe('DocumentTaskPipeline', () => {
         'saving_document',
         'completed',
       ],
+      'insert operation keeps the 5-phase path with single writing_widget',
     )
     assert.match(
       phases.find((item) => item.phase === 'building_insight' && item.status === 'completed')?.summary || '',
@@ -265,7 +266,7 @@ describe('DocumentTaskPipeline', () => {
   })
 
   it('routes update_existing drafts to widget update instead of append insert', async () => {
-    const writes: Array<{ kind: 'update' | 'insert'; title: string; target?: string }> = []
+    const writes: Array<{ stage: 'locate' | 'update' | 'insert'; title: string; target?: string }> = []
     const phases: Array<{ phase: string; summary: string }> = []
     const pipeline = new DocumentTaskPipeline({
       now: () => new Date('2026-04-16T10:00:00.000Z'),
@@ -301,16 +302,17 @@ describe('DocumentTaskPipeline', () => {
           },
         },
       }),
-      writeWidget: async ({ draft }) => {
+      writeWidget: async ({ draft, stage }) => {
         writes.push({
-          kind: draft.insertionMode === 'update_existing' ? 'update' : 'insert',
+          stage,
           title: draft.title,
           target: draft.targetWidgetTitle,
         })
+        if (stage === 'locate') return '已定位现有信息卡：ready_positioning_card'
         return '已更新现有信息卡（需求文档.md）'
       },
       insertWidget: async ({ draft }) => {
-        writes.push({ kind: 'insert', title: draft.title })
+        writes.push({ stage: 'insert', title: draft.title })
         return '不应走到追加路径'
       },
       saveDocument: async () => '已保存文档：/tmp/需求文档.md',
@@ -326,20 +328,27 @@ describe('DocumentTaskPipeline', () => {
     })
 
     assert.equal(result.success, true)
-    assert.deepEqual(writes, [{
-      kind: 'update',
-      title: 'ready_positioning_card',
-      target: 'ready_positioning_card',
-    }])
+    assert.deepEqual(writes, [
+      { stage: 'locate', title: 'ready_positioning_card', target: 'ready_positioning_card' },
+      { stage: 'update', title: 'ready_positioning_card', target: 'ready_positioning_card' },
+    ])
     assert.ok(
-      phases.some((phase) => phase.phase === 'writing_widget' && /定位|更新现有信息卡/.test(phase.summary)),
-      'expected task progress to describe locating/updating the existing widget',
+      phases.some((phase) => phase.phase === 'locating_target_widget'),
+      'expected a locating_target_widget phase before updating',
+    )
+    assert.ok(
+      phases.some((phase) => phase.phase === 'updating_widget'),
+      'expected an updating_widget phase after locating',
+    )
+    assert.ok(
+      !phases.some((phase) => phase.phase === 'writing_widget'),
+      'update path should not emit the writing_widget phase',
     )
     assert.match(result.finalText || '', /已更新现有信息卡/)
   })
 
   it('fails update_existing writes when the target widget cannot be found instead of appending a new card', async () => {
-    const writes: Array<{ kind: 'update' | 'insert'; title: string; target?: string }> = []
+    const writes: Array<{ stage: 'locate' | 'update' | 'insert'; title: string; target?: string }> = []
     const pipeline = new DocumentTaskPipeline({
       now: () => new Date('2026-04-16T10:00:00.000Z'),
       log: () => undefined,
@@ -374,16 +383,19 @@ describe('DocumentTaskPipeline', () => {
           },
         },
       }),
-      writeWidget: async ({ draft }) => {
+      writeWidget: async ({ draft, stage }) => {
         writes.push({
-          kind: draft.insertionMode === 'update_existing' ? 'update' : 'insert',
+          stage,
           title: draft.title,
           target: draft.targetWidgetTitle,
         })
-        throw new Error('未找到可更新的信息卡：missing_widget')
+        if (stage === 'locate') {
+          throw new Error('未找到可更新的信息卡：missing_widget')
+        }
+        return '不应走到 update 阶段'
       },
       insertWidget: async ({ draft }) => {
-        writes.push({ kind: 'insert', title: draft.title })
+        writes.push({ stage: 'insert', title: draft.title })
         return '不应回退到追加路径'
       },
       saveDocument: async () => '已保存文档：/tmp/需求文档.md',
@@ -392,15 +404,113 @@ describe('DocumentTaskPipeline', () => {
     const result = await pipeline.run({
       question: '把这个信息卡改成极简风格',
       signal: new AbortController().signal,
+      taskType: 'document_read_then_widget_update',
     })
 
     assert.equal(result.success, false)
     assert.deepEqual(writes, [{
-      kind: 'update',
+      stage: 'locate',
       title: 'ready_positioning_card',
       target: 'missing_widget',
     }])
     assert.match(result.error || '', /未找到可更新的信息卡/)
     assert.match(result.finalText || '', /卡片草稿已生成/)
+  })
+
+  it('runs document_list_widgets as a single listing phase after loading the document', async () => {
+    const phases: Array<{ phase: string; status: string }> = []
+    const pipeline = new DocumentTaskPipeline({
+      now: () => new Date('2026-04-16T10:00:00.000Z'),
+      log: () => undefined,
+      loadDocumentSnapshot: async () => ({
+        title: '需求文档.md',
+        path: '/tmp/需求文档.md',
+        content: 'Ready 是一个集成式创作工作台。',
+        isDirty: false,
+        charCount: 16,
+      }),
+      buildInsight: async () => {
+        throw new Error('list 路径不应调用 buildInsight')
+      },
+      buildWidgetDraft: async () => {
+        throw new Error('list 路径不应调用 buildWidgetDraft')
+      },
+      writeWidget: async () => {
+        throw new Error('list 路径不应调用 writeWidget')
+      },
+      saveDocument: async () => {
+        throw new Error('list 路径不应调用 saveDocument')
+      },
+      listWidgets: async () => '当前文档包含 2 个信息卡：\n- ready_positioning_card\n- project_overview_card',
+      emitPhase: (phase) => {
+        phases.push({ phase: phase.phase, status: phase.status })
+      },
+    } as any)
+
+    const result = await pipeline.run({
+      question: '看看这个文档里有哪些信息卡',
+      signal: new AbortController().signal,
+      taskType: 'document_list_widgets',
+    })
+
+    assert.equal(result.success, true)
+    assert.match(result.finalText || '', /当前文档包含 2 个信息卡/)
+    assert.deepEqual(
+      phases
+        .filter((item) => item.status === 'running' || item.phase === 'completed')
+        .map((item) => item.phase),
+      ['loading_document', 'listing_widgets', 'completed'],
+      'list intent uses the minimal 2-phase path',
+    )
+  })
+
+  it('runs document_remove_widget through locate → remove → save phases', async () => {
+    const removeCalls: Array<'locate' | 'remove'> = []
+    const phases: Array<{ phase: string; status: string }> = []
+    const pipeline = new DocumentTaskPipeline({
+      now: () => new Date('2026-04-16T10:00:00.000Z'),
+      log: () => undefined,
+      loadDocumentSnapshot: async () => ({
+        title: '需求文档.md',
+        path: '/tmp/需求文档.md',
+        content: 'Ready 是一个集成式创作工作台。',
+        isDirty: true,
+        charCount: 16,
+      }),
+      buildInsight: async () => {
+        throw new Error('remove 路径不应调用 buildInsight')
+      },
+      buildWidgetDraft: async () => {
+        throw new Error('remove 路径不应调用 buildWidgetDraft')
+      },
+      writeWidget: async () => {
+        throw new Error('remove 路径不应调用 writeWidget')
+      },
+      saveDocument: async () => '已保存文档：/tmp/需求文档.md',
+      removeWidget: async ({ stage }) => {
+        removeCalls.push(stage)
+        return stage === 'locate' ? '已定位 ready_positioning_card' : '已删除 ready_positioning_card'
+      },
+      emitPhase: (phase) => {
+        phases.push({ phase: phase.phase, status: phase.status })
+      },
+    } as any)
+
+    const result = await pipeline.run({
+      question: '把当前文档里的那个信息卡删掉',
+      signal: new AbortController().signal,
+      taskType: 'document_remove_widget',
+    })
+
+    assert.equal(result.success, true)
+    assert.deepEqual(removeCalls, ['locate', 'remove'])
+    assert.match(result.finalText || '', /已删除 ready_positioning_card/)
+    assert.deepEqual(
+      phases
+        .filter((item) => item.status === 'running' || item.phase === 'completed')
+        .map((item) => item.phase),
+      ['loading_document', 'locating_target_widget', 'removing_widget', 'saving_document', 'completed'],
+      'remove intent walks locate → remove → save',
+    )
   })
 })

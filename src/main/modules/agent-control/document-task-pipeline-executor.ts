@@ -20,6 +20,7 @@ import {
   type DocumentStructuredTaskType,
   type DocumentTaskPipelinePhaseUpdate,
   type DocumentWidgetDraft,
+  type DocumentWidgetWriteStage,
 } from './document-task-pipeline'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from './document-task-plan'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
@@ -667,22 +668,31 @@ export class DocumentTaskPipelineExecutor {
     draft: DocumentWidgetDraft
     snapshot: ActiveDocumentSnapshot
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+    stage?: DocumentWidgetWriteStage
     signal: AbortSignal
   }): Promise<string> {
     void params.signal
+    const stage: DocumentWidgetWriteStage = params.stage
+      || (params.draft.insertionMode === 'update_existing' ? 'update' : 'insert')
 
-    if (params.draft.insertionMode === 'update_existing') {
+    if (stage === 'locate') {
       const target = String(params.draft.targetWidgetTitle || '').trim()
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
-
       const listPayload = await params.requestModuleToolAction('document.listWidgets', {})
       const widgetSummary = typeof listPayload.summary === 'string' ? listPayload.summary : ''
       if (!this.doesListWidgetsSummaryContainTarget(widgetSummary, target)) {
         throw new Error(`未找到可更新的信息卡：${target}`)
       }
+      return `已定位信息卡：${target}`
+    }
 
+    if (stage === 'update') {
+      const target = String(params.draft.targetWidgetTitle || '').trim()
+      if (!target) {
+        throw new Error('未提供要更新的信息卡目标')
+      }
       const payload = await params.requestModuleToolAction('document.updateWidget', {
         target,
         title: params.draft.title,
@@ -1514,6 +1524,10 @@ export class DocumentTaskPipelineExecutor {
       building_insight: '提炼重点',
       generating_widget_spec: '生成卡片草稿',
       writing_widget: params.structuredIntent === 'document_read_then_widget_update' ? '更新现有卡片' : '写入卡片',
+      locating_target_widget: '定位目标卡片',
+      updating_widget: '更新现有卡片',
+      listing_widgets: '列出文档卡片',
+      removing_widget: '删除信息卡',
       saving_document: '保存文档',
       completed: '完成',
       failed: '失败',
@@ -1620,9 +1634,10 @@ export class DocumentTaskPipelineExecutor {
         providerContext: params.providerContext,
         signal,
       }),
-      writeWidget: async ({ draft, snapshot, signal }) => await this.writeDocumentWidget({
+      writeWidget: async ({ draft, snapshot, stage, signal }) => await this.writeDocumentWidget({
         draft,
         snapshot,
+        stage,
         requestModuleToolAction: params.requestModuleToolAction,
         signal,
       }),

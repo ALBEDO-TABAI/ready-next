@@ -1,6 +1,8 @@
 export type StructuredDocumentIntent =
   | 'document_read_then_widget_create'
   | 'document_read_then_widget_update'
+  | 'document_list_widgets'
+  | 'document_remove_widget'
   | null
 
 const READ_DOCUMENT_PATTERNS = [
@@ -27,21 +29,30 @@ const EXISTING_WIDGET_UPDATE_PATTERNS = [
   /(把|将).*(这个|当前|已有|现有).*(信息卡|卡片|widget).*(改成|改为|换成)/i,
 ] as const
 
-const EXISTING_WIDGET_NON_CREATE_PATTERNS = [
-  /(查看|列出|看看).*(widget|卡片)/i,
-  /(删除|删掉|移除).*(widget|卡片)/i,
+const LIST_WIDGET_PATTERNS = [
+  /(查看|列出|看看|看一下|有哪些|都有哪些).*(widget|卡片|信息卡)/i,
+  /(widget|卡片|信息卡).*(列表|清单|列出|有哪些)/i,
+] as const
+
+const REMOVE_WIDGET_PATTERNS = [
+  /(删除|删掉|移除|去掉|清除).*(widget|卡片|信息卡)/i,
+  /(把|将).*(widget|卡片|信息卡).*(删|移|去)/i,
 ] as const
 
 export function classifyStructuredDocumentIntent(userText: string): StructuredDocumentIntent {
   const text = String(userText || '').trim()
   if (!text) return null
 
-  if (EXISTING_WIDGET_UPDATE_PATTERNS.some((pattern) => pattern.test(text))) {
-    return 'document_read_then_widget_update'
+  if (REMOVE_WIDGET_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'document_remove_widget'
   }
 
-  if (EXISTING_WIDGET_NON_CREATE_PATTERNS.some((pattern) => pattern.test(text))) {
-    return null
+  if (LIST_WIDGET_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'document_list_widgets'
+  }
+
+  if (EXISTING_WIDGET_UPDATE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'document_read_then_widget_update'
   }
 
   const wantsReadDocument = READ_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text))

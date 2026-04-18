@@ -24,6 +24,9 @@ export type ToolTimeoutProfile =
 
 export interface ToolProjectionHint {
   mutating?: boolean
+  // Consumers: DomainAdapter.applyResult should advance a projection step when a tool with
+  // emitsProjectionPatch=true executes in a tool_batch (see DocumentDomainAdapter for the
+  // document-domain implementation; SkillDomainAdapter consumes the same hint).
   emitsProjectionPatch?: boolean
 }
 

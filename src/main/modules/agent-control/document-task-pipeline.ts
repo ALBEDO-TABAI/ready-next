@@ -6,13 +6,21 @@ export type DocumentWidgetPipelinePhase =
   | 'building_insight'
   | 'generating_widget_spec'
   | 'writing_widget'
+  | 'locating_target_widget'
+  | 'updating_widget'
+  | 'listing_widgets'
+  | 'removing_widget'
   | 'saving_document'
   | 'completed'
   | 'failed'
 
+export type DocumentWidgetWriteStage = 'locate' | 'update' | 'insert'
+
 export type DocumentStructuredTaskType =
   | 'document_read_then_widget_create'
   | 'document_read_then_widget_update'
+  | 'document_list_widgets'
+  | 'document_remove_widget'
 
 export type DocumentWidgetOperation = 'create' | 'update'
 
@@ -139,10 +147,22 @@ interface DocumentTaskPipelineDeps {
     draft: DocumentWidgetDraft
     snapshot: ActiveDocumentSnapshot
     plan: DocumentReadPlan
+    stage: DocumentWidgetWriteStage
     signal: AbortSignal
   }) => Promise<string>
   saveDocument: (params: {
     snapshot: ActiveDocumentSnapshot
+    signal: AbortSignal
+  }) => Promise<string>
+  listWidgets?: (params: {
+    snapshot: ActiveDocumentSnapshot
+    plan: DocumentReadPlan
+    signal: AbortSignal
+  }) => Promise<string>
+  removeWidget?: (params: {
+    snapshot: ActiveDocumentSnapshot
+    plan: DocumentReadPlan
+    stage: 'locate' | 'remove'
     signal: AbortSignal
   }) => Promise<string>
   emitPhase?: (payload: DocumentTaskPipelinePhaseUpdate) => void
@@ -182,6 +202,7 @@ export class DocumentTaskPipeline {
   ): DocumentReadPlan {
     const operation: DocumentWidgetOperation =
       taskType === 'document_read_then_widget_update' ? 'update' : 'create'
+    // For list/remove tasks, operation is unused but set to 'create' as a neutral default.
     const preferredWidget =
       /stats card|指标卡|统计卡/i.test(question)
         ? 'stats_card'
@@ -410,6 +431,102 @@ export class DocumentTaskPipeline {
         }),
       })
       plan = this.createReadPlan(params.question, snapshot, params.taskType)
+
+      if (plan.taskType === 'document_list_widgets') {
+        if (!this.deps.listWidgets) {
+          throw new Error('document pipeline 缺少 listWidgets 依赖')
+        }
+        const listSummary = await this.runPhase({
+          phase: 'listing_widgets',
+          summary: '正在列出文档中的信息卡',
+          budgetMs: budget.writeWidgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.listWidgets!({
+            snapshot: snapshot!,
+            plan,
+            signal: params.signal,
+          }),
+        })
+        this.deps.emitPhase?.({
+          phase: 'completed',
+          status: 'completed',
+          summary: '文档信息卡已列出',
+          startedAt: this.now().toISOString(),
+          budgetMs: budget.totalMs,
+        })
+        this.deps.log('document pipeline phase=completed status=completed')
+        return {
+          success: true,
+          plan,
+          snapshot,
+          finalText: listSummary,
+        }
+      }
+
+      if (plan.taskType === 'document_remove_widget') {
+        if (!this.deps.removeWidget) {
+          throw new Error('document pipeline 缺少 removeWidget 依赖')
+        }
+        const removeLocateBudgetMs = Math.max(1, Math.floor(budget.writeWidgetMs / 3))
+        const removeBudgetMs = Math.max(1, budget.writeWidgetMs - removeLocateBudgetMs)
+        await this.runPhase({
+          phase: 'locating_target_widget',
+          summary: '正在定位待删除的信息卡',
+          budgetMs: removeLocateBudgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.removeWidget!({
+            snapshot: snapshot!,
+            plan,
+            stage: 'locate',
+            signal: params.signal,
+          }),
+        })
+        const removeSummary = await this.runPhase({
+          phase: 'removing_widget',
+          summary: '正在删除信息卡',
+          budgetMs: removeBudgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.removeWidget!({
+            snapshot: snapshot!,
+            plan,
+            stage: 'remove',
+            signal: params.signal,
+          }),
+        })
+        const saveSummary = await this.runPhase({
+          phase: 'saving_document',
+          summary: '正在保存文档',
+          budgetMs: budget.saveDocumentMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.saveDocument({
+            snapshot: snapshot!,
+            signal: params.signal,
+          }),
+        })
+        this.deps.emitPhase?.({
+          phase: 'completed',
+          status: 'completed',
+          summary: '信息卡已删除',
+          startedAt: this.now().toISOString(),
+          budgetMs: budget.totalMs,
+        })
+        this.deps.log('document pipeline phase=completed status=completed')
+        return {
+          success: true,
+          plan,
+          snapshot,
+          finalText: [removeSummary, saveSummary].filter(Boolean).join('\n'),
+        }
+      }
+
       const cachedInsight = await this.deps.getCachedInsight?.({
         question: params.question,
         snapshot,
@@ -463,20 +580,57 @@ export class DocumentTaskPipeline {
         }), plan),
       })
 
-      const writeSummary = await this.runPhase({
-        phase: 'writing_widget',
-        summary: plan.operation === 'update' ? '正在定位并更新现有信息卡' : '正在写入信息卡',
-        budgetMs: budget.writeWidgetMs,
-        totalStartedAtMs,
-        totalBudgetMs: budget.totalMs,
-        signal: params.signal,
-        fn: async () => await this.deps.writeWidget({
-          draft: widgetDraft!,
-          snapshot: snapshot!,
-          plan,
+      let writeSummary: string
+      if (plan.operation === 'update') {
+        const locateBudgetMs = Math.max(1, Math.floor(budget.writeWidgetMs / 3))
+        const updateBudgetMs = Math.max(1, budget.writeWidgetMs - locateBudgetMs)
+        await this.runPhase({
+          phase: 'locating_target_widget',
+          summary: '正在定位现有信息卡',
+          budgetMs: locateBudgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
           signal: params.signal,
-        }),
-      })
+          fn: async () => await this.deps.writeWidget({
+            draft: widgetDraft!,
+            snapshot: snapshot!,
+            plan,
+            stage: 'locate',
+            signal: params.signal,
+          }),
+        })
+        writeSummary = await this.runPhase({
+          phase: 'updating_widget',
+          summary: '正在更新现有信息卡',
+          budgetMs: updateBudgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.writeWidget({
+            draft: widgetDraft!,
+            snapshot: snapshot!,
+            plan,
+            stage: 'update',
+            signal: params.signal,
+          }),
+        })
+      } else {
+        writeSummary = await this.runPhase({
+          phase: 'writing_widget',
+          summary: '正在写入信息卡',
+          budgetMs: budget.writeWidgetMs,
+          totalStartedAtMs,
+          totalBudgetMs: budget.totalMs,
+          signal: params.signal,
+          fn: async () => await this.deps.writeWidget({
+            draft: widgetDraft!,
+            snapshot: snapshot!,
+            plan,
+            stage: 'insert',
+            signal: params.signal,
+          }),
+        })
+      }
 
       const saveSummary = await this.runPhase({
         phase: 'saving_document',

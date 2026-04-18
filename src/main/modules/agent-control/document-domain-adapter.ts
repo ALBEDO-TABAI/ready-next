@@ -2,6 +2,10 @@ import type { ToolPolicy } from './execution-tool-config'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
 import type { DocumentToolLoopState } from './document-tool-loop-orchestrator'
 import type { DocumentChatSessionLike } from './document-domain-helpers'
+import type { ToolDefinition } from './tool-definition'
+import type { ScopeRunTaskStep } from './types'
+import { defaultToolRegistry, type ToolRegistryReader } from './tool-registry'
+import { normalizeToolExecutionOutput } from './tool-result-types'
 
 interface DocumentDomainOrchestratorLike {
   tryDeterministicSectionFormatFlow: (params: {
@@ -69,6 +73,36 @@ interface DocumentToolLoopOrchestratorLike {
 interface DocumentAdapterState {
   toolLoopState: DocumentToolLoopState
   taskTitle: string
+  projectionSteps: ScopeRunTaskStep[]
+  currentStepId: string | null
+}
+
+function ensureProjectionFields(state: DocumentAdapterState): DocumentAdapterState {
+  if (Array.isArray(state.projectionSteps) && state.currentStepId !== undefined) return state
+  return {
+    ...state,
+    projectionSteps: Array.isArray(state.projectionSteps) ? state.projectionSteps : [],
+    currentStepId: state.currentStepId ?? null,
+  }
+}
+
+function buildDocumentStepId(existing: ScopeRunTaskStep[], toolName: string): string {
+  const repeats = existing.filter((step) => step.id === toolName || step.id.startsWith(`${toolName}#`)).length
+  return repeats === 0 ? toolName : `${toolName}#${repeats + 1}`
+}
+
+function truncateDetail(text: string, max = 240): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, max)}…`
+}
+
+function resolveDocumentStepStatus(resultText: string): ScopeRunTaskStep['status'] {
+  const trimmed = resultText.trim()
+  if (!trimmed) return 'done'
+  if (/^(错误|失败|error[:：]?)/i.test(trimmed)) return 'error'
+  return 'done'
 }
 
 interface DocumentTaskPipelineExecutorLike {
@@ -107,11 +141,24 @@ function buildUserMessage(content: string | null | undefined) {
 export class DocumentDomainAdapter implements DomainAdapter {
   readonly id = 'document'
 
+  private readonly toolRegistry: ToolRegistryReader
+
   constructor(private readonly deps: {
     orchestrator: DocumentDomainOrchestratorLike
     toolLoopOrchestrator: DocumentToolLoopOrchestratorLike
     pipelineExecutor?: DocumentTaskPipelineExecutorLike
-  }) {}
+    toolRegistry?: ToolRegistryReader
+  }) {
+    this.toolRegistry = deps.toolRegistry || defaultToolRegistry
+  }
+
+  private lookupToolDefinition(toolName: string): ToolDefinition | null {
+    try {
+      return this.toolRegistry.getToolDefinition(toolName)
+    } catch {
+      return null
+    }
+  }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'document'
@@ -127,6 +174,8 @@ export class DocumentDomainAdapter implements DomainAdapter {
       domainState: {
         toolLoopState,
         taskTitle: resolveDocumentTaskTitle(params.toolPolicy),
+        projectionSteps: [],
+        currentStepId: null,
       } satisfies DocumentAdapterState,
     }
   }
@@ -229,12 +278,33 @@ export class DocumentDomainAdapter implements DomainAdapter {
   }
 
   applyResult(params: Parameters<DomainAdapter['applyResult']>[0]): DomainAdapterApplyResult {
-    let state = params.domainState as DocumentAdapterState
+    let state = ensureProjectionFields(params.domainState as DocumentAdapterState)
     if (params.phase === 'tool_batch') {
       for (const inspection of params.toolBatch?.documentToolInspections || []) {
         state = {
           ...state,
           toolLoopState: this.deps.toolLoopOrchestrator.applyToolInspection(state.toolLoopState, inspection),
+        }
+      }
+      for (const executedTool of params.toolBatch?.executedTools || []) {
+        const definition = this.lookupToolDefinition(executedTool.name)
+        if (!definition?.projectionHint?.emitsProjectionPatch) continue
+        if (definition.domain !== 'document') continue
+        const normalized = normalizeToolExecutionOutput(executedTool.result)
+        const stepId = buildDocumentStepId(state.projectionSteps, executedTool.name)
+        const status = resolveDocumentStepStatus(normalized.text)
+        const detail = truncateDetail(normalized.text)
+        const step: ScopeRunTaskStep = {
+          id: stepId,
+          title: executedTool.name,
+          status,
+          detail: detail || null,
+          updatedAt: new Date().toISOString(),
+        }
+        state = {
+          ...state,
+          projectionSteps: [...state.projectionSteps, step],
+          currentStepId: stepId,
         }
       }
       const decision = this.deps.toolLoopOrchestrator.handleIterationResult({
@@ -310,11 +380,20 @@ export class DocumentDomainAdapter implements DomainAdapter {
   }
 
   buildProjectionPatch(params: Parameters<DomainAdapter['buildProjectionPatch']>[0]): Record<string, unknown> | null {
-    return this.deps.toolLoopOrchestrator.buildStructuredTaskPayload({
-      taskTitle: (params.domainState as DocumentAdapterState).taskTitle,
+    const state = ensureProjectionFields(params.domainState as DocumentAdapterState)
+    const basePayload = this.deps.toolLoopOrchestrator.buildStructuredTaskPayload({
+      taskTitle: state.taskTitle,
       taskSummary: params.projection.summary,
-      state: (params.domainState as DocumentAdapterState).toolLoopState,
+      state: state.toolLoopState,
       phase: params.projection.phase,
-    })
+    }) as Record<string, unknown>
+    if (state.projectionSteps.length === 0 || !state.currentStepId) {
+      return basePayload
+    }
+    return {
+      ...basePayload,
+      steps: state.projectionSteps,
+      currentStepId: state.currentStepId,
+    }
   }
 }
