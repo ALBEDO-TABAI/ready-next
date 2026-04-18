@@ -1,6 +1,7 @@
 import type { ChatAttachment, ConversationScope } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
+import { refreshDocumentWidgetTargetSnapshot } from './widget-target-attachment'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
@@ -31,9 +32,13 @@ function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: C
 }
 
 export function filterAttachmentsForComposedAgentInput(content: string, attachments: ChatAttachment[]): ChatAttachment[] {
-  return attachments.filter((attachment) => (
-    attachment.source !== 'document-widget-target' || shouldKeepDocumentWidgetTargetAttachment(content, attachment)
-  ))
+  return attachments
+    .map((attachment) => {
+      if (attachment.source !== 'document-widget-target') return attachment
+      if (!shouldKeepDocumentWidgetTargetAttachment(content, attachment)) return null
+      return refreshDocumentWidgetTargetSnapshot(attachment)
+    })
+    .filter((attachment): attachment is ChatAttachment => Boolean(attachment))
 }
 
 function normalizeAttachmentType(value: unknown): ChatAttachment['type'] {
@@ -78,7 +83,9 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         url: typeof record.url === 'string' ? record.url : undefined,
         title: typeof record.title === 'string' ? record.title : undefined,
         documentTitle: typeof record.documentTitle === 'string' ? record.documentTitle : undefined,
+        tabId: typeof record.tabId === 'string' ? record.tabId : undefined,
         widgetTitle: typeof record.widgetTitle === 'string' ? record.widgetTitle : undefined,
+        widgetId: typeof record.widgetId === 'string' ? record.widgetId : undefined,
         widgetCode: typeof record.widgetCode === 'string' ? record.widgetCode : undefined,
         widgetMode: typeof record.widgetMode === 'string' ? record.widgetMode : undefined,
         selection: typeof record.selection === 'string' ? record.selection : undefined,
@@ -155,7 +162,9 @@ function formatDocumentWidgetTargetReference(payload: {
   name: string
   path: string
   documentTitle?: string
+  tabId?: string
   widgetTitle?: string
+  widgetId?: string
   widgetCode?: string
   widgetMode?: string
 }): string {
@@ -163,7 +172,9 @@ function formatDocumentWidgetTargetReference(payload: {
     '### Widget 更新上下文',
     `- 文档: ${payload.documentTitle || '(未保存草稿)'}`,
     `- 路径: ${payload.path}`,
+    payload.tabId ? `- 标签页ID: ${payload.tabId}` : null,
     `- 目标 widget: ${payload.widgetTitle || payload.name}`,
+    payload.widgetId ? `- widgetId: ${payload.widgetId}` : null,
     payload.widgetMode ? `- 当前模式: ${payload.widgetMode}` : null,
     '- 约束: 这是现有 widget 更新入口。优先使用 document_update_widget，不要新增第二个同类 widget，修改后保存文档。',
     '',
@@ -251,7 +262,9 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       url: attachment.url,
       title: attachment.title,
       documentTitle: attachment.documentTitle,
+      tabId: attachment.tabId,
       widgetTitle: attachment.widgetTitle,
+      widgetId: attachment.widgetId,
       widgetCode: attachment.widgetCode,
       widgetMode: attachment.widgetMode,
       selection: attachment.selection,
@@ -348,7 +361,9 @@ export async function buildComposedAgentInput(params: {
               name: att.name,
               path: att.path,
               documentTitle: att.documentTitle,
+              tabId: att.tabId,
               widgetTitle: att.widgetTitle,
+              widgetId: att.widgetId,
               widgetCode: att.widgetCode,
               widgetMode: att.widgetMode,
             })}`,
@@ -502,7 +517,9 @@ export async function buildComposedAgentInput(params: {
               name: poolFile.name,
               path: poolFile.path,
               documentTitle: poolFile.documentTitle,
+              tabId: poolFile.tabId,
               widgetTitle: poolFile.widgetTitle,
+              widgetId: poolFile.widgetId,
               widgetCode: poolFile.widgetCode,
               widgetMode: poolFile.widgetMode,
             })}`,

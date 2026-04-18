@@ -23,6 +23,7 @@ export function buildDocumentTaskStepCacheKey(params: {
   targetSnapshot?: {
     title: string
     path: string | null
+    tabId?: string | null
   } | null
 }): string {
   const targetBinding = params.job.bindings.find((binding) => binding.role === 'target_document')?.resource || null
@@ -31,6 +32,8 @@ export function buildDocumentTaskStepCacheKey(params: {
     || params.targetSnapshot?.title
     || targetBinding?.name
     || 'unknown-target'
+  const widgetId = targetBinding?.widgetId || 'no-widget'
+  const tabId = params.targetSnapshot?.tabId || targetBinding?.tabId || 'no-tab'
 
   const bindingKey = params.job.bindings
     .map((binding) => {
@@ -46,6 +49,8 @@ export function buildDocumentTaskStepCacheKey(params: {
   return [
     params.step,
     targetIdentity,
+    widgetId,
+    tabId,
     normalizeQuestion(params.question),
     hashText(bindingKey),
   ].join('::')

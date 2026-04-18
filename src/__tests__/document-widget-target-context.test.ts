@@ -36,7 +36,9 @@ describe('document widget target context', () => {
     const attachment = createDocumentWidgetTargetAttachment({
       documentTitle: '新文档.md',
       documentPath: '/Users/user/新文档.md',
+      tabId: 'doc-1',
       widgetTitle: 'stock_price_chart',
+      widgetId: 'widget_stock_price_chart',
       widgetCode: '<div>demo</div>',
       widgetMode: 'scripted',
     })
@@ -44,6 +46,8 @@ describe('document widget target context', () => {
     assert.equal(attachment.source, 'document-widget-target')
     assert.equal(attachment.widgetTitle, 'stock_price_chart')
     assert.equal(attachment.documentTitle, '新文档.md')
+    assert.equal(attachment.tabId, 'doc-1')
+    assert.equal(attachment.widgetId, 'widget_stock_price_chart')
   })
 
   it('injects a structured widget update context block into composed agent input', async () => {
@@ -61,7 +65,9 @@ describe('document widget target context', () => {
     const attachment = createDocumentWidgetTargetAttachment({
       documentTitle: '新文档.md',
       documentPath: '/Users/user/新文档.md',
+      tabId: 'doc-1',
       widgetTitle: 'stock_price_chart',
+      widgetId: 'widget_stock_price_chart',
       widgetCode: '<div class="card">demo</div>',
       widgetMode: 'scripted',
     })
@@ -75,6 +81,8 @@ describe('document widget target context', () => {
     assert.equal(typeof composed, 'string')
     assert.match(String(composed), /### Widget 更新上下文/)
     assert.match(String(composed), /目标 widget: stock_price_chart/)
+    assert.match(String(composed), /标签页ID: doc-1/)
+    assert.match(String(composed), /widgetId: widget_stock_price_chart/)
     assert.match(String(composed), /优先使用 document_update_widget/)
     assert.match(String(composed), /```show-widget/)
   })
@@ -94,7 +102,9 @@ describe('document widget target context', () => {
     const attachment = createDocumentWidgetTargetAttachment({
       documentTitle: '新文档.md',
       documentPath: '/Users/user/新文档.md',
+      tabId: 'doc-1',
       widgetTitle: 'stock_price_chart',
+      widgetId: 'widget_stock_price_chart',
       widgetCode: '<div class="card">demo</div>',
       widgetMode: 'scripted',
     })

@@ -124,9 +124,10 @@ interface DocumentTaskPipelineExecutionResult {
   result?: DomainAdapterDispatchResult
 }
 
+const WIDGET_DRAFT_TTL_MS = 90_000
+
 export class DocumentTaskPipelineExecutor {
   private readonly documentInsightCache = new DocumentInsightCache()
-  private readonly documentWidgetDraftCache = new Map<string, DocumentWidgetDraft>()
   private readonly sessionInsightCaches = new Map<string, Array<{
     key: string
     insight: DocumentInsight
@@ -137,6 +138,7 @@ export class DocumentTaskPipelineExecutor {
     key: string
     draft: DocumentWidgetDraft
     createdAt: string
+    expiresAt: number
   }>>()
 
   constructor(private readonly deps: DocumentTaskPipelineExecutorDeps) {}
@@ -711,9 +713,14 @@ export class DocumentTaskPipelineExecutor {
 
   private serializeExistingWidgetsForPrompt(records: DocumentWidgetRecord[]): string {
     const payload = records.map((record) => ({
+      id: record.id,
       index: record.index,
       title: record.title,
       mode: record.mode,
+      component: record.componentSpec?.component || null,
+      hasComponentSpec: Boolean(record.componentSpec),
+      canPatch: Boolean(record.componentSpec),
+      canReplace: true,
       widgetCode: this.clipWidgetCodeForPrompt(record.widgetCode),
     }))
     return JSON.stringify(payload, null, 2)
@@ -744,6 +751,7 @@ export class DocumentTaskPipelineExecutor {
       lines.push('')
       lines.push('注意：文档里已有 widget。若待更新 widget 已确定组件类型，**必须沿用同一组件**，不要换类别；改动只作用于 props 内容。')
       lines.push('')
+      lines.push('若目标 widget 标记为 `canPatch=false`，说明它没有结构化底稿；此时不要输出 componentSpecPatch，必须输出完整 componentSpec 以整卡替换。')
       lines.push('【字段级 patch（优先）】若用户需求只涉及一两个字段的微调（例如仅改 tone/color/heading 或替换一条 point），请只输出 `componentSpecPatch`（仅含变更字段路径的对象），不要重新输出完整 componentSpec。')
       lines.push('仅当用户要求"整张卡片重写/彻底换内容/换组件类型"时才输出完整 componentSpec。patch 和 componentSpec 二选一。')
       lines.push('componentSpecPatch 字段结构：{ "component"?: string, "props"?: { ...只写变更字段 }, "dataSource"?: { ... } }。props 内对象会按字段合并，数组字段会整体替换，设为 null 表示删除该字段。')
@@ -774,6 +782,7 @@ export class DocumentTaskPipelineExecutor {
       if (params.preferredTarget) {
         segments.push(`上下文已指明目标 widget：${params.preferredTarget}。若无相反证据，请直接选它。`)
       }
+      segments.push('若候选项里 `canPatch=false`，只能整卡替换，不能输出 patch-only。')
       segments.push('')
     }
     segments.push(`用户问题：${params.question}`)
@@ -805,12 +814,25 @@ export class DocumentTaskPipelineExecutor {
     return validation.ok ? [] : validation.errors
   }
 
+  private findTargetWidgetRecord(
+    records: DocumentWidgetRecord[],
+    draft: DocumentWidgetDraft,
+  ): DocumentWidgetRecord | null {
+    if (draft.targetWidgetId) {
+      return records.find((record) => record.id === draft.targetWidgetId) || null
+    }
+    const targetTitle = String(draft.targetWidgetTitle || '').trim()
+    if (!targetTitle) return null
+    return records.find((record) => record.title === targetTitle) || null
+  }
+
   private evaluateWidgetDraftAttempt(
     parsed: Record<string, unknown> | null,
     params: {
       insight: DocumentInsight
       snapshot: ActiveDocumentSnapshot
       plan: DocumentReadPlan
+      existingWidgets?: DocumentWidgetRecord[]
       targetCandidates?: string[]
       preferredTarget?: string
     },
@@ -833,13 +855,6 @@ export class DocumentTaskPipelineExecutor {
     ))
     const draft = this.normalizePipelineWidgetDraft(parsed, params)
     const errors: string[] = []
-    if (params.plan.operation === 'update' && hasMeaningfulPatch && !hasComponentSpec) {
-      // patch-only update is valid; renderer will merge with existing spec
-    } else if (!hasComponentSpec) {
-      errors.push('Widget 草稿缺少 componentSpec.component')
-    } else {
-      errors.push(...this.validateDraftComponentSpec(draft))
-    }
     if (params.plan.operation === 'update' && params.targetCandidates && params.targetCandidates.length > 0) {
       const resolution = this.resolveControlledWidgetTarget(draft.targetWidgetTitle, params.targetCandidates)
       if (resolution.resolved) {
@@ -849,6 +864,22 @@ export class DocumentTaskPipelineExecutor {
       } else if (resolution.unresolvedReason) {
         errors.push(resolution.unresolvedReason)
       }
+      const targetRecord = this.findTargetWidgetRecord(params.existingWidgets || [], draft)
+      if (targetRecord) {
+        draft.targetWidgetId = targetRecord.id
+      }
+    }
+    if (params.plan.operation === 'update' && hasMeaningfulPatch && !hasComponentSpec) {
+      const targetRecord = this.findTargetWidgetRecord(params.existingWidgets || [], draft)
+      if (targetRecord?.componentSpec) {
+        draft.targetWidgetId = targetRecord.id
+      } else if (targetRecord) {
+        errors.push(`目标 widget "${targetRecord.title}" 不支持字段级 patch，请输出完整 componentSpec 以整卡替换。`)
+      }
+    } else if (!hasComponentSpec) {
+      errors.push('Widget 草稿缺少 componentSpec.component')
+    } else {
+      errors.push(...this.validateDraftComponentSpec(draft))
     }
     return { draft, errors }
   }
@@ -902,6 +933,7 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
+      existingWidgets: allUpdateWidgets,
       targetCandidates,
       preferredTarget: preferredTargetResolved,
     })
@@ -938,6 +970,7 @@ export class DocumentTaskPipelineExecutor {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
+      existingWidgets: allUpdateWidgets,
       targetCandidates,
       preferredTarget: preferredTargetResolved,
     })
@@ -988,11 +1021,13 @@ export class DocumentTaskPipelineExecutor {
       || (params.draft.insertionMode === 'update_existing' ? 'update' : 'insert')
 
     if (stage === 'locate') {
-      const target = String(params.draft.targetWidgetTitle || '').trim()
+      const target = String(params.draft.targetWidgetId || params.draft.targetWidgetTitle || '').trim()
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
-      const listPayload = await params.requestModuleToolAction('document.listWidgets', {})
+      const listPayload = await params.requestModuleToolAction('document.listWidgets', {
+        tabId: params.snapshot.tabId || undefined,
+      })
       const widgetSummary = typeof listPayload.summary === 'string' ? listPayload.summary : ''
       if (!this.doesListWidgetsSummaryContainTarget(widgetSummary, target)) {
         throw new Error(`未找到可更新的信息卡：${target}`)
@@ -1001,7 +1036,7 @@ export class DocumentTaskPipelineExecutor {
     }
 
     if (stage === 'update') {
-      const target = String(params.draft.targetWidgetTitle || '').trim()
+      const target = String(params.draft.targetWidgetId || params.draft.targetWidgetTitle || '').trim()
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
@@ -1011,6 +1046,7 @@ export class DocumentTaskPipelineExecutor {
         componentSpec: params.draft.componentSpec,
         componentSpecPatch: params.draft.componentSpecPatch,
         widgetCode: params.draft.widgetCode,
+        tabId: params.snapshot.tabId || undefined,
       })
       return typeof payload.summary === 'string' ? payload.summary : `已更新信息卡：${target}`
     }
@@ -1021,24 +1057,52 @@ export class DocumentTaskPipelineExecutor {
       widgetCode: params.draft.widgetCode,
       position: params.draft.insertionMode === 'after_section' ? 'after_section' : 'append_end',
       sectionTitle: params.draft.targetSectionTitle,
+      tabId: params.snapshot.tabId || undefined,
     })
     return typeof payload.summary === 'string' ? payload.summary : '已写入信息卡'
   }
 
   private async verifyDocumentTaskPlanWrite(params: {
     draft: DocumentWidgetDraft
+    snapshot: ActiveDocumentSnapshot
     targetResource: RequestEnvelopeResource
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
   }): Promise<string> {
     void params.signal
-    const payload = await params.requestModuleToolAction('document.listWidgets', {})
+    const inspectPayload = await params.requestModuleToolAction('document.inspectActive', {
+      tabId: params.snapshot.tabId || undefined,
+    })
+    const refreshedSnapshot = this.normalizeActiveDocumentSnapshot((inspectPayload as { snapshot?: unknown }).snapshot)
+    if (!refreshedSnapshot) {
+      throw new Error(`写入后未能重新读取 ${params.targetResource.name}`)
+    }
+    if (refreshedSnapshot.content === params.snapshot.content) {
+      throw new Error(`写入后 ${params.targetResource.name} 内容未变化`)
+    }
+
+    const payload = await params.requestModuleToolAction('document.listWidgets', {
+      tabId: params.snapshot.tabId || undefined,
+    })
     const summary = typeof payload.summary === 'string' ? payload.summary : ''
     const verifyTarget = params.draft.insertionMode === 'update_existing'
-      ? params.draft.targetWidgetTitle || params.draft.title
+      ? params.draft.targetWidgetId || params.draft.targetWidgetTitle || params.draft.title
       : params.draft.title
     if (verifyTarget && summary && !summary.includes(verifyTarget) && !/当前文档共有\s+\d+\s+个 widget/.test(summary)) {
       throw new Error(`写入后未在 ${params.targetResource.name} 中确认到目标信息卡`)
+    }
+    const verifyPath = refreshedSnapshot.path || params.targetResource.documentPath || params.targetResource.path
+    if (verifyPath) {
+      const readResult = await readDocumentEditableText(verifyPath)
+      if (!readResult.success) {
+        throw new Error(`写入后未能重新读取磁盘文件：${verifyPath}`)
+      }
+      if (readResult.content !== refreshedSnapshot.content) {
+        throw new Error(`写入后 ${params.targetResource.name} 未成功落盘`)
+      }
+      if (readResult.content === params.snapshot.content) {
+        throw new Error(`写入后 ${params.targetResource.name} 的磁盘内容未变化`)
+      }
     }
     return summary || `已核对 ${params.targetResource.name}`
   }
@@ -1156,7 +1220,8 @@ export class DocumentTaskPipelineExecutor {
         userText: params.job.instruction,
         requestModuleToolAction: params.requestModuleToolAction,
         signal: params.signal,
-        targetPathOverride: targetResource.path,
+        targetPathOverride: targetResource.documentPath || targetResource.path,
+        targetTabIdOverride: targetResource.tabId || null,
       })
       const sourceMaterial = buildDocumentInsightSourceMaterial({
         requestEnvelope: params.requestEnvelope,
@@ -1321,6 +1386,15 @@ export class DocumentTaskPipelineExecutor {
         requestModuleToolAction: params.requestModuleToolAction,
         signal: params.signal,
       })
+      // Invalidate the draft we just wrote so the next round (same phrasing, same widget/tab)
+      // doesn't replay a stale draft. The next round builds fresh from the now-updated document.
+      this.deleteCachedWidgetDraft(
+        params.sessionId,
+        params.job.instruction,
+        params.job,
+        targetSnapshot,
+        'write-succeeded',
+      )
       emitStepUpdate({
         job: params.job,
         jobIndex: params.jobIndex,
@@ -1337,7 +1411,9 @@ export class DocumentTaskPipelineExecutor {
         status: 'running',
         summary: `正在保存 ${targetLabel}`,
       })
-      const savePayload = await params.requestModuleToolAction('document.saveTab', {})
+      const savePayload = await params.requestModuleToolAction('document.saveTab', {
+        tabId: targetSnapshot.tabId || undefined,
+      })
       const saveSummary = typeof savePayload.summary === 'string' ? savePayload.summary : `已保存 ${targetLabel}`
       emitStepUpdate({
         job: params.job,
@@ -1357,6 +1433,7 @@ export class DocumentTaskPipelineExecutor {
       })
       const verifySummary = await this.verifyDocumentTaskPlanWrite({
         draft: currentDraft,
+        snapshot: targetSnapshot,
         targetResource,
         requestModuleToolAction: params.requestModuleToolAction,
         signal: params.signal,
@@ -1621,6 +1698,9 @@ export class DocumentTaskPipelineExecutor {
     const content = typeof (raw as { content?: unknown }).content === 'string' ? String((raw as { content: string }).content) : ''
     if (!title || !content) return null
     return {
+      tabId: typeof (raw as { tabId?: unknown }).tabId === 'string' && (raw as { tabId: string }).tabId.trim()
+        ? String((raw as { tabId: string }).tabId).trim()
+        : null,
       title,
       path: typeof (raw as { path?: unknown }).path === 'string' && (raw as { path: string }).path.trim()
         ? String((raw as { path: string }).path).trim()
@@ -1730,16 +1810,18 @@ export class DocumentTaskPipelineExecutor {
   ): DocumentWidgetDraft | null {
     const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
     const sessionEntries = this.sessionWidgetDraftCaches.get(sessionId) || []
+    const now = Date.now()
     const sessionHit = sessionEntries.find((entry) => entry.key === key)
-    if (sessionHit) {
-      this.deps.log(`document widget draft session cache hit key=${key}`)
-      return sessionHit.draft
+    if (!sessionHit) return null
+    if (sessionHit.expiresAt <= now) {
+      const filtered = sessionEntries.filter((entry) => entry.key !== key)
+      if (filtered.length > 0) this.sessionWidgetDraftCaches.set(sessionId, filtered)
+      else this.sessionWidgetDraftCaches.delete(sessionId)
+      this.deps.log(`document widget draft session cache expired key=${key}`)
+      return null
     }
-
-    const sharedHit = this.documentWidgetDraftCache.get(key)
-    if (!sharedHit) return null
-    this.deps.log(`document widget draft shared cache hit key=${key}`)
-    return sharedHit
+    this.deps.log(`document widget draft session cache hit key=${key}`)
+    return sessionHit.draft
   }
 
   private storeCachedDocumentWidgetDraft(
@@ -1750,18 +1832,19 @@ export class DocumentTaskPipelineExecutor {
     draft: DocumentWidgetDraft,
   ): void {
     const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
+    const now = Date.now()
     const nextEntry = {
       key,
       draft,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: now + WIDGET_DRAFT_TTL_MS,
     }
     const previous = this.sessionWidgetDraftCaches.get(sessionId) || []
     const nextEntries = [
       nextEntry,
-      ...previous.filter((entry) => entry.key !== key),
+      ...previous.filter((entry) => entry.key !== key && entry.expiresAt > now),
     ].slice(0, 6)
     this.sessionWidgetDraftCaches.set(sessionId, nextEntries)
-    this.documentWidgetDraftCache.set(key, draft)
     this.deps.log(`document widget draft cache store key=${key}`)
   }
 
@@ -1783,9 +1866,6 @@ export class DocumentTaskPipelineExecutor {
       } else {
         this.sessionWidgetDraftCaches.delete(sessionId)
       }
-    }
-    const hadSharedEntry = this.documentWidgetDraftCache.delete(key)
-    if (hadSessionEntry || hadSharedEntry) {
       this.deps.log(`document widget draft cache invalidated key=${key} reason=${reason}`)
     }
   }
@@ -1820,12 +1900,19 @@ export class DocumentTaskPipelineExecutor {
     requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
     targetPathOverride?: string | null
+    targetTabIdOverride?: string | null
   }): Promise<ActiveDocumentSnapshot> {
     const targetPath = params.targetPathOverride?.trim() || this.extractDocumentPathFromUserText(params.userText)
+    const targetTabId = params.targetTabIdOverride?.trim() || null
     const requestSnapshot = async (): Promise<ActiveDocumentSnapshot | null> => {
       if (!params.requestModuleToolAction) return null
-      const payload = await params.requestModuleToolAction('document.inspectActive', {})
-      return this.normalizeActiveDocumentSnapshot((payload as { snapshot?: unknown }).snapshot)
+      const tryInspect = async (tabId?: string): Promise<ActiveDocumentSnapshot | null> => {
+        const payload = await params.requestModuleToolAction!('document.inspectActive', { tabId })
+        return this.normalizeActiveDocumentSnapshot((payload as { snapshot?: unknown }).snapshot)
+      }
+      const targetedSnapshot = await tryInspect(targetTabId || undefined)
+      if (targetedSnapshot || !targetTabId) return targetedSnapshot
+      return tryInspect(undefined)
     }
 
     if (params.requestModuleToolAction && targetPath) {
@@ -1846,6 +1933,7 @@ export class DocumentTaskPipelineExecutor {
       const readResult = await readDocumentEditableText(targetPath)
       if (readResult.success) {
         return {
+          tabId: null,
           title: targetPath.split('/').pop() || targetPath,
           path: targetPath,
           content: readResult.content,
@@ -1960,6 +2048,8 @@ export class DocumentTaskPipelineExecutor {
         userText: question,
         requestModuleToolAction: params.requestModuleToolAction,
         signal,
+        targetPathOverride: envelopeWidgetTarget?.documentPath || envelopeWidgetTarget?.path || null,
+        targetTabIdOverride: envelopeWidgetTarget?.tabId || null,
       }),
       getCachedInsight: ({ question, snapshot }) => this.getCachedDocumentInsight(
         params.sessionId,
@@ -1994,6 +2084,9 @@ export class DocumentTaskPipelineExecutor {
           signal,
           preferredTargetWidgetTitle: envelopeWidgetTarget?.name,
         })
+        if (!built.draft.targetWidgetId && envelopeWidgetTarget?.widgetId) {
+          built.draft.targetWidgetId = envelopeWidgetTarget.widgetId
+        }
         return built.draft
       },
       writeWidget: async ({ draft, snapshot, stage, signal }) => await this.writeDocumentWidget({
@@ -2003,17 +2096,17 @@ export class DocumentTaskPipelineExecutor {
         requestModuleToolAction: params.requestModuleToolAction,
         signal,
       }),
-      saveDocument: async ({ signal }) => {
+      saveDocument: async ({ snapshot, signal }) => {
         void signal
-        const payload = await params.requestModuleToolAction('document.saveTab', {})
+        const payload = await params.requestModuleToolAction('document.saveTab', { tabId: snapshot.tabId || undefined })
         return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
       },
-      listWidgets: async ({ signal }) => {
+      listWidgets: async ({ snapshot, signal }) => {
         void signal
-        const payload = await params.requestModuleToolAction('document.listWidgets', {})
+        const payload = await params.requestModuleToolAction('document.listWidgets', { tabId: snapshot.tabId || undefined })
         return typeof payload.summary === 'string' ? payload.summary : '已列出文档卡片'
       },
-      removeWidget: async ({ plan, stage, signal }) => {
+      removeWidget: async ({ plan, snapshot, stage, signal }) => {
         void signal
         const target = plan.preferredWidget || ''
         if (stage === 'locate') {
@@ -2023,6 +2116,7 @@ export class DocumentTaskPipelineExecutor {
         }
         const payload = await params.requestModuleToolAction('document.removeWidget', {
           target,
+          tabId: snapshot.tabId || undefined,
         })
         return typeof payload.summary === 'string' ? payload.summary : '已删除信息卡'
       },

@@ -39,7 +39,7 @@ describe('widget-draft cache invalidation on failure contract (P3 T6 · Gap M)',
     )
   })
 
-  it('exposes a deleteCachedWidgetDraft method that clears both session and shared caches by key', () => {
+  it('exposes a deleteCachedWidgetDraft method that clears the session cache by key', () => {
     assert.match(
       source,
       /private deleteCachedWidgetDraft\(\s*sessionId: string,\s*question: string,\s*job: DocumentTaskJob,\s*snapshot: ActiveDocumentSnapshot,\s*reason: string,\s*\): void \{/,
@@ -54,10 +54,10 @@ describe('widget-draft cache invalidation on failure contract (P3 T6 · Gap M)',
       /this\.sessionWidgetDraftCaches\.(?:set|delete)\(/,
       'session cache must be updated on invalidation',
     )
-    assert.match(
+    assert.doesNotMatch(
       body,
-      /this\.documentWidgetDraftCache\.delete\(key\)/,
-      'shared cache must have the specific key removed',
+      /this\.documentWidgetDraftCache/,
+      'shared cross-session cache has been removed; invalidation must only touch sessionWidgetDraftCaches',
     )
     assert.match(
       body,
@@ -89,7 +89,7 @@ describe('widget-draft cache invalidation on failure contract (P3 T6 · Gap M)',
   it('the runDocumentWidgetPipeline dep unwraps built.draft (does not leak {draft, cacheable} outward)', () => {
     assert.match(
       source,
-      /buildWidgetDraft: async \(\{ question, snapshot, insight, plan, signal \}\) => \{\s*const built = await this\.buildDocumentPipelineWidgetDraft\(\{[\s\S]*?\}\)\s*return built\.draft\s*\}/,
+      /buildWidgetDraft: async \(\{ question, snapshot, insight, plan, signal \}\) => \{\s*const built = await this\.buildDocumentPipelineWidgetDraft\(\{[\s\S]*?\}\)[\s\S]*?return built\.draft\s*\}/,
     )
   })
 })
