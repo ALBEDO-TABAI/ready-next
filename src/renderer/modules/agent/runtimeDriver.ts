@@ -472,41 +472,117 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         })
     })
 
-    let toolActionRequestQueue: Promise<void> = Promise.resolve()
+    // Per-scope serialized queue: prevents one stuck tool from blocking other scopes.
+    // scopeless requests each get an ephemeral chain keyed by requestId so they never block.
+    const scopeQueues = new Map<string, Promise<void>>()
+    // Per-request cancellation latch: cancel IPC from main flips these to settle the queued task early.
+    const activeToolRequests = new Map<string, { settled: boolean; abort: () => void }>()
+
+    const budgetForTool = (tool: string): number => {
+      const name = String(tool || '').trim().toLowerCase()
+      if (!name) return 15_000
+      if (name.startsWith('skill_') || name.startsWith('skill:')) return 120_000
+      if (name.startsWith('browser_') || name.startsWith('browser:')) return 60_000
+      if (name.startsWith('document_') || name.startsWith('document:')) return 30_000
+      if (name.startsWith('feishu_') || name.startsWith('feishu:')) return 30_000
+      return 15_000
+    }
+
+    const runWithWatchdog = async (data: {
+      requestId: string
+      agent?: string
+      sessionId?: string
+      runId?: string
+      tool: string
+      args: Record<string, unknown>
+    }): Promise<void> => {
+      const requestId = data.requestId
+      // If main already cancelled this request before we got here, short-circuit.
+      const existing = activeToolRequests.get(requestId)
+      if (existing?.settled) { activeToolRequests.delete(requestId); return }
+
+      const scopeId = resolveScopeIdForRunPayload(data)
+      if (!scopeId) {
+        activeToolRequests.delete(requestId)
+        await window.electronAPI.agent.completeToolActionRequest({
+          requestId,
+          handled: false,
+          error: 'Scope run not found for tool action request',
+        })
+        return
+      }
+
+      const agentName = typeof data.agent === 'string' && data.agent.trim() ? data.agent : store.getState().currentAgent
+      const tool = String(data.tool || '').trim()
+      const args = (data.args || {}) as Record<string, unknown>
+      const runId = typeof data.runId === 'string' ? data.runId : null
+      const budgetMs = budgetForTool(tool)
+
+      let watchdog: ReturnType<typeof setTimeout> | null = null
+      const watchdogPromise = new Promise<never>((_, reject) => {
+        watchdog = setTimeout(() => {
+          const entry = activeToolRequests.get(requestId)
+          if (entry && !entry.settled) {
+            entry.settled = true
+            reject(new Error(`renderer-watchdog:${budgetMs}`))
+          }
+        }, budgetMs)
+      })
+      const cancelPromise = new Promise<never>((_, reject) => {
+        const entry = activeToolRequests.get(requestId)
+        if (entry) {
+          entry.abort = () => {
+            if (entry.settled) return
+            entry.settled = true
+            reject(new Error('cancelled'))
+          }
+        }
+      })
+
+      try {
+        const result = await Promise.race([
+          executeModuleToolAction({
+            scopeId,
+            agentName,
+            tool,
+            args,
+            runId,
+            activateWorkbenchMode,
+            upsertScopeRunState,
+            getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
+          }),
+          watchdogPromise,
+          cancelPromise,
+        ])
+        await window.electronAPI.agent.completeToolActionRequest({
+          requestId,
+          handled: result.handled,
+          payload: result.payload,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // For cancelled we've already been told; still ack so main's pending map releases even if
+        // the cancel IPC was missed. completeToolActionRequest on an unknown id is a no-op.
+        await window.electronAPI.agent.completeToolActionRequest({
+          requestId,
+          handled: false,
+          error: message,
+        }).catch(() => { /* ignore */ })
+        throw error
+      } finally {
+        if (watchdog) clearTimeout(watchdog)
+        activeToolRequests.delete(requestId)
+      }
+    }
+
     const cleanupToolActionRequest = window.electronAPI.agent.onToolActionRequest
       ? window.electronAPI.agent.onToolActionRequest((data) => {
-        toolActionRequestQueue = toolActionRequestQueue
-          .then(async () => {
-            const scopeId = resolveScopeIdForRunPayload(data)
-            if (!scopeId) {
-              await window.electronAPI.agent.completeToolActionRequest({
-                requestId: data.requestId,
-                handled: false,
-                error: 'Scope run not found for tool action request',
-              })
-              return
-            }
-
-            const agentName = typeof data.agent === 'string' && data.agent.trim() ? data.agent : store.getState().currentAgent
-            const tool = String(data.tool || '').trim()
-            const args = (data.args || {}) as Record<string, unknown>
-            const runId = typeof data.runId === 'string' ? data.runId : null
-            const result = await executeModuleToolAction({
-              scopeId,
-              agentName,
-              tool,
-              args,
-              runId,
-              activateWorkbenchMode,
-              upsertScopeRunState,
-              getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
-            })
-            await window.electronAPI.agent.completeToolActionRequest({
-              requestId: data.requestId,
-              handled: result.handled,
-              payload: result.payload,
-            })
-          })
+        const queueKey = resolveScopeIdForRunPayload(data) || `scopeless:${data.requestId}`
+        activeToolRequests.set(data.requestId, { settled: false, abort: () => { /* set below */ } })
+        const prev = scopeQueues.get(queueKey) || Promise.resolve()
+        const next = prev
+          .catch(() => { /* previous task's error already handled */ })
+          .then(() => runWithWatchdog(data))
           .catch(async (error) => {
             const scopeId = resolveScopeIdForRunPayload(data)
             if (scopeId) {
@@ -561,12 +637,23 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 error: error instanceof Error ? error.message : String(error),
               }))
             }
-            await window.electronAPI.agent.completeToolActionRequest({
-              requestId: data.requestId,
-              handled: false,
-              error: error instanceof Error ? error.message : String(error),
-            })
+            // runWithWatchdog already acked main; nothing else to do.
           })
+        scopeQueues.set(queueKey, next)
+        void next.finally(() => {
+          if (scopeQueues.get(queueKey) === next) scopeQueues.delete(queueKey)
+        })
+      })
+      : () => { /* older test stubs */ }
+
+    const cleanupCancelToolActionRequest = window.electronAPI.agent.onCancelToolActionRequest
+      ? window.electronAPI.agent.onCancelToolActionRequest((data) => {
+        const ids = Array.isArray(data?.requestIds) ? data.requestIds : []
+        for (const rid of ids) {
+          const entry = activeToolRequests.get(rid)
+          if (!entry || entry.settled) continue
+          entry.abort()
+        }
       })
       : () => { /* older test stubs */ }
 
@@ -719,6 +806,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       cleanupError()
       cleanupToolAction()
       cleanupToolActionRequest()
+      cleanupCancelToolActionRequest()
       cleanupScopeRunEvent()
       cleanupConversationEvent()
     }

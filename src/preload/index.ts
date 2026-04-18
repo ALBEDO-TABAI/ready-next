@@ -156,6 +156,11 @@ const agentAPI = {
     ipcRenderer.on('agent:toolActionRequest', handler)
     return () => { ipcRenderer.removeListener('agent:toolActionRequest', handler) }
   },
+  onCancelToolActionRequest: (callback: (data: { requestIds: string[] }) => void) => {
+    const handler = (_: unknown, data: { requestIds: string[] }) => callback(data)
+    ipcRenderer.on('agent:cancelToolActionRequest', handler)
+    return () => { ipcRenderer.removeListener('agent:cancelToolActionRequest', handler) }
+  },
   completeToolActionRequest: (payload: {
     requestId: string
     handled: boolean

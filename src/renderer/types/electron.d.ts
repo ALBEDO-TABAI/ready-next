@@ -752,6 +752,9 @@ interface ElectronAgentAPI {
       args: Record<string, unknown>
     }) => void
   ) => () => void
+  onCancelToolActionRequest: (
+    callback: (data: { requestIds: string[] }) => void
+  ) => () => void
   completeToolActionRequest: (payload: {
     requestId: string
     handled: boolean

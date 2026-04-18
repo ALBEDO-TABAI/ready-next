@@ -89,7 +89,43 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     resolve: (payload: Record<string, unknown>) => void
     reject: (error: Error) => void
     timer: NodeJS.Timeout
+    agent: string
+    sessionId: string
   }>()
+  // Reverse index: "${agent}|${sessionId}" → requestIds waiting on the renderer.
+  // Lets agent:kill / agent:newSession cancel in-flight requests instead of waiting for the 120s watchdog.
+  const sessionPendingIndex = new Map<string, Set<string>>()
+  const indexKey = (agent: string, sessionId?: string): string => `${agent || ''}|${sessionId || ''}`
+  const releasePendingRequest = (requestId: string): void => {
+    const entry = pendingToolActionRequests.get(requestId)
+    if (!entry) return
+    pendingToolActionRequests.delete(requestId)
+    clearTimeout(entry.timer)
+    const key = indexKey(entry.agent, entry.sessionId)
+    const set = sessionPendingIndex.get(key)
+    if (set) {
+      set.delete(requestId)
+      if (set.size === 0) sessionPendingIndex.delete(key)
+    }
+  }
+  const cancelToolActionRequestsBySession = (agent: string, sessionId?: string): void => {
+    const key = indexKey(agent, sessionId)
+    const requestIds = sessionPendingIndex.get(key)
+    if (!requestIds || requestIds.size === 0) return
+    const cancelled: string[] = []
+    for (const rid of Array.from(requestIds)) {
+      const entry = pendingToolActionRequests.get(rid)
+      if (!entry) continue
+      pendingToolActionRequests.delete(rid)
+      clearTimeout(entry.timer)
+      entry.reject(new Error('cancelled'))
+      cancelled.push(rid)
+    }
+    sessionPendingIndex.delete(key)
+    if (!mainWindow.isDestroyed() && cancelled.length > 0) {
+      mainWindow.webContents.send('agent:cancelToolActionRequest', { requestIds: cancelled })
+    }
+  }
   const requestRendererToolAction = async (payload: {
     agent?: string
     sessionId?: string
@@ -101,12 +137,18 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       throw new Error('Main window is not available for design tool execution')
     }
     const requestId = randomUUID()
+    const agent = payload.agent || ''
+    const sessionId = payload.sessionId || ''
     return await new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
-        pendingToolActionRequests.delete(requestId)
+        releasePendingRequest(requestId)
         reject(new Error(`Timed out waiting for renderer tool action result: ${payload.tool}`))
       }, 120_000)
-      pendingToolActionRequests.set(requestId, { resolve, reject, timer })
+      pendingToolActionRequests.set(requestId, { resolve, reject, timer, agent, sessionId })
+      const key = indexKey(agent, sessionId)
+      let set = sessionPendingIndex.get(key)
+      if (!set) { set = new Set<string>(); sessionPendingIndex.set(key, set) }
+      set.add(requestId)
       mainWindow.webContents.send('agent:toolActionRequest', {
         requestId,
         ...payload,
@@ -128,8 +170,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (!pending) {
       return { success: false, error: `Unknown tool action request: ${requestId}` }
     }
-    pendingToolActionRequests.delete(requestId)
-    clearTimeout(pending.timer)
+    releasePendingRequest(requestId)
     if (payload?.error) {
       pending.reject(new Error(payload.error))
     } else if (!payload?.handled) {
@@ -177,6 +218,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     try {
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
+      cancelToolActionRequestsBySession(agent, sessionId)
       orchestrator.newSession(agent, sessionId)
       return { success: true, data: { cleared: true } }
     } catch (error) {
@@ -190,6 +232,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     try {
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
+      cancelToolActionRequestsBySession(agent, sessionId)
       orchestrator.kill(agent, sessionId)
       return { success: true, data: { killed: true } }
     } catch (error) {
