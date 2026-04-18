@@ -59,6 +59,7 @@ export function addDocumentWidgetTargetReference(context: DocumentWidgetTargetCo
       attachment,
     ],
     inputValue: prompt,
+    pendingContinuationIntent: null,
   }))
 
   window.dispatchEvent(new CustomEvent(READY_FOCUS_CHAT_INPUT_EVENT))

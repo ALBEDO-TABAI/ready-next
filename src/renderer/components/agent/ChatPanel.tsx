@@ -1590,6 +1590,7 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     isStreaming,
     streamingMessageId,
     selectAgent,
+    setComposerDraft,
     setInputValue,
     sendMessage,
     stopStreaming,
@@ -2240,7 +2241,7 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingRef.current = true
-    setInputValue('')
+    setInputValue('', { preserveContinuationIntent: true })
     chatInputRef.current?.resetHeight()
     try {
       await sendMessage(content)
@@ -2372,6 +2373,24 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     [currentAgent, patchScopeRun]
   )
 
+  const buildRunContinuationIntent = useCallback(
+    (
+      run: Pick<ScopeRunState, 'taskId' | 'taskContinuation' | 'blockedReason'> | null | undefined,
+      responseText?: string,
+    ) => {
+      const taskId = run?.taskId || run?.taskContinuation?.taskId || null
+      if (!taskId) return undefined
+      return {
+        taskId,
+        executionId: run?.taskContinuation?.executionId || undefined,
+        stepId: run?.taskContinuation?.stepId || undefined,
+        blockedReason: run?.blockedReason || undefined,
+        responseText: responseText || undefined,
+      }
+    },
+    [],
+  )
+
   const handleContinueTaskInput = useCallback(
     async (scopeId: string) => {
       const run =
@@ -2385,9 +2404,10 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
         scopeId,
         taskId: run?.taskId || undefined,
         responseText: trimmed,
+        continuationIntent: buildRunContinuationIntent(run, trimmed),
       })
     },
-    [mergedTaskRuns]
+    [buildRunContinuationIntent, mergedTaskRuns]
   )
 
   const handleSubmitTaskConfirmation = useCallback(
@@ -2399,9 +2419,13 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
         scopeId,
         taskId: run?.taskId || undefined,
         responseText: confirmed ? '确认继续。' : '暂不继续，请先停止。',
+        continuationIntent: buildRunContinuationIntent(
+          run,
+          confirmed ? '确认继续。' : '暂不继续，请先停止。',
+        ),
       })
     },
-    [mergedTaskRuns]
+    [buildRunContinuationIntent, mergedTaskRuns]
   )
 
   const handleSubmitTaskAgentResult = useCallback(
@@ -2417,9 +2441,10 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
         scopeId,
         taskId: run?.taskId || undefined,
         responseText: trimmed,
+        continuationIntent: buildRunContinuationIntent(run, trimmed),
       })
     },
-    [mergedTaskRuns]
+    [buildRunContinuationIntent, mergedTaskRuns]
   )
 
   const handleSuspendTask = useCallback(async (scopeId: string) => {
@@ -2439,8 +2464,9 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     await window.electronAPI.agent.resumeRun({
       scopeId,
       taskId: run?.taskId || undefined,
+      continuationIntent: buildRunContinuationIntent(run),
     })
-  }, [mergedTaskRuns])
+  }, [buildRunContinuationIntent, mergedTaskRuns])
 
   const handleRetryTask = useCallback(
     async (scopeId: string) => {
@@ -2448,7 +2474,6 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
       const continuation = run?.taskContinuation
-      const taskId = run?.taskId || continuation?.taskId || null
       if (continuation?.executionId && continuation.stepId) {
         const result = await window.electronAPI.skills
           .restartFromStep({
@@ -2461,16 +2486,13 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
           return
         }
       }
-      setInputValue([
+      setComposerDraft(
         '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
-        taskId ? `Task ID: ${taskId}` : null,
-        continuation?.executionId ? `Execution ID: ${continuation.executionId}` : null,
-        continuation?.stepId ? `Step ID: ${continuation.stepId}` : null,
-        run?.blockedReason ? `继续前上下文：${run.blockedReason}` : null,
-      ].filter(Boolean).join('\n'))
+        buildRunContinuationIntent(run) || null,
+      )
       focusInputWithResize()
     },
-    [applySkillExecutionDetailToScope, focusInputWithResize, mergedTaskRuns, setInputValue]
+    [applySkillExecutionDetailToScope, buildRunContinuationIntent, focusInputWithResize, mergedTaskRuns, setComposerDraft]
   )
 
   const handleOpenTaskArtifact = useCallback(async (path: string) => {
@@ -3206,7 +3228,7 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
           currentAgentDisplayName={currentAgentData?.displayName || '管家'}
           agents={agents}
           isChannelScope={currentScope?.sourceKind === 'channel'}
-          onInputChange={setInputValue}
+          onInputChange={(value) => setInputValue(value, { preserveContinuationIntent: true })}
           onSend={() => {
             void handleSend()
           }}

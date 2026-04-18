@@ -534,13 +534,29 @@ test('rss, calendar, and feishu domain adapters mirror executed tools into struc
       } as never,
     } as never)
 
+    assert.equal(
+      applied.projection,
+      undefined,
+      `${item.executor} 不应在单次 tool_batch 后立即 finalize`,
+    )
+
+    const finalized = item.adapter.applyResult({
+      ...createAdapterApplyParams(item.executor),
+      domainState: applied.domainState,
+      phase: 'no_tool_call',
+      responseText: '',
+    } as never)
+
+    assert.ok(finalized.projection, `${item.executor} 应在 no_tool_call 时 finalize projection`)
+    assert.equal(finalized.projection?.phase, 'done')
+
     const patch = item.adapter.buildProjectionPatch({
       route: createRoute(item.executor),
       request: {} as never,
       executionIntentContext: {} as never,
       toolPolicy: {} as never,
-      domainState: applied.domainState,
-      projection: applied.projection || null,
+      domainState: finalized.domainState,
+      projection: finalized.projection || null,
     } as never)
 
     assert.equal(patch?.module, item.expectedModule)
@@ -550,5 +566,87 @@ test('rss, calendar, and feishu domain adapters mirror executed tools into struc
     assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.id, item.toolName)
     assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.status, 'done')
     assert.match(String(patch?.taskSummary || ''), /已排队执行|Success/)
+  }
+})
+
+test('rss, calendar, and feishu domain adapters defer finalization across multiple tool batches', () => {
+  const cases = [
+    {
+      adapter: new RSSDomainAdapter(),
+      executor: 'rss' as const,
+      toolName: 'rss_fetch_updates',
+      resultText: JSON.stringify({
+        module: 'rss',
+        action: 'rss.fetchUpdates',
+        message: 'rss.fetchUpdates 已排队执行。',
+      }),
+    },
+    {
+      adapter: new CalendarDomainAdapter(),
+      executor: 'calendar' as const,
+      toolName: 'calendar_create_event',
+      resultText: JSON.stringify({
+        module: 'calendar',
+        action: 'calendar.createEvent',
+        message: 'calendar.createEvent 已排队执行。',
+      }),
+    },
+    {
+      adapter: new FeishuDomainAdapter(),
+      executor: 'feishu' as const,
+      toolName: 'feishu_message_send',
+      resultText: JSON.stringify({
+        module: 'feishu',
+        action: 'feishu.messageSend',
+        message: 'Success',
+      }),
+    },
+  ]
+
+  for (const item of cases) {
+    const prepared = item.adapter.prepare({
+      route: createRoute(item.executor),
+      allowedToolNames: [item.toolName],
+      hasTools: true,
+      userText: `${item.executor} task`,
+      executionIntentContext: {} as never,
+    } as never)
+
+    const firstBatch = item.adapter.applyResult({
+      ...createAdapterApplyParams(item.executor),
+      domainState: prepared.domainState,
+      phase: 'tool_batch',
+      toolBatch: {
+        executedTools: [
+          {
+            id: 'tool-1',
+            name: item.toolName,
+            input: item.executor === 'calendar' ? { title: '周会一' } : {},
+            result: createToolExecutionOutput(item.resultText),
+          },
+        ],
+      } as never,
+    } as never)
+
+    assert.equal(firstBatch.projection, undefined, `${item.executor} 第一次 tool_batch 不应 finalize`)
+
+    const secondBatch = item.adapter.applyResult({
+      ...createAdapterApplyParams(item.executor),
+      domainState: firstBatch.domainState,
+      phase: 'tool_batch',
+      toolBatch: {
+        executedTools: [
+          {
+            id: 'tool-2',
+            name: item.toolName,
+            input: item.executor === 'calendar' ? { title: '周会二' } : {},
+            result: createToolExecutionOutput(item.resultText),
+          },
+        ],
+      } as never,
+    } as never)
+
+    assert.equal(secondBatch.projection, undefined, `${item.executor} 多步 tool_batch 不应 finalize`)
+    assert.equal((secondBatch.domainState as { steps: Array<{ id: string }> }).steps.length, 2)
   }
 })

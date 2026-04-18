@@ -7,7 +7,7 @@ import type { AgentControlRuntime } from './runtime'
 import type { ExecutionHostRequest, ExecutionHostResult } from './run-contracts'
 import type { IntentClassification } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
-import type { ContinuationState } from './continuation-state'
+import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
@@ -162,6 +162,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
+    continuationIntent?: ContinuationIntent | null,
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
   ): Promise<{
@@ -193,6 +194,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
         budget,
         budgetState,
         taskBudgetRuntime,
+        continuationIntent,
         continuationState,
       })
       if (!result.success) {
@@ -219,6 +221,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     budget?: ExecutionHostRequest['budget'],
     budgetState?: ExecutionHostRequest['budgetState'],
     taskBudgetRuntime?: ExecutionHostRequest['taskBudgetRuntime'],
+    continuationIntent?: ContinuationIntent | null,
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
   ): Promise<SendAndCollectResult> {
@@ -250,6 +253,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       budget,
       budgetState,
       taskBudgetRuntime,
+      continuationIntent,
       continuationState,
       sessionIdOverride,
     ).then((result) => {
@@ -306,6 +310,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       request.budget,
       request.budgetState,
       request.taskBudgetRuntime,
+      request.continuationIntent,
       request.continuationState,
       request.sessionIdOverride,
     )

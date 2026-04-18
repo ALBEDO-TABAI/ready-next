@@ -39,11 +39,20 @@ export type {
   ToolTraceEvent,
 } from '../modules/agent/types'
 
+export interface PendingContinuationIntent {
+  taskId: string
+  executionId?: string
+  stepId?: string
+  blockedReason?: string
+  responseText?: string
+}
+
 interface AgentState {
   agents: Agent[]
   messages: AgentMessage[]
   currentAgent: string
   inputValue: string
+  pendingContinuationIntent: PendingContinuationIntent | null
   isStreaming: boolean
   streamingMessageId: string | null
   streamingRequestId: string | null
@@ -70,7 +79,9 @@ interface AgentState {
   toggleAgentSelection: (name: string) => void
   addMessage: (message: AgentMessage) => void
   appendToMessage: (id: string, chunk: string) => void
-  setInputValue: (value: string) => void
+  setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
+  setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
+  clearPendingContinuationIntent: () => void
   setIsStreaming: (streaming: boolean) => void
   sendMessage: (content: string) => Promise<void>
   stopStreaming: () => void
@@ -220,6 +231,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   ],
   currentAgent: 'butler',
   inputValue: '',
+  pendingContinuationIntent: null,
   isStreaming: false,
   streamingMessageId: null,
   streamingRequestId: null,
@@ -261,7 +273,19 @@ export const useAgent = create<AgentState>((set, get) => ({
     )
   })),
 
-  setInputValue: (value) => set({ inputValue: value }),
+  setInputValue: (value, options) => set({
+    inputValue: value,
+    pendingContinuationIntent: options?.preserveContinuationIntent
+      ? get().pendingContinuationIntent
+      : null,
+  }),
+
+  setComposerDraft: (value, continuationIntent) => set({
+    inputValue: value,
+    pendingContinuationIntent: continuationIntent || null,
+  }),
+
+  clearPendingContinuationIntent: () => set({ pendingContinuationIntent: null }),
 
   setIsStreaming: (streaming) => set({ isStreaming: streaming }),
 
@@ -424,6 +448,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({
       messages: restored,
       inputValue: undoneContent,
+      pendingContinuationIntent: null,
       isStreaming: false,
       streamingMessageId: null,
       streamingRequestId: null,
@@ -476,7 +501,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       toolTrace: [],
       toolTraceStatus: 'idle',
       attachments: [],
-      filePool: []
+      filePool: [],
+      pendingContinuationIntent: null,
     })
     void persistLocalConversationScope(fallbackScope)
 
@@ -543,6 +569,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
         isStreaming: isActiveScopePhase(activeRunState?.phase),
         streamingRequestId: activeRunState?.requestId || null,
+        pendingContinuationIntent: null,
       })
     } catch { /* ignore */ }
   },
@@ -600,6 +627,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
         attachments: [],
         filePool: [],
+        pendingContinuationIntent: null,
       })
     } catch { /* ignore */ }
   },
@@ -689,6 +717,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const shouldCoalesce =
       !bypassCoalescingOnce &&
       !stateBeforeSend.isStreaming &&
+      !stateBeforeSend.pendingContinuationIntent &&
       stateBeforeSend.sendCoalescingEnabled &&
       normalizedContent.length > 0 &&
       !normalizedContent.startsWith('/') &&
@@ -730,7 +759,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
 
     bypassCoalescingOnce = false
-    const { currentAgent, addMessage, setIsStreaming, attachments, currentScope, currentScopeId } = get()
+    const {
+      currentAgent,
+      addMessage,
+      setIsStreaming,
+      attachments,
+      currentScope,
+      currentScopeId,
+      pendingContinuationIntent,
+    } = get()
 
     let scope = currentScope
     let scopeId = currentScopeId
@@ -943,7 +980,12 @@ export const useAgent = create<AgentState>((set, get) => ({
 
         const sendWithCurrentScope = async () => (
           window.electronAPI.agent.sendScoped
-            ? window.electronAPI.agent.sendScoped(activeScopeId, finalMessage, requestId)
+            ? window.electronAPI.agent.sendScoped({
+              scopeId: activeScopeId,
+              message: finalMessage,
+              requestId,
+              continuationIntent: pendingContinuationIntent || undefined,
+            })
             : window.electronAPI.agent.send(currentAgent, finalMessage, activeScopeId, requestId)
         )
 
@@ -1005,6 +1047,7 @@ export const useAgent = create<AgentState>((set, get) => ({
             toolTraceStatus: 'error',
           }))
         }
+        set({ pendingContinuationIntent: null })
         // Stream data arrives via onStream listener
         // Persistence of assistant message happens in onStream 'done' handler
       } else {

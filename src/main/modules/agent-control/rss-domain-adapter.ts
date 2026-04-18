@@ -92,19 +92,20 @@ export class RSSDomainAdapter implements DomainAdapter {
           taskSummary: buildSummary(record, executedTool.name, executedTool.input),
         }
       }
-      if (nextState.currentStepId) {
-        return {
-          domainState: nextState,
-          projection: {
-            phase: 'done',
-            summary: nextState.taskSummary || 'RSS 任务已执行',
-            waitingFor: 'none',
-            resumableActions: ['cancel'],
-            blockedReason: null,
-          },
-        }
-      }
       return { domainState: nextState }
+    }
+
+    if (params.phase === 'no_tool_call' && state.currentStepId) {
+      return {
+        domainState: state,
+        projection: {
+          phase: 'done',
+          summary: state.taskSummary || 'RSS 任务已执行',
+          waitingFor: 'none',
+          resumableActions: ['cancel'],
+          blockedReason: null,
+        },
+      }
     }
 
     if (params.phase === 'budget_limit' && state.currentStepId) {

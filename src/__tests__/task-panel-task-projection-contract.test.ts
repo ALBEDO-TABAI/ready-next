@@ -30,5 +30,6 @@ test('task panel reads task projections and renders budget and recovery hints', 
   assert.match(source, /activeProjection\?\.interactionState/)
   assert.match(source, /degradationReason/)
   assert.match(source, /stepBudget/)
-  assert.match(source, /activeProjection\?\.blockedReason \? `继续前上下文：\$\{activeProjection\.blockedReason\}` : null/)
+  assert.match(source, /setComposerDraft\(/)
+  assert.doesNotMatch(source, /继续前上下文：/)
 })

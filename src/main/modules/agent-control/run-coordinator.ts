@@ -116,6 +116,7 @@ export class RunCoordinator {
       budget,
       budgetState,
       taskBudgetRuntime,
+      continuationIntent: request.continuationIntent || null,
     })
 
     const resolvedTaskBudgetRuntime = result.taskBudgetRuntime

@@ -243,6 +243,14 @@ interface ScopeRunTaskContinuationData {
   targetUrl?: string | null
 }
 
+interface ContinuationIntentData {
+  taskId: string
+  executionId?: string
+  stepId?: string
+  blockedReason?: string
+  responseText?: string
+}
+
 interface ScopeRunMemoryCaptureItemData {
   memoryId: string
   category: 'user_preference' | 'summary'
@@ -642,9 +650,12 @@ interface ElectronAgentAPI {
     channelId?: string
   ) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
   sendScoped: (
-    scopeId: string,
-    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    requestId?: string
+    payload: {
+      scopeId: string
+      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
+      requestId?: string
+      continuationIntent?: ContinuationIntentData | null
+    }
   ) => Promise<{ success: boolean; error?: string | null }>
   suspendRun: (payload: {
     scopeId: string
@@ -655,12 +666,14 @@ interface ElectronAgentAPI {
     taskId?: string
     requestId?: string
     responseText?: string
+    continuationIntent?: ContinuationIntentData | null
   }) => Promise<{ success: boolean; error?: string | null }>
   respondToInteraction: (payload: {
     scopeId: string
     taskId?: string
     requestId?: string
     responseText: string
+    continuationIntent?: ContinuationIntentData | null
   }) => Promise<{ success: boolean; error?: string | null }>
   upsertChannel: (payload: {
     id?: string

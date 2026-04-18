@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyContinuationIntentToState,
   buildContinuationStateFromProjection,
+  normalizeContinuationIntent,
   parseContinuationControlText,
   selectContinuationProjection,
 } from '../main/modules/agent-control/continuation-state'
@@ -133,4 +135,46 @@ test('buildContinuationStateFromProjection keeps a single continuation identity 
   assert.equal(continuationState.continuationRef?.executionId, 'exec-prev')
   assert.equal(continuationState.blockedReason, '等待确认后继续执行')
   assert.deepEqual(continuationState.resumableActions, ['continue', 'cancel'])
+})
+
+test('normalizeContinuationIntent trims values and requires a task id', () => {
+  const normalized = normalizeContinuationIntent({
+    taskId: '  task-prev  ',
+    executionId: '  exec-prev  ',
+    stepId: '  approve  ',
+    blockedReason: '  等待确认  ',
+    responseText: '  可以继续  ',
+  })
+
+  assert.deepEqual(normalized, {
+    taskId: 'task-prev',
+    executionId: 'exec-prev',
+    stepId: 'approve',
+    blockedReason: '等待确认',
+    responseText: '可以继续',
+  })
+  assert.equal(normalizeContinuationIntent({ taskId: '   ' }), null)
+})
+
+test('applyContinuationIntentToState keeps task identity while applying explicit continuation overrides', () => {
+  const baseState = buildContinuationStateFromProjection(createProjection(), {
+    executionId: 'exec-prev',
+    stepId: 'approve',
+    blockedReason: '等待确认后继续执行',
+  })
+
+  const resolved = applyContinuationIntentToState(baseState, {
+    taskId: 'task-prev',
+    executionId: 'exec-next',
+    stepId: 'deliver',
+    blockedReason: '已经补充完结果',
+    responseText: '可以继续',
+  })
+
+  assert.equal(resolved.taskId, 'task-prev')
+  assert.equal(resolved.currentStepId, 'deliver')
+  assert.equal(resolved.blockedReason, '已经补充完结果')
+  assert.equal(resolved.continuationRef?.taskId, 'task-prev')
+  assert.equal(resolved.continuationRef?.executionId, 'exec-next')
+  assert.equal(resolved.continuationRef?.stepId, 'deliver')
 })

@@ -26,10 +26,13 @@ import { RSSDomainAdapter } from '../agent-control/rss-domain-adapter'
 import { DocumentTaskPipelineExecutor } from '../agent-control/document-task-pipeline-executor'
 import type { DocumentInsight, DocumentInsightMetrics, DocumentWidgetDraft } from '../agent-control/document-task-pipeline'
 import {
+  applyContinuationIntentToState,
   buildContinuationStateFromProjection,
+  normalizeContinuationIntent,
   parseContinuationControlText,
   sanitizeContinuationRequest,
   selectContinuationProjection,
+  type ContinuationIntent,
   type ContinuationState,
 } from '../agent-control/continuation-state'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
@@ -416,20 +419,6 @@ export class DirectChatEngine extends EventEmitter {
         publishScopeRunEvent: (payload, projectionTruth) => {
           this.runtime?.publishScopeRunEvent(payload, projectionTruth || null)
         },
-        runScopedTurn: async ({ scope, message, identity, requestId }) => {
-          if (!message) {
-            return { success: false, error: '子任务缺少消息内容' }
-          }
-          return this.runtime?.sendScoped({
-            scopeId: scope.id,
-            message: message as string | MultimodalBlock[],
-            requestId: requestId || identity?.workerSessionId,
-            taskId: identity?.taskId,
-            parentTaskId: identity?.parentTaskId,
-            parentStepId: identity?.parentStepId,
-            sessionIdOverride: identity?.workerSessionId,
-          }) || { success: false, error: 'Agent runtime unavailable' }
-        },
       }),
     })
     this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log })
@@ -677,6 +666,7 @@ export class DirectChatEngine extends EventEmitter {
       budget?: RunBudgetSeed
       budgetState?: RunBudgetUsage
       taskBudgetRuntime?: TaskBudgetRuntime
+      continuationIntent?: ContinuationIntent | null
       continuationState?: ContinuationState | null
     },
   ): Promise<ExecutionTurnResult> {
@@ -693,10 +683,12 @@ export class DirectChatEngine extends EventEmitter {
     const rawContinuationUserText = typeof content === 'string'
       ? executionOptions?.requestEnvelope?.rawUserText || content
       : null
+    const normalizedContinuationIntent = normalizeContinuationIntent(executionOptions?.continuationIntent || null)
     const parsedContinuationControl = typeof rawContinuationUserText === 'string'
       ? parseContinuationControlText(rawContinuationUserText)
       : null
     const resolvedContinuationState = executionOptions?.continuationState
+      || this.resolveContinuationStateFromIntent(sessionId, normalizedContinuationIntent)
       || (
         typeof rawContinuationUserText === 'string'
           ? this.resolveContinuationState(sessionId, rawContinuationUserText, {
@@ -1300,6 +1292,61 @@ export class DirectChatEngine extends EventEmitter {
         }
         : persistedState.continuationRef,
       budgetRuntime: restoredBudget.runtime || persistedState.budgetRuntime || null,
+      restoreDiagnostics: restoredBudget.diagnostics,
+    }
+    if (sessionId) {
+      rememberContinuationState(sessionId, resolvedState)
+    }
+    return resolvedState
+  }
+
+  private resolveContinuationStateFromIntent(
+    sessionId: string | undefined,
+    intent: ContinuationIntent | null | undefined,
+  ): ContinuationState | null {
+    const normalizedIntent = normalizeContinuationIntent(intent)
+    if (!normalizedIntent) return null
+
+    const projection = this.resolveContinuationProjection(sessionId, '', {
+      explicitTaskId: normalizedIntent.taskId,
+      allowImplicitContinuation: true,
+    })
+
+    if (projection) {
+      const baseState = buildContinuationStateFromProjection(projection, {
+        executionId: normalizedIntent.executionId ?? null,
+        stepId: normalizedIntent.stepId ?? null,
+        blockedReason: normalizedIntent.blockedReason ?? projection.blockedReason ?? null,
+      })
+      const intentState = applyContinuationIntentToState(baseState, normalizedIntent)
+      const restoredBudget = restoreContinuationTaskBudgetRuntime({
+        taskType: 'continuation',
+        continuationState: intentState,
+      })
+      const resolvedState: ContinuationState = {
+        ...intentState,
+        budgetRuntime: restoredBudget.runtime || null,
+        restoreDiagnostics: restoredBudget.diagnostics,
+      }
+      if (sessionId) {
+        rememberContinuationState(sessionId, resolvedState, {
+          updatedAt: toContinuationUpdatedAt(projection.updatedAt),
+        })
+      }
+      return resolvedState
+    }
+
+    const persistedState = getContinuationState(sessionId, { taskId: normalizedIntent.taskId })
+    if (!persistedState) return null
+
+    const intentState = applyContinuationIntentToState(persistedState, normalizedIntent)
+    const restoredBudget = restoreContinuationTaskBudgetRuntime({
+      taskType: 'continuation',
+      continuationState: intentState,
+    })
+    const resolvedState: ContinuationState = {
+      ...intentState,
+      budgetRuntime: restoredBudget.runtime || intentState.budgetRuntime || null,
       restoreDiagnostics: restoredBudget.diagnostics,
     }
     if (sessionId) {

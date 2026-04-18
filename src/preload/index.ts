@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 
+type ContinuationIntentPayload = {
+  taskId: string
+  executionId?: string
+  stepId?: string
+  blockedReason?: string
+  responseText?: string
+}
+
 // Agent API
 const agentAPI = {
   send: (
@@ -65,15 +73,30 @@ const agentAPI = {
   getRemoteAttachmentCacheStats: (channelId?: string) =>
     ipcRenderer.invoke('agent:getRemoteAttachmentCacheStats', { channelId }),
   sendScoped: (
-    scopeId: string,
-    message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-    requestId?: string
-  ) => ipcRenderer.invoke('agent:sendScoped', { scopeId, message, requestId }),
+    payload: {
+      scopeId: string
+      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
+      requestId?: string
+      continuationIntent?: ContinuationIntentPayload | null
+    }
+  ) => ipcRenderer.invoke('agent:sendScoped', payload),
   suspendRun: (payload: { scopeId: string; taskId?: string }) =>
     ipcRenderer.invoke('agent:suspendRun', payload),
-  resumeRun: (payload: { scopeId: string; taskId?: string; requestId?: string; responseText?: string }) =>
+  resumeRun: (payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText?: string
+    continuationIntent?: ContinuationIntentPayload | null
+  }) =>
     ipcRenderer.invoke('agent:resumeRun', payload),
-  respondToInteraction: (payload: { scopeId: string; taskId?: string; requestId?: string; responseText: string }) =>
+  respondToInteraction: (payload: {
+    scopeId: string
+    taskId?: string
+    requestId?: string
+    responseText: string
+    continuationIntent?: ContinuationIntentPayload | null
+  }) =>
     ipcRenderer.invoke('agent:respondToInteraction', payload),
   upsertChannel: (payload: {
     id?: string

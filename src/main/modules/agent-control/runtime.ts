@@ -27,6 +27,7 @@ import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
+import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
 import { forgetSession } from './session-continuity'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
@@ -626,12 +627,24 @@ export class AgentControlRuntime extends EventEmitter {
     parentTaskId?: string
     parentStepId?: string
     sessionIdOverride?: string
+    continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string }> {
     const scopeRow = this.db.getConversationScope(payload.scopeId)
     if (!scopeRow) {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }
     const scope = this.mapConversationRow(scopeRow)
+    const normalizedContinuationIntent = (() => {
+      const intent = normalizeContinuationIntent(payload.continuationIntent || null)
+      if (!intent) return null
+      const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
+      if (!target) return null
+      return this.buildContinuationIntent({
+        projection: target.projection,
+        scopeRunSummary: target.scopeRunSummary,
+        incoming: intent,
+      })
+    })()
     return this.runCoordinator.runScoped(
       {
         scope,
@@ -643,6 +656,7 @@ export class AgentControlRuntime extends EventEmitter {
         parentTaskId: payload.parentTaskId,
         parentStepId: payload.parentStepId,
         sessionIdOverride: payload.sessionIdOverride,
+        continuationIntent: normalizedContinuationIntent,
       },
       {
         onSuccess: async (result) => {
@@ -732,6 +746,7 @@ export class AgentControlRuntime extends EventEmitter {
     taskId?: string
     requestId?: string
     responseText?: string
+    continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string }> {
     const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
     if (!target) {
@@ -740,9 +755,11 @@ export class AgentControlRuntime extends EventEmitter {
     return this.sendScoped({
       scopeId: target.scope.id,
       requestId: payload.requestId,
-      message: this.buildContinuationControlMessage({
+      message: String(payload.responseText || '').trim() || '继续当前任务。',
+      continuationIntent: this.buildContinuationIntent({
         projection: target.projection,
-        lead: '继续当前任务。',
+        scopeRunSummary: target.scopeRunSummary,
+        incoming: payload.continuationIntent || null,
         responseText: payload.responseText,
       }),
     })
@@ -753,6 +770,7 @@ export class AgentControlRuntime extends EventEmitter {
     taskId?: string
     requestId?: string
     responseText: string
+    continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string }> {
     const responseText = String(payload.responseText || '').trim()
     if (!responseText) {
@@ -762,18 +780,14 @@ export class AgentControlRuntime extends EventEmitter {
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
     }
-    const lead =
-      target.projection?.interactionState === 'awaiting_confirmation'
-        ? '我已确认，继续执行。'
-        : target.projection?.interactionState === 'human_takeover'
-          ? '人工步骤已完成，请继续。'
-          : '以下是我补充的信息，请继续。'
     return this.sendScoped({
       scopeId: target.scope.id,
       requestId: payload.requestId,
-      message: this.buildContinuationControlMessage({
+      message: responseText,
+      continuationIntent: this.buildContinuationIntent({
         projection: target.projection,
-        lead,
+        scopeRunSummary: target.scopeRunSummary,
+        incoming: payload.continuationIntent || null,
         responseText,
       }),
     })
@@ -1476,23 +1490,38 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  private buildContinuationControlMessage(params: {
+  private buildContinuationIntent(params: {
     projection: TaskProjectionRecord | null
-    lead: string
+    scopeRunSummary: ScopeRunSummary | null
+    incoming?: ContinuationIntent | null
     responseText?: string
-  }): string {
-    return [
-      params.lead,
-      params.projection?.taskId ? `Task ID: ${params.projection.taskId}` : null,
-      params.projection?.continuationRef?.executionId
-        ? `Execution ID: ${params.projection.continuationRef.executionId}`
-        : null,
-      params.projection?.continuationRef?.stepId
-        ? `Step ID: ${params.projection.continuationRef.stepId}`
-        : null,
-      params.projection?.blockedReason ? `继续前上下文：${params.projection.blockedReason}` : null,
-      params.responseText ? `我的回复：${params.responseText}` : null,
-    ].filter(Boolean).join('\n')
+  }): ContinuationIntent | null {
+    const incoming = normalizeContinuationIntent(params.incoming || null)
+    const taskId =
+      params.projection?.taskId
+      || params.scopeRunSummary?.taskId
+      || params.scopeRunSummary?.taskContinuation?.taskId
+      || incoming?.taskId
+      || null
+    if (!taskId) return null
+
+    const continuationRef = params.projection?.continuationRef || params.scopeRunSummary?.taskContinuation || null
+    return normalizeContinuationIntent({
+      taskId,
+      executionId: incoming?.executionId || continuationRef?.executionId,
+      stepId:
+        incoming?.stepId
+        || continuationRef?.stepId
+        || params.projection?.currentStepId
+        || params.scopeRunSummary?.currentStepId
+        || undefined,
+      blockedReason:
+        incoming?.blockedReason
+        || params.projection?.blockedReason
+        || params.scopeRunSummary?.blockedReason
+        || undefined,
+      responseText: params.responseText || incoming?.responseText,
+    })
   }
 
   private parseChannelAttachments(raw: unknown): ChannelAttachment[] {

@@ -27,6 +27,14 @@ export interface ContinuationState {
   restoreDiagnostics?: ContinuationBudgetRestoreDiagnostics | null
 }
 
+export interface ContinuationIntent {
+  taskId: string
+  executionId?: string
+  stepId?: string
+  blockedReason?: string
+  responseText?: string
+}
+
 export interface ParsedContinuationControlText {
   sanitizedUserText: string
   explicitTaskId: string | null
@@ -139,6 +147,51 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     blockerType: typeof record.blockerType === 'string' ? record.blockerType : null,
     targetUrl: typeof record.targetUrl === 'string' ? record.targetUrl : null,
   }
+}
+
+function normalizeOptionalContinuationText(value: unknown): string | undefined {
+  const normalized = String(value || '').trim()
+  return normalized || undefined
+}
+
+export function normalizeContinuationIntent(value: Partial<ContinuationIntent> | null | undefined): ContinuationIntent | null {
+  if (!value) return null
+  const taskId = String(value.taskId || '').trim()
+  if (!taskId) return null
+  return {
+    taskId,
+    executionId: normalizeOptionalContinuationText(value.executionId),
+    stepId: normalizeOptionalContinuationText(value.stepId),
+    blockedReason: normalizeOptionalContinuationText(value.blockedReason),
+    responseText: normalizeOptionalContinuationText(value.responseText),
+  }
+}
+
+export function applyContinuationIntentToState(
+  baseState: ContinuationState,
+  intent: Partial<ContinuationIntent> | null | undefined,
+): ContinuationState {
+  const normalizedIntent = normalizeContinuationIntent(intent)
+  if (!normalizedIntent || normalizedIntent.taskId !== baseState.taskId) {
+    return normalizeContinuationState(baseState) || baseState
+  }
+
+  const currentStepId = normalizedIntent.stepId || baseState.currentStepId || null
+  const continuationRef = (baseState.continuationRef || normalizedIntent.executionId)
+    ? normalizeContinuationRef({
+      ...(baseState.continuationRef || {}),
+      taskId: baseState.taskId,
+      executionId: normalizedIntent.executionId || baseState.continuationRef?.executionId,
+      stepId: normalizedIntent.stepId || baseState.continuationRef?.stepId || currentStepId,
+    }, baseState.taskId, currentStepId)
+    : null
+
+  return normalizeContinuationState({
+    ...baseState,
+    currentStepId,
+    blockedReason: normalizedIntent.blockedReason ?? baseState.blockedReason ?? null,
+    continuationRef,
+  }) || baseState
 }
 
 export function parseContinuationControlText(raw: string): ParsedContinuationControlText {

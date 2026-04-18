@@ -10,7 +10,7 @@ import type {
 import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
 import type { RequestEnvelope } from './request-envelope'
-import type { ContinuationState } from './continuation-state'
+import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
@@ -336,6 +336,7 @@ export interface RunCoordinatorRequest {
   parentStepId?: string
   sessionIdOverride?: string
   budget?: RunBudgetSeed
+  continuationIntent?: ContinuationIntent | null
 }
 
 export interface RunCoordinatorResult {
@@ -358,6 +359,7 @@ export interface ExecutionHostRequest {
   budget?: RunBudgetSeed
   budgetState?: RunBudgetUsage
   taskBudgetRuntime?: TaskBudgetRuntime
+  continuationIntent?: ContinuationIntent | null
   continuationState?: ContinuationState | null
 }
 
@@ -443,8 +445,6 @@ export interface SubtaskRunRequest {
   taskType: TaskType
   initialSummary?: string | null
   initialSteps?: ScopeRunTaskStep[]
-  message?: RunMessage
-  requestId?: string
   runInlineWorker?: (context: SubtaskInlineWorkerContext) => Promise<SubtaskInlineWorkerResult>
 }
 

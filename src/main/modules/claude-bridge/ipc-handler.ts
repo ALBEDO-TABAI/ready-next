@@ -458,6 +458,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     scopeId: string
     message: string | MultimodalBlock[]
     requestId?: string
+    continuationIntent?: {
+      taskId: string
+      executionId?: string
+      stepId?: string
+      blockedReason?: string
+      responseText?: string
+    } | null
   }): Promise<IPCResponse> => {
     try {
       log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'}`)
@@ -487,6 +494,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     taskId?: string
     requestId?: string
     responseText?: string
+    continuationIntent?: {
+      taskId: string
+      executionId?: string
+      stepId?: string
+      blockedReason?: string
+      responseText?: string
+    } | null
   }): Promise<IPCResponse> => {
     try {
       const result = await runtime!.resumeRun(payload)
@@ -501,6 +515,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     taskId?: string
     requestId?: string
     responseText: string
+    continuationIntent?: {
+      taskId: string
+      executionId?: string
+      stepId?: string
+      blockedReason?: string
+      responseText?: string
+    } | null
   }): Promise<IPCResponse> => {
     try {
       const result = await runtime!.respondToInteraction(payload)
