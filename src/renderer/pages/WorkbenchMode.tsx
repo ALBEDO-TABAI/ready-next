@@ -13,6 +13,7 @@ import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
+import { useTogglePanelWithResize } from '../modules/workbench/useTogglePanelWithResize'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
@@ -131,13 +132,13 @@ export default function WorkbenchMode() {
     if (!targetVariant) return
 
     if (sidebarVisible && sidePanelVariant === targetVariant) {
-      toggleSidebar()
+      handleToggleSidebarWithResize()
       return
     }
 
     setSidePanelVariant(targetVariant)
     if (!sidebarVisible) {
-      toggleSidebar()
+      handleToggleSidebarWithResize()
     }
   }
 
@@ -152,6 +153,15 @@ export default function WorkbenchMode() {
       chatPanelWidth: Math.max(280, Math.min(600, state.chatPanelWidth + delta))
     }))
   }, [])
+
+  const handleToggleChatPanelWithResize = useTogglePanelWithResize(
+    "[data-liquid-shell='chat-panel']",
+    toggleChatPanel,
+  )
+  const handleToggleSidebarWithResize = useTogglePanelWithResize(
+    "[data-liquid-shell='side-panel']",
+    toggleSidebar,
+  )
 
   const hideIconRail = false
   const activeIcon = useMemo(() => {
@@ -242,17 +252,17 @@ export default function WorkbenchMode() {
 
       event.preventDefault()
       if (handledAction === 'toggle-sidebar') {
-        toggleSidebar()
+        handleToggleSidebarWithResize()
         return
       }
-      toggleChatPanel()
+      handleToggleChatPanelWithResize()
     }
 
     window.addEventListener('keydown', handlePanelShortcut)
     return () => {
       window.removeEventListener('keydown', handlePanelShortcut)
     }
-  }, [creatingType, renamingPath, toggleChatPanel, toggleSidebar])
+  }, [creatingType, renamingPath, handleToggleChatPanelWithResize, handleToggleSidebarWithResize])
 
   return (
     <LiquidSceneProvider mouseContainer={sceneRef}>
@@ -286,7 +296,7 @@ export default function WorkbenchMode() {
             </div>
           )}
 
-          <TopBar onToggleChatPanel={toggleChatPanel} onWorkbenchModeChange={handleWorkbenchModeChange} />
+          <TopBar onToggleChatPanel={handleToggleChatPanelWithResize} onWorkbenchModeChange={handleWorkbenchModeChange} />
 
           <div className="flex flex-1 overflow-hidden" data-workbench-shell="true">
             <IconRail activeIcon={activeIcon} onIconClick={handleIconClick} hidden={hideIconRail} expanded={sidebarVisible} />
@@ -343,7 +353,7 @@ export default function WorkbenchMode() {
               <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={handlePanelResizeStateChange} />
             )}
 
-            <ChatPanel shellWidth={chatShellWidth} panelState={chatPanelState} />
+            <ChatPanel shellWidth={chatShellWidth} panelState={chatPanelState} onTogglePanel={handleToggleChatPanelWithResize} />
           </div>
 
           <StatusBar />

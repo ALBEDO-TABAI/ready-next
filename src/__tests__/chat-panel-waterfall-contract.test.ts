@@ -22,7 +22,7 @@ test('chat panel collapse uses the new single-layer motion handoff instead of th
   assert.match(chatPanel, /exit=\{\s*reduceMotion[\s\S]*x: WORKBENCH_PANEL_MOTION_OFFSET_PX,\s*opacity: 0\.01,/)
   assert.match(chatPanel, /className="relative overflow-visible"/)
   assert.match(chatPanel, /zIndex:\s*4/)
-  assert.match(chatPanel, /className="relative min-h-0 overflow-hidden"/)
+  assert.match(chatPanel, /className="relative min-h-0 overflow-hidden flex flex-col"/)
   assert.match(chatPanel, /zIndex:\s*1/)
   assert.match(chatPanel, /pointerEvents:\s*isPresent \? 'auto' : 'none'/)
   assert.match(chatPanel, /width: shellWidth,/)

@@ -21,10 +21,10 @@ test('TopBar right padding follows the chat panel gutter via CSS variable, not a
   )
 })
 
-test('overlayLockCount self-heals after 600ms so a leaked lock cannot strand the BrowserView hidden', () => {
+test('overlayLockCount self-heals after 1000ms so a leaked lock cannot strand the BrowserView hidden and the theme-transition finishes first', () => {
   const source = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 
-  assert.match(source, /OVERLAY_LOCK_SELF_HEAL_MS\s*=\s*600/)
+  assert.match(source, /OVERLAY_LOCK_SELF_HEAL_MS\s*=\s*1000/)
   assert.match(source, /pendingSelfHealTimers/)
   assert.match(source, /overlayLockCount self-healed after/)
 })

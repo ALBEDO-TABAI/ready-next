@@ -1020,7 +1020,7 @@ function ChatPanelMotionLayer({
             {header}
           </div>
 
-          <div className="relative min-h-0 overflow-hidden" style={{ zIndex: 1 }}>
+          <div className="relative min-h-0 overflow-hidden flex flex-col" style={{ zIndex: 1 }}>
             {body}
           </div>
         </div>
@@ -1576,9 +1576,10 @@ function formatFolderAttachmentSummary(attachment: ChatAttachment): string {
 interface ChatPanelProps {
   shellWidth: number
   panelState: ChatPanelState
+  onTogglePanel?: () => void
 }
 
-export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
+export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: ChatPanelProps) {
   const {
     agents,
     messages,
@@ -1619,7 +1620,8 @@ export default function ChatPanel({ shellWidth, panelState }: ChatPanelProps) {
     setTaskSectionExpanded
   } = useAgent()
 
-  const { toggleChatPanel } = useWorkspace()
+  const { toggleChatPanel: toggleChatPanelStore } = useWorkspace()
+  const toggleChatPanel = onTogglePanel ?? toggleChatPanelStore
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)

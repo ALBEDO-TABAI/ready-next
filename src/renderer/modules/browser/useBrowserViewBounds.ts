@@ -4,7 +4,7 @@ import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
-const OVERLAY_LOCK_SELF_HEAL_MS = 600
+const OVERLAY_LOCK_SELF_HEAL_MS = 1000
 
 interface UseBrowserViewBoundsParams {
   isElectron: boolean
