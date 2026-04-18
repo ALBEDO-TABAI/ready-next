@@ -161,7 +161,10 @@ export function useBrowserViewBounds({
   const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
     if (!isElectron) return
     const requestToken = ++visibilitySyncTokenRef.current
-    if (!isActiveRef.current) return
+    if (!isActiveRef.current) {
+      window.electronAPI?.browser?.hideAll()
+      return
+    }
 
     if (!isVisibleAllowedRef.current) {
       window.electronAPI?.browser?.hideAll()
@@ -260,7 +263,7 @@ export function useBrowserViewBounds({
 
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })
-  }, [syncBrowserVisibility])
+  }, [isActive, isVisibleAllowed, syncBrowserVisibility])
 
   useEffect(() => {
     const handleOverlayLock = (event: Event) => {

@@ -64,11 +64,14 @@ test('workbench outlet keeps all modes mounted but only paints the current trans
   assert.match(keyboardShortcuts, /if \(appMode === 'workbench'\)/)
 })
 
-test('workbench shell hides all browser hosts whenever browser is outside the visible mode set and on unmount', () => {
+test('workbench shell hides all browser hosts on unmount (show/hide during mode change is now consolidated inside useBrowserViewBounds)', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 
-  assert.match(workbenchMode, /const visibleModes = \[workbenchMode, splitMode\]\.filter\(Boolean\)/)
-  assert.match(workbenchMode, /if \(!visibleModes\.includes\('browser'\)\) \{[\s\S]*void window\.electronAPI\?\.browser\.hideAll\(\)/)
+  // Mode-change hide/show is now driven by the isActive/isVisibleAllowed reactive effect inside useBrowserViewBounds,
+  // so WorkbenchMode no longer needs the visibleModes effect.
+  assert.doesNotMatch(workbenchMode, /const visibleModes = \[workbenchMode, splitMode\]\.filter\(Boolean\)/)
+  assert.doesNotMatch(workbenchMode, /if \(!visibleModes\.includes\('browser'\)\) \{[\s\S]*void window\.electronAPI\?\.browser\.hideAll\(\)/)
+  // Unmount cleanup is still the last-resort guard against stale native overlays.
   assert.match(workbenchMode, /useEffect\(\(\) => \{[\s\S]*return \(\) => \{[\s\S]*void window\.electronAPI\?\.browser\.hideAll\(\)/)
   assert.doesNotMatch(workbenchMode, /browser\.hideActiveHost\(\)/)
 })

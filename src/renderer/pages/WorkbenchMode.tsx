@@ -240,7 +240,6 @@ export default function WorkbenchMode() {
 
     if (!isRedirectingDuringMotion && transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
       setBrowserLayoutMotionPhase('leaving')
-      void window.electronAPI?.browser.hideAll()
     } else if (!isRedirectingDuringMotion && transitionTargetModeRef.current !== 'browser' && nextMode === 'browser') {
       setBrowserLayoutMotionPhase('entering')
     } else if (transitionTargetModeRef.current === nextMode) {
@@ -272,14 +271,6 @@ export default function WorkbenchMode() {
       }
     }
   }, [])
-
-  // BrowserView 隐藏控制
-  useEffect(() => {
-    const visibleModes = [workbenchMode, splitMode].filter(Boolean)
-    if (!visibleModes.includes('browser')) {
-      void window.electronAPI?.browser.hideAll()
-    }
-  }, [splitMode, workbenchMode])
 
   useEffect(() => {
     return () => {

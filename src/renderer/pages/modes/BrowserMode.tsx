@@ -297,14 +297,6 @@ export default function BrowserMode({
   }, [])
 
   useEffect(() => {
-    if (!isElectron || isMotionSettled) return
-
-    // 切换滑动期间只隐藏原生 BrowserView，避免在位移中的壳层区域上重抓冻结帧，
-    // 否则会把左侧文件面板等错位画面缓存进浏览器区域里。
-    void window.electronAPI?.browser?.hideAll?.()
-  }, [isElectron, isMotionSettled])
-
-  useEffect(() => {
     if (!shouldRevealBrowserHost || !browserRuntimeReady) {
       clearSurfaceReadyTimer()
       setIsBrowserSurfaceReady(false)
