@@ -436,9 +436,7 @@ html[data-theme-transitioning='true'] .document-path-bar {
     background-color 220ms ease,
     color 220ms ease,
     border-color 220ms ease,
-    box-shadow 220ms ease,
-    backdrop-filter 220ms ease,
-    -webkit-backdrop-filter 220ms ease;
+    box-shadow 220ms ease;
 }
 
 html[data-skin='liquid-glass'],
