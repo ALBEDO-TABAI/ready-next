@@ -3,6 +3,7 @@ import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import { parseShowWidgetFences, tryParseWidgetPayload } from '../../components/document/widget-fence-parser'
 import {
+  buildDocumentWidgetFenceSource,
   collectDocumentWidgets,
   summarizeWidgetRecord,
   type DocumentWidgetComponentSpecSummary,
@@ -16,6 +17,18 @@ interface DocActionPayload {
   type: string
   [key: string]: unknown
 }
+
+function raceWithTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`docaction-timeout:${label}:${ms}`)), ms)
+    op.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error) => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
+const widgetWriteLocks = new Map<string, Promise<void>>()
 
 export interface CommandResult {
   handled: boolean
@@ -59,7 +72,11 @@ async function resolveWidgetCodeInput(
   }
 
   try {
-    const compiled = await compileDocumentWidgetComponentSpec(componentSpec as DocumentWidgetComponentSpec)
+    const compiled = await raceWithTimeout(
+      compileDocumentWidgetComponentSpec(componentSpec as DocumentWidgetComponentSpec),
+      10_000,
+      'compile_widget_spec',
+    )
     return {
       widgetCode: compiled.widgetCode,
       componentName: compiled.component,
@@ -289,26 +306,17 @@ function rewriteSectionInDocument(
 }
 
 interface WidgetFenceOptions {
+  id?: string
   componentSpec?: DocumentWidgetComponentSpecSummary
   widgetState?: object | null
 }
 
 function buildShowWidgetFence(title: string, widgetCode: string, opts?: WidgetFenceOptions): string {
-  const payload: Record<string, unknown> = {
-    title: title.trim(),
-    widget_code: widgetCode,
-  }
-  if (opts?.componentSpec) {
-    payload.component_spec = opts.componentSpec
-  }
-  if (opts?.widgetState && typeof opts.widgetState === 'object' && Object.keys(opts.widgetState).length > 0) {
-    payload.widget_state = opts.widgetState
-  }
-  return [
-    '```show-widget',
-    JSON.stringify(payload),
-    '```',
-  ].join('\n')
+  return buildDocumentWidgetFenceSource(title, widgetCode, {
+    id: opts?.id,
+    componentSpec: opts?.componentSpec,
+    widgetState: opts?.widgetState ?? null,
+  })
 }
 
 function validateWidgetCode(widgetCode: string): { valid: boolean; reason?: string } {
@@ -359,6 +367,11 @@ function resolveWidgetRecord(
   if (Number.isInteger(numeric) && numeric >= 1) {
     const byIndex = widgets[numeric - 1]
     return byIndex ? { widget: byIndex } : { widget: null, error: `未找到序号为 ${numeric} 的 widget` }
+  }
+
+  const byId = widgets.find((widget) => widget.id === trimmed)
+  if (byId) {
+    return { widget: byId }
   }
 
   const normalizedTarget = normalizeWidgetTitleKey(trimmed)
@@ -414,6 +427,7 @@ function updateWidgetInDocument(
   const nextTitle = typeof title === 'string' && title.trim().length > 0 ? title.trim() : resolved.widget.title
   const nextComponentSpec = componentSpec ?? resolved.widget.componentSpec ?? undefined
   const replacementFence = buildShowWidgetFence(nextTitle, widgetCode, {
+    id: resolved.widget.id,
     componentSpec: nextComponentSpec || undefined,
     widgetState: resolved.widget.widgetState ?? undefined,
   })
@@ -473,6 +487,7 @@ function upsertWidgetFenceByTitle(
       matchedCount += 1
       if (matchedCount === 1) {
         const fence = buildShowWidgetFence(title, widgetCode, {
+          id: parsed?.id,
           componentSpec: componentSpec ?? parsed?.componentSpec ?? undefined,
           widgetState: parsed?.widgetState ?? undefined,
         })
@@ -582,7 +597,11 @@ function normalizePotentialWidgetPayloadContent(content: string): string {
       ? tryParseWidgetPayload(part, part)
       : null
     if (!widget) return null
-    return buildShowWidgetFence(widget.title || `widget_${Math.random().toString(36).slice(2, 8)}`, widget.widgetCode)
+    return buildShowWidgetFence(widget.title || `widget_${Math.random().toString(36).slice(2, 8)}`, widget.widgetCode, {
+      id: widget.id,
+      componentSpec: widget.componentSpec ?? undefined,
+      widgetState: widget.widgetState,
+    })
   })
 
   if (fences.every(Boolean)) {
@@ -861,6 +880,7 @@ export function buildActiveDocumentContext(): string | null {
 }
 
 export interface ActiveDocumentSnapshot {
+  tabId: string
   title: string
   path: string | null
   content: string
@@ -868,16 +888,19 @@ export interface ActiveDocumentSnapshot {
   charCount: number
 }
 
-export function getActiveDocumentSnapshot(): ActiveDocumentSnapshot | null {
+export function getActiveDocumentSnapshot(tabId?: string): ActiveDocumentSnapshot | null {
   const mode = useMode.getState().workbenchMode
   if (mode !== 'document') return null
 
   const docStore = useDocTabs.getState()
-  const activeTab = docStore.tabs.find((tab) => tab.id === docStore.activeTabId)
+  const activeTab = typeof tabId === 'string' && tabId.trim().length > 0
+    ? docStore.tabs.find((tab) => tab.id === tabId.trim())
+    : docStore.tabs.find((tab) => tab.id === docStore.activeTabId)
   if (!activeTab) return null
 
   const content = activeTab.content || ''
   return {
+    tabId: activeTab.id,
     title: activeTab.title,
     path: activeTab.path || null,
     content,
@@ -997,7 +1020,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       ...summaries.map((item) => {
         const hint = item.componentHint ? ` · ${item.componentHint}` : ''
         const state = item.hasState ? ' · 带状态' : ''
-        return `${item.index}. ${item.title} [${item.mode}]${hint}${state}${item.preview ? ` · ${item.preview}` : ''}`
+        const patch = item.canPatch ? ' · 可 patch' : ' · 仅整卡替换'
+        return `${item.index}. ${item.title} [${item.mode}] · id=${item.id}${hint}${state}${patch}${item.preview ? ` · ${item.preview}` : ''}`
       }),
       '',
       '```json',
@@ -1015,50 +1039,71 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可更新 widget 的文档标签'
 
-    const patchCandidate = action.componentSpecPatch && typeof action.componentSpecPatch === 'object' && !Array.isArray(action.componentSpecPatch)
-      ? action.componentSpecPatch as Record<string, unknown>
-      : null
-    const shouldApplyPatch = Boolean(
-      patchCandidate && Object.keys(patchCandidate).length > 0 && !widgetCode.trim() && !action.componentSpec,
-    )
-    if (shouldApplyPatch) {
-      const widgetRecords = collectDocumentWidgets(tab.content)
-      const lowerTarget = target.toLowerCase()
-      const matches = widgetRecords.filter((record) => record.title === target || record.title.toLowerCase() === lowerTarget)
-      const record = typeof occurrence === 'number' && occurrence > 0
-        ? matches[Math.min(occurrence - 1, matches.length - 1)]
-        : matches[0]
-      if (!record) return `未找到可更新的 widget：${target}`
-      if (!record.componentSpec) {
-        return `widget 更新已拒绝：目标 widget "${record.title}" 不带 component_spec，无法做字段级 patch，请改用完整 componentSpec 或 widgetCode 覆盖。`
+    const tabId = tab.id
+    const runUpdate = async (): Promise<string> => {
+      const patchCandidate = action.componentSpecPatch && typeof action.componentSpecPatch === 'object' && !Array.isArray(action.componentSpecPatch)
+        ? action.componentSpecPatch as Record<string, unknown>
+        : null
+      const shouldApplyPatch = Boolean(
+        patchCandidate && Object.keys(patchCandidate).length > 0 && !widgetCode.trim() && !action.componentSpec,
+      )
+      if (shouldApplyPatch) {
+        const widgetRecords = collectDocumentWidgets(tab.content)
+        const lowerTarget = target.toLowerCase()
+        const matches = widgetRecords.filter((record) => record.title === target || record.title.toLowerCase() === lowerTarget)
+        const record = typeof occurrence === 'number' && occurrence > 0
+          ? matches[Math.min(occurrence - 1, matches.length - 1)]
+          : matches[0]
+        if (!record) return `未找到可更新的 widget：${target}`
+        if (!record.componentSpec) {
+          return `widget 更新已拒绝：目标 widget "${record.title}" 不带 component_spec，无法做字段级 patch，请改用完整 componentSpec 或 widgetCode 覆盖。`
+        }
+        const mergedSpec = mergeComponentSpecPatch(record.componentSpec, patchCandidate!)
+        try {
+          const compiled = await raceWithTimeout(
+            compileDocumentWidgetComponentSpec(mergedSpec as DocumentWidgetComponentSpec),
+            10_000,
+            'compile_widget_spec',
+          )
+          const updated = updateWidgetInDocument(
+            tab.content,
+            target,
+            compiled.widgetCode,
+            nextTitle,
+            occurrence,
+            normalizeComponentSpecForFence(mergedSpec),
+          )
+          if (!updated.found) return updated.error || 'widget 更新失败'
+          if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+          docStore.setTabContent(tab.id, updated.content)
+          return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${tab.title}）`
+        } catch (error) {
+          return `widget 更新已拒绝：${error instanceof Error ? error.message : String(error)}`
+        }
       }
-      const mergedSpec = mergeComponentSpecPatch(record.componentSpec, patchCandidate!)
-      try {
-        const compiled = await compileDocumentWidgetComponentSpec(mergedSpec as DocumentWidgetComponentSpec)
-        const updated = updateWidgetInDocument(
-          tab.content,
-          target,
-          compiled.widgetCode,
-          nextTitle,
-          occurrence,
-          normalizeComponentSpecForFence(mergedSpec),
-        )
-        if (!updated.found) return updated.error || 'widget 更新失败'
-        if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
-        docStore.setTabContent(tab.id, updated.content)
-        return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${tab.title}）`
-      } catch (error) {
-        return `widget 更新已拒绝：${error instanceof Error ? error.message : String(error)}`
-      }
+
+      const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
+      if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
+      const updated = updateWidgetInDocument(tab.content, target, resolvedWidget.widgetCode, nextTitle, occurrence, resolvedWidget.componentSpec)
+      if (!updated.found) return updated.error || 'widget 更新失败'
+      if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+      docStore.setTabContent(tab.id, updated.content)
+      return `已更新 widget：${nextTitle || updated.widget?.title || target}（${tab.title}）`
     }
 
-    const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
-    if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
-    const updated = updateWidgetInDocument(tab.content, target, resolvedWidget.widgetCode, nextTitle, occurrence, resolvedWidget.componentSpec)
-    if (!updated.found) return updated.error || 'widget 更新失败'
-    if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
-    docStore.setTabContent(tab.id, updated.content)
-    return `已更新 widget：${nextTitle || updated.widget?.title || target}（${tab.title}）`
+    const prev = widgetWriteLocks.get(tabId) || Promise.resolve()
+    const task = prev
+      .catch(() => undefined)
+      .then(() => raceWithTimeout(runUpdate(), 15_000, 'update_widget'))
+    const lockPromise: Promise<void> = task.then(() => undefined, () => undefined)
+    widgetWriteLocks.set(tabId, lockPromise)
+    try {
+      return await task
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    } finally {
+      if (widgetWriteLocks.get(tabId) === lockPromise) widgetWriteLocks.delete(tabId)
+    }
   }
 
   if (type === 'remove_widget') {
