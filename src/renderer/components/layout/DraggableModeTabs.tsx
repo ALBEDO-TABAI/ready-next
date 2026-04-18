@@ -17,6 +17,7 @@ const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
 ]
 
 const BROWSER_CAPTURE_FREEZE_EVENT = 'ready:browser-capture-freeze'
+const CAPTURE_FREEZE_HOVER_DELAY_MS = 160
 
 interface DraggableModeTabsProps {
   activeMode: WorkbenchMode
@@ -36,6 +37,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
   const currentRef = useRef(modes.findIndex(m => m.id === activeMode))
   const isDraggingRef = useRef(false)
   const skipClickAnimationRef = useRef(false)
+  const captureFreezeTimerRef = useRef<number | null>(null)
 
   const cancelAnimation = useCallback(() => {
     if (rafRef.current) {
@@ -195,14 +197,31 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     onChange(modes[index].id)
   }, [onChange])
 
-  // 鼠标悬停预捕获：当悬停在非当前激活的模式上时，触发预捕获
+  const clearCaptureFreezeTimer = useCallback(() => {
+    if (captureFreezeTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(captureFreezeTimerRef.current)
+      captureFreezeTimerRef.current = null
+    }
+  }, [])
+
+  // 鼠标悬停预捕获：悬停在浏览器图标且停留 ≥ CAPTURE_FREEZE_HOVER_DELAY_MS 后才触发截图 IPC，
+  // 避免扫过图标也发截屏。
   const handleIconHover = useCallback((index: number) => {
     const mode = modes[index].id
-    // 如果悬停的是浏览器模式，且当前不是浏览器模式，触发预捕获
-    if (mode === 'browser' && activeMode !== 'browser') {
+    clearCaptureFreezeTimer()
+    if (mode !== 'browser' || activeMode === 'browser') return
+    if (typeof window === 'undefined') return
+    captureFreezeTimerRef.current = window.setTimeout(() => {
+      captureFreezeTimerRef.current = null
       window.dispatchEvent(new CustomEvent(BROWSER_CAPTURE_FREEZE_EVENT))
-    }
-  }, [activeMode])
+    }, CAPTURE_FREEZE_HOVER_DELAY_MS)
+  }, [activeMode, clearCaptureFreezeTimer])
+
+  const handleIconLeave = useCallback(() => {
+    clearCaptureFreezeTimer()
+  }, [clearCaptureFreezeTimer])
+
+  useEffect(() => clearCaptureFreezeTimer, [clearCaptureFreezeTimer])
 
   // Calculate icon styles based on proximity to thumb center
   const getIconStyle = useCallback((index: number) => {
@@ -252,6 +271,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => handleIconClick(index, e)}
             onMouseEnter={() => handleIconHover(index)}
+            onMouseLeave={handleIconLeave}
             title={mode.id}
           >
             <Icon style={{ width: 15, height: 15 }} strokeWidth={2} />

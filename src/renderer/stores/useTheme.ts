@@ -126,7 +126,7 @@ export const useTheme = create<ThemeState>((set, get) => {
         const state = get()
         if (state.theme === 'system') {
             const newResolved = resolveTheme('system')
-            applyColorTheme(newResolved, 'system')
+            applyColorTheme(newResolved, 'system', { animate: false })
             set({ resolvedTheme: newResolved })
         }
     }

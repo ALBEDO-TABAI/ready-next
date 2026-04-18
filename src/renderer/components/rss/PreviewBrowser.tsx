@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
-import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from '../../modules/browser/resize-events'
-import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
+import { useHostedPreviewBounds } from '../../modules/browser/useHostedPreviewBounds'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode } from '../../stores/useMode'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
@@ -34,11 +33,6 @@ const defaultPreviewState: PreviewState = {
 export default function PreviewBrowser({ item, onClose, isActive = true }: PreviewBrowserProps) {
   const [previewState, setPreviewState] = useState<PreviewState>(defaultPreviewState)
   const contentRef = useRef<HTMLDivElement>(null)
-  const frameSyncRafRef = useRef<number | null>(null)
-  const finalSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const panelResizingRef = useRef(false)
-  const lastBoundsKeyRef = useRef('')
-  const pendingSyncOptionsRef = useRef<{ force: boolean; trailingFinal: boolean } | null>(null)
 
   const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
   const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
@@ -48,69 +42,18 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   const chatPanelWidth = useWorkspace((state) => state.chatPanelWidth)
   const effectiveSidePanelWidth = sidePanelWidths.shared
 
-  const clearFrameSync = useCallback(() => {
-    if (frameSyncRafRef.current !== null) {
-      cancelAnimationFrame(frameSyncRafRef.current)
-      frameSyncRafRef.current = null
-    }
-    pendingSyncOptionsRef.current = null
-  }, [])
+  const sendPreviewBounds = useCallback(
+    (bounds: { x: number; y: number; width: number; height: number }) => {
+      void window.electronAPI?.browser?.previewUpdateBounds(bounds)
+    },
+    [],
+  )
 
-  const clearFinalSyncTimeout = useCallback(() => {
-    if (finalSyncTimeoutRef.current !== null) {
-      clearTimeout(finalSyncTimeoutRef.current)
-      finalSyncTimeoutRef.current = null
-    }
-  }, [])
-
-  const sendBoundsImmediate = useCallback((options?: { force?: boolean }) => {
-    const container = contentRef.current
-    if (!container) return
-    const rect = container.getBoundingClientRect()
-    const width = Math.round(rect.width)
-    const height = Math.round(rect.height)
-    if (width <= 0 || height <= 0) return
-    const x = Math.round(rect.left)
-    const y = Math.round(rect.top)
-    const boundsKey = `${x}:${y}:${width}:${height}`
-    if (!options?.force && lastBoundsKeyRef.current === boundsKey) return
-
-    lastBoundsKeyRef.current = boundsKey
-    void window.electronAPI?.browser?.previewUpdateBounds({
-      x,
-      y,
-      width,
-      height,
-    })
-  }, [])
-
-  const scheduleBoundsSync = useCallback((options?: { force?: boolean; trailingFinal?: boolean }) => {
-    if (!isActive) return
-
-    const previousOptions = pendingSyncOptionsRef.current
-    pendingSyncOptionsRef.current = {
-      force: previousOptions?.force || options?.force || false,
-      trailingFinal: previousOptions?.trailingFinal || options?.trailingFinal || false,
-    }
-
-    if (frameSyncRafRef.current !== null) return
-
-    frameSyncRafRef.current = requestAnimationFrame(() => {
-      frameSyncRafRef.current = null
-      const pendingOptions = pendingSyncOptionsRef.current
-      pendingSyncOptionsRef.current = null
-      if (!pendingOptions) return
-
-      sendBoundsImmediate({ force: pendingOptions.force })
-      if (!pendingOptions.trailingFinal || panelResizingRef.current) return
-
-      clearFinalSyncTimeout()
-      finalSyncTimeoutRef.current = setTimeout(() => {
-        finalSyncTimeoutRef.current = null
-        sendBoundsImmediate({ force: true })
-      }, 64)
-    })
-  }, [clearFinalSyncTimeout, isActive, sendBoundsImmediate])
+  const { scheduleSync: scheduleBoundsSync, flush: flushBoundsSync } = useHostedPreviewBounds({
+    hostRef: contentRef,
+    isActive,
+    sendBounds: sendPreviewBounds,
+  })
 
   useEffect(() => {
     const unsubscribe = window.electronAPI?.browser?.onPreviewUpdate((state) => {
@@ -137,41 +80,11 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   }, [isActive, item.id, item.link, scheduleBoundsSync])
 
   useEffect(() => {
-    const el = contentRef.current
-    if (!el) return
-
-    const handleBoundsShift = () => {
-      scheduleBoundsSync({
-        force: panelResizingRef.current,
-        trailingFinal: !panelResizingRef.current,
-      })
-    }
-
-    const observer = new ResizeObserver(handleBoundsShift)
-    observer.observe(el)
-    const unsubscribeWindowResize = subscribeWorkbenchWindowResize(handleBoundsShift)
-
-    return () => {
-      observer.disconnect()
-      unsubscribeWindowResize()
-      clearFrameSync()
-      clearFinalSyncTimeout()
-    }
-  }, [clearFinalSyncTimeout, clearFrameSync, scheduleBoundsSync])
-
-  useEffect(() => {
-    if (!isActive) {
-      clearFrameSync()
-      clearFinalSyncTimeout()
-      return
-    }
-
-    scheduleBoundsSync({ force: true, trailingFinal: !panelResizingRef.current })
+    if (!isActive) return
+    scheduleBoundsSync({ force: true, trailingFinal: true })
   }, [
     chatPanelVisible,
     chatPanelWidth,
-    clearFinalSyncTimeout,
-    clearFrameSync,
     effectiveSidePanelWidth,
     sidebarVisible,
     sidePanelVariant,
@@ -181,35 +94,11 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   ])
 
   useEffect(() => {
-    const handlePanelResizeState = (event: Event) => {
-      const detail = (event as CustomEvent<PanelResizeStateDetail>).detail
-      if (!detail) return
-
-      if (detail.resizing) {
-        panelResizingRef.current = true
-        clearFinalSyncTimeout()
-        scheduleBoundsSync({ force: true })
-        return
-      }
-
-      panelResizingRef.current = false
-      clearFinalSyncTimeout()
-      scheduleBoundsSync({ force: true, trailingFinal: true })
-    }
-
-    window.addEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
     return () => {
-      window.removeEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
-    }
-  }, [clearFinalSyncTimeout, scheduleBoundsSync])
-
-  useEffect(() => {
-    return () => {
-      clearFrameSync()
-      clearFinalSyncTimeout()
+      flushBoundsSync()
       void window.electronAPI?.browser?.previewClose()
     }
-  }, [clearFinalSyncTimeout, clearFrameSync])
+  }, [flushBoundsSync])
 
   const handleClose = useCallback(() => {
     void window.electronAPI?.browser?.previewClose()

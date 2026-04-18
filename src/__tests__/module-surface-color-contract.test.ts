@@ -11,7 +11,6 @@ test('document canvas and rss canvas share one module surface background token',
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
-  const documentEnterOverlay = readWorkspaceFile('src/renderer/components/document/DocumentEnterOverlay.tsx')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
   const previewBrowser = readWorkspaceFile('src/renderer/components/rss/PreviewBrowser.tsx')
@@ -24,7 +23,6 @@ test('document canvas and rss canvas share one module surface background token',
 
   assert.match(documentMode, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(markdownEditor, /background: 'var\(--workbench-module-surface-bg\)'/)
-  assert.match(documentEnterOverlay, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(rssMode, /background: 'var\(--workbench-module-surface-bg\)'/)
   assert.match(rssFeed, /background: 'transparent'/)
   assert.match(previewBrowser, /rss-preview-surface/)

@@ -1245,8 +1245,15 @@ html[data-theme='dark'] .ready-app-bg {
   opacity: 0.94;
 }
 
-/* Disable all transitions during panel resize drag */
-body.resizing * {
+/* Disable layout-related transitions during panel resize drag.
+   Scoped to panel/canvas/glass shells + BrowserView hosts so unrelated
+   hover/tooltip transitions elsewhere are not collateral damage. */
+body.resizing .workbench-panel-frame,
+body.resizing .workbench-canvas-shell,
+body.resizing .glass-surface-panel,
+body.resizing .glass-surface-floating,
+body.resizing [data-liquid-shell],
+body.resizing [data-browser-surface] {
   transition: none !important;
 }
 

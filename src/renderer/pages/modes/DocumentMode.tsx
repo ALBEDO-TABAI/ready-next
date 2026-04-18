@@ -12,6 +12,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
 } from '../../modules/workbench/chrome'
+import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { getFileExtension } from '../../utils/path'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
@@ -33,30 +34,7 @@ const getFileTypeColor = (path: string | null): string => {
 
 // --- SplitResizeHandle ---
 function SplitResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
-  const onResizeRef = useRef(onResize)
-  onResizeRef.current = onResize
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    let lastX = e.clientX
-
-    const handleMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - lastX
-      lastX = ev.clientX
-      if (delta !== 0) onResizeRef.current(delta)
-    }
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.classList.remove('resizing')
-    }
-
-    document.body.classList.add('resizing')
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [])
-
+  const handleMouseDown = useRafResizeDrag({ onDelta: onResize })
   return <div className="resize-handle" onMouseDown={handleMouseDown} />
 }
 

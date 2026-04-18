@@ -49,32 +49,36 @@ const LiquidSceneContext = createContext<RefObject<HTMLDivElement | null> | null
 const NOISE_TEXTURE =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIiB2aWV3Qm94PSIwIDAgMTYwIDE2MCI+PGZpbHRlciBpZD0ibiI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuODUiIG51bU9jdGF2ZXM9IjIiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48ZmVDb2xvck1hdHJpeCB0eXBlPSJzYXR1cmF0ZSIgdmFsdWVzPSIwIi8+PGZlQ29tcG9uZW50VHJhbnNmZXI+PGZlRnVuY0EgdHlwZT0idGFibGUiIHRhYmxlVmFsdWVzPSIwIDAuNDUiLz48L2ZlQ29tcG9uZW50VHJhbnNmZXI+PC9maWx0ZXI+PHJlY3Qgd2lkdGg9IjE2MCIgaGVpZ2h0PSIxNjAiIGZpbHRlcj0idXJsKCNuKSIgb3BhY2l0eT0iMC45Ii8+PC9zdmc+'
 
+// Displacement/aberration trimmed 2026-04-18: SVG filter pipeline is GPU-bound
+// during backdrop blur stacking, and button/list tones gain almost no visual
+// refraction from the extra magnitude. See
+// docs/performance/2026-04-18-ui-animation-jank-gap-audit.md §G7.
 const primitiveByTone: Record<LiquidGlassTone, Omit<LiquidGlassProps, 'children' | 'mouseContainer'>> = {
   button: {
-    displacementScale: 100,
+    displacementScale: 60,
     blurAmount: 0.5,
     saturation: 140,
-    aberrationIntensity: 2,
+    aberrationIntensity: 0,
     elasticity: 0,
     cornerRadius: 32,
     mode: 'standard',
     padding: '0px',
   },
   card: {
-    displacementScale: 92,
+    displacementScale: 70,
     blurAmount: 0.4,
     saturation: 140,
-    aberrationIntensity: 2,
+    aberrationIntensity: 1.2,
     elasticity: 0,
     cornerRadius: 30,
     mode: 'standard',
     padding: '0px',
   },
   panel: {
-    displacementScale: 76,
+    displacementScale: 60,
     blurAmount: 0.36,
     saturation: 140,
-    aberrationIntensity: 1.8,
+    aberrationIntensity: 1.2,
     elasticity: 0,
     cornerRadius: 24,
     mode: 'standard',

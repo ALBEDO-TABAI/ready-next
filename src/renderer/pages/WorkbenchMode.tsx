@@ -9,10 +9,10 @@ import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
-import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
+import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 
@@ -25,66 +25,12 @@ function ResizeHandle({
   direction?: 'right' | 'left'
   onResizeStateChange?: (resizing: boolean) => void
 }) {
-  const onResizeRef = useRef(onResize)
-  onResizeRef.current = onResize
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startX = e.clientX
-    let lastX = startX
-    let pendingDelta = 0
-    let rafId: number | null = null
-
-    const flushPendingDelta = () => {
-      rafId = null
-      if (pendingDelta === 0) return
-      const delta = pendingDelta
-      pendingDelta = 0
-      onResizeRef.current(direction === 'right' ? delta : -delta)
-    }
-
-    const handleMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - lastX
-      lastX = ev.clientX
-      if (delta !== 0) {
-        pendingDelta += delta
-        if (rafId === null) {
-          rafId = window.requestAnimationFrame(flushPendingDelta)
-        }
-      }
-    }
-
-    const handleMouseUp = () => {
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId)
-        flushPendingDelta()
-      }
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.classList.remove('resizing')
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      onResizeStateChange?.(false)
-      window.dispatchEvent(
-        new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
-          detail: { resizing: false },
-        }),
-      )
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    document.body.classList.add('resizing')
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    onResizeStateChange?.(true)
-    window.dispatchEvent(
-      new CustomEvent(PANEL_RESIZE_STATE_EVENT, {
-        detail: { resizing: true },
-      }),
-    )
-  }, [direction, onResizeStateChange])
+  const handleMouseDown = useRafResizeDrag({
+    onDelta: onResize,
+    direction,
+    onResizeStateChange,
+    dispatchPanelResizeEvent: true,
+  })
 
   return (
     <div
