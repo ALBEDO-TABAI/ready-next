@@ -11,7 +11,6 @@ import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { PANEL_RESIZE_STATE_EVENT } from '../modules/browser/resize-events'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
-import { WORKBENCH_PANEL_MOTION_DURATION_MS } from '../modules/workbench/panel-motion'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { readStorage } from '../utils/storage'
@@ -97,8 +96,6 @@ function ResizeHandle({
 
 // D方案：简单的过渡状态管理
 const MODE_TRANSITION_DURATION_MS = 350
-const PANEL_CONTENT_TRANSITION_MS = WORKBENCH_PANEL_MOTION_DURATION_MS
-const SIDEBAR_CONTENT_TRANSITION_MS = WORKBENCH_PANEL_MOTION_DURATION_MS
 
 export default function WorkbenchMode() {
   const {
@@ -123,75 +120,16 @@ export default function WorkbenchMode() {
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
-  const [shouldRenderSidebarShell, setShouldRenderSidebarShell] = useState(sidebarVisible)
-  const [isSidebarContentVisible, setIsSidebarContentVisible] = useState(sidebarVisible)
-  const [chatPanelState, setChatPanelState] = useState<'expanding' | 'expanded' | 'collapsing' | 'collapsed'>(
-    chatPanelVisible ? 'expanded' : 'collapsed',
-  )
   const transitionTimerRef = useRef<number | null>(null)
-  const sidebarShellTimerRef = useRef<number | null>(null)
-  const sidebarEnterFrameRef = useRef<number | null>(null)
-  const chatPanelStateTimerRef = useRef<number | null>(null)
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
+
+  const isSidebarContentVisible = sidebarVisible
+  const chatPanelState: 'expanded' | 'collapsed' = chatPanelVisible ? 'expanded' : 'collapsed'
 
   useEffect(() => {
     transitionTargetModeRef.current = workbenchMode
   }, [workbenchMode])
-
-  useEffect(() => {
-    if (sidebarShellTimerRef.current) {
-      window.clearTimeout(sidebarShellTimerRef.current)
-      sidebarShellTimerRef.current = null
-    }
-    if (sidebarEnterFrameRef.current !== null) {
-      window.cancelAnimationFrame(sidebarEnterFrameRef.current)
-      sidebarEnterFrameRef.current = null
-    }
-
-    if (sidebarVisible) {
-      setShouldRenderSidebarShell(true)
-      sidebarEnterFrameRef.current = window.requestAnimationFrame(() => {
-        sidebarEnterFrameRef.current = null
-        setIsSidebarContentVisible(true)
-      })
-      return
-    }
-
-    setIsSidebarContentVisible(false)
-    sidebarShellTimerRef.current = window.setTimeout(() => {
-      sidebarShellTimerRef.current = null
-      setShouldRenderSidebarShell(false)
-    }, SIDEBAR_CONTENT_TRANSITION_MS)
-  }, [sidebarVisible])
-
-  useEffect(() => {
-    if (chatPanelStateTimerRef.current) {
-      window.clearTimeout(chatPanelStateTimerRef.current)
-      chatPanelStateTimerRef.current = null
-    }
-
-    if (chatPanelVisible) {
-      setChatPanelState((previous) => {
-        if (previous === 'expanded') return previous
-        return 'expanding'
-      })
-      chatPanelStateTimerRef.current = window.setTimeout(() => {
-        chatPanelStateTimerRef.current = null
-        setChatPanelState('expanded')
-      }, PANEL_CONTENT_TRANSITION_MS)
-      return
-    }
-
-    setChatPanelState((previous) => {
-      if (previous === 'collapsed') return previous
-      return 'collapsing'
-    })
-    chatPanelStateTimerRef.current = window.setTimeout(() => {
-      chatPanelStateTimerRef.current = null
-      setChatPanelState('collapsed')
-    }, PANEL_CONTENT_TRANSITION_MS)
-  }, [chatPanelVisible])
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -279,10 +217,10 @@ export default function WorkbenchMode() {
     if (sidePanelVariant === 'skills') return 'skills'
     return 'folder'
   }, [sidePanelVariant])
-  const sidebarShellWidth = shouldRenderSidebarShell ? sidePanelWidths.shared : 0
-  const showSidebarResizeHandle = shouldRenderSidebarShell
-  const chatShellWidth = chatPanelState === 'collapsed' ? WORKBENCH_EDGE_RAIL_SIZE : chatPanelWidth
-  const showChatResizeHandle = chatPanelState !== 'collapsed'
+  const sidebarShellWidth = sidebarVisible ? sidePanelWidths.shared : 0
+  const showSidebarResizeHandle = sidebarVisible
+  const chatShellWidth = chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE
+  const showChatResizeHandle = chatPanelVisible
 
   // D方案：简化的模式切换处理
   const handleWorkbenchModeChange = useCallback(function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
@@ -331,15 +269,6 @@ export default function WorkbenchMode() {
     return () => {
       if (transitionTimerRef.current) {
         window.clearTimeout(transitionTimerRef.current)
-      }
-      if (sidebarShellTimerRef.current) {
-        window.clearTimeout(sidebarShellTimerRef.current)
-      }
-      if (sidebarEnterFrameRef.current !== null) {
-        window.cancelAnimationFrame(sidebarEnterFrameRef.current)
-      }
-      if (chatPanelStateTimerRef.current) {
-        window.clearTimeout(chatPanelStateTimerRef.current)
       }
     }
   }, [])

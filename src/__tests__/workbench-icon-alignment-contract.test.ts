@@ -38,7 +38,7 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   assert.match(topBar, /title="收起\/展开聊天面板"/)
   assert.match(chatPanel, /width:\s*shellWidth,/)
   assert.match(chatPanel, /minWidth:\s*shellWidth,/)
-  assert.match(workbenchMode, /const chatShellWidth = chatPanelState === 'collapsed' \? WORKBENCH_EDGE_RAIL_SIZE : chatPanelWidth/)
+  assert.match(workbenchMode, /const chatShellWidth = chatPanelVisible \? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE/)
   assert.match(workbenchMode, /<ChatPanel shellWidth=\{chatShellWidth\} panelState=\{chatPanelState\} \/>/)
   assert.match(chatPanel, /<CollapsedChatRail/)
   assert.match(chatPanel, /WORKBENCH_TOPBAR_PADDING_RIGHT/)

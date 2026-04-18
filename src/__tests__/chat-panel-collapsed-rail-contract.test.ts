@@ -12,5 +12,5 @@ test('collapsed chat rail keeps its outer shell border fully transparent', () =>
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 
   assert.match(chatPanel, /border:\s*'1px solid transparent'/)
-  assert.match(workbenchMode, /const chatShellWidth = chatPanelState === 'collapsed' \? WORKBENCH_EDGE_RAIL_SIZE : chatPanelWidth/)
+  assert.match(workbenchMode, /const chatShellWidth = chatPanelVisible \? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE/)
 })
