@@ -2,7 +2,16 @@ import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { getProviderDef, type AIModelConfig } from '../../../shared/ai-providers'
 import { buildFocusedDocumentContext } from '../../../shared/document-sectioning'
-import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
+import {
+  describeApprovedWidgetProps,
+  validateDocumentWidgetComponentSpec,
+  type DocumentWidgetComponentName,
+  type DocumentWidgetComponentSpec,
+} from '../../../shared/document-widget-openui'
+import {
+  collectDocumentWidgets,
+  type DocumentWidgetRecord,
+} from '../../../shared/document-widget-parse'
 import { readDocumentEditableText } from '../document-engine/ipc-handler'
 import { type DomainAdapterDispatchResult } from './domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
@@ -223,14 +232,19 @@ export class DocumentTaskPipelineExecutor {
   private createPipelineSession(
     systemPrompt: string,
     userPrompt: string,
-    options?: { includeSystemMessage?: boolean },
+    options?: {
+      includeSystemMessage?: boolean
+      overrideMessages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+    },
   ): DocumentPipelineSimpleSession {
-    const messages = options?.includeSystemMessage
-      ? [
-        { role: 'system' as const, content: systemPrompt },
-        { role: 'user' as const, content: userPrompt },
-      ]
-      : [{ role: 'user' as const, content: userPrompt }]
+    const messages = options?.overrideMessages
+      ? options.overrideMessages.map((message) => ({ role: message.role, content: message.content }))
+      : options?.includeSystemMessage
+        ? [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt },
+        ]
+        : [{ role: 'user' as const, content: userPrompt }]
     return {
       messages,
       abortController: null,
@@ -248,10 +262,18 @@ export class DocumentTaskPipelineExecutor {
     providerContext: TurnProviderContext
     signal: AbortSignal
     timeoutMs: number
+    messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
   }): Promise<string> {
+    const kimiOptions = params.messages
+      ? { overrideMessages: params.messages }
+      : { includeSystemMessage: true }
+    const defaultOptions = params.messages
+      ? { overrideMessages: params.messages }
+      : undefined
+
     if (params.providerContext.isKimiCoding) {
       return this.deps.requestKimiCodingSimple({
-        session: this.createPipelineSession(params.systemPrompt, params.userPrompt, { includeSystemMessage: true }),
+        session: this.createPipelineSession(params.systemPrompt, params.userPrompt, kimiOptions),
         config: params.providerContext.config,
         baseUrl: params.providerContext.baseUrl,
         signal: params.signal,
@@ -261,7 +283,7 @@ export class DocumentTaskPipelineExecutor {
 
     if (params.providerContext.useAnthropicProtocol) {
       return this.deps.requestAnthropicSimple({
-        session: this.createPipelineSession(params.systemPrompt, params.userPrompt),
+        session: this.createPipelineSession(params.systemPrompt, params.userPrompt, defaultOptions),
         config: params.providerContext.config,
         baseUrl: params.providerContext.baseUrl,
         signal: params.signal,
@@ -270,7 +292,7 @@ export class DocumentTaskPipelineExecutor {
     }
 
     return this.deps.requestOpenAISimple({
-      session: this.createPipelineSession(params.systemPrompt, params.userPrompt),
+      session: this.createPipelineSession(params.systemPrompt, params.userPrompt, defaultOptions),
       config: params.providerContext.config,
       baseUrl: params.providerContext.baseUrl,
       provider: params.providerContext.provider as ReturnType<typeof getProviderDef> | undefined,
@@ -611,6 +633,122 @@ export class DocumentTaskPipelineExecutor {
     }
   }
 
+  private readonly approvedWidgetComponentNames: DocumentWidgetComponentName[] = [
+    'info_card',
+    'stats_card',
+    'comparison_grid',
+    'callout_block',
+    'data_table',
+  ]
+
+  private clipWidgetCodeForPrompt(widgetCode: string, maxChars = 1000): string {
+    const trimmed = String(widgetCode || '').trim()
+    if (trimmed.length <= maxChars) return trimmed
+    return `${trimmed.slice(0, maxChars)}\n…[widgetCode 已截断]`
+  }
+
+  private collectExistingWidgetsForPrompt(snapshot: ActiveDocumentSnapshot, limit = 3): DocumentWidgetRecord[] {
+    const widgets = collectDocumentWidgets(snapshot.content)
+    return widgets.slice(0, Math.max(1, limit))
+  }
+
+  private serializeExistingWidgetsForPrompt(records: DocumentWidgetRecord[]): string {
+    const payload = records.map((record) => ({
+      index: record.index,
+      title: record.title,
+      mode: record.mode,
+      widgetCode: this.clipWidgetCodeForPrompt(record.widgetCode),
+    }))
+    return JSON.stringify(payload, null, 2)
+  }
+
+  private buildWidgetDraftSystemPrompt(params: {
+    plan: DocumentReadPlan
+    hasExistingWidgets: boolean
+  }): string {
+    const propsBlock = describeApprovedWidgetProps(this.approvedWidgetComponentNames)
+    const lines: string[] = [
+      '你是 Ready 的 widget 草稿阶段。',
+      '你只负责根据给定 insight 生成一个可写入文档的 componentSpec 草稿。',
+      '必须只输出 JSON，且不要包裹 markdown 代码块。',
+      '字段为 title、insertionMode、componentSpec、targetSectionTitle、targetWidgetTitle。',
+      params.plan.operation === 'update'
+        ? '这次是更新现有信息卡，不允许 append_end；必须使用 update_existing，并尽量提供 targetWidgetTitle。'
+        : '默认 insertionMode 使用 append_end。',
+      'componentSpec.component 只能是 info_card、stats_card、comparison_grid、callout_block、data_table。',
+      '优先选择简单稳定的组件，不要发明 catalog 外的新组件。',
+      '',
+      '每个允许的组件 props 字段（! 表示必填，? 表示可选）：',
+      propsBlock,
+      '',
+      '请严格按照上面的 props 字段输出，**所有必填字段都必须出现且非空**。',
+    ]
+    if (params.plan.operation === 'update' && params.hasExistingWidgets) {
+      lines.push('')
+      lines.push('注意：文档里已有 widget。若待更新 widget 已确定组件类型，**必须沿用同一组件**，不要换类别；改动只作用于 props 内容。')
+    }
+    return lines.join('\n')
+  }
+
+  private buildWidgetDraftUserPrompt(params: {
+    question: string
+    snapshot: ActiveDocumentSnapshot
+    insight: DocumentInsight
+    plan: DocumentReadPlan
+    existingWidgets: DocumentWidgetRecord[]
+  }): string {
+    const segments: string[] = []
+    if (params.plan.operation === 'update' && params.existingWidgets.length > 0) {
+      segments.push('现有 widget（update 候选，必须优先以此为改动基线）：')
+      segments.push(this.serializeExistingWidgetsForPrompt(params.existingWidgets))
+      segments.push('')
+    }
+    segments.push(`用户问题：${params.question}`)
+    segments.push(`文档标题：${params.snapshot.title}`)
+    segments.push(`任务类型：${params.plan.taskType}`)
+    segments.push(`推荐组件：${params.insight.recommendedWidget}`)
+    segments.push('')
+    segments.push('insight JSON：')
+    segments.push(JSON.stringify(params.insight, null, 2))
+    return segments.join('\n')
+  }
+
+  private appendInsightWarning(insight: DocumentInsight, warning: string): void {
+    const next = new Set(insight.warnings || [])
+    next.add(warning)
+    insight.warnings = Array.from(next)
+  }
+
+  private validateDraftComponentSpec(draft: DocumentWidgetDraft): string[] {
+    if (!draft.componentSpec) return []
+    const validation = validateDocumentWidgetComponentSpec(draft.componentSpec)
+    return validation.ok ? [] : validation.errors
+  }
+
+  private evaluateWidgetDraftAttempt(
+    parsed: Record<string, unknown> | null,
+    params: {
+      insight: DocumentInsight
+      snapshot: ActiveDocumentSnapshot
+      plan: DocumentReadPlan
+    },
+  ): { draft: DocumentWidgetDraft; errors: string[] } {
+    if (!parsed) {
+      const draft = this.normalizePipelineWidgetDraft(null, params)
+      return { draft, errors: ['Widget 草稿未返回可解析 JSON'] }
+    }
+    const hasComponentSpec = parsed.componentSpec
+      && typeof parsed.componentSpec === 'object'
+      && typeof (parsed.componentSpec as Record<string, unknown>).component === 'string'
+      && String((parsed.componentSpec as Record<string, unknown>).component).trim().length > 0
+    const draft = this.normalizePipelineWidgetDraft(parsed, params)
+    if (!hasComponentSpec) {
+      return { draft, errors: ['Widget 草稿缺少 componentSpec.component'] }
+    }
+    const errors = this.validateDraftComponentSpec(draft)
+    return { draft, errors }
+  }
+
   private async buildDocumentPipelineWidgetDraft(params: {
     question: string
     snapshot: ActiveDocumentSnapshot
@@ -620,39 +758,91 @@ export class DocumentTaskPipelineExecutor {
     providerContext: TurnProviderContext
     signal: AbortSignal
   }): Promise<DocumentWidgetDraft> {
-    const systemPrompt = [
-      '你是 Ready 的 widget 草稿阶段。',
-      '你只负责根据给定 insight 生成一个可写入文档的 componentSpec 草稿。',
-      '必须只输出 JSON。',
-      '字段为 title、insertionMode、componentSpec、targetSectionTitle、targetWidgetTitle。',
-      params.plan.operation === 'update'
-        ? '这次是更新现有信息卡，不允许 append_end；必须使用 update_existing，并尽量提供 targetWidgetTitle。'
-        : '默认 insertionMode 使用 append_end。',
-      'componentSpec.component 只能是 info_card、stats_card、comparison_grid、callout_block、data_table。',
-      '优先选择简单稳定的组件，不要发明 catalog 外的新组件。',
-    ].join('\n')
-    const userPrompt = [
-      `用户问题：${params.question}`,
-      `文档标题：${params.snapshot.title}`,
-      `任务类型：${params.plan.taskType}`,
-      `推荐组件：${params.insight.recommendedWidget}`,
-      '',
-      'insight JSON：',
-      JSON.stringify(params.insight, null, 2),
-    ].join('\n')
-    const raw = await this.requestDocumentPipelineSimpleText({
+    const existingWidgets = params.plan.operation === 'update'
+      ? this.collectExistingWidgetsForPrompt(params.snapshot)
+      : []
+    const systemPrompt = this.buildWidgetDraftSystemPrompt({
+      plan: params.plan,
+      hasExistingWidgets: existingWidgets.length > 0,
+    })
+    const userPrompt = this.buildWidgetDraftUserPrompt({
+      question: params.question,
+      snapshot: params.snapshot,
+      insight: params.insight,
+      plan: params.plan,
+      existingWidgets,
+    })
+
+    const firstRaw = await this.requestDocumentPipelineSimpleText({
       systemPrompt,
       userPrompt,
       providerContext: params.providerContext,
       signal: params.signal,
       timeoutMs: params.timeoutMs,
     })
-    const parsed = this.parsePipelineJson<Record<string, unknown>>(raw)
-    return this.normalizePipelineWidgetDraft(parsed, {
+    this.deps.log(`document pipeline widget draft attempt=1 rawChars=${firstRaw.length}`)
+    const firstParsed = this.parsePipelineJson<Record<string, unknown>>(firstRaw)
+    const firstAttempt = this.evaluateWidgetDraftAttempt(firstParsed, {
       insight: params.insight,
       snapshot: params.snapshot,
       plan: params.plan,
     })
+    if (firstAttempt.errors.length === 0) {
+      return firstAttempt.draft
+    }
+    this.deps.log(`document pipeline widget draft attempt=1 invalid errors=${firstAttempt.errors.join('；')}`)
+
+    const repromptMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+      { role: 'assistant', content: firstRaw || '{}' },
+      {
+        role: 'user',
+        content: [
+          '上一次输出的 componentSpec 未通过校验：',
+          firstAttempt.errors.join('\n'),
+          '',
+          '请只修正上述字段，保持其它内容不变，重新输出完整 JSON。所有必填字段都必须出现且非空。',
+        ].join('\n'),
+      },
+    ]
+    const secondRaw = await this.requestDocumentPipelineSimpleText({
+      systemPrompt,
+      userPrompt,
+      providerContext: params.providerContext,
+      signal: params.signal,
+      timeoutMs: params.timeoutMs,
+      messages: repromptMessages,
+    })
+    this.deps.log(`document pipeline widget draft attempt=2 rawChars=${secondRaw.length}`)
+    const secondParsed = this.parsePipelineJson<Record<string, unknown>>(secondRaw)
+    const secondAttempt = this.evaluateWidgetDraftAttempt(secondParsed, {
+      insight: params.insight,
+      snapshot: params.snapshot,
+      plan: params.plan,
+    })
+    if (secondAttempt.errors.length === 0) {
+      return secondAttempt.draft
+    }
+    this.deps.log(`document pipeline widget draft attempt=2 invalid errors=${secondAttempt.errors.join('；')}`)
+
+    const lastErrors = secondAttempt.errors.length > 0 ? secondAttempt.errors : firstAttempt.errors
+    if (params.plan.operation === 'update') {
+      throw new Error(`Widget componentSpec 两次校验失败：${lastErrors.join('；')}`)
+    }
+
+    const fallbackDraft = this.buildFallbackDocumentWidgetDraft({
+      insight: params.insight,
+      snapshot: params.snapshot,
+      plan: params.plan,
+      targetWidgetTitle: secondAttempt.draft.targetWidgetTitle || firstAttempt.draft.targetWidgetTitle,
+    })
+    this.appendInsightWarning(
+      params.insight,
+      `已使用兜底摘要卡（原因：componentSpec 两次校验失败 · ${lastErrors.join('；')}）`,
+    )
+    this.deps.log('document pipeline widget draft fallback=applied mode=create')
+    return fallbackDraft
   }
 
   private doesListWidgetsSummaryContainTarget(summary: string, target: string): boolean {
@@ -1654,6 +1844,27 @@ export class DocumentTaskPipelineExecutor {
       signal: params.signal,
       taskType: params.structuredIntent,
     })
+
+    const fallbackWarnings = (pipelineResult.insight?.warnings || []).filter(
+      (warning) => warning.includes('兜底摘要卡'),
+    )
+    if (fallbackWarnings.length > 0) {
+      params.emitStructuredTaskPayload({
+        module: 'document',
+        message: fallbackWarnings[0],
+        taskTitle: '文档信息卡',
+        taskSummary: fallbackWarnings[0],
+        executionDiagnostics: {
+          pipeline: {
+            document: {
+              ...(documentPipelineDiagnostics || {}),
+              fallbackWarning: fallbackWarnings[0],
+              fallbackWarnings,
+            },
+          },
+        },
+      })
+    }
 
     return {
       success: pipelineResult.success,

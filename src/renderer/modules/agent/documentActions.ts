@@ -2,6 +2,10 @@ import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import { parseShowWidgetFences, tryParseWidgetPayload } from '../../components/document/widget-fence-parser'
+import {
+  collectDocumentWidgets,
+  type DocumentWidgetRecord,
+} from '../../../shared/document-widget-parse'
 import { compileDocumentWidgetComponentSpec } from './documentWidgetOpenUI'
 import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
 
@@ -297,50 +301,6 @@ function normalizeWidgetTitleKey(title: string): string {
 
 function ensureTrailingNewline(content: string): string {
   return content.endsWith('\n') ? content : `${content}\n`
-}
-
-type WidgetRenderMode = 'static-svg' | 'static-html' | 'scripted'
-
-interface DocumentWidgetRecord {
-  index: number
-  title: string
-  widgetCode: string
-  rawFence: string
-  start: number
-  end: number
-  mode: WidgetRenderMode
-}
-
-function getWidgetRenderMode(widgetCode: string): WidgetRenderMode {
-  if (/<script\b/i.test(widgetCode)) return 'scripted'
-  if (/<svg\b/i.test(widgetCode)) return 'static-svg'
-  return 'static-html'
-}
-
-function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
-  const normalizedSource = source.replace(/\r\n/g, '\n')
-  const regex = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
-  const widgets: DocumentWidgetRecord[] = []
-
-  for (const match of normalizedSource.matchAll(regex)) {
-    const fullMatch = match[0]
-    const body = match[1] || ''
-    const parsed = tryParseWidgetPayload(body, fullMatch)
-    if (!parsed) continue
-
-    const start = match.index ?? 0
-    widgets.push({
-      index: widgets.length + 1,
-      title: parsed.title?.trim() || `widget_${widgets.length + 1}`,
-      widgetCode: parsed.widgetCode,
-      rawFence: fullMatch,
-      start,
-      end: start + fullMatch.length,
-      mode: getWidgetRenderMode(parsed.widgetCode),
-    })
-  }
-
-  return widgets
 }
 
 function resolveWidgetRecord(

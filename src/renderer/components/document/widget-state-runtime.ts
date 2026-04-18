@@ -1,20 +1,14 @@
-export interface WidgetPersistedControlState {
-  index: number
-  tag: 'input' | 'textarea' | 'select'
-  type?: string
-  value?: string
-  checked?: boolean
-}
+export type {
+  WidgetPersistedControlState,
+  WidgetPersistedActiveTargetState,
+  DocumentWidgetPersistedState,
+} from '../../../shared/document-widget-parse'
 
-export interface WidgetPersistedActiveTargetState {
-  attr: 'data-tab-target' | 'data-focus-target'
-  value: string
-}
-
-export interface DocumentWidgetPersistedState {
-  controls?: WidgetPersistedControlState[]
-  activeTargets?: WidgetPersistedActiveTargetState[]
-}
+import type {
+  WidgetPersistedControlState,
+  WidgetPersistedActiveTargetState,
+  DocumentWidgetPersistedState,
+} from '../../../shared/document-widget-parse'
 
 export function collectWidgetPersistedState(root: ParentNode): DocumentWidgetPersistedState {
   const controls = Array.from(root.querySelectorAll('input, textarea, select'))

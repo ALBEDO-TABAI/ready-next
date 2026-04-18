@@ -939,6 +939,105 @@ function resolvePropsFromSnapshots(
   }
 }
 
+type JsonSchemaNode = {
+  type?: string | string[]
+  properties?: Record<string, JsonSchemaNode>
+  required?: string[]
+  items?: JsonSchemaNode | JsonSchemaNode[]
+  enum?: unknown[]
+  anyOf?: JsonSchemaNode[]
+  oneOf?: JsonSchemaNode[]
+  const?: unknown
+  minItems?: number
+  maxItems?: number
+}
+
+function summarizePrimitive(node: JsonSchemaNode): string {
+  if (node.enum && node.enum.length > 0) {
+    const values = node.enum
+      .filter((value): value is string | number | boolean => {
+        const t = typeof value
+        return t === 'string' || t === 'number' || t === 'boolean'
+      })
+      .map((value) => String(value))
+    if (values.length > 0) return `enum: ${values.join('|')}`
+  }
+  if (Array.isArray(node.type)) return node.type.join('|')
+  if (typeof node.type === 'string') return node.type
+  return 'any'
+}
+
+function summarizeTypeInline(node: JsonSchemaNode): string {
+  if (node.anyOf && node.anyOf.length > 0) {
+    return node.anyOf.map((sub) => summarizeTypeInline(sub)).join('|')
+  }
+  if (node.type === 'array') {
+    const items = Array.isArray(node.items) ? node.items[0] : node.items
+    if (!items) return 'array'
+    if (items.type === 'object') {
+      const keys = Object.keys(items.properties || {})
+      if (keys.length === 0) return 'object[]'
+      return `{${keys.join(',')}}[]`
+    }
+    if (items.type === 'array') return `${summarizeTypeInline(items)}[]`
+    return `${summarizePrimitive(items)}[]`
+  }
+  if (node.type === 'object') {
+    const keys = Object.keys(node.properties || {})
+    return keys.length > 0 ? `{${keys.join(',')}}` : 'object'
+  }
+  return summarizePrimitive(node)
+}
+
+function describeNestedObjectNode(label: string, node: JsonSchemaNode): string | null {
+  if (node.type !== 'object' || !node.properties) return null
+  const required = new Set(node.required || [])
+  const parts = Object.entries(node.properties).map(([key, child]) => {
+    const marker = required.has(key) ? '!' : '?'
+    return `${key}${marker}(${summarizeTypeInline(child)})`
+  })
+  if (parts.length === 0) return null
+  return `    · ${label} = {${parts.join(', ')}}`
+}
+
+function collectNestedLines(schema: JsonSchemaNode): string[] {
+  if (!schema.properties) return []
+  const lines: string[] = []
+  for (const [propName, node] of Object.entries(schema.properties)) {
+    if (node.type === 'array') {
+      const items = Array.isArray(node.items) ? node.items[0] : node.items
+      if (items && items.type === 'object') {
+        const nested = describeNestedObjectNode(`${propName}[]`, items)
+        if (nested) lines.push(nested)
+      }
+    } else if (node.type === 'object') {
+      const nested = describeNestedObjectNode(propName, node)
+      if (nested) lines.push(nested)
+    }
+  }
+  return lines
+}
+
+export function describeApprovedWidgetProps(names: Iterable<DocumentWidgetComponentName>): string {
+  const blocks: string[] = []
+  for (const name of names) {
+    const schema = componentSchemas[name]
+    if (!schema) continue
+    const jsonSchema = z.toJSONSchema(schema) as JsonSchemaNode
+    const required = new Set(jsonSchema.required || [])
+    const propEntries = Object.entries(jsonSchema.properties || {})
+    const propsLine = propEntries.map(([key, node]) => {
+      const marker = required.has(key) ? '!' : '?'
+      return `${key}${marker}(${summarizeTypeInline(node)})`
+    }).join(', ')
+    blocks.push(`- ${name}: ${propsLine}`)
+    for (const nestedLine of collectNestedLines(jsonSchema)) {
+      blocks.push(nestedLine)
+    }
+  }
+  return blocks.join('\n')
+}
+
 export function validateDocumentWidgetComponentSpec(spec: DocumentWidgetComponentSpec): DocumentWidgetValidateResult {
   const entry = getComponentEntry(spec.component)
   if (!entry) {
