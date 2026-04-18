@@ -15,6 +15,7 @@ import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
+import { withRitual } from '../modules/overlay/useRitualOverlay'
 
 function ResizeHandle({
   onResize,
@@ -40,9 +41,6 @@ function ResizeHandle({
   )
 }
 
-// D方案：简单的过渡状态管理
-const MODE_TRANSITION_DURATION_MS = 350
-
 export default function WorkbenchMode() {
   const {
     toggleSidebar,
@@ -62,11 +60,9 @@ export default function WorkbenchMode() {
   const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const [workspaceInitError, setWorkspaceInitError] = useState<string | null>(null)
-  // D方案：仅用于控制 BrowserView 的显示时机
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
-  const transitionTimerRef = useRef<number | null>(null)
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
 
@@ -168,55 +164,35 @@ export default function WorkbenchMode() {
   const chatShellWidth = chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE
   const showChatResizeHandle = chatPanelVisible
 
-  // D方案：简化的模式切换处理
-  const handleWorkbenchModeChange = useCallback(function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
+  const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
     if (nextMode === workbenchMode) return
 
     if (splitMode) {
       setWorkbenchMode(nextMode)
       return
     }
-    const isRedirectingDuringMotion = !isMotionSettled
 
-    // 清除之前的定时器
-    if (transitionTimerRef.current) {
-      window.clearTimeout(transitionTimerRef.current)
-      transitionTimerRef.current = null
-    }
+    setIsMotionSettled(false)
+    try {
+      await withRitual('mode-switch', ({ signalReady }) => {
+        const comingFromBrowser = transitionTargetModeRef.current === 'browser' && nextMode !== 'browser'
+        const enteringBrowser = transitionTargetModeRef.current !== 'browser' && nextMode === 'browser'
+        if (comingFromBrowser) setBrowserLayoutMotionPhase('leaving')
+        else if (enteringBrowser) setBrowserLayoutMotionPhase('entering')
 
-    if (!isRedirectingDuringMotion && transitionTargetModeRef.current === 'browser' && nextMode !== 'browser') {
-      setBrowserLayoutMotionPhase('leaving')
-    } else if (!isRedirectingDuringMotion && transitionTargetModeRef.current !== 'browser' && nextMode === 'browser') {
-      setBrowserLayoutMotionPhase('entering')
-    } else if (transitionTargetModeRef.current === nextMode) {
-      setBrowserLayoutMotionPhase('idle')
-    }
-
-    // 开始过渡：先标记为未稳定（BrowserView 等需要暂停更新）
-    if (!isRedirectingDuringMotion) {
-      setIsMotionSettled(false)
-    }
-
-    // 执行模式切换
-    transitionTargetModeRef.current = nextMode
-    setWorkbenchMode(nextMode)
-
-    // 过渡结束后标记为稳定
-    transitionTimerRef.current = window.setTimeout(() => {
-      setIsMotionSettled(true)
-      setBrowserLayoutMotionPhase('idle')
-      transitionTimerRef.current = null
-    }, MODE_TRANSITION_DURATION_MS)
-  }, [isMotionSettled, setWorkbenchMode, splitMode, workbenchMode])
-
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (transitionTimerRef.current) {
-        window.clearTimeout(transitionTimerRef.current)
+        transitionTargetModeRef.current = nextMode
+        setWorkbenchMode(nextMode)
+        signalReady()
+      })
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        throw error
       }
+    } finally {
+      setBrowserLayoutMotionPhase('idle')
+      setIsMotionSettled(true)
     }
-  }, [])
+  }, [setWorkbenchMode, splitMode, workbenchMode])
 
   useEffect(() => {
     return () => {

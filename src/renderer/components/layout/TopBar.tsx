@@ -3,6 +3,7 @@ import { PanelLeftClose, Moon, Sun } from 'lucide-react'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { useTheme } from '../../stores/useTheme'
 import { useWorkspace } from '../../stores/useWorkspace'
+import { useRitualOverlayStore } from '../../modules/overlay/useRitualOverlay'
 import ModeSlider from './ModeSlider'
 import DraggableModeTabs from './DraggableModeTabs'
 import Modal from '../ui/Modal'
@@ -24,6 +25,9 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
   const { modalProps, showAlert } = useModal()
   const { resolvedTheme, toggleTheme } = useTheme()
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
+  const isThemeRitualRunning = useRitualOverlayStore(
+    (state) => state.session?.stage === 'theme-transition',
+  )
 
   const handleModeChange = useCallback((mode: WorkbenchMode) => {
     if (onWorkbenchModeChange) {
@@ -78,6 +82,7 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
         <IconButton
           icon={resolvedTheme === 'dark' ? <Sun style={{ width: 15, height: 15 }} strokeWidth={2} /> : <Moon style={{ width: 15, height: 15 }} strokeWidth={2} />}
           onClick={toggleTheme}
+          disabled={isThemeRitualRunning}
           title={resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
           style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
         />

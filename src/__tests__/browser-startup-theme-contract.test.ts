@@ -18,7 +18,7 @@ test('browser startup gates chrome until host restoration completes and main pro
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
   const themeStore = readWorkspaceFile('src/renderer/stores/useTheme.ts')
 
-  assert.match(browserMode, /const shouldShowStartupPlaceholder =\s*!activeTab\?\.error &&\s*!shouldShowFreezeFrame &&\s*\(!browserRuntimeReady \|\| !isBrowserSurfaceReady\)/)
+  assert.match(browserMode, /const shouldShowStartupPlaceholder =\s*!activeTab\?\.error &&\s*\(!browserRuntimeReady \|\| !isBrowserSurfaceReady\)/)
   assert.match(browserMode, /className="browser-surface-startup-mask"/)
   assert.match(browserMode, /animation:\s*['"]browserStartupSpinner/)
   assert.match(styles, /@keyframes browserStartupSpinner/)
@@ -92,9 +92,8 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(mainIndex, /rendererReadyToShow/)
   assert.match(mainIndex, /nativeTheme\.themeSource = resolveStoredThemeSource\(\)/)
   assert.match(mainIndex, /getDatabase\(\)\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)
+  // Theme transitions are now orchestrated by the shared ritual overlay; see theme-ritual-orchestration-contract.test.ts.
   assert.match(themeStore, /const THEME_TRANSITION_ATTRIBUTE = 'data-theme-transitioning'/)
-  assert.match(themeStore, /requestAnimationFrame\(\(\) => \{[\s\S]*document\.documentElement\.setAttribute\('data-theme', resolved\)/)
-  assert.match(themeStore, /requestAnimationFrame\(\(\) => \{[\s\S]*window\.electronAPI\.theme\.set\(option\)/)
-  assert.match(themeStore, /window\.setTimeout\(\(\) => \{[\s\S]*document\.documentElement\.removeAttribute\(THEME_TRANSITION_ATTRIBUTE\)/)
-  assert.match(styles, /html\[data-theme-transitioning='true'\]/)
+  assert.match(themeStore, /root\.setAttribute\('data-theme', resolved\)/)
+  assert.match(themeStore, /window\.electronAPI\.theme\.set\(option\)/)
 })

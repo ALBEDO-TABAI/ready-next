@@ -21,7 +21,7 @@ test('system prefers-color-scheme change applies new theme without the 220ms tra
   const block = source.slice(start, blockEnd + 1)
   assert.match(
     block,
-    /applyColorTheme\([^)]*,\s*'system'\s*,\s*\{\s*animate:\s*false\s*\}\)/,
+    /applyColorTheme\([^)]*,\s*'system'\s*,[^)]*\{\s*animate:\s*false\s*\}\)/,
     'handleSystemChange must opt out of the animated theme transition',
   )
 })

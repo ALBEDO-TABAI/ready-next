@@ -119,17 +119,13 @@ describe('useTheme liquid default', () => {
     assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
   })
 
-  it('stages theme changes through a temporary root transition flag', () => {
+  it('updates the store immediately when setTheme is called; DOM swap is staged by the ritual overlay', () => {
     useTheme.getState().setTheme('dark')
-
-    assert.strictEqual(documentAttributes.get('data-theme-transitioning'), 'true')
-    assert.strictEqual(documentAttributes.get('data-theme'), 'light')
-
-    flushAnimationFrame()
-    assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
-
-    flushAnimationFrame()
-    flushTimeout()
+    // Store updates synchronously; the DOM attribute is swapped inside withRitual's holding phase.
+    assert.strictEqual(useTheme.getState().theme, 'dark')
+    assert.strictEqual(useTheme.getState().resolvedTheme, 'dark')
+    assert.strictEqual(storage.get('ready-theme'), 'dark')
+    // The legacy transition flag is no longer set — transitions live on the overlay, not the <html> element.
     assert.strictEqual(documentAttributes.get('data-theme-transitioning'), undefined)
   })
 })

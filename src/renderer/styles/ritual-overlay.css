@@ -1,0 +1,106 @@
+[data-ritual-overlay] {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--workbench-mode-bg, var(--bg-content));
+  opacity: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--ritual-enter-duration, 120ms) cubic-bezier(0.32, 0, 0.67, 0);
+}
+
+[data-ritual-overlay][data-stage='theme-transition'] {
+  background: var(--bg-primary, #ffffff);
+}
+
+[data-ritual-overlay][data-phase='entering'],
+[data-ritual-overlay][data-phase='holding'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+[data-ritual-overlay][data-phase='leaving'] {
+  opacity: 0;
+  transition-duration: var(--ritual-leave-duration, 200ms);
+  transition-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+[data-ritual-reduce-flash] {
+  animation: ritual-reduce-flash 80ms ease-out;
+}
+
+@keyframes ritual-reduce-flash {
+  0% { background-color: var(--bg-primary); }
+  50% { background-color: var(--bg-panel); }
+  100% { background-color: var(--bg-primary); }
+}
+
+.ritual-theme-choreography {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  pointer-events: none;
+}
+
+.ritual-theme-choreography svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ritual-theme-choreography [data-glyph='sun'],
+.ritual-theme-choreography [data-glyph='moon'] {
+  transform-origin: 24px 24px;
+  opacity: 0;
+  transform: translateY(0) rotate(0deg);
+  transition:
+    opacity 220ms cubic-bezier(0.32, 0, 0.67, 0),
+    transform 320ms cubic-bezier(0.32, 0, 0.67, 0);
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-dark'][data-phase='entering'] .ritual-theme-choreography [data-glyph='sun'],
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-dark'][data-phase='holding'] .ritual-theme-choreography [data-glyph='sun'] {
+  opacity: 1;
+  transform: translateY(0) rotate(0deg);
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-dark'][data-phase='leaving'] .ritual-theme-choreography [data-glyph='sun'] {
+  opacity: 0;
+  transform: translateY(-12px) rotate(-45deg);
+  transition-delay: 0ms;
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-dark'][data-phase='holding'] .ritual-theme-choreography [data-glyph='moon'] {
+  opacity: 1;
+  transform: translateY(0) rotate(0deg);
+  transition-delay: 160ms;
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-light'][data-phase='entering'] .ritual-theme-choreography [data-glyph='moon'],
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-light'][data-phase='holding'] .ritual-theme-choreography [data-glyph='moon'] {
+  opacity: 1;
+  transform: translateY(0) rotate(0deg);
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-light'][data-phase='leaving'] .ritual-theme-choreography [data-glyph='moon'] {
+  opacity: 0;
+  transform: translateY(12px) rotate(45deg);
+  transition-delay: 0ms;
+}
+
+[data-ritual-overlay][data-stage='theme-transition'][data-direction='to-light'][data-phase='holding'] .ritual-theme-choreography [data-glyph='sun'] {
+  opacity: 1;
+  transform: translateY(0) rotate(0deg);
+  transition-delay: 160ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ritual-overlay],
+  .ritual-theme-choreography [data-glyph] {
+    transition: none !important;
+    animation: none !important;
+  }
+}

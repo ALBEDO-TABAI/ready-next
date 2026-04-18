@@ -1,17 +1,12 @@
 import { create } from 'zustand'
 import { readStorage, writeStorage } from '../utils/storage'
+import { withRitual } from '../modules/overlay/useRitualOverlay'
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
 export type ThemeSkin = 'liquid-glass'
 
 const THEME_TRANSITION_ATTRIBUTE = 'data-theme-transitioning'
-const THEME_TRANSITION_DURATION_MS = 220
-
-let themeDomFrameId: number | null = null
-let themeNativeFrameId: number | null = null
-let themeTransitionTimerId: number | null = null
-let themeTransitionToken = 0
 
 interface ThemeState {
     theme: ThemeOption
@@ -45,66 +40,40 @@ const resolveTheme = (theme: ThemeOption): ResolvedTheme => {
     return theme
 }
 
-const clearThemeTransitionWork = () => {
-    if (typeof window === 'undefined') return
-    if (themeDomFrameId !== null) {
-        window.cancelAnimationFrame(themeDomFrameId)
-        themeDomFrameId = null
-    }
-    if (themeNativeFrameId !== null) {
-        window.cancelAnimationFrame(themeNativeFrameId)
-        themeNativeFrameId = null
-    }
-    if (themeTransitionTimerId !== null) {
-        window.clearTimeout(themeTransitionTimerId)
-        themeTransitionTimerId = null
-    }
-}
-
 const syncNativeTheme = (option: ThemeOption) => {
     if (typeof window !== 'undefined' && window.electronAPI?.theme) {
         window.electronAPI.theme.set(option).catch(() => { /* ignore in browser-only dev */ })
     }
 }
 
+const applyThemeImmediate = (resolved: ResolvedTheme, option: ThemeOption) => {
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    root.removeAttribute(THEME_TRANSITION_ATTRIBUTE)
+    root.setAttribute('data-theme', resolved)
+    syncNativeTheme(option)
+}
+
 const applyColorTheme = (
     resolved: ResolvedTheme,
     option: ThemeOption,
+    currentResolved: ResolvedTheme,
     { animate = true }: { animate?: boolean } = {},
 ) => {
     if (typeof document === 'undefined') return
 
-    const root = document.documentElement
-    clearThemeTransitionWork()
-
-    if (!animate || typeof window === 'undefined') {
-        root.removeAttribute(THEME_TRANSITION_ATTRIBUTE)
-        root.setAttribute('data-theme', resolved)
-        syncNativeTheme(option)
+    if (!animate || typeof window === 'undefined' || resolved === currentResolved) {
+        applyThemeImmediate(resolved, option)
         return
     }
 
-    const transitionToken = ++themeTransitionToken
-    root.setAttribute(THEME_TRANSITION_ATTRIBUTE, 'true')
-
-    themeDomFrameId = requestAnimationFrame(() => {
-        if (transitionToken !== themeTransitionToken) return
-        themeDomFrameId = null
-        document.documentElement.setAttribute('data-theme', resolved)
-
-        themeNativeFrameId = requestAnimationFrame(() => {
-            if (transitionToken !== themeTransitionToken) return
-            themeNativeFrameId = null
-            if (window.electronAPI?.theme) {
-                window.electronAPI.theme.set(option).catch(() => { /* ignore in browser-only dev */ })
-            }
-
-            themeTransitionTimerId = window.setTimeout(() => {
-                if (transitionToken !== themeTransitionToken) return
-                themeTransitionTimerId = null
-                document.documentElement.removeAttribute(THEME_TRANSITION_ATTRIBUTE)
-            }, THEME_TRANSITION_DURATION_MS)
-        })
+    const direction = resolved === 'dark' ? 'to-dark' : 'to-light'
+    void withRitual('theme-transition', ({ signalReady }) => {
+        applyThemeImmediate(resolved, option)
+        signalReady()
+    }, { meta: { direction } }).catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        applyThemeImmediate(resolved, option)
     })
 }
 
@@ -117,7 +86,7 @@ export const useTheme = create<ThemeState>((set, get) => {
     const initial = getStoredTheme()
     const initialSkin = getStoredSkin()
     const resolved = resolveTheme(initial)
-    applyColorTheme(resolved, initial, { animate: false })
+    applyColorTheme(resolved, initial, resolved, { animate: false })
     applySkin(initialSkin)
 
     // Listen for system theme changes
@@ -126,7 +95,7 @@ export const useTheme = create<ThemeState>((set, get) => {
         const state = get()
         if (state.theme === 'system') {
             const newResolved = resolveTheme('system')
-            applyColorTheme(newResolved, 'system', { animate: false })
+            applyColorTheme(newResolved, 'system', state.resolvedTheme, { animate: false })
             set({ resolvedTheme: newResolved })
         }
     }
@@ -137,8 +106,9 @@ export const useTheme = create<ThemeState>((set, get) => {
         resolvedTheme: resolved,
         skin: initialSkin,
         setTheme: (theme) => {
+            const prevResolved = get().resolvedTheme
             const newResolved = resolveTheme(theme)
-            applyColorTheme(newResolved, theme)
+            applyColorTheme(newResolved, theme, prevResolved)
             writeStorage('ready-theme', theme)
             set({ theme, resolvedTheme: newResolved })
         },
@@ -149,7 +119,7 @@ export const useTheme = create<ThemeState>((set, get) => {
                 state.theme === 'light' ? 'dark' :
                 state.theme === 'dark' ? 'system' : 'light'
             const newResolved = resolveTheme(next)
-            applyColorTheme(newResolved, next)
+            applyColorTheme(newResolved, next, state.resolvedTheme)
             writeStorage('ready-theme', next)
             set({ theme: next, resolvedTheme: newResolved })
         },

@@ -13,7 +13,7 @@ test('workbench mode switch and icon rail share the blue slider treatment', () =
   const iconRailGroup = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  assert.match(modeTabs, /var\(--color-blue,\s*#5B8DEF\)/)
+  assert.match(styles, /var\(--color-blue,\s*#5B8DEF\)/)
 
   assert.match(iconRail, /className="icon-rail-slider-shell"/)
   assert.match(iconRailGroup, /icon-rail-slider/)

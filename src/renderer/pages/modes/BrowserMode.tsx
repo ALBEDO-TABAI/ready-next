@@ -26,18 +26,9 @@ import {
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 
-const BROWSER_CAPTURE_FREEZE_EVENT = 'ready:browser-capture-freeze'
+// 模式切换的仪式化遮罩接管了"离开浏览器时的截图"这一职责。
+// 本组件只需保留 resize 期间的 captureStableFrame 作为 BrowserView 就绪信号。
 
-// 冻结帧过渡动画配置
-const FREEZE_FRAME_CONFIG = {
-  fadeDurationMs: 180,        // 淡出持续时间
-  blurStartPx: 0,            // 起始模糊度
-  blurEndPx: 2,              // 结束模糊度（轻微模糊增强丝滑感）
-  scaleStart: 1,             // 起始缩放
-  scaleEnd: 0.998,           // 结束缩放（轻微缩小增强深度感）
-}
-
-// 新增：切换动画相关 props
 interface BrowserModeProps {
   isActive?: boolean
   isMotionSettled?: boolean
@@ -238,9 +229,7 @@ export default function BrowserMode({
   hostVisibleRef.current = browserRuntimeReady && tabs.length > 0
 
   const {
-    cachedFreezeFrame,
     captureStableFrame,
-    freezeFrame,
   } = useBrowserResizeFreeze({
     isElectron,
     isActive,
@@ -249,29 +238,9 @@ export default function BrowserMode({
     surfaceRef: contentRef,
     sendBoundsImmediate,
   })
-  const visibleFreezeFrame = freezeFrame ?? cachedFreezeFrame
-  const shouldUseNeutralFreezeFrameExit = !freezeFrame && Boolean(cachedFreezeFrame?.src)
-  const shouldShowFreezeFrame = Boolean(visibleFreezeFrame?.src) && (layoutPhase !== 'idle' || !isBrowserSurfaceReady || Boolean(freezeFrame))
 
-  // 监听离开浏览器模式前的截图请求
-  useEffect(() => {
-    if (!isElectron) return
-
-    const handleCaptureFreeze = () => {
-      if (!isActive) return
-      void captureStableFrame()
-    }
-
-    window.addEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
-    return () => {
-      window.removeEventListener(BROWSER_CAPTURE_FREEZE_EVENT, handleCaptureFreeze)
-    }
-  }, [isActive, isElectron, captureStableFrame])
-
-  // Startup placeholder: 有过冻结帧时显示冻结帧，而不是 loading
   const shouldShowStartupPlaceholder =
     !activeTab?.error &&
-    !shouldShowFreezeFrame &&
     (!browserRuntimeReady || !isBrowserSurfaceReady)
 
   const clearSurfaceReadyTimer = useCallback(() => {
@@ -367,81 +336,6 @@ export default function BrowserMode({
     }
   }, [clearStableFrameRefreshTimer, clearSurfaceReadyTimer])
 
-  // 冻结帧高级淡出动画状态（模糊 + 缩放 + 透明度）
-  const [freezeFrameStyle, setFreezeFrameStyle] = useState({
-    opacity: 1,
-    filter: 'blur(0px)',
-    transform: 'scale(1)',
-  })
-  const prevShouldShowRef = useRef(shouldShowFreezeFrame)
-  const freezeFrameAnimRef = useRef<number | null>(null)
-
-  const clearFreezeFrameAnim = useCallback(() => {
-    if (freezeFrameAnimRef.current !== null) {
-      cancelAnimationFrame(freezeFrameAnimRef.current)
-      freezeFrameAnimRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    clearFreezeFrameAnim()
-
-    if (prevShouldShowRef.current && !shouldShowFreezeFrame) {
-      // 开始高级淡出：透明度 + 轻微模糊 + 轻微缩放
-      const startTime = performance.now()
-      const duration = FREEZE_FRAME_CONFIG.fadeDurationMs
-
-      const animate = (now: number) => {
-        const elapsed = now - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        // 使用 ease-out-quart 缓动
-        const easeOut = 1 - Math.pow(1 - progress, 4)
-
-        const opacity = 1 - easeOut
-        const targetBlur = shouldUseNeutralFreezeFrameExit ? 0 : FREEZE_FRAME_CONFIG.blurEndPx
-        const targetScale = shouldUseNeutralFreezeFrameExit ? 1 : FREEZE_FRAME_CONFIG.scaleEnd
-        const blur = FREEZE_FRAME_CONFIG.blurStartPx + (targetBlur - FREEZE_FRAME_CONFIG.blurStartPx) * easeOut
-        const scale = FREEZE_FRAME_CONFIG.scaleStart + (targetScale - FREEZE_FRAME_CONFIG.scaleStart) * easeOut
-
-        setFreezeFrameStyle({
-          opacity,
-          filter: `blur(${blur}px)`,
-          transform: `scale(${scale})`,
-        })
-
-        if (progress < 1) {
-          freezeFrameAnimRef.current = requestAnimationFrame(animate)
-          return
-        }
-
-        freezeFrameAnimRef.current = null
-        prevShouldShowRef.current = shouldShowFreezeFrame
-      }
-
-      freezeFrameAnimRef.current = requestAnimationFrame(animate)
-      return () => {
-        clearFreezeFrameAnim()
-      }
-    }
-
-    setFreezeFrameStyle({
-      opacity: 1,
-      filter: 'blur(0px)',
-      transform: 'scale(1)',
-    })
-    prevShouldShowRef.current = shouldShowFreezeFrame
-    return undefined
-  }, [clearFreezeFrameAnim, shouldShowFreezeFrame, shouldUseNeutralFreezeFrameExit])
-
-  useEffect(() => {
-    return () => {
-      clearFreezeFrameAnim()
-    }
-  }, [clearFreezeFrameAnim])
-
-  // 只要有冻结帧数据就渲染，通过 style 控制显隐
-  const shouldRenderFreezeFrame = Boolean(visibleFreezeFrame?.src) && (shouldShowFreezeFrame || freezeFrameStyle.opacity > 0)
-
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
     return (
@@ -523,43 +417,8 @@ export default function BrowserMode({
             />
           </div>
 
-          {shouldRenderFreezeFrame && visibleFreezeFrame ? (
-            <div
-              className="browser-resize-shell-freeze"
-              style={{
-                position: 'absolute',
-                top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 40,
-                pointerEvents: 'none',
-                overflow: 'hidden',
-                borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
-                opacity: freezeFrameStyle.opacity,
-                filter: freezeFrameStyle.filter,
-                transform: freezeFrameStyle.transform,
-                willChange: freezeFrameStyle.opacity < 1 ? 'opacity, filter, transform' : 'auto',
-                transition: 'none', // 使用 JS 动画，不用 CSS transition
-              }}
-            >
-              <img
-                src={visibleFreezeFrame.src}
-                alt=""
-                draggable={false}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'block',
-                  objectFit: 'fill',
-                  userSelect: 'none',
-                }}
-              />
-            </div>
-          ) : null}
-
-          {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示（有过冻结帧时不显示，避免遮挡） */}
-          {!shouldShowFreezeFrame && !isBrowserHostFullyVisible && (
+          {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示 */}
+          {!isBrowserHostFullyVisible && (
             <div
               className="browser-transition-mask"
               style={{

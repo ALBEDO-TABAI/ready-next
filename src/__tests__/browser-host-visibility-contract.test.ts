@@ -84,8 +84,10 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(browserMode, /isActive:\s*shouldPrepareBrowserHost/)
   assert.match(browserMode, /isVisibleAllowed:\s*isMotionSettled/)
   assert.match(browserMode, /layoutPhase,/)
-  assert.match(browserMode, /const visibleFreezeFrame = freezeFrame \?\? cachedFreezeFrame/)
-  assert.match(browserMode, /const shouldShowFreezeFrame = Boolean\(visibleFreezeFrame\?\.src\) && \(layoutPhase !== 'idle' \|\| !isBrowserSurfaceReady \|\| Boolean\(freezeFrame\)\)/)
+  // Freeze frame chrome-jank mask is now superseded by the shared ritual overlay.
+  assert.doesNotMatch(browserMode, /const visibleFreezeFrame/)
+  assert.doesNotMatch(browserMode, /const shouldShowFreezeFrame/)
+  assert.doesNotMatch(browserMode, /browser-resize-shell-freeze/)
   assert.match(browserMode, /if \(!isElectron\) return[\s\S]*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return/)
   assert.doesNotMatch(browserMode, /topInset:\s*WORKBENCH_TOOLBAR_ROW_HEIGHT/)
   assert.doesNotMatch(browserMode, /const \[activePanel, setActivePanel\] = useState/)

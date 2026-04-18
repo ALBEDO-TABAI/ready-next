@@ -16,7 +16,8 @@ test('topbar module switcher uses stable widths and avoids vertical position jit
   assert.doesNotMatch(topBar, /GooeySegmentedControl/)
   assert.match(draggableModeTabs, /className="draggable-mode-tabs"/)
   assert.match(draggableModeTabs, /className={`draggable-mode-tabs__icon/)
-  assert.match(draggableModeTabs, /transform: `translateX\(\$\{position \* 100\}%\)`/)
+  // Thumb translateX now lives in CSS via the --dmt-thumb-pos variable.
+  assert.match(draggableModeTabs, /el\.style\.setProperty\('--dmt-thumb-pos'/)
   assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
 })
 

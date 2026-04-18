@@ -5,6 +5,7 @@ import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import RitualOverlay from './components/overlay/RitualOverlay'
 import { useTheme } from './stores/useTheme'
 import { initAgentListeners } from './stores/useAgent'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
@@ -62,6 +63,7 @@ function App() {
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Routes>
       </div>
+      <RitualOverlay />
     </ErrorBoundary>
   )
 }
