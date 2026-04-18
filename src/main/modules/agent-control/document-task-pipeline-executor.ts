@@ -31,17 +31,6 @@ import type { ConversationScope, ScopeRunEventPayload } from './types'
 
 interface DocumentPipelineCacheSession {
   activeRunId: string | null
-  documentInsightCache: Array<{
-    key: string
-    insight: DocumentInsight
-    metrics?: DocumentInsightMetrics
-    createdAt: string
-  }>
-  documentWidgetDraftCache: Array<{
-    key: string
-    draft: DocumentWidgetDraft
-    createdAt: string
-  }>
 }
 
 interface DocumentPipelineSimpleSession {
@@ -55,8 +44,6 @@ interface DocumentPipelineSimpleSession {
   activeRunId: null
   preferTextToolBridge: false
   lastDocumentContextInput: null
-  documentInsightCache: []
-  documentWidgetDraftCache: []
 }
 
 interface DocumentTaskPipelineExecutorDeps {
@@ -103,6 +90,7 @@ export interface DocumentTaskPipelineExecutionParams {
   hasTools: boolean
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   signal: AbortSignal
+  sessionId: string
   session: DocumentPipelineCacheSession
   providerContext: TurnProviderContext
   emitStructuredTaskPayload: (payload: unknown) => void
@@ -121,8 +109,24 @@ interface DocumentTaskPipelineExecutionResult {
 export class DocumentTaskPipelineExecutor {
   private readonly documentInsightCache = new DocumentInsightCache()
   private readonly documentWidgetDraftCache = new Map<string, DocumentWidgetDraft>()
+  private readonly sessionInsightCaches = new Map<string, Array<{
+    key: string
+    insight: DocumentInsight
+    metrics?: DocumentInsightMetrics
+    createdAt: string
+  }>>()
+  private readonly sessionWidgetDraftCaches = new Map<string, Array<{
+    key: string
+    draft: DocumentWidgetDraft
+    createdAt: string
+  }>>()
 
   constructor(private readonly deps: DocumentTaskPipelineExecutorDeps) {}
+
+  clearSessionCache(sessionId: string): void {
+    this.sessionInsightCaches.delete(sessionId)
+    this.sessionWidgetDraftCaches.delete(sessionId)
+  }
 
   async tryExecute(params: DocumentTaskPipelineExecutionParams): Promise<DocumentTaskPipelineExecutionResult> {
     const preferredSkillToolNames = params.toolPolicy.preferredSkillToolNames || null
@@ -141,7 +145,7 @@ export class DocumentTaskPipelineExecutor {
       const planResult = await this.runDocumentTaskPlan({
         plan: params.executionIntentContext.documentTaskPlan,
         requestEnvelope: params.executionIntentContext.requestEnvelope,
-        session: params.session,
+        sessionId: params.sessionId,
         scopeId: params.scopeId,
         parentTaskId: params.parentTaskId || params.route.taskId,
         parentRunId: params.parentRunId || params.session.activeRunId || null,
@@ -175,7 +179,7 @@ export class DocumentTaskPipelineExecutor {
         executionIntentContext: params.executionIntentContext,
         requestModuleToolAction: params.requestModuleToolAction!,
         signal: params.signal,
-        session: params.session,
+        sessionId: params.sessionId,
         providerContext: params.providerContext,
         emitStructuredTaskPayload: params.emitStructuredTaskPayload,
       })
@@ -234,8 +238,6 @@ export class DocumentTaskPipelineExecutor {
       activeRunId: null,
       preferTextToolBridge: false,
       lastDocumentContextInput: null,
-      documentInsightCache: [],
-      documentWidgetDraftCache: [],
     }
   }
 
@@ -779,7 +781,7 @@ export class DocumentTaskPipelineExecutor {
     jobIndex: number
     totalJobs: number
     requestEnvelope: RequestEnvelope
-    session: DocumentPipelineCacheSession
+    sessionId: string
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
     providerContext: TurnProviderContext
@@ -864,7 +866,7 @@ export class DocumentTaskPipelineExecutor {
         targetSnapshot,
       })
       const cachedInsight = this.getCachedDocumentInsight(
-        params.session,
+        params.sessionId,
         params.job.instruction,
         targetSnapshot,
         {
@@ -886,7 +888,7 @@ export class DocumentTaskPipelineExecutor {
       currentInsight = ('insight' in insightResult ? insightResult.insight : insightResult)
       if (!cachedInsight) {
         this.storeCachedDocumentInsight(
-          params.session,
+          params.sessionId,
           params.job.instruction,
           targetSnapshot,
           currentInsight,
@@ -916,7 +918,7 @@ export class DocumentTaskPipelineExecutor {
         summary: `正在为 ${targetLabel} 生成卡片草稿`,
       })
       const cachedDraft = this.getCachedDocumentWidgetDraft(
-        params.session,
+        params.sessionId,
         params.job.instruction,
         params.job,
         targetSnapshot,
@@ -941,7 +943,7 @@ export class DocumentTaskPipelineExecutor {
       })
       if (!cachedDraft) {
         this.storeCachedDocumentWidgetDraft(
-          params.session,
+          params.sessionId,
           params.job.instruction,
           params.job,
           targetSnapshot,
@@ -1051,7 +1053,7 @@ export class DocumentTaskPipelineExecutor {
   private async runDocumentTaskPlan(params: {
     plan: DocumentTaskPlan
     requestEnvelope: RequestEnvelope
-    session: DocumentPipelineCacheSession
+    sessionId: string
     scopeId?: string
     parentTaskId?: string
     parentRunId?: string | null
@@ -1118,7 +1120,7 @@ export class DocumentTaskPipelineExecutor {
             jobIndex,
             totalJobs,
             requestEnvelope: params.requestEnvelope,
-            session: params.session,
+            sessionId: params.sessionId,
             requestModuleToolAction: params.requestModuleToolAction,
             signal: params.signal,
             providerContext: params.providerContext,
@@ -1235,7 +1237,7 @@ export class DocumentTaskPipelineExecutor {
         jobIndex,
         totalJobs: params.plan.jobs.length,
         requestEnvelope: params.requestEnvelope,
-        session: params.session,
+        sessionId: params.sessionId,
         requestModuleToolAction: params.requestModuleToolAction,
         signal: params.signal,
         providerContext: params.providerContext,
@@ -1313,7 +1315,7 @@ export class DocumentTaskPipelineExecutor {
   }
 
   private getCachedDocumentInsight(
-    session: DocumentPipelineCacheSession,
+    sessionId: string,
     question: string,
     snapshot: ActiveDocumentSnapshot,
     options?: {
@@ -1322,7 +1324,8 @@ export class DocumentTaskPipelineExecutor {
     },
   ): DocumentInsightStageResult | null {
     const key = this.buildDocumentInsightCacheKey(question, snapshot, options)
-    const hit = session.documentInsightCache.find((entry) => entry.key === key)
+    const sessionEntries = this.sessionInsightCaches.get(sessionId) || []
+    const hit = sessionEntries.find((entry) => entry.key === key)
     if (hit) {
       this.deps.log(`document insight session cache hit key=${key}`)
       return {
@@ -1347,7 +1350,7 @@ export class DocumentTaskPipelineExecutor {
   }
 
   private storeCachedDocumentInsight(
-    session: DocumentPipelineCacheSession,
+    sessionId: string,
     question: string,
     snapshot: ActiveDocumentSnapshot,
     insight: DocumentInsight,
@@ -1364,22 +1367,25 @@ export class DocumentTaskPipelineExecutor {
       metrics,
       createdAt: new Date().toISOString(),
     }
-    session.documentInsightCache = [
+    const previous = this.sessionInsightCaches.get(sessionId) || []
+    const nextEntries = [
       nextEntry,
-      ...session.documentInsightCache.filter((entry) => entry.key !== key),
+      ...previous.filter((entry) => entry.key !== key),
     ].slice(0, 6)
+    this.sessionInsightCaches.set(sessionId, nextEntries)
     this.documentInsightCache.set(key, { insight, metrics })
     this.deps.log(`document insight cache store key=${key}`)
   }
 
   private getCachedDocumentWidgetDraft(
-    session: DocumentPipelineCacheSession,
+    sessionId: string,
     question: string,
     job: DocumentTaskJob,
     snapshot: ActiveDocumentSnapshot,
   ): DocumentWidgetDraft | null {
     const key = this.buildDocumentWidgetDraftCacheKey(question, job, snapshot)
-    const sessionHit = session.documentWidgetDraftCache.find((entry) => entry.key === key)
+    const sessionEntries = this.sessionWidgetDraftCaches.get(sessionId) || []
+    const sessionHit = sessionEntries.find((entry) => entry.key === key)
     if (sessionHit) {
       this.deps.log(`document widget draft session cache hit key=${key}`)
       return sessionHit.draft
@@ -1392,7 +1398,7 @@ export class DocumentTaskPipelineExecutor {
   }
 
   private storeCachedDocumentWidgetDraft(
-    session: DocumentPipelineCacheSession,
+    sessionId: string,
     question: string,
     job: DocumentTaskJob,
     snapshot: ActiveDocumentSnapshot,
@@ -1404,10 +1410,12 @@ export class DocumentTaskPipelineExecutor {
       draft,
       createdAt: new Date().toISOString(),
     }
-    session.documentWidgetDraftCache = [
+    const previous = this.sessionWidgetDraftCaches.get(sessionId) || []
+    const nextEntries = [
       nextEntry,
-      ...session.documentWidgetDraftCache.filter((entry) => entry.key !== key),
+      ...previous.filter((entry) => entry.key !== key),
     ].slice(0, 6)
+    this.sessionWidgetDraftCaches.set(sessionId, nextEntries)
     this.documentWidgetDraftCache.set(key, draft)
     this.deps.log(`document widget draft cache store key=${key}`)
   }
@@ -1486,7 +1494,7 @@ export class DocumentTaskPipelineExecutor {
     executionIntentContext: ExecutionIntentContext
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
-    session: DocumentPipelineCacheSession
+    sessionId: string
     providerContext: TurnProviderContext
     emitStructuredTaskPayload: (payload: unknown) => void
   }): Promise<{ success: boolean; finalText?: string; error?: string }> {
@@ -1583,7 +1591,7 @@ export class DocumentTaskPipelineExecutor {
         signal,
       }),
       getCachedInsight: ({ question, snapshot }) => this.getCachedDocumentInsight(
-        params.session,
+        params.sessionId,
         question,
         snapshot,
       ),
@@ -1601,7 +1609,7 @@ export class DocumentTaskPipelineExecutor {
         signal: params.signal,
       }),
       storeCachedInsight: ({ question, snapshot, insight, metrics }) => {
-        this.storeCachedDocumentInsight(params.session, question, snapshot, insight, metrics)
+        this.storeCachedDocumentInsight(params.sessionId, question, snapshot, insight, metrics)
       },
       buildWidgetDraft: async ({ question, snapshot, insight, plan, signal }) => await this.buildDocumentPipelineWidgetDraft({
         question,

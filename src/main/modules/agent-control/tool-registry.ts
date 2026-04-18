@@ -146,6 +146,12 @@ const BROWSER_READ_TOOL_NAMES = new Set([
 
 const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls'])
 const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill'])
+const PROJECTION_PATCH_DOCUMENT_TOOL_NAMES = new Set<string>([
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
+  'document_save_tab',
+])
 
 function getOpenAIToolName(tool: Record<string, unknown>): string | null {
   const fn = tool.function && typeof tool.function === 'object'
@@ -368,7 +374,11 @@ function resolveToolProjectionHint(
   if (kind === 'write') {
     hint.mutating = true
   }
-  if (PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')) {
+  const emitsFromSkill =
+    PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')
+  const emitsFromDocument =
+    domain === 'document' && PROJECTION_PATCH_DOCUMENT_TOOL_NAMES.has(toolName)
+  if (emitsFromSkill || emitsFromDocument) {
     hint.emitsProjectionPatch = true
   }
   return Object.keys(hint).length > 0 ? hint : null
@@ -376,6 +386,9 @@ function resolveToolProjectionHint(
 
 function resolveToolResultShape(toolName: string, domain: ToolDomain): ToolDefinition['resultShape'] {
   if (PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')) {
+    return 'projection_patch'
+  }
+  if (domain === 'document' && PROJECTION_PATCH_DOCUMENT_TOOL_NAMES.has(toolName)) {
     return 'projection_patch'
   }
   return 'text'

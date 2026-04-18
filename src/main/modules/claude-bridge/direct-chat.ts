@@ -163,17 +163,6 @@ interface DirectChatSession {
   activeRunId: string | null
   preferTextToolBridge: boolean
   lastDocumentContextInput?: string | null
-  documentInsightCache: Array<{
-    key: string
-    insight: DocumentInsight
-    metrics?: DocumentInsightMetrics
-    createdAt: string
-  }>
-  documentWidgetDraftCache: Array<{
-    key: string
-    draft: DocumentWidgetDraft
-    createdAt: string
-  }>
 }
 
 interface ToolCall {
@@ -623,9 +612,8 @@ export class DirectChatEngine extends EventEmitter {
       activeRunId: null,
       preferTextToolBridge: false,
       lastDocumentContextInput: null,
-      documentInsightCache: [],
-      documentWidgetDraftCache: [],
     })
+    this.documentTaskPipelineExecutor.clearSessionCache(name)
   }
 
   setSystemPrompt(name: string, systemPrompt?: string): void {
@@ -1456,6 +1444,7 @@ export class DirectChatEngine extends EventEmitter {
   cleanup(): void {
     for (const [name] of this.sessions) {
       this.stopGeneration(name)
+      this.documentTaskPipelineExecutor.clearSessionCache(name)
     }
     this.sessions.clear()
   }
