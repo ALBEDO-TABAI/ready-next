@@ -418,7 +418,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
             editor.view.dispatch(editor.state.tr.setMeta(revealHighlightPluginKey, { type: 'clear' }))
           }
           revealClearTimerRef.current = null
-        }, 1600)
+        }, 1000)
         onRevealHandled?.()
       })
     }, [editor, onRevealHandled, revealTarget])

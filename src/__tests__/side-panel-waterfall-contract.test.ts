@@ -34,6 +34,8 @@ test('side panel uses a shared waterfall handoff shell instead of hard swapping 
   assert.doesNotMatch(sidePanel, /useWorkspace\(\(state\) => state\.sidebarVisible\)/)
   assert.doesNotMatch(sidePanel, /useWorkspace\(\(state\) => state\.sidePanelWidths\)/)
   assert.doesNotMatch(sidePanel, /transition: 'width 300ms ease-in-out, min-width 300ms ease-in-out'/)
+  assert.doesNotMatch(sidePanel, /backfaceVisibility:\s*'hidden'/)
+  assert.doesNotMatch(sidePanel, /translateZ\(0\)/)
   assert.match(sidePanel, /initial=\{\s*reduceMotion \? false : \{ y: resolvedDirection > 0 \? '100%' : '-100%' \}\s*\}/)
   assert.match(sidePanel, /exit=\{\s*reduceMotion\s*\?\s*undefined\s*:\s*\{\s*y: resolvedDirection > 0 \? '-100%' : '100%'/)
   assert.doesNotMatch(sidePanel, /opacity:\s*0/)

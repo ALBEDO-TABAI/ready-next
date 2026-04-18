@@ -69,8 +69,6 @@ function AnimatedPanelLayer({
             className="absolute inset-0"
             style={{
               willChange: 'transform',
-              backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)',
             }}
             initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '72%' : '-72%' }}
             animate={{
@@ -99,8 +97,6 @@ function AnimatedPanelLayer({
             className="absolute inset-0 flex min-h-0 flex-col"
             style={{
               willChange: 'transform',
-              backfaceVisibility: 'hidden',
-              transform: 'translateZ(0)',
             }}
             initial={reduceMotion ? false : { y: resolvedDirection > 0 ? '100%' : '-100%' }}
             animate={{

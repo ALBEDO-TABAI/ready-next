@@ -373,7 +373,7 @@ export function NewEventCard({
       >
         <button
           onClick={onClose}
-          className="hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-all duration-150 ease-out"
+          className="hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out"
           style={{
             padding: '5px 14px', borderRadius: 6,
             border: '1px solid var(--border-default)', background: 'var(--bg-primary)',
@@ -385,7 +385,7 @@ export function NewEventCard({
         <button
           onClick={handleSave}
           disabled={!title.trim()}
-          className="active:scale-[0.98] transition-all duration-150 ease-out"
+          className="active:scale-[0.98] transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out"
           style={{
             padding: '5px 14px', borderRadius: 6,
             border: 'none', background: 'var(--text-title)',

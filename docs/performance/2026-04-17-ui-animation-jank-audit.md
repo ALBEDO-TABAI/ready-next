@@ -26,8 +26,17 @@
 - 工作台主链路已开始清理泛化过渡：
   - `TopBar / IconRail / Browser header / Chat header / Chat panel` 的关键交互不再使用 `transition-all`；
   - `tiptap.css` 里 3 处 `transition: all` 已改成属性白名单。
+- `P2` 第二轮细节收口已补上以下条目：
+  - `MorphIconRailGroup` 不再依赖 `layout` / `layoutId` 迁移 thumb，改成单个 thumb 通过索引位移移动，并把“浮起/下陷/记忆态”的时长压缩到短节奏。
+  - `SidePanel` 的瀑布切换层移除了手工 `translateZ(0)` 与 `backfaceVisibility: hidden`，避免在玻璃壳层里继续拆合成层。
+  - 文档定位高亮不再通过 `box-shadow` 闪烁做强调，改成更短的底色 + `outline` 提示；高亮停留时间同步缩短。
+  - `EventModal` / `NewEventMenu` 剩余的 `transition-all` 与 `transition: all` 已改成属性白名单。
+  - `P2` 里关于 `WorkbenchModeOutlet` 冗余隐藏方式和 `tiptap.css` 的 `transition: all`，当前已通过代码与测试双重锁定，作为回归保护保留。
+- `O13`（BrowserView overlay 额外 fade）在这轮复查后**主动跳过**：
+  - 当前浏览器模式已经同时具备缓存静帧、冻结帧淡出和过渡遮罩接管；
+  - 本轮未再追加新的遮罩淡出逻辑，避免对现有稳定链路做无收益扰动。
 
-这轮实施没有扩到 `P1/P2`，因此下面正文里的问题分析仍然成立，但“建议实施项”里凡是与上述条目重复的，以当前代码实现为最新状态。
+下面正文里的问题分析仍然保留审计时的根因判断，但“建议实施项”里凡是与上述条目重复的，以当前代码实现为最新状态。
 
 ---
 
@@ -296,6 +305,14 @@ const applyColorTheme = (resolved, option) => {
 - 风险: 低；需要调参。
 
 ### 6.3 P2 —— 较低优先级 / 细节打磨
+
+> `2026-04-18` 补充说明：
+> - `O8` 已实施；
+> - `O10` / `O12` 已作为回归保护由代码与契约测试锁定；
+> - `O11` 已实施；
+> - `EventModal / NewEventMenu` 的剩余 `transition-all` 清理已实施；
+> - `O13` 已复查并主动跳过；
+> - `O9 / O14` 仍未纳入正式工作台实施范围。
 
 **O8. framer-motion layout 动画使用范围审查**
 - `MorphIconRailGroup` / `MorphTabStrip` 的 `layoutId` + spring 动画虽然视觉上好，但每次切模式都在跑。可把 thumb 改成纯 `translate3d` + transform，不走 layout reconciliation。

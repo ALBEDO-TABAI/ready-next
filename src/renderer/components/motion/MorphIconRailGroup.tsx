@@ -22,34 +22,25 @@ interface MorphIconRailGroupProps {
   style?: CSSProperties
 }
 
-const THUMB_LIFT_BEFORE_SLIDE_MS = 1500
-const THUMB_PRESS_SETTLE_MS = 750
+const THUMB_REOPEN_DELAY_MS = 140
+const THUMB_REST_SETTLE_MS = 120
 const THUMB_DEPTH_TRANSITION = {
-  duration: 0.75,
+  duration: 0.14,
   ease: [0.22, 1, 0.36, 1],
 } as const
-const THUMB_LIFT_TRANSITION = {
-  duration: 1.5,
-  ease: [0.22, 1, 0.36, 1],
-} as const
-const ICON_RAIL_SLOWER_MOTION_TRANSITION = {
-  ...WORKBENCH_SLIDER_MOTION_TRANSITION,
-  stiffness: 60,
-  damping: 38,
-  mass: 3.2,
-} as const
+const ICON_RAIL_ITEM_PITCH = 40
 
 export default function MorphIconRailGroup({
   items,
   activeId,
   expanded = true,
   onSelect,
-  layoutId,
+  layoutId: _layoutId,
   className,
   style,
 }: MorphIconRailGroupProps) {
   const reduceMotion = useReducedMotion()
-  const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : ICON_RAIL_SLOWER_MOTION_TRANSITION
+  const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_MOTION_TRANSITION
   const [thumbId, setThumbId] = useState(activeId)
   const [thumbState, setThumbState] = useState<'elevated' | 'pressing' | 'resting'>(expanded ? 'elevated' : 'resting')
   const previousActiveIdRef = useRef(activeId)
@@ -90,7 +81,7 @@ export default function MorphIconRailGroup({
         settleTimerRef.current = window.setTimeout(() => {
           setThumbState('resting')
           settleTimerRef.current = null
-        }, THUMB_PRESS_SETTLE_MS)
+        }, THUMB_REST_SETTLE_MS)
       }
     } else if (!previousExpanded) {
       setThumbId(previousActiveId)
@@ -100,7 +91,7 @@ export default function MorphIconRailGroup({
         slideTimerRef.current = window.setTimeout(() => {
           setThumbId(activeId)
           slideTimerRef.current = null
-        }, reduceMotion ? 0 : THUMB_LIFT_BEFORE_SLIDE_MS)
+        }, reduceMotion ? 0 : THUMB_REOPEN_DELAY_MS)
       }
     } else {
       setThumbState('elevated')
@@ -111,18 +102,29 @@ export default function MorphIconRailGroup({
     previousExpandedRef.current = expanded
   }, [activeId, expanded, reduceMotion])
 
+  const thumbIndex = Math.max(items.findIndex(({ id }) => id === thumbId), 0)
+  const thumbOffset = thumbIndex * ICON_RAIL_ITEM_PITCH
+
   return (
     <MotionConfig transition={transition}>
       <div className={['icon-rail-slider', className].filter(Boolean).join(' ')} style={style}>
         <div className="icon-rail-slider__track" />
+        <motion.span
+          aria-hidden="true"
+          className="icon-rail-slider__thumb-shell"
+          animate={reduceMotion ? { y: thumbOffset } : { y: thumbOffset }}
+          transition={transition}
+        >
+          <span
+            className={`icon-rail-slider__thumb ${thumbState === 'resting' ? 'is-resting' : thumbState === 'pressing' ? 'is-pressing' : 'is-elevated'}`}
+          />
+        </motion.span>
         {items.map(({ id, label, icon: Icon }) => {
           const isActive = thumbId === id && thumbState === 'elevated'
           const isRemembered = thumbId === id && thumbState !== 'elevated'
-          const thumbVisible = thumbId === id
           return (
             <motion.button
               key={id}
-              layout
               type="button"
               onClick={() => onSelect?.(id)}
               title={label}
@@ -139,24 +141,6 @@ export default function MorphIconRailGroup({
                     : 'var(--text-gray)',
               }}
             >
-              {thumbVisible ? (
-                <motion.span
-                  layoutId={`${layoutId}-thumb`}
-                  animate={reduceMotion
-                    ? undefined
-                    : thumbState === 'resting'
-                      ? { scale: 0.94, y: 1.2 }
-                      : thumbState === 'pressing'
-                        ? { scale: 0.965, y: 0.95 }
-                        : { scale: 1, y: 0 }}
-                  transition={reduceMotion
-                    ? REDUCED_MOTION_TRANSITION
-                    : thumbState === 'elevated'
-                      ? THUMB_LIFT_TRANSITION
-                      : THUMB_DEPTH_TRANSITION}
-                  className={`icon-rail-slider__thumb ${thumbState === 'resting' ? 'is-resting' : thumbState === 'pressing' ? 'is-pressing' : 'is-elevated'}`}
-                />
-              ) : null}
               <span className="relative z-[1]">
                 <Icon className="h-[15px] w-[15px]" strokeWidth={2} />
               </span>

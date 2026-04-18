@@ -11,14 +11,18 @@ test('workbench hot-path surfaces avoid transition-all on interactive chrome', (
   const hotPathFiles = [
     'src/renderer/components/agent/ChatInput.tsx',
     'src/renderer/components/agent/ChatMessages.tsx',
+    'src/renderer/components/calendar/EventModal.tsx',
+    'src/renderer/components/calendar/NewEventMenu.tsx',
     'src/renderer/components/document/DocumentTabRail.tsx',
     'src/renderer/components/layout/FileTree.tsx',
     'src/renderer/components/rss/PreviewBrowser.tsx',
     'src/renderer/components/rss/RSSFeed.tsx',
     'src/renderer/pages/modes/RSSMode.tsx',
+    'src/renderer/styles/tiptap.css',
   ]
 
   for (const path of hotPathFiles) {
     assert.doesNotMatch(readWorkspaceFile(path), /transition-all/)
+    assert.doesNotMatch(readWorkspaceFile(path), /transition:\s*all/)
   }
 })

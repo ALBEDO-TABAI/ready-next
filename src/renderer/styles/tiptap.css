@@ -248,8 +248,8 @@
 .ready-doc-reveal-highlight {
   background: color-mix(in srgb, var(--color-blue-light) 85%, white 15%);
   border-radius: 4px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent);
-  animation: ready-doc-reveal-flash 1.6s ease-out;
+  outline: 1px solid color-mix(in srgb, var(--color-blue) 18%, transparent);
+  animation: ready-doc-reveal-flash 1s ease-out;
 }
 
 .ProseMirror pre.ready-doc-widget-codeblock.is-collapsed {
@@ -479,15 +479,12 @@
 @keyframes ready-doc-reveal-flash {
   0% {
     background: color-mix(in srgb, var(--color-blue) 24%, white 76%);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 26%, transparent);
   }
   55% {
     background: color-mix(in srgb, var(--color-blue-light) 92%, white 8%);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-blue) 16%, transparent);
   }
   100% {
     background: color-mix(in srgb, var(--color-blue-light) 72%, transparent);
-    box-shadow: 0 0 0 0 transparent;
   }
 }
 

@@ -428,7 +428,8 @@ export default function EventModal({
                         border: `1px solid ${contentType === value ? 'var(--color-blue)' : 'var(--border-default)'}`,
                         background: contentType === value ? 'var(--color-blue-light)' : 'transparent',
                         color: contentType === value ? 'var(--color-blue)' : 'var(--text-body)',
-                        cursor: 'pointer', transition: 'all 0.15s',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                       }}
                     >
                       <Icon style={{ width: 12, height: 12 }} />
@@ -454,7 +455,8 @@ export default function EventModal({
                           border: `1px solid ${selected ? color : 'var(--border-default)'}`,
                           background: selected ? `${color}12` : 'transparent',
                           color: selected ? color : 'var(--text-body)',
-                          cursor: 'pointer', transition: 'all 0.15s',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                         }}
                       >
                         <span style={{ width: 6, height: 6, borderRadius: 3, background: selected ? color : 'var(--border-default)' }} />
@@ -479,7 +481,8 @@ export default function EventModal({
                         border: `1px solid ${publishStatus === value ? color : 'var(--border-default)'}`,
                         background: publishStatus === value ? `${color}15` : 'transparent',
                         color: publishStatus === value ? color : 'var(--text-body)',
-                        cursor: 'pointer', transition: 'all 0.15s',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                       }}
                     >
                       <span style={{ width: 6, height: 6, borderRadius: 3, background: publishStatus === value ? color : 'var(--border-default)' }} />
@@ -505,7 +508,7 @@ export default function EventModal({
             {mode === 'edit' && onDelete && event && (
               <button
                 onClick={handleDelete}
-                className="active:scale-[0.98] transition-all duration-150 ease-out"
+                className="active:scale-[0.98] transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out"
                 style={{
                   padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
                   background: confirmDelete ? 'var(--color-red)' : 'transparent',
@@ -520,7 +523,7 @@ export default function EventModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               onClick={onClose}
-              className="hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-all duration-150 ease-out"
+              className="hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out"
               style={{
                 padding: '5px 14px', borderRadius: 6,
                 border: '1px solid var(--border-default)', background: 'var(--bg-primary)',
@@ -532,7 +535,7 @@ export default function EventModal({
             <button
               onClick={handleSave}
               disabled={!title.trim()}
-              className="active:scale-[0.98] transition-all duration-150 ease-out"
+              className="active:scale-[0.98] transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out"
               style={{
                 padding: '5px 14px', borderRadius: 6,
                 border: 'none', background: 'var(--text-title)',
