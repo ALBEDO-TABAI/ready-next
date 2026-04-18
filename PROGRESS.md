@@ -6,6 +6,11 @@
 
 0. Agent 核心重构已先落地第一段可上线基础层。
 
+- `2026-04-18` 已完成一轮 `P1` 文档信息卡修改链路结构性收口，重点是“把已有但被短路的路径连起来”而不是新增能力：
+  - `DocumentTaskPipelineExecutor.tryExecute` 当前已把 `document_list_widgets` / `document_remove_widget` 两种结构化意图也路由进 `runDocumentWidgetPipeline`；list / remove 请求不再回落普通工具循环，会产出结构化步骤与诊断，并在构造 `DocumentTaskPipeline` 时注入对应 `listWidgets` / `removeWidget` deps 桥接到 renderer `document.listWidgets` / `document.removeWidget` 动作。
+  - `DocumentInsight.recommendedWidget` 类型与 insight / widget 两段 system prompt 已从 5 种 info-card 字面量放开到 `documentWidgetCatalog` 全集；新增共享 `WIDGET_COMPONENT_IDS` 单一事实源，`normalizePipelineInsight` 与 `approvedWidgetComponentNames` 都从该常量派生，未来 catalog 变更无需再多点同步。
+  - `pipelinePhaseOrder` 不再硬编码 create 专用 5 步；`buildPipelinePhaseOrder(taskType)` 会按 create / update / list / remove 分别派生对应 phase 序列，UI 步骤列表现在与实际发出的 phase 集合一一对齐。
+  - 已新增 `executor-routes-list-and-remove-intents / pipeline-phase-order-matches-task-type / widget-catalog-recommended-widget-superset` 三份契约测试，并回归 `document-task-pipeline / document-task-pipeline-widget-prompt / document-widget-openui-describe-props / document-task-pipeline-host-contract`；`npm run typecheck` 与测试差分相对改动前零新增失败。
 - `2026-04-18` 已完成 agent runtime realignment phase4 的第二轮“实质收口”，这轮不再只满足“有 adapter 文件”：
   - `skill / rss / calendar / feishu` 四个 domain adapter 现在都会从统一 `executedTools` 批次摘要里接住本轮工具结果，再由 adapter 自己生成任务卡 patch。
   - `TurnEngine` 已补通用工具结果明细：会把工具名、标准化结果、原始文本和可选 JSON 一起传给 adapter，Browser / Document 原有专项统计不回退。

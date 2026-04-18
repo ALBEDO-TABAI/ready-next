@@ -5,6 +5,7 @@ import { buildFocusedDocumentContext } from '../../../shared/document-sectioning
 import {
   describeApprovedWidgetProps,
   validateDocumentWidgetComponentSpec,
+  WIDGET_COMPONENT_IDS,
   type DocumentWidgetComponentName,
   type DocumentWidgetComponentSpec,
 } from '../../../shared/document-widget-openui'
@@ -20,6 +21,7 @@ import { DocumentInsightCache } from './document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from './document-source-materials'
 import { runDocumentTaskPlanWithSubtasks } from './document-task-subtask-runner'
 import {
+  buildPipelinePhaseOrder,
   DocumentTaskPipeline,
   type ActiveDocumentSnapshot,
   type DocumentInsight,
@@ -183,6 +185,8 @@ export class DocumentTaskPipelineExecutor {
     if (
       params.executionIntentContext.structuredDocumentIntent === 'document_read_then_widget_create'
       || params.executionIntentContext.structuredDocumentIntent === 'document_read_then_widget_update'
+      || params.executionIntentContext.structuredDocumentIntent === 'document_list_widgets'
+      || params.executionIntentContext.structuredDocumentIntent === 'document_remove_widget'
     ) {
       const pipelineResult = await this.runDocumentWidgetPipeline({
         structuredIntent: params.executionIntentContext.structuredDocumentIntent,
@@ -359,15 +363,10 @@ export class DocumentTaskPipelineExecutor {
       : []
     const recommendedWidget = (() => {
       const value = typeof raw.recommendedWidget === 'string' ? raw.recommendedWidget.trim() : ''
-      switch (value) {
-        case 'stats_card':
-        case 'comparison_grid':
-        case 'callout_block':
-        case 'data_table':
-          return value
-        default:
-          return 'info_card'
+      if ((WIDGET_COMPONENT_IDS as ReadonlyArray<string>).includes(value)) {
+        return value as DocumentWidgetComponentName
       }
+      return 'info_card' satisfies DocumentWidgetComponentName
     })()
     const warnings = Array.isArray(raw.warnings)
       ? raw.warnings.map((item) => String(item || '').trim()).filter(Boolean)
@@ -574,7 +573,7 @@ export class DocumentTaskPipelineExecutor {
       '你是 Ready 的文档 insight 阶段。',
       '你只负责阅读文档并提炼和问题最相关的结构化结果，不要生成 widget，不要写回文档。',
       '必须只输出 JSON，对象字段为 summary、keyPoints、evidence、recommendedWidget、warnings。',
-      'recommendedWidget 只能是 info_card、stats_card、comparison_grid、callout_block、data_table 之一。',
+      `recommendedWidget 只能是以下组件之一：${WIDGET_COMPONENT_IDS.join('、')}。`,
       'keyPoints 保持 3 到 6 条，evidence 至少给 1 条简短引文。',
     ].join('\n')
     const userPrompt = [
@@ -633,13 +632,7 @@ export class DocumentTaskPipelineExecutor {
     }
   }
 
-  private readonly approvedWidgetComponentNames: DocumentWidgetComponentName[] = [
-    'info_card',
-    'stats_card',
-    'comparison_grid',
-    'callout_block',
-    'data_table',
-  ]
+  private readonly approvedWidgetComponentNames: DocumentWidgetComponentName[] = [...WIDGET_COMPONENT_IDS]
 
   private clipWidgetCodeForPrompt(widgetCode: string, maxChars = 1000): string {
     const trimmed = String(widgetCode || '').trim()
@@ -675,7 +668,7 @@ export class DocumentTaskPipelineExecutor {
       params.plan.operation === 'update'
         ? '这次是更新现有信息卡，不允许 append_end；必须使用 update_existing，并尽量提供 targetWidgetTitle。'
         : '默认 insertionMode 使用 append_end。',
-      'componentSpec.component 只能是 info_card、stats_card、comparison_grid、callout_block、data_table。',
+      `componentSpec.component 只能是以下组件之一：${this.approvedWidgetComponentNames.join('、')}。`,
       '优先选择简单稳定的组件，不要发明 catalog 外的新组件。',
       '',
       '每个允许的组件 props 字段（! 表示必填，? 表示可选）：',
@@ -1702,13 +1695,7 @@ export class DocumentTaskPipelineExecutor {
       requestEnvelope: params.executionIntentContext.requestEnvelope,
       snapshotContent: '',
     })
-    const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = [
-      'loading_document',
-      'building_insight',
-      'generating_widget_spec',
-      'writing_widget',
-      'saving_document',
-    ]
+    const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = buildPipelinePhaseOrder(params.structuredIntent)
     const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
       loading_document: '读取文档',
       building_insight: '提炼重点',
@@ -1835,6 +1822,24 @@ export class DocumentTaskPipelineExecutor {
         void signal
         const payload = await params.requestModuleToolAction('document.saveTab', {})
         return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
+      },
+      listWidgets: async ({ signal }) => {
+        void signal
+        const payload = await params.requestModuleToolAction('document.listWidgets', {})
+        return typeof payload.summary === 'string' ? payload.summary : '已列出文档卡片'
+      },
+      removeWidget: async ({ plan, stage, signal }) => {
+        void signal
+        const target = plan.preferredWidget || ''
+        if (stage === 'locate') {
+          return target
+            ? `已定位待删除的信息卡：${target}`
+            : '未提供待删除信息卡的 target，等待删除阶段反馈'
+        }
+        const payload = await params.requestModuleToolAction('document.removeWidget', {
+          target,
+        })
+        return typeof payload.summary === 'string' ? payload.summary : '已删除信息卡'
       },
       emitPhase: emitDocumentPipelinePhase,
     })

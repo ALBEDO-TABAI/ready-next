@@ -1,4 +1,7 @@
-import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
+import type {
+  DocumentWidgetComponentName,
+  DocumentWidgetComponentSpec,
+} from '../../../shared/document-widget-openui'
 import { validateDocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
 
 export type DocumentWidgetPipelinePhase =
@@ -52,12 +55,7 @@ export interface DocumentInsight {
     sectionTitle?: string
     quote: string
   }>
-  recommendedWidget:
-    | 'info_card'
-    | 'stats_card'
-    | 'comparison_grid'
-    | 'callout_block'
-    | 'data_table'
+  recommendedWidget: DocumentWidgetComponentName
   warnings?: string[]
 }
 
@@ -175,6 +173,19 @@ const DEFAULT_BUDGET: DocumentTaskPipelineBudget = {
   buildWidgetMs: 60_000,
   writeWidgetMs: 15_000,
   saveDocumentMs: 15_000,
+}
+
+export function buildPipelinePhaseOrder(taskType: DocumentStructuredTaskType): DocumentWidgetPipelinePhase[] {
+  switch (taskType) {
+    case 'document_read_then_widget_create':
+      return ['loading_document', 'building_insight', 'generating_widget_spec', 'writing_widget', 'saving_document']
+    case 'document_read_then_widget_update':
+      return ['loading_document', 'building_insight', 'generating_widget_spec', 'locating_target_widget', 'updating_widget', 'saving_document']
+    case 'document_list_widgets':
+      return ['loading_document', 'listing_widgets']
+    case 'document_remove_widget':
+      return ['loading_document', 'locating_target_widget', 'removing_widget', 'saving_document']
+  }
 }
 
 function isAbortError(error: unknown): boolean {

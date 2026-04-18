@@ -514,6 +514,9 @@ Ready 采用 Electron 三层架构：
 - `direct-chat` 里的文档深读后制卡 pipeline 已开始受正式任务路由约束：只有 document executor 路径命中时才会进入这条 deterministic pipeline，避免继续漂成主循环前置特例
 - `RecoveryRouter` 现在会产出稳定的重试元数据：`rate_limit / transient` 使用 `350ms` 起步、最大 `8s`、最多 `3` 次的指数抖动退避；一旦出现恢复记录或预算进入 warning，`ToolRuntime` 会把后续工具批次自动降为串行，`ExecutionLoopOrchestrator` 只继续保留模型请求恢复。
 - `tool_result` 发往 renderer / provider transcript 前，主进程最后一公里仍会序列化成兼容旧通道的文本或 JSON 字符串；本期没有改 preload / renderer 协议。
+- `DocumentTaskPipelineExecutor.tryExecute` 当前已把 `document_list_widgets` 与 `document_remove_widget` 两种结构化意图也接入文档信息卡 pipeline；list / remove 请求不再回落到普通工具循环，会产出结构化步骤、进度与诊断，并复用 renderer 侧 `document.listWidgets` / `document.removeWidget` 动作桥接。
+- `DocumentInsight.recommendedWidget` 类型以及 insight / widget 两段 system prompt 现已从 5 种 info-card 家族字面量放开到 `documentWidgetCatalog` 全集（20 种组件）；新增共享 `WIDGET_COMPONENT_IDS` 导出作为单一事实源，未来新增组件无需再同步改 prompt 文本与归一化 switch。
+- `pipelinePhaseOrder` 不再硬编码成 create 专用的 5 步；executor 现会按 `structuredIntent` 调用 `buildPipelinePhaseOrder(taskType)` 动态派生 phase 序列，UI 步骤列表与实际发出的 phase 集合一一对齐：update 补齐“定位/更新”，list 呈现“读取文档 → 列出文档卡片”，remove 呈现“读取文档 → 定位目标卡片 → 删除信息卡 → 保存文档”。
 
 ## 9. 开发约定
 ### 9.1 新增跨进程功能的最小闭环

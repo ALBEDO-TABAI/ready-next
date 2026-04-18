@@ -1155,3 +1155,6 @@ export function buildDocumentWidgetOpenUIRulesSnippet(): string {
 
   return lines.join('\n')
 }
+
+export const WIDGET_COMPONENT_IDS: ReadonlyArray<DocumentWidgetComponentName>
+  = documentWidgetCatalog.map((entry) => entry.name)
