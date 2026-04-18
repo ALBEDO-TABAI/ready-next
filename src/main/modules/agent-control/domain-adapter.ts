@@ -1,6 +1,7 @@
 import type { RequestEnvelope } from './request-envelope'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
+import type { ToolExecutionOutput } from './tool-result-types'
 import type {
   RunBudgetHint,
   TaskExecutionRoute,
@@ -22,7 +23,15 @@ export interface DomainAdapterProjection {
   blockedReason?: string | null
 }
 
+export interface DomainAdapterExecutedTool {
+  toolName: string
+  output: ToolExecutionOutput
+  resultText: string
+  parsedJson?: Record<string, unknown> | null
+}
+
 export interface DomainAdapterToolBatchSummary {
+  executedTools?: DomainAdapterExecutedTool[]
   executedDocActionCount?: number
   executedMutatingDocActionCount?: number
   executedInspectionDocActionCount?: number
@@ -137,6 +146,19 @@ export function filterAllowedToolNamesByPrefixes(
   }
   const filtered = allowedToolNames.filter((toolName) => prefixes.some((prefix) => toolName.startsWith(prefix)))
   return filtered.length > 0 ? filtered : null
+}
+
+export function readExecutedToolPayload(executedTool: DomainAdapterExecutedTool): Record<string, unknown> | null {
+  if (executedTool.output.projectionPatch && typeof executedTool.output.projectionPatch === 'object') {
+    return executedTool.output.projectionPatch
+  }
+  if (executedTool.output.data && typeof executedTool.output.data === 'object') {
+    return executedTool.output.data
+  }
+  if (executedTool.parsedJson && typeof executedTool.parsedJson === 'object') {
+    return executedTool.parsedJson
+  }
+  return null
 }
 
 export function selectDomainAdapter(

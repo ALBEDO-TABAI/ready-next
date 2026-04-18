@@ -8,6 +8,7 @@ import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapt
 import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
 import { selectDomainAdapter, type DomainAdapter } from '../main/modules/agent-control/domain-adapter'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu') {
   return {
@@ -18,6 +19,45 @@ function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calen
     steps: [],
     continuation: null,
   }
+}
+
+function createDomainApplyParams(executor: 'skill' | 'rss' | 'calendar' | 'feishu', domainState: unknown, toolBatch: Record<string, unknown>) {
+  return {
+    route: createRoute(executor),
+    request: {
+      abortSignal: new AbortController().signal,
+    } as never,
+    host: {} as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: '',
+    pureUserInput: '',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: null,
+    emitStructuredTaskPayload: () => undefined,
+    domainState,
+    phase: 'tool_batch' as const,
+    toolBatch,
+  } as const
+}
+
+function createProjectionParams(
+  executor: 'skill' | 'rss' | 'calendar' | 'feishu',
+  domainState: unknown,
+  projection: { phase: 'blocked' | 'done'; summary: string; waitingFor?: string; resumableActions?: string[]; blockedReason?: string | null },
+) {
+  return {
+    route: createRoute(executor),
+    request: {} as never,
+    executionIntentContext: {} as never,
+    toolPolicy: {} as never,
+    domainState,
+    projection,
+  } as never
 }
 
 test('every phase4 domain adapter implements the unified lifecycle contract', () => {
@@ -58,6 +98,201 @@ test('domain adapter selector picks the matching adapter for the resolved execut
   })
 
   assert.equal(selected?.id, 'calendar')
+})
+
+test('skill domain adapter turns structured skill tool results into adapter-owned projection truth', () => {
+  const adapter = new SkillDomainAdapter()
+  const prepared = adapter.prepare({
+    route: createRoute('skill'),
+    request: {
+      abortSignal: new AbortController().signal,
+    } as never,
+    host: {} as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: '继续 skill workflow',
+    pureUserInput: '继续 skill workflow',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: ['skill_get_state'],
+  })
+  const applied = adapter.applyResult(createDomainApplyParams('skill', prepared.domainState, {
+    executedTools: [{
+      toolName: 'skill_get_state',
+      output: createToolExecutionOutput('请选择视频风格', {
+        projectionPatch: {
+          module: 'skill',
+          message: '请选择视频风格',
+          taskTitle: '技能执行 · video-copy-analyzer',
+          taskSummary: '请选择视频风格',
+          steps: [{
+            id: 'collect_input',
+            title: 'collect_input',
+            status: 'blocked',
+            updatedAt: '2026-04-18T12:00:00.000Z',
+          }],
+          currentStepId: 'collect_input',
+          waitingFor: 'input',
+          resumableActions: ['continue', 'cancel'],
+          blockedReason: '请选择视频风格',
+          taskContinuation: {
+            executionId: 'exec-1',
+            stepId: 'collect_input',
+            blockerType: 'need_input',
+          },
+          recentArtifacts: [{
+            id: 'artifact-1',
+            module: 'skill',
+            kind: 'skill-artifact',
+            label: '风格提示',
+            createdAt: '2026-04-18T12:00:00.000Z',
+          }],
+        },
+        interactionHint: 'awaiting_clarification',
+      }),
+      resultText: '请选择视频风格',
+      parsedJson: null,
+    }],
+  }))
+
+  assert.equal(applied.interactionState, 'awaiting_clarification')
+  assert.equal(applied.projection?.waitingFor, 'input')
+  assert.equal(applied.projection?.summary, '请选择视频风格')
+
+  const patch = adapter.buildProjectionPatch(createProjectionParams('skill', applied.domainState, applied.projection!))
+  assert.equal(patch?.taskTitle, '技能执行 · video-copy-analyzer')
+  assert.equal((patch?.taskContinuation as { executionId?: string } | undefined)?.executionId, 'exec-1')
+  assert.equal(Array.isArray(patch?.recentArtifacts), true)
+})
+
+test('rss domain adapter builds a done projection from legacy json tool results', () => {
+  const adapter = new RSSDomainAdapter()
+  const prepared = adapter.prepare({
+    route: createRoute('rss'),
+    request: {
+      abortSignal: new AbortController().signal,
+    } as never,
+    host: {} as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: '添加一个 RSS 源',
+    pureUserInput: '添加一个 RSS 源',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: ['rss_add_source'],
+  })
+  const structured = {
+    module: 'rss',
+    intent: 'add_rss_source',
+    executionKind: 'deterministic',
+    action: 'rss.addSource',
+    message: 'rss.addSource 已排队执行。',
+    ownerResourceId: 'source-1',
+  }
+  const applied = adapter.applyResult(createDomainApplyParams('rss', prepared.domainState, {
+    executedTools: [{
+      toolName: 'rss_add_source',
+      output: createToolExecutionOutput(JSON.stringify(structured)),
+      resultText: JSON.stringify(structured),
+      parsedJson: structured,
+    }],
+  }))
+
+  assert.equal(applied.projection?.phase, 'done')
+  assert.match(applied.projection?.summary || '', /source-1/)
+
+  const patch = adapter.buildProjectionPatch(createProjectionParams('rss', applied.domainState, applied.projection!))
+  assert.equal(patch?.taskTitle, 'RSS 任务')
+  assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.id, 'rss_add_source')
+  assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.status, 'done')
+})
+
+test('calendar domain adapter blocks when legacy tool results indicate missing user input', () => {
+  const adapter = new CalendarDomainAdapter()
+  const prepared = adapter.prepare({
+    route: createRoute('calendar'),
+    request: {
+      abortSignal: new AbortController().signal,
+    } as never,
+    host: {} as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: '创建一个会议',
+    pureUserInput: '创建一个会议',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: ['calendar_create_event'],
+  })
+  const applied = adapter.applyResult(createDomainApplyParams('calendar', prepared.domainState, {
+    executedTools: [{
+      toolName: 'calendar_create_event',
+      output: createToolExecutionOutput('Error: title, startTime and endTime are required'),
+      resultText: 'Error: title, startTime and endTime are required',
+      parsedJson: null,
+    }],
+  }))
+
+  assert.equal(applied.projection?.phase, 'blocked')
+  assert.equal(applied.projection?.waitingFor, 'input')
+
+  const patch = adapter.buildProjectionPatch(createProjectionParams('calendar', applied.domainState, applied.projection!))
+  assert.equal(patch?.taskTitle, '日程任务')
+  assert.equal(patch?.waitingFor, 'input')
+  assert.match(String(patch?.blockedReason || ''), /required/)
+})
+
+test('feishu domain adapter summarizes legacy structured results with target identifiers', () => {
+  const adapter = new FeishuDomainAdapter()
+  const prepared = adapter.prepare({
+    route: createRoute('feishu'),
+    request: {
+      abortSignal: new AbortController().signal,
+    } as never,
+    host: {} as never,
+    session: {
+      messages: [],
+    } as never,
+    userText: '把消息发到飞书',
+    pureUserInput: '把消息发到飞书',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    hasTools: true,
+    toolPolicy: {} as never,
+    allowedToolNames: ['feishu_message_send'],
+  })
+  const structured = {
+    module: 'feishu',
+    intent: 'send_feishu_message',
+    executionKind: 'deterministic',
+    action: 'feishu.messageSend',
+    message: 'Success',
+    msg_id: 'om_dc13264520392913993dd051dba21dcf',
+    chat_id: 'oc_a0553eda9014c201e6969b478895c230',
+  }
+  const applied = adapter.applyResult(createDomainApplyParams('feishu', prepared.domainState, {
+    executedTools: [{
+      toolName: 'feishu_message_send',
+      output: createToolExecutionOutput(JSON.stringify(structured)),
+      resultText: JSON.stringify(structured),
+      parsedJson: structured,
+    }],
+  }))
+
+  assert.equal(applied.projection?.phase, 'done')
+  assert.match(applied.projection?.summary || '', /om_dc13264520392913993dd051dba21dcf/)
+
+  const patch = adapter.buildProjectionPatch(createProjectionParams('feishu', applied.domainState, applied.projection!))
+  assert.equal(patch?.taskTitle, '飞书任务')
+  assert.equal((patch?.steps as Array<{ id: string; status: string }>)[0]?.status, 'done')
 })
 
 test('browser domain adapter preserves upload prompt refinement before building browser state', async () => {

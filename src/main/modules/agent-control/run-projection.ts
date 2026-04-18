@@ -2,7 +2,6 @@ import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunSummary,
-  ScopeRunTaskContinuation,
   ScopeRunTaskStep,
 } from './types'
 import { logAgentMetric } from './metrics'
@@ -20,15 +19,6 @@ function browserStepTitle(id: string): string {
     recover: '恢复页面',
   }
   return titles[id] || id
-}
-
-function skillStepStatus(value: string): ScopeRunTaskStep['status'] {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'done' || normalized === 'success' || normalized === 'completed') return 'done'
-  if (normalized === 'running' || normalized === 'active') return 'running'
-  if (normalized === 'waiting' || normalized === 'blocked') return 'blocked'
-  if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'error') return 'error'
-  return 'pending'
 }
 
 function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): RunProjectionPatch {
@@ -192,53 +182,6 @@ export class RunProjection {
         currentStepId: steps[currentIndex]?.id || previous?.currentStepId || null,
         waitingFor: 'none',
         resumableActions: ['cancel'],
-      }
-    }
-
-    const executionId = rawText.match(/^Execution ID:\s*(.+)$/m)?.[1]?.trim()
-    const skillId = rawText.match(/^Skill:\s*(.+)$/m)?.[1]?.trim()
-    if (executionId && skillId) {
-      const currentStepId = rawText.match(/^Current step:\s*(.+)$/m)?.[1]?.trim() || null
-      const blockerMatch = rawText.match(/^Blocker:\s*([^-\n]+)-\s*(.+)$/m)
-      const blockerType = blockerMatch?.[1]?.trim() || null
-      const blockerMessage = blockerMatch?.[2]?.trim() || null
-      const recentSteps = rawText.match(/^Recent steps:\s*(.+)$/m)?.[1]?.trim() || ''
-      const steps = recentSteps
-        ? recentSteps.split(',').map((item) => item.trim()).filter(Boolean).map((item) => {
-          const match = item.match(/^(.+)\((.+)\)$/)
-          const stepId = (match?.[1] || item).trim()
-          return {
-            id: stepId,
-            title: stepId,
-            status: skillStepStatus(match?.[2] || 'pending'),
-            updatedAt: payload.timestamp,
-          } satisfies ScopeRunTaskStep
-        })
-        : previous?.steps || []
-      return {
-        taskTitle: `技能执行 · ${skillId}`,
-        taskSummary: blockerMessage || `当前步骤：${currentStepId || '进行中'}`,
-        steps,
-        currentStepId,
-        waitingFor: blockerType === 'need_input'
-          ? 'input'
-          : blockerType === 'need_confirmation'
-            ? 'confirmation'
-            : blockerType === 'need_agent_result'
-              ? 'agent_result'
-              : blockerType
-                ? 'background'
-                : 'none',
-        resumableActions: [
-          ...(blockerType ? ['continue'] as const : []),
-          'cancel' as const,
-        ],
-        taskContinuation: {
-          taskId: payload.taskId ?? previous?.taskId ?? null,
-          executionId,
-          stepId: currentStepId,
-          blockerType,
-        } satisfies ScopeRunTaskContinuation,
       }
     }
 

@@ -7,6 +7,7 @@ import {
   selectDomainAdapter,
   type DomainAdapter,
   type DomainAdapterApplyResult,
+  type DomainAdapterToolBatchSummary,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import {
@@ -156,6 +157,30 @@ function normalizeToolBatchResult(result: TurnToolBatchResult): {
     budgetLimited: result.budgetLimited,
     recoveryHistory: result.recoveryHistory,
   }
+}
+
+function tryParseToolResultObject(text: string): Record<string, unknown> | null {
+  const trimmed = String(text || '').trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function shouldDeferProjectionPatchToAdapter(adapterId: string | undefined, toolName: string): boolean {
+  if (!adapterId) return false
+  if (adapterId === 'skill') return toolName.startsWith('skill_')
+  if (adapterId === 'rss') return toolName.startsWith('rss_') || toolName.startsWith('skill_rss_')
+  if (adapterId === 'calendar') return toolName.startsWith('calendar_')
+  if (adapterId === 'feishu') return toolName.startsWith('feishu_')
+  return false
 }
 
 function normalizeStepBudgetState(stepBudget: {
@@ -1155,6 +1180,7 @@ export class TurnEngine {
         let executedPrimaryDesignToolThisIteration = false
         let documentToolResultsThisIteration: string[] = []
         let documentToolInspectionsThisIteration: unknown[] = []
+        let executedToolsThisIteration: NonNullable<DomainAdapterToolBatchSummary['executedTools']> = []
 
         const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
           toolCalls: toolCallsForIteration,
@@ -1199,6 +1225,14 @@ export class TurnEngine {
             const resultText = result.text
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
+            executedToolsThisIteration.push({
+              toolName,
+              output: result,
+              resultText,
+              parsedJson: result.data && typeof result.data === 'object'
+                ? result.data
+                : tryParseToolResultObject(resultText),
+            })
             host.log(`tool execute: ${toolName}, result=${resultText.slice(0, 140)}`)
             const documentToolInspection = inspectDocumentToolCall(toolName, resultText)
             if (documentToolInspection.isDocumentTool) {
@@ -1231,10 +1265,13 @@ export class TurnEngine {
               executedPrimaryDesignToolThisIteration = true
               designToolLoopState = designResult.state
             }
-            if (result.projectionPatch) {
+            if (result.projectionPatch && !shouldDeferProjectionPatchToAdapter(selectedDomainAdapter?.id, toolName)) {
               transcript.emitStructuredPayload(result.projectionPatch)
             } else {
-              transcript.emitOutput(serializedResult.slice(0, 200), 'tool_result')
+              transcript.emitOutput(
+                result.projectionPatch ? serializedResult : serializedResult.slice(0, 200),
+                'tool_result',
+              )
             }
             params.onResult({
               executedTool,
@@ -1379,6 +1416,7 @@ export class TurnEngine {
             responseText: response.text,
             toolTransport: response.toolTransport,
             toolBatch: {
+              executedTools: executedToolsThisIteration,
               executedDocActionCount,
               executedMutatingDocActionCount,
               executedInspectionDocActionCount,

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
+import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
+import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapter'
+import { SkillDomainAdapter } from '../main/modules/agent-control/skill-domain-adapter'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
@@ -413,7 +417,7 @@ test('TurnEngine emits blocked and done document payloads before finishing the t
   assert.match(toolResults[1].chunk || '', /文档已更新/)
 })
 
-test('TurnEngine promotes tool projection patches into structured transcript truth', async () => {
+test('TurnEngine routes skill tool results through SkillDomainAdapter as a single structured truth patch', async () => {
   const engine = new TurnEngine()
   let toolLoopCalls = 0
   const { request, events } = createRequest({
@@ -425,6 +429,7 @@ test('TurnEngine promotes tool projection patches into structured transcript tru
       confidence: 'high',
     }),
     host: {
+      domainAdapters: [new SkillDomainAdapter()],
       requestToolLoopResponse: async () => {
         toolLoopCalls += 1
         if (toolLoopCalls === 1) {
@@ -435,7 +440,7 @@ test('TurnEngine promotes tool projection patches into structured transcript tru
           }
         }
         return {
-          text: '已记录当前 blocker',
+          text: '好的，我已经记录下来',
           toolCalls: [],
           stopReason: 'stop',
         }
@@ -488,11 +493,197 @@ test('TurnEngine promotes tool projection patches into structured transcript tru
   const structuredEvents = result.projectionTruth?.transcriptEvents?.filter((event) => event.kind === 'structured_payload') || []
   const toolResults = events.filter((event) => event.kind === 'output' && event.type === 'tool_result')
 
-  assert.equal(structuredEvents.length > 0, true)
+  assert.equal(structuredEvents.length, 1)
   assert.equal(result.projectionTruth?.projectionPatch?.module, 'skill')
   assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '技能执行 · video-copy-analyzer')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'input')
   assert.equal(toolResults.some((event) => /"module":"skill"/.test(event.chunk || '')), true)
+})
+
+test('TurnEngine converts rss legacy json results into adapter-owned projection truth', async () => {
+  const engine = new TurnEngine()
+  let toolLoopCalls = 0
+  const legacyResult = {
+    module: 'rss',
+    intent: 'add_rss_source',
+    executionKind: 'deterministic',
+    action: 'rss.addSource',
+    message: 'rss.addSource 已排队执行。',
+    ownerResourceId: 'source-1',
+  }
+  const { request } = createRequest({
+    userText: '添加一个 RSS 订阅',
+    intentClassification: createIntent({
+      primaryDomain: 'rss',
+      mentionedDomains: ['rss'],
+      actionSignals: ['rss-action'],
+      confidence: 'high',
+    }),
+    host: {
+      domainAdapters: [new RSSDomainAdapter()],
+      requestToolLoopResponse: async () => {
+        toolLoopCalls += 1
+        if (toolLoopCalls === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'rss_add_source', input: { name: 'Ready', url: 'https://example.com/rss.xml' } }],
+            stopReason: 'tool_use',
+          }
+        }
+        return {
+          text: 'RSS 已处理完成',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'rss_add_source',
+          input: { name: 'Ready', url: 'https://example.com/rss.xml' },
+          result: {
+            text: JSON.stringify(legacyResult),
+            shape: 'text',
+            data: null,
+            projectionPatch: null,
+            interactionHint: null,
+          },
+          recoveryHistory: [],
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, 'RSS 任务')
+  assert.match(String(result.projectionTruth?.projectionPatch?.taskSummary || ''), /source-1/)
+  assert.equal((result.projectionTruth?.projectionPatch?.steps as Array<{ id: string }>)?.[0]?.id, 'rss_add_source')
+})
+
+test('TurnEngine converts calendar validation errors into blocked adapter projection truth', async () => {
+  const engine = new TurnEngine()
+  let toolLoopCalls = 0
+  const { request } = createRequest({
+    userText: '帮我建个日程',
+    intentClassification: createIntent({
+      primaryDomain: 'calendar',
+      mentionedDomains: ['calendar'],
+      actionSignals: ['calendar-action'],
+      confidence: 'high',
+    }),
+    host: {
+      domainAdapters: [new CalendarDomainAdapter()],
+      requestToolLoopResponse: async () => {
+        toolLoopCalls += 1
+        if (toolLoopCalls === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'calendar_create_event', input: {} }],
+            stopReason: 'tool_use',
+          }
+        }
+        return {
+          text: '等待补充日程信息',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'calendar_create_event',
+          input: {},
+          result: {
+            text: 'Error: title, startTime and endTime are required',
+            shape: 'text',
+            data: null,
+            projectionPatch: null,
+            interactionHint: null,
+          },
+          recoveryHistory: [],
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '日程任务')
+  assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'input')
+  assert.match(String(result.projectionTruth?.projectionPatch?.blockedReason || ''), /required/)
+})
+
+test('TurnEngine converts feishu legacy json results into adapter-owned projection truth', async () => {
+  const engine = new TurnEngine()
+  let toolLoopCalls = 0
+  const legacyResult = {
+    module: 'feishu',
+    intent: 'send_feishu_message',
+    executionKind: 'deterministic',
+    action: 'feishu.messageSend',
+    message: 'Success',
+    msg_id: 'om_dc13264520392913993dd051dba21dcf',
+    chat_id: 'oc_a0553eda9014c201e6969b478895c230',
+  }
+  const { request } = createRequest({
+    userText: '把消息发到飞书',
+    intentClassification: createIntent({
+      primaryDomain: 'feishu',
+      mentionedDomains: ['feishu'],
+      actionSignals: ['feishu-action'],
+      confidence: 'high',
+    }),
+    host: {
+      domainAdapters: [new FeishuDomainAdapter()],
+      runtime: {
+        isChannelTypeAvailable: (channelType: string) => channelType === 'feishu-app',
+        getConversationScope: () => null,
+      },
+      requestToolLoopResponse: async () => {
+        toolLoopCalls += 1
+        if (toolLoopCalls === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'feishu_message_send', input: { chat_id: 'chat-1' } }],
+            stopReason: 'tool_use',
+          }
+        }
+        return {
+          text: '飞书发送完成',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'feishu_message_send',
+          input: { chat_id: 'chat-1' },
+          result: {
+            text: JSON.stringify(legacyResult),
+            shape: 'text',
+            data: null,
+            projectionPatch: null,
+            interactionHint: null,
+          },
+          recoveryHistory: [],
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, '飞书任务')
+  assert.match(String(result.projectionTruth?.projectionPatch?.taskSummary || ''), /om_dc13264520392913993dd051dba21dcf/)
+  assert.equal((result.projectionTruth?.projectionPatch?.steps as Array<{ id: string }>)?.[0]?.id, 'feishu_message_send')
 })
 
 test('TurnEngine surfaces budget-limit text and diagnostics when tool-call budget is exhausted', async () => {
