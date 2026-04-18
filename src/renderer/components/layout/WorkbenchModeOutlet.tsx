@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect } from 'react'
+import { lazy, memo, Suspense, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
@@ -9,11 +9,16 @@ type ModeComponentProps = {
   layoutPhase?: BrowserHostLayoutPhase
 }
 
+type ModeVisualState = 'current' | 'entering' | 'leaving' | 'hidden'
+type ModeDirection = 'forward' | 'backward'
+
 interface ModeSceneProps {
   modeKey: WorkbenchMode
   isActive: boolean
   isMotionSettled: boolean
   browserLayoutPhase: BrowserHostLayoutPhase | null
+  visualState: ModeVisualState
+  direction: ModeDirection
 }
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
@@ -35,7 +40,17 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
 
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
+const MODE_SCENE_TRANSITION_MS = 280
 let hasPreloadedWorkbenchModes = false
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
 
 function ModeFallback() {
   return (
@@ -49,11 +64,13 @@ function ModeFallback() {
 
 function areModeScenePropsEqual(previous: ModeSceneProps, next: ModeSceneProps) {
   if (previous.modeKey !== next.modeKey) return false
-  if (!previous.isActive && !next.isActive) return true
+  if (previous.visualState === 'hidden' && next.visualState === 'hidden') return true
   return (
     previous.isActive === next.isActive
     && previous.isMotionSettled === next.isMotionSettled
     && previous.browserLayoutPhase === next.browserLayoutPhase
+    && previous.visualState === next.visualState
+    && previous.direction === next.direction
   )
 }
 
@@ -62,20 +79,20 @@ const ModeScene = memo(function ModeScene({
   isActive,
   isMotionSettled,
   browserLayoutPhase,
+  visualState,
+  direction,
 }: ModeSceneProps) {
   const ModeComponent = MODE_COMPONENTS[modeKey]
 
   return (
     <div
-      className="absolute inset-0 overflow-hidden"
+      className="workbench-mode-scene"
       style={{
-        display: isActive ? 'block' : 'none',
-        pointerEvents: isActive ? 'auto' : 'none',
-        transform: 'translate3d(0, 0, 0)',
-        opacity: isActive ? 1 : 0,
+        pointerEvents: visualState === 'current' ? 'auto' : 'none',
       }}
       data-workbench-mode-panel={modeKey}
-      data-mode-visual-state={isActive ? 'current' : 'hidden'}
+      data-mode-visual-state={visualState}
+      data-mode-direction={direction}
       aria-hidden={!isActive}
     >
       <Suspense fallback={<ModeFallback />}>
@@ -90,6 +107,23 @@ const ModeScene = memo(function ModeScene({
   )
 }, areModeScenePropsEqual)
 
+interface SceneRuntime {
+  current: WorkbenchMode
+  previous: WorkbenchMode | null
+  direction: ModeDirection
+}
+
+function resolveVisualState(
+  modeKey: WorkbenchMode,
+  runtime: SceneRuntime,
+): ModeVisualState {
+  if (modeKey === runtime.current) {
+    return runtime.previous ? 'entering' : 'current'
+  }
+  if (modeKey === runtime.previous) return 'leaving'
+  return 'hidden'
+}
+
 export default function WorkbenchModeOutlet({
   mode,
   isMotionSettled = true,
@@ -99,13 +133,43 @@ export default function WorkbenchModeOutlet({
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
 }) {
-  useEffect(() => {
+  const previousModeRef = useRef<WorkbenchMode>(mode)
+  const [runtime, setRuntime] = useState<SceneRuntime>({
+    current: mode,
+    previous: null,
+    direction: 'forward',
+  })
+
+  useLayoutEffect(() => {
     if (hasPreloadedWorkbenchModes) return
     hasPreloadedWorkbenchModes = true
     ALL_MODE_LOADERS.forEach((loadMode) => {
       void loadMode()
     })
   }, [])
+
+  useLayoutEffect(() => {
+    if (mode === previousModeRef.current) return
+    const previousMode = previousModeRef.current
+    previousModeRef.current = mode
+    const prevIdx = ALL_WORKBENCH_MODES.indexOf(previousMode)
+    const nextIdx = ALL_WORKBENCH_MODES.indexOf(mode)
+    const direction: ModeDirection = nextIdx >= prevIdx ? 'forward' : 'backward'
+
+    if (prefersReducedMotion()) {
+      setRuntime({ current: mode, previous: null, direction })
+      return
+    }
+
+    setRuntime({ current: mode, previous: previousMode, direction })
+    const timer = window.setTimeout(() => {
+      setRuntime((prev) => (prev.current === mode ? { ...prev, previous: null } : prev))
+    }, MODE_SCENE_TRANSITION_MS + 40)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [mode])
 
   return (
     <div
@@ -114,15 +178,21 @@ export default function WorkbenchModeOutlet({
         background: 'transparent',
       }}
     >
-      {ALL_WORKBENCH_MODES.map((modeKey) => (
-        <ModeScene
-          key={modeKey}
-          modeKey={modeKey}
-          isActive={modeKey === mode}
-          isMotionSettled={isMotionSettled}
-          browserLayoutPhase={browserLayoutPhase}
-        />
-      ))}
+      {ALL_WORKBENCH_MODES.map((modeKey) => {
+        const visualState = resolveVisualState(modeKey, runtime)
+        return (
+          <ModeScene
+            key={modeKey}
+            modeKey={modeKey}
+            isActive={modeKey === runtime.current}
+            isMotionSettled={isMotionSettled}
+            browserLayoutPhase={browserLayoutPhase}
+            visualState={visualState}
+            direction={runtime.direction}
+          />
+        )
+      })}
     </div>
   )
 }
+

@@ -15,7 +15,7 @@ import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
-import { withRitual } from '../modules/overlay/useRitualOverlay'
+import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 
 function ResizeHandle({
   onResize,
@@ -164,6 +164,15 @@ export default function WorkbenchMode() {
   const chatShellWidth = chatPanelVisible ? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE
   const showChatResizeHandle = chatPanelVisible
 
+  const handlePanelResizeStateChange = useCallback((resizing: boolean) => {
+    setIsPanelResizing(resizing)
+    setPanelResizingSignal(resizing)
+  }, [])
+
+  useEffect(() => () => {
+    setPanelResizingSignal(false)
+  }, [])
+
   const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
     if (nextMode === workbenchMode) return
 
@@ -247,7 +256,11 @@ export default function WorkbenchMode() {
 
   return (
     <LiquidSceneProvider mouseContainer={sceneRef}>
-      <div ref={sceneRef} className="workbench-mode-root relative flex h-full flex-col overflow-hidden">
+      <div
+        ref={sceneRef}
+        className="workbench-mode-root relative flex h-full flex-col overflow-hidden"
+        style={{ ['--workbench-right-gutter' as string]: `${chatShellWidth}px` }}
+      >
         <div className="relative z-10 flex h-full flex-col">
           {workspaceInitError && (
             <div
@@ -284,7 +297,7 @@ export default function WorkbenchMode() {
             />
 
             {showSidebarResizeHandle && (
-              <ResizeHandle onResize={handleSidebarResize} direction="right" onResizeStateChange={setIsPanelResizing} />
+              <ResizeHandle onResize={handleSidebarResize} direction="right" onResizeStateChange={handlePanelResizeStateChange} />
             )}
 
             {splitMode ? (
@@ -304,7 +317,7 @@ export default function WorkbenchMode() {
                     browserLayoutPhase={browserLayoutPhase}
                   />
                 </div>
-                <ResizeHandle onResize={handleSplitResize} direction="right" onResizeStateChange={setIsPanelResizing} />
+                <ResizeHandle onResize={handleSplitResize} direction="right" onResizeStateChange={handlePanelResizeStateChange} />
                 <div className="flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
                   <WorkbenchModeOutlet
                     mode={splitMode}
@@ -327,7 +340,7 @@ export default function WorkbenchMode() {
             )}
 
             {showChatResizeHandle && (
-              <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={setIsPanelResizing} />
+              <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={handlePanelResizeStateChange} />
             )}
 
             <ChatPanel shellWidth={chatShellWidth} panelState={chatPanelState} />

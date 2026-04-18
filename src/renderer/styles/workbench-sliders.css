@@ -91,12 +91,7 @@
     background 140ms ease;
 }
 
-.icon-rail-slider__thumb.is-elevated {
-  opacity: 1;
-  border-color: rgba(255, 255, 255, 0.8);
-}
-
-.icon-rail-slider__thumb.is-pressing {
+.icon-rail-slider:has(.icon-rail-slider__button:active) .icon-rail-slider__thumb {
   opacity: 0.92;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.2) 16%, transparent 36%),
@@ -111,7 +106,7 @@
   border-color: rgba(255, 255, 255, 0.54);
 }
 
-.icon-rail-slider__thumb.is-resting {
+.icon-rail-slider[data-expanded='false'] .icon-rail-slider__thumb {
   opacity: 0.78;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.08) 18%, transparent 40%),
@@ -150,7 +145,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-html[data-skin='liquid-glass'] .icon-rail-slider__thumb.is-resting {
+html[data-skin='liquid-glass'] .icon-rail-slider[data-expanded='false'] .icon-rail-slider__thumb {
   opacity: 0.74;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.06) 22%, transparent 44%),
@@ -166,7 +161,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb.is-resting {
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-html[data-skin='liquid-glass'] .icon-rail-slider__thumb.is-pressing {
+html[data-skin='liquid-glass'] .icon-rail-slider:has(.icon-rail-slider__button:active) .icon-rail-slider__thumb {
   opacity: 0.88;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.14) 20%, transparent 42%),

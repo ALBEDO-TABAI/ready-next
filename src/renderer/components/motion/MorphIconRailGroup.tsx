@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ElementType } from 'react'
+import type { CSSProperties, ElementType } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import '../../styles/workbench-sliders.css'
 import {
@@ -22,12 +22,6 @@ interface MorphIconRailGroupProps {
   style?: CSSProperties
 }
 
-const THUMB_REOPEN_DELAY_MS = 140
-const THUMB_REST_SETTLE_MS = 120
-const THUMB_DEPTH_TRANSITION = {
-  duration: 0.14,
-  ease: [0.22, 1, 0.36, 1],
-} as const
 const ICON_RAIL_ITEM_PITCH = 40
 
 export default function MorphIconRailGroup({
@@ -41,87 +35,28 @@ export default function MorphIconRailGroup({
 }: MorphIconRailGroupProps) {
   const reduceMotion = useReducedMotion()
   const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_MOTION_TRANSITION
-  const [thumbId, setThumbId] = useState(activeId)
-  const [thumbState, setThumbState] = useState<'elevated' | 'pressing' | 'resting'>(expanded ? 'elevated' : 'resting')
-  const previousActiveIdRef = useRef(activeId)
-  const previousExpandedRef = useRef(expanded)
-  const slideTimerRef = useRef<number | null>(null)
-  const settleTimerRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (slideTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(slideTimerRef.current)
-      }
-      if (settleTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(settleTimerRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    const previousActiveId = previousActiveIdRef.current
-    const previousExpanded = previousExpandedRef.current
-
-    if (slideTimerRef.current !== null && typeof window !== 'undefined') {
-      window.clearTimeout(slideTimerRef.current)
-      slideTimerRef.current = null
-    }
-    if (settleTimerRef.current !== null && typeof window !== 'undefined') {
-      window.clearTimeout(settleTimerRef.current)
-      settleTimerRef.current = null
-    }
-
-    if (!expanded) {
-      setThumbId(activeId)
-      if (reduceMotion || typeof window === 'undefined') {
-        setThumbState('resting')
-      } else {
-        setThumbState('pressing')
-        settleTimerRef.current = window.setTimeout(() => {
-          setThumbState('resting')
-          settleTimerRef.current = null
-        }, THUMB_REST_SETTLE_MS)
-      }
-    } else if (!previousExpanded) {
-      setThumbId(previousActiveId)
-      setThumbState('elevated')
-
-      if (previousActiveId !== activeId && typeof window !== 'undefined') {
-        slideTimerRef.current = window.setTimeout(() => {
-          setThumbId(activeId)
-          slideTimerRef.current = null
-        }, reduceMotion ? 0 : THUMB_REOPEN_DELAY_MS)
-      }
-    } else {
-      setThumbState('elevated')
-      setThumbId(activeId)
-    }
-
-    previousActiveIdRef.current = activeId
-    previousExpandedRef.current = expanded
-  }, [activeId, expanded, reduceMotion])
-
-  const thumbIndex = Math.max(items.findIndex(({ id }) => id === thumbId), 0)
+  const thumbIndex = Math.max(items.findIndex(({ id }) => id === activeId), 0)
   const thumbOffset = thumbIndex * ICON_RAIL_ITEM_PITCH
 
   return (
     <MotionConfig transition={transition}>
-      <div className={['icon-rail-slider', className].filter(Boolean).join(' ')} style={style}>
+      <div
+        data-expanded={expanded ? 'true' : 'false'}
+        className={['icon-rail-slider', className].filter(Boolean).join(' ')}
+        style={style}
+      >
         <div className="icon-rail-slider__track" />
         <motion.span
           aria-hidden="true"
           className="icon-rail-slider__thumb-shell"
-          animate={reduceMotion ? { y: thumbOffset } : { y: thumbOffset }}
+          animate={{ y: thumbOffset }}
           transition={transition}
         >
-          <span
-            className={`icon-rail-slider__thumb ${thumbState === 'resting' ? 'is-resting' : thumbState === 'pressing' ? 'is-pressing' : 'is-elevated'}`}
-          />
+          <span className="icon-rail-slider__thumb" />
         </motion.span>
         {items.map(({ id, label, icon: Icon }) => {
-          const isActive = thumbId === id && thumbState === 'elevated'
-          const isRemembered = thumbId === id && thumbState !== 'elevated'
+          const isActive = activeId === id && expanded
+          const isRemembered = activeId === id && !expanded
           return (
             <motion.button
               key={id}

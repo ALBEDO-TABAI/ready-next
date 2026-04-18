@@ -4,6 +4,7 @@ import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
+const OVERLAY_LOCK_SELF_HEAL_MS = 600
 
 interface UseBrowserViewBoundsParams {
   isElectron: boolean
@@ -158,9 +159,22 @@ export function useBrowserViewBounds({
     })
   }, [scheduleBoundsSync])
 
-  const syncBrowserVisibility = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
+  const syncBrowserVisibility = useCallback(async (
+    phaseOrOptions?: 'hidden' | 'visible' | { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode; forceBoundsSync?: boolean },
+    maybeOptions?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode; forceBoundsSync?: boolean },
+  ) => {
     if (!isElectron) return
+    const phase: 'auto' | 'hidden' | 'visible' =
+      typeof phaseOrOptions === 'string' ? phaseOrOptions : 'auto'
+    const options = (typeof phaseOrOptions === 'string' ? maybeOptions : phaseOrOptions) ?? {}
+
     const requestToken = ++visibilitySyncTokenRef.current
+
+    if (phase === 'hidden') {
+      window.electronAPI?.browser?.hideAll()
+      return
+    }
+
     if (!isActiveRef.current) {
       window.electronAPI?.browser?.hideAll()
       return
@@ -180,10 +194,21 @@ export function useBrowserViewBounds({
     }
 
     await sendBoundsImmediate({
-      forceExact: options?.forceExact ?? true,
-      syncMode: options?.syncMode ?? 'settled',
+      forceExact: options.forceExact ?? true,
+      syncMode: options.syncMode ?? 'settled',
     })
     if (requestToken !== visibilitySyncTokenRef.current) return
+
+    if (options.forceBoundsSync) {
+      await new Promise<void>((resolve) => {
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+          resolve()
+          return
+        }
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+      })
+      if (requestToken !== visibilitySyncTokenRef.current) return
+    }
 
     const shouldStillShowBrowserView =
       !hasErrorRef.current && overlayLockCountRef.current === 0
@@ -266,14 +291,32 @@ export function useBrowserViewBounds({
   }, [isActive, isVisibleAllowed, syncBrowserVisibility])
 
   useEffect(() => {
+    const pendingSelfHealTimers: number[] = []
+
+    const cancelOldestSelfHeal = () => {
+      const timer = pendingSelfHealTimers.shift()
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+
     const handleOverlayLock = (event: Event) => {
       const detail = (event as CustomEvent<{ locked?: boolean }>).detail
       if (!detail) return
 
       if (detail.locked) {
         overlayLockCountRef.current += 1
+        const selfHealTimer = window.setTimeout(() => {
+          const index = pendingSelfHealTimers.indexOf(selfHealTimer)
+          if (index >= 0) pendingSelfHealTimers.splice(index, 1)
+          if (overlayLockCountRef.current > 0) {
+            overlayLockCountRef.current -= 1
+            console.warn('[ready] overlayLockCount self-healed after', OVERLAY_LOCK_SELF_HEAL_MS, 'ms')
+            void syncBrowserVisibility({ forceExact: true })
+          }
+        }, OVERLAY_LOCK_SELF_HEAL_MS)
+        pendingSelfHealTimers.push(selfHealTimer)
       } else {
         overlayLockCountRef.current = Math.max(0, overlayLockCountRef.current - 1)
+        cancelOldestSelfHeal()
       }
 
       void syncBrowserVisibility({ forceExact: true })
@@ -282,6 +325,8 @@ export function useBrowserViewBounds({
     window.addEventListener(BROWSER_OVERLAY_LOCK_EVENT, handleOverlayLock as EventListener)
     return () => {
       window.removeEventListener(BROWSER_OVERLAY_LOCK_EVENT, handleOverlayLock as EventListener)
+      for (const timer of pendingSelfHealTimers) window.clearTimeout(timer)
+      pendingSelfHealTimers.length = 0
     }
   }, [syncBrowserVisibility])
 

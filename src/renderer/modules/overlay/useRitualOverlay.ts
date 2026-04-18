@@ -61,6 +61,11 @@ const REDUCE_MOTION_FLASH_MS = 80
 let sessionCounter = 0
 let currentAbortController: AbortController | null = null
 let currentCleanup: (() => void) | null = null
+let panelResizingActive = false
+
+export function setPanelResizingSignal(resizing: boolean): void {
+  panelResizingActive = resizing
+}
 
 const resolveTimeline = (stage: RitualStage): RitualTimelineConfig =>
   stage === 'theme-transition' ? THEME_TRANSITION_TIMELINE : MODE_SWITCH_TIMELINE
@@ -119,6 +124,16 @@ export async function withRitual<T>(
   workFn: (args: WithRitualArgs) => Promise<T> | T,
   options: { meta?: RitualMeta } = {},
 ): Promise<T> {
+  if (panelResizingActive) {
+    const noopAbort = new AbortController()
+    const args: WithRitualArgs = {
+      signalReady: () => undefined,
+      abortSignal: noopAbort.signal,
+      setMeta: () => undefined,
+    }
+    return await workFn(args)
+  }
+
   if (currentAbortController) {
     currentAbortController.abort()
   }
@@ -247,6 +262,8 @@ export const __testing__ = {
     }
     currentCleanup = null
     sessionCounter = 0
+    panelResizingActive = false
     useRitualOverlayStore.getState()._setSession(null)
   },
+  getPanelResizingSignal: () => panelResizingActive,
 }

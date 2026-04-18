@@ -45,7 +45,7 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
         background: 'transparent',
         height: WORKBENCH_TOPBAR_HEIGHT,
         paddingLeft: WORKBENCH_TOPBAR_PADDING_LEFT,
-        paddingRight: WORKBENCH_TOPBAR_PADDING_RIGHT,
+        paddingRight: `calc(var(--workbench-right-gutter, 0px) + ${WORKBENCH_TOPBAR_PADDING_RIGHT}px)`,
         borderBottom: '1px solid transparent',
         boxShadow: 'none',
       }}

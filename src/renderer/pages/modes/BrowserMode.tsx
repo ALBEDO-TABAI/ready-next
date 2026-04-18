@@ -50,7 +50,9 @@ export default function BrowserMode({
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
-  const stableFrameRefreshTimerRef = useRef<number | null>(null)
+  const captureTokenConsumedRef = useRef(false)
+  const captureTokenExpiryTimerRef = useRef<number | null>(null)
+  const wasActiveRef = useRef<boolean>(isActive)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -250,10 +252,11 @@ export default function BrowserMode({
     }
   }, [])
 
-  const clearStableFrameRefreshTimer = useCallback(() => {
-    if (stableFrameRefreshTimerRef.current) {
-      window.clearTimeout(stableFrameRefreshTimerRef.current)
-      stableFrameRefreshTimerRef.current = null
+  const CAPTURE_TOKEN_WINDOW_MS = 2000
+  const clearCaptureTokenExpiryTimer = useCallback(() => {
+    if (captureTokenExpiryTimerRef.current) {
+      window.clearTimeout(captureTokenExpiryTimerRef.current)
+      captureTokenExpiryTimerRef.current = null
     }
   }, [])
 
@@ -265,18 +268,43 @@ export default function BrowserMode({
   }, [browserRuntimeReady, clearSurfaceReadyTimer, shouldRevealBrowserHost])
 
   useEffect(() => {
-    clearStableFrameRefreshTimer()
-    if (!isActive || layoutPhase !== 'idle' || !isBrowserHostFullyVisible || activeTab?.loading) return
-
-    stableFrameRefreshTimerRef.current = window.setTimeout(() => {
-      stableFrameRefreshTimerRef.current = null
-      void captureStableFrame()
-    }, 180)
-
-    return () => {
-      clearStableFrameRefreshTimer()
+    if (isActive && !wasActiveRef.current) {
+      captureTokenConsumedRef.current = false
+      clearCaptureTokenExpiryTimer()
+      captureTokenExpiryTimerRef.current = window.setTimeout(() => {
+        captureTokenExpiryTimerRef.current = null
+        captureTokenConsumedRef.current = true
+      }, CAPTURE_TOKEN_WINDOW_MS)
+    } else if (!isActive && wasActiveRef.current) {
+      clearCaptureTokenExpiryTimer()
+      captureTokenConsumedRef.current = true
     }
-  }, [activeTab?.loading, captureStableFrame, clearStableFrameRefreshTimer, isActive, isBrowserHostFullyVisible, layoutPhase])
+    wasActiveRef.current = isActive
+  }, [CAPTURE_TOKEN_WINDOW_MS, clearCaptureTokenExpiryTimer, isActive])
+
+  useEffect(() => {
+    if (!isActive) return
+    if (!browserRuntimeReady || tabs.length === 0) return
+    if (layoutPhase !== 'idle') return
+    if (activeTab?.loading) return
+    if (captureTokenConsumedRef.current) return
+    captureTokenConsumedRef.current = true
+    let cancelled = false
+    void (async () => {
+      const hostHasVisibleFrame = await captureStableFrame()
+      if (cancelled) return
+      if (hostHasVisibleFrame) {
+        setIsBrowserSurfaceReady(true)
+        return
+      }
+      clearSurfaceReadyTimer()
+      surfaceReadyTimerRef.current = window.setTimeout(() => {
+        surfaceReadyTimerRef.current = null
+        setIsBrowserSurfaceReady(true)
+      }, 48)
+    })()
+    return () => { cancelled = true }
+  }, [activeTab?.loading, browserRuntimeReady, captureStableFrame, clearSurfaceReadyTimer, isActive, layoutPhase, tabs.length])
 
   useEffect(() => {
     if (!isElectron) return
@@ -286,39 +314,22 @@ export default function BrowserMode({
 
     const syncVisibleHost = async () => {
       if (!browserRuntimeReady || tabs.length === 0) {
-        await window.electronAPI?.browser?.hideAll?.()
+        await syncBrowserVisibility('hidden')
         return
       }
-      await window.electronAPI?.browser?.hideAll?.()
-      await sendBoundsImmediate({ forceExact: true })
+      await syncBrowserVisibility('hidden')
       if (activeTabId) {
         await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
       }
-      await sendBoundsImmediate({ forceExact: true })
-      await syncBrowserVisibility({ forceExact: true })
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
-      if (cancelled) return
-      const hostHasVisibleFrame = await captureStableFrame()
-      if (cancelled) return
-      if (hostHasVisibleFrame) {
-        setIsBrowserSurfaceReady(true)
-        return
-      }
-      clearSurfaceReadyTimer()
-      surfaceReadyTimerRef.current = window.setTimeout(() => {
-        if (cancelled) return
-        surfaceReadyTimerRef.current = null
-        setIsBrowserSurfaceReady(true)
-      }, 48)
+      await syncBrowserVisibility('visible', { forceBoundsSync: true })
     }
 
     void syncVisibleHost().catch(() => undefined)
 
     return () => {
       cancelled = true
-      clearSurfaceReadyTimer()
     }
-  }, [activeTabId, browserRuntimeReady, clearSurfaceReadyTimer, isElectron, sendBoundsImmediate, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+  }, [activeTabId, browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   // Trailing settle: when motion finishes (layoutPhase flips to idle) and the browser is active,
   // sync once more so the host bounds match the final settled layout. Replaces the 180ms setTimeout
@@ -331,10 +342,10 @@ export default function BrowserMode({
 
   useEffect(() => {
     return () => {
-      clearStableFrameRefreshTimer()
+      clearCaptureTokenExpiryTimer()
       clearSurfaceReadyTimer()
     }
-  }, [clearStableFrameRefreshTimer, clearSurfaceReadyTimer])
+  }, [clearCaptureTokenExpiryTimer, clearSurfaceReadyTimer])
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {

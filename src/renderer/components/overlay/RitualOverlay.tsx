@@ -31,6 +31,13 @@ export function RitualOverlay() {
     lastStageRef.current = session.stage
   }, [session])
 
+  useEffect(() => () => {
+    if (maskActiveRef.current) {
+      void endBrowserMask()
+      maskActiveRef.current = false
+    }
+  }, [])
+
   if (!session) return null
 
   const enterMs = session.timeline.enterDurationMs
