@@ -509,6 +509,10 @@ function TaskCard({
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
   const steps = run.steps || []
+  const PLAN_STEP_COLLAPSE_THRESHOLD = 10
+  const [showAllPlanSteps, setShowAllPlanSteps] = useState(false)
+  const planStepsToRender = showAllPlanSteps ? steps : steps.slice(0, PLAN_STEP_COLLAPSE_THRESHOLD)
+  const hiddenPlanStepCount = Math.max(0, steps.length - planStepsToRender.length)
   const recentArtifacts = run.recentArtifacts || []
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
@@ -651,11 +655,14 @@ function TaskCard({
       </button>
 
       {expanded && !compact && (
-        <div className="flex flex-col" style={{ gap: 2 }}>
+        <div
+          className="flex flex-col"
+          style={{ gap: 2, maxHeight: '60vh', overflowY: 'auto' }}
+        >
           {renderSectionButton('plan')}
           {vm.sections.plan.expanded && steps.length > 0 && (
             <div className="flex flex-col" style={{ gap: 5, paddingBottom: 6 }}>
-              {steps.map((step) => (
+              {planStepsToRender.map((step) => (
                 <div key={step.id} className="flex items-start gap-2">
                   <span
                     style={{
@@ -686,6 +693,44 @@ function TaskCard({
                   </div>
                 </div>
               ))}
+              {hiddenPlanStepCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllPlanSteps(true)}
+                  style={{
+                    alignSelf: 'flex-start',
+                    marginTop: 2,
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    border: '1px dashed var(--border-default)',
+                    background: 'transparent',
+                    fontSize: 10.5,
+                    color: 'var(--text-light)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  展开剩余 {hiddenPlanStepCount} 步
+                </button>
+              )}
+              {showAllPlanSteps && steps.length > PLAN_STEP_COLLAPSE_THRESHOLD && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllPlanSteps(false)}
+                  style={{
+                    alignSelf: 'flex-start',
+                    marginTop: 2,
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    border: '1px dashed var(--border-default)',
+                    background: 'transparent',
+                    fontSize: 10.5,
+                    color: 'var(--text-light)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  收起到前 {PLAN_STEP_COLLAPSE_THRESHOLD} 步
+                </button>
+              )}
             </div>
           )}
 
@@ -2626,7 +2671,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       if (message.type !== 'agent') continue
       const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
       if (!snapshot || !isTaskVisible(snapshot)) continue
-      nextSnapshots[message.id] = renderTaskSnapshotCard(snapshot, `message-snapshot-${message.id}`)
+      nextSnapshots[message.id] = renderTaskSnapshotCard(snapshot, `task-snapshot-${message.id}`)
     }
 
     if (
@@ -2638,7 +2683,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     ) {
       nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
         currentTaskRun,
-        `live-snapshot-${currentTaskRun.responseMessageId}`
+        `task-snapshot-${currentTaskRun.responseMessageId}`
       )
     }
 

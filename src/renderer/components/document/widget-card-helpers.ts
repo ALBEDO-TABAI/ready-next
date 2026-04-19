@@ -3,7 +3,12 @@ import { buildScopedWidgetInlineScript, collectInlineHandlerNames } from './widg
 import { resolveWidgetExportSuggestedName } from './widget-export-snapshot'
 import { applyWidgetPersistedState, type DocumentWidgetPersistedState } from './widget-state-runtime'
 import { sanitizeWidgetHtml } from './widget-sanitizer'
-import { parseShowWidgetFences, tryParseWidgetPayload } from './widget-fence-parser'
+import {
+  buildDocumentWidgetFenceSource,
+  parseShowWidgetFences,
+  tryParseWidgetPayload,
+} from './widget-fence-parser'
+import type { DocumentWidgetComponentSpecSummary } from '../../../shared/document-widget-parse'
 
 export function getWidgetPersistenceKey(title: string, widgetCode: string): string {
   return `${title.trim().toLowerCase()}::${widgetCode.trim().slice(0, 160)}`
@@ -12,17 +17,13 @@ export function getWidgetPersistenceKey(title: string, widgetCode: string): stri
 export function buildWidgetFenceSource(
   title: string,
   widgetCode: string,
-  widgetState?: DocumentWidgetPersistedState | null,
+  options?: {
+    id?: string | null
+    componentSpec?: DocumentWidgetComponentSpecSummary | null
+    widgetState?: DocumentWidgetPersistedState | null
+  },
 ): string {
-  return [
-    '```show-widget',
-    JSON.stringify({
-      title,
-      widget_code: widgetCode,
-      ...(widgetState ? { widget_state: widgetState } : {}),
-    }),
-    '```',
-  ].join('\n')
+  return buildDocumentWidgetFenceSource(title, widgetCode, options)
 }
 
 export function getWidgetModeLabel(widgetCode: string): string {
@@ -206,8 +207,23 @@ async function renderWidgetToPngBase64(
     await waitForAnimationFrame()
     await waitForAnimationFrame()
 
-    const width = Math.max(DEFAULT_WIDGET_EXPORT_WIDTH, Math.ceil(root.scrollWidth || root.getBoundingClientRect().width))
-    const height = Math.max(120, Math.ceil(root.scrollHeight || root.getBoundingClientRect().height))
+    // Prefer the widget's own declared root box over container scroll metrics.
+    // When a widget declares explicit dimensions (e.g. 9:16 1080×1920), using
+    // scrollWidth/scrollHeight can pick up overflow artifacts from mistakenly
+    // added inner 16:9 blocks and produce an exported image with the wrong
+    // aspect ratio. Measuring firstElementChild reflects the widget's own box.
+    const widgetRootElement = (root.firstElementChild as HTMLElement | null) ?? root
+    const widgetRect = widgetRootElement.getBoundingClientRect()
+    const declaredWidth = Math.ceil(widgetRect.width || 0)
+    const declaredHeight = Math.ceil(widgetRect.height || 0)
+    const width = Math.max(
+      120,
+      declaredWidth || Math.ceil(root.scrollWidth || root.getBoundingClientRect().width) || DEFAULT_WIDGET_EXPORT_WIDTH,
+    )
+    const height = Math.max(
+      120,
+      declaredHeight || Math.ceil(root.scrollHeight || root.getBoundingClientRect().height),
+    )
     const clone = root.cloneNode(true) as HTMLElement
     replaceCloneCanvasWithImages(clone, root)
 
@@ -252,7 +268,11 @@ export function renameWidgetFenceTitleInContent(
     if (parsed.widgetCode.trim() !== widgetCode.trim()) continue
 
     const start = match.index ?? 0
-    const replacement = buildWidgetFenceSource(normalizedNextTitle, widgetCode, parsed.widgetState)
+    const replacement = buildWidgetFenceSource(normalizedNextTitle, widgetCode, {
+      id: parsed.id,
+      componentSpec: parsed.componentSpec,
+      widgetState: parsed.widgetState,
+    })
     return `${normalizedSource.slice(0, start)}${replacement}${normalizedSource.slice(start + fullMatch.length)}`
   }
 
@@ -282,7 +302,11 @@ export function mergeWidgetStateMapIntoContent(
 
     const key = getWidgetPersistenceKey(parsed.title || 'widget', parsed.widgetCode)
     const nextState = widgetStateMap[key] || parsed.widgetState || null
-    return buildWidgetFenceSource(parsed.title || 'widget', parsed.widgetCode, nextState)
+    return buildWidgetFenceSource(parsed.title || 'widget', parsed.widgetCode, {
+      id: parsed.id,
+      componentSpec: parsed.componentSpec,
+      widgetState: nextState,
+    })
   })
 }
 

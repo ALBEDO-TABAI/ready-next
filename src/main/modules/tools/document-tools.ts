@@ -79,12 +79,13 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
   },
   {
     name: 'document_update_widget',
-    description: '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。',
+    description: '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。重要：必须保留目标 widget 根元素已声明的宽高与纵横比（例如原先 1080×1920 的 9:16 竖版卡片就不能改成 1920×1080 的 16:9 或在底部追加一个 16:9 的背景块），避免导出图片尺寸与原卡片不一致。',
     action: 'document.updateWidget',
     params: [
       { name: 'target', type: 'string', description: '目标 widget 标题关键词或 1-based 序号', required: true },
       { name: 'widgetCode', type: 'string', description: '可选：新的 widget HTML/SVG/本地交互脚本内容（允许 oninput/onclick 等本地内联事件）', required: false },
       { name: 'componentSpec', type: 'object', description: '可选：结构化 OpenUI 组件规格，例如 { component, props?, dataSource? }。优先使用它而不是自由 HTML。', required: false },
+      { name: 'componentSpecPatch', type: 'object', description: '可选：仅包含变更字段的 componentSpec patch。适合在已有结构化 widget 上做小改。', required: false },
       { name: 'title', type: 'string', description: '可选，更新后的新标题', required: false },
       { name: 'occurrence', type: 'number', description: '当标题命中多个 widget 时，指定第几处（从 1 开始）', required: false },
       { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
@@ -221,8 +222,9 @@ export async function executeDocumentTool(
   if (toolName === 'document_update_widget') {
     const hasWidgetCode = typeof args.widgetCode === 'string' && args.widgetCode.trim().length > 0
     const hasComponentSpec = !!args.componentSpec && typeof args.componentSpec === 'object'
-    if (typeof args.target !== 'string' || (!hasWidgetCode && !hasComponentSpec)) {
-      return 'Error: target and either widgetCode or componentSpec are required'
+    const hasComponentSpecPatch = !!args.componentSpecPatch && typeof args.componentSpecPatch === 'object'
+    if (typeof args.target !== 'string' || (!hasWidgetCode && !hasComponentSpec && !hasComponentSpecPatch)) {
+      return 'Error: target and either widgetCode, componentSpec, or componentSpecPatch are required'
     }
   }
   if (toolName === 'document_remove_widget') {

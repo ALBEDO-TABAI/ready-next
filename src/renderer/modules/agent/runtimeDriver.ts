@@ -1,6 +1,7 @@
 import { deriveScopeRunStatePatch, getActiveScopeRunState, isActiveScopePhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
+import { cancelAllPendingWidgetWrites } from './documentActions'
 import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
 import { extractSkillCommandFromText, runSkillCommand } from './commandHandlers'
@@ -654,6 +655,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           if (!entry || entry.settled) continue
           entry.abort()
         }
+        // Any queued widget writes that haven't yet committed to the store should
+        // treat this as a preempt — bump the per-tab epoch so the runUpdate
+        // closures bail before setTabContent instead of landing old content.
+        if (ids.length > 0) cancelAllPendingWidgetWrites()
       })
       : () => { /* older test stubs */ }
 

@@ -30,6 +30,139 @@ function raceWithTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<
 
 const widgetWriteLocks = new Map<string, Promise<void>>()
 
+// Per-tab epoch: bumped whenever a pending widget write for that tab should be
+// treated as cancelled. runUpdate captures the epoch at enqueue time; before
+// committing to the store it re-checks and bails if the epoch has advanced.
+const widgetWriteEpoch = new Map<string, number>()
+
+export function cancelPendingWidgetWritesForTab(tabId: string): void {
+  widgetWriteEpoch.set(tabId, (widgetWriteEpoch.get(tabId) || 0) + 1)
+}
+
+export function cancelAllPendingWidgetWrites(): void {
+  for (const tabId of Array.from(widgetWriteEpoch.keys())) {
+    widgetWriteEpoch.set(tabId, (widgetWriteEpoch.get(tabId) || 0) + 1)
+  }
+}
+
+function normalizeContentForCompare(input: string): string {
+  return input
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd()
+}
+
+function hashContent(input: string): string {
+  let h1 = 0x811c9dc5
+  let h2 = 0xdeadbeef
+  for (let i = 0; i < input.length; i++) {
+    const c = input.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 16777619)
+    h2 = Math.imul(h2 ^ c, 2246822507)
+  }
+  h1 = (h1 ^ (h1 >>> 16)) >>> 0
+  h2 = (h2 ^ (h2 >>> 13)) >>> 0
+  return `${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`
+}
+
+function describeWidgetSkip(existing: string, incoming: string): {
+  reason: 'byte_identical' | 'normalized_identical' | 'mismatch'
+  summary: string
+  detail: {
+    existingLen: number
+    incomingLen: number
+    existingHash: string
+    incomingHash: string
+    normalizedExistingHash: string
+    normalizedIncomingHash: string
+    firstDiffOffset: number | null
+  }
+} {
+  const normalizedExisting = normalizeContentForCompare(existing)
+  const normalizedIncoming = normalizeContentForCompare(incoming)
+  let firstDiffOffset: number | null = null
+  const minLen = Math.min(existing.length, incoming.length)
+  for (let i = 0; i < minLen; i++) {
+    if (existing.charCodeAt(i) !== incoming.charCodeAt(i)) { firstDiffOffset = i; break }
+  }
+  if (firstDiffOffset === null && existing.length !== incoming.length) firstDiffOffset = minLen
+  const detail = {
+    existingLen: existing.length,
+    incomingLen: incoming.length,
+    existingHash: hashContent(existing),
+    incomingHash: hashContent(incoming),
+    normalizedExistingHash: hashContent(normalizedExisting),
+    normalizedIncomingHash: hashContent(normalizedIncoming),
+    firstDiffOffset,
+  }
+  if (existing === incoming) {
+    return { reason: 'byte_identical', summary: `完全一致 hash=${detail.existingHash} len=${detail.existingLen}`, detail }
+  }
+  if (normalizedExisting === normalizedIncoming) {
+    return {
+      reason: 'normalized_identical',
+      summary: `规范化后一致 len=${detail.existingLen}/${detail.incomingLen} diff@${detail.firstDiffOffset}`,
+      detail,
+    }
+  }
+  return {
+    reason: 'mismatch',
+    summary: `存在实际差异 len=${detail.existingLen}/${detail.incomingLen} diff@${detail.firstDiffOffset}`,
+    detail,
+  }
+}
+
+function logWidgetSkip(scope: string, tabTitle: string, info: ReturnType<typeof describeWidgetSkip>): void {
+  try {
+    // eslint-disable-next-line no-console
+    console.info(`[widget-skip:${scope}]`, { tab: tabTitle, reason: info.reason, ...info.detail })
+  } catch {}
+}
+
+function extractDeclaredWidgetAspect(widgetCode: string): { width: number; height: number } | null {
+  const rootMatch = /<\s*(div|section|svg|article|main)\b([^>]*)>/i.exec(widgetCode)
+  if (!rootMatch) return null
+  const attrs = rootMatch[2] || ''
+  let width: number | null = null
+  let height: number | null = null
+  const styleMatch = /style\s*=\s*["']([^"']*)["']/i.exec(attrs)
+  if (styleMatch) {
+    const style = styleMatch[1] || ''
+    const w = /(?:^|[;\s])width\s*:\s*(\d+(?:\.\d+)?)\s*px/i.exec(style)
+    const h = /(?:^|[;\s])height\s*:\s*(\d+(?:\.\d+)?)\s*px/i.exec(style)
+    if (w) width = parseFloat(w[1])
+    if (h) height = parseFloat(h[1])
+  }
+  if (width == null) {
+    const m = /\bwidth\s*=\s*["']?(\d+(?:\.\d+)?)(?:px)?["']?/i.exec(attrs)
+    if (m) width = parseFloat(m[1])
+  }
+  if (height == null) {
+    const m = /\bheight\s*=\s*["']?(\d+(?:\.\d+)?)(?:px)?["']?/i.exec(attrs)
+    if (m) height = parseFloat(m[1])
+  }
+  if (width && height && width > 0 && height > 0) return { width, height }
+  return null
+}
+
+function assertAspectPreserved(
+  existingCode: string,
+  incomingCode: string,
+): { ok: true } | { ok: false; reason: string } {
+  const oldAspect = extractDeclaredWidgetAspect(existingCode)
+  const newAspect = extractDeclaredWidgetAspect(incomingCode)
+  if (!oldAspect || !newAspect) return { ok: true }
+  const oldRatio = oldAspect.width / oldAspect.height
+  const newRatio = newAspect.width / newAspect.height
+  const drift = Math.abs(oldRatio - newRatio) / oldRatio
+  if (drift <= 0.05) return { ok: true }
+  const flipped = (oldRatio > 1) !== (newRatio > 1)
+  return {
+    ok: false,
+    reason: `widget 根元素声明尺寸从 ${oldAspect.width}×${oldAspect.height}（ratio=${oldRatio.toFixed(3)}）变为 ${newAspect.width}×${newAspect.height}（ratio=${newRatio.toFixed(3)}）${flipped ? '，纵横翻转' : ''}，偏差 ${(drift * 100).toFixed(1)}% 超过 5%。请保持原 widget 的宽高与纵横比。`,
+  }
+}
+
 export interface CommandResult {
   handled: boolean
   text: string
@@ -422,6 +555,16 @@ function updateWidgetInDocument(
   const resolved = resolveWidgetRecord(widgets, target, occurrence)
   if (!resolved.widget) {
     return { content: source, found: false, error: resolved.error }
+  }
+
+  const aspectCheck = assertAspectPreserved(resolved.widget.widgetCode, widgetCode)
+  if (!aspectCheck.ok) {
+    return {
+      content: source,
+      found: false,
+      widget: resolved.widget,
+      error: `widget 更新已拒绝：${aspectCheck.reason}`,
+    }
   }
 
   const nextTitle = typeof title === 'string' && title.trim().length > 0 ? title.trim() : resolved.widget.title
@@ -999,7 +1142,11 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可插入 widget 的文档标签'
     const inserted = insertWidgetIntoDocument(tab.content, title, resolvedWidget.widgetCode, position, sectionTitle, resolvedWidget.componentSpec)
     if (!inserted.inserted) return inserted.error || 'widget 插入失败'
-    if (inserted.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+    if (normalizeContentForCompare(inserted.content) === normalizeContentForCompare(tab.content)) {
+      const skip = describeWidgetSkip(tab.content, inserted.content)
+      logWidgetSkip('insert_widget', tab.title, skip)
+      return `widget 内容未变化，已跳过：${tab.title}（${skip.summary}）`
+    }
     docStore.setTabContent(tab.id, inserted.content)
     if (inserted.updatedExisting) {
       return `已更新同标题 widget（${tab.title}）${inserted.removedDuplicates ? `，并清理 ${inserted.removedDuplicates} 个重复块` : ''}`
@@ -1040,7 +1187,16 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可更新 widget 的文档标签'
 
     const tabId = tab.id
+    const startEpoch = widgetWriteEpoch.get(tabId) || 0
     const runUpdate = async (): Promise<string> => {
+      if ((widgetWriteEpoch.get(tabId) || 0) !== startEpoch) {
+        return `update_widget 已取消：对标签 ${tabId} 的待写入请求已被更高优先级的抢占取消`
+      }
+      const liveTab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+      if (!liveTab || liveTab.id !== tabId) {
+        return `update_widget 已取消：目标文档标签已切换（expected=${tabId}）`
+      }
+      const liveContent = liveTab.content
       const patchCandidate = action.componentSpecPatch && typeof action.componentSpecPatch === 'object' && !Array.isArray(action.componentSpecPatch)
         ? action.componentSpecPatch as Record<string, unknown>
         : null
@@ -1048,7 +1204,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
         patchCandidate && Object.keys(patchCandidate).length > 0 && !widgetCode.trim() && !action.componentSpec,
       )
       if (shouldApplyPatch) {
-        const widgetRecords = collectDocumentWidgets(tab.content)
+        const widgetRecords = collectDocumentWidgets(liveContent)
         const lowerTarget = target.toLowerCase()
         const matches = widgetRecords.filter((record) => record.title === target || record.title.toLowerCase() === lowerTarget)
         const record = typeof occurrence === 'number' && occurrence > 0
@@ -1066,7 +1222,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
             'compile_widget_spec',
           )
           const updated = updateWidgetInDocument(
-            tab.content,
+            liveContent,
             target,
             compiled.widgetCode,
             nextTitle,
@@ -1074,9 +1230,16 @@ export async function performDocAction(action: DocActionPayload): Promise<string
             normalizeComponentSpecForFence(mergedSpec),
           )
           if (!updated.found) return updated.error || 'widget 更新失败'
-          if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
-          docStore.setTabContent(tab.id, updated.content)
-          return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${tab.title}）`
+          if (normalizeContentForCompare(updated.content) === normalizeContentForCompare(liveContent)) {
+            const skip = describeWidgetSkip(liveContent, updated.content)
+            logWidgetSkip('update_widget_patch', liveTab.title, skip)
+            return `widget 内容未变化，已跳过：${liveTab.title}（${skip.summary}）`
+          }
+          if ((widgetWriteEpoch.get(tabId) || 0) !== startEpoch) {
+            return `update_widget 已取消：在写入前被更高优先级的抢占取消`
+          }
+          docStore.setTabContent(liveTab.id, updated.content)
+          return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
         } catch (error) {
           return `widget 更新已拒绝：${error instanceof Error ? error.message : String(error)}`
         }
@@ -1084,11 +1247,18 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
       const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
       if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
-      const updated = updateWidgetInDocument(tab.content, target, resolvedWidget.widgetCode, nextTitle, occurrence, resolvedWidget.componentSpec)
+      const updated = updateWidgetInDocument(liveContent, target, resolvedWidget.widgetCode, nextTitle, occurrence, resolvedWidget.componentSpec)
       if (!updated.found) return updated.error || 'widget 更新失败'
-      if (updated.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
-      docStore.setTabContent(tab.id, updated.content)
-      return `已更新 widget：${nextTitle || updated.widget?.title || target}（${tab.title}）`
+      if (normalizeContentForCompare(updated.content) === normalizeContentForCompare(liveContent)) {
+        const skip = describeWidgetSkip(liveContent, updated.content)
+        logWidgetSkip('update_widget', liveTab.title, skip)
+        return `widget 内容未变化，已跳过：${liveTab.title}（${skip.summary}）`
+      }
+      if ((widgetWriteEpoch.get(tabId) || 0) !== startEpoch) {
+        return `update_widget 已取消：在写入前被更高优先级的抢占取消`
+      }
+      docStore.setTabContent(liveTab.id, updated.content)
+      return `已更新 widget：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
     }
 
     const prev = widgetWriteLocks.get(tabId) || Promise.resolve()
@@ -1114,7 +1284,11 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可删除 widget 的文档标签'
     const removed = removeWidgetFromDocument(tab.content, target, occurrence)
     if (!removed.found) return removed.error || 'widget 删除失败'
-    if (removed.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
+    if (normalizeContentForCompare(removed.content) === normalizeContentForCompare(tab.content)) {
+      const skip = describeWidgetSkip(tab.content, removed.content)
+      logWidgetSkip('remove_widget', tab.title, skip)
+      return `widget 内容未变化，已跳过：${tab.title}（${skip.summary}）`
+    }
     docStore.setTabContent(tab.id, removed.content)
     return `已删除 widget：${removed.widget?.title || target}（${tab.title}）`
   }

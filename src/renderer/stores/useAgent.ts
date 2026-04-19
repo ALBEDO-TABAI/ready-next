@@ -503,6 +503,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       attachments: [],
       filePool: [],
       pendingContinuationIntent: null,
+      taskDisclosureState: {},
     })
     void persistLocalConversationScope(fallbackScope)
 
