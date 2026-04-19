@@ -74,6 +74,81 @@ test('DocumentToolLoopOrchestrator exposes tool-call headroom hints without owni
   assert.deepEqual(hint, { reserveToolCalls: 2 })
 })
 
+test('DocumentToolLoopOrchestrator sanitizes inspection result and emits telemetry on 2nd fallback', () => {
+  const calls: Array<{ name: string; payload: Record<string, unknown> }> = []
+  const orchestrator = new DocumentToolLoopOrchestrator({
+    logMetric: (name, payload) => {
+      calls.push({ name, payload })
+    },
+  })
+  const rawInspection = [
+    '当前文档共有 2 个 widget（my-notes.md）：',
+    '1. 指引 [static-html] · id=widget_abc · 可 patch',
+    '2. 进度卡 [static-html] · id=widget_def · 可 patch',
+    '',
+    '```json',
+    JSON.stringify([
+      { id: 'widget_abc', index: 1, title: '指引', mode: 'static-html', componentHint: null, preview: '', hasState: false, hasComponentSpec: true, canPatch: true, canReplace: true },
+      { id: 'widget_def', index: 2, title: '进度卡', mode: 'static-html', componentHint: null, preview: '', hasState: false, hasComponentSpec: true, canPatch: true, canReplace: true },
+    ]),
+    '```',
+  ].join('\n')
+
+  const state = orchestrator.createState({
+    lastDocumentInspectionResult: rawInspection,
+    forceDocInspectionResultNudges: 1, // 2nd fallback
+  })
+
+  const result = orchestrator.handleNoToolCall({
+    state,
+    forceDocumentTool: true,
+    responseText: '我刚才调用了 document_list_widgets。',
+    toolTransport: 'native',
+  })
+
+  assert.equal(result.finish, true)
+  assert.ok(result.finalText, 'finalText must be present')
+  const finalText = result.finalText || ''
+  assert.notEqual(finalText, rawInspection, 'finalText must not be the raw tool output')
+  assert.equal(finalText.includes('id=widget_'), false, 'finalText must not leak internal ids')
+  assert.equal(finalText.includes('```json'), false, 'finalText must not leak json fence')
+  assert.equal(finalText.includes('· 可 patch'), false, 'finalText must not leak debug markers')
+  assert.match(finalText, /「my-notes\.md」/)
+  assert.match(finalText, /「指引」/)
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.name, 'tool_resolution_violation_post_arbitration')
+  const payload = calls[0]?.payload || {}
+  assert.equal(payload.reason, 'inspection_result_used_as_final_text')
+  assert.equal(payload.stage, 'document_tool_loop_orchestrator')
+  assert.equal(payload.toolTransport, 'native')
+  assert.equal(payload.forceDocInspectionResultNudges, 1)
+})
+
+test('DocumentToolLoopOrchestrator suppresses inspection fallback under text transport', () => {
+  const calls: Array<{ name: string; payload: Record<string, unknown> }> = []
+  const orchestrator = new DocumentToolLoopOrchestrator({
+    logMetric: (name, payload) => {
+      calls.push({ name, payload })
+    },
+  })
+  const state = orchestrator.createState({
+    lastDocumentInspectionResult: '当前文档共有 1 个 widget（x.md）：\n1. A · id=widget_a',
+    forceDocInspectionResultNudges: 1,
+  })
+
+  const result = orchestrator.handleNoToolCall({
+    state,
+    forceDocumentTool: true,
+    responseText: '', // empty — would have hit fallback on native
+    toolTransport: 'text',
+  })
+
+  assert.equal(result.finish, undefined)
+  assert.equal(result.finalText, undefined)
+  assert.equal(calls.length, 0)
+})
+
 test('DocumentToolLoopOrchestrator does not regress to "no mutation" after a save-only follow-up iteration', () => {
   const orchestrator = new DocumentToolLoopOrchestrator()
   const state = orchestrator.createState({

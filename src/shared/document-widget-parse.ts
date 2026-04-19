@@ -349,3 +349,52 @@ export function buildListWidgetsUserFacingText(input: ListWidgetsUserFacingInput
 
   return `已查到${docLabel}中的 ${count} 个 widget，示例：${titlesText} 等。如需编辑，请指出具体标题或序号。`
 }
+
+const INSPECTION_FALLBACK_SENTENCE =
+  '已查询当前文档的 widget 列表。请告诉我你想修改的 widget 标题或序号。'
+
+const LIST_WIDGETS_HEADER_REGEX = /当前文档(?:共有\s*\d+\s*个|没有)\s*widget（([^）]+)）/
+const LIST_WIDGETS_FENCE_REGEX = /```json\s*\n([\s\S]*?)\n?```/
+
+export interface ListWidgetsToolOutputParsed {
+  summaries: DocumentWidgetSummary[]
+  tabTitle: string | null
+}
+
+export function parseListWidgetsToolOutput(raw: string): ListWidgetsToolOutputParsed {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return { summaries: [], tabTitle: null }
+  }
+  const headerMatch = raw.match(LIST_WIDGETS_HEADER_REGEX)
+  const tabTitle = headerMatch?.[1]?.trim() || null
+
+  const fenceMatch = raw.match(LIST_WIDGETS_FENCE_REGEX)
+  if (!fenceMatch) return { summaries: [], tabTitle }
+  const jsonSource = fenceMatch[1]?.trim() || ''
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(jsonSource)
+  } catch {
+    return { summaries: [], tabTitle }
+  }
+  if (!Array.isArray(parsed)) return { summaries: [], tabTitle }
+  const summaries = parsed.filter(
+    (entry): entry is DocumentWidgetSummary =>
+      !!entry && typeof entry === 'object' && typeof (entry as { title?: unknown }).title === 'string',
+  )
+  return { summaries, tabTitle }
+}
+
+export function buildUserFacingInspectionSummary(raw: string | null | undefined): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return INSPECTION_FALLBACK_SENTENCE
+  }
+  const { summaries, tabTitle } = parseListWidgetsToolOutput(raw)
+  if (summaries.length > 0) {
+    return buildListWidgetsUserFacingText({ summaries, tabTitle })
+  }
+  if (/当前文档没有\s*widget/.test(raw)) {
+    return buildListWidgetsUserFacingText({ summaries: [], tabTitle })
+  }
+  return INSPECTION_FALLBACK_SENTENCE
+}

@@ -7,6 +7,12 @@ import {
   type DocumentToolInspection,
   type DocumentToolProgressState,
 } from '../claude-bridge/document-tool-flow'
+import { buildUserFacingInspectionSummary } from '../../../shared/document-widget-parse'
+import { logAgentMetric } from './metrics'
+
+export type DocumentToolLoopOrchestratorDeps = {
+  logMetric?: (name: string, payload: Record<string, unknown>) => void
+}
 
 export interface DocumentToolLoopState {
   forceDocNudges: number
@@ -53,6 +59,12 @@ export interface DocumentStructuredTaskPayload {
 }
 
 export class DocumentToolLoopOrchestrator {
+  private readonly logMetric: (name: string, payload: Record<string, unknown>) => void
+
+  constructor(deps: DocumentToolLoopOrchestratorDeps = {}) {
+    this.logMetric = deps.logMetric ?? logAgentMetric
+  }
+
   createState(initial?: Partial<DocumentToolLoopState>): DocumentToolLoopState {
     return {
       forceDocNudges: initial?.forceDocNudges || 0,
@@ -101,7 +113,11 @@ export class DocumentToolLoopOrchestrator {
 
     if (
       params.state.lastDocumentInspectionResult &&
-      shouldPreferDocumentInspectionResult(params.responseText, params.state.lastDocumentInspectionResult)
+      shouldPreferDocumentInspectionResult(
+        params.responseText,
+        params.state.lastDocumentInspectionResult,
+        params.toolTransport,
+      )
     ) {
       if (params.state.forceDocInspectionResultNudges < 1) {
         return {
@@ -113,9 +129,18 @@ export class DocumentToolLoopOrchestrator {
           preserveAssistantText: params.toolTransport !== 'text',
         }
       }
+      const sanitized = buildUserFacingInspectionSummary(params.state.lastDocumentInspectionResult)
+      this.logMetric('tool_resolution_violation_post_arbitration', {
+        stage: 'document_tool_loop_orchestrator',
+        reason: 'inspection_result_used_as_final_text',
+        toolTransport: params.toolTransport || 'unknown',
+        forceDocInspectionResultNudges: params.state.forceDocInspectionResultNudges,
+        responseTextLen: (params.responseText || '').length,
+        responseTextSample: (params.responseText || '').slice(0, 80),
+      })
       return {
         state: params.state,
-        finalText: params.state.lastDocumentInspectionResult,
+        finalText: sanitized,
         finish: true,
       }
     }

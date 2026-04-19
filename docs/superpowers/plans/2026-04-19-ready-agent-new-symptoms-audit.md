@@ -220,7 +220,7 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
 - 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-linked-yao.md`（approved）。
 - 命令：`npm run typecheck` 全绿；`npm run test` 失败数 16，与 P-1 落地后的基线一致，残留失败均是图标/RSS/calendar/ritual overlay/browser mode 等与 list_widgets 无关的源代码契约测试。
 
-### P-3 · 收紧 orchestrator 的 inspection fallback（避免把失败伪装成答案）
+### P-3 · 收紧 orchestrator 的 inspection fallback（避免把失败伪装成答案）· ✅ 已落地（2026-04-19）
 - `document-tool-loop-orchestrator.ts:116-120`：把 `finalText = lastDocumentInspectionResult` 改成两步：
   1. 第 1 步先 `finalText = buildUserFacingInspectionSummary(lastDocumentInspectionResult)`，即**先消毒**再展示；
   2. 同时 `logAgentMetric('tool_resolution_violation_post_arbitration', { reason: 'inspection_result_used_as_final_text' })`，让它始终可被审计。
@@ -231,6 +231,20 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
   - 第 1 次 fallback 走 nudge；
   - 第 2 次 fallback 走**消毒版** finalText，不含内部 id / JSON 块；
   - `forceDocInspectionResultNudges` 计数行为不回归。
+
+**落地记录**
+- 实现：
+  - 新增共享 helper `parseListWidgetsToolOutput` 与 `buildUserFacingInspectionSummary` 在 `src/shared/document-widget-parse.ts`。前者**仅解析** ```json fence``` 为 `DocumentWidgetSummary[]`（拒非数组、拒缺 title、JSON 损坏回兜底），并用 `/当前文档(?:共有\s*\d+\s*个|没有)\s*widget（([^）]+)）/` 抽 tabTitle。后者空/null/undefined 走统一兜底句 `已查询当前文档的 widget 列表。请告诉我你想修改的 widget 标题或序号。`；`summaries.length > 0` 或识别出 `当前文档没有 widget` 时复用 P-2 的 `buildListWidgetsUserFacingText`；其他完全失败同样走兜底句。**保证**输出不含 `id=widget_` / ` ```json ` / `· 可 patch` / `· 仅整卡替换` / `· 带状态`。
+  - `src/main/modules/claude-bridge/document-tool-flow.ts:61-75` `shouldPreferDocumentInspectionResult` 签名新增第三参数 `toolTransport?: 'native' | 'text'`。顶部短路 `if (toolTransport === 'text') return false`；删除 `/任务已完成/i` 与 `/这是一个查询操作/i` 两条过宽正则；保留 `/调用了\s*\`?document_list_widgets\`?/i` 与 `/如果用户需要我执行其他文档修改操作/i`。空 trimmed 仍然 `return true`（顶部已按 transport 关门）。
+  - `src/main/modules/agent-control/document-tool-loop-orchestrator.ts` 新增可选依赖 `DocumentToolLoopOrchestratorDeps = { logMetric?: ... }`；构造函数签名改为 `constructor(deps: DocumentToolLoopOrchestratorDeps = {})`，**可选默认值**避免破坏 `src/main/modules/claude-bridge/direct-chat.ts:339` 的 `new DocumentToolLoopOrchestrator()`。`handleNoToolCall` 中调 `shouldPreferDocumentInspectionResult` 时透传 `params.toolTransport`；第 2 次 fallback 改为 `finalText = buildUserFacingInspectionSummary(params.state.lastDocumentInspectionResult)` + `this.logMetric('tool_resolution_violation_post_arbitration', { stage: 'document_tool_loop_orchestrator', reason: 'inspection_result_used_as_final_text', toolTransport, forceDocInspectionResultNudges, responseTextLen, responseTextSample })`。
+  - `src/renderer/modules/agent/documentActions.ts:1159-1177` 顶端新增契约注释，提醒 ```json fence``` 被 `parseListWidgetsToolOutput` 消费；渲染侧输出形态**保持不变**，维持 P-2 约定。
+- 测试：
+  - 新增 `src/__tests__/document-inspection-user-facing-summary.test.ts`（12 条）：`parseListWidgetsToolOutput` 正常/fence 缺失/非数组/损坏 JSON/缺 title/空文档 header；`buildUserFacingInspectionSummary` 空/null/undefined/0 widget/1-3 widget/≥4 widget（示例句）/无 fence 兜底/无 header 仍可降级为 `当前文档`。
+  - 扩展 `src/__tests__/document-tool-flow.test.ts`（新增 10 条 transport×正则矩阵）：空+native→true、空+text→false、`任务已完成。` 单独 + native→false（收紧）、`这是一个查询操作。` 单独 + native→false（收紧）、`调用了 document_list_widgets` + native→true、text 通道全关、`如果用户需要我执行其他文档修改操作` 保留、inspection 原文已在 responseText 中则 false。
+  - 扩展 `src/__tests__/document-tool-loop-orchestrator.test.ts`（新增 2 条）：第 2 次 fallback 输出消毒短句（含 `「my-notes.md」` / `「指引」`，**不**含 `id=widget_`、` ```json `、`· 可 patch`），且注入的 `deps.logMetric` 恰被调 1 次、payload 含 `reason: 'inspection_result_used_as_final_text'`、`toolTransport: 'native'`、`forceDocInspectionResultNudges: 1`；`toolTransport: 'text'` + 空 responseText 时不触发 fallback（state/finish/finalText 均不变）。
+  - 现有 `nudges when document inspection result should be surfaced` 用例（L:6-22）继续通过，responseText `我刚才调用了 document_list_widgets，任务已完成。` 仍命中 `/调用了\s*\`?document_list_widgets\`?/i`。
+- 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-stateless-cherny.md`（approved）。
+- 命令：`npm run typecheck` 全绿；`npm run test` 失败数 16，与 P-2 落地后的基线完全一致，残留失败均是图标/RSS/calendar/ritual overlay/browser mode/document tool session context 等与 P-3 无关的源代码合约测试。单独跑 `document-inspection-user-facing-summary.test.ts`（12/12）、`document-tool-flow.test.ts`（14/14）、`document-tool-loop-orchestrator.test.ts`（7/7）全部通过。
 
 ### P-4 · 收紧意图分类，避免 update 被识成 list
 - `document-task-types.ts:32-65`：

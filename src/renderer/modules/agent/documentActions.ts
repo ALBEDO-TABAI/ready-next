@@ -1162,6 +1162,10 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const widgets = collectDocumentWidgets(tab.content)
     if (widgets.length === 0) return `当前文档没有 widget（${tab.title}）`
     const summaries = widgets.map(summarizeWidgetRecord)
+    // Contract: the ```json fence below is consumed by
+    // src/shared/document-widget-parse.ts#parseListWidgetsToolOutput — keep the
+    // fence intact (```json … ```) and the JSON as an array of DocumentWidgetSummary
+    // when modifying output shape.
     return [
       `当前文档共有 ${widgets.length} 个 widget（${tab.title}）：`,
       ...summaries.map((item) => {

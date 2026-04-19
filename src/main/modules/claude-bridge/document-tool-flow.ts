@@ -61,15 +61,15 @@ function isQueuedPlaceholder(result: string): boolean {
 export function shouldPreferDocumentInspectionResult(
   responseText: string | undefined,
   inspectionResult: string | null,
+  toolTransport?: 'native' | 'text',
 ): boolean {
   if (!inspectionResult) return false
+  if (toolTransport === 'text') return false
   const trimmed = (responseText || '').trim()
   if (!trimmed) return true
   if (trimmed.includes(inspectionResult)) return false
   return [
     /调用了\s*`?document_list_widgets`?/i,
-    /这是一个查询操作/i,
-    /任务已完成/i,
     /如果用户需要我执行其他文档修改操作/i,
   ].some((pattern) => pattern.test(trimmed))
 }
