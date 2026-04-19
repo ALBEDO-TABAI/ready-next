@@ -272,12 +272,22 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
 - 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-agile-crescent.md`（approved）。
 - 命令：`npm run typecheck` 全绿（node + web 两段）；`npm run test` 失败数 16，与 P-3 基线完全一致，残留失败均为图标 / RSS / calendar / ritual overlay / browser mode / document tool session context 等与 classifier 无关的源代码合约测试。单独跑 `document-task-classifier.test.ts`（11/11）、`document-task-types.test.ts`（3/3）全通过。
 
-### P-5 · 端到端契约测试：widgetId 下发闭环
+### P-5 · 端到端契约测试：widgetId 下发闭环 · ✅ 已落地（2026-04-19）
 - 新增契约测试：从 "MarkdownEditor 提交 → envelope → pipeline → renderer update_widget patch 分支" 完整链路，验证：
   - envelope 中的 `widgetId` 能到达 `draft.targetWidgetId`；
   - renderer patch 分支按 id 命中；
   - 文档状态被正确更新。
 - 测试文件候选：`src/__tests__/document-task-pipeline-host-contract.test.ts` 或新增 `document-widget-patch-target-resolution.test.ts`。
+
+**落地记录**
+- 实现：新建 `src/__tests__/document-widget-patch-target-resolution.test.ts`，以"Layer-1 runtime + Layer-2 静态契约 + Layer-3 runtime"三层拆分锁定 envelope → executor backfill → renderer patch 三者之间的 wiring，不修改任何实现文件。
+  - Layer-1：`buildRequestEnvelope` 对 `### Widget 更新上下文` 块的解析（2 条）—— 有 / 无 `- widgetId:` 行；缺失时字段为 `null`（`request-envelope.ts:321` 的 `extractNamedBlockValue` 返回 `null`）。
+  - Layer-2：对 `document-task-pipeline-executor.ts` 做正则契约（4 条）—— `envelopeWidgetTarget = …resources.find((resource) => resource.kind === 'widget_target')`；backfill `if (!built.draft.targetWidgetId && envelopeWidgetTarget?.widgetId) { built.draft.targetWidgetId = envelopeWidgetTarget.widgetId }`；`writeDocumentWidget` update 分支 `target = String(params.draft.targetWidgetId || params.draft.targetWidgetTitle || '').trim()`；`tool('document.updateWidget', { target, … componentSpecPatch: params.draft.componentSpecPatch, … })`。
+  - Layer-3：envelope 解析出的 `widgetId` → `performDocAction` 命中（3 条）—— Fixture A（显式 id `widget_guide_fixed`）端到端；匿名 widget 的 FNV 稳定 id 幂等哨兵（正则 `^widget_[a-z0-9]+$`，base36 编码，非 hex）；Fixture B 匿名 widget 通过 `collectDocumentWidgets` 返回的 id 再喂给 `performDocAction` 成功 patch。
+- 修复亮点：首轮测试误用 `/^widget_[a-f0-9]+$/`（hex 假设），被 `hashWidgetIdentity` 的 `toString(36)` 实现打脸（`src/shared/document-widget-parse.ts:74`），及时纠正为 `[a-z0-9]+`。
+- 测试：`src/__tests__/document-widget-patch-target-resolution.test.ts` 9 条全绿（3 个 describe × 2 / 4 / 3 条 it）。
+- 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-polished-crystal.md`（approved）。
+- 命令：`npm run typecheck` 全绿（node + web 两段）；`npm run test` 失败数 16 / 1041，与 P-4 基线完全一致，残留失败均是图标 / RSS / calendar / ritual overlay / browser mode / document tool session context 等与 P-5 无关的源代码合约测试；新增 9 条全部在通过名单。
 
 ### P-6 · 文案与 telemetry 收尾
 - `未找到可更新的 widget：${target}`：当 target 是内部 id（`^widget_[a-f0-9]+$`）时，隐藏 id 本体，展示标题提示："未找到与你选择的卡片对应的 widget，请重新选择或提供标题。"
