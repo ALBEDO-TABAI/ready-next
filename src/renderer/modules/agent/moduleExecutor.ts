@@ -1,6 +1,6 @@
 import { requestModuleAgentAction } from '../../utils/moduleAgentBridge'
 import { createAgentArtifact, mergeArtifacts } from './scopeRunState'
-import { getActiveDocumentSnapshot, mapToolActionToDocAction, performDocAction } from './documentActions'
+import { classifyDocActionFailureReason, getActiveDocumentSnapshot, mapToolActionToDocAction, performDocAction } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
@@ -213,7 +213,7 @@ export async function executeModuleToolAction(
       module: 'document',
       executionKind: 'deterministic',
     })
-    const snapshot = getActiveDocumentSnapshot()
+    const snapshot = getActiveDocumentSnapshot(typeof args.tabId === 'string' ? args.tabId : undefined)
     const summary = snapshot
       ? `已读取当前文档快照：${snapshot.title}（${snapshot.charCount} 字）`
       : '当前没有可读取的活动文档'
@@ -245,12 +245,18 @@ export async function executeModuleToolAction(
       lastEvidenceAt: new Date().toISOString(),
       ...createSingleStepTask('文档任务', summary, new Date().toISOString()),
     })
+    const failureReason = classifyDocActionFailureReason(docAction, summary)
+    const payload: Record<string, unknown> = {
+      intent: tool,
+      summary,
+    }
+    if (failureReason) {
+      payload.ok = false
+      payload.reason = failureReason
+    }
     return {
       handled: true,
-      payload: {
-        intent: tool,
-        summary,
-      },
+      payload,
     }
   }
 

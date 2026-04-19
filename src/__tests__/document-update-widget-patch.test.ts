@@ -192,7 +192,7 @@ describe('update_widget patch 分支目标解析', () => {
     assert.match(updated?.content || '', /"body":"body-next"/)
   })
 
-  it('未找到：id-like target 走 id 文案，不再裸抛内部 id', async () => {
+  it('未找到：id-like target 隐藏内部 id，给出可操作引导', async () => {
     const store = useDocTabs.getState()
     const tab = store.tabs[0]
     store.setTabContent(tab.id, buildGuideFenceFixture())
@@ -203,9 +203,11 @@ describe('update_widget patch 分支目标解析', () => {
       componentSpecPatch: { props: { tone: 'warning' } },
       tabId: tab.id,
     })
-    assert.match(resultId, /id=widget_deadbeef00/)
+    assert.match(resultId, /未找到与你选择的卡片对应的 widget/)
     assert.match(resultId, /共有 1 个 widget/)
-    assert.doesNotMatch(resultId, /可更新的 widget：widget_deadbeef00/)
+    assert.match(resultId, /请重新选择卡片或在消息里提供标题/)
+    assert.doesNotMatch(resultId, /widget_deadbeef00/)
+    assert.doesNotMatch(resultId, /id=widget_/)
 
     const resultTitle = await performDocAction({
       type: 'update_widget',
@@ -214,5 +216,20 @@ describe('update_widget patch 分支目标解析', () => {
       tabId: tab.id,
     })
     assert.match(resultTitle, /未找到标题匹配“不存在的标题”的 widget/)
+  })
+
+  it('未找到：空文档 + id-like target 给出"先插入"提示', async () => {
+    const store = useDocTabs.getState()
+    const tab = store.tabs[0]
+    store.setTabContent(tab.id, '# 空文档\n\n正文，没有 widget。\n')
+
+    const result = await performDocAction({
+      type: 'update_widget',
+      target: 'widget_deadbeef00',
+      componentSpecPatch: { props: { tone: 'warning' } },
+      tabId: tab.id,
+    })
+    assert.equal(result, '当前文档里还没有 widget，请先插入一个再发起修改。')
+    assert.doesNotMatch(result, /widget_deadbeef00/)
   })
 })

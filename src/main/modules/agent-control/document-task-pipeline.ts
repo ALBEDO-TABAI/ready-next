@@ -7,6 +7,7 @@ import {
   buildListWidgetsUserFacingText,
   type DocumentWidgetSummary,
 } from '../../../shared/document-widget-parse'
+import { logAgentMetric } from './metrics'
 
 export type DocumentWidgetPipelinePhase =
   | 'loading_document'
@@ -497,6 +498,12 @@ export class DocumentTaskPipeline {
           budgetMs: budget.totalMs,
         })
         this.deps.log('document pipeline phase=completed status=completed')
+        logAgentMetric('list_widgets_summary_as_final_text', {
+          stage: 'document_task_pipeline.document_list_widgets',
+          widgetCount: listResult.summaries.length,
+          hasTabTitle: Boolean(listResult.tabTitle || snapshot?.title),
+          intent: plan.taskType,
+        })
         return {
           success: true,
           plan,

@@ -32,6 +32,7 @@ import {
 } from './document-task-tool-timing'
 import { DocumentInsightCache } from './document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from './document-source-materials'
+import { logAgentMetric } from './metrics'
 import { runDocumentTaskPlanWithSubtasks } from './document-task-subtask-runner'
 import {
   buildPipelinePhaseOrder,
@@ -1056,6 +1057,17 @@ export class DocumentTaskPipelineExecutor {
         widgetCode: params.draft.widgetCode,
         tabId: params.snapshot.tabId || undefined,
       })
+      if (payload.ok === false && payload.reason === 'target_not_resolved') {
+        logAgentMetric('patch_target_resolution_failed', {
+          stage: 'document_task_pipeline_executor.writeDocumentWidget',
+          targetKind: /^widget_[a-z0-9]+$/.test(target) ? 'internal_id' : 'title_or_index',
+          targetLen: target.length,
+          hadPatch: Boolean(params.draft.componentSpecPatch),
+          hadComponentSpec: Boolean(params.draft.componentSpec),
+          hadWidgetCode: Boolean(params.draft.widgetCode),
+          tabId: params.snapshot.tabId || null,
+        })
+      }
       return typeof payload.summary === 'string' ? payload.summary : `已更新信息卡：${target}`
     }
 

@@ -1211,10 +1211,17 @@ export async function performDocAction(action: DocActionPayload): Promise<string
         const widgetRecords = collectDocumentWidgets(liveContent)
         const resolveResult = resolveWidgetRecord(widgetRecords, target, occurrence)
         if (!resolveResult.widget) {
-          if (widgetRecords.length > 0 && /^widget_[a-z0-9]+$/.test(target)) {
-            return `未找到 id=${target} 对应的 widget（当前文档共有 ${widgetRecords.length} 个 widget，请用标题或序号重试）`
+          const widgetCount = widgetRecords.length
+          const isInternalId = /^widget_[a-z0-9]+$/.test(target)
+          if (isInternalId) {
+            return widgetCount > 0
+              ? `未找到与你选择的卡片对应的 widget（当前文档共有 ${widgetCount} 个 widget），请重新选择卡片或在消息里提供标题。`
+              : `当前文档里还没有 widget，请先插入一个再发起修改。`
           }
-          return resolveResult.error || `未找到可更新的 widget：${target}`
+          if (resolveResult.error) return resolveResult.error
+          return widgetCount > 0
+            ? `未找到可更新的 widget，请用标题或序号重试（当前文档共有 ${widgetCount} 个 widget）。`
+            : `当前文档里还没有 widget，请先插入一个再发起修改。`
         }
         const record = resolveResult.widget
         if (!record.componentSpec) {
@@ -1369,6 +1376,28 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   }
 
   return `不支持的文档动作：${type}`
+}
+
+export type DocActionFailureReason = 'target_not_resolved'
+
+const DOC_ACTION_TARGET_NOT_RESOLVED_PATTERNS: ReadonlyArray<RegExp> = [
+  /未找到与你选择的卡片对应的 widget/,
+  /未找到可更新的 widget，请用标题或序号重试/,
+  /当前文档里还没有 widget，请先插入一个再发起修改/,
+  /未找到序号为\s*\d+\s*的 widget/,
+  /未找到标题匹配.+?的 widget/,
+]
+
+export function classifyDocActionFailureReason(
+  action: DocActionPayload,
+  summary: string,
+): DocActionFailureReason | null {
+  if (!summary) return null
+  const type = String(action.type || '').trim()
+  if (type !== 'update_widget') return null
+  return DOC_ACTION_TARGET_NOT_RESOLVED_PATTERNS.some((re) => re.test(summary))
+    ? 'target_not_resolved'
+    : null
 }
 
 export function mapToolActionToDocAction(tool: string, args: Record<string, unknown>): DocActionPayload | null {

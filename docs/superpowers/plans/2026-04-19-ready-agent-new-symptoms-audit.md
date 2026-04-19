@@ -1,6 +1,6 @@
 ---
 date: 2026-04-19
-status: draft
+status: applied
 scope: ready-agent / document-widget pipeline
 maintainer: Claude (Opus 4.7) · 用户 user@example.com
 superseded-by: TBD
@@ -289,9 +289,52 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
 - 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-polished-crystal.md`（approved）。
 - 命令：`npm run typecheck` 全绿（node + web 两段）；`npm run test` 失败数 16 / 1041，与 P-4 基线完全一致，残留失败均是图标 / RSS / calendar / ritual overlay / browser mode / document tool session context 等与 P-5 无关的源代码合约测试；新增 9 条全部在通过名单。
 
-### P-6 · 文案与 telemetry 收尾
-- `未找到可更新的 widget：${target}`：当 target 是内部 id（`^widget_[a-f0-9]+$`）时，隐藏 id 本体，展示标题提示："未找到与你选择的卡片对应的 widget，请重新选择或提供标题。"
-- 新增 `logAgentMetric` 维度：`patch_target_resolution_failed`、`list_widgets_summary_as_final_text`，便于未来长期观察。
+### P-6 · 文案收尾（不暴露内部 widget id）· ✅ 已落地（2026-04-20）
+- 原 P-6 合并了"文案 + telemetry"，本轮拆成 P-6（仅文案）+ P-7（telemetry + IPC 合约扩展）。P-6 只动 renderer 字符串，零 IPC 契约改动。
+- 目标：任何 `update_widget` patch 失败路径都不再把内部 `widget_xxx` id 本体回显给用户；id-like target 时给出"重选 / 给标题"引导；title/index target 沿用 `resolveWidgetRecord` 的既有友好文案；空文档额外给"先插入"提示。
+
+**落地记录**
+- 实现：`src/renderer/modules/agent/documentActions.ts:1213-1225` 把原先的两分支（`id=${target}` 单行 + `resolveResult.error || 未找到可更新的 widget：${target}`）改为三段式：
+  1. `isInternalId = /^widget_[a-z0-9]+$/.test(target)` 命中 → **不再拼 id 本体**。有 widget：`未找到与你选择的卡片对应的 widget（当前文档共有 N 个 widget），请重新选择卡片或在消息里提供标题。`；空文档：`当前文档里还没有 widget，请先插入一个再发起修改。`
+  2. 非 id target 且 `resolveResult.error` 存在 → 直接走既有 error（保持"未找到序号为 N 的 widget" / "未找到标题匹配 'xxx' 的 widget"）。
+  3. 非 id target 兜底：有 widget → `未找到可更新的 widget，请用标题或序号重试（当前文档共有 N 个 widget）。`；空文档 → 同 1 的"先插入"提示。**兜底文案不再拼 target 原文**，避免反向回显 id。
+- 测试：`src/__tests__/document-update-widget-patch.test.ts:195-232`
+  - 原 `未找到：id-like target 走 id 文案` 用例改为 `未找到：id-like target 隐藏内部 id，给出可操作引导`：断言命中"未找到与你选择的卡片对应的 widget"、"共有 1 个 widget"、"请重新选择卡片或在消息里提供标题"，并显式 `doesNotMatch(widget_deadbeef00)` / `doesNotMatch(id=widget_)`。
+  - 原 title target 未找到的断言保持不变（继续走 `resolveResult.error`）。
+  - 新增 `未找到：空文档 + id-like target 给出"先插入"提示`：文档仅含一行正文（无 widget）→ 断言 result === `当前文档里还没有 widget，请先插入一个再发起修改。` + 不含 `widget_deadbeef00`。
+- 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-lucky-church.md`（approved）。
+- 命令：`npm run typecheck` 全绿（node + web）；`npm run test` 失败数 16 / 1042（原基线 16 / 1041，本轮新增 1 条空文档用例计入 pass，残留失败项完全同 P-5 基线）。`npx tsx --test src/__tests__/document-update-widget-patch.test.ts` 独立跑 17/17 全绿。
+
+### P-7 · Telemetry 收尾（IPC 合约扩展 + 两个新指标）· ✅ 已落地（2026-04-20）
+- 原 P-6 的 telemetry 子目标。新增 `logAgentMetric` 维度：
+  - `patch_target_resolution_failed`：main executor update 分支按 renderer 新回包的 `reason === 'target_not_resolved'` 埋点；
+  - `list_widgets_summary_as_final_text`：main pipeline list 分支每次以 listSummary 作为 finalText 时埋点（常规路径观测，非裁决违反）。
+- IPC 合约扩展：`document.updateWidget` 的 renderer→main payload 现在携带 `{ ok: false, reason: 'target_not_resolved' }`，`executor` 读 `payload.reason` 而不是 regex 匹配 `summary` 字符串；向后兼容，`summary` 合约不变。
+
+**落地记录**
+- 实现（最小侵入路径）：为避免改动 `performDocAction` 返回类型带来的 20+ 测试点 narrowing 成本，走 classifier helper 路径：
+  - **renderer 侧**：`src/renderer/modules/agent/documentActions.ts:1382-1401` 新增 `DocActionFailureReason = 'target_not_resolved'` 类型 + 模块级常量 `DOC_ACTION_TARGET_NOT_RESOLVED_PATTERNS`（覆盖 P-6 的 3 条失败文案 + `resolveWidgetRecord` 的 2 条错误共 5 个正则）+ 纯函数 `classifyDocActionFailureReason(action, summary)`（仅对 `type === 'update_widget'` 生效）。`performDocAction` 签名保持 `Promise<string>` 不变。
+  - **moduleExecutor**：`src/renderer/modules/agent/moduleExecutor.ts:3, 237-261` 引入 classifier，把 `const payload: Record<string, unknown> = { intent, summary }` 作为基底，当 `classifyDocActionFailureReason` 返回非 null 时注入 `payload.ok = false` + `payload.reason = failureReason`。这样 IPC 契约在 `renderer → main` 边界就已携带结构化 reason，等价于"renderer 直接回包 `{ok, reason}`"。
+  - **main executor**：`src/main/modules/agent-control/document-task-pipeline-executor.ts:37, 1046-1072`（其中 `writeDocumentWidget.update` 分支）import `logAgentMetric`；在 `tool('document.updateWidget', …)` 返回 `payload` 之后，当 `payload.ok === false && payload.reason === 'target_not_resolved'` 时 emit `logAgentMetric('patch_target_resolution_failed', { stage, targetKind: 'internal_id' | 'title_or_index', targetLen, hadPatch, hadComponentSpec, hadWidgetCode, tabId })`。**target 本体不落入指标**（避免把 widget id / 标题泄到 ready-agent-metrics.log）。
+  - **main pipeline**：`src/main/modules/agent-control/document-task-pipeline.ts:10, 499-516`（`document_list_widgets` 分支）import `logAgentMetric`；在 `return { success: true, … finalText: buildListWidgetsUserFacingText(…) }` 之前 emit `logAgentMetric('list_widgets_summary_as_final_text', { stage: 'document_task_pipeline.document_list_widgets', widgetCount, hasTabTitle, intent: plan.taskType })`。**tabTitle / widget title 不落入指标**。
+- 测试（新增 3 个测试文件，共 37 条用例全绿）：
+  - `src/__tests__/module-executor-doc-action-payload.test.ts`（12 条）：
+    - `classifyDocActionFailureReason`：5 个正则全部命中、成功文案返回 null、非 update_widget 返回 null、空 summary 返回 null（8 条）；
+    - `executeModuleToolAction`：patch 失败时 payload 含 `ok: false, reason: 'target_not_resolved'`、patch 成功时 payload 只有 `summary`、非 update_widget 即使 summary 含关键词也不会误标记（3 条）；
+    - 防回归哨兵：`DOC_ACTION_TARGET_NOT_RESOLVED_PATTERNS` 必须覆盖 P-6 的 5 条文案样本（1 条，文案改就得同步 classifier）。
+  - `src/__tests__/patch-target-resolution-metric.test.ts`（4 条，**静态契约**）：
+    - executor 必须 `import { logAgentMetric } from './metrics'`；
+    - `payload.ok === false && payload.reason === 'target_not_resolved'` 守卫必须在源码里；
+    - payload 维度必须含 `stage / targetKind 三元运算 / targetLen / hadPatch / hadComponentSpec / hadWidgetCode / tabId`，**不得**出现 `target: target` 或 `targetId: target`（避免写出裸 id）；
+    - moduleExecutor 必须调用 `classifyDocActionFailureReason` 并设 `payload.ok = false` / `payload.reason = failureReason`。
+  - `src/__tests__/document-list-widgets-metric.test.ts`（4 条，**静态契约**）：
+    - pipeline 必须 `import { logAgentMetric } from './metrics'`；
+    - 埋点必须位于 `document_list_widgets` 分支内、`return {` 之前；
+    - payload 必须含 `stage / widgetCount / hasTabTitle / intent`，**不得**出现 `tabTitle: listResult.tabTitle` 或 `title: listResult.tabTitle`；
+    - 指标命名不带 `violation_` 前缀（此为常规路径）。
+- 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-lucky-church.md`（approved）。
+- 命令：`npm run typecheck` 全绿（node + web）；`npm run test` 1046 pass / 16 fail / 1062 tests（较 P-6 基线 1026 pass / 16 fail / 1042 tests 净增 20 pass，残留 16 fail 完全同 P-5 基线，与本次改动无关）。针对 P-7 的 4 个测试文件单独跑 45/45 全绿。`npm run verify` 残留 199 error 均为预先存在的 no-useless-escape / no-control-regex / no-empty 等仓库级 baseline，新改的 4 个源文件 + 4 个测试文件不引入任何新的 lint error。
+- 整轮收尾：审核文档 frontmatter `status` 已从 `draft` 推进到 `applied`。
 
 ---
 
