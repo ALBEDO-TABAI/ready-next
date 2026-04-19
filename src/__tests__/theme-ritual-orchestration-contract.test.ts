@@ -77,7 +77,7 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.doesNotMatch(ritualCss, /\.ready-theme-ritual-base/)
   assert.match(styles, /\.ready-app-bg::before\s*\{[\s\S]*opacity:\s*1/)
   assert.match(styles, /\.ready-app-bg::after\s*\{[\s\S]*opacity:\s*0/)
-  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*calc\(var\(--ritual-hold-duration,\s*440ms\)\s*\+\s*var\(--ritual-leave-duration,\s*720ms\)\s*-\s*80ms\)/)
+  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*calc\(var\(--ritual-hold-duration,\s*440ms\)\s*-\s*40ms\)/)
   assert.match(styles, /html\[data-theme='dark'\]\s+\.ready-app-bg::before\s*\{[\s\S]*opacity:\s*0/)
   assert.match(styles, /html\[data-theme='dark'\]\s+\.ready-app-bg::after\s*\{[\s\S]*opacity:\s*1/)
   assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*0/)

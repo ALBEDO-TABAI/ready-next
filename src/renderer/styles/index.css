@@ -460,6 +460,19 @@ html[data-skin='liquid-glass'] .ready-app-shell {
     background-color calc(var(--ritual-hold-duration, 440ms) - 80ms) cubic-bezier(0.4, 0, 0.6, 1);
 }
 
+/* Hard-swap chrome colors under the ritual's blur+tint. Chrome elements with their own
+   `transition-colors` (Tailwind 150ms) or custom color transitions (icon-rail 320ms) would
+   otherwise keep animating into/past the leave reveal, producing the "tabs finishing color
+   after animation ends" feel. Suppressing transitions on content descendants during the
+   ritual forces the color swap to happen instantly at the data-theme flip, fully hidden
+   under the overlay. The ritual-owned layers (tint, content, bg) keep their own
+   transitions because they are selected directly and not via the descendant rule. */
+html[data-theme-ritual-phase] .ready-app-content *,
+html[data-theme-ritual-phase] .ready-app-content *::before,
+html[data-theme-ritual-phase] .ready-app-content *::after {
+  transition: none !important;
+}
+
 .ready-app-bg {
   position: absolute;
   inset: 0;
@@ -474,7 +487,7 @@ html[data-skin='liquid-glass'] .ready-app-shell {
   content: '';
   position: absolute;
   inset: 0;
-  transition: opacity calc(var(--ritual-hold-duration, 440ms) + var(--ritual-leave-duration, 720ms) - 80ms) cubic-bezier(0.4, 0, 0.6, 1);
+  transition: opacity calc(var(--ritual-hold-duration, 440ms) - 40ms) cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 .ready-app-bg::before {

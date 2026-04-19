@@ -65,7 +65,7 @@ html[data-theme-ritual-phase='holding'][data-theme-ritual-direction='to-light'] 
 
 html[data-theme-ritual-phase='leaving'] .ready-theme-ritual-tint {
   opacity: 0;
-  transition: opacity 500ms cubic-bezier(0.4, 0, 0.6, 1);
+  transition: opacity 360ms cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 /* Only the content layer fades. The shell stays mounted so the ritual base can cover the
