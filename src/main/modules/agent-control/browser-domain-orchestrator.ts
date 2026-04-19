@@ -85,6 +85,7 @@ export class BrowserDomainOrchestrator {
     pureUserInput: string
     sessionMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>
     sessionId?: string
+    hasWidgetTargetContext?: boolean
     decision?: BrowserTaskDecision
     refineDecision?: (decision: BrowserTaskDecision) => Promise<BrowserTaskDecision>
   }): Promise<BrowserExecutionPreparation> {
@@ -94,6 +95,7 @@ export class BrowserDomainOrchestrator {
           userText: params.pureUserInput,
           sessionMessages: params.sessionMessages,
           sessionId: params.sessionId,
+          hasWidgetTargetContext: params.hasWidgetTargetContext,
         })
         : ({ mode: 'free_tool_loop', reason: 'browser_disabled' } as BrowserTaskDecision)
     )

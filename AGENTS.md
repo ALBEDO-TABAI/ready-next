@@ -90,6 +90,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 对实时查询的网页计划，允许先走搜索再落到权威或最新结果页；不要把“没有显式 URL”直接当失败
 - 只有在语义置信度不足、来源冲突或用户目标不明确时，才进入澄清；不要用站点白名单或显式动作词把这类任务硬挡住
 - live-info 语义判断的输入只能是用户的 primary instruction，不能拼上 widget attachment / referenced resources，否则附件正文里的“赛程/比分/天气”等领域词会污染分类，把信息卡修改请求误升级成 browser_workflow
+- 当 `environmentHints.hasWidgetTargetContext = true`（用户携带 `### Widget 更新上下文` 发起对话）时，`intent-classifier` 与 `browser-task-planner.decideTask` 必须跳过 live-info 判定；即使 primary instruction 里出现天气/温度/最新等主题词也不能翻到 browser_workflow。裁决层只会降级工具面板，不会回写 adapter decision，挡板必须在源头
+- `live-info-intent.LOCAL_DOMAIN_HINTS` 需要覆盖常用 widget 口语名词（卡片/信息卡/图表/趋势图/波动图/对比卡/进度卡/…），避免用户用这些词指代 widget 时被误判为 browser 意图
 
 ### 6.10 Agent 工具策略裁决与超时
 - `run-capability-controller.resolveRunCapabilities` 是策略冲突的唯一裁决点：当 `forceDocumentTool × browser_workflow` 或 `widget update/inspect/remove × allowBrowserTools` 这类组合出现时，由它统一降级 `browserDecisionMode` 并重算工具集；上游模块（`browser-task-planner`、`turn-engine` 等）不得再加双重挡板

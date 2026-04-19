@@ -396,6 +396,7 @@ export class BrowserTaskPlanner {
     userText: string
     sessionMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>
     sessionId?: string
+    hasWidgetTargetContext?: boolean
   }): BrowserTaskDecision {
     const text = String(params.userText || '').trim()
     if (!text) return { mode: 'free_tool_loop', reason: 'empty_user_text' }
@@ -417,7 +418,15 @@ export class BrowserTaskPlanner {
     const hasExplicitBrowserAction = /(打开|访问|进入|网页|网站|页面|浏览器|即梦|jimeng)/i.test(text)
     const hasContinuationIntent = /^(继续|接着|下一步|继续在)/i.test(text)
     const requestedSite = this.resolveRequestedBrowserSite(text)
-    const liveInfoIntent = detectLiveInfoIntent(text)
+    // When the caller has explicitly bound the run to a widget target, the user
+    // is editing that card — live-info topic words in their instruction must
+    // not flip the run into browser_workflow. (§6.10 policy arbitration layer
+    // would still demote the tool plan, but it does not rewrite the adapter's
+    // decision mode, so we have to short-circuit here too.)
+    const suppressLiveInfo = Boolean(params.hasWidgetTargetContext)
+    const liveInfoIntent = suppressLiveInfo
+      ? { needsLiveInfo: false, confidence: 'low' as const, topic: 'generic' as const, searchQuery: '', signals: [] as string[] }
+      : detectLiveInfoIntent(text)
     const activeTab = this.deps.getActiveTab()
     const activeContext = `${activeTab?.title || ''} ${activeTab?.url || ''}`.toLowerCase()
     const activeTabLooksCreative = /(jimeng|即梦|创作|生成|image|图像)/.test(activeContext)

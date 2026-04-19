@@ -23,7 +23,7 @@ const SPORTS_PATTERNS = /(比分|赛程|战绩|排名|结果|战报|几比几|�
 const TRANSPORT_PATTERNS = /(航班|高铁|列车|火车|路况|堵车|地铁|延误|票价|余票)/i
 const EXTERNAL_SOURCE_HINTS = /(官网|官方网站|官方|网站|网页|页面|气象台|中国天气网|中央气象台)/i
 const KNOWLEDGE_STYLE_QUESTIONS = /(是什么意思|怎么翻译|英文|英语|定义|原理|为什么|区别|是什么|啥意思|如何理解)/i
-const LOCAL_DOMAIN_HINTS = /(文档|文稿|widget|show-widget|rss|日历|calendar|飞书|feishu|skill|workflow|blocker)/i
+const LOCAL_DOMAIN_HINTS = /(文档|文稿|widget|show-widget|rss|日历|calendar|飞书|feishu|skill|workflow|blocker|信息卡|卡片|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|小工具|提示块|表格)/i
 
 function normalizeSearchQuery(text: string): string {
   let normalized = String(text || '').trim()

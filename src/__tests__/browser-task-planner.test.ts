@@ -234,6 +234,29 @@ describe('BrowserTaskPlanner', () => {
     assert.equal(decision.plan?.targetSearchQuery, '中国气象台')
   })
 
+  it('does not flip to browser_workflow when the caller has bound a widget target, even if the user says weather/score words', () => {
+    // When the user is modifying a specific widget (hasWidgetTargetContext=true),
+    // live-info topic keywords in their instruction must never promote the run
+    // to browser_workflow. Arbitration tables catch the tool-plan fallout but
+    // not the adapter-level decision, so the short-circuit lives here as well.
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '把这张信息卡里最近的温度数据字号调大一点',
+      sessionMessages: [],
+      sessionId: 'scope-widget-weather',
+      hasWidgetTargetContext: true,
+    })
+
+    assert.equal(decision.mode, 'free_tool_loop')
+    assert.equal(decision.reason, 'no_browser_intent')
+  })
+
   it('treats explicit site open requests as browser workflows even without a direct url', () => {
     const planner = new BrowserTaskPlanner({
       getSessionAttachmentHints: () => ({ count: 0 }),

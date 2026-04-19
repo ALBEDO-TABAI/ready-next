@@ -139,6 +139,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
       pureUserInput: params.pureUserInput,
       sessionMessages: params.session.messages,
       sessionId: params.request.sessionId,
+      hasWidgetTargetContext: params.executionIntentContext.hasWidgetTargetContext,
     })
     const skillContextOrchestrator = params.host.skillContextOrchestrator as SkillContextOrchestratorLike
     const explicitSkillRequested = (skillContextOrchestrator.findExplicitlyRequestedSkills?.(params.userText) || []).length > 0
@@ -179,6 +180,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
         pureUserInput: params.pureUserInput,
         sessionMessages: params.session.messages,
         sessionId: params.request.sessionId,
+        hasWidgetTargetContext: params.executionIntentContext.hasWidgetTargetContext,
         decision: refinedDecision,
       })
 

@@ -58,6 +58,33 @@ test('intent classifier recognizes live external info lookups as browser intent'
   assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
 })
 
+test('live-info detection is suppressed when the envelope carries an explicit Widget 更新上下文', () => {
+  // The user is modifying a specific widget and their own words happen to
+  // include a live-info topic keyword (温度/最新). The run must stay on the
+  // document domain — otherwise task-execution-router routes to the browser
+  // executor and the deterministic browser runner will start searching.
+  const userText = [
+    '把这张信息卡里最近的温度数据字号调大一点',
+    '',
+    '### Widget 更新上下文',
+    '- 文档: (未保存草稿)',
+    '- 路径: /tmp/demo.md',
+    '- 标签页ID: doc-1',
+    '- 目标 widget: temperature_card',
+    '- widgetId: widget_temp',
+    '- 当前模式: scripted',
+    '- 约束: 这是现有 widget 更新入口。优先使用 document_update_widget，不要新增第二个同类 widget，修改后保存文档。',
+    '',
+    '```show-widget',
+    '{"title":"temperature_card","widget_code":"<div/>"}',
+    '```',
+  ].join('\n')
+  const result = classifyIntent(buildRequestEnvelope({ userText }))
+
+  assert.notEqual(result.primaryDomain, 'browser')
+  assert.ok(!result.objectSignals.some((item) => /browser-live-info/.test(item)))
+})
+
 test('live-info detection ignores sports/score words carried in widget attachment text', () => {
   // The user wants a cosmetic tweak to an existing widget whose attachment content
   // happens to contain 赛程/比分 — that text must not flip the run into browser_workflow.

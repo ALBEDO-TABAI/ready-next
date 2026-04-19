@@ -90,7 +90,12 @@ function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
   // Live-info detection only consumes the user's own primary instruction — widget
   // attachments and referenced resources carry domain words like 赛程/比分 that
   // would false-positive the sports regex and flip the run into browser_workflow.
-  const liveInfoIntent = detectLiveInfoIntent(envelope.primaryInstruction || '')
+  // When the caller has already bound an explicit Widget 更新上下文, the user is
+  // editing a specific card — never run live-info detection, even if their words
+  // happen to include weather / finance / sports topic keywords.
+  const liveInfoIntent = envelope.environmentHints.hasWidgetTargetContext
+    ? { needsLiveInfo: false, confidence: 'low' as const, signals: [] as string[] }
+    : detectLiveInfoIntent(envelope.primaryInstruction || '')
 
   for (const domain of Object.keys(DOMAIN_OBJECT_PATTERNS) as Array<Exclude<IntentDomain, 'generic'>>) {
     const objectResult = collectSignals(text, DOMAIN_OBJECT_PATTERNS[domain])
