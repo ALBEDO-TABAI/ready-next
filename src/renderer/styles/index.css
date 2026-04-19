@@ -6,6 +6,12 @@
 /* Custom CSS Variables */
 :root {
   color-scheme: light dark;
+  /* Single source of truth for the two workbench canvas colors. The theme-transition ritual
+     overlay picks its own start/end color from these constants — deliberately independent of
+     data-theme — so the ritual can cross-fade between them without snapping when
+     <html data-theme> flips mid-ritual. */
+  --workbench-mode-bg-light: #F6F1E7;
+  --workbench-mode-bg-dark: #192131;
   /* Overlay background used by the theme-transition ritual; tracks the actual canvas color per theme/skin. */
   --ritual-overlay-bg: var(--workbench-mode-bg);
   /* Colors from UI-SPEC-V5.md — Light Mode (default) */
@@ -255,7 +261,7 @@ html[data-skin='liquid-glass'] {
   --bg-primary: #F7F9FC;
   --bg-panel: #EFF3F9;
   --bg-content: #F1F5FB;
-  --workbench-mode-bg: #F6F1E7;
+  --workbench-mode-bg: var(--workbench-mode-bg-light);
   --bg-editor: #FAFCFF;
   --bg-toolbar: #F3F6FB;
   --bg-canvas: #EEF3FA;
@@ -327,7 +333,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --bg-primary: #171D29;
   --bg-panel: #1B2230;
   --bg-content: #141C29;
-  --workbench-mode-bg: #192131;
+  --workbench-mode-bg: var(--workbench-mode-bg-dark);
   --bg-editor: #1B2333;
   --bg-toolbar: #1A2231;
   --bg-canvas: #141A26;
@@ -437,9 +443,21 @@ html[data-skin='liquid-glass'] .ready-app-shell {
   isolation: isolate;
 }
 
-.ready-app-shell > *:not(.ready-app-bg) {
+.ready-app-content {
   position: relative;
+  z-index: 2;
+}
+
+.ready-theme-ritual-tint {
+  position: absolute;
+  inset: 0;
   z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background-color: transparent;
+  transition:
+    opacity 60ms cubic-bezier(0.4, 0, 0.6, 1),
+    background-color calc(var(--ritual-hold-duration, 440ms) - 80ms) cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 .ready-app-bg {
@@ -447,21 +465,42 @@ html[data-skin='liquid-glass'] .ready-app-shell {
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  opacity: var(--app-bg-overlay-opacity, 0);
+  transition: opacity 260ms ease;
+}
+
+.ready-app-bg::before,
+.ready-app-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transition: opacity calc(var(--ritual-hold-duration, 440ms) + var(--ritual-leave-duration, 720ms) - 80ms) cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.ready-app-bg::before {
   background:
     radial-gradient(1240px 700px at 8% 6%, rgba(171, 196, 238, 0.16), transparent 66%),
     radial-gradient(920px 540px at 82% 10%, rgba(170, 208, 235, 0.11), transparent 66%),
     radial-gradient(760px 480px at 52% 90%, rgba(220, 199, 170, 0.08), transparent 72%),
     linear-gradient(142deg, #f3f6fc 0%, #f6f9fd 52%, #f3f6fb 100%);
-  opacity: var(--app-bg-overlay-opacity, 0);
-  transition: opacity 260ms ease;
+  opacity: 1;
 }
 
-html[data-theme='dark'] .ready-app-bg {
+.ready-app-bg::after {
   background:
     radial-gradient(1080px 640px at 10% 6%, rgba(72, 100, 164, 0.24), transparent 66%),
     radial-gradient(860px 520px at 84% 10%, rgba(52, 96, 132, 0.18), transparent 68%),
     radial-gradient(700px 500px at 52% 90%, rgba(66, 74, 112, 0.16), transparent 72%),
     linear-gradient(145deg, #101724 0%, #111a27 52%, #121b2a 100%);
+  opacity: 0;
+}
+
+html[data-theme='dark'] .ready-app-bg::before {
+  opacity: 0;
+}
+
+html[data-theme='dark'] .ready-app-bg::after {
+  opacity: 1;
 }
 
 /* Scrollbar styles */

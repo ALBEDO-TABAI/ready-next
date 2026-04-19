@@ -53,8 +53,12 @@ const MODE_SWITCH_TIMELINE: RitualTimelineConfig = {
 const THEME_TRANSITION_TIMELINE: RitualTimelineConfig = {
   enterDurationMs: 160,
   holdingMinDurationMs: 440,
-  leaveDurationMs: 200,
+  leaveDurationMs: 720,
 }
+
+export const THEME_TRANSITION_ENTER_DURATION_MS = THEME_TRANSITION_TIMELINE.enterDurationMs
+export const THEME_HOLD_DURATION_MS = THEME_TRANSITION_TIMELINE.holdingMinDurationMs
+export const THEME_TRANSITION_LEAVE_DURATION_MS = THEME_TRANSITION_TIMELINE.leaveDurationMs
 
 const REDUCE_MOTION_FLASH_MS = 80
 
@@ -65,6 +69,20 @@ let panelResizingActive = false
 
 export function setPanelResizingSignal(resizing: boolean): void {
   panelResizingActive = resizing
+}
+
+// True when the ritual engine would skip animation entirely (panel-resize in progress,
+// or the user prefers reduced motion). Callers that own DOM mutations wrapped in a ritual
+// should check this first and mutate synchronously instead of entering withRitual — because
+// the bypass paths don't coordinate phase hooks and can leave DOM vs store out of sync.
+export function isRitualBypassActive(): boolean {
+  if (panelResizingActive) return true
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
 }
 
 const resolveTimeline = (stage: RitualStage): RitualTimelineConfig =>

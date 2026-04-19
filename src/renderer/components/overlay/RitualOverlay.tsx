@@ -5,7 +5,6 @@ import ThemeRitualChoreography from './ThemeRitualChoreography'
 
 export function RitualOverlay() {
   const session = useRitualOverlayStore((state) => state.session)
-  const lastStageRef = useRef<string | null>(null)
   const maskActiveRef = useRef(false)
 
   useEffect(() => {
@@ -14,18 +13,27 @@ export function RitualOverlay() {
         void endBrowserMask()
         maskActiveRef.current = false
       }
-      lastStageRef.current = null
       document.documentElement.removeAttribute('data-mode-switching')
+      document.documentElement.removeAttribute('data-theme-ritual-phase')
+      document.documentElement.removeAttribute('data-theme-ritual-direction')
+      document.documentElement.style.removeProperty('--ritual-hold-duration')
+      document.documentElement.style.removeProperty('--ritual-leave-duration')
       return
     }
 
-    if (session.phase === 'entering' || session.phase === 'holding') {
+    const shouldKeepMaskUntilSessionEnd = session.stage === 'theme-transition'
+    const shouldActivateMask =
+      session.phase === 'entering'
+      || session.phase === 'holding'
+      || (shouldKeepMaskUntilSessionEnd && session.phase === 'leaving')
+    if (shouldActivateMask) {
       if (!maskActiveRef.current) {
         beginBrowserMask()
         maskActiveRef.current = true
       }
     }
-    if (session.phase === 'leaving' && maskActiveRef.current) {
+    const shouldReleaseMaskDuringLeaving = session.stage === 'mode-switch' && session.phase === 'leaving'
+    if (shouldReleaseMaskDuringLeaving && maskActiveRef.current) {
       void endBrowserMask()
       maskActiveRef.current = false
     }
@@ -39,7 +47,23 @@ export function RitualOverlay() {
       document.documentElement.removeAttribute('data-mode-switching')
     }
 
-    lastStageRef.current = session.stage
+    // Drive the renderer-owned ritual base + content fade layers off the theme-transition
+    // phase and direction. CSS in ritual-overlay.css keys off these attributes.
+    if (session.stage === 'theme-transition') {
+      document.documentElement.setAttribute('data-theme-ritual-phase', session.phase)
+      document.documentElement.style.setProperty('--ritual-hold-duration', `${session.timeline.holdingMinDurationMs}ms`)
+      document.documentElement.style.setProperty('--ritual-leave-duration', `${session.timeline.leaveDurationMs}ms`)
+      if (session.meta.direction) {
+        document.documentElement.setAttribute('data-theme-ritual-direction', session.meta.direction)
+      } else {
+        document.documentElement.removeAttribute('data-theme-ritual-direction')
+      }
+    } else {
+      document.documentElement.removeAttribute('data-theme-ritual-phase')
+      document.documentElement.removeAttribute('data-theme-ritual-direction')
+      document.documentElement.style.removeProperty('--ritual-hold-duration')
+      document.documentElement.style.removeProperty('--ritual-leave-duration')
+    }
   }, [session])
 
   useEffect(() => () => {
@@ -51,9 +75,6 @@ export function RitualOverlay() {
 
   if (!session) return null
 
-  const enterMs = session.timeline.enterDurationMs
-  const leaveMs = session.timeline.leaveDurationMs
-
   return (
     <div
       data-ritual-overlay=""
@@ -62,8 +83,9 @@ export function RitualOverlay() {
       data-direction={session.meta.direction ?? undefined}
       aria-hidden="true"
       style={{
-        ['--ritual-enter-duration' as string]: `${enterMs}ms`,
-        ['--ritual-leave-duration' as string]: `${leaveMs}ms`,
+        ['--ritual-enter-duration' as string]: `${session.timeline.enterDurationMs}ms`,
+        ['--ritual-leave-duration' as string]: `${session.timeline.leaveDurationMs}ms`,
+        ['--ritual-hold-duration' as string]: `${session.timeline.holdingMinDurationMs}ms`,
       }}
     >
       {session.stage === 'theme-transition' ? <ThemeRitualChoreography /> : null}

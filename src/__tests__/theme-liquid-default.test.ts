@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 const storage = new Map<string, string>()
 const documentAttributes = new Map<string, string>()
 const queuedAnimationFrames: FrameRequestCallback[] = []
-const queuedTimeouts: Array<() => void> = []
+const queuedTimeouts: Array<{ id: number; delay: number | undefined; callback: () => void }> = []
+const nativeThemeCalls: string[] = []
 
 const localStorageMock = {
   getItem: (key: string): string | null => storage.get(key) ?? null,
@@ -49,7 +50,11 @@ type TestWindow = typeof globalThis & {
   document: typeof documentMock
   window: TestWindow
   matchMedia: typeof matchMediaMock
-  electronAPI?: unknown
+  electronAPI?: {
+    theme: {
+      set: (theme: string) => Promise<void>
+    }
+  }
 }
 
 const testWindow = globalThis as TestWindow
@@ -59,7 +64,13 @@ if (typeof testWindow.window === 'undefined') {
   testWindow.window = testWindow
 }
 testWindow.window.matchMedia = matchMediaMock
-testWindow.window.electronAPI = undefined
+testWindow.window.electronAPI = {
+  theme: {
+    set: async (theme: string) => {
+      nativeThemeCalls.push(theme)
+    },
+  },
+}
 testWindow.matchMedia = matchMediaMock
 testWindow.window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
   queuedAnimationFrames.push(callback)
@@ -70,16 +81,18 @@ testWindow.window.cancelAnimationFrame = ((id: number) => {
 }) as typeof cancelAnimationFrame
 testWindow.requestAnimationFrame = testWindow.window.requestAnimationFrame
 testWindow.cancelAnimationFrame = testWindow.window.cancelAnimationFrame
-testWindow.window.setTimeout = ((callback: () => void) => {
-  queuedTimeouts.push(callback)
-  return queuedTimeouts.length as unknown as ReturnType<typeof setTimeout>
+testWindow.window.setTimeout = ((callback: () => void, delay?: number) => {
+  const id = queuedTimeouts.length + 1
+  queuedTimeouts.push({ id, delay, callback })
+  return id as unknown as ReturnType<typeof setTimeout>
 }) as typeof setTimeout
 testWindow.window.clearTimeout = ((id: ReturnType<typeof setTimeout>) => {
-  const index = Number(id) - 1
+  const index = queuedTimeouts.findIndex((entry) => entry.id === Number(id))
   if (index >= 0) queuedTimeouts.splice(index, 1)
 }) as typeof clearTimeout
 
 const { useTheme } = await import('../renderer/stores/useTheme')
+const { useRitualOverlayStore, __testing__: ritualOverlayTesting } = await import('../renderer/modules/overlay/useRitualOverlay')
 
 function flushAnimationFrame() {
   const callback = queuedAnimationFrames.shift()
@@ -87,16 +100,33 @@ function flushAnimationFrame() {
 }
 
 function flushTimeout() {
-  const callback = queuedTimeouts.shift()
-  callback?.()
+  const entry = queuedTimeouts.shift()
+  entry?.callback()
+}
+
+function flushTimeoutByDelay(delay: number) {
+  const index = queuedTimeouts.findIndex((entry) => entry.delay === delay)
+  if (index < 0) {
+    throw new Error(`No queued timeout with delay ${delay}`)
+  }
+  const [entry] = queuedTimeouts.splice(index, 1)
+  entry.callback()
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve()
+  await Promise.resolve()
 }
 
 describe('useTheme liquid default', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    ritualOverlayTesting.resetRitualOverlay()
+    await flushMicrotasks()
     storage.clear()
     documentAttributes.clear()
     queuedAnimationFrames.length = 0
     queuedTimeouts.length = 0
+    nativeThemeCalls.length = 0
     documentAttributes.set('data-theme', 'light')
     useTheme.setState({
       theme: 'light',
@@ -127,5 +157,27 @@ describe('useTheme liquid default', () => {
     assert.strictEqual(storage.get('ready-theme'), 'dark')
     // The legacy transition flag is no longer set — transitions live on the overlay, not the <html> element.
     assert.strictEqual(documentAttributes.get('data-theme-transitioning'), undefined)
+  })
+
+  it('defers native theme sync until the renderer-side hold finishes in the non-reduced-motion path', async () => {
+    useTheme.getState().setTheme('dark')
+
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'entering')
+    assert.deepStrictEqual(nativeThemeCalls, [])
+
+    flushTimeoutByDelay(160)
+    await flushMicrotasks()
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'holding')
+
+    flushAnimationFrame()
+    await flushMicrotasks()
+
+    assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
+    assert.deepStrictEqual(nativeThemeCalls, [])
+
+    flushTimeoutByDelay(440)
+    await flushMicrotasks()
+
+    assert.deepStrictEqual(nativeThemeCalls, ['dark'])
   })
 })

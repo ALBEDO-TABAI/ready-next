@@ -14,8 +14,20 @@
   background: transparent;
 }
 
+/* Theme-transition overlay keeps only the SVG choreography. The renderer-owned ritual base
+   now supplies the single full-screen surface that cross-fades from light to dark (or back). */
 [data-ritual-overlay][data-stage='theme-transition'] {
-  background: var(--ritual-overlay-bg);
+  background: transparent;
+  will-change: opacity;
+}
+
+/* Opacity fade-in on mount. Without @starting-style the element matches
+   [data-phase='entering'] on first paint and skips the transition — it would pop in at
+   opacity:1, which reads as a hard "content disappears" cut instead of a fade. */
+@starting-style {
+  [data-ritual-overlay][data-stage='theme-transition'][data-phase='entering'] {
+    opacity: 0;
+  }
 }
 
 [data-ritual-overlay][data-phase='entering'],
@@ -26,8 +38,79 @@
 
 [data-ritual-overlay][data-phase='leaving'] {
   opacity: 0;
-  transition-duration: var(--ritual-leave-duration, 200ms);
-  transition-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
+  transition: opacity var(--ritual-leave-duration, 200ms) cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* Cross-fade the app's own glass background between light and dark. The app itself remains
+   the glass surface; this tint layer only adds the subtle color drift during the ritual. */
+html[data-theme-ritual-phase='entering'][data-theme-ritual-direction='to-dark'] .ready-theme-ritual-tint {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--workbench-mode-bg-light) 14%, transparent);
+}
+
+html[data-theme-ritual-phase='holding'][data-theme-ritual-direction='to-dark'] .ready-theme-ritual-tint {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--workbench-mode-bg-dark) 18%, transparent);
+}
+
+html[data-theme-ritual-phase='entering'][data-theme-ritual-direction='to-light'] .ready-theme-ritual-tint {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--workbench-mode-bg-dark) 18%, transparent);
+}
+
+html[data-theme-ritual-phase='holding'][data-theme-ritual-direction='to-light'] .ready-theme-ritual-tint {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--workbench-mode-bg-light) 14%, transparent);
+}
+
+html[data-theme-ritual-phase='leaving'] .ready-theme-ritual-tint {
+  opacity: 0;
+  transition: opacity 500ms cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* Only the content layer fades. The shell stays mounted so the ritual base can cover the
+   app without exposing the native window or BrowserView underneath. The residual blur keeps
+   the existing glass state visible instead of collapsing into a solid shell. */
+.ready-app-content {
+  opacity: 1;
+  will-change: opacity;
+  filter: none;
+  transition: opacity 0ms linear, filter 0ms linear;
+}
+
+html[data-theme-ritual-phase='entering'] .ready-app-content {
+  opacity: 0.08;
+  filter: blur(14px) saturate(0.82);
+  transition:
+    opacity 120ms cubic-bezier(0.4, 0, 0.6, 1),
+    filter 120ms cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+html[data-theme-ritual-phase='holding'] .ready-app-content {
+  opacity: 0.08;
+  filter: blur(14px) saturate(0.82);
+  transition: opacity 0ms, filter 0ms;
+}
+
+html[data-theme-ritual-phase='leaving'] .ready-app-content {
+  opacity: 1;
+  filter: none;
+  transition:
+    opacity 600ms cubic-bezier(0.4, 0, 0.6, 1) 40ms,
+    filter 600ms cubic-bezier(0.4, 0, 0.6, 1) 40ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme-ritual-phase] .ready-theme-ritual-tint {
+    opacity: 0 !important;
+    transition: none !important;
+  }
+
+  html[data-theme-ritual-phase] .ready-app-content {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+  }
 }
 
 [data-ritual-reduce-flash] {

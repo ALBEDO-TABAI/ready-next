@@ -24,6 +24,13 @@ test('RitualOverlay unmount cleanup releases any held BrowserView mask', () => {
   )
 })
 
+test('theme-transition keeps the BrowserView mask until the session fully ends, while mode-switch still releases on leaving', () => {
+  const source = readWorkspaceFile('src/renderer/components/overlay/RitualOverlay.tsx')
+
+  assert.match(source, /const shouldReleaseMaskDuringLeaving = session\.stage === 'mode-switch' && session\.phase === 'leaving'/)
+  assert.match(source, /if \(shouldReleaseMaskDuringLeaving && maskActiveRef\.current\) \{/)
+})
+
 test('withRitual short-circuits while a panel is being resized, so no overlay interferes with drag', () => {
   const source = readWorkspaceFile('src/renderer/modules/overlay/useRitualOverlay.ts')
 
