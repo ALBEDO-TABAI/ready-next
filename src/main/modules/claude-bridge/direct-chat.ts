@@ -281,6 +281,7 @@ export class DirectChatEngine extends EventEmitter {
     tool: string
     args: Record<string, unknown>
     }) => Promise<Record<string, unknown>>) | null = null
+  private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
   private maxToolIterations = 24
 
   constructor() {
@@ -501,6 +502,12 @@ export class DirectChatEngine extends EventEmitter {
     this.rendererToolActionRequester = requester
   }
 
+  setCancelPendingToolActions(
+    canceller: ((agent: string, sessionId?: string) => void) | null,
+  ): void {
+    this.cancelPendingToolActions = canceller
+  }
+
   getAIConfig(): AIModelConfig | null {
     try {
       const raw = settingsRepository.getSetting('ai_model_config')
@@ -700,6 +707,11 @@ export class DirectChatEngine extends EventEmitter {
       ? sanitizedContinuationRequest.requestEnvelope
       : executionOptions?.requestEnvelope
     if (session.abortController) {
+      try {
+        this.cancelPendingToolActions?.(name, sessionId)
+      } catch (cancelError) {
+        log(`sendMessage cancelPendingToolActions failed: ${(cancelError as Error)?.message || cancelError}`)
+      }
       session.generation += 1
       session.abortController.abort()
       session.abortController = null

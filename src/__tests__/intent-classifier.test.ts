@@ -57,3 +57,26 @@ test('intent classifier recognizes live external info lookups as browser intent'
   assert.equal(result.crossDomain, false)
   assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
 })
+
+test('live-info detection ignores sports/score words carried in widget attachment text', () => {
+  // The user wants a cosmetic tweak to an existing widget whose attachment content
+  // happens to contain 赛程/比分 — that text must not flip the run into browser_workflow.
+  // (The attachment is injected via the @[...] reference + a "--- 附件: ..." block.)
+  const userText = [
+    '@[lck_week_preview_9_16] 让下方留白少一点',
+    '',
+    '--- 附件: lck_week_preview_9_16 ---',
+    '- 路径: document-widget://lck_week_preview_9_16',
+    '# lck_week_preview_9_16',
+    '这周 LCK 赛程',
+    '- T1 vs GEN, 比分 3:2',
+    '- DK vs HLE, 比分 2:1',
+  ].join('\n')
+  const result = classifyIntent(buildRequestEnvelope({ userText }))
+
+  // Primary user instruction is just a cosmetic tweak — no sports/score words.
+  // Without B1, the sports regex in live-info matches 赛程/比分 inside the
+  // attachment block and pushes primaryDomain to 'browser'.
+  assert.notEqual(result.primaryDomain, 'browser')
+  assert.ok(!result.objectSignals.some((item) => /browser-live-info/.test(item)))
+})

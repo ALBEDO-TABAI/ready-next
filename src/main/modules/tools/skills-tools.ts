@@ -7,6 +7,9 @@ import type {
   SkillInputValue,
   SkillParamDefinition,
 } from '../../../shared/skill-execution-types'
+import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
+
+export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
 
 type ToolParam = SkillParamDefinition
 
@@ -93,10 +96,6 @@ const EXECUTION_TOOL_DEFS: SkillToolDef[] = [
   },
 ]
 
-export const STATIC_SKILL_TOOL_NAMES: string[] = [
-  ...Object.values(STATIC_TOOL_NAMES),
-  ...EXECUTION_TOOL_DEFS.map((tool) => tool.name),
-]
 
 function sanitizeToolToken(value: string): string {
   return value

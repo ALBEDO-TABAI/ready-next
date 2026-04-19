@@ -1,6 +1,7 @@
 import { buildRequestEnvelope } from './request-envelope'
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
+import { logAgentMetric } from './metrics'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import {
@@ -317,6 +318,11 @@ function assertNoToolResolutionViolation(params: {
   visibleCapabilityGroupIds: CapabilityGroupId[]
   allowedToolNames: string[]
 }): void {
+  // Metric-only post-arbitration. The arbitration layer in
+  // run-capability-controller.ts is the single authority for resolving
+  // forceDocumentTool × browser_workflow and related conflicts. If a violation
+  // still reaches this checkpoint, it signals an arbitration regression —
+  // surface it as telemetry + warn log, but never throw at the user.
   const invariantViolations = new Set(params.resolution?.invariantViolations || [])
   const requestStageViolation = buildBrowserToolInvariantViolation({
     allowBrowserTools: params.allowBrowserTools,
@@ -333,14 +339,25 @@ function assertNoToolResolutionViolation(params: {
     invariantViolations: Array.from(invariantViolations),
   }
   params.state.setToolResolution(mergedResolution)
-  params.host.log(`[tool_resolution_error] ${JSON.stringify({
+  params.host.log(`[tool_resolution_warning] ${JSON.stringify({
     stage: params.stage,
     invariantViolations: mergedResolution.invariantViolations,
     allowBrowserTools: params.allowBrowserTools,
     visibleCapabilityGroupIds: params.visibleCapabilityGroupIds,
     allowedToolNames: params.allowedToolNames,
+    note: 'post_arbitration_violation — arbitration layer regression',
   })}`)
-  throw new Error('浏览器工具名单组装异常，本轮已停止请求')
+  try {
+    logAgentMetric('tool_resolution_violation_post_arbitration', {
+      stage: params.stage,
+      invariantViolations: mergedResolution.invariantViolations,
+      allowBrowserTools: params.allowBrowserTools,
+      visibleCapabilityGroupIds: params.visibleCapabilityGroupIds,
+      allowedToolNames: params.allowedToolNames,
+    })
+  } catch {
+    // metrics must never break the turn
+  }
 }
 
 export class TurnEngine {
@@ -675,15 +692,6 @@ export class TurnEngine {
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
-      assertNoToolResolutionViolation({
-        state,
-        host,
-        stage: 'tool_loop_request',
-        resolution: state.toolResolution,
-        allowBrowserTools: toolPolicy.allowBrowserTools,
-        visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
-        allowedToolNames: routedAllowedToolNames,
-      })
       appendSessionMessages(session, selectedDomainPrepareResult?.sessionMessages)
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
         state.interactionState = 'resuming'

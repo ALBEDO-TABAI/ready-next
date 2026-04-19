@@ -87,7 +87,10 @@ function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
     ...envelope.referencedResources.map((ref) => ref.value),
   ].filter(Boolean).join('\n')
   const signals: DomainSignal[] = []
-  const liveInfoIntent = detectLiveInfoIntent(text)
+  // Live-info detection only consumes the user's own primary instruction — widget
+  // attachments and referenced resources carry domain words like 赛程/比分 that
+  // would false-positive the sports regex and flip the run into browser_workflow.
+  const liveInfoIntent = detectLiveInfoIntent(envelope.primaryInstruction || '')
 
   for (const domain of Object.keys(DOMAIN_OBJECT_PATTERNS) as Array<Exclude<IntentDomain, 'generic'>>) {
     const objectResult = collectSignals(text, DOMAIN_OBJECT_PATTERNS[domain])

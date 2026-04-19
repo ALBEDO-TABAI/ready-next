@@ -150,6 +150,12 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     this.engine.setRendererToolActionRequester(requester)
   }
 
+  setCancelPendingToolActions(
+    canceller: ((agent: string, sessionId?: string) => void) | null,
+  ): void {
+    this.engine.setCancelPendingToolActions(canceller)
+  }
+
   async send(
     agent: string,
     message: string | MultimodalBlock[],

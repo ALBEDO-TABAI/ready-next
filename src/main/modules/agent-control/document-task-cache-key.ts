@@ -24,6 +24,7 @@ export function buildDocumentTaskStepCacheKey(params: {
     title: string
     path: string | null
     tabId?: string | null
+    content?: string
   } | null
 }): string {
   const targetBinding = params.job.bindings.find((binding) => binding.role === 'target_document')?.resource || null
@@ -39,7 +40,7 @@ export function buildDocumentTaskStepCacheKey(params: {
     .map((binding) => {
       const identity = binding.resource.path || binding.resource.name
       const textHash = binding.role === 'target_document'
-        ? 'target'
+        ? hashText(params.targetSnapshot?.content ?? binding.resource.text ?? '')
         : hashText(binding.resource.text)
       return `${binding.role}:${identity}:${textHash}`
     })

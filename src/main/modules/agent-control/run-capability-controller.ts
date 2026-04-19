@@ -8,6 +8,15 @@ import type { ToolVisibilityPlan } from './run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { buildExecutionToolState, type ExecutionIntentContext } from './execution-intent-resolver'
+import { logAgentMetric } from './metrics'
+import {
+  MAX_ARBITRATION_RECURSION,
+  resolvePolicyConflicts,
+  type PolicyArbitration,
+  type PolicyConflictType,
+} from './policy-arbitration'
+
+export type { PolicyArbitration, PolicyConflictType }
 
 export interface HostShortcutDecision {
   kind: 'none' | 'openclaw'
@@ -43,6 +52,7 @@ export interface PreparedRunCapabilities {
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
   toolResolution: import('./run-contracts').ToolResolutionDiagnostics
+  arbitration: PolicyArbitration
   _baseParams: RunCapabilityBaseParams
 }
 
@@ -55,6 +65,7 @@ export interface ReconciledRunCapabilities {
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
   toolResolution: import('./run-contracts').ToolResolutionDiagnostics
+  arbitration: PolicyArbitration
 }
 
 function extractOpenclawPairingCommand(userText: string): string | null {
@@ -114,7 +125,10 @@ function buildCapabilityLogLine(params: {
   ].join(', ')
 }
 
-function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<PreparedRunCapabilities, '_baseParams'> {
+function resolveRunCapabilities(
+  baseParams: RunCapabilityBaseParams,
+  recursionDepth = 0,
+): Omit<PreparedRunCapabilities, '_baseParams'> {
   const { visibilityPlan, toolPolicy, capabilityResolution } = buildExecutionToolState({
     config: baseParams.config,
     capabilityProfile: baseParams.capabilityProfile,
@@ -135,6 +149,46 @@ function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<Prepa
     browserHostAvailable: baseParams.runtimeAvailability.browserHostAvailable,
     feishuConnected: baseParams.runtimeAvailability.feishuConnected,
   })
+
+  const { conflicts, demotedBrowserDecisionMode } = resolvePolicyConflicts({
+    toolPolicy,
+    browserDecisionMode: baseParams.browserDecisionMode,
+    executionIntentContext: baseParams.executionIntentContext,
+  })
+
+  if (
+    conflicts.length > 0 &&
+    demotedBrowserDecisionMode &&
+    demotedBrowserDecisionMode !== baseParams.browserDecisionMode &&
+    recursionDepth < MAX_ARBITRATION_RECURSION
+  ) {
+    const resolutionApplied = [`demote_browser_decision:${baseParams.browserDecisionMode}->${demotedBrowserDecisionMode}`]
+    for (const conflict of conflicts) {
+      try {
+        logAgentMetric('policy_conflict_resolved', {
+          conflictType: conflict,
+          from: baseParams.browserDecisionMode,
+          to: demotedBrowserDecisionMode,
+          documentWidgetTaskKind: baseParams.executionIntentContext.documentWidgetTaskKind || null,
+          forceDocumentTool: toolPolicy.forceDocumentTool,
+        })
+      } catch {
+        // metrics must never break the resolver
+      }
+    }
+    const nested = resolveRunCapabilities(
+      { ...baseParams, browserDecisionMode: demotedBrowserDecisionMode },
+      recursionDepth + 1,
+    )
+    return {
+      ...nested,
+      arbitration: {
+        conflictsDetected: conflicts,
+        resolutionApplied: [...resolutionApplied, ...nested.arbitration.resolutionApplied],
+        recursionDepth: nested.arbitration.recursionDepth + 1,
+      },
+    }
+  }
 
   const runtimeSnapshot = buildCapabilityRuntimeSnapshot({
     config: baseParams.config,
@@ -168,6 +222,11 @@ function resolveRunCapabilities(baseParams: RunCapabilityBaseParams): Omit<Prepa
       hasIncomingVideo: baseParams.hasIncomingVideo,
     }),
     toolResolution: toolBundle.toolResolution,
+    arbitration: {
+      conflictsDetected: conflicts,
+      resolutionApplied: [],
+      recursionDepth: 0,
+    },
   }
 }
 

@@ -89,6 +89,13 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 语义判断优先级高于“当前文档上下文”或“最近在改 widget”这类环境噪声，避免把实时查询误路由到 document/design
 - 对实时查询的网页计划，允许先走搜索再落到权威或最新结果页；不要把“没有显式 URL”直接当失败
 - 只有在语义置信度不足、来源冲突或用户目标不明确时，才进入澄清；不要用站点白名单或显式动作词把这类任务硬挡住
+- live-info 语义判断的输入只能是用户的 primary instruction，不能拼上 widget attachment / referenced resources，否则附件正文里的“赛程/比分/天气”等领域词会污染分类，把信息卡修改请求误升级成 browser_workflow
+
+### 6.10 Agent 工具策略裁决与超时
+- `run-capability-controller.resolveRunCapabilities` 是策略冲突的唯一裁决点：当 `forceDocumentTool × browser_workflow` 或 `widget update/inspect/remove × allowBrowserTools` 这类组合出现时，由它统一降级 `browserDecisionMode` 并重算工具集；上游模块（`browser-task-planner`、`turn-engine` 等）不得再加双重挡板
+- `assertNoToolResolutionViolation` 仅作 telemetry 使用：任何残留的 invariant 失谐都通过 `logAgentMetric('tool_resolution_violation_post_arbitration', ...)` 记录并写日志，不再抛错给用户；如再出现该指标即说明裁决层有 bug
+- `document-task-pipeline-executor` 中所有 `requestModuleToolAction` 必须通过 `document-task-tool-timing` 的 `wrapToolCall` / `raceWithTimeout` 包装，并在入口检查 abort signal；不允许出现 `void params.signal` 这样吞掉信号的写法
+- DirectChatEngine 的 `sendMessage` 抢占既要 abort 旧 `AbortController`，也要先调用注入的 `cancelPendingToolActions`，把渲染端正在 pending 的 `agent:toolActionRequest` 取消掉，否则旧的 widget 写入会落到新会话上
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

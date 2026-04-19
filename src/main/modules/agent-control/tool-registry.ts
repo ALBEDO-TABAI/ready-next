@@ -22,8 +22,16 @@ import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-t
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
+import { STATIC_SKILL_TOOL_NAMES } from '../tools/skills-tools-static'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import { createRequire } from 'node:module'
+
+// Skills/system tool runtime getters import the SkillsRuntimeManager (which
+// pulls electron) — keep them lazy via createRequire so this module stays
+// loadable in non-bundled / test contexts. The static name list above is
+// imported eagerly from the pure schema module so the bundled runtime no
+// longer falls back to the inline hardcoded list.
+const lazyRequire = createRequire(import.meta.url)
 
 export type ToolSchemaFormat = 'anthropic' | 'openai'
 
@@ -61,8 +69,6 @@ export interface ToolSchemaResolution {
   error?: string | null
   usedStaticFallback?: boolean
 }
-
-const require = createRequire(import.meta.url)
 
 const DOCUMENT_TOOL_NAMES = [
   'document_new_tab',
@@ -199,19 +205,7 @@ function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat):
 }
 
 function resolveStaticSkillToolNames(): string[] {
-  try {
-    const { STATIC_SKILL_TOOL_NAMES } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
-    return Array.from(new Set(STATIC_SKILL_TOOL_NAMES))
-  } catch {
-    return [
-      'skill_get_state',
-      'skill_submit_input',
-      'skill_submit_confirmation',
-      'skill_submit_agent_result',
-      'skill_restart_from_step',
-      'skill_cancel_execution',
-    ]
-  }
+  return Array.from(new Set(STATIC_SKILL_TOOL_NAMES))
 }
 
 function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
@@ -398,7 +392,7 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution
   const staticToolNames = resolveStaticSkillToolNames()
   const staticTools = staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
   try {
-    const skillToolsModule = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+    const skillToolsModule = lazyRequire('../tools/skills-tools') as typeof import('../tools/skills-tools')
     return {
       tools: format === 'anthropic'
         ? skillToolsModule.getSkillAnthropicTools()
@@ -416,7 +410,7 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution
 function resolveSkillToolDefinitions(): ToolDefinitionResolution {
   const staticToolNames = resolveStaticSkillToolNames()
   try {
-    const { getSkillOpenAITools } = require('../tools/skills-tools') as typeof import('../tools/skills-tools')
+    const { getSkillOpenAITools } = lazyRequire('../tools/skills-tools') as typeof import('../tools/skills-tools')
     const skillNames = collectToolNames(getSkillOpenAITools(), 'openai')
     return {
       definitions: buildToolDefinitions('skills', skillNames),
@@ -490,12 +484,20 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     staticToolNames: SYSTEM_TOOL_NAMES,
     getToolDefinitions: () => buildToolDefinitions('system_host', SYSTEM_TOOL_NAMES),
     getAnthropicTools: () => {
-      const { getSystemAnthropicTools } = require('../tools/system-tools') as typeof import('../tools/system-tools')
-      return getSystemAnthropicTools()
+      try {
+        const { getSystemAnthropicTools } = lazyRequire('../tools/system-tools') as typeof import('../tools/system-tools')
+        return getSystemAnthropicTools()
+      } catch {
+        return SYSTEM_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
     },
     getOpenAITools: () => {
-      const { getSystemOpenAITools } = require('../tools/system-tools') as typeof import('../tools/system-tools')
-      return getSystemOpenAITools()
+      try {
+        const { getSystemOpenAITools } = lazyRequire('../tools/system-tools') as typeof import('../tools/system-tools')
+        return getSystemOpenAITools()
+      } catch {
+        return SYSTEM_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
     },
   },
   design_reserved: {

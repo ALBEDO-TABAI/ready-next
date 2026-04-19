@@ -23,6 +23,12 @@ import { readDocumentEditableText } from '../document-engine/ipc-handler'
 import { type DomainAdapterDispatchResult } from './domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskStepCacheKey } from './document-task-cache-key'
+import {
+  getDocumentToolTimeout,
+  raceWithTimeout,
+  throwIfAborted,
+  wrapToolCall,
+} from './document-task-tool-timing'
 import { DocumentInsightCache } from './document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from './document-source-materials'
 import { runDocumentTaskPlanWithSubtasks } from './document-task-subtask-runner'
@@ -1016,7 +1022,8 @@ export class DocumentTaskPipelineExecutor {
     stage?: DocumentWidgetWriteStage
     signal: AbortSignal
   }): Promise<string> {
-    void params.signal
+    throwIfAborted(params.signal, 'writeDocumentWidget')
+    const tool = wrapToolCall(params.requestModuleToolAction, params.signal)
     const stage: DocumentWidgetWriteStage = params.stage
       || (params.draft.insertionMode === 'update_existing' ? 'update' : 'insert')
 
@@ -1025,7 +1032,7 @@ export class DocumentTaskPipelineExecutor {
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
-      const listPayload = await params.requestModuleToolAction('document.listWidgets', {
+      const listPayload = await tool('document.listWidgets', {
         tabId: params.snapshot.tabId || undefined,
       })
       const widgetSummary = typeof listPayload.summary === 'string' ? listPayload.summary : ''
@@ -1040,7 +1047,7 @@ export class DocumentTaskPipelineExecutor {
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
-      const payload = await params.requestModuleToolAction('document.updateWidget', {
+      const payload = await tool('document.updateWidget', {
         target,
         title: params.draft.title,
         componentSpec: params.draft.componentSpec,
@@ -1051,7 +1058,7 @@ export class DocumentTaskPipelineExecutor {
       return typeof payload.summary === 'string' ? payload.summary : `已更新信息卡：${target}`
     }
 
-    const payload = await params.requestModuleToolAction('document.insertWidget', {
+    const payload = await tool('document.insertWidget', {
       title: params.draft.title,
       componentSpec: params.draft.componentSpec,
       widgetCode: params.draft.widgetCode,
@@ -1069,8 +1076,9 @@ export class DocumentTaskPipelineExecutor {
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
   }): Promise<string> {
-    void params.signal
-    const inspectPayload = await params.requestModuleToolAction('document.inspectActive', {
+    throwIfAborted(params.signal, 'verifyDocumentTaskPlanWrite')
+    const tool = wrapToolCall(params.requestModuleToolAction, params.signal)
+    const inspectPayload = await tool('document.inspectActive', {
       tabId: params.snapshot.tabId || undefined,
     })
     const refreshedSnapshot = this.normalizeActiveDocumentSnapshot((inspectPayload as { snapshot?: unknown }).snapshot)
@@ -1081,7 +1089,7 @@ export class DocumentTaskPipelineExecutor {
       throw new Error(`写入后 ${params.targetResource.name} 内容未变化`)
     }
 
-    const payload = await params.requestModuleToolAction('document.listWidgets', {
+    const payload = await tool('document.listWidgets', {
       tabId: params.snapshot.tabId || undefined,
     })
     const summary = typeof payload.summary === 'string' ? payload.summary : ''
@@ -1411,9 +1419,15 @@ export class DocumentTaskPipelineExecutor {
         status: 'running',
         summary: `正在保存 ${targetLabel}`,
       })
-      const savePayload = await params.requestModuleToolAction('document.saveTab', {
-        tabId: targetSnapshot.tabId || undefined,
-      })
+      throwIfAborted(params.signal, 'document.saveTab')
+      const savePayload = await raceWithTimeout(
+        params.requestModuleToolAction('document.saveTab', {
+          tabId: targetSnapshot.tabId || undefined,
+        }),
+        params.signal,
+        getDocumentToolTimeout('document.saveTab'),
+        'document.saveTab',
+      )
       const saveSummary = typeof savePayload.summary === 'string' ? savePayload.summary : `已保存 ${targetLabel}`
       emitStepUpdate({
         job: params.job,
@@ -1907,7 +1921,13 @@ export class DocumentTaskPipelineExecutor {
     const requestSnapshot = async (): Promise<ActiveDocumentSnapshot | null> => {
       if (!params.requestModuleToolAction) return null
       const tryInspect = async (tabId?: string): Promise<ActiveDocumentSnapshot | null> => {
-        const payload = await params.requestModuleToolAction!('document.inspectActive', { tabId })
+        throwIfAborted(params.signal, 'document.inspectActive')
+        const payload = await raceWithTimeout(
+          params.requestModuleToolAction!('document.inspectActive', { tabId }),
+          params.signal,
+          getDocumentToolTimeout('document.inspectActive'),
+          'document.inspectActive',
+        )
         return this.normalizeActiveDocumentSnapshot((payload as { snapshot?: unknown }).snapshot)
       }
       const targetedSnapshot = await tryInspect(targetTabId || undefined)
@@ -1918,7 +1938,13 @@ export class DocumentTaskPipelineExecutor {
     if (params.requestModuleToolAction && targetPath) {
       const activeSnapshot = await requestSnapshot()
       if (!activeSnapshot || activeSnapshot.path !== targetPath) {
-        await params.requestModuleToolAction('document.openTab', { path: targetPath })
+        throwIfAborted(params.signal, 'document.openTab')
+        await raceWithTimeout(
+          params.requestModuleToolAction('document.openTab', { path: targetPath }),
+          params.signal,
+          getDocumentToolTimeout('document.openTab'),
+          'document.openTab',
+        )
       }
     }
 
@@ -2097,27 +2123,42 @@ export class DocumentTaskPipelineExecutor {
         signal,
       }),
       saveDocument: async ({ snapshot, signal }) => {
-        void signal
-        const payload = await params.requestModuleToolAction('document.saveTab', { tabId: snapshot.tabId || undefined })
+        throwIfAborted(signal, 'document.saveTab')
+        const payload = await raceWithTimeout(
+          params.requestModuleToolAction('document.saveTab', { tabId: snapshot.tabId || undefined }),
+          signal,
+          getDocumentToolTimeout('document.saveTab'),
+          'document.saveTab',
+        )
         return typeof payload.summary === 'string' ? payload.summary : '已保存文档'
       },
       listWidgets: async ({ snapshot, signal }) => {
-        void signal
-        const payload = await params.requestModuleToolAction('document.listWidgets', { tabId: snapshot.tabId || undefined })
+        throwIfAborted(signal, 'document.listWidgets')
+        const payload = await raceWithTimeout(
+          params.requestModuleToolAction('document.listWidgets', { tabId: snapshot.tabId || undefined }),
+          signal,
+          getDocumentToolTimeout('document.listWidgets'),
+          'document.listWidgets',
+        )
         return typeof payload.summary === 'string' ? payload.summary : '已列出文档卡片'
       },
       removeWidget: async ({ plan, snapshot, stage, signal }) => {
-        void signal
+        throwIfAborted(signal, 'document.removeWidget')
         const target = plan.preferredWidget || ''
         if (stage === 'locate') {
           return target
             ? `已定位待删除的信息卡：${target}`
             : '未提供待删除信息卡的 target，等待删除阶段反馈'
         }
-        const payload = await params.requestModuleToolAction('document.removeWidget', {
-          target,
-          tabId: snapshot.tabId || undefined,
-        })
+        const payload = await raceWithTimeout(
+          params.requestModuleToolAction('document.removeWidget', {
+            target,
+            tabId: snapshot.tabId || undefined,
+          }),
+          signal,
+          getDocumentToolTimeout('document.removeWidget'),
+          'document.removeWidget',
+        )
         return typeof payload.summary === 'string' ? payload.summary : '已删除信息卡'
       },
       emitPhase: emitDocumentPipelinePhase,
