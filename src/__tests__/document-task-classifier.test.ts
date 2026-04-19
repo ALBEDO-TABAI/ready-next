@@ -33,4 +33,36 @@ describe('classifyStructuredDocumentIntent', () => {
     const intent = classifyStructuredDocumentIntent('把这个已有的信息卡删除掉')
     assert.equal(intent, 'document_remove_widget')
   })
+
+  it('keeps UPDATE for "优化当前信息卡"', () => {
+    assert.equal(classifyStructuredDocumentIntent('优化当前信息卡'), 'document_read_then_widget_update')
+  })
+
+  it('keeps UPDATE for "修改这个 widget，把标题改成指引"', () => {
+    assert.equal(
+      classifyStructuredDocumentIntent('修改这个 widget，把标题改成指引'),
+      'document_read_then_widget_update',
+    )
+  })
+
+  it('keeps LIST for pure query without edit verbs', () => {
+    assert.equal(classifyStructuredDocumentIntent('看一下有哪些卡片'), 'document_list_widgets')
+  })
+
+  it('suppresses LIST routing when an edit verb co-occurs with LIST keywords', () => {
+    // "看一下…改成…" 同时携带 LIST 关键词与编辑动词；LIST 必须被抑制，否则会把 list 原文当答案。
+    // UPDATE regex 依赖顺序 (edit-verb before widget keyword) 未命中时，应回落到 null 让 pipeline 走非结构化路径，
+    // 而不是继续走 LIST 分支。
+    assert.equal(
+      classifyStructuredDocumentIntent('看一下当前这个卡片，能不能改成蓝色'),
+      null,
+    )
+  })
+
+  it('returns null when input starts with a structured attachment header', () => {
+    assert.equal(
+      classifyStructuredDocumentIntent('### Widget 更新上下文\n卡片列表：指引 / 进度'),
+      null,
+    )
+  })
 })

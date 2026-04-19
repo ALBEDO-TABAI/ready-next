@@ -39,16 +39,18 @@ const REMOVE_WIDGET_PATTERNS = [
   /(把|将).*(widget|卡片|信息卡).*(删|移|去)/i,
 ] as const
 
+const IS_EDIT_VERB = /(更新|修改|调整|优化|重做|替换|改成|改为|重写|改写|换成|换为|简化)/i
+
+const STRUCTURED_ATTACHMENT_PREFIX = /^(?:###\s+|---\s|<!--)/
+
 export function classifyStructuredDocumentIntent(userText: string): StructuredDocumentIntent {
   const text = String(userText || '').trim()
   if (!text) return null
 
+  if (STRUCTURED_ATTACHMENT_PREFIX.test(text)) return null
+
   if (REMOVE_WIDGET_PATTERNS.some((pattern) => pattern.test(text))) {
     return 'document_remove_widget'
-  }
-
-  if (LIST_WIDGET_PATTERNS.some((pattern) => pattern.test(text))) {
-    return 'document_list_widgets'
   }
 
   if (EXISTING_WIDGET_UPDATE_PATTERNS.some((pattern) => pattern.test(text))) {
@@ -58,8 +60,13 @@ export function classifyStructuredDocumentIntent(userText: string): StructuredDo
   const wantsReadDocument = READ_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text))
   const wantsWidgetCreate = CREATE_WIDGET_PATTERNS.some((pattern) => pattern.test(text))
   const mentionsDocumentSource = DOCUMENT_SOURCE_PATTERNS.some((pattern) => pattern.test(text))
+  if (wantsWidgetCreate && (wantsReadDocument || mentionsDocumentSource)) {
+    return 'document_read_then_widget_create'
+  }
 
-  return wantsWidgetCreate && (wantsReadDocument || mentionsDocumentSource)
-    ? 'document_read_then_widget_create'
-    : null
+  if (LIST_WIDGET_PATTERNS.some((pattern) => pattern.test(text)) && !IS_EDIT_VERB.test(text)) {
+    return 'document_list_widgets'
+  }
+
+  return null
 }

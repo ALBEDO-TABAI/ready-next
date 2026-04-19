@@ -246,7 +246,7 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
 - 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-stateless-cherny.md`（approved）。
 - 命令：`npm run typecheck` 全绿；`npm run test` 失败数 16，与 P-2 落地后的基线完全一致，残留失败均是图标/RSS/calendar/ritual overlay/browser mode/document tool session context 等与 P-3 无关的源代码合约测试。单独跑 `document-inspection-user-facing-summary.test.ts`（12/12）、`document-tool-flow.test.ts`（14/14）、`document-tool-loop-orchestrator.test.ts`（7/7）全部通过。
 
-### P-4 · 收紧意图分类，避免 update 被识成 list
+### P-4 · 收紧意图分类，避免 update 被识成 list · ✅ 已落地（2026-04-19）
 - `document-task-types.ts:32-65`：
   - 将 `LIST_WIDGET_PATTERNS` 的优先级降到 UPDATE/CREATE 之后，**仅当没有任何编辑动词时**才判定 list；
   - 增加 `IS_EDIT_VERB` 集合（更新/修改/调整/优化/重做/替换/改成/改为/重写/改写等），edit 动词 > list 动词；
@@ -256,6 +256,21 @@ Patch 分支**完全没有**走 id / 序号 / 模糊 这三条，等于说：**�
   - "优化当前信息卡" → `document_read_then_widget_update`；
   - "看一下有哪些卡片" → `document_list_widgets`；
   - "修改这个 widget，把标题改成指引" → `document_read_then_widget_update`（含 "修改"）。
+
+**落地记录**
+- 实现：`src/main/modules/agent-control/document-task-types.ts`
+  - 新增模块级常量：`IS_EDIT_VERB = /(更新|修改|调整|优化|重做|替换|改成|改为|重写|改写|换成|换为|简化)/i`（13 个无歧义编辑动词，**故意不含** `新建|创建|生成|插入|加一个`（属 CREATE）与 `删除|删掉|移除|去掉|清除`（REMOVE 已覆盖）；**故意不含** `极简` 等风格形容词）；`STRUCTURED_ATTACHMENT_PREFIX = /^(?:###\s+|---\s|<!--)/`（覆盖 `### Widget 更新上下文` / `### 当前文档上下文` / `--- 文档内容开始 ---` / HTML 注释头）。
+  - `classifyStructuredDocumentIntent` 分支重排为 `null(empty) → null(structured-attachment) → REMOVE → UPDATE → CREATE → LIST`；LIST 分支 `&&` 追加 `!IS_EDIT_VERB.test(text)` gating，作为"有编辑动词则放弃 LIST"的挡板。
+  - **未引入** `extractPrimaryUserInstruction` 的跨模块 import；调用方 `execution-intent-resolver.ts:55, 82` 已先做过 primary extraction，分类器侧靠 `STRUCTURED_ATTACHMENT_PREFIX` 做 defense-in-depth 短路。`document-task-pipeline-executor.ts:1327` 的调用链路不动，`job.instruction` 在 plan 构造期已是干净文本。
+- 测试：`src/__tests__/document-task-classifier.test.ts` 在既有 6 条 case 后追加 5 条：
+  1. "优化当前信息卡" → UPDATE（审计 P-4 样本）
+  2. "修改这个 widget，把标题改成指引" → UPDATE（审计 P-4 样本）
+  3. "看一下有哪些卡片" → LIST（审计 P-4 样本，无编辑动词）
+  4. "看一下当前这个卡片，能不能改成蓝色" → **null**（UPDATE regex 的 `edit-verb → 这个 → widget` 顺序未命中；LIST 被 `改成` 抑制；落到 null 让 pipeline 走非结构化路径，比继续把 list 原文当答案更正确）
+  5. "### Widget 更新上下文\n卡片列表：指引 / 进度" → null（`STRUCTURED_ATTACHMENT_PREFIX` 防污染）
+- 既有回归：`document-task-types.test.ts`（3 条）与 `document-task-classifier.test.ts` 原 6 条 全部保持通过，优先级重排**未**破坏 `'把这个信息卡改成极简风格' → UPDATE` / `'把这个已有的信息卡删除掉' → REMOVE` / `'列出…所有 widget' → LIST` / `'看看…有哪些信息卡' → LIST`。
+- 计划原文：`~/.claude/plans/users-user-documents-ready-cowork-agile-crescent.md`（approved）。
+- 命令：`npm run typecheck` 全绿（node + web 两段）；`npm run test` 失败数 16，与 P-3 基线完全一致，残留失败均为图标 / RSS / calendar / ritual overlay / browser mode / document tool session context 等与 classifier 无关的源代码合约测试。单独跑 `document-task-classifier.test.ts`（11/11）、`document-task-types.test.ts`（3/3）全通过。
 
 ### P-5 · 端到端契约测试：widgetId 下发闭环
 - 新增契约测试：从 "MarkdownEditor 提交 → envelope → pipeline → renderer update_widget patch 分支" 完整链路，验证：
