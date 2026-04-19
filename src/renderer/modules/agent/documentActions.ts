@@ -1205,12 +1205,14 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       )
       if (shouldApplyPatch) {
         const widgetRecords = collectDocumentWidgets(liveContent)
-        const lowerTarget = target.toLowerCase()
-        const matches = widgetRecords.filter((record) => record.title === target || record.title.toLowerCase() === lowerTarget)
-        const record = typeof occurrence === 'number' && occurrence > 0
-          ? matches[Math.min(occurrence - 1, matches.length - 1)]
-          : matches[0]
-        if (!record) return `未找到可更新的 widget：${target}`
+        const resolveResult = resolveWidgetRecord(widgetRecords, target, occurrence)
+        if (!resolveResult.widget) {
+          if (widgetRecords.length > 0 && /^widget_[a-z0-9]+$/.test(target)) {
+            return `未找到 id=${target} 对应的 widget（当前文档共有 ${widgetRecords.length} 个 widget，请用标题或序号重试）`
+          }
+          return resolveResult.error || `未找到可更新的 widget：${target}`
+        }
+        const record = resolveResult.widget
         if (!record.componentSpec) {
           return `widget 更新已拒绝：目标 widget "${record.title}" 不带 component_spec，无法做字段级 patch，请改用完整 componentSpec 或 widgetCode 覆盖。`
         }
@@ -1223,10 +1225,10 @@ export async function performDocAction(action: DocActionPayload): Promise<string
           )
           const updated = updateWidgetInDocument(
             liveContent,
-            target,
+            record.id,
             compiled.widgetCode,
             nextTitle,
-            occurrence,
+            undefined,
             normalizeComponentSpecForFence(mergedSpec),
           )
           if (!updated.found) return updated.error || 'widget 更新失败'

@@ -38,6 +38,7 @@ export type DocumentWidgetSegment =
 export type WidgetRenderMode = 'static-svg' | 'static-html' | 'scripted'
 
 export interface DocumentWidgetRecord {
+  id: string
   index: number
   title: string
   widgetCode: string
@@ -50,15 +51,75 @@ export interface DocumentWidgetRecord {
 }
 
 export interface DocumentWidgetSummary {
+  id: string
   index: number
   title: string
   mode: WidgetRenderMode
   componentHint: string | null
   preview: string
   hasState: boolean
+  hasComponentSpec: boolean
+  canPatch: boolean
+  canReplace: boolean
 }
 
 const SHOW_WIDGET_FENCE_REGEX = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
+
+function hashWidgetIdentity(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function ensureDocumentWidgetId(params: {
+  id?: string | null
+  title?: string | null
+  widgetCode: string
+  seed?: string | number | null
+}): string {
+  const explicit = typeof params.id === 'string' ? params.id.trim() : ''
+  if (explicit) return explicit
+  const title = typeof params.title === 'string' ? params.title.trim() : ''
+  const seed = params.seed == null ? '' : String(params.seed)
+  return `widget_${hashWidgetIdentity(`${title}\n${params.widgetCode}\n${seed}`)}`
+}
+
+export interface DocumentWidgetFenceBuildOptions {
+  id?: string | null
+  componentSpec?: DocumentWidgetComponentSpecSummary | null
+  widgetState?: DocumentWidgetPersistedState | null
+}
+
+export function buildDocumentWidgetFenceSource(
+  title: string,
+  widgetCode: string,
+  options?: DocumentWidgetFenceBuildOptions,
+): string {
+  const normalizedTitle = title.trim() || 'widget'
+  const payload: Record<string, unknown> = {
+    id: ensureDocumentWidgetId({
+      id: options?.id,
+      title: normalizedTitle,
+      widgetCode,
+    }),
+    title: normalizedTitle,
+    widget_code: widgetCode,
+  }
+  if (options?.componentSpec) {
+    payload.component_spec = options.componentSpec
+  }
+  if (options?.widgetState && typeof options.widgetState === 'object' && Object.keys(options.widgetState).length > 0) {
+    payload.widget_state = options.widgetState
+  }
+  return [
+    '```show-widget',
+    JSON.stringify(payload),
+    '```',
+  ].join('\n')
+}
 
 export function tryParseWidgetPayload(rawBody: string, rawFence: string): DocumentWidgetData | null {
   try {
@@ -74,6 +135,9 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
     const title = typeof record.title === 'string' && record.title.trim().length > 0
       ? record.title.trim()
       : undefined
+    const id = typeof record.id === 'string' && record.id.trim().length > 0
+      ? record.id.trim()
+      : undefined
     const widgetState = record.widget_state && typeof record.widget_state === 'object'
       ? record.widget_state as DocumentWidgetPersistedState
       : null
@@ -83,6 +147,7 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
       : null
     const componentSpecIsValid = componentSpec && typeof componentSpec.component === 'string' && componentSpec.component.trim().length > 0
     return {
+      id,
       title,
       widgetCode,
       rawFence,
@@ -116,7 +181,15 @@ export function parseShowWidgetFences(text: string): DocumentWidgetSegment[] {
     if (widget) {
       segments.push({
         type: 'widget',
-        data: widget,
+        data: {
+          ...widget,
+          id: ensureDocumentWidgetId({
+            id: widget.id,
+            title: widget.title,
+            widgetCode: widget.widgetCode,
+            seed: start,
+          }),
+        },
       })
     } else {
       segments.push({
@@ -151,7 +224,18 @@ export function parseBareWidgetPayloadSegments(text: string): DocumentWidgetSegm
       : null
 
     if (widget) {
-      segments.push({ type: 'widget', data: widget })
+      segments.push({
+        type: 'widget',
+        data: {
+          ...widget,
+          id: ensureDocumentWidgetId({
+            id: widget.id,
+            title: widget.title,
+            widgetCode: widget.widgetCode,
+            seed: index,
+          }),
+        },
+      })
     } else {
       const content = index < parts.length - 1 ? `${part}\n\n` : part
       if (content) {
@@ -182,6 +266,12 @@ export function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
 
     const start = match.index ?? 0
     widgets.push({
+      id: ensureDocumentWidgetId({
+        id: parsed.id,
+        title: parsed.title,
+        widgetCode: parsed.widgetCode,
+        seed: start,
+      }),
       index: widgets.length + 1,
       title: parsed.title?.trim() || `widget_${widgets.length + 1}`,
       widgetCode: parsed.widgetCode,
@@ -210,16 +300,52 @@ export function summarizeWidgetRecord(record: DocumentWidgetRecord): DocumentWid
   const componentHint = typeof record.componentSpec?.component === 'string' && record.componentSpec.component.trim().length > 0
     ? record.componentSpec.component.trim()
     : null
+  const hasComponentSpec = Boolean(componentHint)
   return {
+    id: record.id,
     index: record.index,
     title: record.title,
     mode: record.mode,
     componentHint,
     preview,
     hasState: Boolean(record.widgetState && typeof record.widgetState === 'object' && Object.keys(record.widgetState).length > 0),
+    hasComponentSpec,
+    canPatch: hasComponentSpec,
+    canReplace: true,
   }
 }
 
 export function summarizeDocumentWidgets(source: string): DocumentWidgetSummary[] {
   return collectDocumentWidgets(source).map(summarizeWidgetRecord)
+}
+
+export interface ListWidgetsUserFacingInput {
+  summaries: DocumentWidgetSummary[]
+  tabTitle?: string | null
+}
+
+export function buildListWidgetsUserFacingText(input: ListWidgetsUserFacingInput): string {
+  const summaries = Array.isArray(input.summaries) ? input.summaries : []
+  const rawTitle = typeof input.tabTitle === 'string' ? input.tabTitle.trim() : ''
+  const docLabel = rawTitle ? `「${rawTitle}」` : '当前文档'
+  const count = summaries.length
+
+  if (count === 0) {
+    return `${docLabel}暂无 widget。如需新增，请告诉我要插入的卡片内容。`
+  }
+
+  const previewTitles = summaries
+    .slice(0, 3)
+    .map((item) => {
+      const title = typeof item?.title === 'string' ? item.title.trim() : ''
+      return title.length > 0 ? `「${title}」` : '「未命名」'
+    })
+
+  const titlesText = previewTitles.join('、')
+
+  if (count <= 3) {
+    return `已查到${docLabel}中的 ${count} 个 widget：${titlesText}。如需编辑，请指出具体标题或序号。`
+  }
+
+  return `已查到${docLabel}中的 ${count} 个 widget，示例：${titlesText} 等。如需编辑，请指出具体标题或序号。`
 }

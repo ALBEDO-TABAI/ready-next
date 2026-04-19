@@ -441,7 +441,35 @@ describe('DocumentTaskPipeline', () => {
       saveDocument: async () => {
         throw new Error('list 路径不应调用 saveDocument')
       },
-      listWidgets: async () => '当前文档包含 2 个信息卡：\n- ready_positioning_card\n- project_overview_card',
+      listWidgets: async () => ({
+        summaries: [
+          {
+            id: 'widget_aaaaaa',
+            index: 1,
+            title: 'ready_positioning_card',
+            mode: 'static-html',
+            componentHint: null,
+            preview: 'positioning preview',
+            hasState: false,
+            hasComponentSpec: false,
+            canPatch: false,
+            canReplace: true,
+          },
+          {
+            id: 'widget_bbbbbb',
+            index: 2,
+            title: 'project_overview_card',
+            mode: 'static-html',
+            componentHint: 'project_overview_card',
+            preview: 'overview preview',
+            hasState: false,
+            hasComponentSpec: true,
+            canPatch: true,
+            canReplace: true,
+          },
+        ],
+        tabTitle: '需求文档.md',
+      }),
       emitPhase: (phase) => {
         phases.push({ phase: phase.phase, status: phase.status })
       },
@@ -454,7 +482,14 @@ describe('DocumentTaskPipeline', () => {
     })
 
     assert.equal(result.success, true)
-    assert.match(result.finalText || '', /当前文档包含 2 个信息卡/)
+    const finalText = result.finalText || ''
+    assert.match(finalText, /已查到「需求文档\.md」中的 2 个 widget/)
+    assert.match(finalText, /「ready_positioning_card」/)
+    assert.match(finalText, /「project_overview_card」/)
+    assert.match(finalText, /请指出具体标题或序号/)
+    assert.doesNotMatch(finalText, /```json/, 'list finalText 不应再夹带 json 围栏')
+    assert.doesNotMatch(finalText, /id=widget_/, 'list finalText 不应再回显内部 id')
+    assert.doesNotMatch(finalText, /可 patch/, 'list finalText 不应再回显内部字段')
     assert.deepEqual(
       phases
         .filter((item) => item.status === 'running' || item.phase === 'completed')

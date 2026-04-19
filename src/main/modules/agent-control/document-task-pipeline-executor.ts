@@ -16,6 +16,7 @@ import {
 } from '../../../shared/document-widget-openui'
 import {
   collectDocumentWidgets,
+  summarizeWidgetRecord,
   type DocumentWidgetRecord,
 } from '../../../shared/document-widget-parse'
 import { resolveControlledWidgetTarget } from '../../../shared/document-widget-target'
@@ -2134,13 +2135,17 @@ export class DocumentTaskPipelineExecutor {
       },
       listWidgets: async ({ snapshot, signal }) => {
         throwIfAborted(signal, 'document.listWidgets')
-        const payload = await raceWithTimeout(
+        await raceWithTimeout(
           params.requestModuleToolAction('document.listWidgets', { tabId: snapshot.tabId || undefined }),
           signal,
           getDocumentToolTimeout('document.listWidgets'),
           'document.listWidgets',
         )
-        return typeof payload.summary === 'string' ? payload.summary : '已列出文档卡片'
+        const widgets = collectDocumentWidgets(snapshot.content || '')
+        return {
+          summaries: widgets.map(summarizeWidgetRecord),
+          tabTitle: snapshot.title || '',
+        }
       },
       removeWidget: async ({ plan, snapshot, stage, signal }) => {
         throwIfAborted(signal, 'document.removeWidget')

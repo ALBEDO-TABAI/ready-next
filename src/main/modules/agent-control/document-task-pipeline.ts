@@ -3,6 +3,10 @@ import type {
   DocumentWidgetComponentSpec,
 } from '../../../shared/document-widget-openui'
 import { validateDocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
+import {
+  buildListWidgetsUserFacingText,
+  type DocumentWidgetSummary,
+} from '../../../shared/document-widget-parse'
 
 export type DocumentWidgetPipelinePhase =
   | 'loading_document'
@@ -19,6 +23,11 @@ export type DocumentWidgetPipelinePhase =
 
 export type DocumentWidgetWriteStage = 'locate' | 'update' | 'insert'
 
+export interface DocumentListWidgetsResult {
+  summaries: DocumentWidgetSummary[]
+  tabTitle: string
+}
+
 export type DocumentStructuredTaskType =
   | 'document_read_then_widget_create'
   | 'document_read_then_widget_update'
@@ -28,6 +37,7 @@ export type DocumentStructuredTaskType =
 export type DocumentWidgetOperation = 'create' | 'update'
 
 export interface ActiveDocumentSnapshot {
+  tabId: string | null
   title: string
   path: string | null
   content: string
@@ -86,6 +96,7 @@ export interface DocumentWidgetDraft {
   insertionMode: 'append_end' | 'after_section' | 'update_existing'
   targetSectionTitle?: string
   targetWidgetTitle?: string
+  targetWidgetId?: string
 }
 
 export interface DocumentTaskPipelineBudget {
@@ -163,7 +174,7 @@ interface DocumentTaskPipelineDeps {
     snapshot: ActiveDocumentSnapshot
     plan: DocumentReadPlan
     signal: AbortSignal
-  }) => Promise<string>
+  }) => Promise<DocumentListWidgetsResult>
   removeWidget?: (params: {
     snapshot: ActiveDocumentSnapshot
     plan: DocumentReadPlan
@@ -465,7 +476,7 @@ export class DocumentTaskPipeline {
         if (!this.deps.listWidgets) {
           throw new Error('document pipeline 缺少 listWidgets 依赖')
         }
-        const listSummary = await this.runPhase({
+        const listResult = await this.runPhase({
           phase: 'listing_widgets',
           summary: '正在列出文档中的信息卡',
           budgetMs: budget.writeWidgetMs,
@@ -490,7 +501,10 @@ export class DocumentTaskPipeline {
           success: true,
           plan,
           snapshot,
-          finalText: listSummary,
+          finalText: buildListWidgetsUserFacingText({
+            summaries: listResult.summaries,
+            tabTitle: listResult.tabTitle || snapshot?.title || '',
+          }),
         }
       }
 
