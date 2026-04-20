@@ -22,6 +22,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
   const targetRef = useRef(mode === 'edit' ? 0 : 1)
   const currentRef = useRef(mode === 'edit' ? 0 : 1)
   const isDraggingRef = useRef(false)
+  const activePointerIdRef = useRef<number | null>(null)
 
   // Sync with external mode prop
   useEffect(() => {
@@ -94,11 +95,43 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     }
   }, [position])
 
-  // Mouse down handler
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  const cancelDrag = useCallback(() => {
+    if (!isDraggingRef.current) return
+
+    isDraggingRef.current = false
+    activePointerIdRef.current = null
+    setIsDragging(false)
+    targetRef.current = mode === 'edit' ? 0 : 1
+    currentRef.current = targetRef.current
+    setPosition(targetRef.current)
+    startSpringAnimation()
+  }, [mode, startSpringAnimation])
+
+  const finishDrag = useCallback(() => {
+    if (!isDraggingRef.current) return
+
+    isDraggingRef.current = false
+    activePointerIdRef.current = null
+    setIsDragging(false)
+
+    const snapToEdit = currentRef.current < 0.5
+    targetRef.current = snapToEdit ? 0 : 1
+
+    const newMode = snapToEdit ? 'edit' : 'preview'
+    if (newMode !== mode) {
+      onChange(newMode)
+    }
+
+    startSpringAnimation()
+  }, [mode, onChange, startSpringAnimation])
+
+  // Pointer down handler
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     isDraggingRef.current = true
+    activePointerIdRef.current = e.pointerId
     setIsDragging(true)
 
     dragStartXRef.current = e.clientX
@@ -108,51 +141,46 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
+    e.currentTarget.setPointerCapture(e.pointerId)
   }, [])
 
-  // Global mouse move handler
-  useEffect(() => {
-    if (!isDragging) return
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || activePointerIdRef.current !== e.pointerId) return
+    const container = containerRef.current
+    if (!container) return
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const container = containerRef.current
-      if (!container) return
+    const rect = container.getBoundingClientRect()
+    const halfWidth = rect.width / 2
+    const deltaX = e.clientX - dragStartXRef.current
+    const deltaPos = deltaX / halfWidth
 
-      const rect = container.getBoundingClientRect()
-      const halfWidth = rect.width / 2
-      const deltaX = e.clientX - dragStartXRef.current
-      const deltaPos = deltaX / halfWidth
+    let newPos = dragStartPosRef.current + deltaPos
+    newPos = Math.max(0, Math.min(1, newPos))
 
-      let newPos = dragStartPosRef.current + deltaPos
-      newPos = Math.max(0, Math.min(1, newPos))
+    currentRef.current = newPos
+    setPosition(newPos)
+  }, [])
 
-      currentRef.current = newPos
-      setPosition(newPos)
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== e.pointerId) return
+    finishDrag()
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
     }
+  }, [finishDrag])
 
-    const handleMouseUp = () => {
-      isDraggingRef.current = false
-      setIsDragging(false)
-
-      const snapToEdit = currentRef.current < 0.5
-      targetRef.current = snapToEdit ? 0 : 1
-
-      const newMode = snapToEdit ? 'edit' : 'preview'
-      if (newMode !== mode) {
-        onChange(newMode)
-      }
-
-      startSpringAnimation()
+  const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== e.pointerId) return
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
     }
+    cancelDrag()
+  }, [cancelDrag])
 
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp, { once: true })
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [isDragging, mode, onChange, startSpringAnimation])
+  const handleLostPointerCapture = useCallback(() => {
+    if (!isDraggingRef.current) return
+    cancelDrag()
+  }, [cancelDrag])
 
   // Click handler for labels
   const handleLabelClick = useCallback((targetMode: 'edit' | 'preview', e: React.MouseEvent) => {
@@ -177,7 +205,11 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
           transform: `translateX(${position * 100}%)`,
           cursor: isDragging ? 'grabbing' : 'pointer',
         }}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onLostPointerCapture={handleLostPointerCapture}
       >
         <div className="draggable-mode-switch__thumb-glow" />
       </div>
@@ -187,7 +219,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
         type="button"
         className={`draggable-mode-switch__label draggable-mode-switch__label--edit ${position < 0.5 ? 'is-active' : ''}`}
         style={getEditStyle()}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => handleLabelClick('edit', e)}
       >
         编辑
@@ -196,7 +228,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
         type="button"
         className={`draggable-mode-switch__label draggable-mode-switch__label--preview ${position >= 0.5 ? 'is-active' : ''}`}
         style={getPreviewStyle()}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => handleLabelClick('preview', e)}
       >
         预览

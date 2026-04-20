@@ -73,6 +73,43 @@ type: #type/video/youtube/new
     assert.equal(preview.blocks.some((block) => block.type === 'chips'), true)
   })
 
+  it('extracts Obsidian image embeds with caption or size modifiers', () => {
+    const captionPreview = buildStructuredNotePreview(`![[assets/cover image.png|封面图]]`, '/vault/notes/demo.md')
+    const sizedPreview = buildStructuredNotePreview(`![[assets/cover image.png|400]]`, '/vault/notes/demo.md')
+
+    assert.equal(captionPreview.embeds[0]?.kind, 'image')
+    assert.equal(captionPreview.embeds[0]?.localPath, '/vault/notes/assets/cover image.png')
+    assert.equal(captionPreview.embeds[0]?.alt, '封面图')
+    assert.equal(sizedPreview.embeds[0]?.kind, 'image')
+    assert.equal(sizedPreview.embeds[0]?.localPath, '/vault/notes/assets/cover image.png')
+    assert.equal(sizedPreview.embeds[0]?.alt, 'cover image.png')
+  })
+
+  it('unwraps markdown image destinations wrapped with angle brackets', () => {
+    const preview = buildStructuredNotePreview(
+      '![概念 MV 感知建筑图](<gQlMMD8auMs_audiovisual_structure.png>)',
+      '/Users/demo/project/gQlMMD8auMs_audiovisual_analysis.md',
+    )
+
+    assert.equal(preview.embeds[0]?.kind, 'image')
+    assert.equal(
+      preview.embeds[0]?.localPath,
+      '/Users/demo/project/gQlMMD8auMs_audiovisual_structure.png',
+    )
+    assert.equal(
+      preview.embeds[0]?.url,
+      'local-file:///Users/demo/project/gQlMMD8auMs_audiovisual_structure.png',
+    )
+    assert.equal(preview.embeds[0]?.displayUrl, 'gQlMMD8auMs_audiovisual_structure.png')
+  })
+
+  it('normalizes inline Obsidian image embeds inside markdown blocks', () => {
+    const preview = buildStructuredNotePreview(`封面： ![[assets/cover.png|插图]]`, '/vault/notes/demo.md')
+
+    assert.match(preview.bodyMarkdown, /!\[插图\]\(<assets\/cover\.png>\)/)
+    assert.doesNotMatch(preview.bodyMarkdown, /!\[\[/)
+  })
+
   it('recovers malformed frontmatter with loose parsing instead of warning', () => {
     const preview = buildStructuredNotePreview(`---
 title: "Broken quote

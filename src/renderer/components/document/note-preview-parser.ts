@@ -129,6 +129,14 @@ function stripWrappingQuotes(value: string): string {
   return trimmed
 }
 
+function stripMarkdownDestinationBrackets(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    return trimmed.slice(1, -1).trim()
+  }
+  return trimmed
+}
+
 function splitFrontmatter(content: string): {
   frontmatter: Record<string, unknown> | null
   body: string
@@ -440,6 +448,11 @@ function getDirectory(path: string | null | undefined): string | null {
   return lastSlash > 0 ? normalized.slice(0, lastSlash) : null
 }
 
+function getReferenceBasename(reference: string): string {
+  const cleaned = stripMarkdownDestinationBrackets(reference).split('?')[0].split('#')[0]
+  return cleaned.split(/[/\\]/).pop() || cleaned
+}
+
 function resolveRelativePath(baseDir: string, relativePath: string): string {
   const baseParts = normalizePath(baseDir).split('/').filter(Boolean)
   const relativeParts = normalizePath(relativePath).split('/').filter(Boolean)
@@ -459,14 +472,85 @@ function resolveRelativePath(baseDir: string, relativePath: string): string {
 
 function toLocalFileUrl(filePath: string): string {
   const normalized = normalizePath(filePath)
-  return `local-file:///${encodeURI(normalized).replace(/#/g, '%23')}`
+  const encoded = normalized
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return normalized.startsWith('/')
+    ? `local-file://${encoded}`
+    : `local-file:///${encoded}`
 }
 
 function getReferenceExtension(reference: string): string {
-  const cleaned = reference.split('?')[0].split('#')[0]
-  const basename = cleaned.split(/[/\\]/).pop() || cleaned
+  const basename = getReferenceBasename(reference)
   const lastDot = basename.lastIndexOf('.')
   return lastDot > 0 ? basename.slice(lastDot + 1).toLowerCase() : ''
+}
+
+function isObsidianEmbedSizeToken(token: string): boolean {
+  const normalized = token.trim().toLowerCase()
+  return /^\d+$/.test(normalized) || /^\d+x\d+$/.test(normalized) || /^\d+x$/.test(normalized) || /^x\d+$/.test(normalized)
+}
+
+function parseObsidianEmbed(
+  raw: string,
+): {
+  target: string
+  kind: 'image' | 'video'
+  label: string
+} | null {
+  const trimmed = stripWrappingQuotes(raw)
+  const match = trimmed.match(/^!\[\[([^\]]+)\]\]$/)
+  if (!match) return null
+
+  const parts = match[1]
+    .split('|')
+    .map((part) => stripWrappingQuotes(part).trim())
+    .filter(Boolean)
+
+  const target = parts[0]
+  if (!target) return null
+
+  const extension = getReferenceExtension(target)
+  const kind = IMAGE_EXTENSIONS.has(extension)
+    ? 'image'
+    : VIDEO_EXTENSIONS.has(extension)
+      ? 'video'
+      : null
+  if (!kind) return null
+
+  const label = parts.slice(1).find((part) => !isObsidianEmbedSizeToken(part)) || getReferenceBasename(target)
+
+  return {
+    target,
+    kind,
+    label,
+  }
+}
+
+function escapeMarkdownImageText(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+}
+
+function normalizeObsidianMarkdownEmbeds(markdown: string): string {
+  const lines = markdown.split('\n')
+  let inCodeFence = false
+
+  return lines.map((line) => {
+    const trimmed = line.trimStart()
+    if (/^```/.test(trimmed) || /^~~~/.test(trimmed)) {
+      inCodeFence = !inCodeFence
+      return line
+    }
+
+    if (inCodeFence) return line
+
+    return line.replace(/!\[\[([^\]]+)\]\]/g, (match) => {
+      const embed = parseObsidianEmbed(match)
+      if (!embed || embed.kind !== 'image') return match
+      return `![${escapeMarkdownImageText(embed.label)}](<${embed.target}>)`
+    })
+  }).join('\n')
 }
 
 function resolveReference(reference: string, notePath: string | null | undefined): {
@@ -475,7 +559,7 @@ function resolveReference(reference: string, notePath: string | null | undefined
   localPath: string | null
   isLocal: boolean
 } {
-  const trimmed = stripWrappingQuotes(reference)
+  const trimmed = stripMarkdownDestinationBrackets(stripWrappingQuotes(reference))
 
   if (/^(https?:|data:|local-file:|file:)/i.test(trimmed)) {
     return {
@@ -799,21 +883,16 @@ function parseStandaloneEmbedLine(
     })
   }
 
-  const wikiEmbed = trimmed.match(/^!\[\[([^\]]+)\]\]$/)
-  if (wikiEmbed) {
-    const target = wikiEmbed[1].trim()
-    const extension = getReferenceExtension(target)
-    if (IMAGE_EXTENSIONS.has(extension)) {
-      return buildBodyEmbed('image', target, notePath, {
-        alt: target.split(/[/\\]/).pop() || target,
+  const obsidianEmbed = parseObsidianEmbed(trimmed)
+  if (obsidianEmbed) {
+    if (obsidianEmbed.kind === 'image') {
+      return buildBodyEmbed('image', obsidianEmbed.target, notePath, {
+        alt: obsidianEmbed.label,
       })
     }
-    if (VIDEO_EXTENSIONS.has(extension)) {
-      return buildBodyEmbed('video', target, notePath, {
-        title: target.split(/[/\\]/).pop() || target,
-      })
-    }
-    return null
+    return buildBodyEmbed('video', obsidianEmbed.target, notePath, {
+      title: obsidianEmbed.label,
+    })
   }
 
   if (/^https?:\/\/\S+$/i.test(trimmed)) {
@@ -847,7 +926,9 @@ function shouldPromoteToSectionHeading(line: string): boolean {
 
 function flushMarkdownBlock(buffer: string[], blocks: PreviewBlock[], indexRef: { value: number }): void {
   if (buffer.length === 0) return
-  const markdown = buffer.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  const markdown = normalizeObsidianMarkdownEmbeds(
+    buffer.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
+  )
   buffer.length = 0
   if (!markdown) return
 
@@ -884,7 +965,7 @@ function parseBodyBlocks(
 
     normalizedSegments.forEach((subsegment) => {
       if (subsegment.type === 'widget') {
-        const widgetId = makeId('widget', subsegment.data.title || `widget-${widgets.length}`, widgets.length)
+        const widgetId = subsegment.data.id || makeId('widget', subsegment.data.title || `widget-${widgets.length}`, widgets.length)
         widgets.push({
           id: widgetId,
           ...subsegment.data,

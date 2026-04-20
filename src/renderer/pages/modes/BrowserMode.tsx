@@ -54,6 +54,7 @@ export default function BrowserMode({
   const captureTokenConsumedRef = useRef(false)
   const captureTokenExpiryTimerRef = useRef<number | null>(null)
   const wasActiveRef = useRef<boolean>(isActive)
+  const previousTabCountRef = useRef(tabs.length)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -318,9 +319,16 @@ export default function BrowserMode({
     if (!isElectron) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
 
+    const previousTabCount = previousTabCountRef.current
+    previousTabCountRef.current = tabs.length
+    const tabCountChangedWhileHostAlreadyPresent = previousTabCount > 0 && tabs.length > 0 && previousTabCount !== tabs.length
+
     const syncVisibleHost = async () => {
       if (!browserRuntimeReady || tabs.length === 0) {
         await syncBrowserVisibility('hidden')
+        return
+      }
+      if (tabCountChangedWhileHostAlreadyPresent) {
         return
       }
       await syncBrowserVisibility('hidden')

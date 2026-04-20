@@ -329,11 +329,30 @@ export default function NotePreview({
         h3: ({ children }) => <h3 className="note-preview-markdown-h3">{children}</h3>,
         h4: ({ children }) => <h4 className="note-preview-markdown-h4">{children}</h4>,
         p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
+        em: ({ children, node: _node, ...props }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
         hr: () => <hr className="note-preview-markdown-hr" />,
         blockquote: ({ children }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
         ul: ({ children }) => <ul className="note-preview-markdown-ul">{children}</ul>,
         ol: ({ children }) => <ol className="note-preview-markdown-ol">{children}</ol>,
         li: ({ children }) => <li className="note-preview-markdown-li">{children}</li>,
+        table: ({ children, node: _node, ...props }) => (
+          <div className="note-preview-table-scroll" data-note-preview-table="true">
+            <table className="note-preview-markdown-table" {...props}>{children}</table>
+          </div>
+        ),
+        thead: ({ children, node: _node, ...props }) => <thead className="note-preview-markdown-thead" {...props}>{children}</thead>,
+        tbody: ({ children, node: _node, ...props }) => <tbody className="note-preview-markdown-tbody" {...props}>{children}</tbody>,
+        tr: ({ children, node: _node, ...props }) => <tr className="note-preview-markdown-tr" {...props}>{children}</tr>,
+        th: ({ children, node: _node, className, ...props }) => (
+          <th className={className ? `${className} note-preview-markdown-th` : 'note-preview-markdown-th'} {...props}>
+            {children}
+          </th>
+        ),
+        td: ({ children, node: _node, className, ...props }) => (
+          <td className={className ? `${className} note-preview-markdown-td` : 'note-preview-markdown-td'} {...props}>
+            {children}
+          </td>
+        ),
         pre: ({ children }) => <pre className="note-preview-markdown-pre">{children}</pre>,
         code: ({ children, className, ...props }) => (
           <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
