@@ -113,6 +113,15 @@ function flushTimeoutByDelay(delay: number) {
   entry.callback()
 }
 
+function flushTimeoutMatching(predicate: (delay: number | undefined) => boolean) {
+  const index = queuedTimeouts.findIndex((entry) => predicate(entry.delay))
+  if (index < 0) {
+    throw new Error('No queued timeout matching predicate')
+  }
+  const [entry] = queuedTimeouts.splice(index, 1)
+  entry.callback()
+}
+
 async function flushMicrotasks() {
   await Promise.resolve()
   await Promise.resolve()
@@ -159,25 +168,74 @@ describe('useTheme liquid default', () => {
     assert.strictEqual(documentAttributes.get('data-theme-transitioning'), undefined)
   })
 
-  it('defers native theme sync until the renderer-side hold finishes in the non-reduced-motion path', async () => {
+  it('prepares the target theme during holding and only reveals after two settle frames', async () => {
     useTheme.getState().setTheme('dark')
 
     assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'entering')
     assert.deepStrictEqual(nativeThemeCalls, [])
 
-    flushTimeoutByDelay(160)
+    flushTimeoutByDelay(180)
     await flushMicrotasks()
     assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'holding')
+    assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+    assert.deepStrictEqual(nativeThemeCalls, [])
 
     flushAnimationFrame()
     await flushMicrotasks()
 
     assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
-    assert.deepStrictEqual(nativeThemeCalls, [])
+    assert.deepStrictEqual(nativeThemeCalls, ['dark'])
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'holding')
 
-    flushTimeoutByDelay(440)
+    flushAnimationFrame()
+    await flushMicrotasks()
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'holding')
+
+    flushAnimationFrame()
+    await flushMicrotasks()
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'holding')
+
+    flushTimeoutMatching((delay) => typeof delay === 'number' && delay >= 300 && delay <= 320)
     await flushMicrotasks()
 
-    assert.deepStrictEqual(nativeThemeCalls, ['dark'])
+    assert.strictEqual(useRitualOverlayStore.getState().session?.phase, 'leaving')
+  })
+
+  it('ignores stale fallback reconciliation from an aborted earlier theme toggle', async () => {
+    useTheme.getState().setTheme('dark')
+
+    flushTimeoutByDelay(180)
+    await flushMicrotasks()
+    flushAnimationFrame()
+    await flushMicrotasks()
+    flushAnimationFrame()
+    await flushMicrotasks()
+    flushAnimationFrame()
+    await flushMicrotasks()
+
+    useTheme.getState().setTheme('light')
+    await flushMicrotasks()
+
+    flushTimeoutByDelay(180)
+    await flushMicrotasks()
+    flushAnimationFrame()
+    await flushMicrotasks()
+    assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+    assert.strictEqual(nativeThemeCalls.at(-1), 'light')
+
+    flushAnimationFrame()
+    await flushMicrotasks()
+    flushAnimationFrame()
+    await flushMicrotasks()
+    flushTimeoutByDelay(320)
+    await flushMicrotasks()
+    flushTimeoutByDelay(900)
+    await flushMicrotasks()
+
+    flushTimeoutByDelay(3000)
+    await flushMicrotasks()
+
+    assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+    assert.strictEqual(nativeThemeCalls.at(-1), 'light')
   })
 })

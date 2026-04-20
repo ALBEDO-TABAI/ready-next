@@ -51,9 +51,9 @@ const MODE_SWITCH_TIMELINE: RitualTimelineConfig = {
 }
 
 const THEME_TRANSITION_TIMELINE: RitualTimelineConfig = {
-  enterDurationMs: 160,
-  holdingMinDurationMs: 440,
-  leaveDurationMs: 720,
+  enterDurationMs: 180,
+  holdingMinDurationMs: 320,
+  leaveDurationMs: 900,
 }
 
 export const THEME_TRANSITION_ENTER_DURATION_MS = THEME_TRANSITION_TIMELINE.enterDurationMs

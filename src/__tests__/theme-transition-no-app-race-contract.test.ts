@@ -57,7 +57,17 @@ test('App.tsx does not race the theme ritual and the glass-state content fade is
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity:\s*1[\s\S]*?filter:\s*none[\s\S]*?opacity 600ms cubic-bezier\(0\.4,\s*0,\s*0\.6,\s*1\) 40ms/,
+    /html\[data-theme-ritual-phase='holding'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity:\s*0\.0[0-9][\s\S]*?filter:\s*blur\(/,
+  )
+  // Leaving content reveal is keyed to --ritual-leave-duration so it rides the overlay's
+  // opacity fade instead of snapping back in 120ms. Locks the unified-reveal fix in place.
+  assert.match(
+    overlayCss,
+    /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity:\s*1[\s\S]*?filter:\s*none[\s\S]*?opacity var\(--ritual-leave-duration,\s*900ms\)/,
+  )
+  assert.match(
+    overlayCss,
+    /html\[data-theme-ritual-direction='to-light'\]\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity var\(--ritual-to-light-leave-duration,\s*1120ms\)[\s\S]*?filter var\(--ritual-to-light-leave-duration,\s*1120ms\)/,
   )
 
   // 6. CSS must NOT define a dedicated ritual base layer. A low-alpha tint overlay cross-fades
@@ -83,12 +93,24 @@ test('App.tsx does not race the theme ritual and the glass-state content fade is
   )
   assert.match(
     overlayCss,
-    /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity:\s*0/,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color:\s*color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*32%,\s*transparent\)/,
+  )
+  // During leaving, the tint fades in lockstep with the overlay (opacity 1 → 0 over the full
+  // leave duration) so the destination brightness is reached at exactly the moment the icon
+  // finishes fading. The previous `opacity: 1` rule produced a visible tint-pop at session end.
+  assert.match(
+    overlayCss,
+    /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity:\s*0[\s\S]*?opacity var\(--ritual-leave-duration,\s*900ms\)[\s\S]*?background-color var\(--ritual-leave-duration,\s*900ms\)/,
+  )
+  assert.match(
+    overlayCss,
+    /html\[data-theme-ritual-direction='to-light'\]\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity var\(--ritual-to-light-leave-duration,\s*1120ms\)[\s\S]*?background-color var\(--ritual-to-light-leave-duration,\s*1120ms\)/,
   )
   assert.match(styles, /\.ready-app-bg::before\s*\{[\s\S]*?opacity:\s*1/)
   assert.match(styles, /\.ready-app-bg::after\s*\{[\s\S]*?opacity:\s*0/)
-  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*?transition:\s*opacity calc\(var\(--ritual-hold-duration,\s*440ms\)\s*-\s*40ms\)/)
-  assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color calc\(var\(--ritual-hold-duration,\s*440ms\)\s*-\s*80ms\)/)
+  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*?transition:\s*opacity calc\(var\(--ritual-hold-duration,\s*320ms\)\s*-\s*40ms\)/)
+  assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*?background-color calc\(var\(--ritual-hold-duration,\s*320ms\)\s*-\s*80ms\)/)
+  assert.doesNotMatch(overlayCss, /linear-gradient|radial-gradient/)
 
   // 7. Reduced-motion must disable the content fade instead of zeroing the whole shell.
   assert.match(

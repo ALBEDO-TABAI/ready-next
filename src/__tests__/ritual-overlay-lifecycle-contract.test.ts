@@ -25,7 +25,7 @@ test('ritual overlay infrastructure: store, withRitual hook, mask, component, cs
   assert.match(store, /const reduceMotion = prefersReducedMotion\(\)/)
   assert.match(store, /if \(reduceMotion\) \{[\s\S]*runReduceMotionFlash\(stage\)/)
   assert.match(store, /enterDurationMs: 120,[\s\S]*holdingMinDurationMs: 100,[\s\S]*leaveDurationMs: 100/)
-  assert.match(store, /enterDurationMs: 160,[\s\S]*holdingMinDurationMs: 440,[\s\S]*leaveDurationMs: 720/)
+  assert.match(store, /enterDurationMs: 180,[\s\S]*holdingMinDurationMs: 320,[\s\S]*leaveDurationMs: 900/)
   assert.match(store, /store\.getState\(\)\._setPhase\(id, 'holding'\)/)
   assert.match(store, /store\.getState\(\)\._setPhase\(id, 'leaving'\)/)
 

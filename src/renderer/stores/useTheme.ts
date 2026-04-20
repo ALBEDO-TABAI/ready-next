@@ -1,15 +1,16 @@
 import { create } from 'zustand'
 import { readStorage, writeStorage } from '../utils/storage'
 import {
-    THEME_HOLD_DURATION_MS,
     isRitualBypassActive,
     withRitual,
 } from '../modules/overlay/useRitualOverlay'
 
 // After-ritual hard timeout to force DOM↔store alignment even if the ritual exits unexpectedly
 // (aborted by a rapid second click, engine throws, etc.). Chosen as roughly 1.5× the longest
-// possible theme ritual timeline (160 + 440 + 720 = 1320ms).
-const THEME_DOM_RECONCILE_FALLBACK_MS = 2000
+// possible theme ritual timeline (180 + 320 + 900 = 1400ms).
+const THEME_DOM_RECONCILE_FALLBACK_MS = 3000
+let themeTransitionRequestToken = 0
+let themeDomReconcileTimer: number | null = null
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
@@ -71,21 +72,53 @@ const ensureDomThemeMatches = (resolved: ResolvedTheme, option: ThemeOption) => 
     syncNativeTheme(option)
 }
 
-// waitFor with AbortSignal — resolves on timer or abort, whichever comes first.
-// Kept local to the theme store because it participates in deferred data-theme writing
-// and should not be confused with the ritual engine's internal waitFor.
-const waitForHoldingEnd = (ms: number, signal: AbortSignal): Promise<void> =>
+const clearThemeDomReconcileTimer = () => {
+    if (themeDomReconcileTimer) {
+        window.clearTimeout(themeDomReconcileTimer)
+        themeDomReconcileTimer = null
+    }
+}
+
+const waitForThemeSettleFrames = (frameCount: number, signal: AbortSignal): Promise<void> =>
     new Promise((resolve) => {
-        if (signal.aborted) { resolve(); return }
-        const timer = window.setTimeout(() => {
-            signal.removeEventListener('abort', onAbort)
+        if (signal.aborted || frameCount <= 0) {
             resolve()
-        }, ms)
+            return
+        }
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            resolve()
+            return
+        }
+
+        let remainingFrames = frameCount
         const onAbort = () => {
-            window.clearTimeout(timer)
             resolve()
         }
+
+        const step = () => {
+            if (signal.aborted) {
+                signal.removeEventListener('abort', onAbort)
+                resolve()
+                return
+            }
+            window.requestAnimationFrame(() => {
+                if (signal.aborted) {
+                    signal.removeEventListener('abort', onAbort)
+                    resolve()
+                    return
+                }
+                remainingFrames -= 1
+                if (remainingFrames <= 0) {
+                    signal.removeEventListener('abort', onAbort)
+                    resolve()
+                    return
+                }
+                step()
+            })
+        }
+
         signal.addEventListener('abort', onAbort, { once: true })
+        step()
     })
 
 const applyColorTheme = (
@@ -95,6 +128,8 @@ const applyColorTheme = (
     { animate = true }: { animate?: boolean } = {},
 ) => {
     if (typeof document === 'undefined') return
+    const requestToken = ++themeTransitionRequestToken
+    clearThemeDomReconcileTimer()
 
     // Early bypass — no ritual animation for these cases; mutate DOM synchronously.
     // Includes: first-load hydration (animate:false), system-theme no-op (resolved===current),
@@ -110,39 +145,36 @@ const applyColorTheme = (
     }
 
     const direction = resolved === 'dark' ? 'to-dark' : 'to-light'
-    const holdMs = THEME_HOLD_DURATION_MS
 
     void withRitual('theme-transition', async ({ signalReady, abortSignal }) => {
-        // signalReady kicks the engine into holding; by this point the engine has already
-        // set phase='holding' and awaited one rAF — the overlay has painted the holding
-        // styles (full opacity, 94% tint, heavy blur) and is visually covering the screen.
-        signalReady()
-        // Flip <html data-theme> NOW, at the start of holding. The overlay's translucent
-        // frosted glass (high alpha + heavy blur) absorbs the underlying content swap,
-        // while its own bg cross-fade from outgoing→incoming canvas color drives the
-        // visible light↔dark transition over the next holdMs. Flipping at the *end* of
-        // holding would race the bg cross-fade and produce a visible jolt on the
-        // holding→leaving boundary.
-        if (!abortSignal.aborted) {
-            document.documentElement.setAttribute('data-theme', resolved)
-        }
-        // Keep the workFn alive until the holding phase ends so the engine's
-        // `await workPromise` lines up with the renderer-owned ritual base completing its
-        // single light↔dark color cross-fade before native window materials update.
-        await waitForHoldingEnd(holdMs, abortSignal)
-        if (!abortSignal.aborted) {
-            syncNativeTheme(option)
+        if (abortSignal.aborted || requestToken !== themeTransitionRequestToken) return
+
+        document.documentElement.setAttribute('data-theme', resolved)
+        if (abortSignal.aborted || requestToken !== themeTransitionRequestToken) return
+
+        syncNativeTheme(option)
+        await waitForThemeSettleFrames(2, abortSignal)
+
+        if (!abortSignal.aborted && requestToken === themeTransitionRequestToken) {
+            signalReady()
         }
     }, { meta: { direction } }).catch(() => {
-        // Any failure path (abort from rapid second click, engine throw) falls through to
-        // this reconcile — cheap and idempotent.
-        ensureDomThemeMatches(resolved, option)
+        if (requestToken === themeTransitionRequestToken) {
+            ensureDomThemeMatches(resolved, option)
+        }
     })
 
     // Hard-timeout safety net: if the ritual never reaches leaving (e.g., unmount mid-transition)
     // this guarantees the DOM eventually matches the store so the next click starts from a
     // consistent state.
-    window.setTimeout(() => ensureDomThemeMatches(resolved, option), THEME_DOM_RECONCILE_FALLBACK_MS)
+    themeDomReconcileTimer = window.setTimeout(() => {
+        if (requestToken === themeTransitionRequestToken) {
+            ensureDomThemeMatches(resolved, option)
+        }
+        if (themeDomReconcileTimer) {
+            themeDomReconcileTimer = null
+        }
+    }, THEME_DOM_RECONCILE_FALLBACK_MS)
 }
 
 const applySkin = (skin: ThemeSkin) => {

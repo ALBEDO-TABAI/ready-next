@@ -31,15 +31,17 @@ test('theme transitions route through the ritual overlay and the per-selector tr
 
   // data-theme flips at the START of holding, but nativeTheme sync is delayed until
   // AFTER the renderer-side hold finishes so system window materials cannot flash early.
-  assert.match(themeStore, /signalReady\(\)[\s\S]*?document\.documentElement\.setAttribute\('data-theme', resolved\)[\s\S]*?await waitForHoldingEnd\([\s\S]*?abortSignal\)[\s\S]*?syncNativeTheme\(option\)/)
+  assert.match(themeStore, /document\.documentElement\.setAttribute\('data-theme', resolved\)[\s\S]*?syncNativeTheme\(option\)[\s\S]*?await waitForThemeSettleFrames\(2,\s*abortSignal\)[\s\S]*?signalReady\(\)/)
 
-  // Abort / error recovery: a failed ritual must reconcile DOM with the store's resolvedTheme.
+  // Abort / error recovery: only the newest request may reconcile DOM / native theme after aborts.
   assert.match(themeStore, /const ensureDomThemeMatches = /)
-  assert.match(themeStore, /\.catch\([\s\S]*?ensureDomThemeMatches\(resolved, option\)[\s\S]*?\)/)
+  assert.match(themeStore, /let themeTransitionRequestToken = 0/)
+  assert.match(themeStore, /let themeDomReconcileTimer: number \| null = null/)
+  assert.match(themeStore, /const requestToken = \+\+themeTransitionRequestToken/)
+  assert.match(themeStore, /if \(themeDomReconcileTimer\) \{\s*window\.clearTimeout\(themeDomReconcileTimer\)/)
+  assert.match(themeStore, /\.catch\([\s\S]*?requestToken === themeTransitionRequestToken[\s\S]*?ensureDomThemeMatches\(resolved, option\)/)
 
-  // Legacy token + multi-RAF plumbing is gone.
-  assert.doesNotMatch(themeStore, /let themeTransitionToken/)
-  assert.doesNotMatch(themeStore, /themeDomFrameId/)
+  // Legacy multi-RAF plumbing is gone in favor of the explicit settle-frame gate.
   assert.doesNotMatch(themeStore, /THEME_TRANSITION_DURATION_MS/)
 
   // toggleTheme collapses to strict 2-way (never lands on 'system') so every click yields a
@@ -68,6 +70,7 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.match(ritualCss, /\[data-direction='to-dark'\]/)
   assert.match(ritualCss, /\[data-direction='to-light'\]/)
   assert.match(ritualCss, /@media \(prefers-reduced-motion: reduce\)/)
+  assert.match(ritualCss, /\[data-ritual-overlay\]\[data-phase='leaving'\]\s*\{[\s\S]*opacity:\s*0[\s\S]*transition:\s*opacity var\(--ritual-leave-duration,\s*900ms\)/)
 
   // The overlay itself is transparent during theme-transition; there is no separate ritual base.
   // The app's own glass background stays in place, while a low-alpha tint overlay carries the
@@ -77,15 +80,20 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.doesNotMatch(ritualCss, /\.ready-theme-ritual-base/)
   assert.match(styles, /\.ready-app-bg::before\s*\{[\s\S]*opacity:\s*1/)
   assert.match(styles, /\.ready-app-bg::after\s*\{[\s\S]*opacity:\s*0/)
-  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*calc\(var\(--ritual-hold-duration,\s*440ms\)\s*-\s*40ms\)/)
+  assert.match(styles, /\.ready-app-bg::before,\s*\.ready-app-bg::after\s*\{[\s\S]*calc\(var\(--ritual-hold-duration,\s*320ms\)\s*-\s*40ms\)/)
   assert.match(styles, /html\[data-theme='dark'\]\s+\.ready-app-bg::before\s*\{[\s\S]*opacity:\s*0/)
   assert.match(styles, /html\[data-theme='dark'\]\s+\.ready-app-bg::after\s*\{[\s\S]*opacity:\s*1/)
   assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*0/)
   assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*opacity 60ms cubic-bezier\(0\.4,\s*0,\s*0\.6,\s*1\)/)
-  assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*background-color calc\(var\(--ritual-hold-duration,\s*440ms\)\s*-\s*80ms\)/)
+  assert.match(styles, /\.ready-theme-ritual-tint\s*\{[\s\S]*background-color calc\(var\(--ritual-hold-duration,\s*320ms\)\s*-\s*80ms\)/)
   assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*1/)
   assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*1/)
-  assert.match(ritualCss, /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*opacity:\s*0/)
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-light'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*background-color:\s*color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*32%,\s*transparent\)/)
+  // Leaving fades the tint out in lockstep with the overlay's own opacity (900ms), instead of
+  // keeping it at opacity:1 and relying on a separate background-color drain. Unifies the
+  // leave-phase brightness transition so destination lands exactly when the icon disappears.
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity:\s*0[\s\S]*?opacity var\(--ritual-leave-duration,\s*900ms\)/)
+  assert.match(ritualCss, /html\[data-theme-ritual-direction='to-light'\]\[data-theme-ritual-phase='leaving'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?opacity var\(--ritual-to-light-leave-duration,\s*1120ms\)/)
   // @starting-style gives the entering phase a real opacity fade-in. Without it the
   // overlay matches [data-phase='entering']'s opacity:1 rule from the first paint and
   // pops in instantly instead of fading.
@@ -93,7 +101,11 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   // The content fade must target the app-content layer, not the shell, and should
   // keep a faint blurred residual so the existing app glass remains visible instead of a separate plate.
   assert.match(ritualCss, /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-content\s*\{[\s\S]*opacity:\s*0\.(0[1-9]|1\d)[\s\S]*filter:\s*blur\(/)
-  assert.match(ritualCss, /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*opacity 600ms cubic-bezier\(0\.4,\s*0,\s*0\.6,\s*1\) 40ms/)
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\s+\.ready-app-content\s*\{[\s\S]*opacity:\s*0\.0[0-9]/)
+  // Content restoration rides the full leave duration so it can't produce a mid-leave snap-reveal.
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*opacity var\(--ritual-leave-duration,\s*900ms\)/)
+  assert.match(ritualCss, /html\[data-theme-ritual-direction='to-light'\]\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*opacity var\(--ritual-to-light-leave-duration,\s*1120ms\)/)
+  assert.doesNotMatch(ritualCss, /linear-gradient|radial-gradient/)
   assert.doesNotMatch(ritualCss, /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-shell\s*\{[\s\S]*opacity:\s*0/)
 
   // Constant colors live in :root so there's one source of truth for the light/dark canvas

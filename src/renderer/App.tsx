@@ -18,15 +18,10 @@ void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 function App() {
   useKeyboardShortcuts()
 
-  // Apply theme on mount — the store initializer already sets data-theme,
-  // but this ensures the component subscribes so system-theme changes
-  // trigger a re-render if needed.
-  const resolvedTheme = useTheme(s => s.resolvedTheme)
+  // `data-theme` is owned exclusively by useTheme (sync for bypass/system/init paths,
+  // deferred to the ritual overlay's holding phase for user-driven toggles). Subscribing
+  // here would race the ritual and re-introduce the 3-flash bug.
   const skin = useTheme(s => s.skin)
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', resolvedTheme)
-  }, [resolvedTheme])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-skin', skin)
@@ -47,21 +42,24 @@ function App() {
     <ErrorBoundary>
       <div className="ready-app-shell h-screen w-screen flex flex-col bg-[var(--bg-primary)] overflow-hidden">
         <div className="ready-app-bg" aria-hidden="true" />
-        <Routes>
-          <Route path="/" element={<WorkbenchMode />} />
-          <Route path="/workbench" element={<WorkbenchMode />} />
-          <Route path="/ready" element={<ReadyMode />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route
-            path="/liquid-test"
-            element={(
-              <Suspense fallback={<div className="h-full w-full" />}>
-                <LiquidTest />
-              </Suspense>
-            )}
-          />
-          <Route path="*" element={<Navigate to="/workbench" replace />} />
-        </Routes>
+        <div className="ready-theme-ritual-tint" aria-hidden="true" />
+        <div className="ready-app-content h-full min-h-0 flex flex-col">
+          <Routes>
+            <Route path="/" element={<WorkbenchMode />} />
+            <Route path="/workbench" element={<WorkbenchMode />} />
+            <Route path="/ready" element={<ReadyMode />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route
+              path="/liquid-test"
+              element={(
+                <Suspense fallback={<div className="h-full w-full" />}>
+                  <LiquidTest />
+                </Suspense>
+              )}
+            />
+            <Route path="*" element={<Navigate to="/workbench" replace />} />
+          </Routes>
+        </div>
       </div>
       <RitualOverlay />
     </ErrorBoundary>
