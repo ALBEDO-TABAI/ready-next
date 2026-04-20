@@ -2,6 +2,14 @@ import {
   buildDocumentWidgetOpenUIRulesSnippet as buildOpenUIRulesFromCatalog,
   type DocumentWidgetComponentName,
 } from '../../../shared/document-widget-openui'
+import {
+  WIDGET_SKELETONS,
+  WIDGET_SKELETON_IDS,
+  WIDGET_SIZE_IDS,
+  findSkeletonForTriggerKeyword,
+  widgetSkeletonRequiresTriggerKeyword,
+  type WidgetSkeletonId,
+} from '../../../shared/document-widget-skeletons'
 
 export type DocumentWidgetFamily = DocumentWidgetComponentName | null
 
@@ -334,6 +342,29 @@ export function buildDocumentWidgetClarificationSnippet(userText: string): strin
 
 export function buildDocumentWidgetOpenUIRulesSnippet(): string {
   return buildOpenUIRulesFromCatalog()
+}
+
+export function inferWidgetSkeletonId(userText: string): WidgetSkeletonId | null {
+  return findSkeletonForTriggerKeyword(userText)
+}
+
+export function buildDocumentWidgetSkeletonRulesSnippet(): string {
+  const lines: string[] = []
+  lines.push('## Widget 骨架规则 (v0.1)')
+  lines.push('- 优先使用 9 个骨架之一；自由构图（freeform_static/freeform_interactive）仅在用户消息命中触发关键词时使用。')
+  lines.push(`- 支持尺寸：${WIDGET_SIZE_IDS.join(' / ')}。A4 仅用于打印/导出 PDF；landscape_4_3 用于横版报表。`)
+  lines.push('- background_mode 是跨骨架维度：opaque 默认带外框，transparent 去掉外框方便无痕嵌入文档。')
+  lines.push('- freeform_interactive 必须声明 supports_animation=true，其他骨架不允许带动画脚本。')
+  lines.push('')
+  lines.push('### 骨架清单')
+  for (const id of WIDGET_SKELETON_IDS) {
+    const def = WIDGET_SKELETONS[id]
+    const trigger = widgetSkeletonRequiresTriggerKeyword(id) && def.triggerKeywords
+      ? `（触发关键词：${def.triggerKeywords.join(' / ')}）`
+      : ''
+    lines.push(`- ${id}：${def.displayName} — ${def.description}${trigger}`)
+  }
+  return lines.join('\n')
 }
 
 export function buildDocumentWidgetGuidanceSnippet(profile: DocumentWidgetProfile | null): string {

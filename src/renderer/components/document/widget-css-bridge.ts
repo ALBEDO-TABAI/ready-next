@@ -1,6 +1,13 @@
+export type WidgetBackgroundMode = 'opaque' | 'transparent'
+
 export interface WidgetThemePayload {
   vars: Record<string, string>
   isDark: boolean
+  backgroundMode: WidgetBackgroundMode
+}
+
+export interface ResolveWidgetThemeOptions {
+  backgroundMode?: WidgetBackgroundMode
 }
 
 const THEME_VAR_NAMES = [
@@ -20,7 +27,8 @@ const THEME_VAR_NAMES = [
   '--color-red',
 ] as const
 
-export function resolveWidgetThemePayload(): WidgetThemePayload {
+export function resolveWidgetThemePayload(options?: ResolveWidgetThemeOptions): WidgetThemePayload {
+  const backgroundMode: WidgetBackgroundMode = options?.backgroundMode === 'transparent' ? 'transparent' : 'opaque'
   const root = document.documentElement
   const styles = getComputedStyle(root)
 
@@ -29,7 +37,7 @@ export function resolveWidgetThemePayload(): WidgetThemePayload {
     vars[name] = styles.getPropertyValue(name).trim()
   }
 
-  vars['--widget-bg-primary'] = vars['--bg-content']
+  vars['--widget-bg-primary'] = backgroundMode === 'transparent' ? 'transparent' : vars['--bg-content']
   vars['--widget-bg-secondary'] = vars['--bg-canvas']
   vars['--widget-border'] = vars['--border-default']
   vars['--widget-text-primary'] = vars['--text-title']
@@ -43,13 +51,26 @@ export function resolveWidgetThemePayload(): WidgetThemePayload {
     isDark:
       root.getAttribute('data-theme') === 'dark' ||
       root.classList.contains('dark'),
+    backgroundMode,
   }
 }
 
-export function getWidgetIframeStyleBlock(vars: Record<string, string>): string {
+export interface WidgetIframeStyleOptions {
+  backgroundMode?: WidgetBackgroundMode
+}
+
+export function getWidgetIframeStyleBlock(
+  vars: Record<string, string>,
+  options?: WidgetIframeStyleOptions,
+): string {
   const cssVars = Object.entries(vars)
     .map(([key, value]) => `${key}:${value};`)
     .join('\n')
+
+  const isTransparent = options?.backgroundMode === 'transparent'
+  const cardBackground = isTransparent ? 'transparent' : 'var(--widget-bg-primary)'
+  const cardBorder = isTransparent ? '0' : '1px solid var(--widget-border)'
+  const cardPadding = isTransparent ? '0' : '16px'
 
   return `
 :root {
@@ -79,10 +100,21 @@ html, body {
 }
 
 .widget-root .card {
-  border: 1px solid var(--widget-border);
+  border: ${cardBorder};
   border-radius: 16px;
-  background: var(--widget-bg-primary);
-  padding: 16px;
+  background: ${cardBackground};
+  padding: ${cardPadding};
+}
+
+.widget-root .widget-canvas {
+  display: block;
+  width: 100%;
+}
+
+.widget-root .widget-canvas[data-widget-bg="transparent"] > .card {
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .widget-root .muted {

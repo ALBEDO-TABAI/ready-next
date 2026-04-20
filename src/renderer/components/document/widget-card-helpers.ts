@@ -8,7 +8,10 @@ import {
   parseShowWidgetFences,
   tryParseWidgetPayload,
 } from './widget-fence-parser'
-import type { DocumentWidgetComponentSpecSummary } from '../../../shared/document-widget-parse'
+import type {
+  DocumentWidgetComponentSpecSummary,
+  DocumentWidgetSkeletonSpecSummary,
+} from '../../../shared/document-widget-parse'
 
 export function getWidgetPersistenceKey(title: string, widgetCode: string): string {
   return `${title.trim().toLowerCase()}::${widgetCode.trim().slice(0, 160)}`
@@ -20,6 +23,7 @@ export function buildWidgetFenceSource(
   options?: {
     id?: string | null
     componentSpec?: DocumentWidgetComponentSpecSummary | null
+    skeletonSpec?: DocumentWidgetSkeletonSpecSummary | null
     widgetState?: DocumentWidgetPersistedState | null
   },
 ): string {
@@ -271,6 +275,7 @@ export function renameWidgetFenceTitleInContent(
     const replacement = buildWidgetFenceSource(normalizedNextTitle, widgetCode, {
       id: parsed.id,
       componentSpec: parsed.componentSpec,
+      skeletonSpec: parsed.skeletonSpec,
       widgetState: parsed.widgetState,
     })
     return `${normalizedSource.slice(0, start)}${replacement}${normalizedSource.slice(start + fullMatch.length)}`
@@ -305,6 +310,7 @@ export function mergeWidgetStateMapIntoContent(
     return buildWidgetFenceSource(parsed.title || 'widget', parsed.widgetCode, {
       id: parsed.id,
       componentSpec: parsed.componentSpec,
+      skeletonSpec: parsed.skeletonSpec,
       widgetState: nextState,
     })
   })

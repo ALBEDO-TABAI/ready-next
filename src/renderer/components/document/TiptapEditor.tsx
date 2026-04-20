@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -22,6 +22,8 @@ import {
   exportWidgetCardSnapshot,
   getDocumentWidgetRenderBudget,
 } from './widget-card-helpers'
+import WidgetEditDrawer, { type WidgetEditDrawerInput, type WidgetEditDrawerSave } from './WidgetEditDrawer'
+import type { DocumentWidgetData } from '../../../shared/document-widget-parse'
 
 export interface TiptapEditorProps {
   content: string
@@ -52,11 +54,19 @@ function getWidgetMemoryKey(title: string, widgetCode: string): string {
   return `${title}::${widgetCode.slice(0, 160)}`
 }
 
+interface WidgetEditRequestContext {
+  widget: DocumentWidgetData
+  pos: number
+  nodeSize: number
+  title: string
+}
+
 function createWidgetBlockExtension(
   getEditor: () => Editor | null,
   preferManualPreview: boolean,
   onRequestPreview?: (title: string) => void,
   onRequestAgentUpdate?: (title: string, widgetCode: string) => void,
+  onRequestEdit?: (context: WidgetEditRequestContext) => void,
 ): Extension {
   return Extension.create({
     name: 'readyDocWidgetBlock',
@@ -108,15 +118,26 @@ function createWidgetBlockExtension(
                     preferManualPreview={preferManualPreview}
                     sourceVisible={sourceVisible}
                     onRequestPreview={onRequestPreview}
+                    onRequestEdit={onRequestEdit ? () => onRequestEdit({
+                      widget,
+                      pos,
+                      nodeSize: node.nodeSize,
+                      title,
+                    }) : undefined}
                     onRenameTitle={(nextTitle) => {
                       const currentEditor = getEditor()
                       if (!currentEditor) return
-                      const nextPayload = JSON.stringify({
-                        title: nextTitle,
-                        widget_code: widget.widgetCode,
-                      })
                       currentEditor.view.dispatch(
-                        currentEditor.state.tr.insertText(nextPayload, pos + 1, pos + node.nodeSize - 1),
+                        currentEditor.state.tr.insertText(
+                          buildWidgetFenceSource(nextTitle, widget.widgetCode, {
+                            id: widget.id,
+                            componentSpec: widget.componentSpec,
+                            skeletonSpec: widget.skeletonSpec,
+                            widgetState: widget.widgetState,
+                          }).replace(/^```show-widget\s*\n?|\n?\s*```$/g, ''),
+                          pos + 1,
+                          pos + node.nodeSize - 1,
+                        ),
                       )
                     }}
                     onQuoteToAgent={onRequestAgentUpdate ? (nextTitle, nextCode) => onRequestAgentUpdate(nextTitle, nextCode) : undefined}
@@ -131,7 +152,12 @@ function createWidgetBlockExtension(
                       )
                     }}
                     onCopySource={() => {
-                      void navigator.clipboard?.writeText(buildWidgetFenceSource(title, widget.widgetCode))
+                      void navigator.clipboard?.writeText(buildWidgetFenceSource(title, widget.widgetCode, {
+                        id: widget.id,
+                        componentSpec: widget.componentSpec,
+                        skeletonSpec: widget.skeletonSpec,
+                        widgetState: widget.widgetState,
+                      }))
                     }}
                     onDelete={() => {
                       const currentEditor = getEditor()
@@ -239,6 +265,41 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     const isUpdatingRef = useRef(false)
     const revealClearTimerRef = useRef<number | null>(null)
     const editorRef = useRef<Editor | null>(null)
+    const [editDrawerContext, setEditDrawerContext] = useState<WidgetEditRequestContext | null>(null)
+    const editContextRef = useRef<WidgetEditRequestContext | null>(null)
+    editContextRef.current = editDrawerContext
+
+    const handleEditRequest = useCallback((context: WidgetEditRequestContext) => {
+      setEditDrawerContext(context)
+    }, [])
+
+    const handleCloseEditDrawer = useCallback(() => {
+      setEditDrawerContext(null)
+    }, [])
+
+    const handleSaveEditDrawer = useCallback((result: WidgetEditDrawerSave) => {
+      const context = editContextRef.current
+      const currentEditor = editorRef.current
+      if (!context || !currentEditor) {
+        setEditDrawerContext(null)
+        return
+      }
+      const nextFence = buildWidgetFenceSource(context.title, result.widgetCode, {
+        id: context.widget.id,
+        componentSpec: context.widget.componentSpec,
+        skeletonSpec: result.skeletonSpec,
+        widgetState: context.widget.widgetState,
+      }).replace(/^```show-widget\s*\n?|\n?\s*```$/g, '')
+      currentEditor.view.dispatch(
+        currentEditor.state.tr.insertText(
+          nextFence,
+          context.pos + 1,
+          context.pos + context.nodeSize - 1,
+        ),
+      )
+      setEditDrawerContext(null)
+    }, [])
+
     const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(content), [content])
     const widgetBlockExtension = useMemo(
       () => createWidgetBlockExtension(
@@ -246,9 +307,20 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
         widgetRenderBudget.forceManualPreviewAll,
         onRequestPreview,
         onRequestAgentUpdate,
+        handleEditRequest,
       ),
-      [onRequestAgentUpdate, onRequestPreview, widgetRenderBudget.forceManualPreviewAll],
+      [handleEditRequest, onRequestAgentUpdate, onRequestPreview, widgetRenderBudget.forceManualPreviewAll],
     )
+
+    const editDrawerInput = useMemo<WidgetEditDrawerInput | null>(() => {
+      if (!editDrawerContext) return null
+      return {
+        title: editDrawerContext.title,
+        widgetCode: editDrawerContext.widget.widgetCode,
+        skeletonSpec: editDrawerContext.widget.skeletonSpec,
+        componentSpec: editDrawerContext.widget.componentSpec,
+      }
+    }, [editDrawerContext])
 
     const editor = useEditor({
       extensions: [
@@ -435,6 +507,12 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     return (
       <div className={`tiptap-editor-wrapper ${className || ''}`}>
         <EditorContent editor={editor} />
+        <WidgetEditDrawer
+          open={editDrawerContext !== null}
+          input={editDrawerInput}
+          onClose={handleCloseEditDrawer}
+          onSave={handleSaveEditDrawer}
+        />
       </div>
     )
   }

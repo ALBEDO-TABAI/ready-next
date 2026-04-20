@@ -9,6 +9,7 @@ import {
   buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
   buildDocumentWidgetOpenUIRulesSnippet,
+  buildDocumentWidgetSkeletonRulesSnippet,
   type DocumentWidgetProfile,
 } from '../claude-bridge/widget-guidance'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
@@ -189,6 +190,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 - "这篇文章怎么样" → 直接回答，不使用工具
 `)
 
+    guidance.push(buildDocumentWidgetSkeletonRulesSnippet())
     guidance.push(buildDocumentWidgetOpenUIRulesSnippet())
 
     const widgetGuidance = buildDocumentWidgetGuidanceSnippet(policy.documentWidgetProfile || null)

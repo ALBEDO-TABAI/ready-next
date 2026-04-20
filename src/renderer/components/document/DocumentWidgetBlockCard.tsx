@@ -1,4 +1,4 @@
-import { Code2, Copy, Eye, Trash2 } from 'lucide-react'
+import { Code2, Copy, Eye, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import WidgetRenderer from './WidgetRenderer'
@@ -15,6 +15,7 @@ interface DocumentWidgetBlockCardProps {
   onQuoteToAgent?: (title: string, widgetCode: string) => void
   onExport?: (title: string, widgetCode: string) => void
   onRequestPreview?: (title: string) => void
+  onRequestEdit?: () => void
 }
 
 export default function DocumentWidgetBlockCard({
@@ -29,6 +30,7 @@ export default function DocumentWidgetBlockCard({
   onQuoteToAgent,
   onExport,
   onRequestPreview,
+  onRequestEdit,
 }: DocumentWidgetBlockCardProps) {
   const [copied, setCopied] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -65,6 +67,20 @@ export default function DocumentWidgetBlockCard({
             >
               <Eye size={13} strokeWidth={2} />
               <span>预览</span>
+            </button>
+          ) : null}
+          {onRequestEdit ? (
+            <button
+              type="button"
+              className="ready-doc-widget-card-action"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onRequestEdit()
+              }}
+            >
+              <Pencil size={13} strokeWidth={2} />
+              <span>编辑</span>
             </button>
           ) : null}
           <button type="button" className="ready-doc-widget-card-action" onClick={onToggleSource}>

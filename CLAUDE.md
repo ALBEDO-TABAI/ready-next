@@ -83,6 +83,12 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 一句话里出现多个来源、多个目标或多个顺序步骤时，必须先生成 `DocumentTaskPlan + DocumentTaskJob[]`，再按 job 顺序执行
 - 文档卡片类执行状态必须按计划步骤展示；未开始步骤显示 `pending`，失败步骤显示 `blocked`，不能再把整条链路默认标成进行中或完成
 
+### 6.8.1 Widget 骨架仲裁层（v0.1+）
+- 文档 widget 采用「骨架 + 设计规范」作为 LLM 与用户之间的仲裁层：`src/shared/document-widget-skeletons.ts` 定义 9 个骨架（A–G + H1 freeform_static / H2 freeform_interactive），`background_mode` 是跨骨架的正交维度，不新增骨架
+- Legacy `componentSpec`（20 个组件）通过 `src/shared/document-widget-skeleton-mapping.ts` 只读映射到骨架；保存时可升级为 `skeletonSpec`，但不得在解析阶段丢弃原 `component_spec` 字段
+- H1/H2 仅在用户消息命中触发关键词（`做一个超特殊卡片` / `交互式信息卡` / `交互式数据图`）时允许使用；LLM 即便选了也要在渲染端走 `arbitrateSkeletonForUserText` 降级到最近的 A–G
+- Widget 相关口语（信息卡 / 卡片 / 图表 / 超特殊卡片 / 交互式信息卡 / 透明背景 / A4 / 4:3 / …）必须同步到 `live-info-intent.LOCAL_DOMAIN_HINTS`，避免被误判为 browser 意图
+
 ### 6.9 实时外部信息查询原则
 - 天气、新闻、股价、汇率、比分、航班、路况、空气质量、官网最新公告这类依赖最新外部信息的问题，不能只因为用户没写“打开网页/浏览器”就当成普通直答
 - 这类请求必须先做轻量语义判断；命中后优先进入浏览器查询工作流，而不是继续沿用 `direct_answer`
@@ -98,6 +104,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `assertNoToolResolutionViolation` 仅作 telemetry 使用：任何残留的 invariant 失谐都通过 `logAgentMetric('tool_resolution_violation_post_arbitration', ...)` 记录并写日志，不再抛错给用户；如再出现该指标即说明裁决层有 bug
 - `document-task-pipeline-executor` 中所有 `requestModuleToolAction` 必须通过 `document-task-tool-timing` 的 `wrapToolCall` / `raceWithTimeout` 包装，并在入口检查 abort signal；不允许出现 `void params.signal` 这样吞掉信号的写法
 - DirectChatEngine 的 `sendMessage` 抢占既要 abort 旧 `AbortController`，也要先调用注入的 `cancelPendingToolActions`，把渲染端正在 pending 的 `agent:toolActionRequest` 取消掉，否则旧的 widget 写入会落到新会话上
+- H1/H2 freeform 骨架的触发关键词校验与降级也统一走 `arbitrateSkeletonForUserText`；任何绕过裁决层直接在 pipeline executor 内加 skeleton 白名单的做法都视为双重挡板，不允许
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

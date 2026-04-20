@@ -3,7 +3,11 @@ import { AlertTriangle } from 'lucide-react'
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
-import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-css-bridge'
+import {
+  getWidgetIframeStyleBlock,
+  resolveWidgetThemePayload,
+  type WidgetBackgroundMode,
+} from './widget-css-bridge'
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } from './widget-sanitizer'
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
@@ -15,6 +19,17 @@ interface WidgetRendererProps {
   widgetState?: DocumentWidgetPersistedState | null
   onWidgetStateChange?: (state: DocumentWidgetPersistedState) => void
   preferManualPreview?: boolean
+  backgroundMode?: WidgetBackgroundMode
+}
+
+const TRANSPARENT_BG_MARKER = /data-widget-bg=["']transparent["']/i
+
+function inferBackgroundMode(
+  explicit: WidgetBackgroundMode | undefined,
+  widgetCode: string,
+): WidgetBackgroundMode {
+  if (explicit === 'transparent' || explicit === 'opaque') return explicit
+  return TRANSPARENT_BG_MARKER.test(widgetCode) ? 'transparent' : 'opaque'
 }
 
 const MAX_IFRAME_HEIGHT = 2000
@@ -30,6 +45,7 @@ export default function WidgetRenderer({
   widgetState,
   onWidgetStateChange,
   preferManualPreview = false,
+  backgroundMode,
 }: WidgetRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const widgetTokenRef = useRef(`widget-${Math.random().toString(36).slice(2, 10)}`)
@@ -45,11 +61,20 @@ export default function WidgetRenderer({
 
   const sanitizedWidgetCode = useMemo(() => sanitizeWidgetHtml(widgetCode), [widgetCode])
   const staticFallbackHtml = useMemo(() => stripWidgetScripts(sanitizedWidgetCode), [sanitizedWidgetCode])
-  const themePayload = useMemo(() => resolveWidgetThemePayload(), [])
+  const resolvedBackgroundMode = useMemo<WidgetBackgroundMode>(
+    () => inferBackgroundMode(backgroundMode, sanitizedWidgetCode),
+    [backgroundMode, sanitizedWidgetCode],
+  )
+  const themePayload = useMemo(
+    () => resolveWidgetThemePayload({ backgroundMode: resolvedBackgroundMode }),
+    [resolvedBackgroundMode],
+  )
   const srcDoc = useMemo(() => {
-    const styleBlock = getWidgetIframeStyleBlock(themePayload.vars)
+    const styleBlock = getWidgetIframeStyleBlock(themePayload.vars, {
+      backgroundMode: resolvedBackgroundMode,
+    })
     return buildWidgetReceiverSrcdoc(styleBlock, themePayload.isDark, sanitizedWidgetCode, widgetTokenRef.current)
-  }, [sanitizedWidgetCode, themePayload])
+  }, [sanitizedWidgetCode, themePayload, resolvedBackgroundMode])
   const openHref = useCallback(async (href: string) => {
     if (window.electronAPI?.browser?.createTab) {
       const result = await window.electronAPI.browser.createTab(href)
@@ -78,12 +103,12 @@ export default function WidgetRenderer({
   const postTheme = useCallback(() => {
     const iframe = iframeRef.current
     if (!iframe?.contentWindow) return
-    const payload = resolveWidgetThemePayload()
+    const payload = resolveWidgetThemePayload({ backgroundMode: resolvedBackgroundMode })
     iframe.contentWindow.postMessage(
       { type: 'widget:theme', vars: payload.vars, isDark: payload.isDark },
       '*',
     )
-  }, [])
+  }, [resolvedBackgroundMode])
 
   useLayoutEffect(() => {
     function handleMessage(event: MessageEvent) {

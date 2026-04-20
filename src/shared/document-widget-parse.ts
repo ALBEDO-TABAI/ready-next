@@ -22,6 +22,13 @@ export interface DocumentWidgetComponentSpecSummary {
   dataSource?: Record<string, unknown>
 }
 
+export interface DocumentWidgetSkeletonSpecSummary {
+  skeleton: string
+  size?: string
+  background_mode?: 'opaque' | 'transparent'
+  props?: Record<string, unknown>
+}
+
 export interface DocumentWidgetData {
   id?: string
   title?: string
@@ -29,6 +36,7 @@ export interface DocumentWidgetData {
   rawFence: string
   widgetState?: DocumentWidgetPersistedState | null
   componentSpec?: DocumentWidgetComponentSpecSummary | null
+  skeletonSpec?: DocumentWidgetSkeletonSpecSummary | null
 }
 
 export type DocumentWidgetSegment =
@@ -47,6 +55,7 @@ export interface DocumentWidgetRecord {
   end: number
   mode: WidgetRenderMode
   componentSpec?: DocumentWidgetComponentSpecSummary | null
+  skeletonSpec?: DocumentWidgetSkeletonSpecSummary | null
   widgetState?: DocumentWidgetPersistedState | null
 }
 
@@ -90,6 +99,7 @@ export function ensureDocumentWidgetId(params: {
 export interface DocumentWidgetFenceBuildOptions {
   id?: string | null
   componentSpec?: DocumentWidgetComponentSpecSummary | null
+  skeletonSpec?: DocumentWidgetSkeletonSpecSummary | null
   widgetState?: DocumentWidgetPersistedState | null
 }
 
@@ -110,6 +120,9 @@ export function buildDocumentWidgetFenceSource(
   }
   if (options?.componentSpec) {
     payload.component_spec = options.componentSpec
+  }
+  if (options?.skeletonSpec) {
+    payload.skeleton_spec = options.skeletonSpec
   }
   if (options?.widgetState && typeof options.widgetState === 'object' && Object.keys(options.widgetState).length > 0) {
     payload.widget_state = options.widgetState
@@ -146,6 +159,11 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
       ? (rawComponentSpec as DocumentWidgetComponentSpecSummary)
       : null
     const componentSpecIsValid = componentSpec && typeof componentSpec.component === 'string' && componentSpec.component.trim().length > 0
+    const rawSkeletonSpec = record.skeleton_spec ?? record.skeletonSpec
+    const skeletonSpecCandidate = rawSkeletonSpec && typeof rawSkeletonSpec === 'object' && !Array.isArray(rawSkeletonSpec)
+      ? (rawSkeletonSpec as DocumentWidgetSkeletonSpecSummary)
+      : null
+    const skeletonSpecIsValid = skeletonSpecCandidate && typeof skeletonSpecCandidate.skeleton === 'string' && skeletonSpecCandidate.skeleton.trim().length > 0
     return {
       id,
       title,
@@ -153,6 +171,7 @@ export function tryParseWidgetPayload(rawBody: string, rawFence: string): Docume
       rawFence,
       widgetState,
       componentSpec: componentSpecIsValid ? componentSpec : null,
+      skeletonSpec: skeletonSpecIsValid ? skeletonSpecCandidate : null,
     }
   } catch {
     return null
@@ -280,6 +299,7 @@ export function collectDocumentWidgets(source: string): DocumentWidgetRecord[] {
       end: start + fullMatch.length,
       mode: getWidgetRenderMode(parsed.widgetCode),
       componentSpec: parsed.componentSpec ?? null,
+      skeletonSpec: parsed.skeletonSpec ?? null,
       widgetState: parsed.widgetState ?? null,
     })
   }

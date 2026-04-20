@@ -80,8 +80,10 @@ export function buildWidgetReceiverSrcdoc(
 ): string {
   const safeInitialHtml = escapeHtmlForTemplate(initialHtml)
   const safeToken = escapeInlineJsString(token)
+  const animationHostStub = `if(typeof window.__widgetRender!=='function'){window.__widgetRender=function(){};}if(typeof window.__widgetFrame!=='function'){window.__widgetFrame=function(){};}`
   const receiverScript = `(function(){
 try {
+${animationHostStub}
 var widgetToken='${safeToken}';
 var root=document.getElementById('__widget-root');
 var resizeTimer=null;

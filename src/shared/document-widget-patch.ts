@@ -1,4 +1,7 @@
-import type { DocumentWidgetComponentSpecSummary } from './document-widget-parse'
+import type {
+  DocumentWidgetComponentSpecSummary,
+  DocumentWidgetSkeletonSpecSummary,
+} from './document-widget-parse'
 
 export function mergeComponentSpecPatch(
   base: DocumentWidgetComponentSpecSummary,
@@ -11,6 +14,30 @@ export function mergeComponentSpecPatch(
     component: nextComponent,
     props: mergeRecordPatch(base.props, patch.props),
     dataSource: mergeRecordPatch(base.dataSource, patch.dataSource),
+  }
+}
+
+export function mergeSkeletonSpecPatch(
+  base: DocumentWidgetSkeletonSpecSummary | null | undefined,
+  patch: Record<string, unknown>,
+): DocumentWidgetSkeletonSpecSummary {
+  const baseSkeleton = base?.skeleton ?? ''
+  const nextSkeleton = typeof patch.skeleton === 'string' && patch.skeleton.trim().length > 0
+    ? patch.skeleton.trim()
+    : baseSkeleton
+  const nextSize = typeof patch.size === 'string' && patch.size.trim().length > 0
+    ? patch.size.trim()
+    : base?.size
+  const bgPatch = patch.background_mode ?? patch.backgroundMode
+  const nextBackgroundMode: 'opaque' | 'transparent' | undefined =
+    bgPatch === 'opaque' || bgPatch === 'transparent'
+      ? bgPatch
+      : base?.background_mode
+  return {
+    skeleton: nextSkeleton,
+    size: nextSize,
+    background_mode: nextBackgroundMode,
+    props: mergeRecordPatch(base?.props, patch.props),
   }
 }
 
