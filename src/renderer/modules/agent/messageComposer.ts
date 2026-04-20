@@ -5,37 +5,53 @@ import { refreshDocumentWidgetTargetSnapshot } from './widget-target-attachment'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
-function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: ChatAttachment): boolean {
+function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: ChatAttachment): { kept: boolean; reason: string } {
   const normalized = content.trim()
-  if (!normalized) return false
+  if (!normalized) return { kept: false, reason: 'empty_content' }
 
   const widgetTitle = String(attachment.widgetTitle || attachment.title || attachment.name || '').trim()
   if (widgetTitle && normalized.toLowerCase().includes(widgetTitle.toLowerCase())) {
-    return true
+    return { kept: true, reason: 'title_mention' }
   }
 
   if (/更新当前文档里的\s+.+widget[:：]?/i.test(normalized)) {
-    return true
+    return { kept: true, reason: 'widget_phrase' }
   }
 
   const hasWidgetSubject = /(widget|show-widget|文档|卡片|图表|组件|章节|正文|段落)/i.test(normalized)
-  const hasEditVerb = /(更新|修改|调整|优化|替换|删除|新增|插入|改|去掉|拿掉|补上|统一|恢复|重写|保存)/i.test(normalized)
+  const hasEditVerb = /(更新|修改|调整|优化|替换|删除|新增|插入|改|去掉|拿掉|补上|统一|恢复|重写|保存|修正|恢复|还原|找回|回到|对齐)/i.test(normalized)
   if (hasWidgetSubject && hasEditVerb) {
-    return true
+    return { kept: true, reason: 'subject_and_verb' }
   }
 
-  if (/^(再|继续|把|让|统一|改|调整|优化|去掉|移除|淡一点|浅一点|更.*一点|收紧|拉开|简化)/.test(normalized)) {
-    return true
+  if (/^(再|继续|把|让|统一|改|调整|优化|去掉|移除|淡一点|浅一点|更.*一点|收紧|拉开|简化|原本|重新|回到|还原|对齐)/.test(normalized)) {
+    return { kept: true, reason: 'pronoun_prefix' }
   }
 
-  return false
+  if (/(原本|之前|上一次|先前|刚才).{0,16}(设计|风格|尺寸|样式|大小|布局|丢了|没了|掉了|乱了|错了)/.test(normalized)) {
+    return { kept: true, reason: 'meta_correction' }
+  }
+
+  return { kept: false, reason: 'no_match' }
 }
 
 export function filterAttachmentsForComposedAgentInput(content: string, attachments: ChatAttachment[]): ChatAttachment[] {
   return attachments
     .map((attachment) => {
       if (attachment.source !== 'document-widget-target') return attachment
-      if (!shouldKeepDocumentWidgetTargetAttachment(content, attachment)) return null
+      const verdict = shouldKeepDocumentWidgetTargetAttachment(content, attachment)
+      try {
+        const widgetTitle = String(attachment.widgetTitle || attachment.title || attachment.name || '').trim()
+        console.debug('[widget_sticky]', JSON.stringify({
+          kept: verdict.kept,
+          reason: verdict.reason,
+          widgetTitle,
+          widgetId: attachment.widgetId || null,
+          tabId: attachment.tabId || null,
+          contentPreview: content.trim().slice(0, 120),
+        }))
+      } catch { /* debug log is advisory */ }
+      if (!verdict.kept) return null
       return refreshDocumentWidgetTargetSnapshot(attachment)
     })
     .filter((attachment): attachment is ChatAttachment => Boolean(attachment))

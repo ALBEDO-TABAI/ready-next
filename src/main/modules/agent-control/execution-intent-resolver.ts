@@ -23,6 +23,8 @@ import { resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
 import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-task-plan'
+import { logAgentMetric } from './metrics'
+import type { ActiveWidgetEditLease } from './widget-edit-lease'
 
 export interface ExecutionIntentContext {
   requestEnvelope: RequestEnvelope
@@ -44,8 +46,9 @@ export function resolveExecutionIntentContext(params: {
   previousInputs: string[]
   lastDocumentContextInput?: string | null
   intentClassification?: IntentClassification | null
+  activeWidgetEditLease?: ActiveWidgetEditLease | null
 }): ExecutionIntentContext {
-  const hasWidgetTargetContext = params.requestEnvelope.environmentHints.hasWidgetTargetContext
+  const envelopeHasWidgetTarget = params.requestEnvelope.environmentHints.hasWidgetTargetContext
   const contextualUserInput = resolveToolPolicyInput(
     params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText,
     params.lastDocumentContextInput
@@ -54,10 +57,15 @@ export function resolveExecutionIntentContext(params: {
   )
   const userInstructionText = extractPrimaryUserInstruction(contextualUserInput)
   const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent(contextualUserInput)
+  const leaseValid = params.activeWidgetEditLease
+    && params.activeWidgetEditLease.expireAt > Date.now()
+  const leaseStickyEligible = Boolean(leaseValid) && !explicitWidgetCreateIntent
+  const hasWidgetTargetContext = envelopeHasWidgetTarget || leaseStickyEligible
+  const inferredWidgetTaskKind = inferDocumentWidgetTaskKind(contextualUserInput)
   const documentWidgetTaskKind =
     hasWidgetTargetContext && !explicitWidgetCreateIntent
       ? 'update'
-      : inferDocumentWidgetTaskKind(contextualUserInput)
+      : inferredWidgetTaskKind
   const effectiveEnvelope = contextualUserInput === (params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText)
     ? params.requestEnvelope
     : buildRequestEnvelope({ userText: contextualUserInput })
@@ -68,6 +76,25 @@ export function resolveExecutionIntentContext(params: {
   const shouldUseDocumentTaskPlan = Boolean(
     documentTaskPlan.blockedReason || (documentTaskPlan.requiresStructuredPlan && documentTaskPlan.jobs.length > 0),
   )
+
+  logAgentMetric('intent_context', {
+    envelopeHasWidgetTarget,
+    leaseValid: Boolean(leaseValid),
+    leaseStickyEligible,
+    hasWidgetTargetContext,
+    explicitWidgetCreateIntent,
+    inferredWidgetTaskKind,
+    resolvedWidgetTaskKind: documentWidgetTaskKind,
+    structuredIntent: documentTaskPlan.requiresStructuredPlan ? documentTaskPlan.jobs.length : 0,
+    shouldUseDocumentTaskPlan,
+    primaryInstruction: (params.requestEnvelope.primaryInstruction || '').slice(0, 120),
+    contextualInputPreview: contextualUserInput.slice(0, 120),
+    leaseWidgetId: params.activeWidgetEditLease?.widgetId || null,
+    leaseTabId: params.activeWidgetEditLease?.tabId || null,
+    leaseAgeMs: params.activeWidgetEditLease
+      ? Math.max(0, Date.now() - params.activeWidgetEditLease.acquiredAt)
+      : null,
+  })
 
   return {
     requestEnvelope: effectiveEnvelope,

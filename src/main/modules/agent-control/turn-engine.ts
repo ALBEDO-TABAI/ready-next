@@ -424,11 +424,13 @@ export class TurnEngine {
       const session = request.session
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
       const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
+      const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
         previousInputs: host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
         lastDocumentContextInput: session.lastDocumentContextInput,
         intentClassification: request.intentClassification || classifyIntent(requestEnvelope),
+        activeWidgetEditLease,
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       const pureUserInput = requestEnvelope.pureUserText

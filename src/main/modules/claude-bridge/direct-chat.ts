@@ -39,6 +39,7 @@ import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-contr
 import { SkillDomainAdapter } from '../agent-control/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
 import { SubtaskRuntime } from '../agent-control/subtask-runtime'
+import { WidgetEditLeaseStore, type ActiveWidgetEditLease } from '../agent-control/widget-edit-lease'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
 import { TurnEngine } from '../agent-control/turn-engine'
 import {
@@ -254,6 +255,7 @@ show-widget 规则：
 
 export class DirectChatEngine extends EventEmitter {
   private sessions = new Map<string, DirectChatSession>()
+  private readonly widgetEditLeaseStore = new WidgetEditLeaseStore()
   private browserController: BrowserController | null = null
   private readonly browserDomainOrchestrator: BrowserDomainOrchestrator
   private readonly skillContextOrchestrator: SkillContextOrchestrator
@@ -410,6 +412,17 @@ export class DirectChatEngine extends EventEmitter {
           this.runtime?.publishScopeRunEvent(payload, projectionTruth || null)
         },
       }),
+      acquireWidgetEditLease: (acquireParams) => {
+        this.widgetEditLeaseStore.acquire(acquireParams.agent, acquireParams.sessionId, {
+          widgetId: acquireParams.widgetId,
+          tabId: acquireParams.tabId,
+          documentPath: acquireParams.documentPath,
+          widgetTitle: acquireParams.widgetTitle,
+          origin: acquireParams.origin,
+        })
+      },
+      resolveWidgetEditLease: (resolveParams) =>
+        this.widgetEditLeaseStore.resolve(resolveParams.agent, resolveParams.sessionId),
     })
     this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log })
     this.hostCapabilityDispatcher = new HostCapabilityDispatcher({
@@ -621,6 +634,7 @@ export class DirectChatEngine extends EventEmitter {
       lastDocumentContextInput: null,
     })
     this.documentTaskPipelineExecutor.clearSessionCache(name)
+    this.widgetEditLeaseStore.release(name)
   }
 
   setSystemPrompt(name: string, systemPrompt?: string): void {
@@ -961,6 +975,7 @@ export class DirectChatEngine extends EventEmitter {
       collectRecentPureUserInputs: (messages: ChatMessage[], limit?: number) => this.collectRecentPureUserInputs(messages, limit),
       sessionHasMediaInputs: (messages: ChatMessage[]) => this.sessionHasMediaInputs(messages),
       sessionHasVideoInputs: (messages: ChatMessage[]) => this.sessionHasVideoInputs(messages),
+      resolveActiveWidgetEditLease: () => this.widgetEditLeaseStore.resolve(params.name, params.sessionId),
       domainAdapters: this.domainAdapters,
       skillContextOrchestrator: this.skillContextOrchestrator,
       browserDomainOrchestrator: this.browserDomainOrchestrator,
@@ -1457,7 +1472,9 @@ export class DirectChatEngine extends EventEmitter {
     for (const [name] of this.sessions) {
       this.stopGeneration(name)
       this.documentTaskPipelineExecutor.clearSessionCache(name)
+      this.widgetEditLeaseStore.release(name)
     }
     this.sessions.clear()
+    this.widgetEditLeaseStore.clear()
   }
 }

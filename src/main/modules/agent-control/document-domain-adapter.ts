@@ -113,6 +113,7 @@ interface DocumentTaskPipelineExecutorLike {
     requestModuleToolAction?: Parameters<DomainAdapter['dispatch']>[0]['host']['requestModuleToolAction']
     signal: Parameters<DomainAdapter['dispatch']>[0]['request']['abortSignal']
     sessionId: string
+    agentName?: string
     session: Parameters<DomainAdapter['dispatch']>[0]['session']
     providerContext: Parameters<DomainAdapter['dispatch']>[0]['host']['providerContext']
     emitStructuredTaskPayload: Parameters<DomainAdapter['dispatch']>[0]['emitStructuredTaskPayload']
@@ -205,6 +206,7 @@ export class DocumentDomainAdapter implements DomainAdapter {
         requestModuleToolAction: params.host.requestModuleToolAction,
         signal: params.request.abortSignal,
         sessionId: params.request.sessionId || '',
+        agentName: params.request.agentName,
         session: params.session,
         providerContext: params.host.providerContext,
         emitStructuredTaskPayload: params.emitStructuredTaskPayload,

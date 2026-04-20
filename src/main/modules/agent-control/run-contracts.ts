@@ -542,6 +542,7 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   collectRecentPureUserInputs: (messages: TurnEngineSessionMessage[], limit?: number) => string[]
   sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean
   sessionHasVideoInputs: (messages: TurnEngineSessionMessage[]) => boolean
+  resolveActiveWidgetEditLease?: () => import('./widget-edit-lease').ActiveWidgetEditLease | null
   domainAdapters?: DomainAdapter[]
   skillContextOrchestrator: unknown
   browserDomainOrchestrator: unknown

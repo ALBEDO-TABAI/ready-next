@@ -104,6 +104,19 @@ interface DocumentTaskPipelineExecutorDeps {
     projectionTruth?: ProjectionTruthSnapshot | null,
   ) => void | Promise<void>
   createSubtaskRuntime?: () => SubtaskRuntime
+  acquireWidgetEditLease?: (params: {
+    agent: string
+    sessionId?: string | null
+    widgetId?: string | null
+    tabId?: string | null
+    documentPath?: string | null
+    widgetTitle?: string | null
+    origin: 'pipeline_write' | 'pipeline_locate' | 'envelope_widget_target'
+  }) => void
+  resolveWidgetEditLease?: (params: {
+    agent: string
+    sessionId?: string | null
+  }) => import('./widget-edit-lease').ActiveWidgetEditLease | null
 }
 
 export interface DocumentTaskPipelineExecutionParams {
@@ -117,6 +130,7 @@ export interface DocumentTaskPipelineExecutionParams {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   signal: AbortSignal
   sessionId: string
+  agentName?: string
   session: DocumentPipelineCacheSession
   providerContext: TurnProviderContext
   emitStructuredTaskPayload: (payload: unknown) => void
@@ -210,6 +224,7 @@ export class DocumentTaskPipelineExecutor {
         requestModuleToolAction: params.requestModuleToolAction!,
         signal: params.signal,
         sessionId: params.sessionId,
+        agentName: params.agentName,
         providerContext: params.providerContext,
         emitStructuredTaskPayload: params.emitStructuredTaskPayload,
       })
@@ -1992,6 +2007,7 @@ export class DocumentTaskPipelineExecutor {
     requestModuleToolAction: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
     signal: AbortSignal
     sessionId: string
+    agentName?: string
     providerContext: TurnProviderContext
     emitStructuredTaskPayload: (payload: unknown) => void
   }): Promise<{ success: boolean; finalText?: string; error?: string }> {
@@ -1999,9 +2015,50 @@ export class DocumentTaskPipelineExecutor {
       requestEnvelope: params.executionIntentContext.requestEnvelope,
       snapshotContent: '',
     })
-    const envelopeWidgetTarget = params.executionIntentContext.requestEnvelope.resources.find(
+    const realEnvelopeWidgetTarget = params.executionIntentContext.requestEnvelope.resources.find(
       (resource) => resource.kind === 'widget_target',
     )
+    const leaseSnapshot = (params.agentName && this.deps.resolveWidgetEditLease)
+      ? this.deps.resolveWidgetEditLease({ agent: params.agentName, sessionId: params.sessionId })
+      : null
+    const envelopeWidgetTarget: RequestEnvelopeResource | null = realEnvelopeWidgetTarget
+      || (leaseSnapshot
+        ? {
+          kind: 'widget_target',
+          source: 'widget_target',
+          id: `lease::${leaseSnapshot.widgetId || leaseSnapshot.widgetTitle}`,
+          name: leaseSnapshot.widgetTitle,
+          path: leaseSnapshot.documentPath || null,
+          documentPath: leaseSnapshot.documentPath || null,
+          tabId: leaseSnapshot.tabId || null,
+          widgetId: leaseSnapshot.widgetId || null,
+          text: '',
+          summary: null,
+          order: 0,
+          canRead: true,
+          canWrite: true,
+        }
+        : null)
+    if (!realEnvelopeWidgetTarget && leaseSnapshot) {
+      logAgentMetric('widget_lease_synthesized_envelope_target', {
+        sessionId: params.sessionId || null,
+        leaseWidgetId: leaseSnapshot.widgetId,
+        leaseTabId: leaseSnapshot.tabId,
+        leaseAgeMs: Math.max(0, Date.now() - leaseSnapshot.acquiredAt),
+        origin: leaseSnapshot.origin,
+      })
+    }
+    if (realEnvelopeWidgetTarget && params.agentName && this.deps.acquireWidgetEditLease) {
+      this.deps.acquireWidgetEditLease({
+        agent: params.agentName,
+        sessionId: params.sessionId,
+        widgetId: realEnvelopeWidgetTarget.widgetId || null,
+        tabId: realEnvelopeWidgetTarget.tabId || null,
+        documentPath: realEnvelopeWidgetTarget.documentPath || realEnvelopeWidgetTarget.path || null,
+        widgetTitle: realEnvelopeWidgetTarget.name || null,
+        origin: 'envelope_widget_target',
+      })
+    }
     const pipelinePhaseOrder: Array<DocumentTaskPipelinePhaseUpdate['phase']> = buildPipelinePhaseOrder(params.structuredIntent)
     const pipelinePhaseTitles: Record<DocumentTaskPipelinePhaseUpdate['phase'], string> = {
       loading_document: '读取文档',
@@ -2128,13 +2185,27 @@ export class DocumentTaskPipelineExecutor {
         }
         return built.draft
       },
-      writeWidget: async ({ draft, snapshot, stage, signal }) => await this.writeDocumentWidget({
-        draft,
-        snapshot,
-        stage,
-        requestModuleToolAction: params.requestModuleToolAction,
-        signal,
-      }),
+      writeWidget: async ({ draft, snapshot, stage, signal }) => {
+        const writeResult = await this.writeDocumentWidget({
+          draft,
+          snapshot,
+          stage,
+          requestModuleToolAction: params.requestModuleToolAction,
+          signal,
+        })
+        if (params.agentName && this.deps.acquireWidgetEditLease) {
+          this.deps.acquireWidgetEditLease({
+            agent: params.agentName,
+            sessionId: params.sessionId,
+            widgetId: draft.targetWidgetId || envelopeWidgetTarget?.widgetId || null,
+            tabId: snapshot.tabId || envelopeWidgetTarget?.tabId || null,
+            documentPath: snapshot.path || envelopeWidgetTarget?.documentPath || envelopeWidgetTarget?.path || null,
+            widgetTitle: draft.title || envelopeWidgetTarget?.name || null,
+            origin: stage === 'locate' ? 'pipeline_locate' : 'pipeline_write',
+          })
+        }
+        return writeResult
+      },
       saveDocument: async ({ snapshot, signal }) => {
         throwIfAborted(signal, 'document.saveTab')
         const payload = await raceWithTimeout(
