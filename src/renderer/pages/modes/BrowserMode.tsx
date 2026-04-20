@@ -318,8 +318,6 @@ export default function BrowserMode({
     if (!isElectron) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
 
-    let cancelled = false
-
     const syncVisibleHost = async () => {
       if (!browserRuntimeReady || tabs.length === 0) {
         await syncBrowserVisibility('hidden')
@@ -333,17 +331,13 @@ export default function BrowserMode({
     }
 
     void syncVisibleHost().catch(() => undefined)
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeTabId, browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+  }, [browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     if (!isElectron || !isActive) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
-    if (layoutPhase !== 'idle') return
     if (!browserRuntimeReady || tabs.length === 0 || !activeTabId) return
+    if (layoutPhase !== 'idle') return
 
     clearPostActivationHostResyncTimer()
     postActivationHostResyncTimerRef.current = window.setTimeout(() => {

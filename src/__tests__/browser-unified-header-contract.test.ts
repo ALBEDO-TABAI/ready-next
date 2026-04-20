@@ -138,4 +138,8 @@ test('tab rail renders a visible starter tab when the browser has no hydrated ta
 
   assert.match(tabRail, /tabs\.length === 0/)
   assert.match(tabRail, /浏览器启动中…|新标签页/)
+  assert.match(
+    tabRail,
+    /if \(isStarterTab\) \{\s*if \(loading\) return\s*void onNewTab\(\)\s*return\s*\}/,
+  )
 })

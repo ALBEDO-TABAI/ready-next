@@ -401,6 +401,7 @@ export default function TabRail({
                     onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
                     onClick={() => {
                       if (isStarterTab) {
+                        if (loading) return
                         void onNewTab()
                         return
                       }

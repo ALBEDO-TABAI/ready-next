@@ -20,6 +20,7 @@ export function useBrowserRuntimeEffects({
 }: UseBrowserRuntimeEffectsParams) {
   const activationFrameRef = useRef<number | null>(null)
   const hasHydratedRuntimeRef = useRef(!isElectron)
+  const startupDefaultTabBootstrapRef = useRef(!isElectron)
   const hydrationPromiseRef = useRef<Promise<boolean> | null>(null)
   const [browserRuntimeReady, setBrowserRuntimeReady] = useState(!isElectron)
 
@@ -79,6 +80,44 @@ export function useBrowserRuntimeEffects({
     }
     return hasHydratedRuntimeRef.current
   }, [isElectron, restoreExistingTabs])
+
+  const bootstrapDefaultStartupTab = useCallback(async () => {
+    if (!isElectron) return false
+
+    await sendBoundsImmediate({ forceExact: true })
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+
+    const result = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL) as { success: boolean; tabId?: string } | undefined
+    if (!result?.success || !result.tabId) {
+      return false
+    }
+
+    const newTab: BrowserTab = {
+      id: result.tabId,
+      url: DEFAULT_BROWSER_URL,
+      title: 'Loading...',
+      loading: true,
+      canGoBack: false,
+      canGoForward: false,
+      domain: extractBrowserDomain(DEFAULT_BROWSER_URL),
+      owner: 'manual',
+      required: false,
+      activity: 'idle',
+    }
+
+    const store = useBrowserTabs.getState()
+    store.addTab(newTab)
+    browserTabActivationSequencer.invalidate()
+    store.setActiveTabId(result.tabId)
+    store.setUrlInput('')
+    hasHydratedRuntimeRef.current = true
+
+    requestAnimationFrame(() => {
+      void sendBoundsImmediate({ forceExact: true })
+    })
+
+    return true
+  }, [isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     if (!isElectron) return
@@ -148,6 +187,7 @@ export function useBrowserRuntimeEffects({
         browserTabActivationSequencer.invalidate()
         useBrowserTabs.getState().setActiveTabId(result.tabId)
         useBrowserTabs.getState().setUrlInput(url === DEFAULT_BROWSER_URL ? '' : url)
+        hasHydratedRuntimeRef.current = true
         requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
       }
     })
@@ -189,7 +229,11 @@ export function useBrowserRuntimeEffects({
     let cancelled = false
     activationFrameRef.current = requestAnimationFrame(async () => {
       activationFrameRef.current = null
-      const hasTabs = await ensureBrowserRuntime()
+      let hasTabs = await ensureBrowserRuntime()
+      if (!hasTabs && !startupDefaultTabBootstrapRef.current) {
+        startupDefaultTabBootstrapRef.current = true
+        hasTabs = await bootstrapDefaultStartupTab()
+      }
       if (cancelled) return
 
       if (hasTabs) {
@@ -207,7 +251,7 @@ export function useBrowserRuntimeEffects({
         activationFrameRef.current = null
       }
     }
-  }, [ensureBrowserRuntime, isActive, isElectron, sendBoundsImmediate])
+  }, [bootstrapDefaultStartupTab, ensureBrowserRuntime, isActive, isElectron, sendBoundsImmediate])
 
   useEffect(() => {
     return () => {

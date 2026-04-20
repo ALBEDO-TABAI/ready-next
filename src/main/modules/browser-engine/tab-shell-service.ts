@@ -154,13 +154,12 @@ export class BrowserTabShellService {
   switchTab(tabId: string): BrowserTabSwitchResult {
     const nextTab = this.host.tabs.get(tabId)
     if (!nextTab?.view) return { success: false, error: 'Tab not found' }
-    this.detachNonTargetHosts(tabId)
-
     this.host.setActiveTabId(tabId)
     if (this.host.shouldPresentHosts()) {
       this.host.showHost(nextTab.view, this.host.getViewBounds())
       this.host.applyBounds(nextTab.view)
     }
+    this.detachNonTargetHosts(tabId)
 
     return {
       success: true,

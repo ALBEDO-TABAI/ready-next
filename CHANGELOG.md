@@ -8,6 +8,10 @@
 - `BrowserMode` 补回“延后一次宿主重显”的轻量兜底：当浏览器模式已进入稳定态、主进程标签恢复完成或新活动标签刚创建后，会在短延时后再次执行 `fitActiveTabToBounds + visible(forceBoundsSync)`，避免 BrowserView 停留在隐藏态，必须手动点标签才出现
 - 这次修复只落在 renderer 的 BrowserView 重同步层，没有改动主进程标签生命周期、BrowserView hide/show IPC 顺序和现有 mode-switch 显隐协议
 - 新增/更新合同测试，锁定“启动恢复 / 新建活动标签后必须补一次延后重显”，防止后续再把这条恢复链路删掉
+- 浏览器冷启动在主进程没有真实标签时，现已只在首次进入浏览器模式时自动补开默认首页；不再显示一个可点按的“假标签”等用户手动点一下才开始工作
+- 启动中的 starter tab 现在保留视觉占位，但点击已禁用，避免用户在运行时尚未准备好时误触发一次额外的首页创建
+- 普通切标签不再复用 BrowserView 的“hidden -> fit -> visible”启动恢复链路；该三步流现在只在进入浏览器/恢复真实宿主时触发，切换标签只保留轻量对齐，消除切标签时一闪而过的空白壳层
+- 主进程 `BrowserTabShellService.switchTab()` 现已改为“先显示新标签，再移除旧标签”，避免切换时出现真实 BrowserView 真空期；对应服务单测同步改成新顺序
 
 ## [Unreleased] - 2026-04-19
 

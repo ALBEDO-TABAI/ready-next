@@ -11,6 +11,13 @@
   - `BrowserMode` 现已补回一次“延后宿主重显”兜底：浏览器模式进入稳定态后，只要主进程标签恢复完成或活动标签刚切到/新建，就会再做一轮 `fitActiveTabToBounds + visible(forceBoundsSync)`，把被提前留在隐藏态的 BrowserView 拉回前台。
   - 这次没有改 BrowserView 生命周期和标签创建链路，只补 renderer 端恢复节拍，避免把 mode switch、遮罩和 bounds 同步带出新问题。
   - 已通过 `browser-mode-startup-resync / browser-sync-visible-host-three-step / browser-host-visibility / browser-runtime-hydration / browser-state-restore` 定向回归，以及 `npm run typecheck`。
+  - 同日继续修复冷启动默认页策略回归：`useBrowserRuntimeEffects` 现在会在“主进程没有真实标签 + 首次进入浏览器模式”时自动补开默认首页，只执行一次；用户后续手动关空标签页时不会被再次强行补开。
+  - `TabRail` 的 starter tab 在 `loading` 阶段已禁用点击，避免用户点到假标签后才触发首页创建，造成“看起来像要点一下浏览器才开始工作”的错觉。
+  - 已补齐 `browser-empty-state-bootstrap-contract` 与 `browser-unified-header-contract`，并与现有 `browser-runtime-hydration / browser-mode-startup-resync / browser-host-visibility` 一起完成定向回归；`npm run typecheck` 继续通过。
+  - 同日继续优化切标签闪空：根因确认是 `BrowserMode` 把 `activeTabId` 也挂进了启动恢复 effect，导致普通切标签也执行 `hidden -> fit -> visible`，先把 BrowserView 整体藏掉一帧。
+  - 现已把启动恢复和普通切标签拆开：三步流只在宿主恢复场景触发；切标签仅保留后续轻量 `fitActiveTabToBounds + visible(forceBoundsSync)` 对齐，不再先 `hideAll`。
+  - 进一步确认主进程切标签顺序也会放大真空期：`BrowserTabShellService.switchTab()` 之前是先 `detachNonTargetHosts()` 再 `showHost(next)`；现在改成先 `showHost(next) + applyBounds`，随后再 detach 旧标签，让新宿主先顶上来。
+  - 已新增/更新 `browser-tab-switch-visibility-contract` 与 `browser-engine-services` 单测，并与 `browser-sync-visible-host-three-step / browser-mode-startup-resync / browser-view-visibility-consolidation` 等一起完成定向回归；`npm run typecheck` 继续通过。
 
 - `2026-04-19` 已完成主题启动白屏与昼夜切换过渡偏色双修复（计划 `plans/proud-painting-karp.md`，审计 `docs/performance/2026-04-19-theme-startup-transition-gap-audit.md`）：
   - `index.html` `<head>` 内联 bootstrap 同步落 `data-theme` + `data-skin`，不再等 IPC 才写入；`:root` 加 `color-scheme: light dark`，dark 覆盖为 `dark`。
