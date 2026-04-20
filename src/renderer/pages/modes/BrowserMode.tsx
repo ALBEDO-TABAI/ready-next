@@ -50,6 +50,7 @@ export default function BrowserMode({
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
+  const postActivationHostResyncTimerRef = useRef<number | null>(null)
   const captureTokenConsumedRef = useRef(false)
   const captureTokenExpiryTimerRef = useRef<number | null>(null)
   const wasActiveRef = useRef<boolean>(isActive)
@@ -252,6 +253,13 @@ export default function BrowserMode({
     }
   }, [])
 
+  const clearPostActivationHostResyncTimer = useCallback(() => {
+    if (postActivationHostResyncTimerRef.current) {
+      window.clearTimeout(postActivationHostResyncTimerRef.current)
+      postActivationHostResyncTimerRef.current = null
+    }
+  }, [])
+
   const CAPTURE_TOKEN_WINDOW_MS = 2000
   const clearCaptureTokenExpiryTimer = useCallback(() => {
     if (captureTokenExpiryTimerRef.current) {
@@ -331,6 +339,37 @@ export default function BrowserMode({
     }
   }, [activeTabId, browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
+  useEffect(() => {
+    if (!isElectron || !isActive) return
+    if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
+    if (layoutPhase !== 'idle') return
+    if (!browserRuntimeReady || tabs.length === 0 || !activeTabId) return
+
+    clearPostActivationHostResyncTimer()
+    postActivationHostResyncTimerRef.current = window.setTimeout(() => {
+      postActivationHostResyncTimerRef.current = null
+      void (async () => {
+        await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
+        await syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
+      })().catch(() => undefined)
+    }, 180)
+
+    return () => {
+      clearPostActivationHostResyncTimer()
+    }
+  }, [
+    activeTabId,
+    browserRuntimeReady,
+    clearPostActivationHostResyncTimer,
+    isActive,
+    isElectron,
+    layoutPhase,
+    syncBrowserVisibility,
+    shouldPresentBrowserHost,
+    shouldRevealBrowserHost,
+    tabs.length,
+  ])
+
   // Trailing settle: when motion finishes (layoutPhase flips to idle) and the browser is active,
   // sync once more so the host bounds match the final settled layout. Replaces the 180ms setTimeout
   // re-sync that used to fire on every browser entry.
@@ -342,10 +381,11 @@ export default function BrowserMode({
 
   useEffect(() => {
     return () => {
+      clearPostActivationHostResyncTimer()
       clearCaptureTokenExpiryTimer()
       clearSurfaceReadyTimer()
     }
-  }, [clearCaptureTokenExpiryTimer, clearSurfaceReadyTimer])
+  }, [clearCaptureTokenExpiryTimer, clearPostActivationHostResyncTimer, clearSurfaceReadyTimer])
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {

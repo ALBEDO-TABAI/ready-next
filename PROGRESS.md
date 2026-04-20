@@ -1,10 +1,16 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-19
+> 更新时间: 2026-04-20
 
 ## 当前真值摘要
 
 0. Agent 核心重构已先落地第一段可上线基础层。
+
+- `2026-04-20` 已修复 BrowserView 启动恢复 / 新建标签显示回归：
+  - 问题层级确认在 renderer 的 BrowserView 重同步层，不是主进程建标签失败，也不是 BrowserView 基础 hide/show IPC 损坏。
+  - `BrowserMode` 现已补回一次“延后宿主重显”兜底：浏览器模式进入稳定态后，只要主进程标签恢复完成或活动标签刚切到/新建，就会再做一轮 `fitActiveTabToBounds + visible(forceBoundsSync)`，把被提前留在隐藏态的 BrowserView 拉回前台。
+  - 这次没有改 BrowserView 生命周期和标签创建链路，只补 renderer 端恢复节拍，避免把 mode switch、遮罩和 bounds 同步带出新问题。
+  - 已通过 `browser-mode-startup-resync / browser-sync-visible-host-three-step / browser-host-visibility / browser-runtime-hydration / browser-state-restore` 定向回归，以及 `npm run typecheck`。
 
 - `2026-04-19` 已完成主题启动白屏与昼夜切换过渡偏色双修复（计划 `plans/proud-painting-karp.md`，审计 `docs/performance/2026-04-19-theme-startup-transition-gap-audit.md`）：
   - `index.html` `<head>` 内联 bootstrap 同步落 `data-theme` + `data-skin`，不再等 IPC 才写入；`:root` 加 `color-scheme: light dark`，dark 覆盖为 `dark`。

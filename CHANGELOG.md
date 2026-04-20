@@ -1,5 +1,14 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-04-20
+
+### 修复
+
+#### BrowserView 启动恢复与新建标签重显回归
+- `BrowserMode` 补回“延后一次宿主重显”的轻量兜底：当浏览器模式已进入稳定态、主进程标签恢复完成或新活动标签刚创建后，会在短延时后再次执行 `fitActiveTabToBounds + visible(forceBoundsSync)`，避免 BrowserView 停留在隐藏态，必须手动点标签才出现
+- 这次修复只落在 renderer 的 BrowserView 重同步层，没有改动主进程标签生命周期、BrowserView hide/show IPC 顺序和现有 mode-switch 显隐协议
+- 新增/更新合同测试，锁定“启动恢复 / 新建活动标签后必须补一次延后重显”，防止后续再把这条恢复链路删掉
+
 ## [Unreleased] - 2026-04-19
 
 ### 修复
