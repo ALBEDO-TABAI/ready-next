@@ -240,17 +240,11 @@ export default function TabRail({
 
     window.addEventListener('dragend', handleGlobalDragCleanup)
     window.addEventListener('drop', handleGlobalDragCleanup)
-    window.addEventListener('mouseup', handleGlobalDragCleanup)
-    window.addEventListener('pointerup', handleGlobalDragCleanup)
-    window.addEventListener('pointercancel', handleGlobalDragCleanup)
     document.addEventListener('visibilitychange', handleVisibilityCleanup)
 
     return () => {
       window.removeEventListener('dragend', handleGlobalDragCleanup)
       window.removeEventListener('drop', handleGlobalDragCleanup)
-      window.removeEventListener('mouseup', handleGlobalDragCleanup)
-      window.removeEventListener('pointerup', handleGlobalDragCleanup)
-      window.removeEventListener('pointercancel', handleGlobalDragCleanup)
       document.removeEventListener('visibilitychange', handleVisibilityCleanup)
     }
   }, [clearGlobalDragState])
