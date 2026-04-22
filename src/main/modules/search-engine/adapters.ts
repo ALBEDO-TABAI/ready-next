@@ -1,0 +1,446 @@
+import { readFile, readdir, stat } from 'fs/promises'
+import { createHash } from 'crypto'
+import { basename, extname, join } from 'path'
+import { appendFileSync } from 'fs'
+import { BINARY_EXTENSIONS } from '../document-engine/ipc-handler'
+import { getLogPath } from '../../utils/platform'
+import { parseDocumentGraph } from '../../../shared/document-graph-parse'
+import type { SearchRepository } from './repository'
+
+const SEARCH_LOG = getLogPath('ready-search.log')
+
+function logSearch(message: string): void {
+  try {
+    appendFileSync(SEARCH_LOG, `[${new Date().toISOString()}] ${message}\n`)
+  } catch {
+    /* best-effort */
+  }
+}
+
+export interface AdapterReindexResult {
+  indexed: number
+  skipped: number
+  removed: number
+  scanned: number
+}
+
+export interface IndexSourceAdapter {
+  readonly sourceType: string
+  readonly workspaceScope: 'per-root' | 'shared'
+  reindex(ctx: AdapterContext): Promise<AdapterReindexResult>
+}
+
+export interface AdapterContext {
+  workspaceId: number
+  workspaceRoot: string
+  repository: SearchRepository
+  signal?: AbortSignal
+}
+
+const MAX_FILE_BYTES = 2 * 1024 * 1024
+const BATCH_SIZE = 500
+const IGNORED_DIR_NAMES = new Set([
+  '.git', '.hg', '.svn', '.DS_Store',
+  'node_modules', '__pycache__',
+  '.next', '.nuxt', '.cache', '.turbo', '.parcel-cache',
+  'dist', 'build', 'out', 'target',
+  '.venv', 'venv',
+])
+
+/** Canonical filesystem adapter — the original single-source reindex behavior. */
+export class FileSystemAdapter implements IndexSourceAdapter {
+  readonly sourceType = 'document'
+  readonly workspaceScope = 'per-root'
+
+  async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
+    const result: AdapterReindexResult = { indexed: 0, skipped: 0, removed: 0, scanned: 0 }
+    try {
+      const rootStat = await stat(ctx.workspaceRoot)
+      if (!rootStat.isDirectory()) throw new Error(`root is not a directory: ${ctx.workspaceRoot}`)
+    } catch (error) {
+      logSearch(`FileSystemAdapter: root invalid ${ctx.workspaceRoot} ${error instanceof Error ? error.message : String(error)}`)
+      return result
+    }
+
+    const existingPaths = new Map<string, number>()
+    for (const row of ctx.repository.listPathsForWorkspace(ctx.workspaceId, this.sourceType)) {
+      existingPaths.set(row.path, row.id)
+    }
+
+    const filePaths = await this.collectCandidatePaths(ctx.workspaceRoot)
+    result.scanned = filePaths.length
+
+    for (let offset = 0; offset < filePaths.length; offset += BATCH_SIZE) {
+      if (ctx.signal?.aborted) throw new Error('aborted')
+      const batch = filePaths.slice(offset, offset + BATCH_SIZE)
+      // eslint-disable-next-line no-await-in-loop
+      const parsedBatch = await Promise.all(batch.map((p) => this.loadFile(p)))
+
+      ctx.repository.transaction(() => {
+        for (const parsed of parsedBatch) {
+          if (!parsed) continue
+          const upsert = ctx.repository.upsertDocument({
+            workspaceId: ctx.workspaceId,
+            path: parsed.path,
+            name: parsed.name,
+            ext: parsed.ext,
+            size: parsed.size,
+            mtime: parsed.mtime,
+            contentHash: parsed.contentHash,
+            frontmatterJson: parsed.frontmatterJson,
+            body: parsed.body,
+            sourceType: this.sourceType,
+          })
+          ctx.repository.replaceTags(upsert.documentId, parsed.tags)
+          ctx.repository.replaceLinks(upsert.documentId, parsed.wikilinks, parsed.mdlinks)
+          ctx.repository.replaceAttachments(upsert.documentId, parsed.attachments)
+          if (upsert.skipped) result.skipped += 1
+          else result.indexed += 1
+          existingPaths.delete(parsed.path)
+        }
+      })
+
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+
+    if (existingPaths.size > 0) {
+      ctx.repository.transaction(() => {
+        for (const path of existingPaths.keys()) {
+          ctx.repository.deletePath(ctx.workspaceId, path)
+          result.removed += 1
+        }
+      })
+    }
+
+    ctx.repository.transaction(() => {
+      ctx.repository.resolveWikilinkTargets(ctx.workspaceId)
+    })
+
+    return result
+  }
+
+  async loadOne(filePath: string, rawOverride?: string): Promise<LoadedFile | null> {
+    return this.loadFile(filePath, rawOverride)
+  }
+
+  private async collectCandidatePaths(root: string): Promise<string[]> {
+    const results: string[] = []
+    const stack: string[] = [root]
+    while (stack.length > 0) {
+      const current = stack.pop()!
+      let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        entries = await readdir(current, { withFileTypes: true })
+      } catch { continue }
+      for (const entry of entries) {
+        const fullPath = join(current, entry.name)
+        if (entry.isDirectory()) {
+          if (IGNORED_DIR_NAMES.has(entry.name)) continue
+          stack.push(fullPath)
+          continue
+        }
+        if (!entry.isFile()) continue
+        const ext = extname(entry.name).toLowerCase()
+        if (BINARY_EXTENSIONS.has(ext)) continue
+        results.push(fullPath)
+      }
+    }
+    return results
+  }
+
+  private async loadFile(filePath: string, rawOverride?: string): Promise<LoadedFile | null> {
+    try {
+      const ext = extname(filePath).toLowerCase()
+      if (BINARY_EXTENSIONS.has(ext)) return null
+      const fileStat = await stat(filePath).catch(() => null)
+      let size = 0
+      let mtime = 0
+      if (fileStat) {
+        if (!fileStat.isFile()) return null
+        if (fileStat.size > MAX_FILE_BYTES) {
+          logSearch(`skip oversized path=${filePath} size=${fileStat.size}`)
+          return null
+        }
+        size = fileStat.size
+        mtime = Math.floor(fileStat.mtimeMs)
+      }
+      const raw = rawOverride ?? (await readFile(filePath, 'utf-8'))
+      if (!fileStat) {
+        size = Buffer.byteLength(raw, 'utf-8')
+        mtime = Math.floor(Date.now())
+      }
+      const contentHash = createHash('sha256').update(raw).digest('hex').slice(0, 16)
+      const graph = parseDocumentGraph(raw)
+      const frontmatterJson = graph.frontmatter ? JSON.stringify(graph.frontmatter) : null
+      return {
+        path: filePath,
+        name: basename(filePath),
+        ext,
+        size,
+        mtime,
+        contentHash,
+        frontmatterJson,
+        body: graph.body,
+        tags: graph.tags,
+        wikilinks: graph.wikilinks,
+        mdlinks: graph.mdlinks,
+        attachments: graph.attachments,
+      }
+    } catch (error) {
+      logSearch(`loadFile failed path=${filePath} error=${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
+  }
+}
+
+export interface LoadedFile {
+  path: string
+  name: string
+  ext: string
+  size: number
+  mtime: number
+  contentHash: string
+  frontmatterJson: string | null
+  body: string
+  tags: ReturnType<typeof parseDocumentGraph>['tags']
+  wikilinks: ReturnType<typeof parseDocumentGraph>['wikilinks']
+  mdlinks: ReturnType<typeof parseDocumentGraph>['mdlinks']
+  attachments: ReturnType<typeof parseDocumentGraph>['attachments']
+}
+
+// ---------------------------------------------------------------------------
+// Shared-scope adapters below. Each reads a single SQLite table (owned by its
+// domain module) and mirrors rows into `documents` with source_type set. The
+// adapters deliberately stay read-only against their source tables; writes are
+// still performed by the domain modules (rss-engine, calendar-engine, …) which
+// emit events or we simply re-scan on next reindex.
+// ---------------------------------------------------------------------------
+
+function stripHtml(html: string | null | undefined): string {
+  if (!html) return ''
+  return html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hashContent(body: string): string {
+  return createHash('sha256').update(body).digest('hex').slice(0, 16)
+}
+
+function syncShared(
+  adapter: IndexSourceAdapter,
+  ctx: AdapterContext,
+  rows: Array<{
+    path: string
+    sourceId: string
+    name: string
+    body: string
+    meta: Record<string, unknown>
+    mtime: number
+  }>,
+): AdapterReindexResult {
+  const result: AdapterReindexResult = { indexed: 0, skipped: 0, removed: 0, scanned: rows.length }
+  const existingPaths = new Map<string, number>()
+  for (const row of ctx.repository.listPathsForWorkspace(ctx.workspaceId, adapter.sourceType)) {
+    existingPaths.set(row.path, row.id)
+  }
+
+  ctx.repository.transaction(() => {
+    for (const row of rows) {
+      const contentHash = hashContent(`${row.name}\n${row.body}`)
+      const upsert = ctx.repository.upsertDocument({
+        workspaceId: ctx.workspaceId,
+        path: row.path,
+        name: row.name,
+        ext: null,
+        size: Buffer.byteLength(row.body, 'utf-8'),
+        mtime: row.mtime,
+        contentHash,
+        frontmatterJson: null,
+        body: row.body,
+        sourceType: adapter.sourceType,
+        sourceId: row.sourceId,
+        sourceMetaJson: JSON.stringify(row.meta),
+      })
+      if (upsert.skipped) result.skipped += 1
+      else result.indexed += 1
+      ctx.repository.replaceTags(upsert.documentId, [])
+      ctx.repository.replaceLinks(upsert.documentId, [], [])
+      ctx.repository.replaceAttachments(upsert.documentId, [])
+      existingPaths.delete(row.path)
+    }
+    for (const path of existingPaths.keys()) {
+      ctx.repository.deletePath(ctx.workspaceId, path)
+      result.removed += 1
+    }
+  })
+
+  return result
+}
+
+export class BookmarkAdapter implements IndexSourceAdapter {
+  readonly sourceType = 'bookmark'
+  readonly workspaceScope = 'shared'
+
+  async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
+    const db = ctx.repository.getConnection()
+    const bookmarks = db
+      .prepare('SELECT id, url, title, favicon, created_at FROM browser_bookmarks')
+      .all<{ id: string; url: string; title: string; favicon: string | null; created_at: number | null }>()
+    const rows = bookmarks.map((b) => ({
+      path: b.url || `bookmark://${b.id}`,
+      sourceId: b.id,
+      name: b.title || b.url,
+      body: [b.title || '', b.url].filter(Boolean).join(' '),
+      meta: { url: b.url, favicon: b.favicon, createdAt: b.created_at },
+      mtime: b.created_at ?? 0,
+    }))
+    return syncShared(this, ctx, rows)
+  }
+}
+
+export class RssAdapter implements IndexSourceAdapter {
+  readonly sourceType = 'rss'
+  readonly workspaceScope = 'shared'
+
+  async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
+    const db = ctx.repository.getConnection()
+    const items = db
+      .prepare(
+        `SELECT id, source_id, title, link, summary, author, published_at, starred
+         FROM rss_items
+         ORDER BY published_at DESC
+         LIMIT 5000`,
+      )
+      .all<{
+        id: string
+        source_id: string
+        title: string
+        link: string
+        summary: string | null
+        author: string | null
+        published_at: number | null
+        starred: number | null
+      }>()
+    const rows = items.map((item) => ({
+      path: `rss://${item.id}`,
+      sourceId: item.id,
+      name: item.title || item.link,
+      body: [item.title || '', stripHtml(item.summary), item.author || '', item.link].filter(Boolean).join(' '),
+      meta: {
+        link: item.link,
+        sourceId: item.source_id,
+        publishedAt: item.published_at,
+        starred: item.starred === 1,
+      },
+      mtime: item.published_at ?? 0,
+    }))
+    return syncShared(this, ctx, rows)
+  }
+}
+
+export class CalendarAdapter implements IndexSourceAdapter {
+  readonly sourceType = 'calendar'
+  readonly workspaceScope = 'shared'
+
+  async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
+    const db = ctx.repository.getConnection()
+    const events = db
+      .prepare(
+        `SELECT id, calendar_id, title, description, location, start_time, end_time, all_day
+         FROM calendar_events
+         ORDER BY start_time DESC
+         LIMIT 5000`,
+      )
+      .all<{
+        id: string
+        calendar_id: string
+        title: string
+        description: string | null
+        location: string | null
+        start_time: number
+        end_time: number
+        all_day: number | null
+      }>()
+    const rows = events.map((event) => ({
+      path: `calendar://${event.id}`,
+      sourceId: event.id,
+      name: event.title,
+      body: [event.title, event.description || '', event.location || ''].filter(Boolean).join(' '),
+      meta: {
+        calendarId: event.calendar_id,
+        startTime: event.start_time,
+        endTime: event.end_time,
+        allDay: event.all_day === 1,
+        location: event.location,
+      },
+      mtime: event.start_time,
+    }))
+    return syncShared(this, ctx, rows)
+  }
+}
+
+export class AgentMessageAdapter implements IndexSourceAdapter {
+  readonly sourceType = 'agent'
+  readonly workspaceScope = 'shared'
+
+  async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
+    const db = ctx.repository.getConnection()
+    const conversations = db
+      .prepare(
+        `SELECT id, agent, title, updated_at FROM chat_conversations ORDER BY updated_at DESC LIMIT 500`,
+      )
+      .all<{ id: string; agent: string; title: string; updated_at: string }>()
+    const rows: Array<{
+      path: string
+      sourceId: string
+      name: string
+      body: string
+      meta: Record<string, unknown>
+      mtime: number
+    }> = []
+    for (const conv of conversations) {
+      const messages = db
+        .prepare(
+          `SELECT role, content, timestamp FROM chat_messages
+           WHERE conversation_id = ?
+           ORDER BY timestamp DESC LIMIT 40`,
+        )
+        .all<{ role: string; content: string; timestamp: string }>(conv.id)
+      if (messages.length === 0) continue
+      const body = messages
+        .slice()
+        .reverse()
+        .map((m) => `[${m.role}] ${m.content}`)
+        .join('\n')
+      const lastTs = Date.parse(messages[0].timestamp)
+      rows.push({
+        path: `agent://${conv.id}`,
+        sourceId: conv.id,
+        name: conv.title || `${conv.agent} · ${conv.id.slice(0, 8)}`,
+        body,
+        meta: {
+          agent: conv.agent,
+          messageCount: messages.length,
+          lastRole: messages[0].role,
+        },
+        mtime: Number.isFinite(lastTs) ? Math.floor(lastTs) : 0,
+      })
+    }
+    return syncShared(this, ctx, rows)
+  }
+}
+
+export const SHARED_WORKSPACE_ROOT = '@shared'

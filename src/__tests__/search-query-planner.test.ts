@@ -1,0 +1,71 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { parseSearchQuery } from '../main/modules/search-engine/query'
+
+describe('search-engine query planner', () => {
+  it('classifies a mix of tag / wikilink / term tokens', () => {
+    const parsed = parseSearchQuery('#alpha [[plan]] keyword')
+    assert.deepEqual(parsed.tags, ['alpha'])
+    assert.deepEqual(parsed.wikilinks, ['plan'])
+    assert.equal(parsed.ftsMatch, '"keyword"')
+    assert.equal(parsed.tokens.length, 3)
+  })
+
+  it('keeps quoted phrases intact (ASCII)', () => {
+    const parsed = parseSearchQuery('"hello world" tail')
+    assert.equal(parsed.ftsMatch, '"hello world" "tail"')
+    assert.deepEqual(
+      parsed.tokens.map((t) => t.kind),
+      ['phrase', 'term'],
+    )
+  })
+
+  it('NFKC-normalizes fullwidth # / [] prefix forms', () => {
+    const parsed = parseSearchQuery('＃ａｌｐｈａ')
+    assert.deepEqual(parsed.tags, ['alpha'])
+    assert.equal(parsed.ftsMatch, null)
+  })
+
+  it('expands CJK terms into bigram FTS match', () => {
+    const parsed = parseSearchQuery('机器学习')
+    // "机器学习" → bigrams "机器" "器学" "学习"
+    assert.equal(parsed.ftsMatch, '"机器" "器学" "学习"')
+  })
+
+  it('collapses CJK phrases before bigram expansion', () => {
+    const parsed = parseSearchQuery('"机器 学习"')
+    assert.equal(parsed.ftsMatch, '"机器" "器学" "学习"')
+  })
+
+  it('returns null ftsMatch when only prefix tokens supplied', () => {
+    const parsed = parseSearchQuery('#tag1 [[note]]')
+    assert.equal(parsed.ftsMatch, null)
+    assert.deepEqual(parsed.tags, ['tag1'])
+    assert.deepEqual(parsed.wikilinks, ['note'])
+  })
+
+  it('strips zero-width characters prior to tokenization', () => {
+    const parsed = parseSearchQuery('alp​ha') // contains zero-width space between "alp" and "ha"
+    assert.equal(parsed.ftsMatch, '"alpha"')
+  })
+
+  it('ignores empty quotes and blank tags', () => {
+    const parsed = parseSearchQuery('"" # real')
+    assert.equal(parsed.tokens.length, 1)
+    assert.equal(parsed.tokens[0].value, 'real')
+    assert.equal(parsed.ftsMatch, '"real"')
+  })
+
+  it('extracts src: prefix into sources list', () => {
+    const parsed = parseSearchQuery('src:bookmark foo')
+    assert.deepEqual(parsed.sources, ['bookmark'])
+    assert.equal(parsed.ftsMatch, '"foo"')
+  })
+
+  it('supports multiple src: filters combined with tags', () => {
+    const parsed = parseSearchQuery('src:rss src:document #topic')
+    assert.deepEqual(parsed.sources, ['rss', 'document'])
+    assert.deepEqual(parsed.tags, ['topic'])
+    assert.equal(parsed.ftsMatch, null)
+  })
+})

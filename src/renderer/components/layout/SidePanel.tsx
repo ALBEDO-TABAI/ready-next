@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import FilesPanel from './FilesPanel'
 import GlobalSearchPanel from './GlobalSearchPanel'
 import SkillsCenterPanel from './SkillsCenterPanel'
+import BacklinksCenterPanel from './BacklinksCenterPanel'
+import GraphCenterPanel from './GraphCenterPanel'
 import { FILES_PANEL_DIMENSIONS } from './panelTokens'
 import {
   WORKBENCH_PANEL_MOTION_DURATION_S,
@@ -12,7 +14,7 @@ import {
   WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S,
 } from '../../modules/workbench/panel-motion'
 
-export type SidePanelVariant = 'files' | 'search' | 'skills' | 'hidden'
+export type SidePanelVariant = 'files' | 'search' | 'skills' | 'backlinks' | 'graph' | 'hidden'
 
 type RenderableSidePanelVariant = Exclude<SidePanelVariant, 'hidden'>
 
@@ -33,6 +35,8 @@ const PANEL_STACK_ORDER: Record<RenderableSidePanelVariant, number> = {
   files: 0,
   search: 1,
   skills: 2,
+  backlinks: 3,
+  graph: 4,
 }
 
 function AnimatedPanelLayer({
@@ -141,6 +145,36 @@ export default function SidePanel({
             />
           )}
         </SkillsCenterPanel>
+      )
+    }
+
+    if (targetVariant === 'backlinks') {
+      return (
+        <BacklinksCenterPanel key={panelKey}>
+          {(slots) => (
+            <AnimatedPanelLayer
+              direction={transitionDirection}
+              reduceMotion={!!reduceMotion}
+              header={slots.header}
+              body={slots.body}
+            />
+          )}
+        </BacklinksCenterPanel>
+      )
+    }
+
+    if (targetVariant === 'graph') {
+      return (
+        <GraphCenterPanel key={panelKey}>
+          {(slots) => (
+            <AnimatedPanelLayer
+              direction={transitionDirection}
+              reduceMotion={!!reduceMotion}
+              header={slots.header}
+              body={slots.body}
+            />
+          )}
+        </GraphCenterPanel>
       )
     }
 

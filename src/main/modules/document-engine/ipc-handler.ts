@@ -3,10 +3,11 @@ import {
   readFileSync, writeFileSync, readdirSync, statSync, existsSync,
   mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, type FSWatcher
 } from 'fs'
-import { readFile } from 'fs/promises'
+import { readFile, readdir, stat } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
+import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
@@ -45,7 +46,7 @@ async function getDocx(): Promise<typeof import('docx') | null> {
 
 // --- Binary file detection ---
 
-const BINARY_EXTENSIONS = new Set([
+export const BINARY_EXTENSIONS = new Set([
   // Images
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif',
   // Video
@@ -308,6 +309,14 @@ function shouldHideInternalBackup(name: string): boolean {
   )
 }
 
+export type DocumentWriteIndexHook = (path: string, content: string) => void
+
+let documentWriteIndexHook: DocumentWriteIndexHook | null = null
+
+export function setDocumentWriteIndexHook(hook: DocumentWriteIndexHook | null): void {
+  documentWriteIndexHook = hook
+}
+
 export async function readDocumentEditableText(
   filePath: string,
 ): Promise<{ success: boolean; content: string; error?: string }> {
@@ -421,6 +430,24 @@ async function saveDocumentWithDialog(payload: {
 }
 
 export function setupDocumentIPC(useMock = false): void {
+  // Renderer notifies main whenever a widget update has been committed into the tab content store.
+  //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
+  //   step is acked by the actual editor state, not just the tool-call IPC round-trip.
+  ipcMain.removeAllListeners('document:widgetCommitted')
+  ipcMain.on('document:widgetCommitted', (_event, payload: DocumentWidgetCommitEvent) => {
+    if (!payload || typeof payload !== 'object') return
+    const tabId = typeof payload.tabId === 'string' ? payload.tabId : ''
+    const widgetId = typeof payload.widgetId === 'string' ? payload.widgetId : ''
+    const committedAt = typeof payload.committedAt === 'number' ? payload.committedAt : Date.now()
+    if (!tabId || !widgetId) return
+    documentCommitRegistry.record({
+      tabId,
+      widgetId,
+      requestId: typeof payload.requestId === 'string' ? payload.requestId : undefined,
+      committedAt,
+    })
+  })
+
   type DirectoryWatchSession = {
     sender: WebContents
     watchers: Map<string, FSWatcher>
@@ -564,7 +591,7 @@ export function setupDocumentIPC(useMock = false): void {
 
         // react-pdf reads raw bytes more reliably than fetching a custom protocol URL.
         if (category === 'pdf') {
-          data.bytes = new Uint8Array(readFileSync(path))
+          data.bytes = new Uint8Array(await readFile(path))
         }
 
         return {
@@ -574,7 +601,7 @@ export function setupDocumentIPC(useMock = false): void {
       }
 
       // Text file — read as UTF-8
-      const content = readFileSync(path, 'utf-8')
+      const content = await readFile(path, 'utf-8')
       return {
         success: true,
         data: { type: 'text' as const, content },
@@ -600,6 +627,13 @@ export function setupDocumentIPC(useMock = false): void {
           success: false,
           error: result.error || '文档写入失败',
           errorCode: ext === '.docx' ? 'DOCX_WRITE_FAILED' : 'UNSUPPORTED_TEXT_WRITE',
+        }
+      }
+      if (documentWriteIndexHook) {
+        try {
+          documentWriteIndexHook(path, content)
+        } catch (hookError) {
+          console.warn('[document-engine] write index hook failed', hookError)
         }
       }
       return result
@@ -639,12 +673,12 @@ export function setupDocumentIPC(useMock = false): void {
         return { success: false, error: 'Directory not found', errorCode: 'FILE_NOT_FOUND' }
       }
 
-      const items = readdirSync(dir)
+      const items = (await readdir(dir))
         .filter((name) => !shouldHideInternalBackup(name))
-        .map(name => {
+      const entries = await Promise.all(items.map(async (name) => {
         const filePath = join(dir, name)
         try {
-          const stats = statSync(filePath)
+          const stats = await stat(filePath)
           return {
             name,
             path: filePath,
@@ -662,9 +696,9 @@ export function setupDocumentIPC(useMock = false): void {
             modified: new Date(0)
           }
         }
-      })
+      }))
 
-      return { success: true, items }
+      return { success: true, items: entries }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage, errorCode: 'PARSE_ERROR' }
@@ -701,7 +735,7 @@ export function setupDocumentIPC(useMock = false): void {
         }
       }
 
-      const buffer = readFileSync(path)
+      const buffer = await readFile(path)
 
       // Use the mammoth module — handle both default and named exports
       const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
@@ -724,7 +758,7 @@ export function setupDocumentIPC(useMock = false): void {
       const errorMessage = error instanceof Error ? error.message : String(error)
       if (/end of central directory|zip file/i.test(errorMessage)) {
         try {
-          const rawText = readFileSync(path, 'utf-8')
+          const rawText = await readFile(path, 'utf-8')
           if (looksLikeReadableText(rawText)) {
             const html = `<pre>${escapeHtml(rawText)}</pre>`
             return {
@@ -788,7 +822,7 @@ export function setupDocumentIPC(useMock = false): void {
         }
       }
 
-      const buffer = readFileSync(path)
+      const buffer = await readFile(path)
       const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
       const workbook = xlsxMod.read(buffer, { type: 'buffer' })
 

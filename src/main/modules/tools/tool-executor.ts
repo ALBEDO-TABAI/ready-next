@@ -17,6 +17,7 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
+import { executeFileManagementTool } from './file-management-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
@@ -87,6 +88,9 @@ export async function executeToolCall(
           emitToolAction: context.emitToolAction,
           requestModuleToolAction: context.requestModuleToolAction,
         })
+
+      case 'file':
+        return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
 
       case 'rss':
         return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })

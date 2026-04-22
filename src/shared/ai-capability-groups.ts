@@ -2,6 +2,7 @@ export type CapabilityGroupId =
   | 'browser_interaction'
   | 'browser_content_tasks'
   | 'document'
+  | 'file_management'
   | 'rss'
   | 'calendar'
   | 'skills'
@@ -65,6 +66,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'auto',
     defaultProfiles: ['local_chat', 'remote_channel', 'embedded_workflow'],
     executionKinds: ['deterministic', 'interactive'],
+    settingsVisible: true,
+  },
+  {
+    id: 'file_management',
+    label: '文件管理',
+    description: '跨源搜索（文档 / RSS / 书签 / 日程 / 会话）、反向链接、定位、分类与重命名。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat', 'remote_channel', 'embedded_workflow'],
+    executionKinds: ['deterministic'],
     settingsVisible: true,
   },
   {

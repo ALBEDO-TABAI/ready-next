@@ -1196,6 +1196,132 @@ interface ElectronDocumentAPI {
   onDirectoryChange: (
     callback: (data: { paths: string[]; timestamp: number }) => void
   ) => () => void
+  notifyWidgetCommitted?: (payload: {
+    tabId: string
+    widgetId: string
+    requestId?: string
+    committedAt: number
+  }) => void
+  reindexWorkspace: (root: string) => Promise<DocumentReindexWorkspaceResponse>
+  indexDocument: (payload: { path: string; root?: string; content?: string }) => Promise<DocumentIndexDocumentResponse>
+  searchIndex: (payload: { query: string; limit?: number; workspaceRoot?: string; sources?: string[] }) => Promise<DocumentSearchIndexResponse>
+  reindexAllSources: (root: string) => Promise<DocumentReindexAllSourcesResponse>
+  listSources: () => Promise<DocumentListSourcesResponse>
+  getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
+  getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) => Promise<DocumentGraphResponse>
+}
+
+interface DocumentBacklinkReference {
+  path: string
+  name: string
+  kind: string
+}
+
+interface DocumentBacklinksResponse {
+  success: boolean
+  data?: { references: DocumentBacklinkReference[] }
+  error?: string
+}
+
+interface DocumentGraphNode {
+  id: string
+  type: 'doc' | 'tag' | 'ghost'
+  label: string
+  sourceType?: string
+}
+
+interface DocumentGraphEdge {
+  source: string
+  target: string
+  kind: string
+}
+
+interface DocumentGraphResponse {
+  success: boolean
+  data?: { nodes: DocumentGraphNode[]; edges: DocumentGraphEdge[] }
+  error?: string
+}
+
+interface DocumentSearchHit {
+  path: string
+  name: string
+  snippet: string
+  rank: number
+  nameMatch: boolean
+  tagsHit: string[]
+  linksHit: string[]
+  sourceType: string
+  sourceMeta?: Record<string, unknown> | null
+}
+
+interface DocumentAdapterReindexResult {
+  indexed: number
+  skipped: number
+  removed: number
+  scanned: number
+  error?: string
+}
+
+interface DocumentReindexAllSourcesResult {
+  ok: boolean
+  perSource: Record<string, DocumentAdapterReindexResult>
+  elapsedMs: number
+}
+
+interface DocumentReindexAllSourcesResponse {
+  success: boolean
+  data?: DocumentReindexAllSourcesResult
+  error?: string
+}
+
+interface DocumentListSourcesResponse {
+  success: boolean
+  data?: { sources: string[] }
+  error?: string
+}
+
+interface DocumentSearchIndexResult {
+  items: DocumentSearchHit[]
+  stats: { returned: number; elapsedMs: number }
+  degraded: boolean
+}
+
+interface DocumentSearchIndexResponse {
+  success: boolean
+  data?: DocumentSearchIndexResult
+  error?: string
+}
+
+interface DocumentReindexWorkspaceResult {
+  ok: boolean
+  root: string
+  workspaceId: number
+  indexed: number
+  skipped: number
+  removed: number
+  scanned: number
+  elapsedMs: number
+  degraded: boolean
+  error?: string
+}
+
+interface DocumentReindexWorkspaceResponse {
+  success: boolean
+  data?: DocumentReindexWorkspaceResult
+  error?: string
+}
+
+interface DocumentIndexDocumentResult {
+  ok: boolean
+  documentId?: number
+  skipped?: boolean
+  error?: string
+}
+
+interface DocumentIndexDocumentResponse {
+  success: boolean
+  data?: DocumentIndexDocumentResult
+  error?: string
 }
 
 // =============================================================================
@@ -2064,6 +2190,23 @@ interface ElectronMemoryLifecycleAPI {
 }
 
 // =============================================================================
+// Tools API Types
+// =============================================================================
+
+interface ToolEventLogPayload {
+  type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'
+  requestId: string
+  tool: string
+  scopeId?: string | null
+  elapsedMs?: number
+  error?: string
+}
+
+interface ElectronToolsAPI {
+  logToolEvent: (payload: ToolEventLogPayload) => void
+}
+
+// =============================================================================
 // Top-level API
 // =============================================================================
 
@@ -2084,6 +2227,7 @@ interface ElectronAPI {
   chat: ElectronChatAPI
   userProfile: ElectronUserProfileAPI
   agentPersonality: ElectronAgentPersonalityAPI
+  tools?: ElectronToolsAPI
   platform: string
   getFilePathFromDrop: (file: File) => string
 }

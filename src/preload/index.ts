@@ -326,7 +326,21 @@ const documentAPI = {
     const handler = (_: unknown, data: { paths: string[]; timestamp: number }) => callback(data)
     ipcRenderer.on('document:directoryChanged', handler)
     return () => { ipcRenderer.removeListener('document:directoryChanged', handler) }
-  }
+  },
+  notifyWidgetCommitted: (payload: { tabId: string; widgetId: string; requestId?: string; committedAt: number }) => {
+    ipcRenderer.send('document:widgetCommitted', payload)
+  },
+  reindexWorkspace: (root: string) => ipcRenderer.invoke('document:reindexWorkspace', root),
+  indexDocument: (payload: { path: string; root?: string; content?: string }) =>
+    ipcRenderer.invoke('document:indexDocument', payload),
+  searchIndex: (payload: { query: string; limit?: number; workspaceRoot?: string; sources?: string[] }) =>
+    ipcRenderer.invoke('document:searchIndex', payload),
+  reindexAllSources: (root: string) => ipcRenderer.invoke('document:reindexAllSources', root),
+  listSources: () => ipcRenderer.invoke('document:listSources'),
+  getBacklinks: (payload: { path: string; limit?: number }) =>
+    ipcRenderer.invoke('document:getBacklinks', payload),
+  getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) =>
+    ipcRenderer.invoke('document:getGraph', payload),
 }
 
 // RSS API
@@ -544,6 +558,17 @@ const agentPersonalityAPI = {
   delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
 }
 
+const toolsAPI = {
+  logToolEvent: (payload: {
+    type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'
+    requestId: string
+    tool: string
+    scopeId?: string | null
+    elapsedMs?: number
+    error?: string
+  }) => ipcRenderer.send('tools:logToolEvent', payload),
+}
+
 // Expose APIs to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
@@ -562,6 +587,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chat: chatAPI,
   userProfile: userProfileAPI,
   agentPersonality: agentPersonalityAPI,
+  tools: toolsAPI,
   platform: process.platform,
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
@@ -587,6 +613,7 @@ declare global {
       chat: typeof chatAPI
       userProfile: typeof userProfileAPI
       agentPersonality: typeof agentPersonalityAPI
+      tools: typeof toolsAPI
       platform: string
       getFilePathFromDrop: (file: File) => string
     }

@@ -4,6 +4,7 @@ import type { ToolResultShape } from './tool-result-types'
 export type ToolDomain =
   | 'browser'
   | 'document'
+  | 'file'
   | 'rss'
   | 'calendar'
   | 'feishu'

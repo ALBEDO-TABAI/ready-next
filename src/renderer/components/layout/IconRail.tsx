@@ -1,4 +1,4 @@
-import { Folder, Search, Puzzle, Settings } from 'lucide-react'
+import { Folder, Search, Puzzle, Link2, Network, Settings } from 'lucide-react'
 import { motion } from 'framer-motion'
 import MorphIconRailGroup from '../motion/MorphIconRailGroup'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../../modules/workbench/chrome'
@@ -14,6 +14,8 @@ const topIcons = [
   { id: 'folder', icon: Folder, label: '文件' },
   { id: 'search', icon: Search, label: '搜索' },
   { id: 'skills', icon: Puzzle, label: '技能中心' },
+  { id: 'backlinks', icon: Link2, label: '反向链接' },
+  { id: 'graph', icon: Network, label: '关系图谱' },
 ]
 
 export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = false, expanded = true }: IconRailProps) {

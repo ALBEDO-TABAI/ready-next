@@ -1,10 +1,56 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-20
+> 更新时间: 2026-04-21
 
 ## 当前真值摘要
 
 0. Agent 核心重构已先落地第一段可上线基础层。
+
+- `2026-04-21` 全局搜索 Step 5（多源索引抽象）+ Step 6（Agent 工具层 · 反向链接 · 关系图谱）已落地（计划 `plans/1-4-piped-bear.md` §Step 5/6）：
+  - **Migration 027**：`documents` 表新增 `source_type / source_meta_json / source_id` 列 + `idx_documents_source` 索引；插入 `@shared` workspace 承载非文件源。原 `(workspace_id, path)` 唯一键沿用，bookmark/rss/calendar/agent 各自用 `rss://id` 等伪 URI 落 path。
+  - **Adapter 层**（`src/main/modules/search-engine/adapters.ts`）：`IndexSourceAdapter` 接口 + 5 个实现 —— `FileSystemAdapter`（per-root，原 reindex 主循环重构进来）、`BookmarkAdapter / RssAdapter / CalendarAdapter / AgentMessageAdapter`（均 shared，直接 SELECT 本域表写入 documents）。`syncShared` helper 统一事务 + 删除孤儿行。`conversation_attachments` 表当前不存在，adapter 暂不实现。
+  - **多源搜索**：`SearchEngine.reindexAllSources(root)` 并列跑 fs + 4 个 shared adapter；`search(query, {sources?})` 动态拼 `d.source_type IN (…)`；query planner 新增 `src:xxx` token 类型，与 `opts.sources` 合并。新 IPC `document:reindexAllSources / listSources`；preload + `electron.d.ts` 同步 `DocumentSearchHit.sourceType / sourceMeta`、`DocumentReindexAllSourcesResult` 等类型。
+  - **GlobalSearchPanel** 切到 `reindexAllSources`，渲染源 chip（doc/bookmark/rss/calendar/agent），`openResult` 按 source_type 分流：doc 走 `selectFile + workbench mode`；bookmark/rss 用 `window.open(url)`（main 的 `setWindowOpenHandler` 自动 `shell.openExternal`）；calendar/agent 暂切到相应 mode。
+  - **Agent 工具层**（新 capability group `file_management` / 新 `ToolDomain 'file'`）：`src/main/modules/tools/file-management-tools.ts` 暴露 7 个工具 —— `file_search / file_locate / file_get_backlinks / file_get_graph`（只读，主进程直查 SQLite，无需 renderer 往返）+ `file_classify / file_rename / file_move`（写类，`assertInsideWorkspace` 严格 workspace root 前缀校验，`newName` 拒绝路径分隔符，默认不覆盖）。`file_classify` 通过 `src/shared/document-graph-parse-frontmatter-writer.ts` 的 `writeFrontmatter` 幂等写入 YAML frontmatter，再主动 `engine.indexDocument` 回写索引。
+  - 工具链路接入：`tool-registry.ts` 新增 `file_management` provider；`tool-parallelism-policy.ts` 在前缀分发里加 `file_` → `domain='file'` 分支（write tools `accessMode='write'`）；`tool-executor.ts` switch 增加 `case 'file'` 走 `executeFileManagementTool`。`ai-capability-groups.ts` 补 `file_management` 组定义。遵循 CLAUDE.md §6.10：不在 `turn-engine` 加双重挡板；裁决仍只走 `resolveRunCapabilities` / `resolvePolicyConflicts` 既有两类冲突。
+  - **反向链接 Panel**（`src/renderer/components/document/BacklinksPanel.tsx`）：读 `document:getBacklinks(path)` IPC（新增，基于 `doc_links.target_doc_id`），列表条目点击 `selectFile(srcPath)`。空结果自动隐藏整个面板；待接入 `MarkdownEditor` 底部槽位。
+  - **关系图谱视图**（`src/renderer/components/graph/`）：不引入新 npm 依赖；自写 ~180 行 Verlet force sim（`runForceLayout` 纯函数 + `useForceLayout` hook），节点 = doc/tag/ghost、边 = wikilink/mdlink/tag-of；`GraphView.tsx` 用 SVG 渲染 + pointer 捕获做 pan/zoom/drag；`document:getGraph({centerPath?, depth?, workspaceRoot?})` IPC 支持 BFS 深度限制；空图状态友好提示。
+  - 新增单测 6 条（`document-graph-parse-frontmatter-writer` 3 + `search-query-planner` 额外 2 条 src: 覆盖 + `search-force-layout` 3）全绿；合计 Step 5/6 引入 27 条单测。`npm run typecheck` 干净。
+  - 关键新文件：`src/main/modules/search-engine/adapters.ts`、`src/main/modules/tools/file-management-tools.ts`、`src/shared/document-graph-parse-frontmatter-writer.ts`、`src/renderer/components/document/BacklinksPanel.tsx`、`src/renderer/components/graph/{useForceLayout.ts,GraphView.tsx}`。
+
+- `2026-04-21` 全局搜索 FTS5 索引 Step 4（草稿叠加 + 收尾）已落地（计划 `plans/1-4-piped-bear.md` §Step 4）：
+  - NFKC 归一、零宽剥离、CJK bigram、`####heading` 跳过、widget fence 文本入索引、`BINARY_EXTENSIONS + >2MB` 防护，均已在 Step 2/3 落地，Step 4 不再重复做。
+  - `GlobalSearchPanel.tsx` 新增 `parseLocalQuery / buildDraftSnippet / matchDraftTab`：`useDocTabs.tabs.filter(t => !t.path || t.isDirty)` 被本地用 `parseDocumentGraph` 解析并按 AND 语义匹配（所有 tag / wikilink 必须命中；所有 FTS term 必须命中 normalized body 或 name）；命中草稿前置合入结果流，同路径的 IPC 结果会被过滤掉（以 draft 现值为真）。
+  - 结果渲染带 `draft` 角标，点击草稿直接 `setActiveTab(tab.id) + setWorkbenchMode('document')`；磁盘文件仍走 `selectFile(path)`。统计行改为「命中 N 条 +M 草稿 · X ms · degraded?」。
+  - 全套单测 19/19（`document-graph-parse` 11 + `search-query-planner` 8）全绿，`npm run typecheck` 通过。
+  - Step 1-4 合计关键文件：`migrations.ts`（026 迁移）+ `search-engine/{repository, indexer, query, ipc-handler}.ts`（新模块）+ `document-graph-parse.ts`（新共享）+ `document-engine/ipc-handler.ts`（`export BINARY_EXTENSIONS`、`setDocumentWriteIndexHook`）+ `database.ts`（`export DatabaseConnection/Statement`）+ `preload/index.ts` + `electron.d.ts` + `GlobalSearchPanel.tsx`。图谱铺路已完成：`doc_links + tags + documents` 三张表构成完整图数据源，后续做 Obsidian 式图谱只需 renderer 读取 + D3/Cytoscape 渲染。
+
+- `2026-04-21` 全局搜索 FTS5 索引 Step 3（前缀语法 + FTS5 查询 + 面板切换）已落地（计划 `plans/1-4-piped-bear.md` §Step 3）：
+  - 新增 `src/main/modules/search-engine/query.ts`：`parseSearchQuery` 按引号短语 / `#tag` / `[[wikilink]]` / 普通 term 四类切分；所有 token 走 NFKC 归一 + 零宽剥离；纯标点（`#` / `[[` / `""` 单独出现）直接丢弃；CJK term / phrase 展开为 bigram 短语串（`"机器学习"` → `"机器" "器学" "学习"`，各段间 AND）。
+  - `SearchEngine.search` 按 `parsed.ftsMatch / tags / wikilinks` 动态拼 SQL：FTS 段走 `documents_fts MATCH + bm25(documents_fts, 2.0, 1.0) + snippet(…, char(1), char(2), …, 12)`（用控制字符做 mark 分隔避免 `dangerouslySetInnerHTML`）；tag 条件走 `tags IN (…) GROUP BY doc_id HAVING COUNT(DISTINCT)=N` 保证 AND；wikilink 走 `doc_links kind='wikilink'`；无 FTS term 时跳过 join，改按 `indexed_at DESC` 排序。查询侧再补一次 tag/link 回读用于填 `tagsHit / linksHit` 标记。
+  - 新 IPC `document:searchIndex({query, limit?, workspaceRoot?})` 在 `search-engine/ipc-handler.ts` 注册，preload `documentAPI.searchIndex` 与 `electron.d.ts` 的 `DocumentSearchHit / SearchIndexResult / Response` 类型全链路同步。
+  - `GlobalSearchPanel.tsx` 切换到 `electronAPI.document.searchIndex`：runSearch 整块替换、`SearchResultItem` 扩 `tagsHit/linksHit/snippet`，`renderSnippet` 按控制字符切段用 `<mark>` 标注；`workspaceRoot` 变化时自动 `reindexWorkspace`；带前缀语法（`#/[[`）时 replace-all 按钮自动禁用并给出 tooltip；替换成功后 `document:write` 钩子即时更新索引，之后自动再查一次。panel 顶部文案改为「#tag / [[wikilink]] 前缀语法 · 引号可做短语匹配」。统计行改为「命中 N 条 · X ms」并带 degraded 标记。
+  - 新增单测 `src/__tests__/search-query-planner.test.ts` 8/8 全绿：tag/wikilink/term 分类、引号短语、NFKC 全角 `＃ａｌｐｈａ`、CJK bigram 展开、CJK 短语折空格再 bigram、纯前缀 token → `ftsMatch=null`、零宽字符剥离、`""` / `#` 纯标点丢弃。`npm run typecheck` 通过。
+
+- `2026-04-21` 全局搜索 FTS5 索引 Step 2（Markdown 图谱解析 + 边表写入）已落地（计划 `plans/1-4-piped-bear.md` §Step 2）：
+  - 新增 `src/shared/document-graph-parse.ts`：`parseDocumentGraph` 在 NFKC 归一 + 剥零宽字符后，逐行提取 `#tag`（含 `#中文/hierarchical`、`####heading` 跳过、lookbehind 约束前导符号）、`[[wikilink]]`（含 `#anchor` / `|alias`）、普通 `[label](url)`（`![..](..)` 单独进 attachment，`![[x.ext]]` 在 wikilink 扩展后识别），可选 YAML frontmatter（`tags` 字段合入）；widget fence 在 body 中被剥除，结构化 `componentSpec / skeletonSpec` 的所有字符串叶子 join 成 `widgetText` 追加到 body 末尾，实现「widget 里的文本可被 FTS5 命中」但不污染 tags。
+  - `search-engine/repository.ts` 扩展 `replaceTags / replaceLinks / replaceAttachments / resolveWikilinkTargets / listWorkspaceRoots`；indexer 在同一 transaction 里同时 upsert documents + 写三张边表，批结束后统一跑一次 wikilink target 解析（按 name / name+'.md' 回填 `target_doc_id` 与 `resolved` 标志）。
+  - FTS5 改为常规表（去掉 external-content 与对应同步触发器），仅保留 `documents_ad` 删除触发器；由 indexer 在事务内显式 `DELETE + INSERT documents_fts(rowid, name, body)`，snippet/bm25 可以直接读索引内正文。
+  - 新增 `document:indexDocument(path, root?, content?)` IPC；`document-engine/ipc-handler.ts` 暴露 `setDocumentWriteIndexHook(fn)`，`setupSearchIPC()` 启动时挂钩，`document:write` 成功后自动触发对应工作区的增量索引（通过 `searchEngine.findWorkspaceRootForPath` 匹配最长 root）。
+  - 新增单测 `src/__tests__/document-graph-parse.test.ts` 11 条全绿：`####heading` 不漏成 tag、`ab#xy` / URL 锚点不误判、`[[bar#intro|Alias]]` anchor+alias、内部 vs 外部链接、image/video/audio/file 分类、`[[x.png]]` 提升为 attachment、frontmatter tags 合并、`＃ａｂｃ` NFKC 归一与零宽剥离、widget fence 文本进入 body 但 `"#fakeTag"` 不污染 tag 列表。`npm run typecheck` 通过。
+
+- `2026-04-21` 全局搜索 FTS5 索引 Step 1（schema + 索引基建）已落地（计划 `plans/1-4-piped-bear.md`）：
+  - Migration 026 新增 `workspaces / documents / documents_fts (FTS5) / tags / doc_links / doc_attachments` 六张表 + 外部内容 FTS5 的三条同步触发器；FTS5 创建失败被包裹 try/catch 以兼容未编入 FTS5 的 better-sqlite3 构建。
+  - 新模块 `src/main/modules/search-engine/`：`repository.ts` 封装 workspaces/documents 的 prepare 语句与手写事务，`indexer.ts` 实现 `reindexWorkspace` 分片扫描（`BINARY_EXTENSIONS` + `>2MB` + 常见忽略目录如 `node_modules/.git/dist/...`），每 500 条一批事务包裹、批间 `setImmediate` 让出 event loop；`probeFts5Availability` 靠 `sqlite_master` 查 `documents_fts` 决定是否走降级路径。
+  - IPC 契约闭环：`document:reindexWorkspace` 在 `setupSearchIPC()` 注册，`setupGlobalIPC` 与既有 `setupDocumentIPC` 并列调用；preload `documentAPI.reindexWorkspace(root)` + `electron.d.ts` 的 `DocumentReindexWorkspaceResult / Response` 类型同步。
+  - `document-engine/ipc-handler.ts` 中的 `BINARY_EXTENSIONS` 改为 `export`，`database.ts` 中的 `DatabaseConnection / DatabaseStatement` 改为 `export`，供 search-engine 复用。
+  - 本步只写 documents 基础行（tags/doc_links/doc_attachments 留到 Step 2 的解析器），`npm run typecheck:node` + `npm run typecheck:web` 通过。
+
+- `2026-04-21` 已修复浏览器模式下“拖拽左侧栏调宽时标签栏和原生页面错位”：
+  - 根因确认在 BrowserView bounds 的双重延后，不在布局常量也不在标签栏 DOM：拖拽输入端已经由 `useRafResizeDrag` 做过一轮按帧合并，但 `useBrowserViewBounds` 又额外等了一帧，主进程 `BrowserHostLayoutService` 还会再等 16ms 才 `setBounds`，导致原生页面持续落后于假 chrome。
+  - renderer 现已按 resize reason 分流：真实拖拽时直接发送 transient bounds，不再额外排入下一帧；click-toggle 等非拖拽过渡仍保留原调度路径，避免无差别放大 BrowserView 更新频率。
+  - 主进程 BrowserView 宿主层现已取消 transient bounds 的二次 timer 合并，只保留相同几何去重，让 native BrowserView 和 DOM 外壳共用同一拍节奏。
+  - 已新增 / 更新 BrowserView 对齐合同测试，并通过定向合同回归、`npm run typecheck:node` 与 `npm run typecheck:web`。
 
 - `2026-04-20` 已修复 BrowserView 启动恢复 / 新建标签显示回归：
   - 问题层级确认在 renderer 的 BrowserView 重同步层，不是主进程建标签失败，也不是 BrowserView 基础 hide/show IPC 损坏。

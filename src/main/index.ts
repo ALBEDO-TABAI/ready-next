@@ -14,6 +14,7 @@ import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
+import { setupSearchIPC } from './modules/search-engine/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
@@ -239,6 +240,7 @@ async function createWindow(): Promise<void> {
 function setupGlobalIPC(): void {
   // Module IPC handlers (no window dependency)
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
+  setupSearchIPC()
   setupRSSIPC(RSS_USE_MOCK)
   setupCalendarIPC(CALENDAR_USE_MOCK)
   setupSettingsIPC()

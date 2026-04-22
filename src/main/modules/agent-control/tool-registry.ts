@@ -18,6 +18,11 @@ import {
   getBrowserOpenAITools,
 } from '../tools/browser-tool-catalog'
 import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../tools/document-tools'
+import {
+  FILE_MANAGEMENT_TOOL_NAMES,
+  getFileManagementAnthropicTools,
+  getFileManagementOpenAITools,
+} from '../tools/file-management-tools'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
@@ -442,6 +447,12 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     getToolDefinitions: () => buildToolDefinitions('document', DOCUMENT_TOOL_NAMES),
     getAnthropicTools: () => getDocumentAnthropicTools(),
     getOpenAITools: () => getDocumentOpenAITools(),
+  },
+  file_management: {
+    staticToolNames: FILE_MANAGEMENT_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('file_management', FILE_MANAGEMENT_TOOL_NAMES),
+    getAnthropicTools: () => getFileManagementAnthropicTools(),
+    getOpenAITools: () => getFileManagementOpenAITools(),
   },
   rss: {
     staticToolNames: RSS_TOOL_NAMES,

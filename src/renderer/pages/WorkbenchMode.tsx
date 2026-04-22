@@ -128,6 +128,8 @@ export default function WorkbenchMode() {
       folder: 'files',
       search: 'search',
       skills: 'skills',
+      backlinks: 'backlinks',
+      graph: 'graph',
     }
     const targetVariant = iconVariantMap[icon]
     if (!targetVariant) return
@@ -144,9 +146,9 @@ export default function WorkbenchMode() {
   }
 
   const handleSidebarResize = useCallback((delta: number) => {
-    if (!['files', 'search', 'skills'].includes(sidePanelVariant)) return
+    if (!['files', 'search', 'skills', 'backlinks', 'graph'].includes(sidePanelVariant)) return
     const current = useWorkspace.getState().sidePanelWidths.shared
-    setSidePanelWidth(sidePanelVariant as 'files' | 'search' | 'skills', current + delta)
+    setSidePanelWidth(sidePanelVariant as 'files' | 'search' | 'skills' | 'backlinks' | 'graph', current + delta)
   }, [setSidePanelWidth, sidePanelVariant])
 
   const handleChatResize = useCallback((delta: number) => {
@@ -168,6 +170,8 @@ export default function WorkbenchMode() {
   const activeIcon = useMemo(() => {
     if (sidePanelVariant === 'search') return 'search'
     if (sidePanelVariant === 'skills') return 'skills'
+    if (sidePanelVariant === 'backlinks') return 'backlinks'
+    if (sidePanelVariant === 'graph') return 'graph'
     return 'folder'
   }, [sidePanelVariant])
   const sidebarShellWidth = sidebarVisible ? sidePanelWidths.shared : 0

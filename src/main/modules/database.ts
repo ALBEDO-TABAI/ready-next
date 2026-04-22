@@ -5,13 +5,13 @@ import { app } from 'electron'
 import { runMigrations } from './migrations'
 import { getLogPath } from '../utils/platform'
 
-interface DatabaseStatement {
+export interface DatabaseStatement {
   run(...params: unknown[]): unknown
   get<T = unknown>(...params: unknown[]): T | undefined
   all<T = unknown>(...params: unknown[]): T[]
 }
 
-interface DatabaseConnection {
+export interface DatabaseConnection {
   exec(sql: string): void
   prepare(sql: string): DatabaseStatement
   close(): void

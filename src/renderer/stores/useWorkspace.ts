@@ -9,7 +9,7 @@ export interface FileItem {
   modified: Date
 }
 
-export type SidePanelWidthKey = 'files' | 'search' | 'skills'
+export type SidePanelWidthKey = 'files' | 'search' | 'skills' | 'backlinks' | 'graph'
 export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'hidden'
 
 interface SidePanelWidths {
@@ -267,7 +267,7 @@ const loadSidePanelVariantFromStorage = (): WorkspaceSidePanelVariant => {
     if (!raw) return 'files'
     const parsed = raw as WorkspaceSidePanelVariant
     // Validate the variant
-    if (['files', 'search', 'skills', 'hidden'].includes(parsed)) {
+    if (['files', 'search', 'skills', 'backlinks', 'graph', 'hidden'].includes(parsed)) {
       console.log('[SidePanelVariant] Valid variant loaded:', parsed)
       return parsed
     }

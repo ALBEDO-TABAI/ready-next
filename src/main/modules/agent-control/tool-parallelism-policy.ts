@@ -10,7 +10,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'system'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'system'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -62,6 +62,13 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
     return {
       domain: 'document',
       accessMode: READ_ONLY_DOCUMENT_TOOL_NAMES.has(normalized) ? 'read' : 'write',
+    }
+  }
+  if (normalized.startsWith('file_')) {
+    const writeFileTools = new Set(['file_classify', 'file_rename', 'file_move'])
+    return {
+      domain: 'file',
+      accessMode: writeFileTools.has(normalized) ? 'write' : 'read',
     }
   }
   if (normalized.startsWith('rss_')) {

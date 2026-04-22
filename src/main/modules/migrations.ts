@@ -1255,6 +1255,120 @@ const migrations: Migration[] = [
         'CREATE INDEX IF NOT EXISTS idx_task_projections_parent_updated ON task_projections(parent_task_id, updated_at DESC)'
       )
     }
+  },
+  // ------------------------------------------------------------------ 026
+  // Global search index: workspaces, documents, documents_fts (FTS5),
+  // tags, doc_links, doc_attachments. Foundation for the SQLite-backed
+  // GlobalSearchPanel upgrade + future Obsidian-style graph view.
+  {
+    name: '026_create_search_index_tables',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workspaces (
+          id INTEGER PRIMARY KEY,
+          root TEXT NOT NULL UNIQUE,
+          last_indexed_at INTEGER
+        )
+      `)
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS documents (
+          id INTEGER PRIMARY KEY,
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          ext TEXT,
+          size INTEGER,
+          mtime INTEGER,
+          content_hash TEXT,
+          frontmatter_json TEXT,
+          indexed_at INTEGER,
+          UNIQUE(workspace_id, path)
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)')
+
+      // FTS5 virtual table is optional — some better-sqlite3 builds omit it.
+      // Use a regular (non-external-content) FTS5 table so snippet()/bm25() can
+      // read text directly from the index; indexer manages rows explicitly.
+      // A single DELETE trigger keeps the index in sync when documents rows are
+      // pruned (CASCADE from workspaces or explicit delete of a missing file).
+      try {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+            name, body,
+            tokenize="unicode61 remove_diacritics 2 tokenchars '_-'"
+          )
+        `)
+        db.exec(`
+          CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+            DELETE FROM documents_fts WHERE rowid = old.id;
+          END
+        `)
+      } catch (error) {
+        console.warn('[migrations] 026: FTS5 unavailable, skipping documents_fts', error)
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tags (
+          doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          tag TEXT NOT NULL COLLATE NOCASE,
+          PRIMARY KEY(doc_id, tag)
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag)')
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS doc_links (
+          src_doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK(kind IN ('wikilink','mdlink')),
+          target_text TEXT NOT NULL,
+          target_doc_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+          resolved INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(src_doc_id, kind, target_text)
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_doc_links_target ON doc_links(target_text)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_doc_links_target_doc ON doc_links(target_doc_id)')
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS doc_attachments (
+          doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          ref TEXT NOT NULL,
+          PRIMARY KEY(doc_id, kind, ref)
+        )
+      `)
+    }
+  },
+  // ------------------------------------------------------------------ 027
+  // Multi-source indexing: widen `documents` to carry bookmarks / RSS items /
+  // calendar events / agent messages alongside filesystem files. source_type
+  // defaults to 'document' so existing rows are untouched. A `@shared` workspace
+  // hosts non-filesystem sources (they have no per-workspace root).
+  {
+    name: '027_documents_multi_source',
+    up: (db) => {
+      const cols = db
+        .prepare('PRAGMA table_info(documents)')
+        .all<{ name: string }>()
+        .map((c) => c.name)
+      if (!cols.includes('source_type')) {
+        db.exec("ALTER TABLE documents ADD COLUMN source_type TEXT NOT NULL DEFAULT 'document'")
+      }
+      if (!cols.includes('source_meta_json')) {
+        db.exec('ALTER TABLE documents ADD COLUMN source_meta_json TEXT')
+      }
+      if (!cols.includes('source_id')) {
+        db.exec('ALTER TABLE documents ADD COLUMN source_id TEXT')
+      }
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id)'
+      )
+      db.prepare(
+        'INSERT INTO workspaces (root) VALUES (?) ON CONFLICT(root) DO NOTHING'
+      ).run('@shared')
+    }
   }
 ]
 
