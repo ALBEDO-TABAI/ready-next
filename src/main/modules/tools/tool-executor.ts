@@ -7,6 +7,8 @@ import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime'
 import { defaultToolGateway } from '../agent-control/tool-gateway'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
 import {
   createToolExecutionOutput,
@@ -19,11 +21,19 @@ import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeFileManagementTool } from './file-management-tools'
 import { executeRSSTool } from './rss-tools'
-import { executeSkillTool } from './skills-tools'
+import { executeSkillTool, getSkillActionSchemas } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import {
+  ToolDomainError,
+  errorKindFor,
+  errorMessageOf,
+  isTerminalInfrastructureError,
+} from './tool-errors'
+import { getToolInputSchemas } from './schemas'
+import { validateToolInput } from './tool-input-validator'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -75,50 +85,113 @@ export async function executeToolCall(
     throw error
   }
 
-  const rawResult = await (async () => {
-    switch (definition.domain) {
-      case 'browser':
-        if (!context.browserController) {
-          return 'Browser controller is not available'
-        }
-        return executeBrowserTool(toolName, args, context.browserController, context.abortSignal, context.sessionId)
-
-      case 'document':
-        return executeDocumentTool(toolName, args, {
-          emitToolAction: context.emitToolAction,
-          requestModuleToolAction: context.requestModuleToolAction,
-        })
-
-      case 'file':
-        return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
-
-      case 'rss':
-        return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
-
-      case 'calendar':
-        return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
-
-      case 'skill':
-        return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup)
-
-      case 'system':
-        return executeSystemTool(toolName, args)
-
-      case 'feishu':
-        return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
-
-      case 'memory':
-        return executeMemoryTool(toolName, args, context)
-
-      case 'session':
-        return executeSessionRecallTool(toolName, args, context)
-
-      default:
-        return `Unknown tool: ${toolName}`
+  // Phase 2.5: Zod input validation runs for every tool. The registry is the
+  // union of every per-domain static map plus the dynamic skill-action cache
+  // (PR 12 — user manifests derive to Zod schemas via paramListToZodObject,
+  // cached in skills-tools.ts and refreshed when the skill set changes).
+  // Tools with no registered schema pass through unchanged because
+  // validateToolInput treats a missing entry as { ok: true }.
+  {
+    // Dynamic cache first, static second: static schemas (including the 6
+    // skill control tools) always win over dynamic ones. This is a belt
+    // against a hypothetical user manifest that accidentally names an
+    // action the same as a reserved control-tool name.
+    const mergedSchemas = { ...getSkillActionSchemas(), ...getToolInputSchemas() }
+    const outcome = validateToolInput(toolName, args, mergedSchemas)
+    if (!outcome.ok) {
+      logAgentMetric(TOOL_ERROR_METRICS.inputValidation, {
+        toolName,
+        domain: definition.domain,
+        issueCount: outcome.issueCount,
+        firstCode: outcome.firstCode,
+        firstPath: outcome.firstPath,
+        sessionId: context.sessionId || null,
+      })
+      return outcome.output
     }
-  })()
+    args = outcome.data
+  }
 
-  return toStructuredToolResult(toolName, rawResult)
+  try {
+    const rawResult = await (async () => {
+      switch (definition.domain) {
+        case 'browser':
+          if (!context.browserController) {
+            return 'Browser controller is not available'
+          }
+          return executeBrowserTool(toolName, args, context.browserController, context.abortSignal, context.sessionId)
+
+        case 'document':
+          return executeDocumentTool(toolName, args, {
+            emitToolAction: context.emitToolAction,
+            requestModuleToolAction: context.requestModuleToolAction,
+          })
+
+        case 'file':
+          return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
+
+        case 'rss':
+          return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
+
+        case 'calendar':
+          return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
+
+        case 'skill':
+          return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup)
+
+        case 'system':
+          return executeSystemTool(toolName, args)
+
+        case 'feishu':
+          return executeFeishuTool(toolName, args, { sidecarManager: context.sidecarManager })
+
+        case 'memory':
+          return executeMemoryTool(toolName, args, context)
+
+        case 'session':
+          return executeSessionRecallTool(toolName, args, context)
+
+        default:
+          return `Unknown tool: ${toolName}`
+      }
+    })()
+
+    return toStructuredToolResult(toolName, rawResult)
+  } catch (error) {
+    if (isTerminalInfrastructureError(error)) {
+      throw error
+    }
+    const kind = errorKindFor(error)
+    const message = errorMessageOf(error)
+    const detail = error instanceof ToolDomainError ? error.detail : null
+    logAgentMetric(TOOL_ERROR_METRICS.surfaced, {
+      toolName,
+      errorKind: kind,
+      message: message.slice(0, 200),
+    })
+    // Phase 4: skill_execution_missing is the stale-executionId recovery
+    // path. It's surfaced via errorKind today but was never emitted as its
+    // own metric, so long-tail frequency is invisible. Emit it alongside
+    // the generic `surfaced` metric so log aggregations can bucket it.
+    if (kind === 'skill_execution_missing') {
+      const detailRecord = detail && typeof detail === 'object' ? (detail as Record<string, unknown>) : null
+      const executionIdRaw = detailRecord ? detailRecord.executionId : null
+      logAgentMetric(TOOL_ERROR_METRICS.skillExecutionMissing, {
+        toolName,
+        sessionId: context.sessionId || null,
+        executionId: typeof executionIdRaw === 'string' ? executionIdRaw : null,
+      })
+    }
+    return createToolExecutionOutput(`工具 ${toolName} 失败：${message}`, {
+      shape: 'json',
+      data: {
+        errorKind: kind,
+        toolName,
+        message,
+        detail,
+      },
+    })
+  }
 }
 
 function toStructuredToolResult(toolName: string, rawResult: string | ToolExecutionOutput): ToolExecutionOutput {

@@ -1,5 +1,8 @@
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { isTerminalInfrastructureError } from '../tools/tool-errors'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
@@ -271,6 +274,15 @@ export class ToolRuntime {
           recoveryHistory,
         }
       } catch (error) {
+        // Terminal infrastructure (AbortError, ToolHostUnavailableError) must
+        // bubble so the batch runner can cancel remaining work. Everything
+        // else is surfaced to the model as a structured tool_result — the
+        // dispatch layer already converts domain throws to structured results,
+        // so unknown-kind errors reaching here are the rare residual and are
+        // safer fed back than used to kill the turn.
+        if (isTerminalInfrastructureError(error)) {
+          throw error
+        }
         const classified = classifyExecutionError(error, { source: 'tool_execution' })
         const plan = buildRecoveryPlan(classified)
         const nextAttempt = attempt
@@ -287,33 +299,38 @@ export class ToolRuntime {
 
         await this.drainRegisteredCleanups(attemptContext.__trackedCleanups)
         const recoveredKinds = new Set<ErrorClassifierResult['kind']>(['timeout_tool', 'host_unavailable', 'auth'])
-        if (classified.kind !== 'unknown') {
-          const recovered = recoveredKinds.has(classified.kind)
-          const recoveryHistory = pendingRecoveries.map(({ result: pendingResult, attempt: pendingAttempt }) =>
-            this.buildRecoveryRecord(pendingResult, pendingAttempt, false))
+        const isKnownKind = classified.kind !== 'unknown'
+        const recovered = isKnownKind && recoveredKinds.has(classified.kind)
+        const recoveryHistory = pendingRecoveries.map(({ result: pendingResult, attempt: pendingAttempt }) =>
+          this.buildRecoveryRecord(pendingResult, pendingAttempt, false))
+        if (isKnownKind) {
           recoveryHistory.push(this.buildRecoveryRecord(classified as KnownExecutionErrorResult, nextAttempt, recovered))
-          const result = createToolExecutionOutput(classified.message, {
-            shape: 'json',
-            data: {
-              errorKind: classified.kind,
-              recovered,
-              source: classified.source,
-              toolName: toolCall.name,
-            },
+        } else {
+          logAgentMetric(TOOL_ERROR_METRICS.unknownSurfaced, {
+            toolName: toolCall.name,
+            message: classified.message.slice(0, 200),
           })
-          if (recoveryHistory.length > 0) {
-            params.hooks?.onToolRecovered?.({ toolCall, result, recoveryHistory })
-          }
-          params.hooks?.onToolResult?.({ toolCall, result })
-          return {
-            id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.input,
-            result,
-            recoveryHistory,
-          }
         }
-        throw error
+        const result = createToolExecutionOutput(classified.message, {
+          shape: 'json',
+          data: {
+            errorKind: classified.kind,
+            recovered,
+            source: classified.source,
+            toolName: toolCall.name,
+          },
+        })
+        if (recoveryHistory.length > 0) {
+          params.hooks?.onToolRecovered?.({ toolCall, result, recoveryHistory })
+        }
+        params.hooks?.onToolResult?.({ toolCall, result })
+        return {
+          id: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.input,
+          result,
+          recoveryHistory,
+        }
       } finally {
         attemptGuard.dispose()
       }

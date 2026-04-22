@@ -543,6 +543,7 @@ export function createEmptyScopeRunState(params: {
     responseSegmentToolTraceStart: 0,
     stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
     error: null,
+    softError: null,
     designPhase: null,
     designTodo: [],
     designReviewSummary: null,
@@ -592,6 +593,9 @@ export function deriveScopeRunStatePatch(
     contextBudget?: AgentContextBudget | null
     toolEvent?: { kind: ToolTraceEvent['kind']; text: string; timestamp: string }
     error?: string
+    errorKind?: string
+    recoverable?: boolean
+    toolName?: string
     blockedReason?: string | null
     timestamp: string
   },
@@ -744,6 +748,20 @@ export function deriveScopeRunStatePatch(
 
   if (event.phase === 'error' && event.error) {
     patch.blockedReason = event.error
+  }
+
+  // Phase 3: derive the soft-failure capsule slot from the event payload.
+  // recoverable=true → surface as soft error (capsule), leave phase/error alone
+  // for downstream consumers. Terminal / legacy events clear the capsule.
+  if (event.phase === 'error' && event.recoverable === true && event.error) {
+    patch.softError = {
+      message: event.error,
+      errorKind: event.errorKind || 'unknown',
+      toolName: event.toolName || null,
+      receivedAt: event.timestamp,
+    }
+  } else if (event.phase === 'error') {
+    patch.softError = null
   }
 
   if (typeof event.controllerId === 'string') {

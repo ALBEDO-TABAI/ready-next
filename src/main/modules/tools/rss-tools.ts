@@ -1,3 +1,6 @@
+import { RSS_SCHEMAS } from './schemas/rss-schemas'
+import { zodObjectToParamList } from './zod-param-derivation'
+
 interface ToolParam {
   name: string
   type: string
@@ -25,10 +28,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.addSource',
     intent: 'add_rss_source',
     executionKind: 'deterministic',
-    params: [
-      { name: 'name', type: 'string', description: '订阅源名称', required: true },
-      { name: 'url', type: 'string', description: '订阅源 URL', required: true },
-    ],
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_add_source) as ToolParam[],
   },
   {
     name: 'rss_fetch_updates',
@@ -36,7 +36,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.fetchUpdates',
     intent: 'fetch_rss_updates',
     executionKind: 'deterministic',
-    params: [],
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_fetch_updates) as ToolParam[],
   },
   {
     name: 'rss_select_item',
@@ -44,10 +44,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.selectItem',
     intent: 'select_rss_item',
     executionKind: 'deterministic',
-    params: [
-      { name: 'itemId', type: 'string', description: '可选，条目 ID', required: false },
-      { name: 'title', type: 'string', description: '可选，条目标题关键词', required: false },
-    ],
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_select_item) as ToolParam[],
   },
   {
     name: 'rss_analyze_item',
@@ -55,11 +52,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.analyzeItem',
     intent: 'analyze_rss_item',
     executionKind: 'pipeline',
-    params: [
-      { name: 'itemId', type: 'string', description: '可选，条目 ID', required: false },
-      { name: 'title', type: 'string', description: '可选，条目标题关键词', required: false },
-      { name: 'analysisType', type: 'string', description: 'copy 或 visual', required: true },
-    ],
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_analyze_item) as ToolParam[],
   },
   {
     name: 'rss_capture_session',
@@ -67,7 +60,7 @@ const RSS_TOOLS: RSSToolDef[] = [
     action: 'rss.captureSession',
     intent: 'capture_rss_session',
     executionKind: 'deterministic',
-    params: [],
+    params: zodObjectToParamList(RSS_SCHEMAS.rss_capture_session) as ToolParam[],
   },
 ]
 

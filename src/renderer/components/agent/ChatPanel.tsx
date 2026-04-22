@@ -55,6 +55,7 @@ import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/e
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
+import { SoftFailureCapsule } from './SoftFailureCapsule'
 import ChatAttachments from './ChatAttachments'
 
 // ---------------------------------------------------------------------------
@@ -1662,7 +1663,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     pendingSendFlushAt,
     loadSendPreferences,
     taskDisclosureState,
-    setTaskSectionExpanded
+    setTaskSectionExpanded,
+    dismissSoftError
   } = useAgent()
 
   const { toggleChatPanel: toggleChatPanelStore } = useWorkspace()
@@ -3146,6 +3148,18 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         )}
         renderMarkdown={(content) => <MarkdownContent content={content} />}
       />
+
+      {(() => {
+        const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
+        const softError = scopedRun?.softError || null
+        if (!softError || !currentScopeId) return null
+        return (
+          <SoftFailureCapsule
+            softError={softError}
+            onDismiss={() => dismissSoftError(currentScopeId)}
+          />
+        )
+      })()}
 
       <div
         style={{

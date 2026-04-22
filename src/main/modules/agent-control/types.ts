@@ -393,6 +393,12 @@ export interface ScopeRunEventPayload {
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItem
   error?: string
+  /** Phase 3: structured error classification surfaced at the agent:error boundary. */
+  errorKind?: string
+  /** Phase 3: true when the error should be shown as a soft-failure capsule (no system message). */
+  recoverable?: boolean
+  /** Phase 3: attached tool name (when the error originated from a tool host). */
+  toolName?: string
   blockedReason?: string | null
   controllerId?: string
   ownerTabId?: string

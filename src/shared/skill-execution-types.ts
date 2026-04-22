@@ -19,6 +19,8 @@ export interface SkillParamDefinition {
   description: string
   required: boolean
   enum?: string[]
+  items?: Record<string, unknown>
+  additionalProperties?: boolean
 }
 
 export interface SkillActionDefinition {

@@ -1,3 +1,6 @@
+import { DOCUMENT_SCHEMAS } from './schemas/document-schemas'
+import { zodObjectToParamList } from './zod-param-derivation'
+
 interface ToolParam {
   name: string
   type: string
@@ -17,136 +20,91 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
     name: 'document_new_tab',
     description: '在文档模式中新建一个标签页，可选指定标题。',
     action: 'document.newTab',
-    params: [{ name: 'title', type: 'string', description: '新标签标题（可选）', required: false }],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_new_tab) as ToolParam[],
   },
   {
     name: 'document_open_tab',
     description: '按绝对路径打开一个文档文件标签页。',
     action: 'document.openTab',
-    params: [{ name: 'path', type: 'string', description: '文档绝对路径', required: true }],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_open_tab) as ToolParam[],
   },
   {
     name: 'document_switch_tab',
     description: '切换当前文档标签页，可传 tabId / 标题 / 序号。',
     action: 'document.switchTab',
-    params: [{ name: 'target', type: 'string', description: 'tabId、标题关键词或序号', required: true }],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_switch_tab) as ToolParam[],
   },
   {
     name: 'document_rename_tab',
     description: '重命名文档标签页。',
     action: 'document.renameTab',
-    params: [
-      { name: 'title', type: 'string', description: '新标题', required: true },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_rename_tab) as ToolParam[],
   },
   {
     name: 'document_set_content',
     description: '覆盖写入文档内容。',
     action: 'document.setContent',
-    params: [
-      { name: 'content', type: 'string', description: '完整文档内容', required: true },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_set_content) as ToolParam[],
   },
   {
     name: 'document_append_content',
     description: '向文档尾部追加内容。',
     action: 'document.appendContent',
-    params: [
-      { name: 'content', type: 'string', description: '要追加的内容', required: true },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_append_content) as ToolParam[],
   },
   {
     name: 'document_insert_widget',
     description: '向文档插入一个 show-widget 可视化组件代码围栏。',
     action: 'document.insertWidget',
-    params: [
-      { name: 'title', type: 'string', description: 'widget 标题（建议 snake_case 或简短标题）', required: true },
-      { name: 'widgetCode', type: 'string', description: '可选：直接提供 widget 的 HTML/SVG/本地交互脚本内容（允许 oninput/onclick 等本地内联事件）', required: false },
-      { name: 'componentSpec', type: 'object', description: '可选：结构化 OpenUI 组件规格，例如 { component, props?, dataSource? }。优先使用它而不是自由 HTML。', required: false },
-      { name: 'position', type: 'string', description: '插入位置：append_end 或 after_section', required: true },
-      { name: 'sectionTitle', type: 'string', description: '当 position=after_section 时，目标章节标题', required: false },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_insert_widget) as ToolParam[],
   },
   {
     name: 'document_list_widgets',
     description: '列出当前文档中的 show-widget 组件，便于后续更新或删除。',
     action: 'document.listWidgets',
-    params: [{ name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false }],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_list_widgets) as ToolParam[],
   },
   {
     name: 'document_update_widget',
     description: '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。重要：必须保留目标 widget 根元素已声明的宽高与纵横比（例如原先 1080×1920 的 9:16 竖版卡片就不能改成 1920×1080 的 16:9 或在底部追加一个 16:9 的背景块），避免导出图片尺寸与原卡片不一致。',
     action: 'document.updateWidget',
-    params: [
-      { name: 'target', type: 'string', description: '目标 widget 标题关键词或 1-based 序号', required: true },
-      { name: 'widgetCode', type: 'string', description: '可选：新的 widget HTML/SVG/本地交互脚本内容（允许 oninput/onclick 等本地内联事件）', required: false },
-      { name: 'componentSpec', type: 'object', description: '可选：结构化 OpenUI 组件规格，例如 { component, props?, dataSource? }。优先使用它而不是自由 HTML。', required: false },
-      { name: 'componentSpecPatch', type: 'object', description: '可选：仅包含变更字段的 componentSpec patch。适合在已有结构化 widget 上做小改。', required: false },
-      { name: 'title', type: 'string', description: '可选，更新后的新标题', required: false },
-      { name: 'occurrence', type: 'number', description: '当标题命中多个 widget 时，指定第几处（从 1 开始）', required: false },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_update_widget) as ToolParam[],
   },
   {
     name: 'document_remove_widget',
     description: '删除文档中某个已有 widget，可按标题或序号定位。',
     action: 'document.removeWidget',
-    params: [
-      { name: 'target', type: 'string', description: '目标 widget 标题关键词或 1-based 序号', required: true },
-      { name: 'occurrence', type: 'number', description: '当标题命中多个 widget 时，指定第几处（从 1 开始）', required: false },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_remove_widget) as ToolParam[],
   },
   {
     name: 'document_replace_text',
     description: '在文档中查找并替换文本。',
     action: 'document.replaceText',
-    params: [
-      { name: 'from', type: 'string', description: '要替换的原文', required: true },
-      { name: 'to', type: 'string', description: '替换后的文本', required: true },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_replace_text) as ToolParam[],
   },
   {
     name: 'document_replace_exact',
     description: '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。',
     action: 'document.replaceExact',
-    params: [
-      { name: 'target', type: 'string', description: '要精准替换的原文片段', required: true },
-      { name: 'replacement', type: 'string', description: '替换后的新内容', required: true },
-      { name: 'occurrence', type: 'number', description: '可选，第几处匹配（从 1 开始）', required: false },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_replace_exact) as ToolParam[],
   },
   {
     name: 'document_format_section',
     description: '按章节标题定位并仅优化排版/格式，不改变原意；若找不到章节则不做修改。',
     action: 'document.formatSection',
-    params: [
-      { name: 'sectionTitle', type: 'string', description: '章节标题（例如：引言、第二部分）', required: true },
-      { name: 'style', type: 'string', description: '可选，格式化风格（默认 readable）', required: false },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_format_section) as ToolParam[],
   },
   {
     name: 'document_rewrite_section',
     description: '按章节标题定位并重写该章节内容；若找不到章节则不做修改。',
     action: 'document.rewriteSection',
-    params: [
-      { name: 'sectionTitle', type: 'string', description: '章节标题（例如：引言、第二部分）', required: true },
-      { name: 'content', type: 'string', description: '章节完整新内容（不含标题行）', required: true },
-      { name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false },
-    ],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_rewrite_section) as ToolParam[],
   },
   {
     name: 'document_save_tab',
     description: '保存当前或指定文档标签。',
     action: 'document.saveTab',
-    params: [{ name: 'tabId', type: 'string', description: '可选，目标标签 ID', required: false }],
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_save_tab) as ToolParam[],
   },
 ]
 

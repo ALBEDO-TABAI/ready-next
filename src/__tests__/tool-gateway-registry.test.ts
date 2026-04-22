@@ -64,6 +64,10 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.deepEqual(documentInsertWidget?.projectionHint, { mutating: true, emitsProjectionPatch: true })
   assert.equal(documentUpdateWidget?.resultShape, 'projection_patch')
   assert.deepEqual(documentUpdateWidget?.projectionHint, { mutating: true, emitsProjectionPatch: true })
+  assert.equal(
+    typeof (documentUpdateWidget?.schema?.properties as Record<string, unknown> | undefined)?.componentSpecPatch,
+    'object',
+  )
   assert.equal(documentRemoveWidget?.resultShape, 'projection_patch')
   assert.deepEqual(documentRemoveWidget?.projectionHint, { mutating: true, emitsProjectionPatch: true })
   assert.equal(documentListWidgets?.resultShape, 'text')

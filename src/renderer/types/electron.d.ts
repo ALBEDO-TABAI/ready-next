@@ -731,6 +731,12 @@ interface ElectronAgentAPI {
       runId?: string
       error: string
       type: string
+      /** Phase 3: classified error kind for capsule UI + telemetry. */
+      errorKind?: string
+      /** Phase 3: true when UI should show a soft-failure capsule (no system chat message). */
+      recoverable?: boolean
+      /** Phase 3: tool name attached when the error came from a tool host. */
+      toolName?: string
     }) => void
   ) => () => void
   onToolAction: (

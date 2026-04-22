@@ -31,6 +31,8 @@ import {
 import { SkillLoader } from './skill-loader'
 import { ExecutionStateStore } from './execution-state-store'
 import { ExecutionCoordinator } from './execution-coordinator'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { isWorkflowStarterAction } from './guardrails'
 
 const execFileAsync = promisify(execFile)
@@ -295,7 +297,13 @@ export class SkillsRuntimeManager {
   private executionCoordinator: ExecutionCoordinator | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
+  private ttlBootTimer: NodeJS.Timeout | null = null
+  private ttlIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
+
+  private static readonly TTL_RETENTION_DAYS = 7
+  private static readonly TTL_SWEEP_INTERVAL_MS = 60 * 60_000
+  private static readonly TTL_BOOT_DELAY_MS = 30_000
 
   constructor() {
     this.runtimeRoot = join(app.getPath('userData'), 'skill-runtime')
@@ -308,6 +316,34 @@ export class SkillsRuntimeManager {
     this.pipCache = join(this.cacheRoot, 'pip')
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
     this.startScheduler()
+    this.startTtlSweep()
+  }
+
+  /**
+   * Phase 4 — periodically purge terminal skill_executions rows older than
+   * the retention window. Runs once 30s after boot (avoid blocking startup)
+   * and then hourly. Each run is best-effort — a failure logs to stderr and
+   * the next tick tries again.
+   */
+  private startTtlSweep(): void {
+    const sweep = (): void => {
+      try {
+        const store = this.getExecutionStore()
+        const { deleted, cutoff } = store.purgeExpiredExecutions(
+          SkillsRuntimeManager.TTL_RETENTION_DAYS,
+        )
+        logAgentMetric(TOOL_ERROR_METRICS.ttlSwept, {
+          deleted,
+          retentionDays: SkillsRuntimeManager.TTL_RETENTION_DAYS,
+          cutoff,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('[SkillsRuntimeManager] TTL sweep failed:', message)
+      }
+    }
+    this.ttlBootTimer = setTimeout(sweep, SkillsRuntimeManager.TTL_BOOT_DELAY_MS)
+    this.ttlIntervalTimer = setInterval(sweep, SkillsRuntimeManager.TTL_SWEEP_INTERVAL_MS)
   }
 
   private getSkillLoader(): SkillLoader {

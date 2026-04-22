@@ -18,7 +18,7 @@ export class TurnTranscript {
       },
     ) => void
     emitStatus: (status: string) => void
-    emitRuntimeError: (error: string) => void
+    emitRuntimeError: (error: unknown, options?: { toolName?: string }) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
   }) {}
 
@@ -56,9 +56,10 @@ export class TurnTranscript {
     this.emitters.emitStatus(status)
   }
 
-  emitRuntimeError(error: string): void {
-    this.events.push({ kind: 'error', error })
-    this.emitters.emitRuntimeError(error)
+  emitRuntimeError(error: unknown, options?: { toolName?: string }): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.events.push({ kind: 'error', error: message })
+    this.emitters.emitRuntimeError(error, options)
   }
 
   emitToolAction(tool: string, args: Record<string, unknown>): void {

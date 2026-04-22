@@ -543,6 +543,7 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean
   sessionHasVideoInputs: (messages: TurnEngineSessionMessage[]) => boolean
   resolveActiveWidgetEditLease?: () => import('./widget-edit-lease').ActiveWidgetEditLease | null
+  refreshActiveWidgetEditLease?: (ttlMs?: number) => import('./widget-edit-lease').ActiveWidgetEditLease | null
   domainAdapters?: DomainAdapter[]
   skillContextOrchestrator: unknown
   browserDomainOrchestrator: unknown
@@ -621,7 +622,7 @@ export interface TurnEngineRequest<TSession extends TurnEngineSession = TurnEngi
       },
     ) => void
     emitStatus: (status: string) => void
-    emitRuntimeError: (error: string) => void
+    emitRuntimeError: (error: unknown, options?: { toolName?: string }) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
   }
   host: TurnEngineHost<TSession>

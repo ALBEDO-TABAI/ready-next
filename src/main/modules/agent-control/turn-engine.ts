@@ -2,6 +2,7 @@ import { buildRequestEnvelope } from './request-envelope'
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import {
@@ -43,6 +44,7 @@ import {
 } from './task-step-runtime'
 import { detectGenericInteractionState } from './interaction-state-detector'
 import { inspectDocumentToolCall } from '../claude-bridge/document-tool-flow'
+import { deriveAgentErrorContract } from '../claude-bridge/error-contract'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import {
   normalizeToolExecutionOutput,
@@ -348,7 +350,7 @@ function assertNoToolResolutionViolation(params: {
     note: 'post_arbitration_violation — arbitration layer regression',
   })}`)
   try {
-    logAgentMetric('tool_resolution_violation_post_arbitration', {
+    logAgentMetric(TOOL_ERROR_METRICS.resolutionViolation, {
       stage: params.stage,
       invariantViolations: mergedResolution.invariantViolations,
       allowBrowserTools: params.allowBrowserTools,
@@ -431,6 +433,9 @@ export class TurnEngine {
         lastDocumentContextInput: session.lastDocumentContextInput,
         intentClassification: request.intentClassification || classifyIntent(requestEnvelope),
         activeWidgetEditLease,
+        refreshWidgetEditLease: host.refreshActiveWidgetEditLease
+          ? () => host.refreshActiveWidgetEditLease?.() || null
+          : undefined,
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       const pureUserInput = requestEnvelope.pureUserText
@@ -503,7 +508,10 @@ export class TurnEngine {
         allowedToolNames: preparedRunCapabilities.allowedToolNames,
       })
       let toolPolicy = preparedRunCapabilities.toolPolicy
-      if ((toolPolicy as any).forceDocumentTool) {
+      const shouldPersistDocumentContext =
+        Boolean((toolPolicy as any).forceDocumentTool)
+        || executionIntentContext.hasWidgetTargetContext
+      if (shouldPersistDocumentContext) {
         session.lastDocumentContextInput = contextualUserInput
       }
 
@@ -1502,8 +1510,15 @@ export class TurnEngine {
       }
       const message = error instanceof Error ? error.message : String(error)
       host.log(`Error: ${message}`)
-      transcript.emitOutput(`API 请求失败: ${message}`, 'error')
-      transcript.emitRuntimeError(message)
+      // Phase 3: recoverable runtime errors surface in the soft-failure capsule;
+      // don't duplicate them as a red transcript line. Terminal errors keep the
+      // old "API 请求失败: ..." transcript line so the fallback system-message
+      // path still has readable context.
+      const contract = deriveAgentErrorContract(error)
+      if (!contract.recoverable) {
+        transcript.emitOutput(`API 请求失败: ${message}`, 'error')
+      }
+      transcript.emitRuntimeError(error)
       return finish({ success: false, error: message, status: 'error', doneEventType: 'done' })
     }
   }

@@ -43,7 +43,9 @@ export interface ChatAttachment {
   url?: string
   title?: string
   documentTitle?: string
+  tabId?: string
   widgetTitle?: string
+  widgetId?: string
   widgetCode?: string
   widgetMode?: string
   heading?: string
@@ -247,6 +249,20 @@ export interface ScopeRunStepMetrics {
   lastToolAt: string | null
 }
 
+/**
+ * Phase 3 — soft-failure capsule payload carried on ScopeRunState.softError.
+ *
+ * Populated when agent:error arrives with recoverable=true. Capsule UI reads
+ * this slot; dismissing the capsule sets it back to null. Terminal errors
+ * also set it to null (they take the system-message path instead).
+ */
+export interface SoftErrorInfo {
+  message: string
+  errorKind: string
+  toolName: string | null
+  receivedAt: string
+}
+
 export interface ScopeRunState {
   scopeId: string
   agent: string
@@ -288,6 +304,8 @@ export interface ScopeRunState {
   responseSegmentToolTraceStart?: number | null
   stepMetrics?: ScopeRunStepMetrics
   error?: string | null
+  /** Phase 3: soft-failure capsule state; null means no capsule is shown. */
+  softError?: SoftErrorInfo | null
   designPhase?: DesignControllerPhase | null
   designTodo?: Array<{
     id: string

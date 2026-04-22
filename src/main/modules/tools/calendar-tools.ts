@@ -1,3 +1,6 @@
+import { CALENDAR_SCHEMAS } from './schemas/calendar-schemas'
+import { zodObjectToParamList } from './zod-param-derivation'
+
 interface ToolParam {
   name: string
   type: string
@@ -25,10 +28,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.listWindow',
     intent: 'list_calendar_window',
     executionKind: 'deterministic',
-    params: [
-      { name: 'start', type: 'string', description: '开始时间 ISO 字符串', required: true },
-      { name: 'end', type: 'string', description: '结束时间 ISO 字符串', required: true },
-    ],
+    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_list_window) as ToolParam[],
   },
   {
     name: 'calendar_create_event',
@@ -36,13 +36,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.createEvent',
     intent: 'create_calendar_event',
     executionKind: 'deterministic',
-    params: [
-      { name: 'title', type: 'string', description: '事件标题', required: true },
-      { name: 'startTime', type: 'string', description: '开始时间 ISO 字符串', required: true },
-      { name: 'endTime', type: 'string', description: '结束时间 ISO 字符串', required: true },
-      { name: 'calendarId', type: 'string', description: '目标日历 ID', required: false },
-      { name: 'description', type: 'string', description: '事件描述', required: false },
-    ],
+    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_create_event) as ToolParam[],
   },
   {
     name: 'calendar_update_event',
@@ -50,13 +44,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.updateEvent',
     intent: 'update_calendar_event',
     executionKind: 'deterministic',
-    params: [
-      { name: 'id', type: 'string', description: '事件 ID', required: true },
-      { name: 'title', type: 'string', description: '可选，更新后的标题', required: false },
-      { name: 'startTime', type: 'string', description: '可选，新的开始时间 ISO 字符串', required: false },
-      { name: 'endTime', type: 'string', description: '可选，新的结束时间 ISO 字符串', required: false },
-      { name: 'description', type: 'string', description: '可选，新的事件描述', required: false },
-    ],
+    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_update_event) as ToolParam[],
   },
   {
     name: 'calendar_delete_event',
@@ -64,7 +52,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.deleteEvent',
     intent: 'delete_calendar_event',
     executionKind: 'deterministic',
-    params: [{ name: 'id', type: 'string', description: '事件 ID', required: true }],
+    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_delete_event) as ToolParam[],
   },
   {
     name: 'calendar_capture_session',
@@ -72,7 +60,7 @@ const CALENDAR_TOOLS: CalendarToolDef[] = [
     action: 'calendar.captureSession',
     intent: 'capture_calendar_session',
     executionKind: 'deterministic',
-    params: [],
+    params: zodObjectToParamList(CALENDAR_SCHEMAS.calendar_capture_session) as ToolParam[],
   },
 ]
 

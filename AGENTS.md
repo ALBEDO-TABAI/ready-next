@@ -106,6 +106,16 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - DirectChatEngine 的 `sendMessage` 抢占既要 abort 旧 `AbortController`，也要先调用注入的 `cancelPendingToolActions`，把渲染端正在 pending 的 `agent:toolActionRequest` 取消掉，否则旧的 widget 写入会落到新会话上
 - H1/H2 freeform 骨架的触发关键词校验与降级也统一走 `arbitrateSkeletonForUserText`；任何绕过裁决层直接在 pipeline executor 内加 skeleton 白名单的做法都视为双重挡板，不允许
 
+### 6.11 工具错误契约
+- Tool handler 可以抛异常，但 dispatch 层（`src/main/modules/tools/tool-executor.ts`）永远不 rethrow 业务错误；所有抛出都被吞成 `ToolExecutionOutput { errorKind, detail }` 结构化结果回灌模型，由模型决定下一步
+- 只有 `isTerminalInfrastructureError(error) === true` 的错误（`AbortError` / `ToolHostUnavailableError`）才允许冒泡出 dispatch 层
+- 所有工具 dispatch 入口都走 Zod `safeParse`；失败返回 `errorKind: 'input_validation'` 结构化结果，不进 handler。静态 schema 注册在 `src/main/modules/tools/schemas/index.ts`，动态 skill-action schema 在 `skills-tools.ts` 按签名缓存并合并
+- 主→渲染 `agent:error` IPC 必须带 `{ errorKind, recoverable, toolName? }`；`recoverable === true` 走软失败胶囊（`SoftFailureCapsule`），其他走系统消息；`errorKind === 'aborted'` 在 runtimeDriver 入口早返
+- 新增 tool-error metric 必须先登记在 `TOOL_ERROR_METRICS`（`src/main/modules/agent-control/tool-error-metrics.ts`），再在 emit 点引用；其他 observability metric（`tool_group_blocked_rate` / `policy_conflict_resolved` / `task_title_correction_rate` …）留在自己模块内，**不**并入此 registry
+- `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行（`running / blocked`）永不清理；sweep 在 `SkillsRuntimeManager` 启动后 30s 首跑、之后每小时跑一次，`tool-error-metrics.ttlSwept` 打点
+- `skill_executions` 表所在的 DB 没有开 `PRAGMA foreign_keys = ON`，`ON DELETE CASCADE` 实际不生效；任何清理跨表数据的逻辑必须显式删子表行（`skill_execution_steps` / `skill_execution_artifacts`）
+- 所有新 executionId 使用 `e-{8hex}` 前缀（`generateSkillExecutionId()`）；旧 UUID 行继续兼容，不做回填；`getExecution` 用 `WHERE id = ?` format-agnostic，`Zod` schema `z.string().trim().min(1)` 不加 UUID 断言
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

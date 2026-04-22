@@ -9,6 +9,7 @@ import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
+import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -149,8 +150,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       let set = sessionPendingIndex.get(key)
       if (!set) { set = new Set<string>(); sessionPendingIndex.set(key, set) }
       set.add(requestId)
+      // Renderer resolves scopeId by scanning scopeRunStates when scopeId/sessionId absent.
+      //   Main's sessionId is the scopeId in practice — forward it explicitly so the renderer
+      //   short-circuits the scan even when its scope run state has been retired.
       mainWindow.webContents.send('agent:toolActionRequest', {
         requestId,
+        scopeId: sessionId || undefined,
         ...payload,
       })
     })
@@ -158,6 +163,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   orchestrator.setRendererToolActionRequester(requestRendererToolAction)
   orchestrator.setCancelPendingToolActions(cancelToolActionRequestsBySession)
   log('setupAgentIPC called, Claude SDK runtime initialized')
+
+  ipcMain.removeAllListeners('tools:logToolEvent')
+  ipcMain.on('tools:logToolEvent', (_event, payload: ToolEventLogPayload) => {
+    if (!payload || typeof payload !== 'object') return
+    appendToolEventLog(payload)
+  })
 
   ipcMain.removeHandler('agent:completeToolActionRequest')
   ipcMain.handle('agent:completeToolActionRequest', async (_, payload: {
@@ -1101,6 +1112,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   orchestrator.on('error', (data) => {
     if (!mainWindow.isDestroyed()) {
+      // Phase 3: agent:error payload already carries errorKind/recoverable/toolName
+      // via orchestrator spread — forward as-is so the renderer can route
+      // recoverable errors to the soft-failure capsule.
       mainWindow.webContents.send('agent:error', data)
       if (data.sessionId) {
         const payload = {
@@ -1112,6 +1126,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           error: data.error,
           latestText: data.error,
           timestamp: new Date().toISOString(),
+          errorKind: data.errorKind,
+          recoverable: data.recoverable,
+          toolName: data.toolName,
         } as const
         runtime?.recordScopeRunEvent(payload)
         mainWindow.webContents.send('agent:scopeRunEvent', payload)

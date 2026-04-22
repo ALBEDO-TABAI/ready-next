@@ -92,6 +92,8 @@ interface AgentState {
   setCurrentScope: (scopeId: string) => Promise<void>
   sendMessageToScope: (scopeId: string, content: string) => Promise<void>
   clearToolTrace: () => void
+  /** Phase 3: dismiss the soft-failure capsule for a given scope. */
+  dismissSoftError: (scopeId: string) => void
   loadConversations: () => Promise<void>
   loadConversation: (convId: string) => Promise<void>
   deleteConversation: (convId: string) => Promise<void>
@@ -372,6 +374,17 @@ export const useAgent = create<AgentState>((set, get) => ({
       },
       toolTrace: [],
       toolTraceStatus: currentRun ? phaseToToolTraceStatus(currentRun.phase) : 'idle',
+    }
+  }),
+
+  dismissSoftError: (scopeId: string) => set((state) => {
+    const currentRun = state.scopeRunStates[scopeId]
+    if (!currentRun || !currentRun.softError) return state
+    return {
+      scopeRunStates: {
+        ...state.scopeRunStates,
+        [scopeId]: { ...currentRun, softError: null },
+      },
     }
   }),
 

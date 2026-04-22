@@ -1369,6 +1369,20 @@ const migrations: Migration[] = [
         'INSERT INTO workspaces (root) VALUES (?) ON CONFLICT(root) DO NOTHING'
       ).run('@shared')
     }
+  },
+
+  // ------------------------------------------------------------------ 028
+  // Phase 4 — TTL sweep index. The `purgeExpiredExecutions` method filters by
+  // `status IN ('completed','failed','cancelled') AND finished_at < ?`; this
+  // composite index keeps the scan linear in the size of the expired set
+  // instead of linear in total rows.
+  {
+    name: '028_add_skill_executions_ttl_index',
+    up: (db) => {
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_skill_executions_status_finished_at ON skill_executions(status, finished_at DESC)'
+      )
+    }
   }
 ]
 

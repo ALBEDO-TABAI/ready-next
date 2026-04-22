@@ -610,3 +610,54 @@ npm run verify
 - `workbench-window-resize-contract.test.ts`
 - `workbench-hot-path-transition-contract.test.ts`
 - `workbench-shell-alignment-contract.test.ts`
+
+## 工具错误契约（Tool Error Contract）
+
+> 落地分四阶段，详见 `plans/2026-04-22-tool-error-contract-refactor.md` 与 `CHANGELOG.md` 对应条目。本节是契约层面的 cheat sheet，新同事读代码前先看这里。
+
+### 核心 invariant
+
+1. **Dispatch 不 rethrow 业务错误**。`src/main/modules/tools/tool-executor.ts` 的 catch 把 tool handler 抛出的任何非基础设施错误吞成 `ToolExecutionOutput { errorKind, detail }` 结构化结果回灌模型，由模型决定下一步是重试、换工具还是认输。
+2. **终结类错误只有两种**：`AbortError`（用户中断）和 `ToolHostUnavailableError`（host 能力离线）。`isTerminalInfrastructureError` 是白名单，其他都不会冒泡。
+3. **Dispatch 入口 Zod 校验**。每个工具都有 Zod schema；`safeParse` 失败直接返回 `errorKind: 'input_validation'` 结构化结果，不进 handler。静态 schema 在 `src/main/modules/tools/schemas/index.ts`；skill-action 动态 schema 在 `skills-tools.ts` 按签名缓存。
+4. **IPC `agent:error` 带结构**。`{ errorKind, recoverable, toolName? }`。`recoverable === true` 在渲染端走软失败胶囊（`SoftFailureCapsule`），其他走系统消息；`errorKind === 'aborted'` 两边都 early-return，让 cancellation 走 `agent:runComplete` 自有路径。
+
+### 相关文件
+
+- `src/main/modules/tools/tool-errors.ts` — 错误类 + `isTerminalInfrastructureError` + `errorKindFor`
+- `src/main/modules/tools/tool-executor.ts` — dispatch 层 try/catch，吞异常 + 打 metric
+- `src/main/modules/tools/tool-input-validator.ts` — `safeParse` 适配
+- `src/main/modules/claude-bridge/error-contract.ts` — `deriveAgentErrorContract` 派生 `{ errorKind, recoverable, toolName? }`
+- `src/main/modules/claude-bridge/direct-chat.ts` — `emitRuntimeError` 签名加宽 + spread contract
+- `src/main/modules/agent-control/turn-engine.ts` — catch 对 recoverable 跳过红字 emitOutput
+- `src/main/modules/claude-bridge/ipc-handler.ts` — `agent:error` 和 `agent:scopeRunEvent` 透传新字段
+- `src/renderer/modules/agent/runtimeDriver.ts` — 三向分流（abort / recoverable / terminal）
+- `src/renderer/components/agent/SoftFailureCapsule.tsx` — 琥珀色 pill，mount 在 ChatPanel 消息区与输入区之间
+- `src/main/modules/agent-control/tool-error-metrics.ts` — **所有新 tool-error metric 必须登记在这里**
+
+### Metric 列表（`TOOL_ERROR_METRICS`）
+
+| Key | Value（log 中的 `metric` 字段） | 触发时机 |
+|---|---|---|
+| `surfaced` | `tool_error_surfaced` | dispatch 吞到一个非终结 handler throw 并转成结构化结果 |
+| `unknownSurfaced` | `tool_error_unknown_surfaced` | tool-runtime 遇到 unknown-kind 错误但仍 surface（少数未分类路径） |
+| `inputValidation` | `tool_input_validation_failed` | dispatch 入口 Zod 拒绝参数 |
+| `resolutionViolation` | `tool_resolution_violation_post_arbitration` | 策略裁决层后仍出现 invariant 失谐 |
+| `skillExecutionMissing` | `skill_execution_missing` | stale executionId 被识别并回灌 |
+| `ttlSwept` | `skill_executions_ttl_swept` | TTL sweep 完成一次（每小时 + 启动后 30s 首跑） |
+
+日志位置：`<系统临时目录>/ready-agent-metrics.log`（macOS：`/tmp/ready-agent-metrics.log`）。
+
+### 生命周期
+
+- `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行永不清理
+- Sweep 启动 30s 后首跑、之后每小时跑一次
+- **重要约束**：DB 未开启 `PRAGMA foreign_keys = ON`，所以 Migration 018 的 `ON DELETE CASCADE` 实际不生效；任何跨表清理必须显式先删 `skill_execution_steps` + `skill_execution_artifacts`，再删 `skill_executions`
+- 新 executionId 是 `e-{8hex}` 前缀；旧 UUID 行继续兼容（`getExecution` 用 `WHERE id = ?` format-agnostic）
+
+### 调试入口
+
+- `grep 'tool_error_surfaced' /tmp/ready-agent-metrics.log` — 最近被吞的 handler 抛错
+- `grep 'tool_input_validation_failed' /tmp/ready-agent-metrics.log | jq '.toolName'` — 哪些工具的输入校验最常被模型搞错
+- `grep 'skill_execution_missing' /tmp/ready-agent-metrics.log` — 哪些 skill 经常遇到 stale executionId
+- `grep 'skill_executions_ttl_swept' /tmp/ready-agent-metrics.log | tail -5` — sweep 跑过几次，每次清了多少行

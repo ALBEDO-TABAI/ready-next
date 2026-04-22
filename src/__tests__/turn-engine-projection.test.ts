@@ -44,8 +44,9 @@ function createEvents() {
       emitStatus: (status: string) => {
         events.push({ kind: 'status', status })
       },
-      emitRuntimeError: (error: string) => {
-        events.push({ kind: 'error', error })
+      emitRuntimeError: (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        events.push({ kind: 'error', error: message })
       },
       emitToolAction: (tool: string, args: Record<string, unknown>) => {
         events.push({ kind: 'tool_action', tool, args })

@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import type {
   ExecutionBlocker,
   ExecutionFrame,
@@ -79,6 +79,18 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/**
+ * Phase 4 — prefix-style skill execution id ("e-" + 8 hex chars, 4B space).
+ *
+ * Makes skill execution ids self-describing in logs so they're easy to tell
+ * apart from scope ids / request ids / task ids. Old `randomUUID()` rows
+ * remain valid; `getExecution(id)` uses plain `WHERE id = ?` so both formats
+ * coexist indefinitely.
+ */
+export function generateSkillExecutionId(): string {
+  return `e-${randomBytes(4).toString('hex')}`
+}
+
 export class ExecutionStateStore {
   constructor(private readonly db: DatabaseConnection) {}
 
@@ -88,7 +100,23 @@ export class ExecutionStateStore {
     sessionId?: string | null
     inputs?: Record<string, SkillInputValue>
   }): SkillExecutionState {
-    const id = randomUUID()
+    // persistState uses ON CONFLICT(id) DO UPDATE, so a raw id collision would
+    // silently overwrite an existing execution instead of throwing. Pre-check
+    // with a SELECT in a small retry loop to keep creates strictly additive.
+    // better-sqlite3 serializes writes, so the check-then-insert is atomic.
+    let attempts = 0
+    let id = generateSkillExecutionId()
+    while (attempts < 3) {
+      const existing = this.db
+        .prepare('SELECT id FROM skill_executions WHERE id = ?')
+        .get<{ id: string }>(id)
+      if (!existing) break
+      id = generateSkillExecutionId()
+      attempts += 1
+    }
+    if (attempts === 3) {
+      throw new Error('Failed to generate unique skill execution id after 3 attempts')
+    }
     const now = nowIso()
     const state: SkillExecutionState = {
       id,
@@ -290,6 +318,46 @@ export class ExecutionStateStore {
       ],
     }
     return this.updateExecution(next)
+  }
+
+  /**
+   * Phase 4 — TTL sweep for terminal skill_executions rows.
+   *
+   * Deletes rows older than `retentionDays` whose status is one of
+   * `completed / failed / cancelled`. Active rows (`running / blocked`) are
+   * never touched. Returns the number of parent rows deleted.
+   *
+   * The database does NOT have `PRAGMA foreign_keys = ON` enabled, so
+   * Migration 018's `ON DELETE CASCADE` is silently a no-op today. We delete
+   * child rows (steps + artifacts) explicitly before the parent to avoid
+   * leaving orphans. If PRAGMA foreign_keys is ever flipped on later, the
+   * explicit deletes here are harmless (rows already gone) — they become
+   * idempotent pre-cleanup.
+   */
+  purgeExpiredExecutions(retentionDays = 7): { deleted: number; cutoff: string } {
+    const safeDays = Math.max(1, Math.floor(retentionDays))
+    const cutoff = new Date(Date.now() - safeDays * 86_400_000).toISOString()
+    const expired = this.db
+      .prepare(
+        `SELECT id FROM skill_executions
+         WHERE status IN ('completed', 'failed', 'cancelled')
+           AND finished_at IS NOT NULL
+           AND finished_at < ?`,
+      )
+      .all<{ id: string }>(cutoff)
+    if (expired.length === 0) return { deleted: 0, cutoff }
+    const ids = expired.map((row) => row.id)
+    const placeholders = ids.map(() => '?').join(',')
+    this.db
+      .prepare(`DELETE FROM skill_execution_artifacts WHERE execution_id IN (${placeholders})`)
+      .run(...ids)
+    this.db
+      .prepare(`DELETE FROM skill_execution_steps WHERE execution_id IN (${placeholders})`)
+      .run(...ids)
+    const result = this.db
+      .prepare(`DELETE FROM skill_executions WHERE id IN (${placeholders})`)
+      .run(...ids) as { changes?: number }
+    return { deleted: Number(result.changes ?? 0), cutoff }
   }
 
   private persistState(state: SkillExecutionState): void {

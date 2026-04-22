@@ -19,7 +19,7 @@ test('tool executor rejects tool calls outside the current allowlist', () => {
   assert.match(builder, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
   assert.match(builder, /allowedToolNames:\s*params\.allowedToolNames \|\| null/)
   assert.match(turnEngine, /const preparedToolContext = buildHostToolContext\(preparedRunCapabilities\.allowedToolNames\)/)
-  assert.match(turnEngine, /const routedAllowedToolNames = executorAllowedToolNames \|\| reconciledRunCapabilities\.allowedToolNames/)
+  assert.match(turnEngine, /const routedAllowedToolNames = selectedDomainPrepareResult\?\.allowedToolNames \|\| reconciledRunCapabilities\.allowedToolNames/)
   assert.match(turnEngine, /const hostToolContext = buildHostToolContext\(routedAllowedToolNames\)/)
   assert.match(turnEngine, /const toolContext = buildHostToolContext\(routedAllowedToolNames, scope\)/)
   assert.doesNotMatch(turnEngine, /const allowedToolNamesForPolicy = new Set\(/)

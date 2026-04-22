@@ -1,6 +1,26 @@
 # Ready 经验文档
 
-> 更新时间: 2026-04-19
+> 更新时间: 2026-04-22
+
+## -1. 工具错误契约：stale executionId 引发架构翻新 (2026-04-22)
+
+- **起因**：一次"Agent 错误: Execution not found"。tool-runtime 的 `classifyExecutionError` 对未分类错误默认 `kind='unknown'` 并 rethrow，用户侧把一次可恢复的 skill 调用渲染成终结类系统消息，并 scope 直接翻到 `phase: 'error'`，污染了 10+ 个 downstream 消费点（projection sync / taskCardViewModel / run-coordinator）。根因：错误分类器同时承担"路由决策 + 遥测描述"两个职责，regex 未命中就走致命分支。
+- **分阶段处理（而不是一次大翻）**：
+  - **Phase 1（dispatch 吃异常）**：tool-executor.ts 外层加 try/catch，把任何 non-terminal handler 抛错吞成 `ToolExecutionOutput { errorKind }` 回灌给模型，让模型自主决定是重试、换工具还是认输；只有 `AbortError` + `ToolHostUnavailableError` 继续冒泡。
+  - **Phase 2/2.5（Zod 双向契约）**：原来 tool schema 只是单向告诉模型长什么样；这次把 102 个工具都接入 dispatch 入口 `safeParse`，模型乱传的参数直接 is_error 回灌，不再进 handler 崩在深处。46 个 schema + 31 份测试文件，字节等价靠 golden snapshot 锁。
+  - **Phase 3（IPC 分流）**：`agent:error` payload 加 `{ errorKind, recoverable, toolName? }`，渲染端 recoverable 走软失败胶囊（`SoftFailureCapsule`），其他走系统消息。关键取舍 —— 用 **侧字段 `softError`** 而非新 phase，避免污染原有的 `phase === 'error'` 10+ 个消费点。
+  - **Phase 4（生命周期 + 观测性收口）**：`skill_executions` 7 天 TTL + `e-{8hex}` executionId 前缀 + `TOOL_ERROR_METRICS` 枚举作为 metric 中央注册。
+- **有意不做的事**：
+  - 不切到 CC-Source 的 `Tool` 接口（async generator + ToolUseContext 50+ 字段）—— 我们的 contract 已经窄，改动成本远大于收益。
+  - 不引 OTel / 外部 telemetry pipeline —— `logAgentMetric` + append-only log + `grep` 对当前阶段刚刚好。
+  - 不把所有 observability metric 收进同一个枚举 —— 只收 tool-error 相关的 6 个，其余 metric 留在所属模块。
+- **踩过的坑 & 固化规则**：
+  - **`PRAGMA foreign_keys = ON` 默认是 OFF**：Migration 018 的 `ON DELETE CASCADE` 在当前 DB 实际不生效。任何跨表清理逻辑必须显式先删子表行，再删父行；或者统一在 DB init 打开 PRAGMA（本期未做，列为后续待办）。
+  - **`INSERT ... ON CONFLICT(id) DO UPDATE` 是静默覆盖**，id 碰撞不抛 UNIQUE 违规。`createExecution` 改用 `SELECT` 预检 + 3 次 retry 兜底，比依赖 UNIQUE 异常更可靠。
+  - **Recoverable 路径零副作用**：不动 phase / error / blockedReason / toolTraceStatus / persist，只写侧字段。一旦改了 phase，10+ 下游消费点全要跟进；侧字段让这次 refactor 可以走原子 PR。
+  - **`emitRuntimeError` 字符串化是反模式**：原 `emitRuntimeError(error: string)` 在 `direct-chat.ts` 把 Error 对象拍扁成 message，下游再也拿不到 errorKind/toolName。加宽到 `(error: unknown, options?)` 在 emitter 内部派生 contract，是最小侵入路径。
+  - **Metric 枚举 value 保持原字符串**：rename key 不动 value，log 聚合查询和 Grafana 现有 dashboard 零回归。
+- **契约最终的 6 条 invariant**：见 `DOCUMENTATION.md#工具错误契约` 与 `CLAUDE.md §6.11`。
 
 ## 0. 视觉主题与启动
 

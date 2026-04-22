@@ -3,69 +3,18 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { getLogPath } from '../../utils/platform'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
-import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
+
+export {
+  SYSTEM_TOOLS,
+  getSystemAnthropicTools,
+  getSystemOpenAITools,
+} from './system-tool-defs'
 
 const execFileAsync = promisify(execFile)
 const LOG = getLogPath('ready-system-tools.log')
 
 function log(msg: string) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
-}
-
-type ToolParam = ToolParamSchemaSpec
-
-interface SystemToolDef {
-  name: string
-  description: string
-  params: ToolParam[]
-}
-
-const SYSTEM_TOOLS: SystemToolDef[] = [
-  {
-    name: 'system_run_embedded_python',
-    description: '使用 Ready 内置的 skills runtime Python 执行代码或脚本。优先用于手动控制 skill 阶段、检查文件或运行辅助 Python 逻辑。',
-    params: [
-      { name: 'code', type: 'string', description: '可选，直接执行的 Python 代码', required: false },
-      { name: 'scriptPath', type: 'string', description: '可选，要执行的 Python 脚本绝对路径', required: false },
-      { name: 'args', type: 'array', description: '可选，脚本参数数组', required: false, items: { type: 'string' } },
-      { name: 'cwd', type: 'string', description: '可选，执行目录', required: false },
-      { name: 'timeoutMs', type: 'number', description: '可选，超时时间毫秒', required: false },
-    ],
-  },
-  {
-    name: 'system_run_openclaw',
-    description: '执行本地 openclaw 配对/插件命令。当前仅允许 openclaw pairing 子命令，用于批准飞书等插件配对请求。',
-    params: [
-      { name: 'command', type: 'string', description: '完整命令，例如 openclaw pairing approve feishu FNXQH9PN', required: true },
-    ],
-  },
-]
-
-export function getSystemAnthropicTools(): Array<Record<string, unknown>> {
-  return SYSTEM_TOOLS.map((tool) => normalizeAnthropicToolSchema({
-    name: tool.name,
-    description: tool.description,
-    input_schema: {
-      type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
-      required: tool.params.filter((param) => param.required).map((param) => param.name),
-    },
-  }))
-}
-
-export function getSystemOpenAITools(): Array<Record<string, unknown>> {
-  return SYSTEM_TOOLS.map((tool) => normalizeOpenAIToolSchema({
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: {
-        type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, buildToolParamSchema(param)])),
-        required: tool.params.filter((param) => param.required).map((param) => param.name),
-      },
-    },
-  }))
 }
 
 function tokenizeCommand(command: string): string[] {

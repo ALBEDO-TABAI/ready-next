@@ -108,6 +108,7 @@ import {
   looksLikeMissingNativeToolsReply,
   shouldEnforceBrowserToolRetry,
 } from './tool-bridge'
+import { deriveAgentErrorContract } from './error-contract'
 import { buildExecutionFallbackState, type ExecutionFallbackInfo } from './execution-fallback-policy'
 import {
   extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
@@ -419,6 +420,8 @@ export class DirectChatEngine extends EventEmitter {
           documentPath: acquireParams.documentPath,
           widgetTitle: acquireParams.widgetTitle,
           origin: acquireParams.origin,
+          widgetFingerprint: acquireParams.widgetFingerprint ?? null,
+          widgetTextSample: acquireParams.widgetTextSample ?? null,
         })
       },
       resolveWidgetEditLease: (resolveParams) =>
@@ -731,6 +734,15 @@ export class DirectChatEngine extends EventEmitter {
       session.abortController = null
       log(`sendMessage preempted previous in-flight run for agent=${name}`)
     }
+    try {
+      const lease = this.widgetEditLeaseStore.resolve(name, sessionId)
+      if (lease && lease.expireAt - Date.now() < 30_000) {
+        this.widgetEditLeaseStore.refresh(name, sessionId)
+        log(`sendMessage refreshed widget-edit lease for agent=${name} sessionId=${sessionId || ''}`)
+      }
+    } catch (leaseRefreshError) {
+      log(`sendMessage refresh lease failed: ${(leaseRefreshError as Error)?.message || leaseRefreshError}`)
+    }
     session.generation += 1
     const runGeneration = session.generation
     session.activeRunId = runId
@@ -760,9 +772,17 @@ export class DirectChatEngine extends EventEmitter {
       if (!isCurrentRun()) return
       this.emit('status', { agent: name, runId, status, isMock: false })
     }
-    const emitRuntimeError = (error: string): void => {
+    const emitRuntimeError = (error: unknown, options?: { toolName?: string }): void => {
       if (!isCurrentRun()) return
-      this.emit('error', { agent: name, runId, error, type: 'runtime' })
+      const contract = deriveAgentErrorContract(error, options)
+      const message = error instanceof Error ? error.message : String(error)
+      this.emit('error', {
+        agent: name,
+        runId,
+        error: message,
+        type: 'runtime',
+        ...contract,
+      })
     }
     const emitToolAction = (tool: string, args: Record<string, unknown>): void => {
       if (!isCurrentRun()) return
@@ -907,9 +927,15 @@ export class DirectChatEngine extends EventEmitter {
       }
       const msg = error instanceof Error ? error.message : String(error)
       log(`Error: ${msg}`)
-      emitOutput(`API 请求失败: ${msg}`, 'error')
+      // Phase 3: recoverable runtime errors skip the red transcript line so the
+      // soft-failure capsule carries the only surface. Terminal errors keep the
+      // transcript line for the system-message fallback path.
+      const contract = deriveAgentErrorContract(error)
+      if (!contract.recoverable) {
+        emitOutput(`API 请求失败: ${msg}`, 'error')
+      }
       emitOutput('', 'done')
-      emitRuntimeError(msg)
+      emitRuntimeError(error)
       emitStatus('error')
       return {
         success: false,
@@ -976,6 +1002,8 @@ export class DirectChatEngine extends EventEmitter {
       sessionHasMediaInputs: (messages: ChatMessage[]) => this.sessionHasMediaInputs(messages),
       sessionHasVideoInputs: (messages: ChatMessage[]) => this.sessionHasVideoInputs(messages),
       resolveActiveWidgetEditLease: () => this.widgetEditLeaseStore.resolve(params.name, params.sessionId),
+      refreshActiveWidgetEditLease: (ttlMs?: number) =>
+        this.widgetEditLeaseStore.refresh(params.name, params.sessionId, ttlMs ? { ttlMs } : undefined),
       domainAdapters: this.domainAdapters,
       skillContextOrchestrator: this.skillContextOrchestrator,
       browserDomainOrchestrator: this.browserDomainOrchestrator,

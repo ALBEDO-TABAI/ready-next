@@ -1,6 +1,8 @@
 import type { ConversationSourceKind } from '../database'
 import type { ToolContext } from './tool-executor'
 import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
+import { SESSION_SCHEMAS } from './schemas/session-schemas'
+import { zodObjectToParamList } from './zod-param-derivation'
 
 interface SessionRecallToolDef {
   name: string
@@ -12,13 +14,7 @@ const SESSION_RECALL_TOOLS: SessionRecallToolDef[] = [
   {
     name: 'session_search',
     description: '搜索历史会话或列出最近会话。无 query 时返回最近历史；有 query 时按会话消息、标题、任务摘要、附件名搜索。默认排除当前会话谱系。',
-    params: [
-      { name: 'query', type: 'string', description: '可选，搜索关键词', required: false },
-      { name: 'channelKey', type: 'string', description: '可选，限定频道来源，例如 local:app', required: false },
-      { name: 'sourceKind', type: 'string', description: '可选，限定会话来源 local 或 channel', required: false, enum: ['local', 'channel'] },
-      { name: 'hasAttachments', type: 'boolean', description: '可选，只返回带附件的历史会话', required: false },
-      { name: 'limit', type: 'number', description: '可选，返回数量限制，默认 5', required: false },
-    ],
+    params: zodObjectToParamList(SESSION_SCHEMAS.session_search) as ToolParamSchemaSpec[],
   },
 ]
 

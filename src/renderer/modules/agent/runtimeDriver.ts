@@ -15,6 +15,7 @@ interface RunPayloadLike {
   sessionId?: string
   runId?: string
   agent?: string
+  scopeId?: string
 }
 
 function generateResponseSegmentId(): string {
@@ -113,6 +114,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   }
 
   function resolveScopeIdForRunPayload(payload: RunPayloadLike): string | null {
+    if (typeof payload.scopeId === 'string' && payload.scopeId.trim()) {
+      return payload.scopeId.trim()
+    }
     if (typeof payload.sessionId === 'string' && payload.sessionId.trim()) {
       return payload.sessionId.trim()
     }
@@ -337,8 +341,74 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const scopeId = resolveScopeIdForRunPayload(data)
       if (!scopeId) return
 
+      // Phase 3: double-defense — AbortError is already short-circuited inside
+      // turn-engine before emitRuntimeError fires, but if anything ever leaks
+      // through as 'aborted' we still want to avoid showing a capsule OR a
+      // system message (cancellation has its own runComplete path).
+      if (data.errorKind === 'aborted') return
+
+      const recoverable = data.recoverable === true
+
       const state = store.getState()
       const runState = state.scopeRunStates[scopeId] || null
+
+      if (recoverable) {
+        // Only mutate the softError slot — do NOT touch phase, error,
+        // blockedReason, toolTraceStatus, and do NOT persist an assistant
+        // message. The turn continues; the capsule is purely a renderer hint.
+        upsertScopeRunState(scopeId, (previous) => ({
+          scopeId,
+          agent: previous?.agent || data.agent,
+          requestId: previous?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+          phase: previous?.phase || 'idle',
+          toolTrace: previous?.toolTrace || [],
+          startedAt: previous?.startedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          latestText: previous?.latestText || null,
+          module: previous?.module || null,
+          intent: previous?.intent || null,
+          executionKind: previous?.executionKind || null,
+          jobId: previous?.jobId || null,
+          artifactRefs: previous?.artifactRefs || [],
+          memoryRefs: previous?.memoryRefs || [],
+          triggerHits: previous?.triggerHits || [],
+          contextBudget: previous?.contextBudget || null,
+          ownerResourceId: previous?.ownerResourceId || null,
+          lastEvidenceAt: previous?.lastEvidenceAt || null,
+          blockedReason: previous?.blockedReason || null,
+          controllerId: previous?.controllerId || null,
+          ownerTabId: previous?.ownerTabId || null,
+          checkpointExpiresAt: previous?.checkpointExpiresAt || null,
+          responseMessageId: previous?.responseMessageId || null,
+          responseBuffer: previous?.responseBuffer || '',
+          stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null },
+          designPhase: previous?.designPhase || null,
+          designTodo: previous?.designTodo || [],
+          designReviewSummary: previous?.designReviewSummary || null,
+          ownedNodeIds: previous?.ownedNodeIds || [],
+          repairScope: previous?.repairScope || null,
+          taskTitle: previous?.taskTitle || null,
+          taskSummary: previous?.taskSummary || null,
+          steps: previous?.steps || [],
+          currentStepId: previous?.currentStepId || null,
+          waitingFor: previous?.waitingFor || 'none',
+          resumableActions: previous?.resumableActions || [],
+          recentArtifacts: previous?.recentArtifacts || [],
+          taskContinuation: previous?.taskContinuation || null,
+          memoryCapture: previous?.memoryCapture || null,
+          error: previous?.error || null,
+          softError: {
+            message: data.error,
+            errorKind: data.errorKind || 'unknown',
+            toolName: data.toolName || null,
+            receivedAt: new Date().toISOString(),
+          },
+        }))
+        return
+      }
+
+      // Terminal path — unchanged behavior, plus clear softError so a stale
+      // capsule does not linger behind a newer system-message error.
       if (state.currentScopeId === scopeId) {
         state.addMessage({
           id: `error-${Date.now()}`,
@@ -391,6 +461,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         taskContinuation: previous?.taskContinuation || null,
         memoryCapture: previous?.memoryCapture || null,
         error: data.error,
+        softError: null,
       }))
       void persistAssistantMessageForRun(scopeId, runState)
     })
@@ -473,11 +544,31 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         })
     })
 
+    const logToolEvent = (payload: {
+      type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'
+      requestId: string
+      tool: string
+      scopeId?: string | null
+      elapsedMs?: number
+      error?: string
+    }) => {
+      try { window.electronAPI.tools?.logToolEvent?.(payload) } catch { /* ignore */ }
+    }
+
     // Per-scope serialized queue: prevents one stuck tool from blocking other scopes.
     // scopeless requests each get an ephemeral chain keyed by requestId so they never block.
     const scopeQueues = new Map<string, Promise<void>>()
     // Per-request cancellation latch: cancel IPC from main flips these to settle the queued task early.
-    const activeToolRequests = new Map<string, { settled: boolean; abort: () => void }>()
+    // `cancelled` is checked at runWithWatchdog entry so a cancel that arrives while the request is
+    //   still queued (before its turn) is honored. `queuedAt` powers the self-rescue TTL — if an entry
+    //   sits in the queue for > 180s without execution, runWithWatchdog treats it as cancelled.
+    const QUEUE_SELF_RESCUE_MS = 180_000
+    const activeToolRequests = new Map<string, {
+      settled: boolean
+      cancelled: boolean
+      abort: () => void
+      queuedAt: number
+    }>()
 
     const budgetForTool = (tool: string): number => {
       const name = String(tool || '').trim().toLowerCase()
@@ -498,8 +589,28 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       args: Record<string, unknown>
     }): Promise<void> => {
       const requestId = data.requestId
-      // If main already cancelled this request before we got here, short-circuit.
       const existing = activeToolRequests.get(requestId)
+      const now = Date.now()
+      const queuedTooLong = existing && now - existing.queuedAt > QUEUE_SELF_RESCUE_MS
+      // Cancel IPC may have flipped the latch while this request was still queued.
+      if (existing?.cancelled || queuedTooLong) {
+        activeToolRequests.delete(requestId)
+        const elapsed = existing ? now - existing.queuedAt : undefined
+        logToolEvent({
+          type: queuedTooLong ? 'self-rescue' : 'cancel',
+          requestId,
+          tool: String(data.tool || ''),
+          scopeId: resolveScopeIdForRunPayload(data),
+          elapsedMs: typeof elapsed === 'number' ? elapsed : undefined,
+          error: queuedTooLong ? 'queue-self-rescue' : 'cancelled',
+        })
+        await window.electronAPI.agent.completeToolActionRequest({
+          requestId,
+          handled: false,
+          error: queuedTooLong ? 'queue-self-rescue' : 'cancelled',
+        }).catch(() => { /* ignore */ })
+        return
+      }
       if (existing?.settled) { activeToolRequests.delete(requestId); return }
 
       const scopeId = resolveScopeIdForRunPayload(data)
@@ -519,22 +630,54 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const runId = typeof data.runId === 'string' ? data.runId : null
       const budgetMs = budgetForTool(tool)
 
+      const startedAt = Date.now()
       let watchdog: ReturnType<typeof setTimeout> | null = null
       const watchdogPromise = new Promise<never>((_, reject) => {
         watchdog = setTimeout(() => {
           const entry = activeToolRequests.get(requestId)
           if (entry && !entry.settled) {
             entry.settled = true
-            reject(new Error(`renderer-watchdog:${budgetMs}`))
+            const message = `renderer-watchdog:${budgetMs}`
+            logToolEvent({
+              type: 'watchdog',
+              requestId,
+              tool,
+              scopeId,
+              elapsedMs: budgetMs,
+              error: message,
+            })
+            reject(new Error(message))
           }
         }, budgetMs)
       })
       const cancelPromise = new Promise<never>((_, reject) => {
         const entry = activeToolRequests.get(requestId)
         if (entry) {
+          // Share the latch with the queue-level abort so cancels that raced ahead (cancelled=true)
+          //   still propagate into the race when runWithWatchdog finally enters.
+          if (entry.cancelled) {
+            entry.settled = true
+            logToolEvent({
+              type: 'cancel',
+              requestId,
+              tool,
+              scopeId,
+              elapsedMs: Date.now() - startedAt,
+            })
+            reject(new Error('cancelled'))
+            return
+          }
           entry.abort = () => {
             if (entry.settled) return
+            entry.cancelled = true
             entry.settled = true
+            logToolEvent({
+              type: 'cancel',
+              requestId,
+              tool,
+              scopeId,
+              elapsedMs: Date.now() - startedAt,
+            })
             reject(new Error('cancelled'))
           }
         }
@@ -560,6 +703,13 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           handled: result.handled,
           payload: result.payload,
         })
+        logToolEvent({
+          type: 'ack',
+          requestId,
+          tool,
+          scopeId,
+          elapsedMs: Date.now() - startedAt,
+        })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         // For cancelled we've already been told; still ack so main's pending map releases even if
@@ -578,8 +728,47 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
     const cleanupToolActionRequest = window.electronAPI.agent.onToolActionRequest
       ? window.electronAPI.agent.onToolActionRequest((data) => {
-        const queueKey = resolveScopeIdForRunPayload(data) || `scopeless:${data.requestId}`
-        activeToolRequests.set(data.requestId, { settled: false, abort: () => { /* set below */ } })
+        const scopeIdForLog = resolveScopeIdForRunPayload(data)
+        const queueKey = scopeIdForLog || `scopeless:${data.requestId}`
+        // Idempotent: if we already have an entry for this requestId, ignore the duplicate dispatch.
+        //   This guards against IPC replay and covers G-Z9.
+        if (activeToolRequests.has(data.requestId)) {
+          logToolEvent({
+            type: 'duplicate',
+            requestId: data.requestId,
+            tool: String(data.tool || ''),
+            scopeId: scopeIdForLog,
+            error: 'duplicate-dispatch',
+          })
+          try {
+            void window.electronAPI.agent.completeToolActionRequest?.({
+              requestId: data.requestId,
+              handled: false,
+              error: 'duplicate-dispatch',
+            }).catch(() => { /* ignore */ })
+          } catch { /* ignore */ }
+          return
+        }
+        // Queue-level abort: flipping `cancelled` guarantees runWithWatchdog's entry check sees
+        //   the cancel even if the request is still waiting its turn in the scope queue.
+        const abortFromQueue = () => {
+          const entry = activeToolRequests.get(data.requestId)
+          if (!entry || entry.settled) return
+          entry.cancelled = true
+          entry.settled = true
+        }
+        activeToolRequests.set(data.requestId, {
+          settled: false,
+          cancelled: false,
+          abort: abortFromQueue,
+          queuedAt: Date.now(),
+        })
+        logToolEvent({
+          type: 'dispatch',
+          requestId: data.requestId,
+          tool: String(data.tool || ''),
+          scopeId: scopeIdForLog,
+        })
         const prev = scopeQueues.get(queueKey) || Promise.resolve()
         const next = prev
           .catch(() => { /* previous task's error already handled */ })

@@ -141,8 +141,8 @@ const agentAPI = {
     ipcRenderer.on('agent:status', handler)
     return () => { ipcRenderer.removeListener('agent:status', handler) }
   },
-  onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => void) => {
-    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; error: string; type: string }) => callback(data)
+  onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => callback(data)
     ipcRenderer.on('agent:error', handler)
     return () => { ipcRenderer.removeListener('agent:error', handler) }
   },

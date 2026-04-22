@@ -1,3 +1,4 @@
+import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
@@ -5,25 +6,23 @@ import type {
   SkillActionDefinition,
   SkillExecutionDetail,
   SkillInputValue,
-  SkillParamDefinition,
 } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
+import {
+  EXECUTION_NOT_FOUND_RE,
+  buildSkillExecutionMissingOutput,
+  type SkillCoordinatorOperation,
+} from './skill-execution-missing'
+import {
+  EXECUTION_TOOL_DEFS,
+  toAnthropicTool,
+  toOpenAITool,
+  type SkillToolDef,
+  type ToolParam,
+} from './skill-execution-tool-defs'
+import { paramListToZodObject } from './paramList-to-zod'
 
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
-
-type ToolParam = SkillParamDefinition
-
-type SkillToolKind = 'skill_action' | 'execution_control'
-
-interface SkillToolDef {
-  name: string
-  description: string
-  kind: SkillToolKind
-  skillId?: string
-  action?: string
-  timeoutMs?: number
-  params: ToolParam[]
-}
 
 const STATIC_TOOL_NAMES: Record<string, string> = {
   'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
@@ -35,66 +34,6 @@ const STATIC_TOOL_NAMES: Record<string, string> = {
   'lets-go-rss:rss_list': 'skill_rss_list',
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
-
-const EXECUTION_TOOL_DEFS: SkillToolDef[] = [
-  {
-    name: 'skill_get_state',
-    description: '读取当前 skill execution 状态、当前 blocker、已完成步骤和最近产物。若不提供 executionId，会优先读取当前会话最近的活跃 execution。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: '可选，execution ID', required: false },
-      { name: 'skillId', type: 'string', description: '可选，限定 skill ID', required: false },
-    ],
-  },
-  {
-    name: 'skill_submit_input',
-    description: '向一个被 need_input 阻塞的 execution 提交输入并继续推进。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: 'execution ID', required: true },
-      { name: 'inputs', type: 'object', description: '输入对象，例如 {"forceSubtitleMode":"funasr"}', required: true },
-    ],
-  },
-  {
-    name: 'skill_submit_confirmation',
-    description: '提交 confirmation 结果并继续执行 skill workflow。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: 'execution ID', required: true },
-      { name: 'stepId', type: 'string', description: '当前 confirmation step ID', required: true },
-      { name: 'confirmed', type: 'boolean', description: '是否确认继续', required: true },
-    ],
-  },
-  {
-    name: 'skill_submit_agent_result',
-    description: '向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: 'execution ID', required: true },
-      { name: 'stepId', type: 'string', description: '当前 agent_task step ID', required: true },
-      { name: 'textContent', type: 'string', description: '生成的正文内容', required: false },
-      { name: 'outputs', type: 'object', description: '可选结构化 outputs 对象', required: false },
-    ],
-  },
-  {
-    name: 'skill_restart_from_step',
-    description: '从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: 'execution ID', required: true },
-      { name: 'stepId', type: 'string', description: '要重跑的 step ID', required: true },
-      { name: 'inputs', type: 'object', description: '可选，覆盖输入对象', required: false },
-    ],
-  },
-  {
-    name: 'skill_cancel_execution',
-    description: '取消一个正在进行的 skill execution。',
-    kind: 'execution_control',
-    params: [
-      { name: 'executionId', type: 'string', description: 'execution ID', required: true },
-    ],
-  },
-]
 
 
 function sanitizeToolToken(value: string): string {
@@ -138,50 +77,50 @@ function getSkillActionToolDefs(): SkillToolDef[] {
   )
 }
 
+// Dynamic-skill-action Zod schema cache (Phase 2.5 PR 12). Keyed by tool name
+// (buildToolName is deterministic per (skillId, actionName)). Built lazily on
+// first call and rebuilt when the underlying manifest set changes. Changes in
+// skill set are detected via a cheap "signature" of name+action pairs — cheaper
+// than subscribing to runtime-manager events and covers manifest reload, skill
+// add/remove, and action visibility toggles.
+let skillActionSchemaCache: Record<string, ZodObject<ZodRawShape>> = {}
+let skillActionSchemaSignature = ''
+
+function computeSkillActionSignature(defs: SkillToolDef[]): string {
+  return defs
+    .map((d) => `${d.name}:${d.params.length}:${d.params.map((p) => `${p.name}/${p.type}/${p.required?'1':'0'}`).join(',')}`)
+    .sort()
+    .join('|')
+}
+
+export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> {
+  try {
+    const defs = getSkillActionToolDefs()
+    const sig = computeSkillActionSignature(defs)
+    if (sig !== skillActionSchemaSignature) {
+      const next: Record<string, ZodObject<ZodRawShape>> = {}
+      for (const def of defs) {
+        if (def.kind !== 'skill_action') continue
+        try {
+          next[def.name] = paramListToZodObject(def.params)
+        } catch {
+          // If a malformed manifest breaks derivation, skip that one rather
+          // than crashing the registry; static tools keep working.
+        }
+      }
+      skillActionSchemaCache = next
+      skillActionSchemaSignature = sig
+    }
+    return skillActionSchemaCache
+  } catch {
+    // Runtime manager unavailable (e.g. boot ordering) — return empty so the
+    // registry falls through to static schemas only.
+    return {}
+  }
+}
+
 function getSkillToolDefs(): SkillToolDef[] {
   return [...getSkillActionToolDefs(), ...EXECUTION_TOOL_DEFS]
-}
-
-function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  const schema: Record<string, unknown> = {
-    type: param.type,
-    description: param.description,
-  }
-  if (param.type === 'array') {
-    schema.items = { type: 'string' }
-  }
-  if (param.type === 'object') {
-    schema.additionalProperties = true
-  }
-  if (param.enum) schema.enum = param.enum
-  return schema
-}
-
-function toAnthropicTool(tool: SkillToolDef): Record<string, unknown> {
-  return {
-    name: tool.name,
-    description: tool.description,
-    input_schema: {
-      type: 'object',
-      properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
-      required: tool.params.filter((param) => param.required).map((param) => param.name),
-    },
-  }
-}
-
-function toOpenAITool(tool: SkillToolDef): Record<string, unknown> {
-  return {
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: {
-        type: 'object',
-        properties: Object.fromEntries(tool.params.map((param) => [param.name, toSchemaParam(param)])),
-        required: tool.params.filter((param) => param.required).map((param) => param.name),
-      },
-    },
-  }
 }
 
 function formatExecutionDetail(detail: SkillExecutionDetail): string {
@@ -275,6 +214,30 @@ function createSkillExecutionOutput(detail: SkillExecutionDetail): ToolExecution
   })
 }
 
+async function runSkillCoordinator(params: {
+  executionId: string
+  operation: SkillCoordinatorOperation
+  sessionId?: string
+  run: () => Promise<SkillExecutionDetail>
+}): Promise<ToolExecutionOutput> {
+  try {
+    const detail = await params.run()
+    return createSkillExecutionOutput(detail)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!EXECUTION_NOT_FOUND_RE.test(message)) {
+      throw error
+    }
+    const activeExecution = findExecutionForSession(params.sessionId)
+    return buildSkillExecutionMissingOutput({
+      executionId: params.executionId,
+      operation: params.operation,
+      activeExecution,
+      originalMessage: message,
+    })
+  }
+}
+
 function formatRunResult(result: {
   success: boolean
   stdout: string
@@ -362,41 +325,78 @@ export async function executeSkillTool(
   if (tool.kind === 'execution_control') {
     switch (tool.name) {
       case 'skill_get_state': {
-        const detail = findExecutionForSession(sessionId, asString(args.executionId), asString(args.skillId))
-        return detail ? createSkillExecutionOutput(detail) : 'No active skill execution found.'
+        const explicitId = asString(args.executionId)
+        const detail = findExecutionForSession(sessionId, explicitId, asString(args.skillId))
+        if (detail) return createSkillExecutionOutput(detail)
+        if (explicitId) {
+          return buildSkillExecutionMissingOutput({
+            executionId: explicitId,
+            operation: 'get_state',
+            activeExecution: findExecutionForSession(sessionId),
+            originalMessage: `Execution not found: ${explicitId}`,
+          })
+        }
+        return 'No active skill execution found.'
       }
       case 'skill_submit_input': {
-        const detail = await manager.submitExecutionInput(asString(args.executionId), asRecord(args.inputs))
-        return createSkillExecutionOutput(detail)
+        const executionId = asString(args.executionId)
+        return runSkillCoordinator({
+          executionId,
+          operation: 'submit_input',
+          sessionId,
+          run: () => manager.submitExecutionInput(executionId, asRecord(args.inputs)),
+        })
       }
       case 'skill_submit_confirmation': {
-        const detail = await manager.submitExecutionConfirmation(
-          asString(args.executionId),
-          asString(args.stepId),
-          asBoolean(args.confirmed),
-        )
-        return createSkillExecutionOutput(detail)
+        const executionId = asString(args.executionId)
+        return runSkillCoordinator({
+          executionId,
+          operation: 'submit_confirmation',
+          sessionId,
+          run: () => manager.submitExecutionConfirmation(
+            executionId,
+            asString(args.stepId),
+            asBoolean(args.confirmed),
+          ),
+        })
       }
       case 'skill_submit_agent_result': {
-        const detail = await manager.submitExecutionAgentResult({
-          executionId: asString(args.executionId),
-          stepId: asString(args.stepId),
-          textContent: typeof args.textContent === 'string' ? args.textContent : undefined,
-          outputs: asRecord(args.outputs),
+        const executionId = asString(args.executionId)
+        return runSkillCoordinator({
+          executionId,
+          operation: 'submit_agent_result',
+          sessionId,
+          run: () => manager.submitExecutionAgentResult({
+            executionId,
+            stepId: asString(args.stepId),
+            textContent: typeof args.textContent === 'string' ? args.textContent : undefined,
+            outputs: asRecord(args.outputs),
+          }),
         })
-        return createSkillExecutionOutput(detail)
       }
       case 'skill_restart_from_step': {
-        const detail = await manager.restartExecutionFromStep(
-          asString(args.executionId),
-          asString(args.stepId),
-          asRecord(args.inputs),
-        )
-        return createSkillExecutionOutput(detail)
+        const executionId = asString(args.executionId)
+        return runSkillCoordinator({
+          executionId,
+          operation: 'restart_from_step',
+          sessionId,
+          run: () => manager.restartExecutionFromStep(
+            executionId,
+            asString(args.stepId),
+            asRecord(args.inputs),
+          ),
+        })
       }
       case 'skill_cancel_execution': {
-        const detail = manager.cancelExecution(asString(args.executionId))
-        return detail ? createSkillExecutionOutput(detail) : 'Execution not found.'
+        const executionId = asString(args.executionId)
+        const detail = manager.cancelExecution(executionId)
+        if (detail) return createSkillExecutionOutput(detail)
+        return buildSkillExecutionMissingOutput({
+          executionId,
+          operation: 'cancel_execution',
+          activeExecution: findExecutionForSession(sessionId),
+          originalMessage: `Execution not found: ${executionId}`,
+        })
       }
       default:
         return `Unknown skill tool: ${toolName}`

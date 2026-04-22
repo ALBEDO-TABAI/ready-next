@@ -1,10 +1,173 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-21
+> 更新时间: 2026-04-22
 
 ## 当前真值摘要
 
 0. Agent 核心重构已先落地第一段可上线基础层。
+
+- `2026-04-22` **工具错误契约 Phase 4 落地：生命周期 + 观测性收口（refactor 最终段）**：
+  - **Migration 028**：`skill_executions` 加 `(status, finished_at DESC)` 复合索引，TTL sweep 扫描成本跟"过期集合"而非"全表"成正比。
+  - **`ExecutionStateStore.purgeExpiredExecutions(7)`**：删终态行（`completed / failed / cancelled` 且 `finished_at < now - 7d`）；**关键发现**：当前 DB init 从未执行 `PRAGMA foreign_keys = ON`，Migration 018 的 `ON DELETE CASCADE` 实际是 no-op，所以方法里显式先删 `skill_execution_artifacts` + `skill_execution_steps` 再删 `skill_executions`，避免孤儿；未来若 PRAGMA 开启，先删子行仍然是安全的 idempotent 预清理。
+  - **`SkillsRuntimeManager.startTtlSweep()`**：构造函数里紧挨 `startScheduler()` 调用；boot 后 30s 首跑、之后每小时跑一次；单次失败只 `console.error`，不 kill 其他调度；每次完成后打 `TOOL_ERROR_METRICS.ttlSwept` metric。
+  - **`generateSkillExecutionId()` = `'e-' + randomBytes(4).toString('hex')`**：新 executionId 形如 `e-9f3a2b1c`，日志一眼可辨；旧 UUID 行继续兼容（`getExecution` 用 `WHERE id = ?` format-agnostic，Zod `SkillExecutionIdSchema` 已是 opaque string）。**踩坑**：`persistState` 用 `INSERT ... ON CONFLICT(id) DO UPDATE`，id 碰撞不抛 UNIQUE 违规而是静默覆盖 —— 改用 `SELECT` 预检 + 3 次 retry，比依赖 UNIQUE 异常更可靠。
+  - **新 `TOOL_ERROR_METRICS` 枚举**（`src/main/modules/agent-control/tool-error-metrics.ts`）：6 个 entry（`surfaced / unknownSurfaced / inputValidation / resolutionViolation / skillExecutionMissing / ttlSwept`）；key 是 camelCase 代码符号，value 是 snake_case 字符串（保持历史 log 聚合查询不变）；非 tool-error 的 metric（`tool_group_blocked_rate` 等）留在自己模块，**不**并入此 registry。
+  - **4 个既有 emit 点换引用**：`tool-executor.ts:101/166`、`tool-runtime.ts:308`、`turn-engine.ts:352`；字符串值未变，仅加 import + 改引用。
+  - **补 `skill_execution_missing` 打点**：`tool-executor.ts` catch 里 `kind === 'skill_execution_missing'` 时额外打点（携带 `toolName` / `sessionId` / `executionId`）；从此长尾频次在 `ready-agent-metrics.log` 可见。
+  - **文档 4 连发**：`CLAUDE.md` §6.11（7 条 invariant）+ `AGENTS.md` 镜像 + `DOCUMENTATION.md` 追加「工具错误契约」大节（invariant + 相关文件 + metric 表 + 生命周期 + 调试入口）+ `LESSONS_LEARNED.md` 首部追加「stale executionId 引发架构翻新」一条。
+  - **5 份新测试共 21 case 全绿**：`skill-execution-id-generator.test.ts` 2 case、`tool-error-metrics-registry.test.ts` 4 case、`execution-state-store-ttl.test.ts` 6 case（in-memory FakeDb 跑真实 purge 逻辑 + cascade 顺序断言）、`tool-error-metrics-contract.test.ts` 6 case（源码 regex 锁 4 个 emit 点 + skill_execution_missing 紧跟条件 + ttlSwept 三字段 + scheduler 常量）、`skill-execution-id-contract.test.ts` 3 case。Phase 1/2 的 `tool-executor-contract.test.ts` 3 处 regex 放宽到接受 literal 或 enum 引用。
+  - 全量 `npm test`：1344 pass / 36 fail（Phase 3 基线 1323/36 → **+21 pass，0 新回归**）；`npx tsc --noEmit` 对所有触动文件干净。
+  - **重构完整闭环**：Phase 1 dispatch 吞异常 → Phase 2/2.5 dispatch 入口 Zod（102 个工具）→ Phase 3 IPC 分流 + 软失败胶囊 → Phase 4 生命周期 + 观测性 + 文档契约。起因的 "Agent 错误: Execution not found" 现在变成一条 `tool-error-metrics.skillExecutionMissing` 打点 + 一个软失败胶囊，不再阻塞 turn。
+  - **后续待办**（不在本期）：DB init 时打开 `PRAGMA foreign_keys = ON`（全局影响，需要审计所有现有 DELETE 路径）、`skill_executions` VACUUM（DELETE 不 reclaim 磁盘）。
+
+- `2026-04-22` **工具错误契约 Phase 3 落地：IPC `agent:error` 结构化 + 渲染端软失败胶囊**：
+  - **新增 `src/main/modules/claude-bridge/error-contract.ts`**：`deriveAgentErrorContract(error, options?)` 纯函数，消化 `errorKindFor()`（对 ToolDomainError/ToolHostUnavailable/AbortError 分类）+ `classifyExecutionError()`（对瞬时错误 rate_limit/timeout/transient/auth/context_overflow 进一步归类）。`tool_handler_failure` 退回 classifier；recoverable 白名单：`rate_limit / timeout_model / timeout_tool / transient / tool_handler_failure / 未知领域 errorKind → true`，`auth / context_overflow / host_unavailable / aborted / unknown → false`。
+  - **加宽 `emitRuntimeError` 签名**：`direct-chat.ts:774`、`turn-transcript.ts:21/59`、`run-contracts.ts:625` 统一放宽到 `(error: unknown, options?: { toolName?: string })`；内部派生 contract 并 spread 到 `emit('error', { agent, runId, error, type, errorKind, recoverable, toolName })`。
+  - **两处 catch 分流 emitOutput**：`turn-engine.ts:1503-1522` 和 `direct-chat.ts:906-934` 的 catch 都在 emitRuntimeError 之前先算一次 contract，`!recoverable` 才写 `transcript.emitOutput('API 请求失败...', 'error')`，避免胶囊和红字 transcript 重复（recoverable contract 在 emitter 内再算一次是幂等的微开销，换来 out-of-band 元数据零逃逸）。
+  - **IPC 层增字段**：`ipc-handler.ts:1113-1135` `agent:scopeRunEvent` 记录 payload 增 `errorKind / recoverable / toolName` 三字段；`agent:error` 通过 orchestrator `...payload` spread 自动携带。`ScopeRunEventPayload` 类型在 `agent-control/types.ts:395-406` 同步 additive 扩展。
+  - **ScopeRunState 加软失败侧字段**：`types.ts` 新增 `SoftErrorInfo { message, errorKind, toolName, receivedAt }` + `ScopeRunState.softError: SoftErrorInfo | null`；`createEmptyScopeRunState` 默认 `softError: null`。
+  - **runtimeDriver onError 三向分流**（`runtimeDriver.ts:340-488`）：① `errorKind === 'aborted'` 早返（cancellation 走 runComplete 自有路径）；② `recoverable === true`（严格布尔，legacy payload 无字段走 fallback）只写 softError，**不**碰 phase/error/blockedReason/toolTraceStatus，**不**触发 addMessage/persistAssistantMessageForRun —— 避免污染 10+ 个 `phase === 'error'` 下游消费点；③ terminal 保留原行为 + 额外 `softError: null` 清除遗留胶囊。
+  - **scopeRunState reducer**：`deriveScopeRunStatePatch` 对 `phase === 'error' && recoverable === true` 写 softError；其他 error 事件（含 legacy）清空。
+  - **新组件 `SoftFailureCapsule.tsx`**：琥珀色 pill 显示 `工具 X 暂时失败`、消息、errorKind 小标签、`×` dismiss；`ChatPanel.tsx:3148` 挂在 `<ChatMessages>` 和输入区之间（同 tool-trace 胶囊一层，视觉归属一致）。
+  - **useAgent 新增 `dismissSoftError(scopeId)`**：只清 softError，不重算。
+  - **Preload + electron.d.ts**：`onError` 回调类型加 `errorKind? / recoverable? / toolName?` 可选字段（legacy 老主进程 payload 无这些字段时默认 terminal，确保 rollback 安全）。
+  - **放弃 feature flag `READY_USE_RECOVERABLE_CAPSULE`**：回滚面只有 runtimeDriver 一个分支，flag 会累积 test matrix 债，不值。
+  - **3 份新测试共 28 case 全绿**：
+    - `error-contract.test.ts` 15 case —— 覆盖 ToolDomainError / ToolHostUnavailable / ToolAbort / legacy AbortError / HTTP 429 / auth / context_overflow / transient / timeout / 纯 Error / string throw / null&undefined / options.toolName 覆盖 / plain object toolName / 未知领域 errorKind 默认 recoverable=true
+    - `agent-error-ipc-contract.test.ts` 9 case —— 源码 regex 锁 `direct-chat`/`turn-engine`/`ipc-handler`/`runtimeDriver`/`scopeRunState`/`ChatPanel` 6 侧 wiring；特别锁 recoverable 分支不调 addMessage/persist/toolTraceStatus，terminal 分支必须清 softError
+    - `agent-error-legacy-payload.test.ts` 4 case —— 严格布尔（`=== true`）+ 严格字符串（`=== 'aborted'`）+ reducer 兜底 + preload 类型可选
+  - 全量 `npm test`：1323 pass / 36 fail（Phase 2.5 收官基线 1295/36 → 净 +28 pass，零新回归）；`npx tsc --noEmit` 对所有触动文件干净。
+  - **下一步**：Phase 4（`skill_executions` TTL + Task-ID 前缀 + 观测性 metric 枚举收口），详见 `plans/2026-04-22-tool-error-contract-refactor.md` §8。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 12 落地：动态 skill-action 工具接入 Zod schema 缓存（Phase 2.5 收官）**：
+  - **新增 `src/main/modules/tools/paramList-to-zod.ts`**：`zodObjectToParamList` 的反函数。接 `SkillParamDefinition[]`（即 manifest 里的 `action.params`）反向建 `z.ZodObject`。`string+enum → z.enum`、`number → z.number`、`boolean → LenientBoolean`（复用 PR 2 的 union literal 语义，接受 `true/false/'true'/'false'/'1'/'0'/1/0`）、`object → z.record(z.string(), z.unknown())` + 可选 `.meta({additionalProperties:true})`、`array` 按 `items.type` 映射元素类型。`required: false` 走 `.optional()`；`.describe()` 在 optional wrapper 上也重新附加一次（Zod v4 `.optional()` 不继承 inner description）。
+  - **`skills-tools.ts` 新增 `getSkillActionSchemas()`**：迭代 `getSkillActionToolDefs()` 按 tool name 缓存 Zod schema。缓存失效检测用 `computeSkillActionSignature(defs)`（name + 参数名/类型/必填组合的 sorted join），比订阅 `SkillsRuntimeManager` 事件成本低且覆盖 manifest 重载、skill 新增/删除、visibility toggle。单个 manifest 反推失败被 try/catch 吞掉，不影响整个 registry。`getSkillsRuntimeManager()` 在 boot 未就绪时被捕获，返回空 map。
+  - **`tool-executor.ts` 的 dispatch 闸门合并静态 + 动态**：`{ ...getSkillActionSchemas(), ...getToolInputSchemas() }`。**静态后置**让 6 个控制工具永远胜出 —— 防止用户 manifest 无意中把自己的 action 命名成 `skill_get_state` 把控制工具的 schema 覆盖掉（虽然 `buildToolName` 的 sanitize 规则理论上不会产生这种名字，但多一道 defensive 更稳）。
+  - **合约断言同步**：`tool-executor-contract.test.ts` 里 PR 1 留下的 `validateToolInput(toolName, args, getToolInputSchemas())` 严格形式放宽到 `validateToolInput(toolName, args, mergedSchemas|getToolInputSchemas())`，继续锁 `getToolInputSchemas()` 依然被调用。
+  - **2 份新测试共 11 case 全绿**：
+    - `paramList-to-zod.test.ts` 8 case —— 各 leaf type 分支 + enum + LenientBoolean + optional 覆盖 + object 类型 + array<string>/number/object 派生 + **对 `SKILL_CONTROL_SCHEMAS` 6 个 schema 做 `zodObjectToParamList → paramListToZodObject → zodObjectToParamList` 往返一致**（保证反函数不丢信息）+ `additionalProperties:true` 字段级/元素级 round-trip 保真。
+    - `skill-action-dynamic-contract.test.ts` 3 case —— source-level 锁 `skills-tools.ts` 里 `getSkillActionSchemas` + 签名缓存 + malformed-manifest catch 的结构；锁 `tool-executor.ts` 合并顺序 `{ ...dynamic, ...static }`；用 `STATIC_TOOL_NAMES` 字面量范围内的正则精确断言 table 不能把 alias 映射到 6 个控制工具名（避免误匹配到 executor 里的 `case 'skill_get_state':` 开关分支）。
+  - 全量 `npm test`：1295 pass / 36 fail（PR 11 基线 1284/36 → 净 +11 pass，零新回归）；`npx tsc --noEmit` 对所有触动文件干净（修了 `z.ZodRawShape` 是 readonly 的 TS 类型问题，用 `Record<string, z.ZodTypeAny>` 中转后 cast）。
+  - **Phase 2.5 收官汇总**：10 个工具域全部接入 dispatch 入口 Zod 校验；Phase 2 pilot 基线 1101/36 → 1295/36（**净 +194 pass，0 新回归**）；共新增 46 个 schema / 31 份测试文件 / 3 份纯模块抽取（skill-execution-tool-defs、file-management-tool-defs、system-tool-defs）；`zod-param-derivation` 覆盖 12 类 Zod 节点并支持数组 items + `.meta({additionalProperties:true})` opt-in；`tool-input-validator` 继续由未注册即 passthrough 守底。Phase 3（IPC errorKind）+ Phase 4（TTL + 观测性收口）可按原计划推进，无 Phase 2.5 遗留 blocker。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 11 落地：system 域 2 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/system-schemas.ts`** + **`system-tool-defs.ts`（纯模块）**：后者仿 PR 6 抽出，绕开 `getSkillsRuntimeManager → electron` 的测试阻塞；原 `system-tools.ts` 保留 `executeSystemTool` 执行逻辑 + re-export 纯模块的 `SYSTEM_TOOLS / getSystemAnthropicTools / getSystemOpenAITools`。
+  - 至此 11 个静态域全部接入 Zod schema 注册表。剩下 PR 12 动态 skill-action。
+  - **3 份新测试共 7 case 全绿**：shape 3 + 派生 2 + 黄金快照 2。
+  - 全量 `npm test`：1284 pass / 36 fail（PR 10 基线 1277/36 → 净 +7 pass，零新回归）。
+  - 下一个（最后一个）：PR 12 动态 skill-action —— `paramListToZodObject` 反向建 Zod + 按 `skillId:actionName` 缓存 + `SkillsRuntimeManager` 重载失效。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 10 落地：browser_content_tasks 域 13 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/browser-content-schemas.ts`**：13 个 Zod schema 覆盖图片收集 / 批量下载 / 结构化提取 / 滚动采集 / 后台任务 / 研究等。
+  - **扩 `zod-param-derivation.ts` 支持 opt-in `additionalProperties`**：新增 `metaAdditionalPropertiesOf(node)` 读 Zod v4 `.meta({ additionalProperties: true })`，把 `additionalProperties:true` 派生到字段级或数组元素级的 `SkillParamDefinition`。这 4 个 PR 10 工具用到：`browser_extract_structured.fields` / `browser_aggregate_results.items` / `browser_run_workflow.steps` 是 array 元素 opt-in，`browser_start_task.payload` 是字段级 opt-in。
+  - **刻意避开 `z.record` 默认 emit `additionalProperties`** ：第一版改法是让所有 `z.record` 默认带 `additionalProperties:true`，但那会让 PR 6/7/8/9 里 4 个已经落地的域（file / document / feishu / browser-interaction）的 LLM-facing 输出整体 drift（hand-rolled 没这个字段）。回退成 opt-in，保证已有的字节等价性。
+  - **`browser-tool-catalog.ts`** 完成 content_task 13 entry 的派生切换，**9 个静态域全部进 registry**。
+  - **2 份新测试共 20 case 全绿**：shape 9 + 派生 11（含 `items.additionalProperties` + 字段级 `additionalProperties` 的 `deepEqual` 锁）。
+  - 全量 `npm test`：1277 pass / 36 fail（PR 9 基线 1257/36 → 净 +20 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 11 system（2 工具；`getSystemAnthropicTools` 参数运行时生成，需要先看它怎么生成的再决定是改读 Zod 源还是抽纯模块）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 9 落地：browser_interaction 域 25 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/browser-interaction-schemas.ts`**：25 个 Zod schema 覆盖导航 / 搜索 / 点击 / 输入 / 视觉分析 / 坐标操作 / 等待等家族；`TabIdOptional` shared constant 收 ~20 份 `tab_id` 字段重复；所有枚举字段（search engine、scroll direction、action kind、capture mode、wait condition）使用 `z.enum(...)` 派生 enum 数组。
+  - **`browser-tool-catalog.ts` 派生改造**：仅 25 个 interaction entry 切换为 `zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS[name]) as ToolParamSchemaSpec[]`；13 个 content_task entry（collect_images、download_urls、extract_structured、scroll_collect、start_task、get_task、resume_task、cancel_task、aggregate_results、download_gallery、research_topic、run_workflow、execute_js）保持 hand-rolled，PR 10 接手。
+  - **手动字节对比验证**：swap 前后分别 `npx tsx dump-browser.ts > ...json`，对 25 个 interaction 工具 `diff` 得到空差，LLM-facing payload 逐字节相同。
+  - **2 份新测试共 38 case 全绿**：shape 13 case（按关键语义抽样：必填/enum/数组/对象类型）+ 派生 25 case（全工具 `deepEqual` hand-rolled，抽 `TAB_ID` 常量降重复）。
+  - **刻意省略全量 golden snapshot**：inline 25 工具 LLM-facing 输出约 ~660 行、噪声大于信号；`toSchemaParam` / `normalizeAnthropicToolSchema` 管道自 PR 1 起未改，派生测试 + 下游 `tool-gateway-registry.test.ts` 等合约测试 + `npm test` 全量回归三者叠加已足够兜 byte drift；在 PROGRESS/CHANGELOG 里明文记录这一偏差。
+  - 全量 `npm test`：1257 pass / 36 fail（PR 8 基线 1219/36 → 净 +38 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 10 browser_content_tasks（13 工具；含结构化 array items 如 `items:{type:'object',additionalProperties:true}`，可能要扩 derivation 或用同一 `browser-content-schemas.ts` 文件）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 8 落地：feishu 域 16 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/feishu-schemas.ts`**：16 个 Zod schema 按 5 个操作族分组；`ChannelId = z.string().describe('飞书频道 ID')` 做 shared constant 收 16 个工具共用的 `channel_id` 字段；`feishu_calendar_create_event.attendees` 用 `z.array(z.string())` 派生出 `items:{type:'string'}`。
+  - **`feishu-tools.ts` 派生改造**：16 个 entry 的 `params` 全换为 `zodObjectToParamList(FEISHU_SCHEMAS[name]) as ToolParam[]`；原 ~200 行 hand-rolled 参数阵列删除；`ToolParam = ToolParamSchemaSpec` 保持（superset 支持 `items`/`additionalProperties`）。
+  - **3 份新测试共 23 case 全绿**：`feishu-schemas.test.ts` 5 case 按操作族分组覆盖必填字段 + 数组类型；`feishu-zod-param-derivation.test.ts` 16 case `deepEqual` 旧 hand-rolled（抽 `CHANNEL_ID` 常量降重复）；`feishu-zod-golden-snapshot.test.ts` 2 case byte-lock。
+  - 全量 `npm test`：1219 pass / 36 fail（PR 7 基线 1196/36 → 净 +23 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 9 browser-interaction（26 工具；`browser-tool-catalog.ts` 集中定义且和 browser-tools.ts 拆分，需先看导入链是否纯）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 7 落地：document 域 15 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/document-schemas.ts`**：15 个 Zod schema。widget 相关字段 `componentSpec / componentSpecPatch` 用 `z.record(z.string(), z.unknown())`，派生为 `{type:'object'}` 不带 `properties`，与旧 `toSchemaParam` 对 object 类型的输出字节一致。
+  - **`document-tools.ts` 派生改造**：原 ~130 行 hand-rolled 参数阵列全部换成 `zodObjectToParamList(DOCUMENT_SCHEMAS[name]) as ToolParam[]`；15 个工具一把过。
+  - **修复合约测试 `document-widget-system.test.ts#documents local inline interactivity in document widget guidance`**：旧断言只 grep `document-tools.ts` 源码找 `HTML\/SVG\/本地交互脚本` 子串；PR 7 后该字符串搬到 `schemas/document-schemas.ts`，合约失效。改成读 `document-tools.ts + document-schemas.ts` 拼接后 grep，保证 "widget 支持本地交互脚本" 的 guidance 契约仍成立且不依赖 SSOT 位置。
+  - **3 份新测试共 31 case 全绿**：shape 14 + 派生 15（含 object 派生）+ 黄金快照 2。
+  - 全量 `npm test`：1196 pass / 36 fail（PR 6 基线 1165/36 → 净 +31 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 8 feishu（16 工具；`FEISHU_TOOLS` 分 doc / message / sheet 三类，可按操作族拆小文件或合成一个 schemas 文件）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 6 落地：file_management 域 7 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/file-management-schemas.ts`**：7 个 Zod schema。数组全用 `z.array(z.string())`（对齐旧 `toSchemaParam` 对数组硬编码的 `items:{type:'string'}`）；`file_classify.setFrontmatter` 用 `z.record(z.string(), z.unknown())` 得到 `type: 'object'` 派生。
+  - **抽出 `src/main/modules/tools/file-management-tool-defs.ts`**（纯模块）：仿 Phase 2 的 skill-execution-tool-defs 做法，把 defs + anthropic/openai builders 搬到不带 `getSearchEngine` 的纯模块。原因：golden snapshot 测试直接 import `file-management-tools.ts` 会触发 `search-engine/ipc-handler → electron 'app'` 失败（`npx tsx` 直接执行能过但 `--test` runner 挂），extract 是已验证过的通用解法。`file-management-tools.ts` 保留执行逻辑并 re-export 3 个公开符号维持调用点不变。
+  - **`file-management-tool-defs.ts` 里的 `params` 全部派生自 Zod**：`zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS[name]) as ToolParam[]`。`toSchemaParam` 里对数组硬编码的 `items:{type:'string'}` 逻辑保留；Zod 派生同样emit `items:{type:'string'}`，downstream idempotent，LLM-facing 输出字节一致。
+  - **3 份新测试共 16 case 全绿**：shape 7 + 派生 7（含数组 items）+ 黄金快照 2（指向新的纯 defs 模块）。
+  - 全量 `npm test`：1165 pass / 36 fail（PR 5 基线 1149/36 → 净 +16 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 7 document（14 工具；widget `componentSpec` 的 `object` 派生是否需要递归展开 properties，届时看 golden snapshot 报不报差异再决定）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 5 落地：session 域 1 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/session-schemas.ts`**：`SessionSearchSchema`，`sourceKind` 走 `z.enum(['local','channel'])`，`hasAttachments` boolean、`limit` number，全字段 optional。
+  - `session-recall-tools.ts` 只有一个 `session_search`，params 切换为 `zodObjectToParamList` 派生。
+  - **3 份新测试共 7 case 全绿**：shape 4 + 派生 1 + 黄金快照 2。
+  - 全量 `npm test`：1149 pass / 36 fail（PR 4 基线 1142/36 → 净 +7 pass，零新回归）。
+  - 下一个：PR 6 file-management（8 工具；`getSearchEngine` 导入链要先确认能否走 pure test，否则沿用源码级正则断言）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 4 落地：calendar 域 5 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/calendar-schemas.ts`**：5 个 schema，全 string 字段无枚举无数组，对旧 hand-rolled 字节一致；`calendar_capture_session` 无参，派生 `[]`。
+  - **`calendar-tools.ts` 派生改造 + `schemas/index.ts` spread 注册**，同一模板一把过。
+  - **3 份新测试共 12 case 全绿**：shape 5 + 派生 5 + 黄金快照 2。
+  - 全量 `npm test`：1142 pass / 36 fail（PR 3 基线 1130/36 → 净 +12 pass，零新回归）。
+  - 下一个：PR 5 session-recall（1 工具）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 3 落地：rss 域 5 个工具接入 Zod schema**：
+  - 触发：PR 2 把 `ZodArray → items` 派生补齐之后，rss 域没有数组 param，是最快的一 PR。
+  - **新增 `src/main/modules/tools/schemas/rss-schemas.ts`**：`RssAddSourceSchema / RssFetchUpdatesSchema / RssSelectItemSchema / RssAnalyzeItemSchema / RssCaptureSessionSchema`。两个工具参数列表为空（`z.object({})`），`zodObjectToParamList` 派生出 `[]`，与旧 `params: []` 字节一致。
+  - **保持 byte-equivalence**：`rss_analyze_item.analysisType` 旧手写只有 `type: 'string'` 无 enum（虽然 executor 会自行拒绝非 copy/visual）。schema 这里**不**加 `z.enum(['copy','visual'])`，避免 golden snapshot 失锁；enum 收紧留作后续独立 PR。
+  - **`rss-tools.ts` 派生改造**：`RSS_TOOLS` 5 个 entry 的 `params` 全换成 `zodObjectToParamList(RSS_SCHEMAS[name]) as ToolParam[]`；`getRSSAnthropicTools / getRSSOpenAITools / executeRSSTool` 调用链不变。
+  - **注册**：`schemas/index.ts` 加 `import { RSS_SCHEMAS } from './rss-schemas'` + `...RSS_SCHEMAS` spread。
+  - **3 份新测试共 12 case 全绿**：`rss-schemas.test.ts` 5 case、`rss-zod-param-derivation.test.ts` 5 case（含两个空 `[]` 工具）、`rss-zod-golden-snapshot.test.ts` 2 case。
+  - 全量 `npm test`：1130 pass / 36 fail（PR 2 基线 1118/36 → 净 +12 pass，零新回归）；`npx tsc --noEmit` 对触动文件干净。
+  - 下一个：PR 4 calendar（5 工具；有 intent 字段要读 tool-registry.ts 对应 entry）。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 2 落地：memory 域 4 个工具接入 Zod schema**：
+  - **新增 `src/main/modules/tools/schemas/memory-schemas.ts`**：4 个 Zod schema（`MemoryCreateSchema / MemorySearchSchema / MemoryUpdateSchema / MemoryListRecentSchema`）；shared `SourceTypeEnum = z.enum([...])` 收 3 个工具共用的 4 值枚举；描述 / enum / optional 顺序全部对旧 `MEMORY_TOOLS` 逐字节一致，否则 golden snapshot 双侧测试会立刻挂。
+  - **扩 `SkillParamDefinition`**（`src/shared/skill-execution-types.ts`）：加 `items?: Record<string, unknown>` + `additionalProperties?: boolean`，与 `./tool-schema.ts::ToolParamSchemaSpec` 超集对齐；两个字段都是 optional，对已有 6 个 skill 控制工具派生零行为变化。
+  - **扩 `zod-param-derivation.ts` 的 `ZodArray` 分支**：`resolveParamType` 现在读 `def.element`（Zod v4 的 array 元素字段），递归 resolve 后 emit `items: { type: <elementType> }`；未知元素类型退化到旧的 `{type: 'array'}` 不带 items；try/catch 包裹 recursion 防止未支持节点炸派生。
+  - **`memory-tools.ts` 派生改造**：`MEMORY_TOOLS` 4 个 entry 的 `params` 字段换成 `zodObjectToParamList(MEMORY_SCHEMAS[name]) as ToolParam[]`，原 ~120 行 hand-rolled 参数阵列删除；`getMemoryAnthropicTools / getMemoryOpenAITools` 调用链不变，`buildToolParamSchema / normalizeAnthropicToolSchema / normalizeOpenAIToolSchema` 仍作输出管道。
+  - **注册进统一表**：`schemas/index.ts` 新加 `...MEMORY_SCHEMAS` spread；后续 PR 3-12 按同一模式追加一行。
+  - **3 份新测试共 13 case 全绿**：
+    - `memory-schemas.test.ts` 7 case —— 形状、optional、enum、tags 必须数组、memory_id 必填、strip 未知键。
+    - `memory-zod-param-derivation.test.ts` 4 case —— 4 个 schema 派生结果 `deepEqual` 内联的旧手写 params 数组（不走 memory-tools.ts，完全从 Zod 反推）。
+    - `memory-zod-golden-snapshot.test.ts` 2 case —— `getMemoryAnthropicTools / getMemoryOpenAITools` 与内联的 `EXPECTED_ANTHROPIC` 结构 `deepEqual`；在派生切换**之前**提交的 commit 锁住 byte-level 等价性。
+  - 全量 `npm test`：1118 pass / 36 fail（PR 1 基线 1105/36 → 净 +13 pass，零新回归）；`npx tsc --noEmit` 对所有触动文件干净。
+  - 下一个：PR 3 rss（5 工具）—— 同一模板一把过。
+
+- `2026-04-22` **工具错误契约 Phase 2.5 PR 1 落地：dispatch 闸门去域限定 + 统一 schema 注册表**（计划 `~/.claude/plans/generic-enchanting-gosling.md`，12 PR 链条首个基础设施 PR）：
+  - 触发：Phase 2 只给 skill 域 6 个控制工具接了 Zod 校验；要把同一 pattern 滚到其他 9 个静态域 + 动态 skill-action，必须先拆掉 `if (definition.domain === 'skill')` 硬闸门，否则每个域 PR 都会在 `tool-executor.ts` 同一块改冲突。`tool-input-validator.ts` 本来就对未注册工具 passthrough —— 把 gate 一次性拆成域无关，后续 PR 只动自己的 schemas 文件即可。
+  - **新增 `src/main/modules/tools/schemas/index.ts`**：`STATIC_TOOL_INPUT_SCHEMAS` 用 spread 汇聚所有域的 Zod 注册表，目前只承接 `SKILL_CONTROL_SCHEMAS` 一组；导出 `getToolInputSchemas()` 访问器而非常量，为 PR 12 折入动态 skill-action cache 预留热路径（无需 cold-path re-export / 缓存失效协调）。
+  - **`tool-executor.ts` 闸门改写**：`if (definition.domain === 'skill')` 包裹去掉；`validateToolInput(toolName, args, getToolInputSchemas())` 每次 dispatch 都跑；未注册工具走 validator 的 `if (!schema) return { ok: true }` 分支，对非 skill 域零行为变化。失败 metric 增字段：`logAgentMetric('tool_input_validation_failed', { toolName, domain, issueCount, firstCode, firstPath, sessionId })` —— `domain` 是新加的，让后续按域统计失败率。
+  - **新测试 `src/__tests__/tool-input-schemas-registry.test.ts`（4 case 全绿）**：注册表包含 6 个 skill 控制工具名、`getToolInputSchemas()` 返回可安全 spread 的普通对象（未冻结、未代理）、无重复键、每个值是带 `safeParse` 的 ZodObject —— 为后续 PR 往里塞域 map 提供不变式兜底。
+  - **扩写 `src/__tests__/tool-executor-contract.test.ts`**：反向断言 `doesNotMatch(/if \(definition\.domain === ['"]skill['"]\) \{...validateToolInput/)` 锁旧守卫消失；正向断言 `validateToolInput(toolName, args, getToolInputSchemas())` 与 `domain: definition.domain` 新字段就位；保留既有的 `args = outcome.data` / `return outcome.output` / `logAgentMetric` 锚点断言。
+  - 全量 `npm test`：1105 pass / 36 fail（Phase 2 基线 1101/36 → 净 +4 pass，零新回归）；`npx tsc --noEmit` 对所有触动文件干净。
+  - 后续 12 个 PR 按计划推进顺序：memory(4) → rss(5) → calendar(5) → session(1) → file(8) → document(14) → feishu(16) → browser-interaction(26) → browser-content(13) → system(2) → skill-action(动态)。每个 PR 只新增 `schemas/{domain}-schemas.ts` + golden snapshot + 派生改造 + 注册表 spread。
+
+- `2026-04-22` **工具错误契约重构 Phase 2 落地：Zod schema pilot on skill control tools**（计划 `plans/2026-04-22-tool-error-contract-refactor.md` §6，详设计 `~/.claude/plans/generic-enchanting-gosling.md`）：
+  - 触发：Phase 1 已把"handler throw"兜住，但 root cause（模型发空串/错格式 executionId → 到 DB 才爆）还在。Zod 4.3.6 本来就在 deps，TS 5.7.3 覆盖 Zod v4 要求，`z.toJSONSchema()` native 可用 —— 对照 CC-Source 的两阶段 dispatch 校验契约落 pilot。
+  - **新增 `src/main/modules/tools/schemas/skill-control-schemas.ts`**：6 个 "execution_control" skill 工具的 Zod schema 作为 SSOT；`SkillExecutionIdSchema = z.string().trim().min(1)`；`LenientBoolean` 用 union literals 严格复刻 `asBoolean` 的 `true/false/'true'/'false'/'1'/'0'/1/0` 覆盖（**不**用 `z.coerce.boolean()` —— 它会把字符串 `"false"` 当真，隐形翻转拒绝为确认）；`SKILL_CONTROL_SCHEMAS: Record<SkillControlToolName, ZodObject<ZodRawShape>>` 带 typed union 防止注册漂移。
+  - **新增 `src/main/modules/tools/tool-input-validator.ts`**：纯函数 `validateToolInput(toolName, args, schemas)`，无 schema 登记 → passthrough；`safeParse` OK → 返回解析后的 `data`（让 `.transform` 生效）；失败 → `createToolExecutionOutput` 带 `errorKind: 'input_validation'`，最多报 10 条 issue，`text` 中文格式 `"工具 X 输入校验失败：path — message"`。
+  - **抽出 `src/main/modules/tools/skill-execution-tool-defs.ts`**：把 `EXECUTION_TOOL_DEFS + toSchemaParam/toAnthropicTool/toOpenAITool` 从 `skills-tools.ts` 移到纯模块，为 golden snapshot 绕开 electron 导入链提供路径；同时把 6 个 tool defs 的 `params` 字段改为 `zodObjectToParamList(SKILL_CONTROL_SCHEMAS[name])` 派生，杀掉 Zod schema ↔ LLM-facing JSONSchema 双源漂移。
+  - **新增 `src/main/modules/tools/zod-param-derivation.ts`**：Zod v4 兼容的 `zodObjectToParamList`，走 `.description` accessor + `.meta()` fallback（Zod v4 的 description 不在 `_def` 里）；支持 `ZodString/Boolean/Number/Object/Record/Array/Optional/Default/Enum/Literal/Union/Pipe` 共 12 类节点，未识别节点**抛错**让测试立刻发现覆盖漏洞；ZodUnion 取第一个成员类型（lenient-boolean union 自动塌缩为 `boolean`）。
+  - **`tool-executor.ts` 接入 validator**：在 `getToolDefinition` 之后、`switch` 之前加 `if (definition.domain === 'skill')` 闸门，只对 skill 域走校验；失败打 `logAgentMetric('tool_input_validation_failed', { toolName, issueCount, firstCode, firstPath, sessionId })` 并提前 return；成功用 `args = outcome.data`（保留 transform 值）。dynamic skill-action 工具同是 skill 域但没注册 schema → passthrough。
+  - **新测试 4 份 + 1 份扩展**（27 case 全绿）：
+    - `skill-control-schemas.test.ts` 11 case —— 形状、optional、lenient boolean 所有合法变体、strip unknown keys。
+    - `tool-input-validator.test.ts` 5 case —— passthrough、coerce OK、失败结构、10 条 issue 上限、root-level error。
+    - `skill-zod-golden-snapshot.test.ts` 3 case —— LLM-facing Anthropic/OpenAI 输出 byte-for-byte 锁定（**commit 在派生切换之前**作为回归网）。
+    - `skill-zod-param-derivation.test.ts` 7 case —— 6 个 schema 派生结果 `deepEqual` 旧手写 params，外加 missing `.describe()` 报错路径。
+    - `tool-executor-contract.test.ts` 扩 1 case —— 校验闸门接入点、metric、`args = outcome.data` 赋值。
+  - 全量 `npm test`：1101 pass / 36 fail（Phase 1 基线 1074/36 → 净 +27 pass，无新回归）；`npx tsc --noEmit` 对所有触动文件干净。
+  - **Out-of-scope**：dynamic skill-action 工具（manifest 驱动），其他域（browser/document/feishu/...）—— pattern 现在已证明，后续按一个域一 PR 推进。MCP 适配 / Task-ID 前缀迁移留 Phase 4。
+
+- `2026-04-22` **工具错误契约重构 Phase 1 落地**（计划 `plans/2026-04-22-tool-error-contract-refactor.md` §5）：
+  - 触发：上一轮 "Agent 错误: Execution not found" 问题盘查后，确认 `tool-runtime.ts:290` 的 `classified.kind !== 'unknown'` 默认值对 LLM-agent 架构是反的（未分类错误被当作致命错误终结整轮），参考 CC-Source 的"所有 tool 错误都是 `is_error: true` tool_result"统一契约设计。
+  - **新增 `src/main/modules/tools/tool-errors.ts`**：`ToolDomainError`（领域错误，带 `errorKind + detail`）、`ToolHostUnavailableError`（host 能力离线，终结类）、`ToolAbortError`；`isTerminalInfrastructureError(error)` 基于 `error.name === 'AbortError'` / `instanceof ToolHostUnavailableError` 做 minify 安全的终结判定；`errorKindFor / errorMessageOf` 规范化导出。
+  - **`tool-executor.ts` 的 `executeToolCall` 外层包 try/catch**：dispatch switch 的所有 throw 被兜住；终结类 rethrow，其余转成带 `errorKind: 'tool_handler_failure'` 的 `ToolExecutionOutput` 并 `logAgentMetric('tool_error_surfaced', ...)`，模型可在下轮 tool_result 里看到并自纠。
+  - **`tool-runtime.ts:289-316` 翻转默认**：`kind === 'unknown'` 不再 `throw error`；入口先 `if (isTerminalInfrastructureError(error)) throw error` 放行终结类，其余一律转结构化返回；unknown-kind 额外 `logAgentMetric('tool_error_unknown_surfaced', ...)` 供后续观测 dispatch 兜底是否仍有漏网。AbortError 继续按原路径冒泡（outer runner 负责 interrupt hook）。
+  - **新测试 `src/__tests__/tool-executor-contract.test.ts`** 7 case 全绿：ToolDomainError kind/detail、ToolHostUnavailableError terminal、AbortError terminal、bare Error fallback to tool_handler_failure、非 Error 值也能 kind 化、`executeToolCall` 源码包 try/catch 且 terminal rethrow、`tool-runtime` 不再有尾部 `throw error`。
+  - 全量 `npm test`：1074 pass / 36 fail（基线 1072 pass / 38 fail，净 +2 pass / -2 fail，36 项失败均为预存 electron 导入链问题与本次无关）；`npm run typecheck` 对触动文件干净。
+  - 不破坏现有 retry/recover 机制（`timeout_tool` / `transient` / `host_unavailable` / `auth` 的 classifier + buildRecoveryPlan 链路保持不变）。后续 Phase 2（Zod 参数校验）/ Phase 3（IPC errorKind/recoverable）/ Phase 4（skill_executions TTL + 观测性收口）按 plan 分 PR 推进。
 
 - `2026-04-21` 全局搜索 Step 5（多源索引抽象）+ Step 6（Agent 工具层 · 反向链接 · 关系图谱）已落地（计划 `plans/1-4-piped-bear.md` §Step 5/6）：
   - **Migration 027**：`documents` 表新增 `source_type / source_meta_json / source_id` 列 + `idx_documents_source` 索引；插入 `@shared` workspace 承载非文件源。原 `(workspace_id, path)` 唯一键沿用，bookmark/rss/calendar/agent 各自用 `rss://id` 等伪 URI 落 path。

@@ -1,4 +1,6 @@
 import { buildToolParamSchema, normalizeAnthropicToolSchema, normalizeOpenAIToolSchema, type ToolParamSchemaSpec } from './tool-schema'
+import { FEISHU_SCHEMAS } from './schemas/feishu-schemas'
+import { zodObjectToParamList } from './zod-param-derivation'
 
 type ToolParam = ToolParamSchemaSpec
 
@@ -54,11 +56,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.docRead',
     intent: 'read_feishu_document',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'doc_token', type: 'string', description: '文档 token，从文档 URL 中提取', required: true },
-      { name: 'doc_type', type: 'string', description: '文档类型：doc(旧版文档), docx(新版文档), sheet(电子表格), bitable(多维表格)', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_doc_read) as ToolParam[],
   },
   {
     name: 'feishu_doc_create',
@@ -66,13 +64,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.docCreate',
     intent: 'create_feishu_document',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'title', type: 'string', description: '文档标题', required: true },
-      { name: 'doc_type', type: 'string', description: '文档类型', required: true },
-      { name: 'content', type: 'object', description: '文档内容，格式根据文档类型而定', required: false },
-      { name: 'folder_token', type: 'string', description: '可选：目标文件夹 token', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_doc_create) as ToolParam[],
   },
   {
     name: 'feishu_doc_update',
@@ -80,12 +72,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.docUpdate',
     intent: 'update_feishu_document',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'doc_token', type: 'string', description: '文档 token', required: true },
-      { name: 'doc_type', type: 'string', description: '文档类型', required: true },
-      { name: 'updates', type: 'object', description: '更新内容，格式根据文档类型而定', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_doc_update) as ToolParam[],
   },
   {
     name: 'feishu_doc_list',
@@ -93,12 +80,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.docList',
     intent: 'list_feishu_documents',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'folder_token', type: 'string', description: '可选：文件夹 token，不提供则列出根目录', required: false },
-      { name: 'doc_type', type: 'string', description: '可选：筛选文档类型，默认 all', required: false },
-      { name: 'limit', type: 'number', description: '可选：返回数量限制，默认 50', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_doc_list) as ToolParam[],
   },
 
   // ============================================================
@@ -110,12 +92,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.messageSend',
     intent: 'send_feishu_message',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'chat_id', type: 'string', description: '群聊 ID 或用户 open_id', required: true },
-      { name: 'content', type: 'object', description: '消息内容，支持文本、富文本、卡片等格式', required: true },
-      { name: 'msg_type', type: 'string', description: '消息类型', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_message_send) as ToolParam[],
   },
   {
     name: 'feishu_message_get_context',
@@ -123,13 +100,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.messageGetContext',
     intent: 'get_feishu_message_context',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
-      { name: 'limit', type: 'number', description: '可选：获取消息数量，默认 50', required: false },
-      { name: 'start_time', type: 'string', description: '可选：起始时间戳（秒）', required: false },
-      { name: 'end_time', type: 'string', description: '可选：结束时间戳（秒）', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_message_get_context) as ToolParam[],
   },
   {
     name: 'feishu_message_reply',
@@ -137,12 +108,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.messageReply',
     intent: 'reply_feishu_message',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'message_id', type: 'string', description: '要回复的消息 ID', required: true },
-      { name: 'content', type: 'object', description: '回复内容', required: true },
-      { name: 'msg_type', type: 'string', description: '消息类型', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_message_reply) as ToolParam[],
   },
 
   // ============================================================
@@ -154,13 +120,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.calendarListEvents',
     intent: 'list_feishu_calendar_events',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'calendar_id', type: 'string', description: '日历 ID，不提供则使用主日历', required: false },
-      { name: 'start_time', type: 'string', description: '起始时间（ISO 8601 格式）', required: true },
-      { name: 'end_time', type: 'string', description: '结束时间（ISO 8601 格式）', required: true },
-      { name: 'limit', type: 'number', description: '可选：返回数量限制，默认 50', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_calendar_list_events) as ToolParam[],
   },
   {
     name: 'feishu_calendar_create_event',
@@ -168,16 +128,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.calendarCreateEvent',
     intent: 'create_feishu_calendar_event',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'calendar_id', type: 'string', description: '可选：日历 ID，不提供则使用主日历', required: false },
-      { name: 'summary', type: 'string', description: '事件标题', required: true },
-      { name: 'description', type: 'string', description: '可选：事件描述', required: false },
-      { name: 'start_time', type: 'string', description: '开始时间（ISO 8601 格式）', required: true },
-      { name: 'end_time', type: 'string', description: '结束时间（ISO 8601 格式）', required: true },
-      { name: 'location', type: 'string', description: '可选：地点', required: false },
-      { name: 'attendees', type: 'array', description: '可选：参与者 open_id 列表', required: false, items: { type: 'string' } },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_calendar_create_event) as ToolParam[],
   },
   {
     name: 'feishu_calendar_update_event',
@@ -185,12 +136,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.calendarUpdateEvent',
     intent: 'update_feishu_calendar_event',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'event_id', type: 'string', description: '事件 ID', required: true },
-      { name: 'calendar_id', type: 'string', description: '可选：日历 ID', required: false },
-      { name: 'updates', type: 'object', description: '更新内容（summary, description, start_time, end_time, location, attendees）', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_calendar_update_event) as ToolParam[],
   },
   {
     name: 'feishu_calendar_delete_event',
@@ -198,11 +144,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.calendarDeleteEvent',
     intent: 'delete_feishu_calendar_event',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'event_id', type: 'string', description: '事件 ID', required: true },
-      { name: 'calendar_id', type: 'string', description: '可选：日历 ID', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_calendar_delete_event) as ToolParam[],
   },
 
   // ============================================================
@@ -214,10 +156,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.chatList',
     intent: 'list_feishu_chats',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'limit', type: 'number', description: '可选：返回数量限制，默认 50', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_chat_list) as ToolParam[],
   },
   {
     name: 'feishu_chat_get_members',
@@ -225,10 +164,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.chatGetMembers',
     intent: 'get_feishu_chat_members',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_chat_get_members) as ToolParam[],
   },
   {
     name: 'feishu_chat_get_info',
@@ -236,10 +172,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.chatGetInfo',
     intent: 'get_feishu_chat_info',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'chat_id', type: 'string', description: '群聊 ID', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_chat_get_info) as ToolParam[],
   },
 
   // ============================================================
@@ -251,12 +184,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.fileUpload',
     intent: 'upload_feishu_file',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'file_path', type: 'string', description: '本地文件路径', required: true },
-      { name: 'file_type', type: 'string', description: '文件类型', required: true },
-      { name: 'parent_token', type: 'string', description: '可选：父文件夹 token', required: false },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_file_upload) as ToolParam[],
   },
   {
     name: 'feishu_file_download',
@@ -264,11 +192,7 @@ const FEISHU_TOOLS: FeishuToolDef[] = [
     action: 'feishu.fileDownload',
     intent: 'download_feishu_file',
     executionKind: 'deterministic',
-    params: [
-      { name: 'channel_id', type: 'string', description: '飞书频道 ID', required: true },
-      { name: 'file_token', type: 'string', description: '文件 token', required: true },
-      { name: 'save_path', type: 'string', description: '保存路径', required: true },
-    ],
+    params: zodObjectToParamList(FEISHU_SCHEMAS.feishu_file_download) as ToolParam[],
   },
 ]
 
