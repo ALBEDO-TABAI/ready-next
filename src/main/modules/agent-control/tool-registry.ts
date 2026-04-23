@@ -50,11 +50,14 @@ export interface ToolRegistryProvider {
   staticToolNames?: readonly string[]
   hasDynamicSource?: boolean
   getToolDefinitions?: () => ToolDefinition[]
-  getToolDefinitionsDetailed?: () => ToolDefinitionResolution
+  // `sessionId` is optional and providers can ignore it. It is currently only
+  // consumed by the `skills` group to gate workflow-control tools when no
+  // active execution exists (B plan Phase 0).
+  getToolDefinitionsDetailed?: (sessionId?: string) => ToolDefinitionResolution
   getAnthropicTools?: () => Array<Record<string, unknown>>
-  getAnthropicToolsDetailed?: () => ToolSchemaResolution
+  getAnthropicToolsDetailed?: (sessionId?: string) => ToolSchemaResolution
   getOpenAITools?: () => Array<Record<string, unknown>>
-  getOpenAIToolsDetailed?: () => ToolSchemaResolution
+  getOpenAIToolsDetailed?: (sessionId?: string) => ToolSchemaResolution
 }
 
 export interface ToolRegistryOptions {
@@ -65,8 +68,12 @@ export interface ToolRegistryReader {
   hasDynamicSource(groupId: CapabilityGroupId): boolean
   getToolDefinition(toolName: string): ToolDefinition | null
   listToolDefinitions(): ToolDefinition[]
-  getToolDefinitionsForGroup(groupId: CapabilityGroupId): ToolDefinition[]
-  getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>>
+  getToolDefinitionsForGroup(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[]
+  getToolSchemasForGroup(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): Array<Record<string, unknown>>
 }
 
 export interface ToolDefinitionResolution {
@@ -399,14 +406,14 @@ function resolveToolResultShape(toolName: string, domain: ToolDomain): ToolDefin
   return 'text'
 }
 
-function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution {
+function resolveSkillToolSchemas(format: ToolSchemaFormat, sessionId?: string): ToolSchemaResolution {
   const staticToolNames = resolveStaticSkillToolNames()
   const staticTools = staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
   try {
     return {
       tools: format === 'anthropic'
-        ? getSkillAnthropicTools()
-        : getSkillOpenAITools(),
+        ? getSkillAnthropicTools(sessionId)
+        : getSkillOpenAITools(sessionId),
     }
   } catch (error) {
     return {
@@ -417,10 +424,10 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution
   }
 }
 
-function resolveSkillToolDefinitions(): ToolDefinitionResolution {
+function resolveSkillToolDefinitions(sessionId?: string): ToolDefinitionResolution {
   const staticToolNames = resolveStaticSkillToolNames()
   try {
-    const skillNames = collectToolNames(getSkillOpenAITools(), 'openai')
+    const skillNames = collectToolNames(getSkillOpenAITools(sessionId), 'openai')
     return {
       definitions: buildToolDefinitions('skills', skillNames),
     }
@@ -473,9 +480,9 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
   skills: {
     staticToolNames: resolveStaticSkillToolNames(),
     hasDynamicSource: true,
-    getToolDefinitionsDetailed: () => resolveSkillToolDefinitions(),
-    getAnthropicToolsDetailed: () => resolveSkillToolSchemas('anthropic'),
-    getOpenAIToolsDetailed: () => resolveSkillToolSchemas('openai'),
+    getToolDefinitionsDetailed: (sessionId?: string) => resolveSkillToolDefinitions(sessionId),
+    getAnthropicToolsDetailed: (sessionId?: string) => resolveSkillToolSchemas('anthropic', sessionId),
+    getOpenAIToolsDetailed: (sessionId?: string) => resolveSkillToolSchemas('openai', sessionId),
   },
   memory: {
     staticToolNames: MEMORY_TOOL_NAMES,
@@ -537,32 +544,39 @@ export class ToolRegistry implements ToolRegistryReader {
     return this.listToolDefinitions().find((tool) => tool.name === toolName) || null
   }
 
-  getToolDefinitionsResolutionForGroup(groupId: CapabilityGroupId): ToolDefinitionResolution {
+  getToolDefinitionsResolutionForGroup(
+    groupId: CapabilityGroupId,
+    sessionId?: string,
+  ): ToolDefinitionResolution {
     const provider = this.groupProviders[groupId]
     if (!provider) {
       return { definitions: [] }
     }
     if (provider.getToolDefinitionsDetailed) {
-      return this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed())
+      return this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
     }
     if (provider.getToolDefinitions) {
       try {
-        return this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() })
+        return this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
       } catch (error) {
         return this.enrichToolDefinitions(groupId, {
           definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
           error: getErrorMessage(error),
           usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-        })
+        }, sessionId)
       }
     }
     return this.enrichToolDefinitions(groupId, {
       definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
       usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-    })
+    }, sessionId)
   }
 
-  getToolSchemasResolutionForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): ToolSchemaResolution {
+  getToolSchemasResolutionForGroup(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): ToolSchemaResolution {
     const provider = this.groupProviders[groupId]
     const staticToolNames = provider?.staticToolNames || []
 
@@ -570,7 +584,7 @@ export class ToolRegistry implements ToolRegistryReader {
       ? provider?.getAnthropicToolsDetailed
       : provider?.getOpenAIToolsDetailed
     if (detailedResolver) {
-      return detailedResolver()
+      return detailedResolver(sessionId)
     }
 
     const directResolver = format === 'anthropic'
@@ -605,25 +619,30 @@ export class ToolRegistry implements ToolRegistryReader {
     return Array.from(tools.values())
   }
 
-  getToolDefinitionsForGroup(groupId: CapabilityGroupId): ToolDefinition[] {
-    return this.getToolDefinitionsResolutionForGroup(groupId).definitions
+  getToolDefinitionsForGroup(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[] {
+    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId).definitions
   }
 
-  getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
-    return this.getToolSchemasResolutionForGroup(groupId, format).tools
+  getToolSchemasForGroup(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): Array<Record<string, unknown>> {
+    return this.getToolSchemasResolutionForGroup(groupId, format, sessionId).tools
   }
 
   private enrichToolDefinitions(
     groupId: CapabilityGroupId,
     resolution: ToolDefinitionResolution,
+    sessionId?: string,
   ): ToolDefinitionResolution {
     if (resolution.definitions.length === 0) {
       return resolution
     }
 
     const metadata = mergeToolMetadata(
-      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'openai').tools, 'openai'),
-      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'anthropic').tools, 'anthropic'),
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'openai', sessionId).tools, 'openai'),
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'anthropic', sessionId).tools, 'anthropic'),
     )
 
     return {

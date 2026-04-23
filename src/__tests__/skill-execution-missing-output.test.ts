@@ -54,6 +54,7 @@ describe('buildSkillExecutionMissingOutput', () => {
       activeSkillId: 'video-copy-analyzer',
       activeStatus: 'blocked',
       originalMessage: 'Execution not found: exec-ghost',
+      referenceHint: null,
     })
   })
 

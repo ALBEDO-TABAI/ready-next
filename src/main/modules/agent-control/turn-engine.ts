@@ -507,6 +507,7 @@ export class TurnEngine {
             || executionIntentContext.requestEnvelope.pureUserText
             || userText,
         },
+        sessionId: request.sessionId,
       })
       const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
       appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({

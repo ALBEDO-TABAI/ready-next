@@ -145,6 +145,7 @@ export function buildExecutionToolState(params: {
   browserDecisionMode: BrowserTaskDecisionMode
   browserHostAvailable?: boolean
   feishuConnected?: boolean
+  sessionId?: string
 }): { visibilityPlan: ToolVisibilityPlan; toolPolicy: ToolPolicy; capabilityResolution: CapabilityResolution } {
   const hasLiveInfoBrowserIntent = params.intentClassification.objectSignals.some((signal) => /browser-live-info/i.test(signal))
   const baseVisibilityPlan = buildToolVisibilityPlan({
@@ -233,6 +234,7 @@ export function buildExecutionToolState(params: {
       visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
       hostOnlyCapabilityGroupIds: capabilityResolution.hostOnlyCapabilityIds,
       capabilityReasons: capabilityResolution.reasons,
+      sessionId: params.sessionId,
     },
   }
 }

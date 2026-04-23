@@ -15,6 +15,12 @@ import {
   toOpenAITool,
 } from '../main/modules/tools/skill-execution-tool-defs'
 
+// P0-T2 (B plan Phase 0): 5 of the 6 control tools now prefix their
+// description with an ONLY-call guard to stop LLMs from fabricating an
+// executionId like "new". `skill_get_state` is read-only and unchanged.
+const EXECUTION_CONTROL_ONLY_PREFIX =
+  'ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0". '
+
 const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   skill_get_state: {
     name: 'skill_get_state',
@@ -30,7 +36,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_input: {
     name: 'skill_submit_input',
-    description: '向一个被 need_input 阻塞的 execution 提交输入并继续推进。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向一个被 need_input 阻塞的 execution 提交输入并继续推进。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -42,7 +48,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_confirmation: {
     name: 'skill_submit_confirmation',
-    description: '提交 confirmation 结果并继续执行 skill workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}提交 confirmation 结果并继续执行 skill workflow。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -55,7 +61,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_agent_result: {
     name: 'skill_submit_agent_result',
-    description: '向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -69,7 +75,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_restart_from_step: {
     name: 'skill_restart_from_step',
-    description: '从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -82,7 +88,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_cancel_execution: {
     name: 'skill_cancel_execution',
-    description: '取消一个正在进行的 skill execution。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}取消一个正在进行的 skill execution。`,
     input_schema: {
       type: 'object',
       properties: {

@@ -13,6 +13,8 @@ import {
   buildSkillExecutionMissingOutput,
   type SkillCoordinatorOperation,
 } from './skill-execution-missing'
+import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
+import { filterExecutionControlToolsBySession } from './skill-tool-session-gate'
 import {
   EXECUTION_TOOL_DEFS,
   toAnthropicTool,
@@ -119,8 +121,13 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
   }
 }
 
-function getSkillToolDefs(): SkillToolDef[] {
-  return [...getSkillActionToolDefs(), ...EXECUTION_TOOL_DEFS]
+function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
+  const executionTools = filterExecutionControlToolsBySession(
+    EXECUTION_TOOL_DEFS,
+    sessionId,
+    (sid) => findExecutionForSession(sid) !== null,
+  )
+  return [...getSkillActionToolDefs(), ...executionTools]
 }
 
 function formatExecutionDetail(detail: SkillExecutionDetail): string {
@@ -234,6 +241,7 @@ async function runSkillCoordinator(params: {
       operation: params.operation,
       activeExecution,
       originalMessage: message,
+      lastReferenceSkill: getLastReferenceSkill(params.sessionId),
     })
   }
 }
@@ -310,14 +318,18 @@ function findExecutionForSession(sessionId?: string, executionId?: string, skill
   return manager.getExecution(matched.id)
 }
 
-export function getSkillAnthropicTools(): Array<Record<string, unknown>> {
-  return getSkillToolDefs().map(toAnthropicTool)
+export function getSkillAnthropicTools(sessionId?: string): Array<Record<string, unknown>> {
+  return getSkillToolDefs(sessionId).map(toAnthropicTool)
 }
 
-export function getSkillOpenAITools(): Array<Record<string, unknown>> {
-  return getSkillToolDefs().map(toOpenAITool)
+export function getSkillOpenAITools(sessionId?: string): Array<Record<string, unknown>> {
+  return getSkillToolDefs(sessionId).map(toOpenAITool)
 }
 
+// Handler lookup always sees the full tool set. If the LLM still manages to
+// invoke a gated tool (e.g. pulled from training memory), we want the dispatch
+// layer to run the normal `Execution not found` path rather than return
+// `Unknown skill tool`. Gating is a LISTING concern, not an execution concern.
 export function findSkillToolByName(toolName: string): SkillToolDef | null {
   return getSkillToolDefs().find((item) => item.name === toolName) || null
 }
@@ -353,6 +365,7 @@ export async function executeSkillTool(
             operation: 'get_state',
             activeExecution: findExecutionForSession(sessionId),
             originalMessage: `Execution not found: ${explicitId}`,
+            lastReferenceSkill: getLastReferenceSkill(sessionId),
           })
         }
         return 'No active skill execution found.'
@@ -415,6 +428,7 @@ export async function executeSkillTool(
           operation: 'cancel_execution',
           activeExecution: findExecutionForSession(sessionId),
           originalMessage: `Execution not found: ${executionId}`,
+          lastReferenceSkill: getLastReferenceSkill(sessionId),
         })
       }
       default:

@@ -1,5 +1,6 @@
 import type { SkillState } from '../skills-runtime/runtime-manager'
 import type { ToolExecutionOutput } from './tool-result-types'
+import { rememberLastReferenceSkill } from './skill-reference-hints'
 
 interface SkillToolRef {
   name?: string
@@ -165,6 +166,11 @@ export class SkillContextOrchestrator {
           skillContent,
         ].filter(Boolean).join('\n'),
       })
+      // P0-T3: remember this reference skill so that if the LLM still tries to
+      // fabricate a skill_submit_* call, the error message can tell it the
+      // loaded skill has no workflow state rather than the generic
+      // "call skill_get_state" guidance.
+      rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
     }
   }
 

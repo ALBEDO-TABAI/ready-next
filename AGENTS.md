@@ -75,6 +75,9 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 系统级 embedded skills 与用户 custom skills 要分层管理
 - Agent 调用 skill 时优先走统一 `skill_*` 工具，而不是绕到手工网页流程
 - 更新 skill 管理逻辑时，要同时考虑运行时、UI、默认命令与说明文案
+- LLM-facing 的 `skill_submit_input / skill_submit_confirmation / skill_submit_agent_result / skill_restart_from_step / skill_cancel_execution` 5 个工具按 session 状态动态曝光：当 `ToolPolicy.sessionId` 提供且该 session 无 active execution 时必须被过滤掉，只保留只读的 `skill_get_state`；入口在 `skill-tool-session-gate.ts::filterExecutionControlToolsBySession`
+- 这 5 个工具的 description 前置固定子句 `ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0".`，防止模型在 reference 技能场景下编造 executionId；文案变更由 `src/__tests__/skill-zod-golden-snapshot.test.ts` 锁定
+- Reference 技能（`runtime: reference` / `execution.mode: advisory`）被内联注入时，orchestrator 必须调 `skill-reference-hints.rememberLastReferenceSkill(sessionId, {id,name})` 登记；`buildSkillExecutionMissingOutput` 检测到 `lastReferenceSkill` 后会用「不要再调 skill_submit_*」文案替代通用 `skill_get_state` 引导
 
 ### 6.8 文档多资源任务原则
 - 文档任务里的附件、`@[文件]`、当前文档上下文、引用片段都必须先进入结构化资源层，不能在入口阶段直接拼平成一段大文本
