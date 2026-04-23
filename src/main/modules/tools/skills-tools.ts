@@ -20,10 +20,12 @@ import {
 } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
+  executeAskUser,
   executeReadArtifact,
   executeRunShell,
   executeWriteArtifact,
 } from './skill-primitives'
+import { getAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
 import {
   EXECUTION_TOOL_DEFS,
   toAnthropicTool,
@@ -464,6 +466,23 @@ export async function executeSkillTool(
           originalMessage: `Execution not found: ${executionId}`,
           lastReferenceSkill: getLastReferenceSkill(sessionId),
         })
+      }
+      case 'skill_ask_user': {
+        const skillId = resolvePrimitiveSkillId(sessionId)
+        return executeAskUser(
+          {
+            question: asString(args.question),
+            options: Array.isArray(args.options)
+              ? (args.options as unknown[]).filter((v) => typeof v === 'string') as string[]
+              : undefined,
+            placeholder: typeof args.placeholder === 'string' ? args.placeholder : undefined,
+          },
+          {
+            sessionId,
+            skillId: skillId || undefined,
+            emitAskUserQuestion: getAskUserQuestionEmitter(),
+          },
+        )
       }
       case 'skill_run_shell':
       case 'skill_write_artifact':

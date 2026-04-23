@@ -161,7 +161,15 @@ export interface AgentArtifact {
 }
 
 export type ScopeRunTaskStepStatus = 'pending' | 'running' | 'blocked' | 'done' | 'error'
-export type ScopeRunWaitingFor = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+export type ScopeRunWaitingFor =
+  | 'input'
+  | 'confirmation'
+  | 'agent_result'
+  // B Phase 1 PR2 T1-8: primitive_ask_user → 'clarification' — drives the
+  // SkillAskUserPrompt capsule.
+  | 'clarification'
+  | 'background'
+  | 'none'
 export type ScopeRunResumableAction = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
 
 export interface ScopeRunTaskStep {

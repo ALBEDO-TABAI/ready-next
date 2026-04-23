@@ -392,6 +392,10 @@ function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
   if (blockerType === 'need_input') return 'input'
   if (blockerType === 'need_confirmation') return 'confirmation'
   if (blockerType === 'need_agent_result') return 'agent_result'
+  // B Phase 1 PR2 T1-8: ephemeral ask_user questions map to the
+  // clarification waiting-for so the renderer knows to mount the
+  // SkillAskUserPrompt capsule instead of a generic input form.
+  if (blockerType === 'primitive_ask_user') return 'clarification'
   return blockerType ? 'background' : 'none'
 }
 

@@ -431,6 +431,26 @@ const skillsAPI = {
   restartFromStep: (payload: { executionId: string; stepId: string; inputs?: Record<string, unknown> }) =>
     ipcRenderer.invoke('skills:executions:restartFromStep', payload),
   cancelExecution: (payload: { executionId: string }) => ipcRenderer.invoke('skills:executions:cancel', payload),
+  // B Phase 1 PR2 — ask_user: submit the user's answer to a pending ephemeral
+  // question. Question metadata is pushed separately via `skill:askUserQuestion`.
+  submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>
+    ipcRenderer.invoke('skills:askUser:submit', payload),
+  listPendingAskUser: () => ipcRenderer.invoke('skills:askUser:pending'),
+  onAskUserQuestion: (
+    handler: (event: {
+      executionId: string
+      sessionId: string | null
+      skillId: string | null
+      question: string
+      options: string[] | null
+      placeholder: string | null
+      askedAt: number
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload)
+    ipcRenderer.on('skill:askUserQuestion', listener)
+    return () => ipcRenderer.removeListener('skill:askUserQuestion', listener)
+  },
   listSchedules: () => ipcRenderer.invoke('skills:schedules:list'),
   createSchedule: (payload: {
     skillId: string

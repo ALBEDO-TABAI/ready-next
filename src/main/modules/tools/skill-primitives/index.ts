@@ -25,3 +25,21 @@ export {
   SHELL_ALLOWLIST,
 } from './run-shell'
 export type { RunShellArgs, RunShellHandlerDeps } from './run-shell'
+export { executeAskUser } from './ask-user'
+export type {
+  AskUserArgs,
+  AskUserHandlerDeps,
+  AskUserQuestionEvent,
+  EmitAskUserQuestion,
+} from './ask-user'
+export {
+  EphemeralExecutionStore,
+  EPHEMERAL_ASK_USER_ID_PREFIX,
+  generateEphemeralAskUserId,
+  getEphemeralExecutionStore,
+  isEphemeralAskUserId,
+} from './ephemeral-execution-store'
+export type {
+  EphemeralAskUserRecord,
+  PendingAskUserView,
+} from './ephemeral-execution-store'

@@ -81,6 +81,10 @@ export async function cleanupAgentRuntime(): Promise<void> {
   // idle TTL sweep, which has a 30-minute granularity.
   const { clearAllReferenceSkillHints } = await import('../agent-control/skill-reference-hints')
   clearAllReferenceSkillHints()
+  // B Phase 1 PR2 — drop any pending ask_user records so their awaiting
+  // Promises reject with a synthetic shutdown error rather than hanging.
+  const { getEphemeralExecutionStore } = await import('../tools/skill-primitives/ephemeral-execution-store')
+  getEphemeralExecutionStore().clear()
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
@@ -90,6 +94,40 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   } else if (browserController) {
     runtime.getOrchestrator().setBrowserController(browserController)
   }
+  // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
+  // renderer. The bridge keeps the handler independent of electron so it can
+  // be unit-tested under `tsx --test`.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { registerAskUserQuestionEmitter } = require('../agent-control/ask-user-bridge') as typeof import('../agent-control/ask-user-bridge')
+  registerAskUserQuestionEmitter((event) => {
+    if (mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('skill:askUserQuestion', event)
+  })
+  // setupAgentIPC runs on every dev reload; strip any prior handler so
+  // `ipcMain.handle` doesn't throw on the second registration.
+  try { ipcMain.removeHandler('skills:askUser:submit') } catch { /* ignore */ }
+  try { ipcMain.removeHandler('skills:askUser:pending') } catch { /* ignore */ }
+  ipcMain.handle('skills:askUser:submit', (_event, rawPayload: unknown) => {
+    const payload = (rawPayload || {}) as { executionId?: string; answer?: string }
+    const executionId = typeof payload.executionId === 'string' ? payload.executionId : ''
+    const answer = typeof payload.answer === 'string' ? payload.answer : ''
+    if (!executionId) {
+      return { success: false, error: 'executionId is required' }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
+    const store = getEphemeralExecutionStore()
+    const resolved = store.resolve(executionId, answer)
+    if (!resolved) {
+      return { success: false, error: 'No pending ask_user question with this id (already answered or timed out)' }
+    }
+    return { success: true }
+  })
+  ipcMain.handle('skills:askUser:pending', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
+    return getEphemeralExecutionStore().list()
+  })
   const orchestrator = runtime.getOrchestrator()
   const pendingToolActionRequests = new Map<string, {
     resolve: (payload: Record<string, unknown>) => void

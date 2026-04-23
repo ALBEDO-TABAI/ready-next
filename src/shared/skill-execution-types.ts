@@ -200,7 +200,18 @@ export interface ExecutionBlockerInputField {
 }
 
 export interface ExecutionBlocker {
-  type: 'need_input' | 'need_confirmation' | 'need_agent_result' | 'completed' | 'failed'
+  type:
+    | 'need_input'
+    | 'need_confirmation'
+    | 'need_agent_result'
+    // B Phase 1 PR2 T1-7: a new blocker subtype for `skill_ask_user`. Lives
+    // alongside the workflow-oriented blockers but does NOT advance any
+    // `skill_executions` step — it's a one-shot question whose resume path
+    // is driven by the primitive handler's Promise rather than by
+    // ExecutionCoordinator.
+    | 'primitive_ask_user'
+    | 'completed'
+    | 'failed'
   executionId: string
   skillId: string
   stepId?: string
@@ -215,6 +226,12 @@ export interface ExecutionBlocker {
     outputKey?: string
     generatedFiles?: SkillGeneratedFileDefinition[]
     sourceMaterials?: SkillSourceMaterial[]
+  }
+  primitiveAskUser?: {
+    question: string
+    options?: string[]
+    placeholder?: string
+    askedAt: number
   }
 }
 

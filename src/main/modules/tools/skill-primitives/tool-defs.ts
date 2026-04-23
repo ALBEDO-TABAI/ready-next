@@ -14,11 +14,16 @@ import type { SkillToolDef } from '../skill-execution-tool-defs'
 import { zodObjectToParamList } from '../zod-param-derivation'
 import { SKILL_PRIMITIVE_SCHEMAS } from './primitive-schemas'
 
-// Phase 1 PR1 exposes write/read/run-shell. `skill_ask_user` lands in PR2
-// (needs the blocker / IPC / renderer capsule work). Its schema lives in
-// primitive-schemas.ts so Zod dispatch validation is ready the moment PR2
-// adds a handler; the tool def entry below will extend at that time.
+// Phase 1 PR1 exposed write/read/run-shell. Phase 1 PR2 adds `skill_ask_user`
+// (ephemeral execution + renderer capsule + 24h timeout).
 export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
+  {
+    name: 'skill_ask_user',
+    description:
+      '向用户发起一次澄清问题，暂停当前 skill 直到用户回复。最多 12 个预设选项按钮，用户也可自由输入。24 小时无响应自动超时。用于你需要一个关键参数 / 决策而无法从上下文推断时；禁止在已经能自行决策时调用。回复结果通过 tool_result 返回。',
+    kind: 'execution_control',
+    params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_ask_user),
+  },
   {
     name: 'skill_run_shell',
     description:
