@@ -279,7 +279,7 @@ src/main/modules/tools/skill-primitives/
 - **改**：`src/main/modules/agent-control/skill-context-orchestrator.ts::maybeInjectExplicitSkillContext`
 - 当技能 `runtime === 'reference'` 时：
   - **旧行为**：调 `skill_*_read_skill` 工具（产生 tool_use 日志）
-  - **新行为**：直接 `readFileSync(<managedPath>/SKILL.md)` → 作为 `{ role: 'user', isMeta: true, content: <...> }` 注入
+  - **新行为**：直接 `readFileSync(<managedPath>/SKILL.md)` → 作为 `{ role: 'system', content: <...> }` 注入（spec 起草时写的 `role: 'user', isMeta: true` 是误记；实际实现走 `role: 'system'`，与 CLAUDE §6.7 一致）
   - 同时写入 `session.skillHints.lastReferenceSkill` 给 Phase 0 的错误分支用
 - 保留旧代码路径作为 workflow 技能的 fallback（runtime !== reference 时继续走 tool 调用）
 - **改**：`custom-skill-registry.ts` 让 reference skill 的 `read_skill` action 默认 `visibility: 'internal'`（避免 LLM 看到这个动作工具）
@@ -452,6 +452,16 @@ when-to-use: 用户给出视频 URL 或本地路径，希望拿到逐段分镜�
 ---
 
 ## 5. Phase 3 — 剩余技能迁移（7–10 天）
+
+> **状态：已完成（2026-04-23）** — 实施时偏离 spec 的几个关键点（实施备注）：
+> 1. **`video-expert-analyzer` 不做小步迁移，整体替换为 vnext**（`/Users/user/Documents/实验田/video-expert-analyzer-vnext`）。vnext 自带 staged 续跑、OpenClaw 接力、19 类视频路由，本身已经是「reference + prescriptive」形态，无需在旧 4-step workflow 上重画 markdown。
+> 2. **`lets-go-rss` 走混合形态而不是纯 reference**：5 个 typed `skill_rss_*` action 全部保留 `visibility: 'public'`（slash 命令 / SkillsCenterPanel UI / `rss-domain-adapter` / 用户力肌记忆都依赖），新增 `read_skill`（reference, internal）只为让 orchestrator inline 注入 SKILL.md（含 Bot 推送严格 ❌ 列表）。
+> 3. **`runtime: 'handler'` 经评估为不必要**：spec §5.3 提议把 `lets-go-rss` action 接到主进程 `rss-engine` 的 JS API，但 Ready 的 `src/main/modules/rss-engine` 服务的是用户工作台 RSS reader，与 embedded `lets-go-rss` 多平台聚合 bot 是两个产品；机械等同会换脸用户期待。decision：移到 Phase 5 C 准备 brief 的开放问题观察。
+> 4. **vnext SKILL.md inline 12K cap 不动**：vnext SKILL.md 表面 17.8KB（磁盘字节数）但 JS string length 只 10.4K UTF-16 code units（CJK 内容压缩），完全在 12K cap 内。原计划的 cap 12K → 24K 提升不必要，未实施。
+> 5. **`item-analysis-manager.ts` 的兼容层**：vnext 删了旧 `ready_pipeline.py` / `ready_ai_analyze.py`，但 `rss-engine/item-analysis-manager.ts` 仍 `runSkill({skillId:'video-expert-analyzer', action:'video_expert_pipeline' / 'video_expert_ai_analyze'})`。新增 `scripts/ready_compat.py` 翻译旧 `--payload-json` 契约到 vnext `orchestrate_vnext.py` 的位置/flag CLI，配套 manifest 留 2 个 `visibility: 'internal'` python action。
+> 6. **顺手收口 `ScopeRunWaitingFor.clarification` 类型穿透**：Phase 1 给类型加了 `'clarification'` 但 4 个消费点没跟着，`tsc --noEmit` 长期 2 红；本期一并补齐 `turn-engine.ts:775` / `run-contracts.ts:659` / `domain-adapter.ts:21` / `browser-domain-adapter.ts:40`。
+>
+> 详细变更见 `CHANGELOG.md` 与 3 份新 e2e 测试（共 20 case 全绿）。
 
 ### 5.1 目标
 把 `video-expert-analyzer` 和 `lets-go-rss` 两个复杂技能按 Phase 2 模板迁移。

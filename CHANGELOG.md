@@ -2,6 +2,28 @@
 
 ## [Unreleased] - 2026-04-23
 
+### Skill Runtime B — Phase 3（video-expert vnext swap + lets-go-rss 混合迁移 + 跨技能回归）
+
+- **video-expert-analyzer 整体替换为 vnext**（`/Users/user/Documents/实验田/video-expert-analyzer-vnext`）：
+  - 26 个 vnext 脚本（`scripts/audiovisual/`、`host_batching.py`、`run_state.py`、`openclaw_dispatch.py`、`storyboard_generator.py` 等）+ `docs/`、`templates/`、`chart/` 全量拷入；旧 13 个 Python 脚本与 `skill.workflow.json` 删除
+  - `ready-skill.json` 改写为 `execution.mode: advisory` + `defaultAction: read_skill`，3 个 action：`read_skill`（reference, internal）+ 2 个 `visibility:'internal'` python 兼容 action（`video_expert_pipeline` / `video_expert_ai_analyze`）
+  - 新增 `scripts/ready_compat.py` 兼容适配器：把旧 `--payload-json {url,outputDir,sceneThreshold,bestThreshold}` 翻译成 vnext `orchestrate_vnext.py` 的位置/flag 参数；`item-analysis-manager.ts` 的 RSS 视觉分析路径无回归
+  - SKILL.md 在 vnext 自带 `name + description` 基础上补 `when-to-use`，遵循 Claude Skill 协议；vnext 正文里大量精确命令保留（prescriptive 型 reference 技能允许内嵌精确命令，与 §6.7 描述一致）
+  - 新增依赖：`anthropic / mlx-whisper / ffmpeg-python / browser_cookie3 / Pillow`，由共享 venv best-effort 安装；mlx-whisper Linux/Windows 装失败由 §6.11 错误回灌契约兜底
+- **lets-go-rss 混合迁移**：
+  - `ready-skill.json` 加 `read_skill`（reference, internal）action 并把 `defaultAction` 从 `rss_update` 翻到 `read_skill` —— 用户一句"用 lets-go-rss"会触发 orchestrator inline 注入 SKILL.md（含 Bot 推送规范严格 ❌ 列表），不再走"工具说明只够 LLM 自由发挥"的旧路径
+  - 5 个 `skill_rss_*` python action 全部保留 `visibility: 'public'`（slash 命令 `/skill lets-go-rss rss_update {…}` / SkillsCenterPanel UI 快捷键 / `rss-domain-adapter` 的 `skill_rss_*` 偏好前缀 / 用户力肌记忆都需要）
+  - SKILL.md 顶部加「执行原则」段落：优先 typed `skill_rss_*` 工具、复杂场景再 `skill_run_shell`、Bot 推送严格按下文规范执行、不替用户改 crontab；`when-to-use` frontmatter 同步补上
+- **inline cap 评估后维持 12K**：vnext SKILL.md 表面看 17.8 KB（磁盘字节数），实际 JS string length 仅 10.4K UTF-16 code units（CJK 内容压缩），完全在现有 12K cap 内 — Phase 3 计划里"raise cap to 24K"的前置假设按字节算时被推翻，cap 不动
+- **`ScopeRunWaitingFor.clarification` 类型在 4 个消费点完成传递**：Phase 1 给 `ScopeRunWaitingFor` 加了 `'clarification'` 但 4 处局部 union 没跟着，导致 `tsc --noEmit` 长期 2 红；本次顺手在 `turn-engine.ts:775` / `run-contracts.ts:659` / `domain-adapter.ts:21` / `browser-domain-adapter.ts:40` 一次性补齐
+- **新增 e2e 3 份共 20 case**：
+  - `embedded-skill-video-expert-vnext-swap.test.ts`（7 case）：manifest 3-action 形态、compat 适配器在位、orchestrate_vnext.py / docs 引用文件落盘、SKILL.md 12K cap 内不被截断、reference 路径不创 `skill_executions` 行
+  - `embedded-skill-lets-go-rss-migration.test.ts`（4 case）：6-action 混合形态（read_skill + 5 retained）、`defaultAction = read_skill`、SKILL.md frontmatter `when-to-use` 就位、orchestrator inline 注入命中
+  - `embedded-skill-batch-reference-migration.test.ts`（9 case）：3 个迁移技能共享同一份契约（advisory + read_skill default + 无 workflow.json + when-to-use frontmatter）
+- **CLAUDE.md / AGENTS.md §6.7 同步**：新增一条「Phase 3 已完成 video-expert (vnext swap) + lets-go-rss (混合) reference 化；至此所有 embedded skill 均无 `skill.workflow.json`；prescriptive 型 reference 技能允许 SKILL.md 内嵌精确命令」
+- **未做**：不引入 `runtime: 'handler'` 分支（spec §5.3 经评估为不必要 — Ready 主进程 `rss-engine` 服务用户 RSS reader，与 embedded `lets-go-rss` 多平台聚合 bot 是两个产品，不可机械等同）；不删除 `skill_executions` 表 / loader / `EXECUTION_TOOL_DEFS`（Phase 4 才退役）；不拆 `ready_pipeline.py`（vnext 自带 staged orchestrator 替代）
+- 回归：全套 1522 case，36 红保持不变（与 Phase 0/1/2 audit 基线一致），3 份新 e2e 共 20 case 全绿；`tsc --noEmit` 双 project 干净
+
 ### Skill Runtime B — Phase 1 finalize + Phase 2 (video-copy-analyzer 机械迁移)
 
 - **Phase 1 接线补齐**：`SkillsRuntimeManager.getSharedVenvBinDir()` 暴露共享 venv bin 目录（Unix `<venvRoot>/bin` / Windows `<venvRoot>/Scripts`），dispatch 层 `skills-tools.ts:505` 在调用 `executeRunShell` 时自动前置到子进程 `PATH`；修复 `skill_run_shell` 之前无法 import venv-installed Python 模块（yt-dlp / funasr / torch / …）的盲点。新增 run-shell mock-spawn 测试验证 PATH 注入顺序
