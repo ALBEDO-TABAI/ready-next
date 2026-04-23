@@ -13,9 +13,12 @@ test('tool executor rejects tool calls outside the current allowlist', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
   assert.match(executor, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
-  assert.match(executor, /if \(allowedToolNames && !allowedToolNames\.has\(toolName\)\) \{[\s\S]*Tool not allowed in current context/)
-  assert.match(executor, /const definition = defaultToolGateway\.getToolDefinition\(toolName\)/)
-  assert.match(executor, /if \(allowedToolNames && !allowedToolNames\.has\(toolName\)\) \{[\s\S]*const definition = defaultToolGateway\.getToolDefinition\(toolName\)/)
+  // R3: definition check MUST come before the allowlist check so the model
+  // can distinguish "unknown tool" (fabricated name) from "tool not allowed"
+  // (real but restricted this turn). See tool-not-allowed-message.ts rationale.
+  assert.match(executor, /const definition = defaultToolGateway\.getToolDefinition\(toolName\)[\s\S]*if \(allowedToolNames && !allowedToolNames\.has\(toolName\)\)/)
+  assert.match(executor, /buildUnknownToolMessage\(toolName\)/)
+  assert.match(executor, /buildToolNotAllowedMessage\(toolName, allowedToolNames\)/)
   assert.match(builder, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
   assert.match(builder, /allowedToolNames:\s*params\.allowedToolNames \|\| null/)
   assert.match(turnEngine, /const preparedToolContext = buildHostToolContext\(preparedRunCapabilities\.allowedToolNames\)/)

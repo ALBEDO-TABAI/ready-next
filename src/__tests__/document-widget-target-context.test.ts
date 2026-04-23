@@ -159,7 +159,8 @@ describe('document widget target context', () => {
       'utf8',
     )
 
-    assert.match(source, /const hasWidgetTargetContext = params\.requestEnvelope\.environmentHints\.hasWidgetTargetContext/)
+    assert.match(source, /const envelopeHasWidgetTarget = params\.requestEnvelope\.environmentHints\.hasWidgetTargetContext/)
+    assert.match(source, /const hasWidgetTargetContext = envelopeHasWidgetTarget \|\| leaseStickyEligible/)
     assert.match(source, /const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent\(contextualUserInput\)/)
     assert.match(source, /hasWidgetTargetContext && !explicitWidgetCreateIntent[\s\S]*\? 'update'/)
     assert.match(source, /const allowDocumentTools = baseVisibilityPlan\.hasTools && \([\s\S]*params\.hasWidgetTargetContext[\s\S]*shouldForceDocumentToolCall\(params\.contextualUserInput\)/)

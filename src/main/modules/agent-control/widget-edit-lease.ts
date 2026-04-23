@@ -6,6 +6,8 @@ export interface ActiveWidgetEditLease {
   acquiredAt: number
   expireAt: number
   origin: 'pipeline_write' | 'pipeline_locate' | 'envelope_widget_target'
+  widgetFingerprint?: string | null
+  widgetTextSample?: string | null
 }
 
 export interface AcquireWidgetEditLeaseInput {
@@ -15,6 +17,14 @@ export interface AcquireWidgetEditLeaseInput {
   widgetTitle?: string | null
   origin: ActiveWidgetEditLease['origin']
   ttlMs?: number
+  widgetFingerprint?: string | null
+  widgetTextSample?: string | null
+}
+
+export interface RefreshWidgetEditLeaseInput {
+  ttlMs?: number
+  widgetFingerprint?: string | null
+  widgetTextSample?: string | null
 }
 
 const DEFAULT_TTL_MS = 120_000
@@ -37,9 +47,39 @@ export class WidgetEditLeaseStore {
       acquiredAt: now,
       expireAt: now + ttl,
       origin: input.origin,
+      widgetFingerprint: input.widgetFingerprint ?? null,
+      widgetTextSample: input.widgetTextSample ?? null,
     }
     this.leases.set(WidgetEditLeaseStore.buildKey(agent, sessionId), lease)
     return lease
+  }
+
+  refresh(
+    agent: string,
+    sessionId: string | null | undefined,
+    input?: RefreshWidgetEditLeaseInput,
+  ): ActiveWidgetEditLease | null {
+    const key = WidgetEditLeaseStore.buildKey(agent, sessionId)
+    const existing = this.leases.get(key)
+    if (!existing) return null
+    const now = Date.now()
+    if (existing.expireAt <= now) {
+      this.leases.delete(key)
+      return null
+    }
+    const ttl = Math.max(10_000, input?.ttlMs ?? DEFAULT_TTL_MS)
+    const next: ActiveWidgetEditLease = {
+      ...existing,
+      expireAt: now + ttl,
+      widgetFingerprint: input && 'widgetFingerprint' in input
+        ? input.widgetFingerprint ?? null
+        : existing.widgetFingerprint ?? null,
+      widgetTextSample: input && 'widgetTextSample' in input
+        ? input.widgetTextSample ?? null
+        : existing.widgetTextSample ?? null,
+    }
+    this.leases.set(key, next)
+    return next
   }
 
   resolve(agent: string, sessionId: string | null | undefined): ActiveWidgetEditLease | null {
@@ -65,5 +105,10 @@ export class WidgetEditLeaseStore {
 
   clear(): void {
     this.leases.clear()
+  }
+
+  snapshotAll(): ActiveWidgetEditLease[] {
+    const now = Date.now()
+    return Array.from(this.leases.values()).filter((lease) => lease.expireAt > now)
   }
 }

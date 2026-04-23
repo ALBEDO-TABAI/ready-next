@@ -218,14 +218,23 @@ describe('document widget renderer contract', () => {
       resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
       'utf8',
     )
+    // Phase 2.5 PR 7: widget tool descriptions moved from inline hand-rolled
+    // params in document-tools.ts to zod schemas in schemas/document-schemas.ts.
+    // Read both files so the guidance-string contract stays valid regardless
+    // of which side holds the description.
     const documentToolsSource = readFileSync(
       resolve(process.cwd(), 'src/main/modules/tools/document-tools.ts'),
       'utf8',
     )
+    const documentSchemasSource = readFileSync(
+      resolve(process.cwd(), 'src/main/modules/tools/schemas/document-schemas.ts'),
+      'utf8',
+    )
+    const widgetGuidanceSurface = `${documentToolsSource}\n${documentSchemasSource}`
 
     assert.match(directChatSource, /内联事件|oninput|onclick/)
     assert.match(directChatSource, /readyWidgetSendMessage|data-ready-agent-message/)
-    assert.match(documentToolsSource, /HTML\/SVG\/本地交互脚本|HTML\/SVG\/脚本/)
+    assert.match(widgetGuidanceSurface, /HTML\/SVG\/本地交互脚本|HTML\/SVG\/脚本/)
   })
 
   it('does not keep an edit-mode placeholder that blocks scripted widget previews', () => {

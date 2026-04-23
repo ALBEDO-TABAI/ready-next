@@ -21,17 +21,29 @@ export class SkillContextOrchestrator {
 
   findExplicitlyRequestedSkills(userText: string): SkillState[] {
     const primary = this.deps.extractPrimaryUserInstruction(userText)
-    if (!primary || !/(skill|技能|使用|用|调用|参考|套用|运用)/i.test(primary)) return []
+    if (!primary) return []
     const normalizedPrimary = this.normalizeLooseToken(primary)
+    if (!normalizedPrimary) return []
     const skills = this.deps.listSkills()
     return skills.filter((skill, index) => {
       const candidates = [skill.id, skill.name]
         .map((item) => this.normalizeLooseToken(item))
-        .filter((item) => item.length >= 3)
+        .filter((item) => item.length >= 6)
       const matched = candidates.some((candidate) => normalizedPrimary.includes(candidate))
       if (!matched) return false
       return skills.findIndex((entry) => entry.id === skill.id) === index
     }).slice(0, 2)
+  }
+
+  listRegisteredSkillTokens(): string[] {
+    const tokens = new Set<string>()
+    for (const skill of this.deps.listSkills()) {
+      for (const raw of [skill.id, skill.name]) {
+        const normalized = this.normalizeLooseToken(raw)
+        if (normalized.length >= 6) tokens.add(normalized)
+      }
+    }
+    return Array.from(tokens)
   }
 
   shouldKeepToolsWithVideo(userText: string, sessionId?: string): boolean {

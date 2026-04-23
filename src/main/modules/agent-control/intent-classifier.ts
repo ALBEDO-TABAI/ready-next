@@ -81,7 +81,17 @@ function dedupe<T>(items: T[]): T[] {
   return Array.from(new Set(items))
 }
 
-function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
+function normalizeSkillToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, '')
+    .trim()
+}
+
+function detectDomainSignals(
+  envelope: RequestEnvelope,
+  options?: { registeredSkillTokens?: string[] },
+): DomainSignal[] {
   const text = [
     envelope.primaryInstruction,
     ...envelope.referencedResources.map((ref) => ref.value),
@@ -137,6 +147,27 @@ function detectDomainSignals(envelope: RequestEnvelope): DomainSignal[] {
     })
   }
 
+  const registeredSkillTokens = options?.registeredSkillTokens
+  if (registeredSkillTokens && registeredSkillTokens.length > 0) {
+    const normalizedPrimary = normalizeSkillToken(envelope.primaryInstruction || '')
+    if (normalizedPrimary) {
+      const matched = registeredSkillTokens.some((token) => token && normalizedPrimary.includes(token))
+      if (matched) {
+        const existing = signals.find((entry) => entry.domain === 'skill')
+        if (existing) {
+          existing.score += 4
+          existing.signals = dedupe([...existing.signals, 'skill-registered-id-object'])
+        } else {
+          signals.push({
+            domain: 'skill',
+            score: 4,
+            signals: ['skill-registered-id-object'],
+          })
+        }
+      }
+    }
+  }
+
   return signals
 }
 
@@ -150,8 +181,11 @@ function resolveExcludedDomains(
     .filter((domain) => domain !== primaryDomain && !positive.has(domain))
 }
 
-export function classifyIntent(envelope: RequestEnvelope): IntentClassification {
-  const signals = detectDomainSignals(envelope)
+export function classifyIntent(
+  envelope: RequestEnvelope,
+  options?: { registeredSkillTokens?: string[] },
+): IntentClassification {
+  const signals = detectDomainSignals(envelope, options)
   if (signals.length === 0) {
     return {
       primaryDomain: 'generic',

@@ -1,9 +1,21 @@
 import { appendFileSync } from 'fs'
 import { createRequire } from 'module'
 import { join } from 'path'
-import { app } from 'electron'
 import { runMigrations } from './migrations'
 import { getLogPath } from '../utils/platform'
+
+// Use CommonJS `require('electron')` rather than `import { app } from 'electron'`.
+// Electron's Node entry (node_modules/electron/index.js) exports a string path
+// via `module.exports =`, so ESM `import { app }` fails with
+// "does not provide an export named 'app'" in non-Electron Node contexts
+// (tsx tests, tool-registry static-import chain). In real Electron runtime
+// `require('electron')` returns the module with `app`/`BrowserWindow`/...,
+// and call-time access still works identically.
+const electronModule = (() => {
+  try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
+  catch { return {} as typeof import('electron') }
+})()
+const { app } = electronModule
 
 export interface DatabaseStatement {
   run(...params: unknown[]): unknown

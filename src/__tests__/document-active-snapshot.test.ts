@@ -43,11 +43,49 @@ describe('active document snapshot', () => {
     const snapshot = getActiveDocumentSnapshot()
 
     assert.deepEqual(snapshot, {
+      tabId: 'doc-1',
       title: '需求文档.md',
       path: null,
       content,
       isDirty: true,
       charCount: content.length,
+    })
+  })
+
+  it('supports reading a specific document tab by tabId', () => {
+    useMode.getState().setWorkbenchMode('document')
+    useDocTabs.setState({
+      tabs: [
+        {
+          id: 'doc-1',
+          title: '文档 A.md',
+          path: null,
+          content: 'A',
+          isDirty: false,
+        },
+        {
+          id: 'doc-2',
+          title: '文档 B.md',
+          path: '/tmp/b.md',
+          content: 'B 内容',
+          isDirty: true,
+        },
+      ],
+      activeTabId: 'doc-1',
+      splitTabId: null,
+      documentSplitRatio: 50,
+      pendingReveal: null,
+    })
+
+    const snapshot = getActiveDocumentSnapshot('doc-2')
+
+    assert.deepEqual(snapshot, {
+      tabId: 'doc-2',
+      title: '文档 B.md',
+      path: '/tmp/b.md',
+      content: 'B 内容',
+      isDirty: true,
+      charCount: 'B 内容'.length,
     })
   })
 

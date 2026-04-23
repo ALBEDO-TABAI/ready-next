@@ -21,9 +21,10 @@ import {
 } from '../../../shared/document-widget-parse'
 import { resolveControlledWidgetTarget } from '../../../shared/document-widget-target'
 import { readDocumentEditableText } from '../document-engine/ipc-handler'
+import { documentCommitRegistry } from '../document-engine/document-commit-registry'
 import { type DomainAdapterDispatchResult } from './domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
-import { buildDocumentTaskStepCacheKey } from './document-task-cache-key'
+import { buildDocumentTaskStepCacheKey, hashText } from './document-task-cache-key'
 import {
   getDocumentToolTimeout,
   raceWithTimeout,
@@ -112,6 +113,8 @@ interface DocumentTaskPipelineExecutorDeps {
     documentPath?: string | null
     widgetTitle?: string | null
     origin: 'pipeline_write' | 'pipeline_locate' | 'envelope_widget_target'
+    widgetFingerprint?: string | null
+    widgetTextSample?: string | null
   }) => void
   resolveWidgetEditLease?: (params: {
     agent: string
@@ -1064,6 +1067,7 @@ export class DocumentTaskPipelineExecutor {
       if (!target) {
         throw new Error('未提供要更新的信息卡目标')
       }
+      const writeStartedAt = Date.now()
       const payload = await tool('document.updateWidget', {
         target,
         title: params.draft.title,
@@ -1082,6 +1086,26 @@ export class DocumentTaskPipelineExecutor {
           hadWidgetCode: Boolean(params.draft.widgetCode),
           tabId: params.snapshot.tabId || null,
         })
+      }
+      const ackWidgetId = String(params.draft.targetWidgetId || '').trim()
+      const ackTabId = String(params.snapshot.tabId || '').trim()
+      if (ackWidgetId && ackTabId && payload.ok !== false) {
+        const committed = await documentCommitRegistry.waitForCommitAfter({
+          tabId: ackTabId,
+          widgetId: ackWidgetId,
+          afterTimestamp: writeStartedAt,
+          timeoutMs: 10_000,
+        })
+        if (!committed) {
+          this.deps.log(
+            `document widget commit ack missing tabId=${ackTabId} widgetId=${ackWidgetId} — proceeding`,
+          )
+          logAgentMetric('document_widget_commit_ack_missing', {
+            tabId: ackTabId,
+            widgetId: ackWidgetId,
+            elapsedMs: Date.now() - writeStartedAt,
+          })
+        }
       }
       return typeof payload.summary === 'string' ? payload.summary : `已更新信息卡：${target}`
     }
@@ -1431,6 +1455,16 @@ export class DocumentTaskPipelineExecutor {
         targetSnapshot,
         'write-succeeded',
       )
+      // Also invalidate any other cache entries targeting the same widgetId. Prompt phrasing and
+      // snapshot text both change between rounds, so key-level deletion alone can miss drafts
+      // cached under an earlier phrasing that still points at the same widget.
+      if (currentDraft.targetWidgetId) {
+        this.deleteCachedWidgetDraftsByWidgetId(
+          params.sessionId,
+          currentDraft.targetWidgetId,
+          'write-succeeded',
+        )
+      }
       emitStepUpdate({
         job: params.job,
         jobIndex: params.jobIndex,
@@ -1912,6 +1946,31 @@ export class DocumentTaskPipelineExecutor {
     }
   }
 
+  private deleteCachedWidgetDraftsByWidgetId(
+    sessionId: string,
+    widgetId: string,
+    reason: string,
+  ): void {
+    if (!widgetId) return
+    const entries = this.sessionWidgetDraftCaches.get(sessionId)
+    if (!Array.isArray(entries) || entries.length === 0) return
+    const keep: typeof entries = []
+    let removed = 0
+    for (const entry of entries) {
+      if (entry.draft.targetWidgetId === widgetId) { removed++; continue }
+      keep.push(entry)
+    }
+    if (removed === 0) return
+    if (keep.length > 0) {
+      this.sessionWidgetDraftCaches.set(sessionId, keep)
+    } else {
+      this.sessionWidgetDraftCaches.delete(sessionId)
+    }
+    this.deps.log(
+      `document widget draft cache invalidated-by-widget widgetId=${widgetId} removed=${removed} reason=${reason}`,
+    )
+  }
+
   private normalizeDocumentTargetPath(path: string): string {
     const trimmed = path.trim()
     const autosaveMatch = trimmed.match(/^(.*\.docx)\.autosave-\d{8}-\d{6}\.bak\.docx$/i)
@@ -2032,11 +2091,14 @@ export class DocumentTaskPipelineExecutor {
           documentPath: leaseSnapshot.documentPath || null,
           tabId: leaseSnapshot.tabId || null,
           widgetId: leaseSnapshot.widgetId || null,
-          text: '',
+          // Carry the recorded widget body slice so cache keys stay stable across rounds.
+          text: leaseSnapshot.widgetTextSample || '',
           summary: null,
           order: 0,
           canRead: true,
           canWrite: true,
+          widgetFingerprint: leaseSnapshot.widgetFingerprint || null,
+          widgetTextSample: leaseSnapshot.widgetTextSample || null,
         }
         : null)
     if (!realEnvelopeWidgetTarget && leaseSnapshot) {
@@ -2194,6 +2256,15 @@ export class DocumentTaskPipelineExecutor {
           signal,
         })
         if (params.agentName && this.deps.acquireWidgetEditLease) {
+          const fingerprintSource = draft.componentSpec
+            ? JSON.stringify(draft.componentSpec)
+            : draft.widgetCode || draft.title
+          const widgetFingerprint = fingerprintSource ? hashText(fingerprintSource) : null
+          // widgetCode captures the actual fence body that was written — use it (trimmed to 2KB) as
+          //   a non-empty text sample so downstream cache keys differentiate widget states.
+          const widgetTextSample = draft.widgetCode
+            ? draft.widgetCode.slice(0, 2048)
+            : draft.title || null
           this.deps.acquireWidgetEditLease({
             agent: params.agentName,
             sessionId: params.sessionId,
@@ -2202,6 +2273,8 @@ export class DocumentTaskPipelineExecutor {
             documentPath: snapshot.path || envelopeWidgetTarget?.documentPath || envelopeWidgetTarget?.path || null,
             widgetTitle: draft.title || envelopeWidgetTarget?.name || null,
             origin: stage === 'locate' ? 'pipeline_locate' : 'pipeline_write',
+            widgetFingerprint,
+            widgetTextSample,
           })
         }
         return writeResult

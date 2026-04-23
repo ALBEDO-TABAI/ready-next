@@ -245,13 +245,32 @@ function formatRunResult(result: {
   outputDir?: string
   error?: string
   command: string[]
-  mode?: 'direct' | 'workflow'
+  mode?: 'direct' | 'workflow' | 'reference'
+  skillId?: string
+  action?: string
   execution?: SkillExecutionDetail | null
   blocker?: { type: string; message: string } | null
 }): string {
   if (result.mode === 'workflow' && result.execution) {
     return formatExecutionDetail(result.execution)
   }
+
+  // Reference-mode skills (`runtime: reference`, typically advisory SKILL.md
+  // loads) are NOT subprocess executions — they read a markdown guidance file.
+  // Wrapping their content in `Command:` / `STDOUT:` envelopes misleads the
+  // model and has been observed to trigger redundant `skill_get_state` probes
+  // for an execution that never exists. Emit a compact header that marks the
+  // payload as guidance and explicitly tells the model no state is tracked.
+  if (result.mode === 'reference') {
+    if (!result.success) {
+      const reason = result.error || result.stderr || 'unknown error'
+      return `Skill reference load failed: ${reason}`
+    }
+    const header = `# Skill guidance (advisory, no execution state): ${result.skillId || 'skill'}${result.action ? ` / ${result.action}` : ''}`
+    const body = result.stdout.trim()
+    return body ? `${header}\n\n${body}` : header
+  }
+
   if (!result.success) {
     const details = [result.error, result.stderr, result.stdout].filter(Boolean).join('\n')
     return `Skill execution failed.\n${details}`.trim()

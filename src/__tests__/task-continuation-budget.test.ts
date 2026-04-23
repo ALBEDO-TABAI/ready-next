@@ -82,6 +82,7 @@ test('continuation routes restore prior budget usage and grant a safety floor wh
 
   assert.equal(route.chain, 'continuation')
   assert.equal(route.executor, 'skill')
+  assert.equal((route as { currentStepId?: string | null }).currentStepId, 'approve')
   assert.equal(route.continuation?.budgetRuntime?.usage.iterationsUsed, 23)
   assert.equal(route.continuation?.budgetRuntime?.usage.toolCallsUsed, 23)
   assert.equal(route.continuation?.budgetRuntime?.budget.maxIterations, 27)

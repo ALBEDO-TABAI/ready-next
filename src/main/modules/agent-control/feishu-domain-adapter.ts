@@ -1,11 +1,16 @@
 import {
   filterAllowedToolNamesByPrefixes,
+  logPrefixNarrowing,
   readStructuredToolResultRecord,
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import type { ScopeRunTaskStep } from './types'
 
+// R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
+// Feishu intentionally strips skill_* tools to keep deterministic feishu sidecar
+// in charge. A skill-pipeline that wants to end in feishu must hand off via
+// the planner / tool_loop chain, not by running under the feishu adapter.
 const TOOL_PREFIXES = ['feishu_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走飞书执行路径。优先使用 feishu_* 工具完成任务，不要改走无关工具。'
 
@@ -66,8 +71,12 @@ export class FeishuDomainAdapter implements DomainAdapter {
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    if (params.host?.log) {
+      logPrefixNarrowing(params.host.log, 'feishu', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+    }
     return {
-      allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
+      allowedToolNames: narrowed,
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
       domainState: createState(null),
     }

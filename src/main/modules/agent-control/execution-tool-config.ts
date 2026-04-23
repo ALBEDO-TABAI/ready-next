@@ -14,6 +14,11 @@ import {
 } from '../claude-bridge/widget-guidance'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { ToolResolutionDiagnostics } from './run-contracts'
+import {
+  filterPreferredSkillAnthropicTools as _filterPreferredSkillAnthropic,
+  filterPreferredSkillOpenAITools as _filterPreferredSkillOpenAI,
+  mergeForceDocumentAllowedNames as _mergeForceDocumentAllowedNames,
+} from './execution-tool-skill-filters'
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
@@ -55,6 +60,16 @@ const PREFERRED_DESIGN_FALLBACK_TOOL_NAMES = new Set([
   'design_save_project',
   'design_export_artifact',
 ])
+
+// Skill-side filter primitives live in a dedicated pure module so that
+// tests can exercise them without pulling in the electron-dependent
+// tool registry chain. They are re-exported here for backward compat.
+export {
+  isSkillToolName,
+  filterPreferredSkillAnthropicTools,
+  filterPreferredSkillOpenAITools,
+  mergeForceDocumentAllowedNames,
+} from './execution-tool-skill-filters'
 
 const CONTENT_MUTATING_DOCUMENT_TOOL_NAMES = new Set([
   'document_set_content',
@@ -212,7 +227,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
 
   let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds)
   if (policy?.forceDocumentTool) {
-    const allowedNames = policy.documentWidgetTaskKind === 'create'
+    const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
       : policy.documentWidgetTaskKind === 'inspect'
         ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
@@ -225,6 +240,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
               : policy.preferFormatOnly
                 ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
                 : FORCE_DOCUMENT_TOOL_NAMES
+    const allowedNames = _mergeForceDocumentAllowedNames(baseAllowed, policy.preferredSkillToolNames)
     tools = filterAnthropicToolsByAllowedNames(tools, allowedNames)
   }
   if (policy?.allowDocumentTools === false) {
@@ -242,13 +258,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
       return !name.startsWith('browser_')
     })
   }
-  if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
-    const allowed = new Set(policy.preferredSkillToolNames)
-    tools = tools.filter((tool) => {
-      const name = typeof tool.name === 'string' ? tool.name : ''
-      return allowed.has(name)
-    })
-  }
+  tools = _filterPreferredSkillAnthropic(tools, policy?.preferredSkillToolNames || [])
   return tools
 }
 
@@ -261,7 +271,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
   const resolution = defaultToolGateway.getToolSchemaResolutionForGroups(visibleGroupIds, 'openai')
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {
-    const allowedNames = policy.documentWidgetTaskKind === 'create'
+    const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
       : policy.documentWidgetTaskKind === 'inspect'
         ? DOCUMENT_WIDGET_INSPECT_TOOL_NAMES
@@ -274,6 +284,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
               : policy.preferFormatOnly
                 ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
                 : FORCE_DOCUMENT_TOOL_NAMES
+    const allowedNames = _mergeForceDocumentAllowedNames(baseAllowed, policy.preferredSkillToolNames)
     tools = filterOpenAIToolsByAllowedNames(tools, allowedNames)
   }
   if (policy?.allowDocumentTools === false) {
@@ -291,13 +302,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
       return typeof fn === 'string' ? !fn.startsWith('browser_') : true
     })
   }
-  if (policy?.preferredSkillToolNames && policy.preferredSkillToolNames.length > 0) {
-    const allowed = new Set(policy.preferredSkillToolNames)
-    tools = tools.filter((tool) => {
-      const fn = (tool.function as { name?: unknown } | undefined)?.name
-      return typeof fn === 'string' ? allowed.has(fn) : false
-    })
-  }
+  tools = _filterPreferredSkillOpenAI(tools, policy?.preferredSkillToolNames || [])
   const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
   const toolNames = collectToolNames(normalizedTools, 'openai')
   return {

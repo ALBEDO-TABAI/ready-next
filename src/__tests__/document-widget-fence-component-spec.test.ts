@@ -63,3 +63,19 @@ test('componentSpec 缺少 component 字段时忽略', () => {
   const records = collectDocumentWidgets(fence)
   assert.equal(records[0].componentSpec, null)
 })
+
+test('collectDocumentWidgets 为新旧 widget 都给出稳定 id', () => {
+  const explicit = collectDocumentWidgets(buildFenceFixture({
+    id: 'widget_explicit_1',
+    title: 'explicit_card',
+    widget_code: '<div>a</div>',
+  }))
+  const legacy = collectDocumentWidgets(buildFenceFixture({
+    title: 'legacy_card',
+    widget_code: '<div>b</div>',
+  }))
+
+  assert.equal(explicit[0].id, 'widget_explicit_1')
+  assert.equal(typeof legacy[0].id, 'string')
+  assert.ok(legacy[0].id.length > 0)
+})

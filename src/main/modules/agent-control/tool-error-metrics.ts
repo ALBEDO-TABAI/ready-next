@@ -29,6 +29,13 @@ export const TOOL_ERROR_METRICS = {
   skillExecutionMissing: 'skill_execution_missing',
   /** skill_executions TTL sweep 完成一次（Phase 4 新增） */
   ttlSwept: 'skill_executions_ttl_swept',
+  /**
+   * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
+   * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明
+   * 策略在 turn-engine 构建 bundle 和 openai-client 重算 bundle 之间发生了漂移，
+   * 是 "Tool not allowed" 假阳性的强信号。
+   */
+  toolSnapshotMismatch: 'tool_snapshot_mismatch',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

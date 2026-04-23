@@ -47,6 +47,8 @@ export function resolveExecutionIntentContext(params: {
   lastDocumentContextInput?: string | null
   intentClassification?: IntentClassification | null
   activeWidgetEditLease?: ActiveWidgetEditLease | null
+  refreshWidgetEditLease?: () => ActiveWidgetEditLease | null
+  registeredSkillTokens?: string[] | null
 }): ExecutionIntentContext {
   const envelopeHasWidgetTarget = params.requestEnvelope.environmentHints.hasWidgetTargetContext
   const contextualUserInput = resolveToolPolicyInput(
@@ -61,6 +63,15 @@ export function resolveExecutionIntentContext(params: {
     && params.activeWidgetEditLease.expireAt > Date.now()
   const leaseStickyEligible = Boolean(leaseValid) && !explicitWidgetCreateIntent
   const hasWidgetTargetContext = envelopeHasWidgetTarget || leaseStickyEligible
+  let leaseRefreshed = false
+  if (leaseStickyEligible && typeof params.refreshWidgetEditLease === 'function') {
+    try {
+      const refreshed = params.refreshWidgetEditLease()
+      leaseRefreshed = Boolean(refreshed)
+    } catch {
+      leaseRefreshed = false
+    }
+  }
   const inferredWidgetTaskKind = inferDocumentWidgetTaskKind(contextualUserInput)
   const documentWidgetTaskKind =
     hasWidgetTargetContext && !explicitWidgetCreateIntent
@@ -94,11 +105,14 @@ export function resolveExecutionIntentContext(params: {
     leaseAgeMs: params.activeWidgetEditLease
       ? Math.max(0, Date.now() - params.activeWidgetEditLease.acquiredAt)
       : null,
+    leaseRefreshed,
   })
 
   return {
     requestEnvelope: effectiveEnvelope,
-    intentClassification: params.intentClassification || classifyIntent(effectiveEnvelope),
+    intentClassification: params.intentClassification || classifyIntent(effectiveEnvelope, {
+      registeredSkillTokens: params.registeredSkillTokens || undefined,
+    }),
     contextualUserInput,
     userInstructionText,
     hasDocumentEnvironment: params.requestEnvelope.rawUserText.includes('## 环境信息') && params.requestEnvelope.rawUserText.includes('当前模式: 文档模式'),

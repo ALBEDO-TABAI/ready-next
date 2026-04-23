@@ -1,11 +1,17 @@
 import {
   filterAllowedToolNamesByPrefixes,
+  logPrefixNarrowing,
   readStructuredToolResultRecord,
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import type { ScopeRunTaskStep } from './types'
 
+// R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
+// Calendar intentionally strips skill_* tools (including skill_calendar_*
+// if it ever gets introduced — unlike RSS) to keep deterministic calendar
+// handlers in charge. Adjust TOOL_PREFIXES only if a calendar skill pipeline
+// actually lands.
 const TOOL_PREFIXES = ['calendar_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走日程执行路径。优先使用 calendar_* 工具完成任务，不要改走无关工具。'
 
@@ -64,8 +70,12 @@ export class CalendarDomainAdapter implements DomainAdapter {
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    if (params.host?.log) {
+      logPrefixNarrowing(params.host.log, 'calendar', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+    }
     return {
-      allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
+      allowedToolNames: narrowed,
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
       domainState: createState(null),
     }

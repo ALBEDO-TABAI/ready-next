@@ -21,8 +21,10 @@ describe('pipeline update-mode existing widget prompt contract (P3 T2)', () => {
   it('serializes each existing widget with title, mode and widgetCode so the LLM sees the component type', () => {
     assert.match(
       source,
-      /private serializeExistingWidgetsForPrompt\(records: DocumentWidgetRecord\[\]\): string \{[\s\S]*?index: record\.index,\s*title: record\.title,\s*mode: record\.mode,\s*widgetCode: this\.clipWidgetCodeForPrompt\(record\.widgetCode\)/,
+      /private serializeExistingWidgetsForPrompt\(records: DocumentWidgetRecord\[\]\): string \{[\s\S]*?index: record\.index,\s*title: record\.title,\s*mode: record\.mode,[\s\S]*?widgetCode: this\.clipWidgetCodeForPrompt\(record\.widgetCode\)/,
     )
+    assert.match(source, /component: record\.componentSpec\?\.component \|\| null/)
+    assert.match(source, /canPatch: Boolean\(record\.componentSpec\)/)
   })
 
   it('places the existing widget block in the user prompt before the insight JSON', () => {

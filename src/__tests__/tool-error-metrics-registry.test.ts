@@ -2,7 +2,8 @@
  * Phase 4 — TOOL_ERROR_METRICS registry shape test.
  *
  * Locks:
- *   - 6 documented entries exist
+ *   - documented entries exist (count grows only when a new metric is added
+ *     and registered here alongside the emit site)
  *   - values are snake_case strings (match log-query grep conventions)
  *   - values are all distinct (no accidental reuse)
  *   - values match the historical metric strings so existing log queries
@@ -14,13 +15,14 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 6 documented keys', () => {
+test('registry exposes the 7 documented keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'inputValidation',
     'resolutionViolation',
     'skillExecutionMissing',
     'surfaced',
+    'toolSnapshotMismatch',
     'ttlSwept',
     'unknownSurfaced',
   ])
@@ -47,4 +49,5 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.resolutionViolation, 'tool_resolution_violation_post_arbitration')
   assert.equal(TOOL_ERROR_METRICS.skillExecutionMissing, 'skill_execution_missing')
   assert.equal(TOOL_ERROR_METRICS.ttlSwept, 'skill_executions_ttl_swept')
+  assert.equal(TOOL_ERROR_METRICS.toolSnapshotMismatch, 'tool_snapshot_mismatch')
 })

@@ -1,9 +1,22 @@
-import { app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { randomUUID } from 'crypto'
+import { createRequire } from 'module'
 import { join, delimiter } from 'path'
 import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs'
+
+// See database.ts for the full rationale. Electron's Node entry is a CJS
+// string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
+// that transitively load this file (e.g. via tool-registry → skills-tools →
+// runtime-manager). `createRequire(...)('electron')` succeeds in both the real
+// Electron runtime (named members populated) and in plain Node (destructuring
+// a string yields `undefined`, which is caught by downstream try/catch when a
+// method such as `app.getPath` is actually invoked).
+const electronModule = (() => {
+  try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
+  catch { return {} as typeof import('electron') }
+})()
+const { app } = electronModule
 import { getDatabase } from '../database'
 import { getWhichCommand } from '../../utils/platform'
 import { EMBEDDED_SKILLS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
@@ -138,7 +151,7 @@ export interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  mode?: 'direct' | 'workflow'
+  mode?: 'direct' | 'workflow' | 'reference'
   execution?: SkillExecutionDetail | null
   blocker?: ExecutionBlocker | null
 }
@@ -713,6 +726,14 @@ export class SkillsRuntimeManager {
     const entryPath = join(skillPath, action.entry)
 
     if (action.runtime === 'reference') {
+      // Reference skills are advisory/guidance loads — readFileSync of SKILL.md
+      // with no subprocess, no side-effects, no execution state to track. The
+      // previous implementation faked `command: ['read', path]` which caused
+      // formatRunResult to wrap the content in "Command: read .../SKILL.md\n
+      // STDOUT:\n..." — confusing the model into thinking a shell executed and
+      // sometimes triggering a follow-up `skill_get_state` probe for an
+      // execution that never exists. `mode: 'reference'` lets formatRunResult
+      // render the file content with a compact guidance header instead.
       try {
         const stdout = readFileSync(entryPath, 'utf-8')
         return {
@@ -721,8 +742,8 @@ export class SkillsRuntimeManager {
           action: action.name,
           stdout: truncateOutput(stdout),
           stderr: '',
-          command: ['read', entryPath],
-          mode: 'direct',
+          command: [],
+          mode: 'reference',
         }
       } catch (error) {
         return {
@@ -731,9 +752,9 @@ export class SkillsRuntimeManager {
           action: action.name,
           stdout: '',
           stderr: '',
-          command: ['read', entryPath],
+          command: [],
           error: error instanceof Error ? error.message : String(error),
-          mode: 'direct',
+          mode: 'reference',
         }
       }
     }

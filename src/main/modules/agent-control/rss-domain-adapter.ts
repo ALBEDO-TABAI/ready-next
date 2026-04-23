@@ -1,11 +1,16 @@
 import {
   filterAllowedToolNamesByPrefixes,
+  logPrefixNarrowing,
   readStructuredToolResultRecord,
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import type { ScopeRunTaskStep } from './types'
 
+// R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
+// RSS uniquely keeps both rss_* (deterministic handlers) and skill_rss_*
+// (pipeline/workflow skills) so a rss workflow started via skill can still
+// call its subsequent actions without the adapter stripping them.
 const TOOL_PREFIXES = ['rss_', 'skill_rss_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走 RSS 执行路径。优先使用 rss_* 或 skill_rss_* 工具完成任务，不要改走无关工具。'
 
@@ -71,8 +76,12 @@ export class RSSDomainAdapter implements DomainAdapter {
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    if (params.host?.log) {
+      logPrefixNarrowing(params.host.log, 'rss', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+    }
     return {
-      allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
+      allowedToolNames: narrowed,
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
       domainState: createState(null),
     }

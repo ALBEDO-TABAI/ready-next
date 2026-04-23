@@ -7,24 +7,23 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser host bounds are applied immediately during layout updates so DOM chrome and page surface stay locked together while resizing', () => {
+test('browser host bounds do not add a second timer hop after renderer-side drag coalescing, so DOM chrome and page surface stay locked together while resizing', () => {
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
 
   assert.match(
     hostLayout,
-    /applyBounds\(view: BrowserHostView, bounds: BrowserRect, syncMode: BrowserBoundsSyncMode = 'settled'\): void \{/,
+    /applyBounds\(view: BrowserHostView, bounds: BrowserRect, _?syncMode: BrowserBoundsSyncMode = 'settled'\): void \{/,
   )
   assert.match(
     hostLayout,
-    /if \(syncMode === 'transient'\) \{[\s\S]*this\.scheduleHostBounds\(view, bounds\)/,
+    /this\.setHostBoundsNow\(view, bounds\)/,
   )
-  assert.match(
-    hostLayout,
-    /this\.clearScheduledBounds\(view\)[\s\S]*this\.setHostBoundsNow\(view, bounds\)/,
-  )
+  assert.doesNotMatch(hostLayout, /scheduleHostBounds\(/)
+  assert.doesNotMatch(hostLayout, /clearScheduledBounds\(/)
+  assert.doesNotMatch(hostLayout, /setTimeout\(\(\) => \{/)
 })
 
-test('browser bounds syncing does not skip fine-grained drag updates and bypasses extra frame delay while the user is resizing panels', () => {
+test('browser bounds syncing bypasses the extra renderer rAF during active drag while preserving the scheduled path for non-drag transitions', () => {
   const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 
   assert.match(
@@ -37,9 +36,12 @@ test('browser bounds syncing does not skip fine-grained drag updates and bypasse
   )
   assert.match(boundsHook, /const frameSyncRequestRef = useRef<PendingBoundsSyncRequest \| null>\(null\)/)
   assert.match(boundsHook, /const panelResizingRef = useRef\(false\)/)
+  assert.match(boundsHook, /const panelResizeReasonRef = useRef<PanelResizeReason \| null>\(null\)/)
   assert.match(boundsHook, /const scheduleBoundsSync = useCallback\(/)
   assert.match(boundsHook, /window\.addEventListener\(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener\)/)
-  assert.match(boundsHook, /if \(detail\.resizing\) \{[\s\S]*panelResizingRef\.current = true/)
+  assert.match(boundsHook, /if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*sendBoundsImmediate\(\{ syncMode: 'transient' \}\)/)
+  assert.match(boundsHook, /if \(detail\.resizing\) \{[\s\S]*panelResizingRef\.current = true[\s\S]*panelResizeReasonRef\.current = detail\.reason/)
+  assert.match(boundsHook, /if \(detail\.reason === 'drag'\) \{[\s\S]*clearFrameSync\(\)[\s\S]*return/)
   assert.match(boundsHook, /panelResizingRef\.current = false[\s\S]*void scheduleBoundsSync\('settled', \{ force: true \}\)/)
   assert.match(boundsHook, /subscribeWorkbenchWindowResize/)
   assert.doesNotMatch(boundsHook, /const startBoundsTracking = useCallback/)

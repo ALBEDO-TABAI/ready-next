@@ -4,6 +4,8 @@ import { resolveAIConfigCapabilities, type AIModelConfig, type AIProviderDef } f
 import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-responses'
 import { buildToolDispatchDecision } from '../agent-control/execution-tool-policy'
 import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
 import type { ToolSnapshot } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
@@ -300,6 +302,17 @@ export class OpenAIExecutionClient {
         expectedAllowedToolNames: params.toolSnapshotContext?.expectedAllowedToolNames || [],
         actualAllowedToolNames: allowedToolNames,
       })}`)
+      try {
+        logAgentMetric(TOOL_ERROR_METRICS.toolSnapshotMismatch, {
+          provider: snapshotDefaults.provider,
+          expectedCount: params.toolSnapshotContext?.expectedAllowedToolNames?.length || 0,
+          actualCount: allowedToolNames.length,
+          expectedSample: (params.toolSnapshotContext?.expectedAllowedToolNames || []).slice(0, 3),
+          actualSample: allowedToolNames.slice(0, 3),
+        })
+      } catch {
+        // metrics must never break the request path
+      }
     }
     const appendToolSnapshot = (snapshot: ToolSnapshot) => {
       toolSnapshots.push(snapshot)

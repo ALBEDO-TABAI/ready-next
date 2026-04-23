@@ -34,6 +34,11 @@ import {
 } from './tool-errors'
 import { getToolInputSchemas } from './schemas'
 import { validateToolInput } from './tool-input-validator'
+import {
+  buildToolNotAllowedMessage,
+  buildUnknownToolMessage,
+  normalizeAllowedToolSet,
+} from './tool-not-allowed-message'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -53,27 +58,28 @@ export async function executeToolCall(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ToolExecutionOutput> {
-  const allowedToolNames = context.allowedToolNames instanceof Set
-    ? context.allowedToolNames
-    : Array.isArray(context.allowedToolNames)
-      ? new Set(context.allowedToolNames)
-      : null
-  if (allowedToolNames && !allowedToolNames.has(toolName)) {
-    return createToolExecutionOutput(`Tool not allowed in current context: ${toolName}`, {
+  // Check registration BEFORE admission so the model can distinguish
+  // "fabricated tool name" from "real tool but not allowed this turn" —
+  // see tool-not-allowed-message.ts for the rationale.
+  const definition = defaultToolGateway.getToolDefinition(toolName)
+  if (!definition) {
+    return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
       shape: 'json',
       data: {
         errorKind: 'host_unavailable',
+        reason: 'tool_not_registered',
         toolName,
       },
     })
   }
 
-  const definition = defaultToolGateway.getToolDefinition(toolName)
-  if (!definition) {
-    return createToolExecutionOutput(`Unknown tool: ${toolName}`, {
+  const allowedToolNames = normalizeAllowedToolSet(context.allowedToolNames)
+  if (allowedToolNames && !allowedToolNames.has(toolName)) {
+    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
       shape: 'json',
       data: {
         errorKind: 'host_unavailable',
+        reason: 'tool_restricted_this_turn',
         toolName,
       },
     })

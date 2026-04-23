@@ -154,7 +154,6 @@ test('runDocumentTaskPlanWithSubtasks executes multi-job document plans through 
 
   const subtaskRuntime = new SubtaskRuntime({
     publishScopeRunEvent: harness.publishScopeRunEvent,
-    runScopedTurn: async () => ({ success: true }),
   })
   const parentPatches: Record<string, unknown>[] = []
 
@@ -253,7 +252,6 @@ test('runDocumentTaskPlanWithSubtasks stops on the first failing child and keeps
 
   const subtaskRuntime = new SubtaskRuntime({
     publishScopeRunEvent: harness.publishScopeRunEvent,
-    runScopedTurn: async () => ({ success: true }),
   })
 
   const result = await runDocumentTaskPlanWithSubtasks({
@@ -307,7 +305,6 @@ test('single-job document plans stay inline and do not create child task project
 
   const subtaskRuntime = new SubtaskRuntime({
     publishScopeRunEvent: harness.publishScopeRunEvent,
-    runScopedTurn: async () => ({ success: true }),
   })
 
   const result = await runDocumentTaskPlanWithSubtasks({

@@ -49,4 +49,14 @@ describe('document task pipeline host contract', () => {
     assert.match(executor, /private async runDocumentTaskPlan\(/)
     assert.match(executor, /shouldUseDocumentTaskPlan/)
   })
+
+  it('threads tabId through inspect, widget mutation, listing, and save calls', () => {
+    const executor = readFileSync(EXECUTOR_PATH, 'utf8')
+
+    assert.match(executor, /document\.inspectActive', \{ tabId \}/)
+    assert.match(executor, /document\.listWidgets', \{\s*tabId: params\.snapshot\.tabId \|\| undefined,\s*\}/)
+    assert.match(executor, /document\.updateWidget', \{[\s\S]*tabId: params\.snapshot\.tabId \|\| undefined,/)
+    assert.match(executor, /document\.insertWidget', \{[\s\S]*tabId: params\.snapshot\.tabId \|\| undefined,/)
+    assert.match(executor, /document\.saveTab', \{ tabId: snapshot\.tabId \|\| undefined \}/)
+  })
 })

@@ -8,8 +8,6 @@ const HOST_TRANSPARENT_BG = '#00000000'
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
   private hostKindByView = new WeakMap<BrowserHostView, BrowserHostKind>()
-  private scheduledBoundsByView = new WeakMap<BrowserHostView, BrowserRect>()
-  private scheduledTimersByView = new WeakMap<BrowserHostView, ReturnType<typeof setTimeout>>()
   private attachedHosts = new WeakSet<BrowserHostView>()
   private hiddenHosts = new WeakSet<BrowserHostView>()
   private readonly offscreenBounds: BrowserRect = { x: -100000, y: -100000, width: 1, height: 1 }
@@ -23,8 +21,6 @@ export class BrowserHostLayoutService {
     this.mainWindow = mainWindow
     this.attachedHosts = new WeakSet<BrowserHostView>()
     this.hiddenHosts = new WeakSet<BrowserHostView>()
-    this.scheduledBoundsByView = new WeakMap<BrowserHostView, BrowserRect>()
-    this.scheduledTimersByView = new WeakMap<BrowserHostView, ReturnType<typeof setTimeout>>()
   }
 
   createHost(partition: string): BrowserHostView {
@@ -75,24 +71,17 @@ export class BrowserHostLayoutService {
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
     this.attachHost(view)
     this.hiddenHosts.delete(view)
-    this.clearScheduledBounds(view)
     this.setHostBoundsNow(view, bounds)
   }
 
   hideHost(view: BrowserHostView): void {
     this.attachHost(view)
     this.hiddenHosts.add(view)
-    this.clearScheduledBounds(view)
     this.setHostBoundsNow(view, this.offscreenBounds)
   }
 
-  applyBounds(view: BrowserHostView, bounds: BrowserRect, syncMode: BrowserBoundsSyncMode = 'settled'): void {
+  applyBounds(view: BrowserHostView, bounds: BrowserRect, _syncMode: BrowserBoundsSyncMode = 'settled'): void {
     if (this.hiddenHosts.has(view)) return
-    if (syncMode === 'transient') {
-      this.scheduleHostBounds(view, bounds)
-      return
-    }
-    this.clearScheduledBounds(view)
     this.setHostBoundsNow(view, bounds)
   }
 
@@ -117,30 +106,6 @@ export class BrowserHostLayoutService {
       this.mainWindow.addBrowserView(view as BrowserView)
     }
     this.attachedHosts.add(view)
-  }
-
-  private scheduleHostBounds(view: BrowserHostView, bounds: BrowserRect): void {
-    this.scheduledBoundsByView.set(view, bounds)
-    if (this.scheduledTimersByView.has(view)) return
-
-    const timer = setTimeout(() => {
-      this.scheduledTimersByView.delete(view)
-      const nextBounds = this.scheduledBoundsByView.get(view)
-      this.scheduledBoundsByView.delete(view)
-      if (!nextBounds || this.hiddenHosts.has(view)) return
-      this.setHostBoundsNow(view, nextBounds)
-    }, 16)
-
-    this.scheduledTimersByView.set(view, timer)
-  }
-
-  private clearScheduledBounds(view: BrowserHostView): void {
-    const timer = this.scheduledTimersByView.get(view)
-    if (timer) {
-      clearTimeout(timer)
-      this.scheduledTimersByView.delete(view)
-    }
-    this.scheduledBoundsByView.delete(view)
   }
 
   private setHostBoundsNow(view: BrowserHostView, bounds: BrowserRect): void {

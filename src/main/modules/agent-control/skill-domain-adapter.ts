@@ -1,5 +1,6 @@
 import {
   filterAllowedToolNamesByPrefixes,
+  logPrefixNarrowing,
   readToolProjectionPatch,
   type DomainAdapter,
   type DomainAdapterProjection,
@@ -7,6 +8,20 @@ import {
 } from './domain-adapter'
 import type { RunProjectionPatch } from './run-contracts'
 
+// R2: Domain adapter prefix narrowing is a SECOND allowedToolNames gate on top
+// of run-capability-controller's bundle. When route.executor === 'skill', this
+// adapter narrows allowedToolNames to the prefixes below; any tool outside the
+// list is stripped even if it made it into preparedRunCapabilities.allowedToolNames.
+//
+// The skill executor must keep memory_* and session_* tools available so the
+// model can read cross-session context before deciding which skill action to
+// call. Everything else (document_/browser_/calendar_/rss_/feishu_) is stripped
+// — that's intentional domain isolation, not a bug.
+//
+// filterAllowedToolNamesByPrefixes returns null (= unrestricted) when the
+// filtered list is empty, so an allowedToolNames input that happens to contain
+// zero skill_*/memory_*/session_* tools falls through to passthrough rather
+// than locking the adapter into an empty list.
 const TOOL_PREFIXES = ['skill_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使用 skill_* 工具推进，不要退回无关的通用工具。'
 
@@ -83,8 +98,12 @@ export class SkillDomainAdapter implements DomainAdapter {
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    if (params.host?.log) {
+      logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+    }
     return {
-      allowedToolNames: filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES),
+      allowedToolNames: narrowed,
       sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
       domainState: { latestProjectionPatch: null, dispatchedAt: null } satisfies SkillAdapterState,
     }

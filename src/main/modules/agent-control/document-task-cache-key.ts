@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 
 import type { DocumentTaskJob, DocumentTaskStep } from './document-task-plan'
 
-function hashText(value: string): string {
+export function hashText(value: string): string {
   return createHash('sha1')
     .update(String(value || ''))
     .digest('hex')
@@ -39,10 +39,15 @@ export function buildDocumentTaskStepCacheKey(params: {
   const bindingKey = params.job.bindings
     .map((binding) => {
       const identity = binding.resource.path || binding.resource.name
-      const textHash = binding.role === 'target_document'
-        ? hashText(params.targetSnapshot?.content ?? binding.resource.text ?? '')
-        : hashText(binding.resource.text)
-      return `${binding.role}:${identity}:${textHash}`
+      const rawText = binding.role === 'target_document'
+        ? (params.targetSnapshot?.content ?? binding.resource.text ?? '')
+        : (binding.resource.text ?? '')
+      // When a lease-synthesized widget_target arrives with empty text, fall back to the widget's
+      //   fingerprint/textSample so distinct widget states don't hash to the same key.
+      const resolvedText = rawText && rawText.length > 0
+        ? rawText
+        : `${binding.resource.widgetTextSample ?? ''}::${binding.resource.widgetFingerprint ?? ''}`
+      return `${binding.role}:${identity}:${hashText(resolvedText)}`
     })
     .sort()
     .join('|')

@@ -5,7 +5,6 @@ import type { ScopeRunEventPayload } from './types'
 
 interface SubtaskRuntimeDeps {
   publishScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void | Promise<void>
-  runScopedTurn: (request: SubtaskRunRequest & { identity?: ReturnType<typeof createWorkerSessionIdentity> }) => Promise<{ success: boolean; error?: string }>
 }
 
 function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]): ProjectionTruthSnapshot | null {
@@ -164,28 +163,6 @@ export class SubtaskRuntime {
         error: message,
         projectionTruth: buildProjectionTruthSnapshot(truthEvents),
       }
-    }
-  }
-
-  async runScopedTurn(request: SubtaskRunRequest): Promise<SubtaskRunResult> {
-    if (!request.message) {
-      throw new Error('runScopedTurn requires a message payload')
-    }
-    const identity = createWorkerSessionIdentity({
-      scopeId: request.scope.id,
-      parentTaskId: request.parentTaskId,
-      parentStepId: request.parentStepId,
-    })
-    const result = await this.deps.runScopedTurn({
-      ...request,
-      identity,
-    })
-    return {
-      taskId: identity.taskId,
-      status: result.success ? 'done' : 'error',
-      finalText: '',
-      error: result.error,
-      projectionTruth: null,
     }
   }
 }

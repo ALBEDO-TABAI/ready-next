@@ -150,11 +150,24 @@ function resolveRunCapabilities(
     feishuConnected: baseParams.runtimeAvailability.feishuConnected,
   })
 
-  const { conflicts, demotedBrowserDecisionMode } = resolvePolicyConflicts({
+  const { conflicts, demotedBrowserDecisionMode, skillPassthroughApplied } = resolvePolicyConflicts({
     toolPolicy,
     browserDecisionMode: baseParams.browserDecisionMode,
     executionIntentContext: baseParams.executionIntentContext,
   })
+
+  if (skillPassthroughApplied) {
+    try {
+      logAgentMetric('policy_conflict_resolved', {
+        conflictType: 'force_document_x_skill_preferred',
+        resolution: 'skill_tool_passthrough',
+        forceDocumentTool: toolPolicy.forceDocumentTool,
+        preferredSkillToolCount: toolPolicy.preferredSkillToolNames?.length || 0,
+      })
+    } catch {
+      // metrics must never break the resolver
+    }
+  }
 
   if (
     conflicts.length > 0 &&
@@ -163,7 +176,11 @@ function resolveRunCapabilities(
     recursionDepth < MAX_ARBITRATION_RECURSION
   ) {
     const resolutionApplied = [`demote_browser_decision:${baseParams.browserDecisionMode}->${demotedBrowserDecisionMode}`]
+    if (skillPassthroughApplied) {
+      resolutionApplied.push('skill_tool_passthrough')
+    }
     for (const conflict of conflicts) {
+      if (conflict === 'force_document_x_skill_preferred') continue
       try {
         logAgentMetric('policy_conflict_resolved', {
           conflictType: conflict,
@@ -224,7 +241,7 @@ function resolveRunCapabilities(
     toolResolution: toolBundle.toolResolution,
     arbitration: {
       conflictsDetected: conflicts,
-      resolutionApplied: [],
+      resolutionApplied: skillPassthroughApplied ? ['skill_tool_passthrough'] : [],
       recursionDepth: 0,
     },
   }

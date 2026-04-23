@@ -4,7 +4,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { buildWidgetExportSnapshot } from '../renderer/components/document/widget-export-snapshot'
 import { buildDocumentHtmlSnapshotExport } from '../shared/document-widget-html-export'
-import { getWidgetPersistenceKey, mergeWidgetStateMapIntoContent } from '../renderer/components/document/widget-card-helpers'
+import {
+  getWidgetPersistenceKey,
+  mergeWidgetStateMapIntoContent,
+  renameWidgetFenceTitleInContent,
+} from '../renderer/components/document/widget-card-helpers'
 
 describe('widget export snapshot helper', () => {
   it('keeps pure svg widgets as svg snapshots', () => {
@@ -102,5 +106,60 @@ describe('widget export snapshot helper', () => {
     assert.match(next, /"widget_state":/)
     assert.match(next, /"value":"42"/)
     assert.match(next, /"data-focus-target"/)
+  })
+
+  it('preserves component_spec and id when renaming a widget fence title', () => {
+    const source = [
+      '```show-widget',
+      JSON.stringify({
+        id: 'widget_chart_01',
+        title: 'chart',
+        widget_code: '<div>hello</div>',
+        component_spec: {
+          component: 'info_card',
+          props: { heading: 'Hello', body: 'World' },
+        },
+        widget_state: {
+          controls: [{ index: 0, tag: 'input', type: 'number', value: '3' }],
+        },
+      }),
+      '```',
+    ].join('\n')
+
+    const next = renameWidgetFenceTitleInContent(source, 'chart', '<div>hello</div>', 'chart_v2')
+
+    assert.match(next, /"id":"widget_chart_01"/)
+    assert.match(next, /"title":"chart_v2"/)
+    assert.match(next, /"component_spec":/)
+    assert.match(next, /"info_card"/)
+    assert.match(next, /"widget_state":/)
+  })
+
+  it('preserves component_spec and id when merging widget_state back into content', () => {
+    const source = [
+      '```show-widget',
+      JSON.stringify({
+        id: 'widget_chart_02',
+        title: 'chart',
+        widget_code: '<div>hello</div>',
+        component_spec: {
+          component: 'info_card',
+          props: { heading: 'Hello', body: 'World' },
+        },
+      }),
+      '```',
+    ].join('\n')
+
+    const next = mergeWidgetStateMapIntoContent(source, {
+      [getWidgetPersistenceKey('chart', '<div>hello</div>')]: {
+        controls: [{ index: 0, tag: 'input', type: 'number', value: '99' }],
+      },
+    })
+
+    assert.match(next, /"id":"widget_chart_02"/)
+    assert.match(next, /"component_spec":/)
+    assert.match(next, /"info_card"/)
+    assert.match(next, /"widget_state":/)
+    assert.match(next, /"value":"99"/)
   })
 })

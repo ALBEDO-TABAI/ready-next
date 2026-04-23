@@ -20,7 +20,7 @@ test('rss feed mirrors calendar header button styling while article rows stay on
   assert.match(rssFeed, /color: 'var\(--text-body\)'/)
   assert.match(rssFeed, /background: 'transparent'/)
   assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel/)
-  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet,/)
+  assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-surface,/)
   assert.match(styles, /background:\s*transparent !important;/)
   assert.doesNotMatch(rssFeed, /bg-\[var\(--bg-primary\)\]/)

@@ -107,3 +107,22 @@ test('live-info detection ignores sports/score words carried in widget attachmen
   assert.notEqual(result.primaryDomain, 'browser')
   assert.ok(!result.objectSignals.some((item) => /browser-live-info/.test(item)))
 })
+
+test('intent classifier detects skill domain via registered skill id without connector word', () => {
+  const result = classifyIntent(
+    buildRequestEnvelope({ userText: 'novel_writer_system 续写这段剧情' }),
+    { registeredSkillTokens: ['novelwritersystem'] },
+  )
+
+  assert.ok(result.mentionedDomains.includes('skill'))
+  assert.ok(result.objectSignals.includes('skill-registered-id-object'))
+})
+
+test('intent classifier stays generic without registeredSkillTokens option', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: 'novel_writer_system 续写这段剧情',
+  }))
+
+  assert.ok(!result.mentionedDomains.includes('skill'))
+  assert.ok(!result.objectSignals.includes('skill-registered-id-object'))
+})

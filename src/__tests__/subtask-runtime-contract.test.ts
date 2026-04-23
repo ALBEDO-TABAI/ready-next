@@ -112,7 +112,6 @@ test('SubtaskRuntime creates an independent child projection and full lifecycle 
 
   const runtime = new SubtaskRuntime({
     publishScopeRunEvent: harness.publishScopeRunEvent,
-    runScopedTurn: async () => ({ success: true }),
   })
 
   const result = await runtime.runInlineWorker({
@@ -194,7 +193,6 @@ test('SubtaskRuntime keeps child failures isolated from the parent task id and b
 
   const runtime = new SubtaskRuntime({
     publishScopeRunEvent: harness.publishScopeRunEvent,
-    runScopedTurn: async () => ({ success: true }),
   })
 
   const result = await runtime.runInlineWorker({
@@ -231,4 +229,14 @@ test('SubtaskRuntime keeps child failures isolated from the parent task id and b
   assert.equal(child?.blockedReason, '写入失败')
   assert.match(parent?.steps[0]?.detail || '', /写入失败/)
   assert.equal((parent?.steps[0] as any)?.childTasks?.[0]?.taskId, result.taskId)
+})
+
+test('SubtaskRuntime only exposes the inline worker lifecycle', () => {
+  const harness = createHarness()
+  const runtime = new SubtaskRuntime({
+    publishScopeRunEvent: harness.publishScopeRunEvent,
+  })
+
+  assert.equal(typeof runtime.runInlineWorker, 'function')
+  assert.equal('runScopedTurn' in runtime, false)
 })

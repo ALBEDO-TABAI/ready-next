@@ -26,6 +26,11 @@ import {
 } from './tool-result-types'
 import { toToolExecutorContext } from './tool-runtime-context-builder'
 import { resolveToolExecutionTimeoutMsForProfile } from '../tools/tool-execution-timeout-policy'
+import {
+  buildToolNotAllowedMessage,
+  buildUnknownToolMessage,
+  normalizeAllowedToolSet,
+} from '../tools/tool-not-allowed-message'
 
 export interface ToolRuntimeContext {
   browserController?: BrowserController | null
@@ -344,27 +349,27 @@ export class ToolRuntime {
       requireRegisteredTool?: boolean
     },
   ): ToolExecutionOutput | null {
-    const allowedToolNames = options?.context?.allowedToolNames instanceof Set
-      ? options.context.allowedToolNames
-      : Array.isArray(options?.context?.allowedToolNames)
-        ? new Set(options.context.allowedToolNames)
-        : null
-
-    if (allowedToolNames && !allowedToolNames.has(toolName)) {
-      return createToolExecutionOutput(`Tool not allowed in current context: ${toolName}`, {
+    // Check registration first (when required) so the model gets an "unknown
+    // tool" signal for fabricated names, not an "allowed list" signal that
+    // would invite retry. Matches tool-executor.ts for a unified contract.
+    if (options?.requireRegisteredTool && !defaultToolGateway.getToolDefinition(toolName)) {
+      return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
         shape: 'json',
         data: {
           errorKind: 'host_unavailable',
+          reason: 'tool_not_registered',
           toolName,
         },
       })
     }
 
-    if (options?.requireRegisteredTool && !defaultToolGateway.getToolDefinition(toolName)) {
-      return createToolExecutionOutput(`Unknown tool: ${toolName}`, {
+    const allowedToolNames = normalizeAllowedToolSet(options?.context?.allowedToolNames)
+    if (allowedToolNames && !allowedToolNames.has(toolName)) {
+      return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
         shape: 'json',
         data: {
           errorKind: 'host_unavailable',
+          reason: 'tool_restricted_this_turn',
           toolName,
         },
       })

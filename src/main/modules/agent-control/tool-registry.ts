@@ -29,14 +29,20 @@ import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
 import { STATIC_SKILL_TOOL_NAMES } from '../tools/skills-tools-static'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
-import { createRequire } from 'node:module'
+import { getSkillAnthropicTools, getSkillOpenAITools } from '../tools/skills-tools'
+import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
 
-// Skills/system tool runtime getters import the SkillsRuntimeManager (which
-// pulls electron) — keep them lazy via createRequire so this module stays
-// loadable in non-bundled / test contexts. The static name list above is
-// imported eagerly from the pure schema module so the bundled runtime no
-// longer falls back to the inline hardcoded list.
-const lazyRequire = createRequire(import.meta.url)
+// skills-tools / system-tools transitively import SkillsRuntimeManager (which
+// imports `electron`). Top-level imports are required here because electron-vite
+// bundles the main process into a single file — a previous `createRequire(import.meta.url)`
+// based lazy-require pattern resolved relative paths against the bundle directory
+// at runtime and always failed with "Cannot find module '../tools/skills-tools'",
+// silently falling back to STATIC_SKILL_TOOL_NAMES so user-installed custom skills
+// (e.g. `skill_novel_writer_system_read_skill`) never appeared in the tool list.
+// In test contexts `electron`'s node entry exports a string, so `app` is undefined;
+// import succeeds and the downstream `getSkillsRuntimeManager()` call throws at
+// method-invocation time. The try/catch wrappers below ensure graceful fallback
+// to static names in that situation.
 
 export type ToolSchemaFormat = 'anthropic' | 'openai'
 
@@ -397,11 +403,10 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution
   const staticToolNames = resolveStaticSkillToolNames()
   const staticTools = staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
   try {
-    const skillToolsModule = lazyRequire('../tools/skills-tools') as typeof import('../tools/skills-tools')
     return {
       tools: format === 'anthropic'
-        ? skillToolsModule.getSkillAnthropicTools()
-        : skillToolsModule.getSkillOpenAITools(),
+        ? getSkillAnthropicTools()
+        : getSkillOpenAITools(),
     }
   } catch (error) {
     return {
@@ -415,7 +420,6 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat): ToolSchemaResolution
 function resolveSkillToolDefinitions(): ToolDefinitionResolution {
   const staticToolNames = resolveStaticSkillToolNames()
   try {
-    const { getSkillOpenAITools } = lazyRequire('../tools/skills-tools') as typeof import('../tools/skills-tools')
     const skillNames = collectToolNames(getSkillOpenAITools(), 'openai')
     return {
       definitions: buildToolDefinitions('skills', skillNames),
@@ -496,7 +500,6 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     getToolDefinitions: () => buildToolDefinitions('system_host', SYSTEM_TOOL_NAMES),
     getAnthropicTools: () => {
       try {
-        const { getSystemAnthropicTools } = lazyRequire('../tools/system-tools') as typeof import('../tools/system-tools')
         return getSystemAnthropicTools()
       } catch {
         return SYSTEM_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
@@ -504,7 +507,6 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     },
     getOpenAITools: () => {
       try {
-        const { getSystemOpenAITools } = lazyRequire('../tools/system-tools') as typeof import('../tools/system-tools')
         return getSystemOpenAITools()
       } catch {
         return SYSTEM_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))

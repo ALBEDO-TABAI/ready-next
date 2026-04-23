@@ -219,7 +219,11 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
     },
     {
       label: 'tool executor should still reject tools outside the allowlist during phase2',
-      pattern: /Tool not allowed in current context: \$\{toolName\}/,
+      pattern: /buildToolNotAllowedMessage\(toolName, allowedToolNames\)/,
+    },
+    {
+      label: 'tool executor should distinguish unknown (unregistered) tools from restricted ones',
+      pattern: /buildUnknownToolMessage\(toolName\)/,
     },
   ])
   assert.doesNotMatch(toolExecutor, /toolName\.startsWith\('browser_'\)/)

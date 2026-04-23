@@ -76,6 +76,7 @@ interface SkillContextOrchestratorLike {
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
+  listRegisteredSkillTokens?: () => string[]
 }
 
 interface DesignToolLoopOrchestratorLike {
@@ -427,15 +428,19 @@ export class TurnEngine {
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
       const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
+      const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
         previousInputs: host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
         lastDocumentContextInput: session.lastDocumentContextInput,
-        intentClassification: request.intentClassification || classifyIntent(requestEnvelope),
+        intentClassification: request.intentClassification || classifyIntent(requestEnvelope, {
+          registeredSkillTokens,
+        }),
         activeWidgetEditLease,
         refreshWidgetEditLease: host.refreshActiveWidgetEditLease
           ? () => host.refreshActiveWidgetEditLease?.() || null
           : undefined,
+        registeredSkillTokens,
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       const pureUserInput = requestEnvelope.pureUserText
@@ -447,12 +452,41 @@ export class TurnEngine {
       const incomingAttachmentHints = host.getIncomingAttachmentHints(request.content)
       let browserDecision = { mode: 'free_tool_loop', reason: 'browser_disabled' } as { mode: string; reason: string }
 
-      const preferredSkillToolNames = (
-        skillContextOrchestrator.findExplicitlyRequestedSkills(contextualUserInput).length > 0
-        || skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
-      )
-        ? skillContextOrchestrator.buildPreferredSkillToolNames(contextualUserInput, request.sessionId)
+      // R1: explicit-skill detection must consider primaryInstruction + pureUserText
+      // as well as contextualUserInput. contextualUserInput can inherit a previous
+      // turn's widget attachment text (lastDocumentContextInput) that drops the
+      // current-turn "按 X skill ..." phrasing, so relying on it alone silently
+      // drops preferredSkillToolNames to null and the skill filter strips the
+      // user's intended skill tools. primaryInstruction comes from the current
+      // turn verbatim and is the correct primary signal.
+      const skillDetectionInputs = Array.from(new Set([
+        contextualUserInput,
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+      ].filter((value): value is string => Boolean(value))))
+      const explicitSkillMatches = skillDetectionInputs
+        .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
+      const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
+      const hasExplicitSkill = Boolean(firstSkillMatch)
+      const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
+      const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
+        ? skillContextOrchestrator.buildPreferredSkillToolNames(
+          firstSkillMatch ? firstSkillMatch.text : contextualUserInput,
+          request.sessionId,
+        )
         : null
+      host.log(
+        `[skill_detection] primaryMatched=${
+          explicitSkillMatches.find((entry) => entry.text === requestEnvelope.primaryInstruction)?.skills.length
+            ? 'true' : 'false'
+        } contextualMatched=${
+          explicitSkillMatches.find((entry) => entry.text === contextualUserInput)?.skills.length
+            ? 'true' : 'false'
+        } pureMatched=${
+          explicitSkillMatches.find((entry) => entry.text === requestEnvelope.pureUserText)?.skills.length
+            ? 'true' : 'false'
+        } activeExecution=${hasActiveSkill} preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
+      )
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
         feishuConnected: host.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,

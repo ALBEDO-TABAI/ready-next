@@ -176,6 +176,36 @@ export function filterAllowedToolNamesByPrefixes(
   return filtered.length > 0 ? filtered : null
 }
 
+/**
+ * R2: Diagnostic log emitted by each narrowing domain adapter so production
+ * logs make the prefix-narrowing step visible. Without this, a "Tool not
+ * allowed" at runtime gives no signal as to whether the culprit was the
+ * turn-engine bundle or the domain adapter's prefix narrowing.
+ */
+export function logPrefixNarrowing(
+  log: (message: string) => void,
+  domainId: string,
+  inputAllowedToolNames: string[] | null | undefined,
+  narrowedAllowedToolNames: string[] | null,
+  prefixes: string[],
+): void {
+  const inputCount = inputAllowedToolNames?.length || 0
+  const narrowedCount = narrowedAllowedToolNames?.length
+  const outputDescription = narrowedAllowedToolNames === null
+    ? 'unrestricted_passthrough'
+    : `${narrowedCount}`
+  const droppedSample = inputAllowedToolNames
+    ? inputAllowedToolNames
+      .filter((name) => !prefixes.some((prefix) => name.startsWith(prefix)))
+      .slice(0, 3)
+    : []
+  log(
+    `[domain_adapter_prefix_narrowing] domain=${domainId} inputCount=${inputCount} `
+    + `outputCount=${outputDescription} prefixes=${prefixes.join('|')} `
+    + `droppedSample=${droppedSample.join(',') || 'none'}`,
+  )
+}
+
 export function selectDomainAdapter(
   adapters: DomainAdapter[] | null | undefined,
   params: DomainAdapterSelectionContext,

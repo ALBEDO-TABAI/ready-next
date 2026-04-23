@@ -44,11 +44,21 @@ export interface RequestEnvelopeResource {
   source: RequestEnvelopeResourceSource
   name: string
   path: string | null
+  documentPath?: string | null
+  tabId?: string | null
+  widgetId?: string | null
   text: string
   summary: string | null
   order: number
   canRead: boolean
   canWrite: boolean
+  // Optional fingerprint of the widget's componentSpec / widgetCode. When `text` is synthesized
+  //   empty (e.g., lease-driven fallback target), cache-key builders fall back to this so different
+  //   widget states don't collide on the same hash key.
+  widgetFingerprint?: string | null
+  // Optional non-empty text slice from the widget body. Used symmetrically with widgetFingerprint
+  //   to differentiate cache keys when the synthesized resource has no snapshot content.
+  widgetTextSample?: string | null
 }
 
 export interface RequestEnvelope {
@@ -194,7 +204,7 @@ function stripStructuredResourceBoilerplate(text: string): string {
   return String(text || '')
     .replace(/^---\s*(引用文件|附件):[^\n]*\n?/gm, '')
     .replace(/^(###\s*当前文档上下文|###\s*文档引用|###\s*浏览页面引用|###\s*文件夹引用|###\s*Widget 更新上下文)\s*\n?/gm, '')
-    .replace(/(?:^|\n)-\s*(标题|文档|路径|类型|字符数|链接|主标题|当前选中文本|页面摘要|名称|用途|目标 widget|当前模式|约束):\s*[^\n]*/g, '')
+    .replace(/(?:^|\n)-\s*(标题|文档|路径|类型|字符数|链接|主标题|当前选中文本|页面摘要|名称|用途|目标 widget|标签页ID|widgetId|当前模式|约束):\s*[^\n]*/g, '')
     .replace(/---\s*文档(摘要|内容)开始\s*---/g, '')
     .replace(/---\s*文档(摘要|内容)结束\s*---/g, '')
     .replace(/```(?:show-widget|quote)?[\s\S]*?```/g, '')
@@ -314,6 +324,8 @@ function buildResourceFromBlock(block: StructuredBlock, order: number): RequestE
   if (block.marker === '### Widget 更新上下文') {
     const name = extractNamedBlockValue(block.text, '目标 widget') || '当前 widget'
     const path = extractNamedBlockValue(block.text, '路径')
+    const tabId = extractNamedBlockValue(block.text, '标签页ID')
+    const widgetId = extractNamedBlockValue(block.text, 'widgetId')
     const text = stripStructuredResourceBoilerplate(block.text)
     return {
       id: `${block.marker}-${order}-${name}`,
@@ -321,6 +333,9 @@ function buildResourceFromBlock(block: StructuredBlock, order: number): RequestE
       source: 'widget_target',
       name,
       path,
+      documentPath: path,
+      tabId,
+      widgetId,
       text,
       summary: summarizeResourceText(text),
       order,

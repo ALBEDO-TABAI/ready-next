@@ -19,7 +19,14 @@ const localStorageMock = {
 let prefersDark = false
 
 const matchMediaMock = (query: string) => ({
-    get matches() { return query === '(prefers-color-scheme: dark)' ? prefersDark : false },
+    get matches() {
+        if (query === '(prefers-color-scheme: dark)') return prefersDark
+        // Tests run in a non-interactive environment — advertise prefers-reduced-motion so the
+        // theme store's isRitualBypassActive() short-circuit applies data-theme synchronously
+        // instead of deferring it until the overlay's holding phase ends.
+        if (query === '(prefers-reduced-motion: reduce)') return true
+        return false
+    },
     media: query,
     onchange: null,
     addListener: () => {},
@@ -933,7 +940,7 @@ describe('useAgent Store', () => {
     it('should retry once after rebuilding a missing local scope during send', async () => {
         const createConversationCalls: Array<{ id: string; agent: string; title: string }> = []
         const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
-        const sendScopedCalls: string[] = []
+        const sendScopedCalls: Array<Record<string, unknown>> = []
 
         ;(globalThis as any).window.electronAPI = {
             agent: {
@@ -956,10 +963,10 @@ describe('useAgent Store', () => {
                         },
                     }
                 },
-                sendScoped: async (scopeId: string) => {
-                    sendScopedCalls.push(scopeId)
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
                     if (sendScopedCalls.length === 1) {
-                        return { success: false, error: `Conversation scope not found: ${scopeId}` }
+                        return { success: false, error: `Conversation scope not found: ${String(payload?.scopeId)}` }
                     }
                     return { success: true }
                 },
@@ -1033,7 +1040,12 @@ describe('useAgent Store', () => {
                 title: '新对话',
             },
         ])
-        assert.deepStrictEqual(sendScopedCalls, ['conv-local-retry', 'conv-local-retry'])
+        assert.deepStrictEqual(
+            sendScopedCalls.map((call) => call.scopeId),
+            ['conv-local-retry', 'conv-local-retry'],
+        )
+        assert.strictEqual(sendScopedCalls[0].message, 'hello again')
+        assert.ok(typeof sendScopedCalls[0].requestId === 'string' && (sendScopedCalls[0].requestId as string).length > 0)
         assert.deepStrictEqual(createLocalScopeCalls, [
             { agent: 'butler', scopeId: 'conv-local-retry' },
             { agent: 'butler', scopeId: 'conv-local-retry' },
@@ -1534,38 +1546,49 @@ describe('useTheme Store', () => {
         assert.strictEqual(documentAttributes.get('data-theme'), 'light')
     })
 
-    it('should toggle theme in cycle: light -> dark -> system -> light', () => {
+    it('should toggle theme strictly between light and dark (no system)', () => {
         assert.strictEqual(useTheme.getState().theme, 'light')
 
         useTheme.getState().toggleTheme()
         assert.strictEqual(useTheme.getState().theme, 'dark')
-
-        useTheme.getState().toggleTheme()
-        assert.strictEqual(useTheme.getState().theme, 'system')
+        assert.strictEqual(useTheme.getState().resolvedTheme, 'dark')
 
         useTheme.getState().toggleTheme()
         assert.strictEqual(useTheme.getState().theme, 'light')
+        assert.strictEqual(useTheme.getState().resolvedTheme, 'light')
+
+        useTheme.getState().toggleTheme()
+        assert.strictEqual(useTheme.getState().theme, 'dark')
     })
 
     it('should persist toggled theme to localStorage', () => {
         useTheme.getState().toggleTheme() // light -> dark
         assert.strictEqual(storage.get('ready-theme'), 'dark')
-        useTheme.getState().toggleTheme() // dark -> system
-        assert.strictEqual(storage.get('ready-theme'), 'system')
+        useTheme.getState().toggleTheme() // dark -> light
+        assert.strictEqual(storage.get('ready-theme'), 'light')
     })
 
     it('should apply correct data-theme attribute when toggling', () => {
-        prefersDark = true
-
         useTheme.getState().toggleTheme() // light -> dark
         assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
 
-        useTheme.getState().toggleTheme() // dark -> system (prefers dark)
+        useTheme.getState().toggleTheme() // dark -> light
+        assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+        assert.strictEqual(useTheme.getState().resolvedTheme, 'light')
+
+        useTheme.getState().toggleTheme() // light -> dark
         assert.strictEqual(documentAttributes.get('data-theme'), 'dark')
+    })
+
+    it('should overwrite system theme with explicit resolved on toggle', () => {
+        prefersDark = true
+        useTheme.getState().setTheme('system')
+        assert.strictEqual(useTheme.getState().theme, 'system')
         assert.strictEqual(useTheme.getState().resolvedTheme, 'dark')
 
-        useTheme.getState().toggleTheme() // system -> light
-        assert.strictEqual(documentAttributes.get('data-theme'), 'light')
+        useTheme.getState().toggleTheme()
+        assert.strictEqual(useTheme.getState().theme, 'light')
+        assert.strictEqual(useTheme.getState().resolvedTheme, 'light')
     })
 
     it('should set skin to liquid-glass and persist it', () => {

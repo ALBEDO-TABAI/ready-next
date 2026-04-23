@@ -45,7 +45,8 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(tabShell, /this\.host\.hideHost\(activeTab\.view\)/)
   assert.match(hostLayout, /showHost\(view: BrowserHostView, bounds: BrowserRect\): void \{[\s\S]*this\.setHostBoundsNow\(view, bounds\)/)
   assert.match(hostLayout, /hideHost\(view: BrowserHostView\): void \{[\s\S]*this\.setHostBoundsNow\(view, this\.offscreenBounds\)/)
-  assert.match(hostLayout, /scheduleHostBounds\(view: BrowserHostView, bounds: BrowserRect\): void \{/)
+  assert.doesNotMatch(hostLayout, /scheduleHostBounds\(/)
+  assert.doesNotMatch(hostLayout, /clearScheduledBounds\(/)
   assert.match(lifecycle, /shouldShow:\s*boolean/)
   assert.match(lifecycle, /if \(shouldShow && this\.host\.shouldPresentHosts\(\)\)/)
 

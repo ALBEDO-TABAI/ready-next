@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 
-import { parseJsonOrEventStreamText } from '../main/modules/openai-responses'
+import { parseJsonOrEventStreamText, parseJsonResponse } from '../main/modules/openai-responses'
 
 describe('parseJsonOrEventStreamText', () => {
   it('parses plain json payloads', () => {
@@ -22,5 +22,18 @@ describe('parseJsonOrEventStreamText', () => {
     assert.strictEqual(payload.id, 'resp_1')
     assert.strictEqual(payload.status, 'completed')
     assert.strictEqual(payload.output_text, 'Hi there')
+  })
+
+  it('turns html responses into a helpful api address error', async () => {
+    const response = new Response('<!doctype html><html><body>NovaCode</body></html>', {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+      },
+    })
+
+    await assert.rejects(
+      () => parseJsonResponse(response, { requestUrl: 'https://ai.novacode.top/chat/completions' }),
+      /\/v1/,
+    )
   })
 })

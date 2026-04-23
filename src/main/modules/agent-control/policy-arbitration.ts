@@ -5,6 +5,7 @@ import type { ExecutionIntentContext } from './execution-intent-resolver'
 export type PolicyConflictType =
   | 'force_document_x_browser_workflow'
   | 'widget_task_x_browser_tools_allowed'
+  | 'force_document_x_skill_preferred'
 
 export interface PolicyArbitration {
   conflictsDetected: PolicyConflictType[]
@@ -21,6 +22,7 @@ export function resolvePolicyConflicts(params: {
 }): {
   conflicts: PolicyConflictType[]
   demotedBrowserDecisionMode: BrowserTaskDecisionMode | null
+  skillPassthroughApplied: boolean
 } {
   const conflicts: PolicyConflictType[] = []
   const browserWorkflow =
@@ -37,9 +39,23 @@ export function resolvePolicyConflicts(params: {
   if (widgetMaintenanceKind && params.toolPolicy.allowBrowserTools && browserWorkflow && !explicitCreate) {
     conflicts.push('widget_task_x_browser_tools_allowed')
   }
-
-  if (conflicts.length === 0) {
-    return { conflicts, demotedBrowserDecisionMode: null }
+  const hasExplicitSkillPreference =
+    Array.isArray(params.toolPolicy.preferredSkillToolNames)
+    && params.toolPolicy.preferredSkillToolNames.length > 0
+  if (params.toolPolicy.forceDocumentTool && hasExplicitSkillPreference) {
+    conflicts.push('force_document_x_skill_preferred')
   }
-  return { conflicts, demotedBrowserDecisionMode: 'free_tool_loop' }
+
+  const hasBrowserConflicts = conflicts.some((c) =>
+    c === 'force_document_x_browser_workflow' || c === 'widget_task_x_browser_tools_allowed')
+  const hasSkillConflict = conflicts.includes('force_document_x_skill_preferred')
+
+  if (!hasBrowserConflicts && !hasSkillConflict) {
+    return { conflicts, demotedBrowserDecisionMode: null, skillPassthroughApplied: false }
+  }
+  return {
+    conflicts,
+    demotedBrowserDecisionMode: hasBrowserConflicts ? 'free_tool_loop' : null,
+    skillPassthroughApplied: hasSkillConflict,
+  }
 }

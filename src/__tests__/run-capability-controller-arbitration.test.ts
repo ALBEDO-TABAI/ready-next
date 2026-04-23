@@ -117,3 +117,55 @@ test('arbitration also detects late browser_workflow flips during a widget-updat
   assert.ok(reconciled.conflicts.length > 0)
   assert.equal(reconciled.demotedBrowserDecisionMode, 'free_tool_loop')
 })
+
+test('arbitration flags forceDocumentTool × preferredSkillToolNames as skill passthrough and keeps browser decision', () => {
+  const result = resolvePolicyConflicts({
+    toolPolicy: buildToolPolicy({
+      forceDocumentTool: true,
+      preferredSkillToolNames: ['skill_novel_writer_system_write_scene'],
+    }),
+    browserDecisionMode: 'free_tool_loop',
+    executionIntentContext: buildIntent('按 novel_writer_system 续写下一段剧情', {
+      documentWidgetTaskKind: 'update',
+    }),
+  })
+
+  assert.ok(result.conflicts.includes('force_document_x_skill_preferred'))
+  assert.equal(result.demotedBrowserDecisionMode, null)
+  assert.equal(result.skillPassthroughApplied, true)
+})
+
+test('arbitration lists both conflicts when forceDocument × browser_workflow × preferredSkillToolNames co-occur', () => {
+  const result = resolvePolicyConflicts({
+    toolPolicy: buildToolPolicy({
+      forceDocumentTool: true,
+      allowBrowserTools: true,
+      preferredSkillToolNames: ['skill_novel_writer_system_write_scene'],
+    }),
+    browserDecisionMode: 'browser_workflow',
+    executionIntentContext: buildIntent('按 novel_writer_system 在文档里更新这张卡片', {
+      documentWidgetTaskKind: 'update',
+    }),
+  })
+
+  assert.ok(result.conflicts.includes('force_document_x_browser_workflow'))
+  assert.ok(result.conflicts.includes('force_document_x_skill_preferred'))
+  assert.equal(result.demotedBrowserDecisionMode, 'free_tool_loop')
+  assert.equal(result.skillPassthroughApplied, true)
+})
+
+test('arbitration does not flag skill passthrough when preferredSkillToolNames is null', () => {
+  const result = resolvePolicyConflicts({
+    toolPolicy: buildToolPolicy({
+      forceDocumentTool: true,
+      preferredSkillToolNames: null,
+    }),
+    browserDecisionMode: 'free_tool_loop',
+    executionIntentContext: buildIntent('更新这张信息卡', {
+      documentWidgetTaskKind: 'update',
+    }),
+  })
+
+  assert.ok(!result.conflicts.includes('force_document_x_skill_preferred'))
+  assert.equal(result.skillPassthroughApplied, false)
+})

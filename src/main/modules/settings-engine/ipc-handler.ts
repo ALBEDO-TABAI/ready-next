@@ -11,6 +11,7 @@ import {
 } from '../../../shared/ai-providers'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { getLogPath } from '../../utils/platform'
+import { parseJsonResponse } from '../openai-responses'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -208,11 +209,11 @@ export function setupSettingsIPC(): void {
 
       if (resp.ok) {
         try {
-          const json = await resp.json() as { data?: Array<{ id: string }> }
+          const json = await parseJsonResponse(resp, { requestUrl: modelsUrl }) as { data?: Array<{ id: string }> }
           const modelList = json.data?.map(m => m.id).slice(0, 20)
           return { success: true, data: { latencyMs, modelList } }
-        } catch {
-          return { success: true, data: { latencyMs } }
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
         }
       }
 
