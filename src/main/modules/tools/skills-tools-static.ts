@@ -17,13 +17,29 @@ const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
 
-const EXECUTION_CONTROL_TOOL_NAMES: string[] = [
-  'skill_get_state',
+/**
+ * Session-gated workflow-control tools (5 names). When the static fallback
+ * path runs during early boot — before the runtime-manager is ready — we
+ * deliberately REFUSE to advertise these names: the model would otherwise see
+ * `skill_submit_input` while no execution exists yet, fabricate an id, and
+ * loop. Patch A2.
+ */
+const EXECUTION_CONTROL_GATED_TOOL_NAMES: string[] = [
   'skill_submit_input',
   'skill_submit_confirmation',
   'skill_submit_agent_result',
   'skill_restart_from_step',
   'skill_cancel_execution',
+]
+
+/** Read-only execution tool — always safe to advertise. */
+const EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES: string[] = [
+  'skill_get_state',
+]
+
+const EXECUTION_CONTROL_TOOL_NAMES: string[] = [
+  ...EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES,
+  ...EXECUTION_CONTROL_GATED_TOOL_NAMES,
 ]
 
 // B Phase 1 — skill primitives are also kind='execution_control' from the
@@ -39,8 +55,28 @@ const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_read_artifact',
 ]
 
+/**
+ * Full static tool list — includes the 5 gated tools. Use for documentation,
+ * snapshot comparisons, or callers that will subsequently filter by session
+ * state. Do NOT feed this directly to the LLM during early boot; use
+ * `STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` instead.
+ */
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
   ...EXECUTION_CONTROL_TOOL_NAMES,
+  ...PRIMITIVE_TOOL_NAMES,
+]
+
+/**
+ * Boot-safe subset: skill action tools + `skill_get_state` + primitives, but
+ * excludes the 5 gated submit/restart/cancel tools. This is what the
+ * ToolRegistry's static fallback advertises while the runtime-manager is
+ * booting. The gated tools re-appear dynamically via session-aware providers
+ * (`filterExecutionControlToolsBySession`) once a session actually has an
+ * active execution. Patch A2.
+ */
+export const STATIC_SKILL_TOOL_NAMES_BOOT_SAFE: string[] = [
+  ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
+  ...EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES,
   ...PRIMITIVE_TOOL_NAMES,
 ]

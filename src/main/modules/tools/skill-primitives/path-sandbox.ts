@@ -33,12 +33,24 @@
 import { resolve, sep, isAbsolute, basename } from 'node:path'
 import { realpathSync } from 'node:fs'
 
+/**
+ * Reserved filenames that the write primitive refuses to overwrite. We compare
+ * case-insensitively because macOS (APFS) and Windows (NTFS) are typically
+ * case-insensitive — otherwise a model could create `skill.md` on macOS and
+ * inadvertently shadow the real `SKILL.md` at read time. Linux is strictly
+ * case-sensitive; on Linux the lowercase check is a defense-in-depth over-match
+ * that still rejects `Skill.md`, which the model shouldn't be creating either.
+ */
 export const RESERVED_FILE_NAMES = new Set<string>([
   'SKILL.md',
   'ready-skill.json',
   'skill.workflow.json',
   'MANIFEST.json',
 ])
+
+const RESERVED_FILE_NAMES_LOWER = new Set<string>(
+  Array.from(RESERVED_FILE_NAMES).map((n) => n.toLowerCase()),
+)
 
 export class PathSandboxError extends Error {
   constructor(
@@ -180,7 +192,7 @@ function findDeepestExistingAncestor(absPath: string): string | null {
  */
 export function assertNotReservedPath(absPath: string): void {
   const leaf = basename(absPath)
-  if (RESERVED_FILE_NAMES.has(leaf)) {
+  if (RESERVED_FILE_NAMES_LOWER.has(leaf.toLowerCase())) {
     throw new PathSandboxError(
       'reserved_path',
       `Refusing to write reserved file ${leaf}`,

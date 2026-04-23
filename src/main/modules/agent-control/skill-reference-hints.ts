@@ -23,7 +23,23 @@ export interface ReferenceSkillHint {
   at: number
 }
 
+/**
+ * Idle TTL for a reference-skill hint. A session that hasn't reloaded its
+ * reference skill in this window is assumed to have moved on — the hint is
+ * purged so the skill-execution-missing error branch falls back to the generic
+ * "tool not applicable" message instead of lying about a stale skill.
+ */
+export const REFERENCE_SKILL_HINT_TTL_MS = 30 * 60 * 1000 // 30 min
+
 const lastReferenceSkillBySession = new Map<string, ReferenceSkillHint>()
+
+function now(): number {
+  return Date.now()
+}
+
+function isExpired(hint: ReferenceSkillHint, at: number): boolean {
+  return at - hint.at > REFERENCE_SKILL_HINT_TTL_MS
+}
 
 export function rememberLastReferenceSkill(
   sessionId: string | undefined,
@@ -36,7 +52,7 @@ export function rememberLastReferenceSkill(
   lastReferenceSkillBySession.set(sessionId, {
     id,
     name: name || id,
-    at: Date.now(),
+    at: now(),
   })
 }
 
@@ -44,12 +60,44 @@ export function getLastReferenceSkill(
   sessionId: string | undefined,
 ): ReferenceSkillHint | null {
   if (!sessionId) return null
-  return lastReferenceSkillBySession.get(sessionId) || null
+  const hint = lastReferenceSkillBySession.get(sessionId)
+  if (!hint) return null
+  if (isExpired(hint, now())) {
+    lastReferenceSkillBySession.delete(sessionId)
+    return null
+  }
+  return hint
 }
 
 export function clearLastReferenceSkill(sessionId: string | undefined): void {
   if (!sessionId) return
   lastReferenceSkillBySession.delete(sessionId)
+}
+
+/**
+ * Purge any hint whose last-write is older than `REFERENCE_SKILL_HINT_TTL_MS`.
+ * Safe to call eagerly; returns the number of entries removed so callers can
+ * log or emit a telemetry counter.
+ */
+export function sweepExpiredReferenceSkillHints(): number {
+  const at = now()
+  let removed = 0
+  for (const [sessionId, hint] of lastReferenceSkillBySession) {
+    if (isExpired(hint, at)) {
+      lastReferenceSkillBySession.delete(sessionId)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/**
+ * Forget hints for every session. Callers wire this up to the runtime
+ * lifecycle: `AgentRuntimeManager.dispose` (app shutdown) and
+ * `ConversationScope` retire hooks. Idempotent.
+ */
+export function clearAllReferenceSkillHints(): void {
+  lastReferenceSkillBySession.clear()
 }
 
 // Exposed for tests only — do not call from production code paths.

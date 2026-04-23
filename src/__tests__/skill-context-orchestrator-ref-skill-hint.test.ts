@@ -11,7 +11,9 @@ import test from 'node:test'
 import { SkillContextOrchestrator } from '../main/modules/agent-control/skill-context-orchestrator'
 import {
   _resetLastReferenceSkillHintsForTests,
+  clearAllReferenceSkillHints,
   getLastReferenceSkill,
+  rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skill-reference-hints'
 
 function referenceSkill(): any {
@@ -138,4 +140,33 @@ test('hints are scoped per session — session-A hint does not leak into session
   assert.ok(getLastReferenceSkill('session-A'))
   assert.equal(getLastReferenceSkill('session-C'), null)
   assert.equal(getLastReferenceSkill(undefined), null)
+})
+
+// Patch A4 — overwriting the same session's hint replaces the previous
+// skill in place; old id must not be recoverable.
+test('same-session overwrite — loading ref-skill-B replaces ref-skill-A in the hint store', () => {
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('session-overwrite', { id: 'novel_writer_system', name: 'Novel' })
+  const first = getLastReferenceSkill('session-overwrite')
+  assert.equal(first?.id, 'novel_writer_system')
+
+  rememberLastReferenceSkill('session-overwrite', { id: 'data_analyst', name: 'Data' })
+  const second = getLastReferenceSkill('session-overwrite')
+  assert.equal(second?.id, 'data_analyst')
+  assert.equal(second?.name, 'Data')
+  // Timestamp moves forward on overwrite (or stays equal on same-ms writes).
+  assert.ok((second?.at || 0) >= (first?.at || 0))
+})
+
+// Patch A1 — clearAllReferenceSkillHints must wipe every session, simulating
+// `cleanupAgentRuntime` on app shutdown.
+test('clearAllReferenceSkillHints wipes every session (runtime dispose)', () => {
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('s1', { id: 'a', name: 'A' })
+  rememberLastReferenceSkill('s2', { id: 'b', name: 'B' })
+  assert.ok(getLastReferenceSkill('s1'))
+  assert.ok(getLastReferenceSkill('s2'))
+  clearAllReferenceSkillHints()
+  assert.equal(getLastReferenceSkill('s1'), null)
+  assert.equal(getLastReferenceSkill('s2'), null)
 })

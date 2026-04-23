@@ -105,3 +105,47 @@ test('shouldExposeExecutionControlTool returns the resolver value per-call for g
   )
   assert.equal(calls.length, 0, 'resolver must not be called for non-gated names')
 })
+
+// Patch A4 — two sessions, one with an execution and one without, must
+// produce different tool lists when both are consulted back-to-back. Each
+// session-scoped call is independent so a filter change for session-A cannot
+// leak into session-B.
+test('concurrent sessions get independent gate outcomes (A active, B idle)', () => {
+  const executionsBySession = new Map<string, boolean>([
+    ['session-A-active', true],
+    ['session-B-idle', false],
+  ])
+  const resolver = (sid: string) => executionsBySession.get(sid) === true
+
+  const listA = filterExecutionControlToolsBySession(
+    ALL_CONTROL_TOOLS,
+    'session-A-active',
+    resolver,
+  )
+  const listB = filterExecutionControlToolsBySession(
+    ALL_CONTROL_TOOLS,
+    'session-B-idle',
+    resolver,
+  )
+
+  assert.deepEqual(
+    listA.map((d) => d.name).sort(),
+    ALL_CONTROL_TOOLS.map((d) => d.name).sort(),
+    'session-A sees the full list because it has an execution',
+  )
+  assert.deepEqual(
+    listB.map((d) => d.name),
+    ['skill_get_state'],
+    'session-B only sees the read-only tool',
+  )
+})
+
+test('gate is pure — calling it twice for the same inputs returns equivalent arrays (no mutation)', () => {
+  const resolver = (sid: string) => sid === 'session-active'
+  const first = filterExecutionControlToolsBySession(ALL_CONTROL_TOOLS, 'session-idle', resolver)
+  const second = filterExecutionControlToolsBySession(ALL_CONTROL_TOOLS, 'session-idle', resolver)
+  assert.deepEqual(first.map((d) => d.name), second.map((d) => d.name))
+  assert.notEqual(first, second, 'must return a fresh array each call; no cached reference')
+  // Input array is untouched.
+  assert.equal(ALL_CONTROL_TOOLS.length, 6)
+})

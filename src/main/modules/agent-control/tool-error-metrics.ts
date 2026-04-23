@@ -39,9 +39,12 @@ export const TOOL_ERROR_METRICS = {
   /** B Phase 1 — Skill primitive 成功调用（附 primitive 维度） */
   skillPrimitiveUsed: 'skill_primitive_used',
   /**
-   * B Phase 1 — Skill primitive 被沙箱 / 白名单拒绝（附 reason 维度：
-   * path_escape | reserved_path | symlink_escape | absolute_path | empty_path |
-   * cmd_not_allowlisted | timeout | missing_skill | output_truncated | command_empty）
+   * B Phase 1 — Skill primitive 被沙箱 / 白名单 / 上限拒绝（附 reason 维度，Patch B
+   * 后扩展）：
+   *   path_escape | reserved_path | symlink_escape | absolute_path | empty_path |
+   *   cmd_not_allowlisted | command_empty | command_parse_failed | timeout |
+   *   missing_skill | size_limit | overflow_artifact_write_failed | aborted |
+   *   not_found | not_a_file
    */
   skillPrimitiveRejected: 'skill_primitive_rejected',
 } as const

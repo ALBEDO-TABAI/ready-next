@@ -21,6 +21,13 @@ import {
 } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
+/**
+ * Hard cap on bytes a single write_artifact call can emit. Protects the app
+ * from a runaway LLM deciding to serialize a 10GB blob. Conservative default;
+ * embedded skills that legitimately need more should split across chunks.
+ */
+export const WRITE_ARTIFACT_HARD_CAP_BYTES = 50 * 1024 * 1024 // 50 MB
+
 export interface WriteArtifactArgs {
   relativePath: string
   content: string
@@ -74,6 +81,24 @@ export async function executeWriteArtifact(
   const buffer = encoding === 'base64'
     ? Buffer.from(args.content, 'base64')
     : Buffer.from(args.content, 'utf-8')
+
+  if (buffer.length > WRITE_ARTIFACT_HARD_CAP_BYTES) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_write_artifact',
+      reason: 'size_limit',
+      requestedBytes: buffer.length,
+      hardCapBytes: WRITE_ARTIFACT_HARD_CAP_BYTES,
+    })
+    throw new ToolDomainError(
+      'size_limit',
+      `skill_write_artifact content exceeds hard cap (${buffer.length} > ${WRITE_ARTIFACT_HARD_CAP_BYTES} bytes).`,
+      {
+        relativePath: args.relativePath,
+        requestedBytes: buffer.length,
+        hardCapBytes: WRITE_ARTIFACT_HARD_CAP_BYTES,
+      },
+    )
+  }
 
   mkdirSync(dirname(absPath), { recursive: true })
   writeFileSync(absPath, buffer)

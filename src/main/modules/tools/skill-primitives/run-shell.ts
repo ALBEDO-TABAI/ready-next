@@ -26,6 +26,8 @@ import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 const STDOUT_LIMIT = 8_192
 const DEFAULT_TIMEOUT_MS = 60_000
 const HARD_CAP_TIMEOUT_MS = 600_000
+/** Grace period between SIGTERM and SIGKILL when killing a runaway child. */
+const SIGKILL_ESCALATION_MS = 5_000
 
 export const SHELL_ALLOWLIST: ReadonlySet<string> = new Set([
   'python',
@@ -70,12 +72,32 @@ interface ParsedCommand {
 }
 
 /**
+ * Surfaces a distinct failure when the minimal tokenizer sees syntax it
+ * deliberately refuses (single quotes, unbalanced double quotes). Callers
+ * convert this into a `command_parse_failed` ToolDomainError so the LLM gets
+ * a clear signal rather than a half-mangled argv.
+ */
+export class CommandParseError extends Error {
+  constructor(public readonly reason: 'single_quote' | 'unbalanced_quote', message: string) {
+    super(message)
+    this.name = 'CommandParseError'
+  }
+}
+
+/**
  * Minimal whitespace-split tokenizer. Respects double quotes so paths with
- * spaces still work; no escapes beyond that.
+ * spaces still work. Explicitly refuses POSIX single-quote quoting and
+ * unbalanced double quotes instead of silently mangling argv.
  */
 export function parseCommand(command: string): ParsedCommand | null {
   const trimmed = command.trim()
   if (!trimmed) return null
+  if (trimmed.includes("'")) {
+    throw new CommandParseError(
+      'single_quote',
+      "skill_run_shell.command does not support POSIX single-quote quoting; use double quotes for arguments that contain spaces.",
+    )
+  }
   const tokens: string[] = []
   let current = ''
   let inQuote = false
@@ -92,6 +114,12 @@ export function parseCommand(command: string): ParsedCommand | null {
       continue
     }
     current += ch
+  }
+  if (inQuote) {
+    throw new CommandParseError(
+      'unbalanced_quote',
+      'skill_run_shell.command contains an unbalanced double quote.',
+    )
   }
   if (current) tokens.push(current)
   if (tokens.length === 0) return null
@@ -115,13 +143,22 @@ function truncate(buffer: string): { text: string; truncated: boolean } {
   return { text: buffer.slice(0, STDOUT_LIMIT), truncated: true }
 }
 
-function writeOverflowArtifact(artifactRoot: string, streamLabel: string, fullText: string): string {
-  const logsDir = join(artifactRoot, '.logs')
-  mkdirSync(logsDir, { recursive: true })
-  const name = `shell-${Date.now()}-${randomUUID().slice(0, 8)}-${streamLabel}.txt`
-  const abs = join(logsDir, name)
-  writeFileSync(abs, fullText, 'utf-8')
-  return abs
+interface OverflowResult {
+  path: string | null
+  error: string | null
+}
+
+function writeOverflowArtifact(artifactRoot: string, streamLabel: string, fullText: string): OverflowResult {
+  try {
+    const logsDir = join(artifactRoot, '.logs')
+    mkdirSync(logsDir, { recursive: true })
+    const name = `shell-${Date.now()}-${randomUUID().slice(0, 8)}-${streamLabel}.txt`
+    const abs = join(logsDir, name)
+    writeFileSync(abs, fullText, 'utf-8')
+    return { path: abs, error: null }
+  } catch (err) {
+    return { path: null, error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 export async function executeRunShell(
@@ -143,7 +180,20 @@ export async function executeRunShell(
     )
   }
 
-  const parsed = parseCommand(args.command)
+  let parsed: ParsedCommand | null
+  try {
+    parsed = parseCommand(args.command)
+  } catch (error) {
+    if (error instanceof CommandParseError) {
+      logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+        primitive: 'skill_run_shell',
+        reason: 'command_parse_failed',
+        detail: error.reason,
+      })
+      throw new ToolDomainError('command_parse_failed', error.message, { detail: error.reason })
+    }
+    throw error
+  }
   if (!parsed) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_run_shell',
@@ -189,10 +239,16 @@ export async function executeRunShell(
   let stderr = ''
   let timedOut = false
   let aborted = false
+  // On Unix we want to create a new process group so `kill(-pid)` can reap
+  // grandchildren spawned by bash/sh wrappers. Windows doesn't support
+  // detached in the same way — `child.kill('SIGTERM')` with `/T /F` semantics
+  // is approximated via taskkill below if needed.
+  const useProcessGroup = process.platform !== 'win32'
   const child = spawnFn(parsed.bin, parsed.args, {
     cwd: roots.assetRoot,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: useProcessGroup,
   })
 
   if (args.stdin != null && child.stdin) {
@@ -211,14 +267,37 @@ export async function executeRunShell(
     stderr += chunk
   })
 
+  let sigkillTimer: NodeJS.Timeout | null = null
+  const terminateChild = (signal: NodeJS.Signals = 'SIGTERM') => {
+    if (child.killed) return
+    try {
+      if (useProcessGroup && typeof child.pid === 'number') {
+        // Negative pid -> process group; kills grandchildren too.
+        process.kill(-child.pid, signal)
+      } else {
+        child.kill(signal)
+      }
+    } catch {
+      /* child already exited or pgid missing — fall through */
+    }
+  }
+  const scheduleSigkillEscalation = () => {
+    if (sigkillTimer) return
+    sigkillTimer = setTimeout(() => {
+      if (!child.killed) terminateChild('SIGKILL')
+    }, SIGKILL_ESCALATION_MS)
+  }
+
   const timer = setTimeout(() => {
     timedOut = true
-    try { child.kill('SIGTERM') } catch { /* ignore */ }
+    terminateChild('SIGTERM')
+    scheduleSigkillEscalation()
   }, timeoutMs)
 
   const onAbort = () => {
     aborted = true
-    try { child.kill('SIGTERM') } catch { /* ignore */ }
+    terminateChild('SIGTERM')
+    scheduleSigkillEscalation()
   }
   if (deps.signal) {
     if (deps.signal.aborted) onAbort()
@@ -230,6 +309,7 @@ export async function executeRunShell(
     child.on('close', (code) => resolve(code ?? -1))
   }).finally(() => {
     clearTimeout(timer)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
     if (deps.signal) deps.signal.removeEventListener('abort', onAbort)
   }) as number
 
@@ -237,12 +317,28 @@ export async function executeRunShell(
 
   const stdoutSafe = truncate(stdout)
   const stderrSafe = truncate(stderr)
-  const stdoutArtifactPath = stdoutSafe.truncated
+  const stdoutArtifact: OverflowResult = stdoutSafe.truncated
     ? writeOverflowArtifact(roots.artifactRoot, 'stdout', stdout)
-    : null
-  const stderrArtifactPath = stderrSafe.truncated
+    : { path: null, error: null }
+  const stderrArtifact: OverflowResult = stderrSafe.truncated
     ? writeOverflowArtifact(roots.artifactRoot, 'stderr', stderr)
-    : null
+    : { path: null, error: null }
+  if (stdoutArtifact.error) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_run_shell',
+      reason: 'overflow_artifact_write_failed',
+      stream: 'stdout',
+      error: stdoutArtifact.error,
+    })
+  }
+  if (stderrArtifact.error) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_run_shell',
+      reason: 'overflow_artifact_write_failed',
+      stream: 'stderr',
+      error: stderrArtifact.error,
+    })
+  }
 
   if (aborted) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
@@ -282,8 +378,20 @@ export async function executeRunShell(
   ]
   if (stdoutSafe.text) textLines.push('STDOUT:', stdoutSafe.text)
   if (stderrSafe.text) textLines.push('STDERR:', stderrSafe.text)
-  if (stdoutSafe.truncated) textLines.push(`(stdout truncated; full log at ${stdoutArtifactPath})`)
-  if (stderrSafe.truncated) textLines.push(`(stderr truncated; full log at ${stderrArtifactPath})`)
+  if (stdoutSafe.truncated) {
+    textLines.push(
+      stdoutArtifact.path
+        ? `(stdout truncated; full log at ${stdoutArtifact.path})`
+        : `(stdout truncated; overflow log write failed: ${stdoutArtifact.error})`,
+    )
+  }
+  if (stderrSafe.truncated) {
+    textLines.push(
+      stderrArtifact.path
+        ? `(stderr truncated; full log at ${stderrArtifact.path})`
+        : `(stderr truncated; overflow log write failed: ${stderrArtifact.error})`,
+    )
+  }
 
   return createToolExecutionOutput(textLines.join('\n'), {
     shape: 'json',
@@ -294,8 +402,10 @@ export async function executeRunShell(
       stderr: stderrSafe.text,
       stdoutTruncated: stdoutSafe.truncated,
       stderrTruncated: stderrSafe.truncated,
-      stdoutArtifactPath,
-      stderrArtifactPath,
+      stdoutArtifactPath: stdoutArtifact.path,
+      stderrArtifactPath: stderrArtifact.path,
+      stdoutArtifactError: stdoutArtifact.error,
+      stderrArtifactError: stderrArtifact.error,
       command: { bin: parsed.bin, args: parsed.args },
     },
   })

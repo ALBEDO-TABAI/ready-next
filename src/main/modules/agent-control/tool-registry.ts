@@ -27,7 +27,7 @@ import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-t
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
-import { STATIC_SKILL_TOOL_NAMES } from '../tools/skills-tools-static'
+import { STATIC_SKILL_TOOL_NAMES_BOOT_SAFE } from '../tools/skills-tools-static'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import { getSkillAnthropicTools, getSkillOpenAITools } from '../tools/skills-tools'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
@@ -223,7 +223,13 @@ function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat):
 }
 
 function resolveStaticSkillToolNames(): string[] {
-  return Array.from(new Set(STATIC_SKILL_TOOL_NAMES))
+  // Patch A2: the static fallback runs while the runtime-manager is still
+  // booting. Advertising the gated submit/restart/cancel tools during that
+  // window is exactly the vector that inspired Phase 0 — the model sees them,
+  // no execution exists yet, it fabricates `executionId: "new"`, loop.
+  // `STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` strips those 5; they re-appear
+  // dynamically via the session-aware provider once an execution lands.
+  return Array.from(new Set(STATIC_SKILL_TOOL_NAMES_BOOT_SAFE))
 }
 
 function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {

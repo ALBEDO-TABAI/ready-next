@@ -146,3 +146,34 @@ test('toOpenAITool wraps the same shape under { type: function, function: { name
     )
   }
 })
+
+// Patch A3 — the OpenAI snapshot already covers description byte-equality via
+// deepEqual above, but we add an explicit substring check so a future
+// "helpful" refactor that drops the ONLY prefix from the OpenAI wire format
+// (while leaving Anthropic intact) would fail loudly here rather than hiding
+// in diffing noise.
+test('toOpenAITool preserves ONLY-call prefix on the 5 gated tools (OpenAI wire)', () => {
+  const gated = [
+    'skill_submit_input',
+    'skill_submit_confirmation',
+    'skill_submit_agent_result',
+    'skill_restart_from_step',
+    'skill_cancel_execution',
+  ]
+  for (const name of gated) {
+    const def = EXECUTION_TOOL_DEFS.find((d) => d.name === name)
+    assert.ok(def, `expected ${name} in EXECUTION_TOOL_DEFS`)
+    const openai = toOpenAITool(def!) as { function: { description: string } }
+    assert.ok(
+      openai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
+      `${name} OpenAI description is missing the ONLY-call prefix: ${openai.function.description.slice(0, 80)}…`,
+    )
+  }
+  // Read-only tool must NOT carry the prefix.
+  const getStateDef = EXECUTION_TOOL_DEFS.find((d) => d.name === 'skill_get_state')!
+  const getStateOpenai = toOpenAITool(getStateDef) as { function: { description: string } }
+  assert.ok(
+    !getStateOpenai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
+    'skill_get_state must remain unprefixed — it is a safe read',
+  )
+})

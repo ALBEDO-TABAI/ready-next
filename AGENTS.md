@@ -119,6 +119,16 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_executions` 表所在的 DB 没有开 `PRAGMA foreign_keys = ON`，`ON DELETE CASCADE` 实际不生效；任何清理跨表数据的逻辑必须显式删子表行（`skill_execution_steps` / `skill_execution_artifacts`）
 - 所有新 executionId 使用 `e-{8hex}` 前缀（`generateSkillExecutionId()`）；旧 UUID 行继续兼容，不做回填；`getExecution` 用 `WHERE id = ?` format-agnostic，`Zod` schema `z.string().trim().min(1)` 不加 UUID 断言
 
+### 6.12 Skill 原语沙箱边界（B Phase 1）
+- `skill_run_shell` 的命令白名单（Phase 1）：`python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / mkdir / rm / cp / mv / echo / awk / sed`，维护在 `src/main/modules/tools/skill-primitives/run-shell.ts::SHELL_ALLOWLIST`；扩展机制为 PR 级别修改白名单常量，**不**提供用户配置开关；遇到 embedded skill 需要的命令打点 `skillPrimitiveRejected{reason:'cmd_not_allowlisted'}` 再统一评估
+- `parseCommand` 只支持双引号分词：命令里出现 POSIX 单引号或不平衡的双引号时抛 `CommandParseError`，handler 转换为 `errorKind: 'command_parse_failed'`；不做 shell 展开、不走 `shell: true`，所以 `$(…)` / `&&` / `|` 等元字符按字面量传递
+- `skill_run_shell` 的超时 kill：Unix 走 `spawn({ detached: true })` 并用 `process.kill(-pid, SIGTERM)` 杀整个进程组，覆盖 bash/sh 孕育的孙进程；5s 后若仍存活升级 `SIGKILL`；Windows 回退到 `child.kill`
+- stdout / stderr 默认上限 8K 字符，超出时把完整内容写入 `<artifactRoot>/.logs/shell-<ts>-<uuid>-<stream>.txt` 并返回 `stdoutArtifactPath` / `stderrArtifactPath`；overflow 写入失败不吞掉命令主结果，通过 `stdoutArtifactError` / `stderrArtifactError` 暴露，同时 emit `skillPrimitiveRejected{reason:'overflow_artifact_write_failed'}`
+- `skill_write_artifact` 只能写 `<artifactRoot>` 子树；绝对路径 / `..` 穿越 / symlink 逃逸 / 保留文件（`SKILL.md` / `ready-skill.json` / `skill.workflow.json` / `MANIFEST.json`，大小写不敏感）一律拒绝；单次写入字节上限 `WRITE_ARTIFACT_HARD_CAP_BYTES = 50 MB`，超出返回 `errorKind: 'size_limit'`
+- `skill_read_artifact` 允许读 `<artifactRoot>` 下的任何文件；默认读 32 KB，最大 1 MB（Zod `.max(1_048_576)` + 运行时 `HARD_CAP_BYTES`）；缺失文件返回 `errorKind: 'not_found'`，目录返回 `not_a_file`
+- 原语 Phase 1 **不提供并发锁**：同一 skill 对同一 path 的 `skill_write_artifact` 并发写以最后赢家为准；若未来某 skill 证实需要原子性，按需引入文件锁或 `mkdtemp + rename`
+- 原语曝光受 `filterSkillPrimitivesBySession` 管控：只有当 session 有 active execution 或者 `skill-reference-hints` 登记过 `lastReferenceSkill` 时才对 LLM 可见；`clearAllReferenceSkillHints` 在 `cleanupAgentRuntime`（app 退出）触发，`sweepExpiredReferenceSkillHints` 随 `SkillsRuntimeManager` 的小时级 TTL sweep 一并跑，idle 超过 30 分钟的 hint 被淘汰
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

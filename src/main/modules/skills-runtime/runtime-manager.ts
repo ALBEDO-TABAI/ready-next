@@ -47,6 +47,7 @@ import { ExecutionCoordinator } from './execution-coordinator'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { isWorkflowStarterAction } from './guardrails'
+import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
 
 const execFileAsync = promisify(execFile)
 
@@ -353,6 +354,16 @@ export class SkillsRuntimeManager {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('[SkillsRuntimeManager] TTL sweep failed:', message)
+      }
+      // Patch A1 — piggy-back the reference-skill hint sweep on this same
+      // cadence. Idle hints older than REFERENCE_SKILL_HINT_TTL_MS would
+      // otherwise linger in-process indefinitely; a live app without
+      // periodic cleanup ends up mis-reporting stale skills in error hints.
+      try {
+        sweepExpiredReferenceSkillHints()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('[SkillsRuntimeManager] reference-hint sweep failed:', message)
       }
     }
     this.ttlBootTimer = setTimeout(sweep, SkillsRuntimeManager.TTL_BOOT_DELAY_MS)

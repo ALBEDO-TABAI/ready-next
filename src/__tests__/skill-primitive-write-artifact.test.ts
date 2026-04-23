@@ -10,7 +10,10 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { executeWriteArtifact } from '../main/modules/tools/skill-primitives/write-artifact'
+import {
+  WRITE_ARTIFACT_HARD_CAP_BYTES,
+  executeWriteArtifact,
+} from '../main/modules/tools/skill-primitives/write-artifact'
 import type { SkillRootSet } from '../main/modules/tools/skill-primitives/root-resolver'
 
 function makeFixture() {
@@ -138,6 +141,48 @@ test('rejects unknown skill with missing_skill errorKind', async () => {
       ),
       (error: unknown) => (error as { errorKind?: string })?.errorKind === 'missing_skill',
     )
+  } finally {
+    fx.cleanup()
+  }
+})
+
+// Patch B4 — hard cap on write_artifact payload size. 50 MB default; any
+// attempt to push more returns size_limit without touching the fs.
+test('rejects size_limit when content exceeds WRITE_ARTIFACT_HARD_CAP_BYTES', async () => {
+  const fx = makeFixture()
+  try {
+    // 'A' byte is 1-byte utf-8. Use cap+1 to exceed by a single byte.
+    const tooBig = 'A'.repeat(WRITE_ARTIFACT_HARD_CAP_BYTES + 1)
+    await assert.rejects(
+      executeWriteArtifact(
+        { relativePath: 'too-big.txt', content: tooBig },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'size_limit',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
+// Patch B2 — reserved filename check is case-insensitive. A lowercase
+// `skill.md` must be rejected on macOS/Windows where the real SKILL.md would
+// be shadowed; on Linux it's a defense-in-depth reject.
+test('refuses reserved filename in any case variant (skill.md, Skill.md)', async () => {
+  const fx = makeFixture()
+  try {
+    for (const name of ['skill.md', 'Skill.md', 'SKILL.MD']) {
+      await assert.rejects(
+        executeWriteArtifact(
+          { relativePath: name, content: 'bad' },
+          { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+        ),
+        (error: unknown) => {
+          const kind = (error as { errorKind?: string })?.errorKind
+          return kind === 'reserved_path'
+        },
+      )
+    }
   } finally {
     fx.cleanup()
   }

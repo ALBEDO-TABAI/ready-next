@@ -76,6 +76,11 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (!runtime) return
   await runtime.stop()
   runtime = null
+  // Patch A1 — drop every session-scoped reference-skill hint when the
+  // runtime is torn down. The in-memory map is otherwise only pruned by the
+  // idle TTL sweep, which has a 30-minute granularity.
+  const { clearAllReferenceSkillHints } = await import('../agent-control/skill-reference-hints')
+  clearAllReferenceSkillHints()
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
