@@ -18,7 +18,7 @@ function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: C
     return { kept: true, reason: 'widget_phrase' }
   }
 
-  const hasWidgetSubject = /(widget|show-widget|文档|卡片|图表|组件|章节|正文|段落)/i.test(normalized)
+  const hasWidgetSubject = /(widget|show-widget|卡片|信息卡|图表|组件)/i.test(normalized)
   const hasEditVerb = /(更新|修改|调整|优化|替换|删除|新增|插入|改|去掉|拿掉|补上|统一|恢复|重写|保存|修正|恢复|还原|找回|回到|对齐)/i.test(normalized)
   if (hasWidgetSubject && hasEditVerb) {
     return { kept: true, reason: 'subject_and_verb' }

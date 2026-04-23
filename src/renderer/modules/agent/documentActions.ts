@@ -45,6 +45,18 @@ export function cancelAllPendingWidgetWrites(): void {
   }
 }
 
+function emitWidgetCommitted(tabId: string, widgetId: string | null | undefined): void {
+  if (!tabId || !widgetId) return
+  const api = (window as unknown as { electronAPI?: { document?: { notifyWidgetCommitted?: (payload: {
+    tabId: string; widgetId: string; requestId?: string; committedAt: number
+  }) => void } } }).electronAPI
+  api?.document?.notifyWidgetCommitted?.({
+    tabId,
+    widgetId: String(widgetId),
+    committedAt: Date.now(),
+  })
+}
+
 function normalizeContentForCompare(input: string): string {
   return input
     .replace(/\r\n/g, '\n')
@@ -1075,7 +1087,13 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const opened = currentStore.tabs.find((tab) => tab.path === path) || getActiveDocTab()
     if (!opened) return `已打开文档：${path}`
 
-    const loaded = await loadDocumentContentForEditing(path)
+    let loaded: Awaited<ReturnType<typeof loadDocumentContentForEditing>>
+    try {
+      loaded = await raceWithTimeout(loadDocumentContentForEditing(path), 10_000, 'open_tab.load')
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return `已打开文档：${path}（读取超时或失败：${reason}）`
+    }
     if (!loaded.success) return `已打开文档：${path}（读取失败：${loaded.error || '未知错误'}）`
 
     currentStore.updateTabContent(opened.id, loaded.content)
@@ -1134,7 +1152,16 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const position = action.position === 'after_section' ? 'after_section' : 'append_end'
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     if (!title) return 'insert_widget 缺少 title'
-    const resolvedWidget = await resolveWidgetCodeInput(widgetCode, action.componentSpec)
+    let resolvedWidget: Awaited<ReturnType<typeof resolveWidgetCodeInput>>
+    try {
+      resolvedWidget = await raceWithTimeout(
+        resolveWidgetCodeInput(widgetCode, action.componentSpec),
+        10_000,
+        'insert_widget.compile',
+      )
+    } catch (error) {
+      return `widget 写入已拒绝：${error instanceof Error ? error.message : String(error)}`
+    }
     if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
     const widgetValidation = validateWidgetCode(resolvedWidget.widgetCode)
     if (!widgetValidation.valid) return `widget 写入已拒绝：${widgetValidation.reason}`
@@ -1252,6 +1279,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
             return `update_widget 已取消：在写入前被更高优先级的抢占取消`
           }
           docStore.setTabContent(liveTab.id, updated.content)
+          emitWidgetCommitted(liveTab.id, updated.widget?.id || record.id)
           return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
         } catch (error) {
           return `widget 更新已拒绝：${error instanceof Error ? error.message : String(error)}`
@@ -1271,6 +1299,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
         return `update_widget 已取消：在写入前被更高优先级的抢占取消`
       }
       docStore.setTabContent(liveTab.id, updated.content)
+      emitWidgetCommitted(liveTab.id, updated.widget?.id || target)
       return `已更新 widget：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
     }
 

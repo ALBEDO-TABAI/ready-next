@@ -12,6 +12,7 @@ import {
   mergeWidgetStateMapIntoContent,
   renameWidgetFenceTitleInContent,
 } from './widget-card-helpers'
+import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -421,14 +422,19 @@ export default function MarkdownEditor({
   }, [tab.content, tab.id, updateTabContent])
 
   const handleWidgetQuoteToAgent = useCallback((widgetTitle: string, widgetCode: string) => {
+    const targetWidget = collectDocumentWidgets(tab.content).find((widget) => (
+      widget.title === widgetTitle && widget.widgetCode.trim() === widgetCode.trim()
+    )) || null
     addDocumentWidgetTargetReference({
       documentTitle: tab.title,
       documentPath: tab.path,
+      tabId: tab.id,
       widgetTitle,
+      widgetId: targetWidget?.id || null,
       widgetCode,
       widgetMode: getWidgetModeLabel(widgetCode),
     })
-  }, [tab.path, tab.title])
+  }, [tab.content, tab.id, tab.path, tab.title])
 
   const handleWidgetExport = useCallback((widgetTitle: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => {
     void exportWidgetCardSnapshot(widgetCode, widgetTitle, widgetState, tab.path)

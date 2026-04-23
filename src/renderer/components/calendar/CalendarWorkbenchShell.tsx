@@ -149,6 +149,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
             background: 'rgba(241, 244, 249, 0.94)',
             backdropFilter: 'blur(20px) saturate(0%)',
             WebkitBackdropFilter: 'blur(20px) saturate(0%)',
+            position: 'relative',
           }}
         >
           <div
@@ -184,6 +185,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
             style={{
               background: 'transparent',
               boxShadow: 'none',
+              marginLeft: -2,
             }}
           >
             <div

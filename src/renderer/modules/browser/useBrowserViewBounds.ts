@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
 import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
-import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
+import { PANEL_RESIZE_STATE_EVENT, type PanelResizeReason, type PanelResizeStateDetail } from './resize-events'
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
 const OVERLAY_LOCK_SELF_HEAL_MS = 1000
@@ -62,6 +62,7 @@ export function useBrowserViewBounds({
   const overlayLockCountRef = useRef(0)
   const visibilitySyncTokenRef = useRef(0)
   const panelResizingRef = useRef(false)
+  const panelResizeReasonRef = useRef<PanelResizeReason | null>(null)
   const isActiveRef = useRef(isActive)
   const layoutPhaseRef = useRef(layoutPhase)
   const isVisibleAllowedRef = useRef(isVisibleAllowed)
@@ -225,6 +226,11 @@ export function useBrowserViewBounds({
     if (!element) return
 
     const handleBoundsShift = () => {
+      if (panelResizeReasonRef.current === 'drag') {
+        clearFrameSync()
+        void sendBoundsImmediate({ syncMode: 'transient' })
+        return
+      }
       if (panelResizingRef.current && frameSyncRequestRef.current !== null) return
       sendBounds({
         forceExact: panelResizingRef.current,
@@ -241,10 +247,11 @@ export function useBrowserViewBounds({
       clearFrameSync()
       clearSettleSyncTimeout()
     }
-  }, [clearFrameSync, clearSettleSyncTimeout, contentRef, sendBounds])
+  }, [clearFrameSync, clearSettleSyncTimeout, contentRef, sendBounds, sendBoundsImmediate])
 
   useEffect(() => {
     if (!isActive) {
+      panelResizeReasonRef.current = null
       clearFrameSync()
       clearSettleSyncTimeout()
       return
@@ -273,12 +280,19 @@ export function useBrowserViewBounds({
 
       if (detail.resizing) {
         panelResizingRef.current = true
+        panelResizeReasonRef.current = detail.reason
         clearSettleSyncTimeout()
+        if (detail.reason === 'drag') {
+          clearFrameSync()
+          return
+        }
         void scheduleBoundsSync('transient', { force: true })
         return
       }
 
       panelResizingRef.current = false
+      panelResizeReasonRef.current = null
+      clearFrameSync()
       clearSettleSyncTimeout()
       void scheduleBoundsSync('settled', { force: true })
     }
@@ -287,7 +301,7 @@ export function useBrowserViewBounds({
     return () => {
       window.removeEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
     }
-  }, [clearSettleSyncTimeout, scheduleBoundsSync])
+  }, [clearFrameSync, clearSettleSyncTimeout, scheduleBoundsSync])
 
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })
