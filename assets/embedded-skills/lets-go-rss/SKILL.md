@@ -1,11 +1,22 @@
 ---
 name: lets-go-rss
 description: 轻量级全平台 RSS 订阅管理器。一键聚合 YouTube、Vimeo、Behance、Twitter/X、知识星球、B站、微博、抖音、小红书的内容更新，支持增量去重和 AI 智能分类。
+when-to-use: |
+  用户希望把多个平台（B站、微博、抖音、小红书、YouTube、Vimeo、知识星球、Twitter/X 等）的账号聚合成统一摘要时使用。
+  典型触发词：聚合订阅 / 抓取 UP 主 / 多平台 digest / RSS 更新 / Bot 推送 / 添加订阅源。
+  注意：本技能是独立的多平台聚合 bot；不是 Ready 工作台 RSS 模式（用户自己加 feed 的那个）的等价物。
 ---
 
 # Let's Go RSS
 
 全平台 RSS 内容聚合工具，支持增量更新、去重、AI 分类。
+
+## 执行原则（给执行该技能的 agent 看）
+
+- **优先用 typed 工具**：`skill_rss_add` / `skill_rss_update` / `skill_rss_status` / `skill_rss_list` / `skill_rss_stats` 是这个技能的标准入口，已经把常见参数封装好；该用就用。
+- **复杂场景再走 shell**：只有当 typed 工具不覆盖（例如要直接 cat `assets/latest_update.md`、跑 `./scripts/run_update_cron.sh`），才用 `skill_run_shell` 调下文里给出的命令。
+- **Bot 推送严格按下文「Bot 汇报规范」执行**：不重新排版、不加表头、不分多条消息、不替换链接；`--status` 输出原样转发。
+- **不要替用户改 crontab**：要给 cron 配置时，只输出建议的 crontab 行，由用户自己执行。
 
 ## 快速使用
 
