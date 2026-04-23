@@ -78,7 +78,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - LLM-facing 的 `skill_submit_input / skill_submit_confirmation / skill_submit_agent_result / skill_restart_from_step / skill_cancel_execution` 5 个工具按 session 状态动态曝光：当 `ToolPolicy.sessionId` 提供且该 session 无 active execution 时必须被过滤掉，只保留只读的 `skill_get_state`；入口在 `skill-tool-session-gate.ts::filterExecutionControlToolsBySession`
 - 这 5 个工具的 description 前置固定子句 `ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0".`，防止模型在 reference 技能场景下编造 executionId；文案变更由 `src/__tests__/skill-zod-golden-snapshot.test.ts` 锁定
 - Reference 技能（`runtime: reference` / `execution.mode: advisory`）被内联注入时，orchestrator 必须调 `skill-reference-hints.rememberLastReferenceSkill(sessionId, {id,name})` 登记；`buildSkillExecutionMissingOutput` 检测到 `lastReferenceSkill` 后会用「不要再调 skill_submit_*」文案替代通用 `skill_get_state` 引导
-- Reference 技能内联注入走直读路径（`SkillContextOrchestrator.tryInlineReferenceSkillDoc` 读 `<managedPath>/SKILL.md` → role:'system' 注入，截断 6K 字符、emit `skill_reference_inlined` metric）；只有 readFileSync 失败或无 managedPath 时才回退到旧的 `skill_*_read_skill` tool-call 路径
+- Reference 技能内联注入走直读路径（`SkillContextOrchestrator.tryInlineReferenceSkillDoc` 读 `<managedPath>/SKILL.md` → role:'system' 注入，截断 12K 字符、emit `skill_reference_inlined` metric）；只有 readFileSync 失败或无 managedPath 时才回退到旧的 `skill_*_read_skill` tool-call 路径
+- Embedded skill 迁移到 reference/advisory（Phase 2 起的 `video-copy-analyzer` 是首例）时，manifest 只保留一个 `read_skill` action（`runtime: reference`, `visibility: internal`），删掉 `execution.workflowFile` 与 `skill.workflow.json`；SKILL.md 要按 Claude Skill 协议声明 `name / description / when-to-use` frontmatter，不在正文里硬编码 `skill_run_shell` 的精确命令（留给模型决定）
 - `custom-skill-registry.ts` 自动生成的 `read_skill` action 默认 `visibility: 'internal'`（避免 LLM 看到 `skill_<id>_read_skill` 并在循环里反复调用）；manifest 显式声明 `visibility: 'public'` 继续被尊重
 - `skill_ask_user` 通过独立 IPC（`skill:askUserQuestion` push + `skills:askUser:submit` invoke）驱动渲染端 `SkillAskUserPrompt` 胶囊；ephemeral 状态存于 `EphemeralExecutionStore`（内存，不写 `skill_executions` 表），executionId 用 `eau-<8hex>` 前缀区分；24h 超时 / AbortSignal 抗抖 / session 关闭都会清 pending 记录
 
@@ -131,6 +132,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_read_artifact` 允许读 `<artifactRoot>` 下的任何文件；默认读 32 KB，最大 1 MB（Zod `.max(1_048_576)` + 运行时 `HARD_CAP_BYTES`）；缺失文件返回 `errorKind: 'not_found'`，目录返回 `not_a_file`
 - 原语 Phase 1 **不提供并发锁**：同一 skill 对同一 path 的 `skill_write_artifact` 并发写以最后赢家为准；若未来某 skill 证实需要原子性，按需引入文件锁或 `mkdtemp + rename`
 - 原语曝光受 `filterSkillPrimitivesBySession` 管控：只有当 session 有 active execution 或者 `skill-reference-hints` 登记过 `lastReferenceSkill` 时才对 LLM 可见；`clearAllReferenceSkillHints` 在 `cleanupAgentRuntime`（app 退出）触发，`sweepExpiredReferenceSkillHints` 随 `SkillsRuntimeManager` 的小时级 TTL sweep 一并跑，idle 超过 30 分钟的 hint 被淘汰
+- `skill_run_shell` 的子进程 `PATH` 由 dispatch 层（`skills-tools.ts`）自动前置共享 venv bin（`SkillsRuntimeManager.getSharedVenvBinDir()` → `<venvRoot>/bin` Unix / `<venvRoot>/Scripts` Windows），确保 `requirements.txt` 驱动安装到共享 venv 的 Python 依赖可被脚本 `import` 到；handler 本身不做 venv 解析，venvBinDir 缺失时走 no-op
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

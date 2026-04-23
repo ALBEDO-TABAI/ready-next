@@ -333,6 +333,8 @@ src/main/modules/tools/skill-primitives/
 
 ## 4. Phase 2 — 最小技能迁移（3–5 天）
 
+> **状态：已完成（2026-04-23）** — 按用户指示做成机械迁移，未引入 wrapper 脚本；同时闭合了两处 Phase 1 平台缺口（`getSharedVenvBinDir` 接线 + inline cap 6K→12K）。详见 `CHANGELOG.md` 和 `embedded-skill-video-copy-migration.test.ts`。
+
 ### 4.1 目标
 拿 `video-copy-analyzer`（最简单的 embedded skill）作为**第一个迁移样本**，验证「markdown + 原语」模式能否替代原来的 `skill.workflow.json`。
 

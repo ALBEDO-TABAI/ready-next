@@ -1,6 +1,24 @@
 # Ready V5 - 更新日志
 
-## [Unreleased] - 2026-04-22
+## [Unreleased] - 2026-04-23
+
+### Skill Runtime B — Phase 1 finalize + Phase 2 (video-copy-analyzer 机械迁移)
+
+- **Phase 1 接线补齐**：`SkillsRuntimeManager.getSharedVenvBinDir()` 暴露共享 venv bin 目录（Unix `<venvRoot>/bin` / Windows `<venvRoot>/Scripts`），dispatch 层 `skills-tools.ts:505` 在调用 `executeRunShell` 时自动前置到子进程 `PATH`；修复 `skill_run_shell` 之前无法 import venv-installed Python 模块（yt-dlp / funasr / torch / …）的盲点。新增 run-shell mock-spawn 测试验证 PATH 注入顺序
+- **Inline 注入上限 6K → 12K**：`REFERENCE_SKILL_INLINE_CAP_CHARS` 放宽至 12_000，容纳 `video-copy-analyzer` 这类体量较大的方法论 SKILL.md；同步更新 `skill-reference-inline-injection.test.ts` 截断断言
+- **Phase 2 机械迁移 `video-copy-analyzer`**：
+  - `ready-skill.json` 从 `execution.mode: workflow` + 3 个 python action 精简为 `execution.mode: advisory` + 单个 `read_skill` reference action（`visibility: internal`），删除 `execution.workflowFile`
+  - `skill.workflow.json` 从仓库移除（reference path 不再读取它）
+  - `SKILL.md` 按 Claude Skill 协议补齐 `when-to-use` frontmatter 字段；保留原方法论正文，不写死 `skill_run_shell` 的精确命令（遵循"skill 只做协议中性声明，调用由模型决定"原则）
+- **新增 e2e 测试 `embedded-skill-video-copy-migration.test.ts`**（4 case）：
+  - manifest 编译到 advisory/reference 且只剩 `read_skill`
+  - `skill.workflow.json` 不再存在于磁盘
+  - SKILL.md frontmatter 含 `when-to-use`
+  - orchestrator 对该 skillId 走 inline-injection 路径（零 tool_use 往返）并调用 `rememberLastReferenceSkill`，让下一 turn 的原语 gating 放行
+- **文档同步**：`CLAUDE.md` / `AGENTS.md` §6.7 补一条 embedded 迁移规范、§6.12 补一条 venv PATH 自动前置说明；inline 截断字符数 6K → 12K 同步；两份文件正文保持 lock-step
+- 回归：全套 138 个 skill 测试 + 新增 4 case = 142 case 全绿；`npx tsc --noEmit` 对 B 改动文件干净（branch 上 2 条 `'clarification'` literal 残留错误是迁移前既存问题，与本次不相关）
+
+## [2026-04-22]
 
 ### 重构
 
