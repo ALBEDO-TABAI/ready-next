@@ -14,7 +14,16 @@ import {
   type SkillCoordinatorOperation,
 } from './skill-execution-missing'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
-import { filterExecutionControlToolsBySession } from './skill-tool-session-gate'
+import {
+  filterExecutionControlToolsBySession,
+  filterSkillPrimitivesBySession,
+} from './skill-tool-session-gate'
+import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
+import {
+  executeReadArtifact,
+  executeRunShell,
+  executeWriteArtifact,
+} from './skill-primitives'
 import {
   EXECUTION_TOOL_DEFS,
   toAnthropicTool,
@@ -122,12 +131,21 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
 }
 
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
+  const hasActiveExecution = (sid: string) => findExecutionForSession(sid) !== null
+  const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
+
   const executionTools = filterExecutionControlToolsBySession(
     EXECUTION_TOOL_DEFS,
     sessionId,
-    (sid) => findExecutionForSession(sid) !== null,
+    hasActiveExecution,
   )
-  return [...getSkillActionToolDefs(), ...executionTools]
+  const primitiveTools = filterSkillPrimitivesBySession(
+    PRIMITIVE_TOOL_DEFS,
+    sessionId,
+    hasActiveExecution,
+    hasReferenceHint,
+  )
+  return [...getSkillActionToolDefs(), ...executionTools, ...primitiveTools]
 }
 
 function formatExecutionDetail(detail: SkillExecutionDetail): string {
@@ -306,6 +324,22 @@ function asRecord(value: unknown): Record<string, SkillInputValue> {
   return value as Record<string, SkillInputValue>
 }
 
+/**
+ * Decide which skillId the Phase 1 primitives should operate on for the
+ * current session. Priority:
+ *   1. the skillId of the most recent active execution (workflow in flight)
+ *   2. the `lastReferenceSkill` hint written by the orchestrator
+ *   3. null — handlers will refuse with a structured error
+ */
+function resolvePrimitiveSkillId(sessionId?: string): string | null {
+  if (!sessionId) return null
+  const active = findExecutionForSession(sessionId)
+  if (active && active.skillId) return active.skillId
+  const hint = getLastReferenceSkill(sessionId)
+  if (hint && hint.id) return hint.id
+  return null
+}
+
 function findExecutionForSession(sessionId?: string, executionId?: string, skillId?: string): SkillExecutionDetail | null {
   const manager = getSkillsRuntimeManager()
   if (executionId) {
@@ -430,6 +464,51 @@ export async function executeSkillTool(
           originalMessage: `Execution not found: ${executionId}`,
           lastReferenceSkill: getLastReferenceSkill(sessionId),
         })
+      }
+      case 'skill_run_shell':
+      case 'skill_write_artifact':
+      case 'skill_read_artifact': {
+        const skillId = resolvePrimitiveSkillId(sessionId)
+        if (!skillId) {
+          return createToolExecutionOutput(
+            `Cannot invoke ${toolName}: no active skill execution or reference-skill hint for this session. Load a skill first, then retry.`,
+            {
+              shape: 'json',
+              data: {
+                errorKind: 'primitive_no_skill_context',
+                toolName,
+                sessionId: sessionId || null,
+              },
+            },
+          )
+        }
+        if (tool.name === 'skill_run_shell') {
+          return executeRunShell(
+            {
+              command: asString(args.command),
+              timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+              stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
+            },
+            { skillId },
+          )
+        }
+        if (tool.name === 'skill_write_artifact') {
+          return executeWriteArtifact(
+            {
+              relativePath: asString(args.relativePath),
+              content: typeof args.content === 'string' ? args.content : '',
+              encoding: args.encoding === 'base64' ? 'base64' : 'utf-8',
+            },
+            { skillId },
+          )
+        }
+        return executeReadArtifact(
+          {
+            relativePath: asString(args.relativePath),
+            maxBytes: typeof args.maxBytes === 'number' ? args.maxBytes : undefined,
+          },
+          { skillId },
+        )
       }
       default:
         return `Unknown skill tool: ${toolName}`

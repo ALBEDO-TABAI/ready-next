@@ -49,3 +49,40 @@ export function filterExecutionControlToolsBySession<T extends { name: string }>
     shouldExposeExecutionControlTool(def.name, sessionId, hasActiveExecution),
   )
 }
+
+/**
+ * B Phase 1 — skill primitives gating.
+ *
+ * Primitives (`skill_ask_user` / `skill_run_shell` / `skill_write_artifact` /
+ * `skill_read_artifact`) are only exposed to the LLM when one of:
+ *   1. The session has an active skill execution (workflow in progress), OR
+ *   2. The session has a `lastReferenceSkill` hint from the orchestrator
+ *      (a reference skill was just inlined this turn).
+ *
+ * Rationale: these are powerful tools (shell exec, disk write) and we don't
+ * want them surfaced to every generic chat. Legacy sessionId-less callers
+ * (boot-time introspection, static fallback) keep the full list so the tool
+ * surface inventory stays stable.
+ */
+export function shouldExposeSkillPrimitive(
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+  hasReferenceSkillHint: (sessionId: string) => boolean,
+): boolean {
+  if (!sessionId) return true
+  if (hasActiveExecution(sessionId)) return true
+  if (hasReferenceSkillHint(sessionId)) return true
+  return false
+}
+
+export function filterSkillPrimitivesBySession<T extends { name: string }>(
+  defs: readonly T[],
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+  hasReferenceSkillHint: (sessionId: string) => boolean,
+): T[] {
+  if (shouldExposeSkillPrimitive(sessionId, hasActiveExecution, hasReferenceSkillHint)) {
+    return [...defs]
+  }
+  return []
+}

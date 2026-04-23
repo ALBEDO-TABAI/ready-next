@@ -36,6 +36,14 @@ export const TOOL_ERROR_METRICS = {
    * 是 "Tool not allowed" 假阳性的强信号。
    */
   toolSnapshotMismatch: 'tool_snapshot_mismatch',
+  /** B Phase 1 — Skill primitive 成功调用（附 primitive 维度） */
+  skillPrimitiveUsed: 'skill_primitive_used',
+  /**
+   * B Phase 1 — Skill primitive 被沙箱 / 白名单拒绝（附 reason 维度：
+   * path_escape | reserved_path | symlink_escape | absolute_path | empty_path |
+   * cmd_not_allowlisted | timeout | missing_skill | output_truncated | command_empty）
+   */
+  skillPrimitiveRejected: 'skill_primitive_rejected',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

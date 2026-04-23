@@ -26,7 +26,21 @@ const EXECUTION_CONTROL_TOOL_NAMES: string[] = [
   'skill_cancel_execution',
 ]
 
+// B Phase 1 — skill primitives are also kind='execution_control' from the
+// registry's perspective, but are session-gated separately. Names included
+// here so static-fallback tool enumeration still lists them when the runtime
+// manager isn't ready yet (boot path). `skill_ask_user` lands with Phase 1
+// PR2; do not list it until its handler is live, otherwise the static
+// fallback advertises a tool that the dispatch layer would answer with
+// "Unknown skill tool".
+const PRIMITIVE_TOOL_NAMES: string[] = [
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+]
+
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
   ...EXECUTION_CONTROL_TOOL_NAMES,
+  ...PRIMITIVE_TOOL_NAMES,
 ]
