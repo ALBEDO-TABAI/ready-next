@@ -6,7 +6,7 @@
  *   - The injection header carries the "don't call skill_submit_* tools"
  *     guidance
  *   - The hint store gets populated with the skill id
- *   - Oversized SKILL.md is truncated to 6000 chars
+ *   - Oversized SKILL.md is truncated to 12000 chars (Phase 2: raised from 6K)
  *   - When SKILL.md is missing, the legacy tool-call path still runs
  */
 
@@ -97,11 +97,11 @@ test('direct readFileSync path skips the tool call when SKILL.md exists', async 
   }
 })
 
-test('truncates to 6000 chars when SKILL.md exceeds the cap', async () => {
+test('truncates to 12000 chars when SKILL.md exceeds the cap', async () => {
   _resetLastReferenceSkillHintsForTests()
   const managedPath = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-ref-trunc-')))
   try {
-    const big = 'X'.repeat(8_000)
+    const big = 'X'.repeat(14_000)
     writeFileSync(join(managedPath, 'SKILL.md'), big, 'utf-8')
 
     const orchestrator = buildOrchestrator(makeSkill(managedPath))
@@ -117,9 +117,9 @@ test('truncates to 6000 chars when SKILL.md exceeds the cap', async () => {
 
     const msg = session.messages[0] as { role: string; content: string }
     // Header + goal + body marker takes less than ~200 chars; the truncated
-    // body itself should be exactly 6_000 chars of 'X'.
-    assert.ok(msg.content.includes('X'.repeat(6_000)))
-    assert.ok(!msg.content.includes('X'.repeat(6_001)), 'must not pass the cap through')
+    // body itself should be exactly 12_000 chars of 'X' (Phase 2: raised cap).
+    assert.ok(msg.content.includes('X'.repeat(12_000)))
+    assert.ok(!msg.content.includes('X'.repeat(12_001)), 'must not pass the cap through')
   } finally {
     rmSync(managedPath, { recursive: true, force: true })
   }

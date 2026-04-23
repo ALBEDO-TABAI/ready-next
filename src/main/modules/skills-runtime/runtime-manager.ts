@@ -419,6 +419,20 @@ export class SkillsRuntimeManager {
     }
   }
 
+  /**
+   * Phase 1 gap fix — exposes the shared venv bin dir so `skill_run_shell`
+   * can prepend it to PATH. Mirrors the calculation in `getBaseEnv()` so
+   * primitives and the legacy workflow runner see the same Python env.
+   * Returns the path unconditionally; a non-existent entry in PATH is
+   * harmless, and pre-installing the venv on every boot just to satisfy
+   * this getter would add startup latency for no gain.
+   */
+  getSharedVenvBinDir(): string {
+    return process.platform === 'win32'
+      ? join(this.venvRoot, 'Scripts')
+      : join(this.venvRoot, 'bin')
+  }
+
   private getExecutionStore(): ExecutionStateStore {
     if (!this.executionStore) {
       const db = this.getRawDatabase()

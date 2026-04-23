@@ -299,3 +299,68 @@ test('detached spawn flag does not break stream capture', async () => {
     fx.cleanup()
   }
 })
+
+// Phase 1 gap-fix — when a skill's venv bin dir is provided, it must be
+// prepended to the child process's PATH so venv-installed packages resolve.
+// Without this wiring, `python3 scripts/x.py` invoked via skill_run_shell
+// cannot import yt-dlp/funasr/torch etc. for skills like video-copy-analyzer.
+test('venvBinDir, when provided, prepends onto spawn env.PATH', async () => {
+  const fx = makeFixture()
+  try {
+    const captured: { env?: NodeJS.ProcessEnv } = {}
+    // Minimal spawn stub: capture env, then emit close(0) synchronously.
+    const fakeSpawn = ((_bin: string, _args: string[], options: any) => {
+      captured.env = options?.env
+      let closeCb: ((code: number) => void) | null = null
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: any) => {
+          if (event === 'close') {
+            closeCb = cb
+            setImmediate(() => closeCb?.(0))
+          }
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    const fakeVenv = '/tmp/fake-skill-runtime/python/bin'
+    await executeRunShell(
+      { command: 'python3 --version' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        venvBinDir: fakeVenv,
+        spawnFn: fakeSpawn,
+      },
+    )
+    const sep = process.platform === 'win32' ? ';' : ':'
+    assert.ok(
+      (captured.env?.PATH || '').startsWith(fakeVenv + sep),
+      `expected PATH to start with "${fakeVenv}${sep}", got "${(captured.env?.PATH || '').slice(0, 120)}"`,
+    )
+
+    // And with venvBinDir omitted, PATH matches process.env.PATH (or at least
+    // doesn't start with the fakeVenv prefix).
+    captured.env = undefined
+    await executeRunShell(
+      { command: 'python3 --version' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        spawnFn: fakeSpawn,
+      },
+    )
+    assert.equal(
+      (captured.env?.PATH || '').startsWith(fakeVenv + sep),
+      false,
+      'PATH should not be prefixed when venvBinDir is omitted',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})

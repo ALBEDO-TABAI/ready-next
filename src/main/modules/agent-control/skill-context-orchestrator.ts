@@ -14,13 +14,13 @@ import { logAgentMetric } from './metrics'
 const REFERENCE_SKILL_DOC_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.md']
 
 /**
- * Cap on inlined reference-skill text. Matches the historical
- * `.slice(0, 6_000)` cut used by the tool-call path so a 10KB SKILL.md
- * produces identical prompt shape regardless of which branch ran. Larger docs
- * get truncated — the skill author can split the long rails into README
- * sections readable via `skill_read_artifact` if needed.
+ * Cap on inlined reference-skill text. Raised from 6K → 12K in Phase 2 to
+ * make room for real-world skill SKILL.md files (e.g. video-copy-analyzer's
+ * methodology section runs ~9KB). Larger docs still get truncated — the
+ * skill author can split the long rails into README sections readable via
+ * `skill_read_artifact` if needed.
  */
-const REFERENCE_SKILL_INLINE_CAP_CHARS = 6_000
+const REFERENCE_SKILL_INLINE_CAP_CHARS = 12_000
 
 interface SkillToolRef {
   name?: string

@@ -508,7 +508,7 @@ export async function executeSkillTool(
               timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
               stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
             },
-            { skillId },
+            { skillId, venvBinDir: manager.getSharedVenvBinDir() },
           )
         }
         if (tool.name === 'skill_write_artifact') {
