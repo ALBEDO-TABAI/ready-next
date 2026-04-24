@@ -1,3 +1,14 @@
+/**
+ * Orchestrator contract. B Phase 4 PR2 drops:
+ *   - `listExecutions` dep (state machine retired)
+ *   - `executeTool` dep from the constructor (it is passed per-call into
+ *     `maybeInjectExplicitSkillContext`, not kept as a long-lived dep)
+ *
+ * `shouldKeepToolsWithVideo`, `findExplicitlyRequestedSkills`, and
+ * `listRegisteredSkillTokens` still operate correctly against the reduced
+ * dep shape.
+ */
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -15,29 +26,31 @@ function createOrchestrator() {
         actions: [{ name: 'video_copy_analyze', visibility: 'public' }],
       } as any,
     ],
-    listExecutions: (_limit, sessionId, activeOnly) =>
-      sessionId === 'scope-1' && activeOnly
-        ? [{ id: 'exec-1', skillId: 'video-copy-analyzer', entryAction: 'video_copy_analyze' }] as any
-        : [],
     resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
-    executeTool: async (_tool, _args) => 'STDOUT:\n技能说明',
   })
 }
 
-test('SkillContextOrchestrator keeps tools available for explicit skill or active execution', () => {
+test('shouldKeepToolsWithVideo returns true on explicit skill mentions even without active execution', () => {
   const orchestrator = createOrchestrator()
 
   assert.equal(orchestrator.shouldKeepToolsWithVideo('使用 video copy analyzer skill', undefined), true)
-  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), true)
+  // Previously this branch required an `activeExecution` hit; post-Phase 4
+  // hasActiveSkillExecution returns false unconditionally so a non-matching
+  // prompt in any session returns false.
+  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), false)
   assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-2'), false)
 })
 
-test('SkillContextOrchestrator builds preferred skill tool names from explicit and active skills', () => {
+test('buildPreferredSkillToolNames seeds with system_run_embedded_python + per-skill action tools', () => {
   const orchestrator = createOrchestrator()
 
   const toolNames = orchestrator.buildPreferredSkillToolNames('使用 video copy analyzer skill', 'scope-1')
 
-  assert.ok(toolNames.includes('skill_get_state'))
+  // Phase 4 PR2 — `skill_get_state` and the 5 submit/restart/cancel names
+  // are retired from the preferred set.
+  assert.ok(!toolNames.includes('skill_get_state'))
+  assert.ok(!toolNames.includes('skill_submit_input'))
+  assert.ok(toolNames.includes('system_run_embedded_python'))
   assert.ok(toolNames.includes('skill_video_copy_analyze'))
 })
 
@@ -80,9 +93,7 @@ test('SkillContextOrchestrator filters out short skill tokens below length thres
         actions: [{ name: 'run', visibility: 'public' }],
       } as any,
     ],
-    listExecutions: () => [],
     resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
-    executeTool: async () => 'STDOUT:\n技能说明',
   })
 
   const matched = orchestrator.findExplicitlyRequestedSkills('rss 是一种格式')
@@ -97,4 +108,10 @@ test('SkillContextOrchestrator listRegisteredSkillTokens returns normalized dedu
   assert.ok(tokens.includes('videocopyanalyzer'))
   assert.ok(tokens.every((token) => token.length >= 6))
   assert.equal(tokens.length, new Set(tokens).size)
+})
+
+test('hasActiveSkillExecution returns false unconditionally post-Phase 4 PR2', () => {
+  const orchestrator = createOrchestrator()
+  assert.equal(orchestrator.hasActiveSkillExecution(), false)
+  assert.equal(orchestrator.hasActiveSkillExecution('sess-1'), false)
 })

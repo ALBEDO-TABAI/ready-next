@@ -36,8 +36,11 @@ export class SkillContextOrchestrator {
   constructor(private readonly deps: {
     extractPrimaryUserInstruction: (raw: string) => string
     listSkills: () => SkillState[]
-    listExecutions: (limit: number, sessionId?: string, activeOnly?: boolean) => Array<{ id: string; skillId: string; entryAction: string }>
     resolveSkillToolByAction: (skillId: string, actionName: string) => SkillToolRef | null
+    // B Phase 4 PR2: `listExecutions` dep retired — the skill_executions
+    // state machine is being decommissioned; `activeExecution`-branched
+    // code paths in this class are replaced with single inline-injection
+    // flow. Tests carrying the old dep shape are updated alongside.
   }) {}
 
   findExplicitlyRequestedSkills(userText: string): SkillState[] {
@@ -85,13 +88,13 @@ export class SkillContextOrchestrator {
   }
 
   buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
+    // B Phase 4 PR2: the 6 execution-control tools were deleted from the
+    // LLM surface; seed the preferred-tool set only with the surviving
+    // system-level Python runner plus per-skill action tools below. The
+    // signature is kept for call-site compat; `sessionId` is unused now
+    // that `hasActiveSkillExecution` returns false in all cases.
+    void sessionId
     const toolNames = new Set<string>([
-      'skill_get_state',
-      'skill_submit_input',
-      'skill_submit_confirmation',
-      'skill_submit_agent_result',
-      'skill_restart_from_step',
-      'skill_cancel_execution',
       'system_run_embedded_python',
     ])
 
@@ -103,24 +106,20 @@ export class SkillContextOrchestrator {
       }
     }
 
-    if (sessionId) {
-      const activeExecutions = this.deps.listExecutions(10, sessionId, true)
-      for (const execution of activeExecutions) {
-        const tool = this.deps.resolveSkillToolByAction(execution.skillId, execution.entryAction)
-        if (tool?.name) toolNames.add(tool.name)
-      }
-    }
-
+    // B Phase 4 PR2: no `activeExecutions` pass — the state machine is
+    // being retired, so the registered-skill token list is driven purely
+    // by the manifest-declared action surface. PR3 deletes the
+    // `hasActiveSkillExecution` method and the turn-engine caller.
     return Array.from(toolNames)
   }
 
-  hasActiveSkillExecution(sessionId?: string): boolean {
-    if (!sessionId) return false
-    try {
-      return this.deps.listExecutions(5, sessionId, true).length > 0
-    } catch {
-      return false
-    }
+  /**
+   * Retained as a no-op stub through B Phase 4 PR2 so the turn-engine
+   * `hasActiveSkillExecution(...)` call site continues to compile. PR3
+   * removes the call site, the dep consumers, and this method in lockstep.
+   */
+  hasActiveSkillExecution(_sessionId?: string): boolean {
+    return false
   }
 
   async maybeInjectExplicitSkillContext(params: {
@@ -134,27 +133,13 @@ export class SkillContextOrchestrator {
     const explicitSkills = this.findExplicitlyRequestedSkills(params.userText)
     if (explicitSkills.length === 0) return
 
+    // B Phase 4 PR2: the `activeExecution` fan-out (invoking
+    // `skill_get_state` when the session had an in-flight workflow) is
+    // retired — no skill creates executions any more, so this branch was
+    // unreachable. Every explicit skill mention now goes through the
+    // single inline-injection path below. PR3 drops the runtime state
+    // machine; this change decouples orchestrator cleanup from that work.
     for (const skill of explicitSkills) {
-      const activeExecution = params.sessionId
-        ? this.deps.listExecutions(10, params.sessionId, true).find((item) => item.skillId === skill.id)
-        : null
-      if (activeExecution) {
-        const args: Record<string, unknown> = { executionId: activeExecution.id }
-        params.emitToolAction('skill_get_state', args)
-        params.emitOutput(`skill_get_state(${JSON.stringify(args)})`, 'tool_use')
-        const result = await params.executeTool('skill_get_state', args)
-        params.emitOutput(result.text.slice(0, 600), 'tool_result')
-        params.session.messages.push({
-          role: 'user',
-          content: [
-            `系统补充：技能 "${skill.name}" 在当前会话已有活跃 execution。`,
-            '必须先基于以下 execution 状态继续推进，而不是重新启动一个新的 workflow：',
-            result.text,
-          ].join('\n'),
-        })
-        continue
-      }
-
       const tool = this.deps.resolveSkillToolByAction(skill.id, skill.defaultAction || '')
       const actionDef = skill.actions.find((action) => action.name === (tool?.action || skill.defaultAction || ''))
       if (!tool || !actionDef) continue

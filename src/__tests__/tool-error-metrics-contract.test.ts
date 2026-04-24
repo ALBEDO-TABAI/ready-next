@@ -25,12 +25,14 @@ test('tool-executor.ts imports TOOL_ERROR_METRICS and uses .inputValidation + .s
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_error_surfaced['"]/)
 })
 
-test('tool-executor.ts emits skill_execution_missing metric when kind matches', () => {
+test('tool-executor.ts no longer emits skill_execution_missing (Phase 4 PR2 retirement)', () => {
   const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
-  assert.match(
-    source,
-    /if\s*\(kind\s*===\s*['"]skill_execution_missing['"]\)[\s\S]*logAgentMetric\(TOOL_ERROR_METRICS\.skillExecutionMissing/,
-  )
+  // The retired metric must NOT be referenced anywhere in the dispatch
+  // executor. `skillExecutionMissing` was the stale-executionId beacon for
+  // the 6 LLM-facing state-machine tools; with those tools deleted, the
+  // metric is unreachable and has been dropped from TOOL_ERROR_METRICS.
+  assert.doesNotMatch(source, /skillExecutionMissing/)
+  assert.doesNotMatch(source, /kind\s*===\s*['"]skill_execution_missing['"]/)
 })
 
 test('tool-runtime.ts uses TOOL_ERROR_METRICS.unknownSurfaced', () => {

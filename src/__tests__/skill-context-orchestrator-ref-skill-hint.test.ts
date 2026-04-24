@@ -57,7 +57,6 @@ function buildOrchestrator(skill: any) {
   return new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skill],
-    listExecutions: () => [],
     resolveSkillToolByAction: (_skillId, action) => ({
       name: `skill_${skill.id.replace(/-/g, '_')}_${action}`,
       action,

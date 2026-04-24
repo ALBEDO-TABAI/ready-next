@@ -96,7 +96,6 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    listExecutions: () => executionLog as any,
     resolveSkillToolByAction: (skillId, actionName) => ({
       name: actionName === 'read_skill'
         ? 'skill_lets_go_rss_read_skill'

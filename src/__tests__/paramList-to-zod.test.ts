@@ -11,7 +11,10 @@ import test from 'node:test'
 
 import { paramListToZodObject } from '../main/modules/tools/paramList-to-zod'
 import { zodObjectToParamList } from '../main/modules/tools/zod-param-derivation'
-import { SKILL_CONTROL_SCHEMAS } from '../main/modules/tools/schemas/skill-control-schemas'
+// B Phase 4 PR2 — `SKILL_CONTROL_SCHEMAS` retired. The round-trip invariant
+// is now exercised against `SKILL_PRIMITIVE_SCHEMAS`, which covers the same
+// Zod shapes (string / boolean / object / array with enum / required).
+import { SKILL_PRIMITIVE_SCHEMAS } from '../main/modules/tools/skill-primitives/primitive-schemas'
 import type { SkillParamDefinition } from '../shared/skill-execution-types'
 
 test('string param builds z.string()', () => {
@@ -68,8 +71,8 @@ test('optional params wrap the leaf in .optional() and preserve description', ()
   assert.equal(schema.safeParse({ x: 'v' }).success, true)
 })
 
-test('round-trip over SKILL_CONTROL_SCHEMAS preserves SkillParamDefinition[]', () => {
-  for (const [name, original] of Object.entries(SKILL_CONTROL_SCHEMAS)) {
+test('round-trip over SKILL_PRIMITIVE_SCHEMAS preserves SkillParamDefinition[]', () => {
+  for (const [name, original] of Object.entries(SKILL_PRIMITIVE_SCHEMAS)) {
     const originalParams = zodObjectToParamList(original)
     const rebuilt = paramListToZodObject(originalParams)
     const rebuiltParams = zodObjectToParamList(rebuilt)

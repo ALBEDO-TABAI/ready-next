@@ -127,7 +127,6 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    listExecutions: () => executionLog as any,
     resolveSkillToolByAction: () => ({
       name: 'skill_video_expert_analyzer_read_skill',
       action: 'read_skill',
@@ -187,7 +186,6 @@ test('vnext SKILL.md fits the existing 12K JS-char cap and is inlined without tr
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    listExecutions: () => [],
     resolveSkillToolByAction: () => ({
       name: 'skill_video_expert_analyzer_read_skill',
       action: 'read_skill',

@@ -18,7 +18,6 @@
 
 import type { ZodObject, ZodRawShape } from 'zod'
 
-import { SKILL_CONTROL_SCHEMAS } from './skill-control-schemas'
 import { MEMORY_SCHEMAS } from './memory-schemas'
 import { RSS_SCHEMAS } from './rss-schemas'
 import { CALENDAR_SCHEMAS } from './calendar-schemas'
@@ -32,7 +31,8 @@ import { SYSTEM_SCHEMAS } from './system-schemas'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
-  ...SKILL_CONTROL_SCHEMAS,
+  // B Phase 4 PR2: `SKILL_CONTROL_SCHEMAS` retired together with the
+  // `skill_submit_*` / `skill_get_state` / restart / cancel tools.
   ...SKILL_PRIMITIVE_SCHEMAS,
   ...MEMORY_SCHEMAS,
   ...RSS_SCHEMAS,
@@ -50,5 +50,3 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
 export function getToolInputSchemas(): Record<string, ZodObject<ZodRawShape>> {
   return STATIC_TOOL_INPUT_SCHEMAS
 }
-
-export { SKILL_CONTROL_SCHEMAS } from './skill-control-schemas'

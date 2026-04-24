@@ -1,179 +1,114 @@
 /**
- * Golden snapshot — locks the LLM-facing Anthropic/OpenAI tool JSONSchema for
- * the 6 skill execution-control tools. Committed BEFORE the Zod-driven param
- * derivation change so there is a byte-for-byte regression net.
+ * Golden snapshot — locks the LLM-facing Anthropic/OpenAI tool JSONSchema
+ * for the 4 skill primitives (skill_ask_user / skill_run_shell /
+ * skill_write_artifact / skill_read_artifact). Replaces the B Phase 0
+ * 6-control-tool snapshot after Phase 4 PR2 retired the state machine.
  *
- * Pure — imports only skill-execution-tool-defs.ts which has no electron deps.
+ * Pure — imports only skill-tool-types + skill-primitives/tool-defs, no
+ * electron deps.
  */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  EXECUTION_TOOL_DEFS,
-  toAnthropicTool,
-  toOpenAITool,
-} from '../main/modules/tools/skill-execution-tool-defs'
+import { toAnthropicTool, toOpenAITool } from '../main/modules/tools/skill-tool-types'
+import { PRIMITIVE_TOOL_DEFS } from '../main/modules/tools/skill-primitives/tool-defs'
 
-// P0-T2 (B plan Phase 0): 5 of the 6 control tools now prefix their
-// description with an ONLY-call guard to stop LLMs from fabricating an
-// executionId like "new". `skill_get_state` is read-only and unchanged.
-const EXECUTION_CONTROL_ONLY_PREFIX =
-  'ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0". '
-
-const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
-  skill_get_state: {
-    name: 'skill_get_state',
-    description: '读取当前 skill execution 状态、当前 blocker、已完成步骤和最近产物。若不提供 executionId，会优先读取当前会话最近的活跃 execution。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: '可选，execution ID' },
-        skillId: { type: 'string', description: '可选，限定 skill ID' },
-      },
-      required: [],
-    },
-  },
-  skill_submit_input: {
-    name: 'skill_submit_input',
-    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向一个被 need_input 阻塞的 execution 提交输入并继续推进。`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: 'execution ID' },
-        inputs: { type: 'object', description: '输入对象，例如 {"forceSubtitleMode":"funasr"}', additionalProperties: true },
-      },
-      required: ['executionId', 'inputs'],
-    },
-  },
-  skill_submit_confirmation: {
-    name: 'skill_submit_confirmation',
-    description: `${EXECUTION_CONTROL_ONLY_PREFIX}提交 confirmation 结果并继续执行 skill workflow。`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: 'execution ID' },
-        stepId: { type: 'string', description: '当前 confirmation step ID' },
-        confirmed: { type: 'boolean', description: '是否确认继续' },
-      },
-      required: ['executionId', 'stepId', 'confirmed'],
-    },
-  },
-  skill_submit_agent_result: {
-    name: 'skill_submit_agent_result',
-    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: 'execution ID' },
-        stepId: { type: 'string', description: '当前 agent_task step ID' },
-        textContent: { type: 'string', description: '生成的正文内容' },
-        outputs: { type: 'object', description: '可选结构化 outputs 对象', additionalProperties: true },
-      },
-      required: ['executionId', 'stepId'],
-    },
-  },
-  skill_restart_from_step: {
-    name: 'skill_restart_from_step',
-    description: `${EXECUTION_CONTROL_ONLY_PREFIX}从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: 'execution ID' },
-        stepId: { type: 'string', description: '要重跑的 step ID' },
-        inputs: { type: 'object', description: '可选，覆盖输入对象', additionalProperties: true },
-      },
-      required: ['executionId', 'stepId'],
-    },
-  },
-  skill_cancel_execution: {
-    name: 'skill_cancel_execution',
-    description: `${EXECUTION_CONTROL_ONLY_PREFIX}取消一个正在进行的 skill execution。`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        executionId: { type: 'string', description: 'execution ID' },
-      },
-      required: ['executionId'],
-    },
-  },
-}
-
-test('EXECUTION_TOOL_DEFS covers exactly the 6 control tool names', () => {
-  const names = EXECUTION_TOOL_DEFS.map((def) => def.name).sort()
+test('PRIMITIVE_TOOL_DEFS covers exactly the 4 primitive names with kind=primitive', () => {
+  const names = PRIMITIVE_TOOL_DEFS.map((def) => def.name).sort()
   assert.deepEqual(names, [
-    'skill_cancel_execution',
-    'skill_get_state',
-    'skill_restart_from_step',
-    'skill_submit_agent_result',
-    'skill_submit_confirmation',
-    'skill_submit_input',
+    'skill_ask_user',
+    'skill_read_artifact',
+    'skill_run_shell',
+    'skill_write_artifact',
   ])
-})
-
-test('toAnthropicTool produces the locked LLM-facing Anthropic schema for all 6 control tools', () => {
-  for (const def of EXECUTION_TOOL_DEFS) {
-    const actual = toAnthropicTool(def)
-    const expected = EXPECTED_ANTHROPIC_TOOLS[def.name]
-    assert.deepEqual(
-      actual,
-      expected,
-      `${def.name} Anthropic schema drifted — expected ${JSON.stringify(expected, null, 2)}\n  got ${JSON.stringify(actual, null, 2)}`,
+  for (const def of PRIMITIVE_TOOL_DEFS) {
+    assert.equal(
+      def.kind,
+      'primitive',
+      `${def.name}.kind should be 'primitive' post-Phase 4 PR2 (was 'execution_control')`,
     )
   }
 })
 
-test('toOpenAITool wraps the same shape under { type: function, function: { name, description, parameters } }', () => {
-  for (const def of EXECUTION_TOOL_DEFS) {
-    const anthropic = EXPECTED_ANTHROPIC_TOOLS[def.name] as {
+test('toAnthropicTool produces { name, description, input_schema: { type, properties, required } } for each primitive', () => {
+  for (const def of PRIMITIVE_TOOL_DEFS) {
+    const actual = toAnthropicTool(def) as {
+      name: string
+      description: string
+      input_schema: {
+        type: 'object'
+        properties: Record<string, unknown>
+        required: string[]
+      }
+    }
+    assert.equal(actual.name, def.name)
+    assert.equal(actual.description, def.description)
+    assert.equal(actual.input_schema.type, 'object')
+    assert.ok(actual.input_schema.properties && typeof actual.input_schema.properties === 'object')
+    assert.ok(Array.isArray(actual.input_schema.required))
+    // Required param names must be a subset of declared properties.
+    for (const reqName of actual.input_schema.required) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(actual.input_schema.properties, reqName),
+        `${def.name}: required param "${reqName}" missing from input_schema.properties`,
+      )
+    }
+  }
+})
+
+test('toOpenAITool wraps the Anthropic shape under { type: function, function: { name, description, parameters } }', () => {
+  for (const def of PRIMITIVE_TOOL_DEFS) {
+    const anthropic = toAnthropicTool(def) as {
       name: string
       description: string
       input_schema: Record<string, unknown>
     }
-    const openaiExpected = {
-      type: 'function',
-      function: {
-        name: anthropic.name,
-        description: anthropic.description,
-        parameters: anthropic.input_schema,
-      },
+    const actual = toOpenAITool(def) as {
+      type: string
+      function: { name: string; description: string; parameters: Record<string, unknown> }
     }
-    const actual = toOpenAITool(def)
-    assert.deepEqual(
-      actual,
-      openaiExpected,
-      `${def.name} OpenAI schema drifted — expected ${JSON.stringify(openaiExpected, null, 2)}\n  got ${JSON.stringify(actual, null, 2)}`,
-    )
+    assert.equal(actual.type, 'function')
+    assert.equal(actual.function.name, anthropic.name)
+    assert.equal(actual.function.description, anthropic.description)
+    assert.deepEqual(actual.function.parameters, anthropic.input_schema)
   }
 })
 
-// Patch A3 — the OpenAI snapshot already covers description byte-equality via
-// deepEqual above, but we add an explicit substring check so a future
-// "helpful" refactor that drops the ONLY prefix from the OpenAI wire format
-// (while leaving Anthropic intact) would fail loudly here rather than hiding
-// in diffing noise.
-test('toOpenAITool preserves ONLY-call prefix on the 5 gated tools (OpenAI wire)', () => {
-  const gated = [
-    'skill_submit_input',
-    'skill_submit_confirmation',
-    'skill_submit_agent_result',
-    'skill_restart_from_step',
-    'skill_cancel_execution',
-  ]
-  for (const name of gated) {
-    const def = EXECUTION_TOOL_DEFS.find((d) => d.name === name)
-    assert.ok(def, `expected ${name} in EXECUTION_TOOL_DEFS`)
-    const openai = toOpenAITool(def!) as { function: { description: string } }
-    assert.ok(
-      openai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
-      `${name} OpenAI description is missing the ONLY-call prefix: ${openai.function.description.slice(0, 80)}…`,
-    )
+test('skill_run_shell advertises command as required + sandboxing intent in description', () => {
+  const def = PRIMITIVE_TOOL_DEFS.find((d) => d.name === 'skill_run_shell')
+  assert.ok(def, 'skill_run_shell must be in PRIMITIVE_TOOL_DEFS')
+  const anthropic = toAnthropicTool(def!) as {
+    description: string
+    input_schema: { required: string[] }
   }
-  // Read-only tool must NOT carry the prefix.
-  const getStateDef = EXECUTION_TOOL_DEFS.find((d) => d.name === 'skill_get_state')!
-  const getStateOpenai = toOpenAITool(getStateDef) as { function: { description: string } }
-  assert.ok(
-    !getStateOpenai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
-    'skill_get_state must remain unprefixed — it is a safe read',
-  )
+  assert.ok(anthropic.input_schema.required.includes('command'))
+  // Allowlist and sandbox intent must survive description refactors; missing
+  // these substrings historically correlated with the LLM forgetting to
+  // short-circuit on disallowed bins.
+  assert.match(anthropic.description, /技能沙箱内/)
+  assert.match(anthropic.description, /白名单/)
+})
+
+test('skill_write_artifact advertises relativePath + content as required + reserved-file intent', () => {
+  const def = PRIMITIVE_TOOL_DEFS.find((d) => d.name === 'skill_write_artifact')
+  assert.ok(def, 'skill_write_artifact must be in PRIMITIVE_TOOL_DEFS')
+  const anthropic = toAnthropicTool(def!) as {
+    description: string
+    input_schema: { required: string[] }
+  }
+  assert.ok(anthropic.input_schema.required.includes('relativePath'))
+  assert.ok(anthropic.input_schema.required.includes('content'))
+  assert.match(anthropic.description, /保留文件名/)
+})
+
+test('skill_ask_user advertises question as required + suspend-semantics in description', () => {
+  const def = PRIMITIVE_TOOL_DEFS.find((d) => d.name === 'skill_ask_user')
+  assert.ok(def, 'skill_ask_user must be in PRIMITIVE_TOOL_DEFS')
+  const anthropic = toAnthropicTool(def!) as {
+    description: string
+    input_schema: { required: string[] }
+  }
+  assert.ok(anthropic.input_schema.required.includes('question'))
+  assert.match(anthropic.description, /暂停当前 skill/)
 })

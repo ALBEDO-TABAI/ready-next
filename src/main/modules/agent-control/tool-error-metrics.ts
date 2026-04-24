@@ -25,9 +25,11 @@ export const TOOL_ERROR_METRICS = {
   inputValidation: 'tool_input_validation_failed',
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
-  /** stale executionId 被 skill-execution-missing 识别并回灌（Phase 4 新增） */
-  skillExecutionMissing: 'skill_execution_missing',
-  /** skill_executions TTL sweep 完成一次（Phase 4 新增） */
+  // B Phase 4 PR2: `skillExecutionMissing` retired alongside the 6
+  // `skill_submit_*` / `skill_get_state` / restart / cancel tools. The
+  // stale-executionId recovery path (`kind === 'skill_execution_missing'`)
+  // is unreachable once the model cannot fabricate an executionId.
+  /** skill_executions TTL sweep 完成一次（Phase 4 新增；PR3 将随状态机一同退役） */
   ttlSwept: 'skill_executions_ttl_swept',
   /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities

@@ -84,7 +84,6 @@ test('orchestrator inline-injects SKILL.md and arms the primitive-gating hint', 
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    listExecutions: () => [],
     resolveSkillToolByAction: () => ({
       name: 'skill_video_copy_analyzer_read_skill',
       action: 'read_skill',

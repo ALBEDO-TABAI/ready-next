@@ -321,8 +321,9 @@ export class DirectChatEngine extends EventEmitter {
     this.skillContextOrchestrator = new SkillContextOrchestrator({
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),
-      listExecutions: (limit, sessionId, activeOnly) => getSkillsRuntimeManager().listExecutions(limit, sessionId, activeOnly),
       resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
+      // B Phase 4 PR2: `listExecutions` dep retired; see
+      // skill-context-orchestrator.ts constructor comment.
     })
     this.anthropicExecutionClient = new AnthropicExecutionClient({
       fetchWithTimeout: (url, init, signal, label, timeoutMs) => this.fetchWithTimeout(url, init, signal, label, timeoutMs),

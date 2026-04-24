@@ -175,19 +175,11 @@ export async function executeToolCall(
       errorKind: kind,
       message: message.slice(0, 200),
     })
-    // Phase 4: skill_execution_missing is the stale-executionId recovery
-    // path. It's surfaced via errorKind today but was never emitted as its
-    // own metric, so long-tail frequency is invisible. Emit it alongside
-    // the generic `surfaced` metric so log aggregations can bucket it.
-    if (kind === 'skill_execution_missing') {
-      const detailRecord = detail && typeof detail === 'object' ? (detail as Record<string, unknown>) : null
-      const executionIdRaw = detailRecord ? detailRecord.executionId : null
-      logAgentMetric(TOOL_ERROR_METRICS.skillExecutionMissing, {
-        toolName,
-        sessionId: context.sessionId || null,
-        executionId: typeof executionIdRaw === 'string' ? executionIdRaw : null,
-      })
-    }
+    // B Phase 4 PR2: `skill_execution_missing` metric was the
+    // stale-executionId recovery-path beacon for the retired state machine.
+    // With the 6 LLM-facing execution-control tools removed, the model
+    // cannot fabricate an executionId any more, so the kind is no longer
+    // generated — the emit block and its registry entry are dropped.
     return createToolExecutionOutput(`工具 ${toolName} 失败：${message}`, {
       shape: 'json',
       data: {

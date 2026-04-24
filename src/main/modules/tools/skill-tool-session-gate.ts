@@ -1,54 +1,15 @@
 /**
- * Pure gating logic for skill execution-control tools.
+ * Pure gating logic for skill primitive tool exposure.
  *
- * Separate from `skills-tools.ts` so that:
- *   - Tests can import this without pulling in electron / runtime-manager via
- *     the skills-tools → runtime-manager chain.
- *   - The logic lives in exactly one place; both getSkillToolDefs and any
- *     future skill_* tool surface (e.g. the primitives in Phase 1) can reuse
- *     the same gate.
+ * B Phase 4 PR2 retired the execution-control gating branch (the 5
+ * `skill_submit_*` / restart / cancel tools are deleted from the tool
+ * surface entirely). This module now only hosts the Phase 1 primitive
+ * gate — exposed because tests import it directly.
  *
- * Behavior (B plan Phase 0 — P0-T1):
- *   - Legacy callers with no sessionId keep the full tool list. This preserves
- *     the static fallback path used during boot when the runtime manager is
- *     not yet available.
- *   - When a sessionId is supplied and the session has NO active execution,
- *     submit_* / restart_from_step / cancel_execution are filtered out of the
- *     tool list (LLM never sees them — stops it from fabricating
- *     `executionId: "new"`).
- *   - `skill_get_state` is NEVER gated — it is a read-only probe that stays
- *     safe in every state.
+ * No electron imports; caller threads in the `hasActiveExecution` and
+ * `hasReferenceSkillHint` predicates so boot-time / fallback callers
+ * without a runtime manager still get sensible defaults.
  */
-
-export const SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'skill_submit_input',
-  'skill_submit_confirmation',
-  'skill_submit_agent_result',
-  'skill_restart_from_step',
-  'skill_cancel_execution',
-])
-
-export function shouldExposeExecutionControlTool(
-  toolName: string,
-  sessionId: string | undefined,
-  hasActiveExecution: (sessionId: string) => boolean,
-): boolean {
-  if (!sessionId) return true
-  if (!SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES.has(toolName)) return true
-  return hasActiveExecution(sessionId)
-}
-
-// Convenience: filter a caller-supplied list of tool definitions. `T` is the
-// tool-def shape (SkillToolDef or any superset exposing `.name`).
-export function filterExecutionControlToolsBySession<T extends { name: string }>(
-  defs: readonly T[],
-  sessionId: string | undefined,
-  hasActiveExecution: (sessionId: string) => boolean,
-): T[] {
-  return defs.filter((def) =>
-    shouldExposeExecutionControlTool(def.name, sessionId, hasActiveExecution),
-  )
-}
 
 /**
  * B Phase 1 — skill primitives gating.
@@ -63,6 +24,10 @@ export function filterExecutionControlToolsBySession<T extends { name: string }>
  * want them surfaced to every generic chat. Legacy sessionId-less callers
  * (boot-time introspection, static fallback) keep the full list so the tool
  * surface inventory stays stable.
+ *
+ * PR3 will rewire `hasActiveExecution` to always return false at the
+ * caller (the state machine is retired), which is why the parameter
+ * survives PR2 unchanged.
  */
 export function shouldExposeSkillPrimitive(
   sessionId: string | undefined,

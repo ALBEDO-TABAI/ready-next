@@ -5,19 +5,10 @@ import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-co
 import type {
   SkillActionDefinition,
   SkillExecutionDetail,
-  SkillInputValue,
 } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
-import {
-  EXECUTION_NOT_FOUND_RE,
-  buildSkillExecutionMissingOutput,
-  type SkillCoordinatorOperation,
-} from './skill-execution-missing'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
-import {
-  filterExecutionControlToolsBySession,
-  filterSkillPrimitivesBySession,
-} from './skill-tool-session-gate'
+import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
   executeAskUser,
@@ -27,12 +18,11 @@ import {
 } from './skill-primitives'
 import { getAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
 import {
-  EXECUTION_TOOL_DEFS,
   toAnthropicTool,
   toOpenAITool,
   type SkillToolDef,
   type ToolParam,
-} from './skill-execution-tool-defs'
+} from './skill-tool-types'
 import { paramListToZodObject } from './paramList-to-zod'
 import {
   getSkillTaskTracker,
@@ -137,35 +127,26 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
 }
 
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
+  // B Phase 4 PR2: the 6 LLM-facing execution-control tools
+  // (`skill_submit_input` / `skill_submit_confirmation` /
+  // `skill_submit_agent_result` / `skill_restart_from_step` /
+  // `skill_cancel_execution` / `skill_get_state`) are retired. Only the
+  // dynamic `skill_<id>_<action>` tools and the 4 primitives reach the
+  // LLM surface.
+  //
+  // The `hasActiveExecution` signal is still read by `filterSkillPrimitivesBySession`
+  // for primitive gating; PR3 retires the state machine entirely and
+  // rewires this to `() => false`.
   const hasActiveExecution = (sid: string) => findExecutionForSession(sid) !== null
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
 
-  const executionTools = filterExecutionControlToolsBySession(
-    EXECUTION_TOOL_DEFS,
-    sessionId,
-    hasActiveExecution,
-  )
   const primitiveTools = filterSkillPrimitivesBySession(
     PRIMITIVE_TOOL_DEFS,
     sessionId,
     hasActiveExecution,
     hasReferenceHint,
   )
-  return [...getSkillActionToolDefs(), ...executionTools, ...primitiveTools]
-}
-
-function formatExecutionDetail(detail: SkillExecutionDetail): string {
-  const recentSteps = detail.steps.slice(-4).map((step) => `${step.stepId}(${step.status})`).join(', ')
-  const recentArtifacts = detail.artifacts.slice(-4).map((artifact) => artifact.path || artifact.label || artifact.id).join(', ')
-  return [
-    `Execution ID: ${detail.id}`,
-    `Skill: ${detail.skillId}`,
-    `Status: ${detail.status}`,
-    detail.currentStepId ? `Current step: ${detail.currentStepId}` : '',
-    detail.blocker ? `Blocker: ${detail.blocker.type} - ${detail.blocker.message}` : '',
-    recentSteps ? `Recent steps: ${recentSteps}` : '',
-    recentArtifacts ? `Recent artifacts: ${recentArtifacts}` : '',
-  ].filter(Boolean).join('\n')
+  return [...getSkillActionToolDefs(), ...primitiveTools]
 }
 
 function toSkillStepStatus(status: string): 'pending' | 'running' | 'blocked' | 'done' | 'error' {
@@ -175,21 +156,6 @@ function toSkillStepStatus(status: string): 'pending' | 'running' | 'blocked' | 
   if (normalized === 'waiting' || normalized === 'blocked' || normalized === 'paused') return 'blocked'
   if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'error') return 'error'
   return 'pending'
-}
-
-function toSkillWaitingFor(blockerType?: string | null): 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' {
-  if (blockerType === 'need_input') return 'input'
-  if (blockerType === 'need_confirmation') return 'confirmation'
-  if (blockerType === 'need_agent_result') return 'agent_result'
-  return blockerType ? 'background' : 'none'
-}
-
-function toSkillInteractionHint(blockerType?: string | null): 'awaiting_confirmation' | 'awaiting_clarification' | null {
-  if (blockerType === 'need_confirmation') return 'awaiting_confirmation'
-  if (blockerType === 'need_input' || blockerType === 'need_agent_result') {
-    return 'awaiting_clarification'
-  }
-  return null
 }
 
 /**
@@ -293,84 +259,6 @@ export function buildSkillTaskProjectionPatch(
   }
 }
 
-function buildSkillProjectionPatch(detail: SkillExecutionDetail): Record<string, unknown> {
-  const waitingFor = toSkillWaitingFor(detail.blocker?.type || null)
-  const resumableActions: Array<'continue' | 'retry' | 'open_artifact' | 'cancel'> = []
-  if (waitingFor !== 'none') resumableActions.push('continue')
-  if ((detail.artifacts || []).length > 0) resumableActions.push('open_artifact')
-  if (detail.status === 'failed' || detail.status === 'cancelled') resumableActions.push('retry')
-  resumableActions.push('cancel')
-
-  return {
-    module: 'skill',
-    message: detail.blocker?.message || `当前步骤：${detail.currentStepId || '进行中'}`,
-    taskTitle: `技能执行 · ${detail.skillId}`,
-    taskSummary: detail.blocker?.message || `当前步骤：${detail.currentStepId || '进行中'}`,
-    taskType: 'multi_step_task',
-    interactionState:
-      waitingFor === 'confirmation'
-        ? 'awaiting_confirmation'
-        : waitingFor === 'input' || waitingFor === 'agent_result'
-          ? 'awaiting_clarification'
-          : 'running',
-    steps: detail.steps.map((step) => ({
-      id: step.stepId,
-      title: step.stepId,
-      status: toSkillStepStatus(step.status),
-      updatedAt: detail.updatedAt,
-    })),
-    currentStepId: detail.currentStepId || null,
-    waitingFor,
-    resumableActions,
-    blockedReason: detail.blocker?.message || null,
-    taskContinuation: {
-      executionId: detail.id,
-      stepId: detail.currentStepId || null,
-      blockerType: detail.blocker?.type || null,
-    },
-    recentArtifacts: detail.artifacts.slice(-4).map((artifact) => ({
-      id: artifact.id,
-      module: 'skill',
-      kind: 'skill-artifact',
-      label: artifact.label || artifact.path || artifact.id || 'artifact',
-      path: artifact.path || null,
-      createdAt: detail.updatedAt,
-    })),
-  }
-}
-
-function createSkillExecutionOutput(detail: SkillExecutionDetail): ToolExecutionOutput {
-  return createToolExecutionOutput(formatExecutionDetail(detail), {
-    projectionPatch: buildSkillProjectionPatch(detail),
-    interactionHint: toSkillInteractionHint(detail.blocker?.type || null),
-  })
-}
-
-async function runSkillCoordinator(params: {
-  executionId: string
-  operation: SkillCoordinatorOperation
-  sessionId?: string
-  run: () => Promise<SkillExecutionDetail>
-}): Promise<ToolExecutionOutput> {
-  try {
-    const detail = await params.run()
-    return createSkillExecutionOutput(detail)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!EXECUTION_NOT_FOUND_RE.test(message)) {
-      throw error
-    }
-    const activeExecution = findExecutionForSession(params.sessionId)
-    return buildSkillExecutionMissingOutput({
-      executionId: params.executionId,
-      operation: params.operation,
-      activeExecution,
-      originalMessage: message,
-      lastReferenceSkill: getLastReferenceSkill(params.sessionId),
-    })
-  }
-}
-
 function formatRunResult(result: {
   success: boolean
   stdout: string
@@ -384,9 +272,12 @@ function formatRunResult(result: {
   execution?: SkillExecutionDetail | null
   blocker?: { type: string; message: string } | null
 }): string {
-  if (result.mode === 'workflow' && result.execution) {
-    return formatExecutionDetail(result.execution)
-  }
+  // B Phase 4 PR2: the `workflow` return branch no longer has a bespoke
+  // text formatter — `formatExecutionDetail` was retired alongside the
+  // state-machine tools. If `runSkill` still returns `mode: 'workflow'`
+  // (legacy manifest declarations), fall through to the generic
+  // stdout/stderr framing below. PR3 removes the `workflow` branch at the
+  // source (SkillsRuntimeManager.runSkill).
 
   // Reference-mode skills (`runtime: reference`, typically advisory SKILL.md
   // loads) are NOT subprocess executions — they read a markdown guidance file.
@@ -420,15 +311,6 @@ function formatRunResult(result: {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function asBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 1 || value === '1'
-}
-
-function asRecord(value: unknown): Record<string, SkillInputValue> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return value as Record<string, SkillInputValue>
 }
 
 /**
@@ -551,84 +433,8 @@ export async function executeSkillTool(
 
   const manager = getSkillsRuntimeManager()
 
-  if (tool.kind === 'execution_control') {
+  if (tool.kind === 'primitive') {
     switch (tool.name) {
-      case 'skill_get_state': {
-        const explicitId = asString(args.executionId)
-        const detail = findExecutionForSession(sessionId, explicitId, asString(args.skillId))
-        if (detail) return createSkillExecutionOutput(detail)
-        if (explicitId) {
-          return buildSkillExecutionMissingOutput({
-            executionId: explicitId,
-            operation: 'get_state',
-            activeExecution: findExecutionForSession(sessionId),
-            originalMessage: `Execution not found: ${explicitId}`,
-            lastReferenceSkill: getLastReferenceSkill(sessionId),
-          })
-        }
-        return 'No active skill execution found.'
-      }
-      case 'skill_submit_input': {
-        const executionId = asString(args.executionId)
-        return runSkillCoordinator({
-          executionId,
-          operation: 'submit_input',
-          sessionId,
-          run: () => manager.submitExecutionInput(executionId, asRecord(args.inputs)),
-        })
-      }
-      case 'skill_submit_confirmation': {
-        const executionId = asString(args.executionId)
-        return runSkillCoordinator({
-          executionId,
-          operation: 'submit_confirmation',
-          sessionId,
-          run: () => manager.submitExecutionConfirmation(
-            executionId,
-            asString(args.stepId),
-            asBoolean(args.confirmed),
-          ),
-        })
-      }
-      case 'skill_submit_agent_result': {
-        const executionId = asString(args.executionId)
-        return runSkillCoordinator({
-          executionId,
-          operation: 'submit_agent_result',
-          sessionId,
-          run: () => manager.submitExecutionAgentResult({
-            executionId,
-            stepId: asString(args.stepId),
-            textContent: typeof args.textContent === 'string' ? args.textContent : undefined,
-            outputs: asRecord(args.outputs),
-          }),
-        })
-      }
-      case 'skill_restart_from_step': {
-        const executionId = asString(args.executionId)
-        return runSkillCoordinator({
-          executionId,
-          operation: 'restart_from_step',
-          sessionId,
-          run: () => manager.restartExecutionFromStep(
-            executionId,
-            asString(args.stepId),
-            asRecord(args.inputs),
-          ),
-        })
-      }
-      case 'skill_cancel_execution': {
-        const executionId = asString(args.executionId)
-        const detail = manager.cancelExecution(executionId)
-        if (detail) return createSkillExecutionOutput(detail)
-        return buildSkillExecutionMissingOutput({
-          executionId,
-          operation: 'cancel_execution',
-          activeExecution: findExecutionForSession(sessionId),
-          originalMessage: `Execution not found: ${executionId}`,
-          lastReferenceSkill: getLastReferenceSkill(sessionId),
-        })
-      }
       case 'skill_ask_user': {
         const skillId = resolvePrimitiveSkillId(sessionId)
         const question = asString(args.question)
@@ -750,10 +556,15 @@ export async function executeSkillTool(
         )
       }
       default:
-        return `Unknown skill tool: ${toolName}`
+        return `Unknown skill primitive: ${toolName}`
     }
   }
 
+  // skill_action path — dispatches to SkillsRuntimeManager.runSkill for
+  // manifest-declared actions. B Phase 4 PR3 will strip the workflow
+  // cleanup branch; PR2 keeps it to minimize diff scope and because
+  // `runSkill` is still callable even though no embedded skill uses
+  // `executionMode: 'workflow'` post-Phase 3.
   const result = await manager.runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
@@ -784,9 +595,7 @@ export async function executeSkillTool(
     success: result.success,
     summary: formatted.slice(0, 240),
   })
-  return result.mode === 'workflow' && result.execution
-    ? createSkillExecutionOutput(result.execution)
-    : formatted
+  return formatted
 }
 
 export type { SkillToolDef, ToolParam, SkillActionDefinition }

@@ -45,7 +45,6 @@ function buildOrchestrator(skill: any) {
   return new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skill],
-    listExecutions: () => [],
     resolveSkillToolByAction: () => ({
       name: 'skill_novel_writer_system_read_skill',
       action: 'read_skill',
