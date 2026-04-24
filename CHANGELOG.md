@@ -1,6 +1,31 @@
 # Ready V5 - 更新日志
 
-## [Unreleased] - 2026-04-22
+## [Unreleased] - 2026-04-24
+
+### 新增功能
+
+#### Skill 模块 PR2：Ephemeral Skill 系统与 Primitive Tools
+- **新增 `skill-ephemeral-ask-user.ts`**：实现 `EphemeralExecutionStore` 类，提供 in-memory 存储用于 skill_ask_user 交互
+  - 4 个 CRUD 操作：`createAskUser` / `getAskUser` / `updateAskUser` / `deleteAskUser`
+  - TTL sweep 机制：默认 5 分钟 TTL，每 60 秒清理一次，boot 后 30 秒首跑
+  - 会话隔离：通过 `sessionId` 索引，支持跨会话查询和清理
+  - 线程安全：使用 Map 实现，无 I/O，失败只影响当前会话
+- **新增 `skill-tool-session-gate.ts`**：实现会话隔离和 primitive tools 过滤逻辑
+  - `shouldExposeAskUserPrimitive(sessionId)`：基于 active ask 状态判断是否暴露 skill_ask_user
+  - `filterSkillPrimitivesBySession(toolNames, sessionId)`：过滤当前会话可见的 primitive tools
+  - `hasActiveEphemeralAsk(sessionId)`：检查会话是否有活跃的 ask 记录
+- **新增 4 个 primitive handlers**：
+  - `executeAskUser`：创建 ephemeral ask 记录，返回等待用户回答的提示
+  - `executeRunShell`：执行 shell 命令，捕获 stdout/stderr，支持 timeout
+  - `executeWriteArtifact`：写入文件，支持创建目录，返回文件路径
+  - `executeReadArtifact`：读取文件内容，支持编码选择
+- **更新 `skills-tools-static.ts`**：新增 `STATIC_SKILL_PRIMITIVE_TOOL_NAMES` 常量，包含 4 个 primitive tools
+- **更新 `SkillsRuntimeManager`**：
+  - 新增静态方法 `getEphemeralStore()`：获取全局 EphemeralExecutionStore 实例
+  - 新增静态方法 `clearAllEphemeralAskUser(sessionId)`：清理指定会话的所有 ephemeral 记录
+  - 构造函数中初始化 ephemeral store 并启动 sweep
+- **更新 `tool-error-metrics.ts`**：新增 `skillEphemeralAskUserTtlSwept` metric，记录 ephemeral store 清理事件
+- **更新 `tool-executor.ts`**：在 primitive tools 执行后注册清理回调，确保 run 结束时清理 ephemeral 状态
 
 ### 重构
 

@@ -115,6 +115,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行（`running / blocked`）永不清理；sweep 在 `SkillsRuntimeManager` 启动后 30s 首跑、之后每小时跑一次，`tool-error-metrics.ttlSwept` 打点
 - `skill_executions` 表所在的 DB 没有开 `PRAGMA foreign_keys = ON`，`ON DELETE CASCADE` 实际不生效；任何清理跨表数据的逻辑必须显式删子表行（`skill_execution_steps` / `skill_execution_artifacts`）
 - 所有新 executionId 使用 `e-{8hex}` 前缀（`generateSkillExecutionId()`）；旧 UUID 行继续兼容，不做回填；`getExecution` 用 `WHERE id = ?` format-agnostic，`Zod` schema `z.string().trim().min(1)` 不加 UUID 断言
+- **skill_ask_user 原语**：使用 `EphemeralExecutionStore` 提供 in-memory 存储，默认 5 分钟 TTL，每 60 秒清理一次。只在没有 active ask 时暴露，通过 `SkillsRuntimeManager.getEphemeralStore()` 访问。与 `skill_executions` 表的持久化执行独立，ephemeral 记录不写入数据库。
+- **primitive tools 限制**：skill_ask_user / skill_run_shell / skill_write_artifact / skill_read_artifact 为系统级 primitive，不允许用户通过 manifest 覆盖。清理通过 `SkillsRuntimeManager.clearAllEphemeralAskUser(sessionId)` 在 run 结束时自动触发。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

@@ -1,5 +1,10 @@
 import type { ZodObject, ZodRawShape } from 'zod'
-import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { readFile, writeFile, mkdir } from 'fs/promises'
+import { existsSync } from 'fs'
+import { join, dirname } from 'path'
+import { getSkillsRuntimeManager, SkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
 import type {
@@ -119,8 +124,49 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
   }
 }
 
+const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
+  {
+    name: 'skill_ask_user',
+    description: '向用户提问并等待回答。用于需要用户输入或确认的场景。',
+    kind: 'primitive' as const,
+    params: [
+      { name: 'question', type: 'string', required: true, description: '要问用户的问题' },
+      { name: 'ttlMs', type: 'number', required: false, description: '超时时间（毫秒），默认 5 分钟' },
+    ],
+  },
+  {
+    name: 'skill_run_shell',
+    description: '执行 shell 命令并返回结果。',
+    kind: 'primitive' as const,
+    params: [
+      { name: 'command', type: 'string', required: true, description: '要执行的命令' },
+      { name: 'args', type: 'array', required: false, description: '命令参数数组', items: { type: 'string' } },
+      { name: 'timeoutMs', type: 'number', required: false, description: '超时时间（毫秒），默认 30 秒' },
+    ],
+  },
+  {
+    name: 'skill_write_artifact',
+    description: '将内容写入文件。支持创建必要的目录结构。',
+    kind: 'primitive' as const,
+    params: [
+      { name: 'path', type: 'string', required: true, description: '文件路径' },
+      { name: 'content', type: 'string', required: true, description: '要写入的内容' },
+      { name: 'encoding', type: 'string', required: false, description: '文件编码，默认 utf-8' },
+    ],
+  },
+  {
+    name: 'skill_read_artifact',
+    description: '读取文件内容。',
+    kind: 'primitive' as const,
+    params: [
+      { name: 'path', type: 'string', required: true, description: '文件路径' },
+      { name: 'encoding', type: 'string', required: false, description: '文件编码，默认 utf-8' },
+    ],
+  },
+]
+
 function getSkillToolDefs(): SkillToolDef[] {
-  return [...getSkillActionToolDefs(), ...EXECUTION_TOOL_DEFS]
+  return [...getSkillActionToolDefs(), ...EXECUTION_TOOL_DEFS, ...PRIMITIVE_TOOL_DEFS]
 }
 
 function formatExecutionDetail(detail: SkillExecutionDetail): string {
@@ -310,6 +356,108 @@ function findExecutionForSession(sessionId?: string, executionId?: string, skill
   return manager.getExecution(matched.id)
 }
 
+async function executeAskUser(
+  args: Record<string, unknown>,
+  sessionId?: string,
+  registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+): Promise<string | ToolExecutionOutput> {
+  const question = asString(args.question)
+  if (!question) {
+    return 'Error: question parameter is required for skill_ask_user'
+  }
+
+  const ttlMs = typeof args.ttlMs === 'number' ? args.ttlMs : undefined
+
+  if (!sessionId) {
+    return 'Error: sessionId is required for skill_ask_user'
+  }
+
+  const ephemeralStore = SkillsRuntimeManager.getEphemeralStore()
+  const askId = ephemeralStore.createAskUser(sessionId, question, ttlMs)
+
+  const result = `Question sent to user (ID: ${askId}). Waiting for response...\n\nQuestion: ${question}`
+
+  if (registerRunCleanup) {
+    registerRunCleanup(() => {
+      ephemeralStore.deleteAskUser(askId)
+    })
+  }
+
+  return result
+}
+
+async function executeRunShell(
+  args: Record<string, unknown>
+): Promise<string | ToolExecutionOutput> {
+  const command = asString(args.command)
+  if (!command) {
+    return 'Error: command parameter is required for skill_run_shell'
+  }
+
+  const commandArgs = Array.isArray(args.args) ? args.args.map(asString) : []
+  const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : 30000
+
+  try {
+    const execFileAsync = promisify(execFile)
+    const { stdout, stderr } = await execFileAsync(command, commandArgs, {
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024, // 1MB
+    })
+
+    const sections: string[] = []
+    if (stdout.trim()) sections.push(`STDOUT:\n${stdout.trim()}`)
+    if (stderr.trim()) sections.push(`STDERR:\n${stderr.trim()}`)
+    return sections.join('\n\n') || 'Command executed successfully (no output).'
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Command execution failed: ${message}`
+  }
+}
+
+async function executeWriteArtifact(
+  args: Record<string, unknown>
+): Promise<string | ToolExecutionOutput> {
+  const path = asString(args.path)
+  const content = typeof args.content === 'string' ? args.content : ''
+  const encoding = (asString(args.encoding) || 'utf-8') as BufferEncoding
+
+  if (!path) {
+    return 'Error: path parameter is required for skill_write_artifact'
+  }
+
+  try {
+    const dir = dirname(path)
+    if (!existsSync(dir)) {
+      await mkdir(dir, { recursive: true })
+    }
+
+    await writeFile(path, content, { encoding })
+    return `Successfully wrote artifact to: ${path}`
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Failed to write artifact: ${message}`
+  }
+}
+
+async function executeReadArtifact(
+  args: Record<string, unknown>
+): Promise<string | ToolExecutionOutput> {
+  const path = asString(args.path)
+  const encoding = (asString(args.encoding) || 'utf-8') as BufferEncoding
+
+  if (!path) {
+    return 'Error: path parameter is required for skill_read_artifact'
+  }
+
+  try {
+    const content = await readFile(path, { encoding })
+    return `File content from: ${path}\n\n${content}`
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Failed to read artifact: ${message}`
+  }
+}
+
 export function getSkillAnthropicTools(): Array<Record<string, unknown>> {
   return getSkillToolDefs().map(toAnthropicTool)
 }
@@ -420,6 +568,31 @@ export async function executeSkillTool(
       default:
         return `Unknown skill tool: ${toolName}`
     }
+  }
+
+  if (tool.kind === 'primitive') {
+    const result = await (async () => {
+      switch (tool.name) {
+        case 'skill_ask_user':
+          return executeAskUser(args, sessionId, registerRunCleanup)
+        case 'skill_run_shell':
+          return executeRunShell(args)
+        case 'skill_write_artifact':
+          return executeWriteArtifact(args)
+        case 'skill_read_artifact':
+          return executeReadArtifact(args)
+        default:
+          return `Unknown primitive tool: ${toolName}`
+      }
+    })()
+
+    if (registerRunCleanup && sessionId) {
+      registerRunCleanup(() => {
+        SkillsRuntimeManager.clearAllEphemeralAskUser(sessionId)
+      })
+    }
+
+    return result
   }
 
   const result = await manager.runSkill({

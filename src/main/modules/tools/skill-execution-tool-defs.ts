@@ -12,7 +12,7 @@ import type { SkillParamDefinition } from '../../../shared/skill-execution-types
 import { SKILL_CONTROL_SCHEMAS } from './schemas/skill-control-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 
-export type SkillToolKind = 'skill_action' | 'execution_control'
+export type SkillToolKind = 'skill_action' | 'execution_control' | 'primitive'
 
 export type ToolParam = SkillParamDefinition
 

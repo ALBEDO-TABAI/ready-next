@@ -26,7 +26,15 @@ const EXECUTION_CONTROL_TOOL_NAMES: string[] = [
   'skill_cancel_execution',
 ]
 
+const STATIC_SKILL_PRIMITIVE_TOOL_NAMES: string[] = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+]
+
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
   ...EXECUTION_CONTROL_TOOL_NAMES,
+  ...STATIC_SKILL_PRIMITIVE_TOOL_NAMES,
 ]

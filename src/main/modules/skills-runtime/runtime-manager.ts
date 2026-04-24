@@ -47,6 +47,7 @@ import { ExecutionCoordinator } from './execution-coordinator'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { isWorkflowStarterAction } from './guardrails'
+import { EphemeralExecutionStore } from '../tools/skill-ephemeral-ask-user'
 
 const execFileAsync = promisify(execFile)
 
@@ -318,6 +319,27 @@ export class SkillsRuntimeManager {
   private static readonly TTL_SWEEP_INTERVAL_MS = 60 * 60_000
   private static readonly TTL_BOOT_DELAY_MS = 30_000
 
+  private static ephemeralStore: EphemeralExecutionStore | null = null
+
+  private static initEphemeralStore(): void {
+    if (!SkillsRuntimeManager.ephemeralStore) {
+      SkillsRuntimeManager.ephemeralStore = new EphemeralExecutionStore()
+      SkillsRuntimeManager.ephemeralStore.startSweep()
+    }
+  }
+
+  static getEphemeralStore(): EphemeralExecutionStore {
+    if (!SkillsRuntimeManager.ephemeralStore) {
+      SkillsRuntimeManager.initEphemeralStore()
+    }
+    // Type assertion because we know ephemeralStore is non-null after init
+    return SkillsRuntimeManager.ephemeralStore!
+  }
+
+  static clearAllEphemeralAskUser(sessionId: string): number {
+    return SkillsRuntimeManager.getEphemeralStore().clearAllForSession(sessionId)
+  }
+
   constructor() {
     this.runtimeRoot = join(app.getPath('userData'), 'skill-runtime')
     this.skillsRoot = join(this.runtimeRoot, 'skills')
@@ -330,6 +352,7 @@ export class SkillsRuntimeManager {
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
     this.startScheduler()
     this.startTtlSweep()
+    SkillsRuntimeManager.initEphemeralStore()
   }
 
   /**
