@@ -33,6 +33,11 @@ export interface ContinuationIntent {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  // B Phase 4: todo-anchored resumption. PR3 wires resumeRun /
+  // respondToInteraction handlers to look up the todo via
+  // `getSkillTaskTracker().findTodo(todoId)` when executionId is empty.
+  todoId?: string
+  todoTitle?: string
 }
 
 export interface ParsedContinuationControlText {

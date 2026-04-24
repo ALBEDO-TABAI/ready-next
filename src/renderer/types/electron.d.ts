@@ -241,6 +241,11 @@ interface ScopeRunTaskContinuationData {
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
+  // B Phase 4: tracker-driven continuation. Present on todo-sourced patches;
+  // main-process resume handlers treat a non-empty `todoId` as the anchor
+  // when `executionId` is empty.
+  todoId?: string | null
+  todoTitle?: string | null
 }
 
 interface ContinuationIntentData {
@@ -249,6 +254,9 @@ interface ContinuationIntentData {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  // B Phase 4: todo-anchored resumption. Extended alongside ScopeRunTaskContinuationData.
+  todoId?: string
+  todoTitle?: string
 }
 
 interface ScopeRunMemoryCaptureItemData {

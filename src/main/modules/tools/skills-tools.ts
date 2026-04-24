@@ -34,6 +34,10 @@ import {
   type ToolParam,
 } from './skill-execution-tool-defs'
 import { paramListToZodObject } from './paramList-to-zod'
+import {
+  getSkillTaskTracker,
+  type SkillTodoOrigin,
+} from '../agent-control/skill-task-tracker'
 
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
 
@@ -186,6 +190,107 @@ function toSkillInteractionHint(blockerType?: string | null): 'awaiting_confirma
     return 'awaiting_clarification'
   }
   return null
+}
+
+/**
+ * Tracker-sourced projection patch for B Phase 4. Keeps the same shape as the
+ * legacy workflow-sourced `buildSkillProjectionPatch` so the renderer task
+ * card (ChatPanel / TaskPanel / taskCardViewModel) consumes both paths
+ * transparently.
+ *
+ * Key differences vs the legacy shape:
+ *   - `taskContinuation` carries `todoId` / `todoTitle` instead of
+ *     `executionId` / `stepId`. Renderer handlers spread this into
+ *     `continuationIntent` so main-process `agent.resumeRun` handlers can
+ *     rehydrate the todo (wired in PR3).
+ *   - `resumableActions` is derived from tracker state: a `blocked` todo
+ *     allows `continue`; a `done` todo allows `retry`.
+ *
+ * Returns `null` when the session has no todos for the given skill — the
+ * caller (PR3 emit path) should skip emission in that case rather than
+ * blanking the task card.
+ */
+export function buildSkillTaskProjectionPatch(
+  sessionId: string,
+  skillId: string,
+): Record<string, unknown> | null {
+  const tracker = getSkillTaskTracker()
+  const todos = tracker.listTodos(sessionId, skillId)
+  if (todos.length === 0) return null
+
+  const blockedTodo = [...todos].reverse().find((t) => t.status === 'blocked')
+  const runningTodo = [...todos].reverse().find((t) => t.status === 'running')
+  const doneTodo = [...todos].reverse().find((t) => t.status === 'done')
+  const latestTodo = blockedTodo || runningTodo || doneTodo || todos[todos.length - 1]
+  const anchorTodo = blockedTodo || doneTodo || runningTodo || todos[todos.length - 1]
+
+  const isAskUserBlocked = blockedTodo?.origin === 'ask_user'
+  // `waitingFor` specifically flags "the user needs to supply information";
+  // a failed run_shell is blocked but not a clarification request.
+  const waitingFor: 'none' | 'clarification' = isAskUserBlocked ? 'clarification' : 'none'
+  // `interactionState` is broader: any blocked todo (user-clarification OR
+  // run failure) surfaces as `awaiting_clarification` so the task card shows
+  // continue/retry buttons instead of a running spinner.
+  const interactionState: 'awaiting_clarification' | 'running' | 'completed' = blockedTodo
+    ? 'awaiting_clarification'
+    : runningTodo
+      ? 'running'
+      : 'completed'
+
+  const resumableActions: Array<'continue' | 'retry' | 'open_artifact' | 'cancel'> = []
+  if (blockedTodo) resumableActions.push('continue')
+  if (doneTodo) resumableActions.push('retry')
+  if (todos.some((t) => t.artifactPath)) resumableActions.push('open_artifact')
+  resumableActions.push('cancel')
+
+  const latestUpdatedAtIso = new Date(latestTodo.updatedAt).toISOString()
+
+  const steps = todos.map((todo) => ({
+    id: todo.id,
+    title: todo.title,
+    status: toSkillStepStatus(todo.status),
+    updatedAt: latestUpdatedAtIso,
+  }))
+
+  const recentArtifacts = todos
+    .filter((todo) => todo.status === 'done' && todo.artifactPath)
+    .slice(-4)
+    .map((todo) => ({
+      id: todo.id,
+      module: 'skill',
+      kind: 'skill-artifact',
+      label: todo.title,
+      path: todo.artifactPath || null,
+      createdAt: new Date(todo.updatedAt).toISOString(),
+    }))
+
+  const message = blockedTodo?.blockedReason
+    || (runningTodo ? runningTodo.title : latestTodo.title)
+
+  return {
+    module: 'skill',
+    message,
+    taskTitle: `技能执行 · ${skillId}`,
+    taskSummary: message,
+    taskType: 'multi_step_task',
+    interactionState,
+    steps,
+    currentStepId: (runningTodo || blockedTodo || latestTodo).id,
+    waitingFor,
+    resumableActions,
+    blockedReason: blockedTodo?.blockedReason || null,
+    taskContinuation: {
+      // Phase 4: legacy fields stay on the shape (as empty) for back-compat
+      // with the renderer's required `executionId: string`; real anchoring is
+      // carried by todoId / todoTitle.
+      executionId: '',
+      stepId: null,
+      blockerType: blockedTodo ? 'need_input' : null,
+      todoId: anchorTodo.id,
+      todoTitle: anchorTodo.title,
+    },
+    recentArtifacts,
+  }
 }
 
 function buildSkillProjectionPatch(detail: SkillExecutionDetail): Record<string, unknown> {
@@ -354,6 +459,63 @@ function findExecutionForSession(sessionId?: string, executionId?: string, skill
   return manager.getExecution(matched.id)
 }
 
+/**
+ * Wraps a primitive handler invocation so the SkillTaskTracker records a
+ * todo for UI task-card projection (B Phase 4 PR1). The wrapper is purely
+ * observational — it never changes the handler's return value or rethrown
+ * errors. When `sessionId` is absent (legacy callers / boot-time) the
+ * wrapper is a no-op passthrough.
+ *
+ * `classify` inspects the successful output to decide `done` vs `blocked`
+ * (run_shell with non-zero exit is a `blocked` todo even though the handler
+ * did not throw). A thrown error unconditionally marks the todo `blocked`
+ * using the error message as the reason.
+ *
+ * Projection emission (pushing the tracker-derived patch to the renderer)
+ * is deferred to B Phase 4 PR3, which will wire a dedicated channel.
+ */
+async function trackPrimitive(
+  params: {
+    sessionId: string | undefined
+    skillId: string
+    origin: SkillTodoOrigin
+    title: string
+    initialStatus?: 'running' | 'blocked'
+    run: () => Promise<ToolExecutionOutput>
+    classify?: (
+      output: ToolExecutionOutput,
+    ) => { status: 'done' | 'blocked'; artifactPath?: string; reason?: string }
+  },
+): Promise<ToolExecutionOutput> {
+  if (!params.sessionId) {
+    return params.run()
+  }
+  const tracker = getSkillTaskTracker()
+  const todoId = tracker.startTodo({
+    sessionId: params.sessionId,
+    skillId: params.skillId,
+    title: params.title,
+    origin: params.origin,
+    status: params.initialStatus,
+  })
+  try {
+    const output = await params.run()
+    const classification = params.classify
+      ? params.classify(output)
+      : { status: 'done' as const }
+    if (classification.status === 'done') {
+      tracker.markDone(todoId, classification.artifactPath)
+    } else {
+      tracker.markBlocked(todoId, classification.reason || 'unknown')
+    }
+    return output
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    tracker.markBlocked(todoId, message)
+    throw error
+  }
+}
+
 export function getSkillAnthropicTools(sessionId?: string): Array<Record<string, unknown>> {
   return getSkillToolDefs(sessionId).map(toAnthropicTool)
 }
@@ -469,20 +631,30 @@ export async function executeSkillTool(
       }
       case 'skill_ask_user': {
         const skillId = resolvePrimitiveSkillId(sessionId)
-        return executeAskUser(
-          {
-            question: asString(args.question),
-            options: Array.isArray(args.options)
-              ? (args.options as unknown[]).filter((v) => typeof v === 'string') as string[]
-              : undefined,
-            placeholder: typeof args.placeholder === 'string' ? args.placeholder : undefined,
-          },
-          {
-            sessionId,
-            skillId: skillId || undefined,
-            emitAskUserQuestion: getAskUserQuestionEmitter(),
-          },
-        )
+        const question = asString(args.question)
+        return trackPrimitive({
+          sessionId,
+          skillId: skillId || '',
+          origin: 'ask_user',
+          title: `等待用户回答: ${question.slice(0, 80)}`,
+          // Born suspended — the handler's awaited Promise unblocks on user
+          // submit, at which point the wrapper transitions to done.
+          initialStatus: 'blocked',
+          run: () => executeAskUser(
+            {
+              question,
+              options: Array.isArray(args.options)
+                ? (args.options as unknown[]).filter((v) => typeof v === 'string') as string[]
+                : undefined,
+              placeholder: typeof args.placeholder === 'string' ? args.placeholder : undefined,
+            },
+            {
+              sessionId,
+              skillId: skillId || undefined,
+              emitAskUserQuestion: getAskUserQuestionEmitter(),
+            },
+          ),
+        })
       }
       case 'skill_run_shell':
       case 'skill_write_artifact':
@@ -502,25 +674,73 @@ export async function executeSkillTool(
           )
         }
         if (tool.name === 'skill_run_shell') {
-          return executeRunShell(
-            {
-              command: asString(args.command),
-              timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
-              stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
+          const command = asString(args.command)
+          // Preview is the first whitespace token (bin) + up to 60 chars for
+          // arg hint. Full command is still in the tool input log.
+          const preview = command.trim().split(/\s+/).slice(0, 3).join(' ').slice(0, 80)
+          return trackPrimitive({
+            sessionId,
+            skillId,
+            origin: 'run_shell',
+            title: `运行命令: ${preview || command.slice(0, 80)}`,
+            run: () => executeRunShell(
+              {
+                command,
+                timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+                stdin: typeof args.stdin === 'string' ? args.stdin : undefined,
+              },
+              { skillId, venvBinDir: manager.getSharedVenvBinDir() },
+            ),
+            classify: (output) => {
+              const data = output.data as
+                | { exitCode?: number; stdoutArtifactPath?: string | null }
+                | null
+                | undefined
+              if (!data || typeof data.exitCode !== 'number') {
+                // Handler returned without structured data — treat as done
+                // rather than blocked; run-shell only omits data on paths we
+                // currently do not hit (future refactors may add them).
+                return { status: 'done' }
+              }
+              if (data.exitCode === 0) {
+                return {
+                  status: 'done',
+                  artifactPath: data.stdoutArtifactPath || undefined,
+                }
+              }
+              return {
+                status: 'blocked',
+                reason: `exit code ${data.exitCode}`,
+              }
             },
-            { skillId, venvBinDir: manager.getSharedVenvBinDir() },
-          )
+          })
         }
         if (tool.name === 'skill_write_artifact') {
-          return executeWriteArtifact(
-            {
-              relativePath: asString(args.relativePath),
-              content: typeof args.content === 'string' ? args.content : '',
-              encoding: args.encoding === 'base64' ? 'base64' : 'utf-8',
+          const relativePath = asString(args.relativePath)
+          return trackPrimitive({
+            sessionId,
+            skillId,
+            origin: 'write_artifact',
+            title: `写入 ${relativePath}`,
+            run: () => executeWriteArtifact(
+              {
+                relativePath,
+                content: typeof args.content === 'string' ? args.content : '',
+                encoding: args.encoding === 'base64' ? 'base64' : 'utf-8',
+              },
+              { skillId },
+            ),
+            classify: (output) => {
+              const data = output.data as { absolutePath?: string } | null | undefined
+              return {
+                status: 'done',
+                artifactPath: data?.absolutePath,
+              }
             },
-            { skillId },
-          )
+          })
         }
+        // skill_read_artifact — no tracker (read is observational noise per
+        // plan §PR1)
         return executeReadArtifact(
           {
             relativePath: asString(args.relativePath),

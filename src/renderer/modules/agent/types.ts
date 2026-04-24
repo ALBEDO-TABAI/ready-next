@@ -186,6 +186,11 @@ export interface ScopeRunTaskContinuation {
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
+  // B Phase 4: tracker-driven continuation. Present on todo-sourced patches
+  // (from `buildSkillTaskProjectionPatch`); main-process resume handlers
+  // treat a non-empty `todoId` as the anchor when `executionId` is empty.
+  todoId?: string | null
+  todoTitle?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
