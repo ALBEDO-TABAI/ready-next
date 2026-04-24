@@ -75,6 +75,7 @@ interface SkillContextOrchestratorLike {
   findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId: string }>
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
+  rememberDetectedReferenceSkills?: (sessionId: string | undefined, skills: unknown[]) => void
   listRegisteredSkillTokens?: () => string[]
 }
 
@@ -485,6 +486,20 @@ export class TurnEngine {
             ? 'true' : 'false'
         } preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
       )
+
+      // Register reference-skill hints BEFORE prepareInitialRun builds the
+      // tool snapshot. `filterSkillPrimitivesBySession` gates primitives on
+      // `hasReferenceSkillHint(sessionId)`, so if we wait for
+      // `maybeInjectExplicitSkillContext` (which runs after tool prep) to
+      // register the hint, the first turn's LLM sees a tool surface with no
+      // `skill_run_shell` / `skill_ask_user` / `skill_write_artifact` /
+      // `skill_read_artifact` and reports "当前上下文没有 skill_run_shell 工具".
+      if (firstSkillMatch && skillContextOrchestrator.rememberDetectedReferenceSkills) {
+        skillContextOrchestrator.rememberDetectedReferenceSkills(
+          request.sessionId,
+          firstSkillMatch.skills as unknown[],
+        )
+      }
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
         feishuConnected: host.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,

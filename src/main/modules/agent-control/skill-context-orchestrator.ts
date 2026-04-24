@@ -110,6 +110,28 @@ export class SkillContextOrchestrator {
     return Array.from(toolNames)
   }
 
+  /**
+   * Register `lastReferenceSkill` hints for explicitly-mentioned reference
+   * skills *before* the tool snapshot is built for the current turn. Without
+   * this the primitive filter (`filterSkillPrimitivesBySession`) sees an
+   * empty hint store on the first turn and strips `skill_run_shell` /
+   * `skill_ask_user` / `skill_write_artifact` / `skill_read_artifact` from
+   * the tool list; by the time `maybeInjectExplicitSkillContext` calls
+   * `rememberLastReferenceSkill` the LLM has already been told the primitives
+   * don't exist. This runs at detection time so the hint is live when
+   * `prepareInitialRun` reads it.
+   */
+  rememberDetectedReferenceSkills(sessionId: string | undefined, skills: SkillState[]): void {
+    if (!sessionId) return
+    for (const skill of skills) {
+      const actionName = skill.defaultAction || ''
+      const actionDef = skill.actions.find((action) => action.name === actionName)
+      if (actionDef?.runtime === 'reference') {
+        rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+      }
+    }
+  }
+
   async maybeInjectExplicitSkillContext(params: {
     userText: string
     session: SkillSessionLike
