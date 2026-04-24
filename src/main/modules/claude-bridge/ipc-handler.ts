@@ -11,6 +11,7 @@ import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
 import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
 import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import { registerSkillReferenceInlinedEmitter } from '../agent-control/skill-reference-inlined-bridge'
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 
 let mammothLib: typeof import('mammoth') | null = null
@@ -101,6 +102,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   registerAskUserQuestionEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:askUserQuestion', event)
+  })
+  // PR5 observability — push a lightweight banner event whenever orchestrator
+  // inlines a reference skill's SKILL.md. The authoritative record stays in
+  // `ready-agent-metrics.log` (`skill_reference_inlined` metric); this IPC is
+  // strictly for the renderer toast that tells the user "skill was loaded".
+  registerSkillReferenceInlinedEmitter((event) => {
+    if (mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('skill:referenceInlined', event)
   })
   // setupAgentIPC runs on every dev reload; strip any prior handler so
   // `ipcMain.handle` doesn't throw on the second registration.

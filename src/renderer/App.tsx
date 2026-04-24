@@ -7,6 +7,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
 import SkillAskUserPrompt from './components/skill/SkillAskUserPrompt'
+import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import { useTheme } from './stores/useTheme'
 import { initAgentListeners } from './stores/useAgent'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
@@ -64,6 +65,7 @@ function App() {
       </div>
       <RitualOverlay />
       <SkillAskUserPrompt />
+      <SkillInlinedToast />
     </ErrorBoundary>
   )
 }

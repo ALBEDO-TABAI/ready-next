@@ -444,6 +444,21 @@ const skillsAPI = {
     ipcRenderer.on('skill:askUserQuestion', listener)
     return () => ipcRenderer.removeListener('skill:askUserQuestion', listener)
   },
+  onSkillReferenceInlined: (
+    handler: (event: {
+      sessionId: string | null
+      skillId: string
+      skillName: string
+      source: 'direct_read' | 'tool_fallback'
+      bytesInjected: number
+      truncated: boolean
+      at: number
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload)
+    ipcRenderer.on('skill:referenceInlined', listener)
+    return () => ipcRenderer.removeListener('skill:referenceInlined', listener)
+  },
   listSchedules: () => ipcRenderer.invoke('skills:schedules:list'),
   createSchedule: (payload: {
     skillId: string

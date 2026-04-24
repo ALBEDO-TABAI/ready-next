@@ -5,6 +5,7 @@ import type { SkillState } from '../skills-runtime/runtime-manager'
 import type { ToolExecutionOutput } from './tool-result-types'
 import { rememberLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from './metrics'
+import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
@@ -162,6 +163,15 @@ export class SkillContextOrchestrator {
           bytesInjected: inlined.text.length,
           truncated: inlined.truncated,
         })
+        emitSkillReferenceInlined({
+          sessionId: params.sessionId ?? null,
+          skillId: skill.id,
+          skillName: skill.name,
+          source: 'direct_read',
+          bytesInjected: inlined.text.length,
+          truncated: inlined.truncated,
+          at: Date.now(),
+        })
         rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
         continue
       }
@@ -187,12 +197,23 @@ export class SkillContextOrchestrator {
           skillContent,
         ].filter(Boolean).join('\n'),
       })
+      const fallbackBytesInjected = skillContent.length
+      const fallbackTruncated = skillContent.length < this.extractSkillReferenceContent(result.text).length
       logAgentMetric('skill_reference_inlined', {
         skillId: skill.id,
         source: 'tool_fallback',
         toolName: tool.name || '',
-        bytesInjected: skillContent.length,
-        truncated: skillContent.length < this.extractSkillReferenceContent(result.text).length,
+        bytesInjected: fallbackBytesInjected,
+        truncated: fallbackTruncated,
+      })
+      emitSkillReferenceInlined({
+        sessionId: params.sessionId ?? null,
+        skillId: skill.id,
+        skillName: skill.name,
+        source: 'tool_fallback',
+        bytesInjected: fallbackBytesInjected,
+        truncated: fallbackTruncated,
+        at: Date.now(),
       })
       // P0-T3: remember this reference skill so that if the LLM still tries to
       // fabricate a skill_submit_* call, the error message can tell it the
