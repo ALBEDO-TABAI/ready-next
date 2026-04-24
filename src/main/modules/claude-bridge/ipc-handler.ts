@@ -10,6 +10,8 @@ import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
 import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
+import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -83,7 +85,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
   clearAllReferenceSkillHints()
   // B Phase 1 PR2 — drop any pending ask_user records so their awaiting
   // Promises reject with a synthetic shutdown error rather than hanging.
-  const { getEphemeralExecutionStore } = await import('../tools/skill-primitives/ephemeral-execution-store')
   getEphemeralExecutionStore().clear()
 }
 
@@ -97,8 +98,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can
   // be unit-tested under `tsx --test`.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { registerAskUserQuestionEmitter } = require('../agent-control/ask-user-bridge') as typeof import('../agent-control/ask-user-bridge')
   registerAskUserQuestionEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:askUserQuestion', event)
@@ -114,8 +113,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (!executionId) {
       return { success: false, error: 'executionId is required' }
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
     const store = getEphemeralExecutionStore()
     const resolved = store.resolve(executionId, answer)
     if (!resolved) {
@@ -124,8 +121,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     return { success: true }
   })
   ipcMain.handle('skills:askUser:pending', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
     return getEphemeralExecutionStore().list()
   })
   const orchestrator = runtime.getOrchestrator()
