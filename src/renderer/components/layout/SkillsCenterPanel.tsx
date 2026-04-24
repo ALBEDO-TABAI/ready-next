@@ -134,7 +134,11 @@ function putSkillDragData(
   })
   e.dataTransfer.setData('application/x-ready-drag', data)
   e.dataTransfer.setData('application/x-ready-skill', data)
-  e.dataTransfer.setData('text/plain', payload.defaultCommand || payload.path)
+  // `text/plain` is the fallback for drop targets that don't understand the
+  // ready-specific payloads (external editors, etc.). Match what ChatPanel
+  // inserts on drop — the `@[Name]` mention — so copy/paste-style flows
+  // stay consistent with the in-app drop behavior.
+  e.dataTransfer.setData('text/plain', `@[${payload.name}]`)
   e.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -540,7 +544,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           source: 'system',
                           defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
+                        title="拖拽到 Agent 输入框可直接插入 @[技能名称] 引用"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />
@@ -640,7 +644,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           source: 'imported',
                           defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
+                        title="拖拽到 Agent 输入框可直接插入 @[技能名称] 引用"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />

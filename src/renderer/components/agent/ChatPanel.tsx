@@ -2801,15 +2801,16 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
               }
             ])
 
-            const command =
-              data.defaultCommand || (inferredSkillId ? `/skill ${inferredSkillId}` : '')
-            const currentInput = useAgent.getState().inputValue.trim()
-            if (command) {
-              setInputValue(currentInput ? `${currentInput}\n${command}` : command)
-            } else {
-              const snippet = `### 技能目录引用\n- 名称: ${data.name}\n- 路径: ${data.path}`
-              setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
-            }
+            // Insert `@[Skill Name]` — same syntax the @-menu produces
+            // (ChatInput.tsx::insertAtReference). The skill is already in
+            // filePool via addAttachments, so the orchestrator's
+            // `findExplicitlyRequestedSkills` matches on the mention and
+            // messageComposer appends the skillId/path context block on send.
+            const mention = `@[${data.name}]`
+            const currentInput = useAgent.getState().inputValue
+            const trimmedEnd = currentInput.replace(/\s+$/, '')
+            const next = trimmedEnd.length === 0 ? mention : `${trimmedEnd} ${mention}`
+            setInputValue(`${next} `)
             focusInputWithResize()
           } else if (data.type === 'browser-tab' && data.url) {
             void (async () => {
