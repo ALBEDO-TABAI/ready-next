@@ -91,7 +91,6 @@ function createContractTurnRequest(userText: string) {
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           buildPreferredSkillToolNames: () => null,
           maybeInjectExplicitSkillContext: async () => undefined,
         },

@@ -130,19 +130,10 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   // `skill_cancel_execution` / `skill_get_state`) are retired. Only the
   // dynamic `skill_<id>_<action>` tools and the 4 primitives reach the
   // LLM surface.
-  //
-  // B Phase 4 PR3 — `hasActiveExecution` is now permanently `false`: the
-  // `skill_executions` state machine is retired, so the only way
-  // `filterSkillPrimitivesBySession` exposes primitives is when the
-  // session has a reference-skill hint. Kept as an arrow for API
-  // stability with the predicate-shaped gating helper.
-  const hasActiveExecution = (_sid: string) => false
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
-
   const primitiveTools = filterSkillPrimitivesBySession(
     PRIMITIVE_TOOL_DEFS,
     sessionId,
-    hasActiveExecution,
     hasReferenceHint,
   )
   return [...getSkillActionToolDefs(), ...primitiveTools]

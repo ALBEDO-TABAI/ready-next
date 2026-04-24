@@ -71,8 +71,9 @@ export class SkillContextOrchestrator {
   }
 
   shouldKeepToolsWithVideo(userText: string, sessionId?: string): boolean {
+    void sessionId
     const primary = this.deps.extractPrimaryUserInstruction(userText)
-    if (!primary) return this.hasActiveSkillExecution(sessionId)
+    if (!primary) return false
     const normalized = primary.toLowerCase()
     if (normalized.includes('/skill')) return true
     if (/(skill_|skill\s+get\s+state|skill_submit_|skill_restart_|skill_cancel_|技能|重跑|重做某一步|继续执行|继续这个 skill)/i.test(primary)) {
@@ -84,15 +85,14 @@ export class SkillContextOrchestrator {
     if (this.findExplicitlyRequestedSkills(primary).length > 0) {
       return true
     }
-    return this.hasActiveSkillExecution(sessionId)
+    return false
   }
 
   buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
     // B Phase 4 PR2: the 6 execution-control tools were deleted from the
     // LLM surface; seed the preferred-tool set only with the surviving
     // system-level Python runner plus per-skill action tools below. The
-    // signature is kept for call-site compat; `sessionId` is unused now
-    // that `hasActiveSkillExecution` returns false in all cases.
+    // signature retains sessionId for caller compat only.
     void sessionId
     const toolNames = new Set<string>([
       'system_run_embedded_python',
@@ -106,20 +106,7 @@ export class SkillContextOrchestrator {
       }
     }
 
-    // B Phase 4 PR2: no `activeExecutions` pass — the state machine is
-    // being retired, so the registered-skill token list is driven purely
-    // by the manifest-declared action surface. PR3 deletes the
-    // `hasActiveSkillExecution` method and the turn-engine caller.
     return Array.from(toolNames)
-  }
-
-  /**
-   * Retained as a no-op stub through B Phase 4 PR2 so the turn-engine
-   * `hasActiveSkillExecution(...)` call site continues to compile. PR3
-   * removes the call site, the dep consumers, and this method in lockstep.
-   */
-  hasActiveSkillExecution(_sessionId?: string): boolean {
-    return false
   }
 
   async maybeInjectExplicitSkillContext(params: {

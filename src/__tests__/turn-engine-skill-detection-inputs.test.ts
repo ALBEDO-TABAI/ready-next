@@ -59,12 +59,13 @@ test('turn-engine emits a [skill_detection] log line for observability', () => {
   assert.match(turnEngine, /\[skill_detection\][\s\S]*preferredSkillToolCount=/)
 })
 
-test('turn-engine preserves the active-execution fallback branch', () => {
+test('turn-engine derives preferredSkillToolNames solely from explicit skill match (post-Phase 4)', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  // Active skill execution must still kick preferredSkillToolNames on even
-  // when findExplicitlyRequestedSkills returns [] across all three inputs.
-  // This is required so an in-flight skill can keep its tools available even
-  // if the user's current turn is a bare "继续" / "嗯".
-  assert.match(turnEngine, /hasExplicitSkill\s*\|\|\s*hasActiveSkill/)
-  assert.match(turnEngine, /hasActiveSkillExecution\(request\.sessionId\)/)
+  // Phase 4 retired the skill_executions state machine, which also retired
+  // the "bare 继续 keeps an in-flight skill's tools loaded" fallback. Now
+  // preferredSkillToolNames is gated strictly on hasExplicitSkill; the old
+  // `hasExplicitSkill || hasActiveSkill` disjunction must not reappear.
+  assert.match(turnEngine, /const\s+preferredSkillToolNames\s*=\s*hasExplicitSkill/)
+  assert.doesNotMatch(turnEngine, /hasActiveSkillExecution\s*\(/)
+  assert.doesNotMatch(turnEngine, /hasActiveSkill\s*\|\|/)
 })

@@ -43,15 +43,6 @@ const READ_ONLY_SKILL_TOOL_NAMES = new Set([
   'skill_rss_stats',
 ])
 
-const INTERACTIVE_SKILL_TOOL_NAMES = new Set([
-  'skill_get_state',
-  'skill_submit_input',
-  'skill_submit_confirmation',
-  'skill_submit_agent_result',
-  'skill_restart_from_step',
-  'skill_cancel_execution',
-])
-
 export function getToolResourceTag(toolName: string): ToolResourceTag {
   const normalized = String(toolName || '').trim()
 
@@ -98,11 +89,7 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   if (normalized.startsWith('skill_')) {
     return {
       domain: 'skill',
-      accessMode: INTERACTIVE_SKILL_TOOL_NAMES.has(normalized)
-        ? 'interactive'
-        : READ_ONLY_SKILL_TOOL_NAMES.has(normalized)
-          ? 'read'
-          : 'interactive',
+      accessMode: READ_ONLY_SKILL_TOOL_NAMES.has(normalized) ? 'read' : 'interactive',
     }
   }
   return { domain: 'system', accessMode: 'interactive' }

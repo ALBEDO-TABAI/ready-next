@@ -30,13 +30,12 @@ function createOrchestrator() {
   })
 }
 
-test('shouldKeepToolsWithVideo returns true on explicit skill mentions even without active execution', () => {
+test('shouldKeepToolsWithVideo returns true on explicit skill mentions, false otherwise', () => {
   const orchestrator = createOrchestrator()
 
   assert.equal(orchestrator.shouldKeepToolsWithVideo('使用 video copy analyzer skill', undefined), true)
-  // Previously this branch required an `activeExecution` hit; post-Phase 4
-  // hasActiveSkillExecution returns false unconditionally so a non-matching
-  // prompt in any session returns false.
+  // Post-Phase 4 PR5 follow-up: the state machine is gone, so a non-matching
+  // prompt in any session returns false regardless of sessionId.
   assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), false)
   assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-2'), false)
 })
@@ -110,8 +109,3 @@ test('SkillContextOrchestrator listRegisteredSkillTokens returns normalized dedu
   assert.equal(tokens.length, new Set(tokens).size)
 })
 
-test('hasActiveSkillExecution returns false unconditionally post-Phase 4 PR2', () => {
-  const orchestrator = createOrchestrator()
-  assert.equal(orchestrator.hasActiveSkillExecution(), false)
-  assert.equal(orchestrator.hasActiveSkillExecution('sess-1'), false)
-})

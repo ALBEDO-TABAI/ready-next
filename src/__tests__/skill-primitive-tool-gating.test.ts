@@ -2,6 +2,9 @@
  * B Phase 1 PR1 — skill primitive gating rules. Pure-module test driving
  * `shouldExposeSkillPrimitive` / `filterSkillPrimitivesBySession` directly so
  * we don't need to boot the runtime-manager.
+ *
+ * Phase 4 PR5 follow-up: the `hasActiveExecution` branch is retired (state
+ * machine gone), so the gate now evaluates `hasReferenceSkillHint` alone.
  */
 
 import assert from 'node:assert/strict'
@@ -26,17 +29,17 @@ function always(): boolean {
 }
 
 test('without sessionId the primitives list passes through unchanged (legacy boot path)', () => {
-  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, undefined, never, never)
+  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, undefined, never)
   assert.equal(got.length, 3)
 })
 
-test('with sessionId + no active execution + no reference hint → primitives are filtered out', () => {
-  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, 'session-1', never, never)
+test('with sessionId + no reference hint → primitives are filtered out', () => {
+  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, 'session-1', never)
   assert.equal(got.length, 0)
 })
 
-test('with sessionId + active execution → primitives are exposed', () => {
-  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, 'session-1', always, never)
+test('with sessionId + reference-skill hint → primitives are exposed', () => {
+  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, 'session-1', always)
   assert.deepEqual(got.map((d) => d.name).sort(), [
     'skill_read_artifact',
     'skill_run_shell',
@@ -44,19 +47,12 @@ test('with sessionId + active execution → primitives are exposed', () => {
   ])
 })
 
-test('with sessionId + reference-skill hint (no active execution) → primitives are exposed', () => {
-  const got = filterSkillPrimitivesBySession(PRIMITIVE_DEFS, 'session-1', never, always)
-  assert.equal(got.length, 3)
-})
-
-test('shouldExposeSkillPrimitive short-circuits: hint alone suffices, execution alone suffices', () => {
-  assert.equal(shouldExposeSkillPrimitive('s', never, never), false)
-  assert.equal(shouldExposeSkillPrimitive('s', always, never), true)
-  assert.equal(shouldExposeSkillPrimitive('s', never, always), true)
-  assert.equal(shouldExposeSkillPrimitive('s', always, always), true)
+test('shouldExposeSkillPrimitive: hint decides exposure when sessionId is present', () => {
+  assert.equal(shouldExposeSkillPrimitive('s', never), false)
+  assert.equal(shouldExposeSkillPrimitive('s', always), true)
 })
 
 test('empty input definition list remains empty regardless of gate outcome', () => {
-  assert.deepEqual(filterSkillPrimitivesBySession([], 's', always, always), [])
-  assert.deepEqual(filterSkillPrimitivesBySession([], 's', never, never), [])
+  assert.deepEqual(filterSkillPrimitivesBySession([], 's', always), [])
+  assert.deepEqual(filterSkillPrimitivesBySession([], 's', never), [])
 })

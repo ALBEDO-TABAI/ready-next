@@ -73,7 +73,6 @@ import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
   findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId: string }>
-  hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
   listRegisteredSkillTokens?: () => string[]
@@ -468,8 +467,7 @@ export class TurnEngine {
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
       const hasExplicitSkill = Boolean(firstSkillMatch)
-      const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
-      const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
+      const preferredSkillToolNames = hasExplicitSkill
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
           firstSkillMatch ? firstSkillMatch.text : contextualUserInput,
           request.sessionId,
@@ -485,7 +483,7 @@ export class TurnEngine {
         } pureMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.pureUserText)?.skills.length
             ? 'true' : 'false'
-        } activeExecution=${hasActiveSkill} preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
+        } preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
       )
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
