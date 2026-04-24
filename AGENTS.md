@@ -126,6 +126,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行（`running / blocked`）永不清理；sweep 在 `SkillsRuntimeManager` 启动后 30s 首跑、之后每小时跑一次，`tool-error-metrics.ttlSwept` 打点
 - `skill_executions` 表所在的 DB 没有开 `PRAGMA foreign_keys = ON`，`ON DELETE CASCADE` 实际不生效；任何清理跨表数据的逻辑必须显式删子表行（`skill_execution_steps` / `skill_execution_artifacts`）
 - 所有新 executionId 使用 `e-{8hex}` 前缀（`generateSkillExecutionId()`）；旧 UUID 行继续兼容，不做回填；`getExecution` 用 `WHERE id = ?` format-agnostic，`Zod` schema `z.string().trim().min(1)` 不加 UUID 断言
+- **primitive tools 限制**：skill_ask_user / skill_run_shell / skill_write_artifact / skill_read_artifact 为系统级 primitive，不允许用户通过 manifest 覆盖；具体沙箱边界 / 曝光规则 / venv PATH 行为见 §6.12。`skill_ask_user` 的 ephemeral 状态由 `getEphemeralExecutionStore()`（`skill-primitives/ephemeral-execution-store.ts`）持有，executionId 走 `eau-<8hex>` 前缀与持久化 `skill_executions` 明确区分；session 关闭通过 `EphemeralExecutionStore.rejectBySession` 清 pending（非定时 sweep）。
 
 ### 6.12 Skill 原语沙箱边界（B Phase 1）
 - `skill_run_shell` 的命令白名单（Phase 1）：`python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / mkdir / rm / cp / mv / echo / awk / sed`，维护在 `src/main/modules/tools/skill-primitives/run-shell.ts::SHELL_ALLOWLIST`；扩展机制为 PR 级别修改白名单常量，**不**提供用户配置开关；遇到 embedded skill 需要的命令打点 `skillPrimitiveRejected{reason:'cmd_not_allowlisted'}` 再统一评估
