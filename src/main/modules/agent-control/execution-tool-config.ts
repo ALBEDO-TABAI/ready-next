@@ -37,6 +37,10 @@ export interface ToolPolicy {
   visibleCapabilityGroupIds?: CapabilityGroupId[]
   hostOnlyCapabilityGroupIds?: CapabilityGroupId[]
   capabilityReasons?: Partial<Record<CapabilityGroupId, string>>
+  // Optional — when set, the skills group will filter out workflow-control
+  // tools (submit/restart/cancel) if this session has no active execution.
+  // See skills-tools.ts::getSkillToolDefs (B plan Phase 0).
+  sessionId?: string
 }
 
 export interface PolicyOpenAIToolBundle {
@@ -225,7 +229,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
-  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds)
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId)
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -268,7 +272,11 @@ export function getPolicyOpenAITools(policy?: ToolPolicy): Array<Record<string, 
 
 export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAIToolBundle {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
-  const resolution = defaultToolGateway.getToolSchemaResolutionForGroups(visibleGroupIds, 'openai')
+  const resolution = defaultToolGateway.getToolSchemaResolutionForGroups(
+    visibleGroupIds,
+    'openai',
+    policy?.sessionId,
+  )
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'

@@ -250,6 +250,16 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
   }
 
   if (actions.length === 0 && documentEntry) {
+    // B Phase 1 PR2 T1-9: default the auto-generated `read_skill` action to
+    // `internal` visibility so the LLM can't learn the
+    // `skill_<id>_read_skill` tool name and keep invoking it in a loop.
+    // The orchestrator inlines SKILL.md directly via `tryInlineReferenceSkillDoc`,
+    // so the read_skill tool only needs to exist for the legacy tool-call
+    // fallback, which runs in-process and does not consult visibility.
+    // Authors can still publish it by declaring `visibility: 'public'` in the
+    // manifest — the normalizer further up in this file respects explicit
+    // declarations and `coerceVisibility` only defaults to 'public' when the
+    // field is missing or unrecognized.
     actions.push({
       name: 'read_skill',
       description: '读取并应用该技能的说明与方法完成当前任务',
@@ -257,7 +267,7 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       entry: documentEntry,
       params: [],
       inputMode: 'flags',
-      visibility: 'public',
+      visibility: 'internal',
     })
   }
   return actions

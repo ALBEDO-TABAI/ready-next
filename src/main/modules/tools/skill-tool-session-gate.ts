@@ -1,49 +1,88 @@
 /**
- * Session gate for skill primitive tools.
+ * Pure gating logic for skill execution-control tools.
  *
- * This module provides session-based filtering and exposure control for
- * skill primitive tools, particularly skill_ask_user.
+ * Separate from `skills-tools.ts` so that:
+ *   - Tests can import this without pulling in electron / runtime-manager via
+ *     the skills-tools → runtime-manager chain.
+ *   - The logic lives in exactly one place; both getSkillToolDefs and any
+ *     future skill_* tool surface (e.g. the primitives in Phase 1) can reuse
+ *     the same gate.
+ *
+ * Behavior (B plan Phase 0 — P0-T1):
+ *   - Legacy callers with no sessionId keep the full tool list. This preserves
+ *     the static fallback path used during boot when the runtime manager is
+ *     not yet available.
+ *   - When a sessionId is supplied and the session has NO active execution,
+ *     submit_* / restart_from_step / cancel_execution are filtered out of the
+ *     tool list (LLM never sees them — stops it from fabricating
+ *     `executionId: "new"`).
+ *   - `skill_get_state` is NEVER gated — it is a read-only probe that stays
+ *     safe in every state.
  */
 
-import { SkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+export const SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'skill_submit_input',
+  'skill_submit_confirmation',
+  'skill_submit_agent_result',
+  'skill_restart_from_step',
+  'skill_cancel_execution',
+])
 
-export function shouldExposeAskUserPrimitive(sessionId: string): boolean {
-  const ephemeralStore = SkillsRuntimeManager.getEphemeralStore()
-  return ephemeralStore.hasActiveAsk(sessionId)
+export function shouldExposeExecutionControlTool(
+  toolName: string,
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+): boolean {
+  if (!sessionId) return true
+  if (!SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES.has(toolName)) return true
+  return hasActiveExecution(sessionId)
 }
 
-export function filterSkillPrimitivesBySession(
-  toolNames: string[],
-  sessionId: string
-): string[] {
-  const STATIC_SKILL_PRIMITIVE_TOOL_NAMES = [
-    'skill_ask_user',
-    'skill_run_shell',
-    'skill_write_artifact',
-    'skill_read_artifact',
-  ]
+// Convenience: filter a caller-supplied list of tool definitions. `T` is the
+// tool-def shape (SkillToolDef or any superset exposing `.name`).
+export function filterExecutionControlToolsBySession<T extends { name: string }>(
+  defs: readonly T[],
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+): T[] {
+  return defs.filter((def) =>
+    shouldExposeExecutionControlTool(def.name, sessionId, hasActiveExecution),
+  )
+}
 
-  if (!sessionId) {
-    return toolNames.filter((name) => !STATIC_SKILL_PRIMITIVE_TOOL_NAMES.includes(name))
+/**
+ * B Phase 1 — skill primitives gating.
+ *
+ * Primitives (`skill_ask_user` / `skill_run_shell` / `skill_write_artifact` /
+ * `skill_read_artifact`) are only exposed to the LLM when one of:
+ *   1. The session has an active skill execution (workflow in progress), OR
+ *   2. The session has a `lastReferenceSkill` hint from the orchestrator
+ *      (a reference skill was just inlined this turn).
+ *
+ * Rationale: these are powerful tools (shell exec, disk write) and we don't
+ * want them surfaced to every generic chat. Legacy sessionId-less callers
+ * (boot-time introspection, static fallback) keep the full list so the tool
+ * surface inventory stays stable.
+ */
+export function shouldExposeSkillPrimitive(
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+  hasReferenceSkillHint: (sessionId: string) => boolean,
+): boolean {
+  if (!sessionId) return true
+  if (hasActiveExecution(sessionId)) return true
+  if (hasReferenceSkillHint(sessionId)) return true
+  return false
+}
+
+export function filterSkillPrimitivesBySession<T extends { name: string }>(
+  defs: readonly T[],
+  sessionId: string | undefined,
+  hasActiveExecution: (sessionId: string) => boolean,
+  hasReferenceSkillHint: (sessionId: string) => boolean,
+): T[] {
+  if (shouldExposeSkillPrimitive(sessionId, hasActiveExecution, hasReferenceSkillHint)) {
+    return [...defs]
   }
-
-  const hasActiveAsk = shouldExposeAskUserPrimitive(sessionId)
-
-  return toolNames.filter((name) => {
-    if (!STATIC_SKILL_PRIMITIVE_TOOL_NAMES.includes(name)) {
-      return true // Non-primitive tools are always exposed
-    }
-
-    // Only expose skill_ask_user if there's an active ask for this session
-    if (name === 'skill_ask_user') {
-      return hasActiveAsk
-    }
-
-    // Other primitives (run_shell, write_artifact, read_artifact) are always exposed
-    return true
-  })
-}
-
-export function hasActiveEphemeralAsk(sessionId: string): boolean {
-  return shouldExposeAskUserPrimitive(sessionId)
+  return []
 }

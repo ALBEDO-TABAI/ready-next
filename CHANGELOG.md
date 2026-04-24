@@ -2,30 +2,54 @@
 
 ## [Unreleased] - 2026-04-24
 
-### 新增功能
+### Skill Runtime B — `codex/skill-runtime-b-plan` 合并到 main（Phase 0–3 完整落地）
 
-#### Skill 模块 PR2：Ephemeral Skill 系统与 Primitive Tools
-- **新增 `skill-ephemeral-ask-user.ts`**：实现 `EphemeralExecutionStore` 类，提供 in-memory 存储用于 skill_ask_user 交互
-  - 4 个 CRUD 操作：`createAskUser` / `getAskUser` / `updateAskUser` / `deleteAskUser`
-  - TTL sweep 机制：默认 5 分钟 TTL，每 60 秒清理一次，boot 后 30 秒首跑
-  - 会话隔离：通过 `sessionId` 索引，支持跨会话查询和清理
-  - 线程安全：使用 Map 实现，无 I/O，失败只影响当前会话
-- **新增 `skill-tool-session-gate.ts`**：实现会话隔离和 primitive tools 过滤逻辑
-  - `shouldExposeAskUserPrimitive(sessionId)`：基于 active ask 状态判断是否暴露 skill_ask_user
-  - `filterSkillPrimitivesBySession(toolNames, sessionId)`：过滤当前会话可见的 primitive tools
-  - `hasActiveEphemeralAsk(sessionId)`：检查会话是否有活跃的 ask 记录
-- **新增 4 个 primitive handlers**：
-  - `executeAskUser`：创建 ephemeral ask 记录，返回等待用户回答的提示
-  - `executeRunShell`：执行 shell 命令，捕获 stdout/stderr，支持 timeout
-  - `executeWriteArtifact`：写入文件，支持创建目录，返回文件路径
-  - `executeReadArtifact`：读取文件内容，支持编码选择
-- **更新 `skills-tools-static.ts`**：新增 `STATIC_SKILL_PRIMITIVE_TOOL_NAMES` 常量，包含 4 个 primitive tools
-- **更新 `SkillsRuntimeManager`**：
-  - 新增静态方法 `getEphemeralStore()`：获取全局 EphemeralExecutionStore 实例
-  - 新增静态方法 `clearAllEphemeralAskUser(sessionId)`：清理指定会话的所有 ephemeral 记录
-  - 构造函数中初始化 ephemeral store 并启动 sweep
-- **更新 `tool-error-metrics.ts`**：新增 `skillEphemeralAskUserTtlSwept` metric，记录 ephemeral store 清理事件
-- **更新 `tool-executor.ts`**：在 primitive tools 执行后注册清理回调，确保 run 结束时清理 ephemeral 状态
+- 将 `codex/skill-runtime-b-plan` 分支（Phase 0 止血 + Phase 1 PR1/PR2 原语 + Phase 2 video-copy 迁移 + Phase 3 video-expert vnext swap / lets-go-rss 混合）合并到 main
+- 合并前 main 上的 `4069e4a feat(skill): implement PR2 ephemeral skill system + primitive tools` 是一次 spec-out 的简化实现（无 path sandbox、无 PATH 白名单、无 ask_user IPC / 渲染端 UI、无 inline 注入、无 embedded skill 迁移），在合并冲突处统一采纳 worktree 的 Phase 1 完整实现；恢复锚点 tag：`backup/main-before-b-merge-20260424`
+- 计划文档随分支一并入 main：`docs/superpowers/plans/2026-04-23-skill-agent-runtime-b-then-c-roadmap.md` + `docs/superpowers/plans/2026-04-23-skill-runtime-b-plan-phases.md`；`plans/2026-04-23-skill-runtime-bootstrap-rootcause.md` 之前已在
+- Phase 4（`skill_executions` 状态机退役 + todo-based projection）与 Phase 5（C 启动 brief）仍为待办
+
+## [Unreleased] - 2026-04-23
+
+### Skill Runtime B — Phase 3（video-expert vnext swap + lets-go-rss 混合迁移 + 跨技能回归）
+
+- **video-expert-analyzer 整体替换为 vnext**（`/Users/user/Documents/实验田/video-expert-analyzer-vnext`）：
+  - 26 个 vnext 脚本（`scripts/audiovisual/`、`host_batching.py`、`run_state.py`、`openclaw_dispatch.py`、`storyboard_generator.py` 等）+ `docs/`、`templates/`、`chart/` 全量拷入；旧 13 个 Python 脚本与 `skill.workflow.json` 删除
+  - `ready-skill.json` 改写为 `execution.mode: advisory` + `defaultAction: read_skill`，3 个 action：`read_skill`（reference, internal）+ 2 个 `visibility:'internal'` python 兼容 action（`video_expert_pipeline` / `video_expert_ai_analyze`）
+  - 新增 `scripts/ready_compat.py` 兼容适配器：把旧 `--payload-json {url,outputDir,sceneThreshold,bestThreshold}` 翻译成 vnext `orchestrate_vnext.py` 的位置/flag 参数；`item-analysis-manager.ts` 的 RSS 视觉分析路径无回归
+  - SKILL.md 在 vnext 自带 `name + description` 基础上补 `when-to-use`，遵循 Claude Skill 协议；vnext 正文里大量精确命令保留（prescriptive 型 reference 技能允许内嵌精确命令，与 §6.7 描述一致）
+  - 新增依赖：`anthropic / mlx-whisper / ffmpeg-python / browser_cookie3 / Pillow`，由共享 venv best-effort 安装；mlx-whisper Linux/Windows 装失败由 §6.11 错误回灌契约兜底
+- **lets-go-rss 混合迁移**：
+  - `ready-skill.json` 加 `read_skill`（reference, internal）action 并把 `defaultAction` 从 `rss_update` 翻到 `read_skill` —— 用户一句"用 lets-go-rss"会触发 orchestrator inline 注入 SKILL.md（含 Bot 推送规范严格 ❌ 列表），不再走"工具说明只够 LLM 自由发挥"的旧路径
+  - 5 个 `skill_rss_*` python action 全部保留 `visibility: 'public'`（slash 命令 `/skill lets-go-rss rss_update {…}` / SkillsCenterPanel UI 快捷键 / `rss-domain-adapter` 的 `skill_rss_*` 偏好前缀 / 用户力肌记忆都需要）
+  - SKILL.md 顶部加「执行原则」段落：优先 typed `skill_rss_*` 工具、复杂场景再 `skill_run_shell`、Bot 推送严格按下文规范执行、不替用户改 crontab；`when-to-use` frontmatter 同步补上
+- **inline cap 评估后维持 12K**：vnext SKILL.md 表面看 17.8 KB（磁盘字节数），实际 JS string length 仅 10.4K UTF-16 code units（CJK 内容压缩），完全在现有 12K cap 内 — Phase 3 计划里"raise cap to 24K"的前置假设按字节算时被推翻，cap 不动
+- **`ScopeRunWaitingFor.clarification` 类型在 4 个消费点完成传递**：Phase 1 给 `ScopeRunWaitingFor` 加了 `'clarification'` 但 4 处局部 union 没跟着，导致 `tsc --noEmit` 长期 2 红；本次顺手在 `turn-engine.ts:775` / `run-contracts.ts:659` / `domain-adapter.ts:21` / `browser-domain-adapter.ts:40` 一次性补齐
+- **新增 e2e 3 份共 20 case**：
+  - `embedded-skill-video-expert-vnext-swap.test.ts`（7 case）：manifest 3-action 形态、compat 适配器在位、orchestrate_vnext.py / docs 引用文件落盘、SKILL.md 12K cap 内不被截断、reference 路径不创 `skill_executions` 行
+  - `embedded-skill-lets-go-rss-migration.test.ts`（4 case）：6-action 混合形态（read_skill + 5 retained）、`defaultAction = read_skill`、SKILL.md frontmatter `when-to-use` 就位、orchestrator inline 注入命中
+  - `embedded-skill-batch-reference-migration.test.ts`（9 case）：3 个迁移技能共享同一份契约（advisory + read_skill default + 无 workflow.json + when-to-use frontmatter）
+- **CLAUDE.md / AGENTS.md §6.7 同步**：新增一条「Phase 3 已完成 video-expert (vnext swap) + lets-go-rss (混合) reference 化；至此所有 embedded skill 均无 `skill.workflow.json`；prescriptive 型 reference 技能允许 SKILL.md 内嵌精确命令」
+- **未做**：不引入 `runtime: 'handler'` 分支（spec §5.3 经评估为不必要 — Ready 主进程 `rss-engine` 服务用户 RSS reader，与 embedded `lets-go-rss` 多平台聚合 bot 是两个产品，不可机械等同）；不删除 `skill_executions` 表 / loader / `EXECUTION_TOOL_DEFS`（Phase 4 才退役）；不拆 `ready_pipeline.py`（vnext 自带 staged orchestrator 替代）
+- 回归：全套 1522 case，36 红保持不变（与 Phase 0/1/2 audit 基线一致），3 份新 e2e 共 20 case 全绿；`tsc --noEmit` 双 project 干净
+
+### Skill Runtime B — Phase 1 finalize + Phase 2 (video-copy-analyzer 机械迁移)
+
+- **Phase 1 接线补齐**：`SkillsRuntimeManager.getSharedVenvBinDir()` 暴露共享 venv bin 目录（Unix `<venvRoot>/bin` / Windows `<venvRoot>/Scripts`），dispatch 层 `skills-tools.ts:505` 在调用 `executeRunShell` 时自动前置到子进程 `PATH`；修复 `skill_run_shell` 之前无法 import venv-installed Python 模块（yt-dlp / funasr / torch / …）的盲点。新增 run-shell mock-spawn 测试验证 PATH 注入顺序
+- **Inline 注入上限 6K → 12K**：`REFERENCE_SKILL_INLINE_CAP_CHARS` 放宽至 12_000，容纳 `video-copy-analyzer` 这类体量较大的方法论 SKILL.md；同步更新 `skill-reference-inline-injection.test.ts` 截断断言
+- **Phase 2 机械迁移 `video-copy-analyzer`**：
+  - `ready-skill.json` 从 `execution.mode: workflow` + 3 个 python action 精简为 `execution.mode: advisory` + 单个 `read_skill` reference action（`visibility: internal`），删除 `execution.workflowFile`
+  - `skill.workflow.json` 从仓库移除（reference path 不再读取它）
+  - `SKILL.md` 按 Claude Skill 协议补齐 `when-to-use` frontmatter 字段；保留原方法论正文，不写死 `skill_run_shell` 的精确命令（遵循"skill 只做协议中性声明，调用由模型决定"原则）
+- **新增 e2e 测试 `embedded-skill-video-copy-migration.test.ts`**（4 case）：
+  - manifest 编译到 advisory/reference 且只剩 `read_skill`
+  - `skill.workflow.json` 不再存在于磁盘
+  - SKILL.md frontmatter 含 `when-to-use`
+  - orchestrator 对该 skillId 走 inline-injection 路径（零 tool_use 往返）并调用 `rememberLastReferenceSkill`，让下一 turn 的原语 gating 放行
+- **文档同步**：`CLAUDE.md` / `AGENTS.md` §6.7 补一条 embedded 迁移规范、§6.12 补一条 venv PATH 自动前置说明；inline 截断字符数 6K → 12K 同步；两份文件正文保持 lock-step
+- 回归：全套 138 个 skill 测试 + 新增 4 case = 142 case 全绿；`npx tsc --noEmit` 对 B 改动文件干净（branch 上 2 条 `'clarification'` literal 残留错误是迁移前既存问题，与本次不相关）
+
+## [2026-04-22]
 
 ### 重构
 

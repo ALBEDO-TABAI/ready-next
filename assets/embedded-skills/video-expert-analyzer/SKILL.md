@@ -1,442 +1,258 @@
 ---
-name: video-expert-analyzer
-description: Advanced video analysis and selection skill with AI-powered automatic scoring. Integrates Walter Murch's rules and dynamic weighting for professional-grade curation. Supports Bilibili, YouTube, and Douyin (抖音).
+name: vea
+description: Video Expert Analyzer VNext — use when the user wants a public or local video analyzed with resumable staged execution, especially for long videos, OpenClaw handoff, multi-batch scene scoring, storyboard output, highlight selection, subtitle or lyric correction, or audiovisual analysis.
+when-to-use: |
+  用户希望对长视频做可续跑的逐镜头深度分析（场景评分、storyboard、精选镜头、视听报告）时使用。
+  典型触发词：分析视频 / 长视频 / 续跑 / 分镜表 / 视听分析 / OpenClaw 接力 / 精选镜头 / 视频专家。
+  默认一口气跑完；只在 OpenClaw 主控场景下走分段接力。
+  与 video-copy-analyzer 区分：本技能做单视频"长任务"深度分析；video-copy 做轻量字幕/文案提取。
 ---
 
-# Video Expert Analyzer - 视频专家分析工具
+# Video Expert Analyzer VNext
 
-基于 **Walter Murch 剪辑六法则** 和 **AI 自动评分系统** 的专业视频分析工具。
+面向长任务的视频分析 skill。目标不是改输出，而是让长视频、长会话、OpenClaw 接力这类场景更稳、更省上下文、更容易续跑，同时尽量避免漏做。
 
-## 支持平台
+## 先看什么
 
-| 平台 | 支持状态 | 说明 |
-|------|---------|------|
-| **Bilibili** | ✅ 完全支持 | yt-dlp 下载 + B站API字幕 |
-| **YouTube** | ✅ 完全支持 | yt-dlp 下载 |
-| **抖音 (Douyin)** | ✅ 完全支持 | 专用下载器（无水印） |
-| **小红书 (Xiaohongshu)** | ✅ 完全支持 | 专用下载器 |
-| **其他平台** | ⚠️ 可能支持 | 取决于 yt-dlp 支持情况 |
+先读这个文件拿到主规则。只有在确实需要时，再按需读取：
 
-## 核心特性
+- `README.md`：整体流程与入口命令
+- `docs/openclaw_orchestration.md`：只在 OpenClaw 主控 + 子代理接力时再读
+- `docs/appendices.md`：平台差异、歌词 OCR、视听路由、异常恢复
 
-✅ **真实 AI 视觉评分** - 调用多模态大模型（Gemini 3.0/Kimi 2.5）真实分析画面内容  
-✅ **双路径评分** - 支持「Agent 模式」（宿主 AI 直接看图）和「API 模式」（远程 API 调用）  
-✅ **中英双语术语** - 所有专业术语附中文释义  
-✅ **可配置输出目录** - 首次使用设置，后续自动使用  
-✅ **精选片段自动复制** - 自动复制到 `scenes/best_shots/`  
-✅ **完整分析报告** - 包含理论依据、评分理由、整体评价（非模板）  
-✅ **动态权重系统** - 根据场景类型自动调整评分权重  
-✅ **智能文件夹命名** - 以视频标题（自动裁剪）命名输出文件夹，更直观易懂
+## 何时用这个版本
 
-> **⚠️ 重要提示：本 skill 的 AI 评分功能需要多模态（视觉理解）模型才能正常工作。**  
-> 请确保使用 Gemini 3.0、Kimi 2.5 等具备视觉能力的模型来调用此 skill。  
+- 用户明确提到 `video-expert-analyzer-vnext`
+- 视频较长、scene 很多，或用户强调”别卡死””能续跑””省上下文”
+- 需要生成场景评分、分镜表、精选镜头、字幕/歌词校正、视听剖析
+- 宿主是 OpenClaw 时，支持主控加当前批次 worker 串行接力
 
-## 模型兼容性
+不要默认替换旧版 `video-expert-analyzer`。这个版本优先用于长任务。
 
-| 模型 | Agent 模式 | API 模式 | 说明 |
-|------|-----------|---------|------|
-| **Gemini 3.0 Flash** | ✅ 推荐 | ✅ 推荐 | 速度快、视觉能力强 |
-| **Gemini 3.0 Pro** | ✅ 推荐 | ✅ 支持 | 最强视觉理解 |
-| **Kimi 2.5** | ✅ 支持 | ✅ 支持 | 中文语境优秀 |
-| **Claude (Sonnet/Opus)** | ✅ 支持 | ❌ 不支持 | 有视觉能力但无 OpenAI 兼容 API |
-| **纯文本模型** | ❌ 不可用 | ❌ 不可用 | 无视觉能力，无法评分 |
+**默认行为是一口气自动做完**，不是人工逐批填表。接力模式只在 OpenClaw 场景下启用。
 
-> **Agent 模式** = 在 IDE（Cursor/VS Code/OpenClaw）中，AI 助手直接查看帧图片评分  
-> **API 模式** = 在终端 CLI 中，通过 OpenAI 兼容 API 远程调用视觉模型
+## 首次使用引导
 
-## 术语对照表 (Terminology)
+只要这次任务是"新视频"（用户给的是视频链接或本地视频文件，而不是已有的 `scene_scores.json` / 已有视频子目录的续跑），在调用任何脚本之前，先按这三步确认：
 
-### 五维评分维度 (Five Dimensions)
+**先找 `vnext_config.json`，有就直接用。**
+- 查找顺序：用户在对话里显式点名的输出根目录 → `~/.config/video-expert-analyzer-vnext/config.json` 的 `output_base_dir`。
+- 在候选根目录下若能找到 `vnext_config.json`，直接读出 `output_root` / `primary_language` / `model_preferences`，跳过下面的提问。
+- 续跑场景（用户给的是 `scene_scores.json` 或已有视频子目录）也按上一级目录找 `vnext_config.json`；找不到不要硬问，沿用现有配置继续跑即可。
 
-| 英文术语 | 中文释义 | 详细说明 |
-|---------|---------|---------|
-| **Aesthetic Beauty** | 美感 | 构图(三分法)、光影质感、色彩和谐度 |
-| **Credibility** | 可信度 | 表演自然度、物理逻辑真实感、无出戏感 |
-| **Impact** | 冲击力 | 视觉显著性(Visual Saliency)、动态张力、第一眼吸引力 |
-| **Memorability** | 记忆度 | 独特视觉符号、冯·雷斯托夫效应(Von Restorff Effect)、金句 |
-| **Fun/Interest** | 趣味度 | 参与感、娱乐价值、社交货币(Social Currency)潜力 |
+**找不到就顺序问这三件事（一次问完，不要一问一等）：**
 
-### 场景类型 (Scene Types)
+1. **分析结果主目录**：告诉用户"之后每个视频会在这个目录下按视频名建子目录，形如 `<主目录>/<视频名>/scene_scores.json …`"，要一个绝对路径。拿到后同时做两件事：写进 `<主目录>/vnext_config.json`；并把 `~/.config/video-expert-analyzer-vnext/config.json` 的 `output_base_dir` 改成这个路径（或在之后每次脚本调用显式带 `-o <主目录>`，两种任选其一，别混用）。
+2. **四类最终报告的主语言**：范围只包含 `*_storyboard.*`、`*_audiovisual_analysis.*`、`*_detailed_analysis.md`、`*_complete_analysis.md` 这四类；其它中间产物（`scene_reports/`、`brief.md`、分类摘要、`delivery_report.json`）保持原样。让用户给一个语言（示例：中文 / English / 日本語），用 ISO 码存 `primary_language`（例如 `zh-CN`、`en-US`、`ja-JP`）。**如果选的不是中文**：脚本仍先产中文版本，你必须在 `finalize` 全部跑完、`delivery_report.json` 落盘之后，逐个把上面四类文件重写为目标语言并覆盖原文件 —— 文件名、章节结构、Scene 编号、截图路径、SVG/JSON 字段名保持不变，只重写自然语言文本；没翻完不算交付完成。
+3. **视觉分析 / 报告生成的模型偏好**：问清楚有没有特殊要求，并主动帮用户落盘：
+   - 有 OpenClaw：看 `~/.openclaw/agents/main/agent/models.json` 列出可用模型让用户挑，把选中的写进 `~/.config/video-expert-analyzer-vnext/config.json` 的 `auto_scoring.preferred_model` 和 `auto_scoring.fallback_models`（按优先级顺序）。
+   - 只有自己的 API key：帮用户把 `OPENAI_API_KEY + OPENAI_MODEL` 或 `ANTHROPIC_API_KEY + ANTHROPIC_MODEL` 以 `export` 形式给出（由用户自己在终端里执行，不要替他 `echo` 进 shell profile）；在 `vnext_config.json` 里只留 `model_preferences.preferred_model` 等**模型名**备忘，**绝不把 API key 明文写进任何 json**。
+   - 说"不需要特殊配置"：什么都不改，继续走默认发现链（先 OpenClaw 再环境变量），并在 `vnext_config.json` 里把 `model_preferences` 记为 `{"source": "auto"}`。
 
-| 类型 | 中文释义 | 特点 |
-|------|---------|------|
-| **TYPE-A Hook** | 钩子/开场型 | 高冲击力、吸引注意力 |
-| **TYPE-B Narrative** | 叙事/情感型 | 人物对话、情感表达 |
-| **TYPE-C Aesthetic** | 氛围/空镜型 | 风景、慢动作、极简构图 |
-| **TYPE-D Commercial** | 商业/展示型 | 产品特写、广告展示 |
+**落盘格式**（写到 `<主目录>/vnext_config.json`）：
 
-### 筛选等级 (Selection Levels)
+```json
+{
+  "output_root": "/Users/.../测试",
+  "primary_language": "zh-CN",
+  "model_preferences": {
+    "source": "openclaw" ,
+    "preferred_model": "...",
+    "fallback_models": ["..."]
+  },
+  "created_at": "2026-04-21T..."
+}
+```
 
-| 等级 | 中文释义 | 标准 |
-|------|---------|------|
-| **MUST KEEP** | 强烈推荐保留 | 加权总分 ≥ 8.5 或 单项 = 10 |
-| **USABLE** | 可用素材 | 7.0 ≤ 加权总分 < 8.5 |
-| **DISCARD** | 建议舍弃 | 加权总分 < 7.0 |
+用户拒绝回答或说"按你默认来"时：该项取默认值（主目录 `~/Downloads/video-analysis`、语言 `zh-CN`、模型 `{"source": "auto"}`），仍然把这个默认决定写进 `vnext_config.json`，不要下次又来问一遍。
 
-### 理论术语 (Theory Terms)
+## 默认执行模式
 
-| 英文 | 中文 | 说明 |
-|------|------|------|
-| **Walter Murch's Six Rules** | 沃尔特·默奇六法则 | 情感>故事>节奏>视线追踪>2D平面>3D空间 |
-| **Von Restorff Effect** | 冯·雷斯托夫效应 | 独特的项目更容易被记住 |
-| **Visual Saliency** | 视觉显著性 | 吸引眼球的程度 |
-| **Social Currency** | 社交货币 | 内容被分享的价值 |
-| **CTA** | 行动号召 | Call to Action |
-| **SYNC** | 节奏同步 | 画面与音频节拍的契合度 |
+**默认由主流程自己执行评分。** 除非宿主明确是 OpenClaw 并且用了 `--dispatch-json`，否则：
 
-## 快速开始
+- `score_batches` 会自动读配置、并行看图、直接写回 `host_batches/*-output.json`，不再要求当前 agent 手工逐批补分。
+- 首次启动时，优先自动读取本机 OpenClaw 的 `~/.openclaw/agents/*/agent/models.json`；找不到时再看当前环境变量里的 API 配置。
+- 如果自动发现不到可用配置，流程必须明确报 `缺少自动评分配置`，并提示如何补，不允许静默退回人工模式。
+- 所有批次完成后，自动进入 `finalize` 生成最终输出。
+- 整条链路（prepare → score_batches → finalize）应当尽量一口气做完，中间不需要用户干预。
 
-### 第 1 步：数据处理 Pipeline
+只有当宿主是 OpenClaw 且明确走接力模式时，才按 `docs/openclaw_orchestration.md` 的规则分段执行。
+
+## 不可妥协规则
+
+1. 不允许抽样、跳过，或对没看过的画面做判断。
+2. 每个 scene 都必须有独立结果，并及时写回文件。
+3. 如果已有 `scene_scores.json`、`run_state.json`、`host_batches/` 或批次 output，优先续跑，不重做已完成阶段。
+4. 每次开始前先读 `run_state.json`；只做当前阶段允许的动作，不自己跳步。
+5. `score_batches` 的正常路径是自动并行评分，不要再把“当前 agent 自己逐批看图填 JSON”当成默认方案。
+6. OpenClaw 子代理接手当前批次后，必须先更新 `receipt.status = "in_progress"`，并写 `started_at`、`updated_at`。
+7. 当前批次完成后，必须把 `receipt.status = "completed"`、`has_todo = false`、`worker_summary`、`updated_at`、`completed_at` 写回。
+8. 如果素材缺失、截图坏掉、当前批次无法判断，必须写成 `blocked` 并停止，不能假装完成。
+9. OpenClaw 主控不要把整条长历史、整份 `scene_scores.json`、所有历史批次一起塞给下一个 worker。
+10. 交付是否完成，以 `delivery_report.json` 和实际输出文件为准，不以口头汇报为准。
+11. 用户请求里包含 `pdf` 时，任何一个必需 PDF 缺失都不算完成。
+12. Windows 上如果本地链路明确报 `HTTP Error 429`，应直接当成平台限流阻塞回报，不要擅自改走浏览器下载、录屏或别的旁路。
+13. 禁止用本地 `PIL` / `OpenCV` 的亮度、颜色、对比度特征脚本冒充“已看图”；这类结果只能算失败或诊断，不能算正式评分。
+14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；每个 `##` ≥ 700 字、每个 `###` ≥ 180 字、每个 `##` 至少引用 3 个不同 Scene 编号。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
+15. `illustrate/output.md` 只能使用 `audiovisual_handoff/illustrate/task.md` 中「场景目录」列出的截图路径，不得凭空编造；同一张截图也不能在连续 3 段以内重复出现，否则脚本会抛 `ValueError`。
+16. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。
+
+## OpenClaw 主控原则（仅 OpenClaw 接力场景适用）
+
+只有宿主明确是 OpenClaw 并且走接力模式时，才适用以下原则：
+
+1. 跑总控入口
+2. 读 `run_state.json`
+3. 优先直接跑 `python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json`
+4. 如果确实只想单独取派单包，再跑 `python3 scripts/openclaw_dispatch.py /path/to/scene_scores.json`
+5. 只把当前批次四件套交给一个短生命周期 worker
+6. worker 写回后，主控重新跑总控入口；需要时再取新的派单包
+
+默认采用”单主控 + 单当前批次 worker”的串行接力，不要同时派两个批次。
+
+**如果不是 OpenClaw 接力场景，忽略这一节，直接按”默认执行模式”自己完成。**
+
+## 主流程
+
+### 0. 总控入口
+
+新视频任务在跑这一步之前，先过一遍上面的"首次使用引导"（有 `vnext_config.json` 就直接读，没有就问用户并落盘）。
+
+优先使用：
 
 ```bash
-# 首次配置（只需一次）
-python3 scripts/pipeline_enhanced.py --setup
-
-# 分析视频
-python3 scripts/pipeline_enhanced.py https://www.bilibili.com/video/BV1xxxxx
-python3 scripts/pipeline_enhanced.py "https://www.douyin.com/video/xxxxx"
+python3 scripts/orchestrate_vnext.py "<视频链接或本地视频>"
+python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json
 ```
 
-### 第 2 步：AI 评分（二选一）
+总控负责准备素材、续跑到正确阶段，并在已有结果上自动接着走。
 
-首次使用时，请选择评分模式：
-
-#### 🅰️ Agent 模式（推荐，IDE/OpenClaw/Cursor 用户）
-
-如果你正在 IDE 或 AI 编程助手中使用此 skill，**无需配置任何 API Key**。
-宿主 AI 助手（如 Gemini、Kimi）本身就具备视觉理解能力，可以直接「看图打分」。
-
-**流程：** 当你（AI 助手）拥有视觉理解能力时，在 pipeline 完成后执行以下步骤：
-
-1. **逐批查看帧画面**：使用 `view_file` 工具查看 `<output_dir>/frames/` 目录下的每张 `.jpg`（建议每批 3-5 张并行查看以提高效率）
-2. **按以下维度为每个场景打分（1-10 整数）**：
-   - **aesthetic_beauty**（美感）：构图、光影、色彩
-   - **credibility**（可信度）：真实感、物理逻辑
-   - **impact**（冲击力）：视觉显著性、第一眼吸引力
-   - **memorability**（记忆度）：独特符号、冯·雷斯托夫效应
-   - **fun_interest**（趣味度）：参与感、娱乐价值
-3. **分类场景类型**：TYPE-A Hook / TYPE-B Narrative / TYPE-C Aesthetic / TYPE-D Commercial
-4. **计算加权分并筛选**：加权 ≥ 8.5 → MUST KEEP，≥ 7.0 → USABLE，< 7.0 → DISCARD
-5. **将评分结果更新到 `scene_scores.json` 中每个场景的字段**
-6. **将精选片段（MUST KEEP + USABLE）对应的 mp4 复制到 `scenes/best_shots/` 并按排名命名**
-7. **生成分析报告** `<video_id>_complete_analysis.md`
-
-#### 🅱️ API 模式（独立 CLI 运行用户）
-
-如果你直接在终端运行脚本，需要配置视觉大模型 API：
+### 1. Prepare
 
 ```bash
-# 设置 API 密钥（必需）
-export VIDEO_ANALYZER_API_KEY="your-api-key"
-
-# 可选：自定义端点和模型
-export VIDEO_ANALYZER_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
-export VIDEO_ANALYZER_MODEL="gemini-2.0-flash"
-
-# 运行 AI 分析
-cd ~/Downloads/video-analysis/<视频文件夹>
-python3 <skill_dir>/scripts/ai_analyzer.py scene_scores.json --mode api
+python3 scripts/pipeline_enhanced.py "<视频链接或本地视频>"
 ```
 
-## 工作流程
+这一步负责下载或读取视频、切场景、抽主截图、提字幕或转写，并初始化：
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   VIDEO EXPERT ANALYZER v2.0                 │
-└─────────────────────────────────────────────────────────────┘
+- `scene_scores.json`
+- `run_state.json`
+- `scene_reports/` 草稿
+- 当前批次任务包
 
-第 1 阶段: 数据处理 (pipeline_enhanced.py)
-1. 📥 下载视频              → video.mp4
-2. 🎵 提取音频              → video.m4a
-3. 🎞️  场景检测 (detect-content) → scenes/*.mp4
-4. 🎤 智能字幕提取           → video.srt
-   (B站API → 内嵌字幕 → RapidOCR → FunASR 四级降级)
-5. 🖼️  帧提取               → frames/*.jpg
-6. 📊 生成评分模板          → scene_scores.json
+Windows 上处理 YouTube / Bilibili 时，也必须先走这条本地 pipeline。不要因为 `yt-dlp` 命令名一时不可见，就改走浏览器、录屏或手动搬运。
 
-第 2 阶段: AI 视觉评分 (选择一种模式)
-┌────────────────────────┬────────────────────────┐
-│   🅰️ Agent 模式         │   🅱️ API 模式           │
-│   宿主 AI 直接看图评分  │   远程调用视觉大模型    │
-│   无需 API Key         │   需要 API Key          │
-│   IDE/OpenClaw/Cursor  │   独立 CLI 运行          │
-└────────────────────────┴────────────────────────┘
-                         ↓
-7. 🤖 真实视觉分析评分     → 基于画面内容的真实评分
-8. 🧮 动态权重计算         → 根据类型计算加权得分
-9. ⭐ 精选镜头筛选         → 复制到 scenes/best_shots/
-10. 📄 生成完整报告        → *_complete_analysis.md
-```
-
-## 分析方法论
-
-### Walter Murch 剪辑六法则
-
-> **情感 Emotion > 故事 Story > 节奏 Rhythm > 视线追踪 Eye-trace > 2D平面 2D Plane > 3D空间 3D Space**
-
-一个情感真挚但画面略抖的镜头，优于一个画面完美但内容空洞的镜头。
-
-### 五维评分体系 (Five-Dimension Scoring)
-
-| 维度 (Dimension) | 基础权重 | 评估要点 |
-|-----------------|---------|---------|
-| **Aesthetic Beauty** 美感 | 20% | 构图(三分法)、光影质感、色彩和谐度 |
-| **Credibility** 可信度 | 20% | 表演自然度、物理逻辑、无出戏感 |
-| **Impact** 冲击力 | 20% | 视觉显著性(Visual Saliency)、动态张力 |
-| **Memorability** 记忆度 | 20% | 独特符号(Von Restorff Effect)、金句 |
-| **Fun/Interest** 趣味度 | 20% | 参与感、娱乐价值、社交货币 |
-
-### 动态权重系统（根据场景类型自动调整）
-
-| 类型 (Type) | 权重分配 (Weighting) | 适用场景 (Application) |
-|------------|---------------------|----------------------|
-| **TYPE-A Hook** | IMPACT 40% + MEMORABILITY 30% + SYNC 20% | 开场钩子、高能时刻 |
-| **TYPE-B Narrative** | CREDIBILITY 40% + MEMORABILITY 30% + AESTHETICS 20% | 叙事段落、情感表达 |
-| **TYPE-C Aesthetic** | AESTHETICS 50% + SYNC 30% + IMPACT 20% | 空镜头、氛围营造 |
-| **TYPE-D Commercial** | CREDIBILITY 40% + MEMORABILITY 40% + AESTHETICS 20% | 产品展示、商业广告 |
-
-### 筛选决策规则
-
-| 等级 (Level) | 中文释义 | 标准 (Criteria) | 用途 (Usage) |
-|-------------|---------|----------------|-------------|
-| 🌟 **MUST KEEP** | 强烈推荐保留 | 加权总分 > 8.5 或 单项 = 10 | 核心素材，极致长板 |
-| 📁 **USABLE** | 可用素材 | 7.0 ≤ 加权总分 < 8.5 | 过渡素材，辅助叙事 |
-| 🗑️ **DISCARD** | 建议舍弃 | 加权总分 < 7.0 或有瑕疵 | 建议舍弃 |
-
-## 输出文件结构
-
-```
-{output_dir}/
-└── {video_id}/
-    ├── {video_id}.mp4                      # 完整视频 (Full Video)
-    ├── {video_id}.m4a                      # 音频文件 (Audio)
-    ├── {video_id}.srt                      # 字幕文件 (Subtitles)
-    ├── {video_id}_transcript.txt           # 转录文本 (Transcript)
-    ├── scene_scores.json                   # 完整评分数据（AI已填写）⭐
-    ├── {video_id}_complete_analysis.md     # ⭐ 完整分析报告（中英双语）
-    ├── scenes/                             # 场景片段 (Scene Clips)
-    │   ├── {video_id}-Scene-001.mp4
-    │   ├── {video_id}-Scene-002.mp4
-    │   ├── ...
-    │   └── best_shots/                     # ⭐ 精选片段（已复制）
-    │       ├── 01_USABLE_xxx.mp4
-    │       ├── 02_MUST_KEEP_xxx.mp4
-    │       └── README.md                   # 双语说明文件
-    └── frames/                             # 场景预览帧 (Preview Frames)
-        ├── {video_id}-Scene-001.jpg
-        └── ...
-```
-
-## 完整分析报告内容
-
-生成的 `*_complete_analysis.md` 包含中英双语术语对照：
-
-### 1. 统计概览 (Statistics Overview)
-- 各等级场景数量统计（带中文释义）
-- 各维度平均分（英文术语 + 中文释义）
-
-### 2. 场景排名表 (Scene Rankings)
-- 按加权分数排序
-- 显示类型（英文 + 中文）
-- 筛选建议（英文 + 中文）
-- 核心优势
-
-### 3. 术语对照表 (Terminology Reference)
-完整的专业术语中英对照表，包含：
-- 英文术语
-- 中文释义
-- 详细说明
-
-### 4. 各场景详细评估（每个场景包含）
-- **基础信息**: 类型分类（双语）、加权得分、筛选建议（双语）
-- **内容描述**: AI 自动生成的场景描述
-- **五维评分表格**: 
-  | 英文术语 | 中文释义 | 得分 | 权重贡献 |
-- **入选/淘汰理由**: AI 生成的理论依据
-- **剪辑建议**: AI 生成的使用建议
-
-### 5. 精选片段推荐 (Best Shots Recommendations)
-- 入选精选文件夹的片段列表（双语）
-- 各类别最佳镜头：
-  - 最佳 Hook 候选 (Best Hook Candidate)
-  - 最佳视觉 (Best Visual)
-  - 最佳可信度 (Best Credibility)
-  - 最佳记忆度 (Best Memorability)
-
-### 6. 整体影片评价 (Overall Assessment)
-- 综合评分
-- 评价结论（双语）
-- 优势分析（各维度详细评价）
-- 改进建议（专业术语 + 中文解释）
-- 使用场景建议（社交媒体/产品展示/品牌宣传/广告投放）
-
-## 使用示例
-
-### 基础分析
+### 2. Score Batches
 
 ```bash
-# 配置输出目录（首次）
-python3 scripts/pipeline_enhanced.py --setup
-
-# 分析视频
-python3 scripts/pipeline_enhanced.py https://www.bilibili.com/video/BV1xxxxx
-
-# 进入输出目录运行 AI 分析
-cd ~/Downloads/video-analysis/BV1xxxxx
-python3 ~/.openclaw/workspace/skills/video-expert-analyzer/scripts/ai_analyzer.py scene_scores.json
+python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode score_batches
 ```
 
-### 快速分析（自定义场景检测阈值）
+这一阶段会自动处理批次分析：
+
+- 先读 `run_state.json`
+- 自动发现可用模型配置
+- 并行读取每个 scene 的 `primary / start / mid / end` 帧
+- 直接写回对应的 `batch-XXX-output.json`
+- 自动合并、校验覆盖率，并在条件满足时进入 `finalize`
+
+当前批次最小任务包只有四个文件：
+
+- `batch-XXX-brief.md`
+- `batch-XXX-contact-sheet.png`
+- `batch-XXX-input.json`
+- `batch-XXX-output.json`
+
+**默认模式**：自动并行评分，不需要当前 agent 手工逐批看图填结果。
+
+**OpenClaw 接力模式**：只在明确走 `--dispatch-json` 时使用；主控仍以自动链路为主，子代理只接手被派发的那一小段工作。
+
+### 3. Merge / Validate
 
 ```bash
-python3 scripts/pipeline_enhanced.py URL --scene-threshold 20
+python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode merge_validate
 ```
 
-### 调整精选阈值
+这一步负责合并批次结果，检查覆盖率，并优先修正旧数据里的资源路径或缺失截图问题。
+
+### 4. Finalize
 
 ```bash
-python3 scripts/ai_analyzer.py scene_scores.json 6.5  # 阈值 6.5
+python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 ```
 
-## 命令参考
+只有在覆盖率完整、资源齐全、没有 `blocked`、没有 `needs_review`、也没有本地特征兜底痕迹后，才进入这一步。
 
-### pipeline_enhanced.py
+这一步除了正式输出，还会自动生成给路由子 skill 使用的轻量分类摘要：
 
-| 选项 | 说明 |
-|------|------|
-| `--setup` | 配置输出目录 |
-| `-o, --output` | 指定输出目录 |
-| `--scene-threshold` | 场景检测阈值 (默认27) |
-| `--best-threshold` | 精选阈值 (默认7.5) |
+- `*_classification_summary.md`
+- `*_classification_summary.json`
+- `classification_result.json`
 
-### ai_analyzer.py
+其中：
+- 分类摘要直接来自结构化结果，不额外跑模型，默认把全片切成约 21 组前 / 中 / 后分段信号。
+- `classification_result.json` 会继续调用子路由逻辑，成为主流程后续视听报告的正式路由来源。
 
-| 参数 | 说明 |
-|------|------|
-| `scene_scores.json` | 评分文件路径 |
-| `--mode api` | API 模式（需设置 `VIDEO_ANALYZER_API_KEY`）|
-| `--mode agent` | Agent 模式（生成模板供宿主 AI 填写）|
+#### 4.1 视听剖析 Agent 接力
 
-| 环境变量 | 说明 |
-|------|------|
-| `VIDEO_ANALYZER_API_KEY` | 视觉大模型 API 密钥（API 模式必需）|
-| `VIDEO_ANALYZER_BASE_URL` | API 端点（默认 Gemini） |
-| `VIDEO_ANALYZER_MODEL` | 模型名称（默认 `gemini-2.0-flash`）|
+`finalize` 生成视听剖析（`*_audiovisual_analysis.*`）时，会按子类型路由触发最多四个交由 agent 完成的子任务：
 
-## 依赖要求
+- `body`：完整的视听剖析正文 Markdown
+- `diagram`：SVG 结构图（仅支持该能力的子类型）
+- `overview`：MV 内容架构总览 JSON（仅音乐/MV 路由）
+- `illustrate`：在近终态 Markdown 中按 Scene 引用插入对应截图
 
-```bash
-# 系统依赖
-brew install ffmpeg
+脚本为每个子任务按顺序写一个任务包到 `audiovisual_handoff/<subtask>/task.md`，并把当次 `run_state` 标成 `blocked`（`pending_task = await_audiovisual_agent`），同时抛 `AudiovisualHandoffPending`。这是运行 skill 的 agent（也就是你）应当：
 
-# 一键安装所有 Python 依赖
-pip3 install -r requirements.txt
+1. 打开 `audiovisual_handoff/brief.md` 看整体状态，再读当前 `status = pending` 子任务的 `task.md`，严格按其中的 system prompt / user message 生成内容。
+2. 把结果写入 task.md 指定的输出文件：
+   - `body/output.md` — 只写正文 Markdown，保留 prompt 要求的所有 `##` 章节标题，不要额外加顶层 `#` 标题。
+   - `diagram/output.svg` — 只写合法的 `<svg>...</svg>` 源码，不要反引号或说明文字。
+   - `overview/output.json` — 只写 JSON 对象，字段严格按 prompt 描述，不要代码块围栏。
+   - `illustrate/output.md` — 写"插图后的完整 Markdown"：保留原文每一行文字不变，只在 `##` 正文模块中被提及到 Scene 的段落后插入 `![简短说明](<截图路径>)`；截图路径必须来自 task.md 列出的"场景目录"，不要编造；同一张图在连续 3 段内不要重复；`## 路由判断`、`## 视听剖析概览 / 视频结构图 / 视频内容架构总览` 等已有图示的模块不再追加。
+3. 完成后重新执行 `python3 scripts/ai_analyzer.py <scene_scores.json> --mode finalize`。脚本会读取你刚写入的输出文件，把该子任务标成 `completed`，然后推进到下一个子任务或完成剩余的交付物。
+4. 不要手工改 `audiovisual_handoff/receipt.json`；脚本会自己维护。也不要用 `python3 - <<'PY' ...` 这类 heredoc 绕过 — harness 的 exec preflight 会拦，改了也会被下一次 finalize 覆盖，只需让脚本自己推进。
+5. 如果某个子任务连续两次都缺关键素材，先排查素材问题，再回到这里重新跑；不要造一份占位文本塞进 `output.*`，那样会污染最终报告。
+6. 子任务触发顺序是 body → (diagram 或 overview，两者互斥，由路由能力决定，多数情况只会触发一个) → illustrate。`illustrate` 最后执行，操作对象是已经拼好了路由判断块和结构图/总览图的近终态 Markdown，所以若 body 或 diagram/overview 需要重跑，对应 `output.*` 要一起删掉，避免 `illustrate/output.md` 基于旧文稿残留。
+7. 视频目录名常含弯引号/特殊字符（例如 `‘GO’`、`’s`、`—`）。读取 `audiovisual_handoff/` 下的文件时，**只从脚本打印的错误信息或 `brief.md` 顶部的"Handoff 目录"绝对路径按原样复制**，不要自己重敲 —— 手敲时很容易把 `‘’` 改写成 `''`，导致 `ENOENT`。如果连续两次 ENOENT，先 `ls` 实际视频目录核对字符，再继续。
 
-# 或手动安装核心依赖
-pip3 install yt-dlp scenedetect[opencv] requests funasr modelscope torch torchaudio
+## 完成标准
 
-# 可选依赖
-pip3 install openai              # API 模式评分
-pip3 install rapidocr-onnxruntime # 烧录字幕 OCR 检测
-```
+最终至少应落出这些结果：
 
-### 环境检测
+- `scene_scores.json`
+- `scene_reports/`
+- `*_detailed_analysis.md`
+- `*_complete_analysis.md`
+- `*_classification_summary.*`
+- `classification_result.json`
+- `*_storyboard.*`
+- `*_storyboard_context.*`
+- `*_audiovisual_analysis.*`
+- `scenes/best_shots/`
+- `delivery_report.json`
 
-```bash
-# 一键检测所有依赖是否就绪
-python3 scripts/check_environment.py
-```
+## 交付前检查
 
-## 平台特定说明
+至少确认：
 
-### 抖音视频下载
+1. `run_state.json` 已更新到正确阶段，没有脏的 `next_batch`
+2. 当前批次 coverage 和 `scene_scores.json` 完成情况一致
+3. 当前要求的结果文件都已经真实存在
+4. 如果用户请求了 PDF，对应 PDF 确实存在且不是空文件
+5. 只要还有 `blocked`、`needs_review`、本地特征兜底痕迹、缺文件、缺图或缺 PDF，就不能报完成
 
-由于抖音的反爬机制，yt-dlp 无法直接下载抖音视频。本工具集成了专用的抖音下载器，可以：
+## 环境变量与调参
 
-- ✅ 自动识别抖音链接（支持 `douyin.com` 和 `v.douyin.com` 短链接）
-- ✅ 自动提取视频信息（标题、作者）
-- ✅ 下载无水印视频
-- ✅ 自动提取音频用于转录
+以下环境变量控制脚本行为，仅在需要时覆盖默认：
 
-**支持的抖音链接格式：**
-- `https://www.douyin.com/video/xxxxx`
-- `https://www.douyin.com/jingxuan?modal_id=xxxxx`
-- `https://v.douyin.com/xxxxx` (短链接)
+- `OPENCLAW_ROOT`：覆盖 OpenClaw 根目录（默认 `~/.openclaw`）。
+- `OPENCLAW_MODELS_JSON`：覆盖 `models.json` 完整路径（默认 `$OPENCLAW_ROOT/agents/main/agent/models.json`）。
+- `VNEXT_STALE_MINUTES`：当前 worker 超过该分钟数未更新 `heartbeat_at`/`updated_at`/`started_at` 时，`reset_stale_in_progress_receipts` 会把 `receipt.status` 从 `in_progress` 重置为 `pending`（默认 30）。
+- `VNEXT_TEXT_MODEL_RETRIES`：`request_text_with_runtime` 对单个 provider 的瞬时错误（rate limit / timeout / 5xx）重试次数（默认 2，指数退避 1s → 2s → 4s）。
+- `AUDIOVISUAL_REPORT_MAX_TOKENS` / `AUDIOVISUAL_REPORT_MODEL`：视听剖析正文生成时直连文本模型的上限 / 模型名（仅在未启用 handoff 架构时生效）。
 
-**抖音下载实现原理：**
-1. 使用移动端 User-Agent 访问页面
-2. 从页面 HTML 中提取 `RENDER_DATA` JSON 数据
-3. 解析视频直链地址（自动替换 `playwm` 为 `play` 获取无水印版本）
-4. 使用正确的 Referer 头下载视频
+## 按需补充
 
-## Troubleshooting
-
-### 终端命令卡顿
-如果在 IDE 中执行 `cp` 或 Python 脚本时终端无响应，这通常是 IDE 终端代理的问题。解决方案：
-- **方案 A**: 打开 macOS 自带 Terminal.app 手动运行命令
-- **方案 B**: 使用 `copy_by_index.py` 脚本通过 JSON 索引批量复制文件
-
-### FunASR 首次下载慢
-FunASR 首次运行需下载约 2-3GB 的 Paraformer 模型。如果下载缓慢：
-- 设置镜像: `export MODELSCOPE_CACHE=~/.cache/modelscope`
-- 或使用 B站 API 字幕（无需本地模型，速度极快）
-
-### Agent 模式评分注意事项
-- 必须使用**具备视觉能力**的多模态模型（参见「模型兼容性」表）
-- 纯文本模型（如 GPT-3.5、Claude Haiku）**无法**执行 Agent 模式评分
-- 建议每批查看 3-5 张帧图片，避免单次加载过多
-
----
-
-## 更新日志
-
-### v2.1.0 (2026-02-27)
-- ✅ **智能字幕提取**：对齐 video-copy-analyzer，支持 B站API→内嵌→RapidOCR→FunASR 四级降级
-- ✅ **新增小红书支持**：集成 `xiaohongshu_downloader.py`
-- ✅ **新增 `requirements.txt`**：一键安装所有依赖
-- ✅ **新增模型兼容性矩阵**：明确不同模型的适用模式
-- ✅ **重写 `check_environment.py`**：检测 v2.1 实际依赖
-- ✅ **清理废弃文件**：移除旧版 pipeline、Whisper 转录等6个废弃脚本
-- ✅ **新增 Troubleshooting 章节**
-
-### v2.0.0 (2026-02-27)
-- ✅ **重写 AI 评分系统**：移除假数据模拟，接入真实视觉大模型
-- ✅ **双路径评分**：Agent 模式（宿主 AI 直接看图）+ API 模式（远程调用）
-- ✅ **修复场景检测**：`detect-adaptive` → `detect-content`，镜头切分更精准
-- ✅ 将语音转录引擎从 Whisper 替换为 FunASR (Paraformer-zh)
-- ✅ 中文场景转录速度大幅提升（10分钟音频约22秒完成）
-- ✅ 移除 `--whisper-model` 参数（FunASR 使用固定 paraformer-zh 模型）
-- ✅ 内置 VAD 自动分段 + 标点恢复
-
-### v1.4.0 (2026-02-06)
-- ✅ 新增抖音视频下载支持
-- ✅ 自动识别抖音链接并切换下载方式
-- ✅ 支持抖音短链接和长链接
-- ✅ 自动获取无水印视频
-
-### v1.3.0 (2026-02-05)
-- ✅ 新增中英双语术语对照
-- ✅ 所有专业术语附中文释义
-- ✅ 报告中的术语表格双语显示
-
-### v1.2.0 (2026-02-05)
-- ✅ 新增 AI 自动分析功能
-- ✅ 动态权重评分系统
-- ✅ 自动生成完整分析报告
-- ✅ 自动复制精选镜头
-
-### v1.1.0 (2026-02-05)
-- ✅ 新增可配置输出目录功能
-- ✅ 精选片段自动保存
-- ✅ 生成详细分析报告模板
-
-### v1.0.0 (2026-02-05)
-- 初始版本
-- 基础视频分析功能
-
----
-
-*基于 Walter Murch 剪辑六法则 (Walter Murch's Six Rules of Editing)*  
-*AI 自动评分系统 (AI Automatic Scoring System)*  
-*动态权重算法 (Dynamic Weighting Algorithm)*  
-*中英双语术语对照 (Bilingual Terminology Reference)*
+- OpenClaw 接力规则：`docs/openclaw_orchestration.md`
+- 平台差异、OCR、视听路由、异常恢复：`docs/appendices.md`

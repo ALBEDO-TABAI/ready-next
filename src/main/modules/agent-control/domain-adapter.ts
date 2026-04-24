@@ -18,7 +18,7 @@ export type DomainAdapterApplyPhase = 'no_tool_call' | 'tool_batch' | 'budget_li
 export interface DomainAdapterProjection {
   phase: DomainAdapterProjectionPhase
   summary: string
-  waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background'
+  waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification'
   resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
   blockedReason?: string | null
 }

@@ -208,7 +208,13 @@ export interface ScopeRunContextBudget {
 }
 
 export type ScopeRunTaskStepStatus = 'pending' | 'running' | 'blocked' | 'done' | 'error'
-export type ScopeRunWaitingFor = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+export type ScopeRunWaitingFor =
+  | 'input'
+  | 'confirmation'
+  | 'agent_result'
+  | 'clarification'
+  | 'background'
+  | 'none'
 export type ScopeRunResumableAction = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
 
 export interface ScopeRunTaskStep {

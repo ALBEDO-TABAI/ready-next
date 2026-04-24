@@ -2,47 +2,19 @@
   "id": "video-copy-analyzer",
   "name": "Video Copy Analyzer",
   "description": "Extract subtitles and generate transcript-oriented copy deliverables from a short video.",
-  "version": "2026.03.15",
-  "defaultAction": "video_copy_analyze",
+  "version": "2026.04.23",
+  "defaultAction": "read_skill",
   "requirementsFile": "requirements.txt",
   "execution": {
-    "mode": "workflow",
-    "workflowFile": "skill.workflow.json",
-    "resultContractVersion": 1,
-    "autoAdvance": true
+    "mode": "advisory"
   },
   "actions": [
     {
-      "name": "video_copy_analyze",
-      "description": "启动 Video Copy Analyzer workflow，并自动推进到 blocker。",
-      "runtime": "python",
-      "entry": "scripts/ready_extract_subtitle.py",
-      "visibility": "public",
-      "inputMode": "json",
-      "params": [
-        { "name": "input", "type": "string", "description": "视频 URL 或本地文件路径", "required": true },
-        { "name": "outputDir", "type": "string", "description": "可选输出目录", "required": false },
-        { "name": "model", "type": "string", "description": "whisper 模型", "required": false, "enum": ["tiny", "base", "small", "medium", "large"] },
-        { "name": "language", "type": "string", "description": "语言 zh/en/auto", "required": false, "enum": ["zh", "en", "auto"] },
-        { "name": "forceSubtitleMode", "type": "string", "description": "可选，强制字幕提取模式", "required": false, "enum": ["auto", "funasr"] }
-      ]
-    },
-    {
-      "name": "video_copy_prepare_input",
-      "description": "准备 workflow 输入与输出目录。",
-      "runtime": "python",
-      "entry": "scripts/ready_prepare_input.py",
+      "name": "read_skill",
+      "description": "读取并应用该技能的说明与方法完成当前任务。",
+      "runtime": "reference",
+      "entry": "SKILL.md",
       "visibility": "internal",
-      "inputMode": "json",
-      "params": []
-    },
-    {
-      "name": "video_copy_extract_subtitle",
-      "description": "运行字幕提取并输出 SRT / transcript。",
-      "runtime": "python",
-      "entry": "scripts/ready_extract_subtitle.py",
-      "visibility": "internal",
-      "inputMode": "json",
       "params": []
     }
   ]

@@ -47,7 +47,7 @@ import { ExecutionCoordinator } from './execution-coordinator'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { isWorkflowStarterAction } from './guardrails'
-import { EphemeralExecutionStore } from '../tools/skill-ephemeral-ask-user'
+import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
 
 const execFileAsync = promisify(execFile)
 
@@ -319,27 +319,6 @@ export class SkillsRuntimeManager {
   private static readonly TTL_SWEEP_INTERVAL_MS = 60 * 60_000
   private static readonly TTL_BOOT_DELAY_MS = 30_000
 
-  private static ephemeralStore: EphemeralExecutionStore | null = null
-
-  private static initEphemeralStore(): void {
-    if (!SkillsRuntimeManager.ephemeralStore) {
-      SkillsRuntimeManager.ephemeralStore = new EphemeralExecutionStore()
-      SkillsRuntimeManager.ephemeralStore.startSweep()
-    }
-  }
-
-  static getEphemeralStore(): EphemeralExecutionStore {
-    if (!SkillsRuntimeManager.ephemeralStore) {
-      SkillsRuntimeManager.initEphemeralStore()
-    }
-    // Type assertion because we know ephemeralStore is non-null after init
-    return SkillsRuntimeManager.ephemeralStore!
-  }
-
-  static clearAllEphemeralAskUser(sessionId: string): number {
-    return SkillsRuntimeManager.getEphemeralStore().clearAllForSession(sessionId)
-  }
-
   constructor() {
     this.runtimeRoot = join(app.getPath('userData'), 'skill-runtime')
     this.skillsRoot = join(this.runtimeRoot, 'skills')
@@ -352,7 +331,6 @@ export class SkillsRuntimeManager {
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
     this.startScheduler()
     this.startTtlSweep()
-    SkillsRuntimeManager.initEphemeralStore()
   }
 
   /**
@@ -376,6 +354,16 @@ export class SkillsRuntimeManager {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('[SkillsRuntimeManager] TTL sweep failed:', message)
+      }
+      // Patch A1 — piggy-back the reference-skill hint sweep on this same
+      // cadence. Idle hints older than REFERENCE_SKILL_HINT_TTL_MS would
+      // otherwise linger in-process indefinitely; a live app without
+      // periodic cleanup ends up mis-reporting stale skills in error hints.
+      try {
+        sweepExpiredReferenceSkillHints()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('[SkillsRuntimeManager] reference-hint sweep failed:', message)
       }
     }
     this.ttlBootTimer = setTimeout(sweep, SkillsRuntimeManager.TTL_BOOT_DELAY_MS)
@@ -429,6 +417,20 @@ export class SkillsRuntimeManager {
       outputsRoot: this.outputsRoot,
       venvRoot: this.venvRoot,
     }
+  }
+
+  /**
+   * Phase 1 gap fix — exposes the shared venv bin dir so `skill_run_shell`
+   * can prepend it to PATH. Mirrors the calculation in `getBaseEnv()` so
+   * primitives and the legacy workflow runner see the same Python env.
+   * Returns the path unconditionally; a non-existent entry in PATH is
+   * harmless, and pre-installing the venv on every boot just to satisfy
+   * this getter would add startup latency for no gain.
+   */
+  getSharedVenvBinDir(): string {
+    return process.platform === 'win32'
+      ? join(this.venvRoot, 'Scripts')
+      : join(this.venvRoot, 'bin')
   }
 
   private getExecutionStore(): ExecutionStateStore {

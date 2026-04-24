@@ -507,6 +507,7 @@ export class TurnEngine {
             || executionIntentContext.requestEnvelope.pureUserText
             || userText,
         },
+        sessionId: request.sessionId,
       })
       const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
       appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({
@@ -771,7 +772,7 @@ export class TurnEngine {
           : 'system'
       const emitRuntimeTaskPayload = (options: {
         summary: string
-        waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+        waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'none'
         resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
         blockedReason?: string | null
       }) => {

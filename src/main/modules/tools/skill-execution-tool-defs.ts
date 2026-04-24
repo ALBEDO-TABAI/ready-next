@@ -33,6 +33,12 @@ export interface SkillToolDef {
  * src/__tests__/skill-zod-golden-snapshot.test.ts. Update the Zod schema
  * when changing a param; never hand-edit a params array here.
  */
+// Hardened prefix prepended to every submit/restart/cancel tool description:
+// stops models from fabricating an `executionId: "new"` after they have only
+// seen a reference-skill guidance payload (B plan Phase 0 — P0-T2).
+const EXECUTION_CONTROL_ONLY_PREFIX =
+  'ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0". '
+
 export const EXECUTION_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_get_state',
@@ -42,31 +48,31 @@ export const EXECUTION_TOOL_DEFS: SkillToolDef[] = [
   },
   {
     name: 'skill_submit_input',
-    description: '向一个被 need_input 阻塞的 execution 提交输入并继续推进。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向一个被 need_input 阻塞的 execution 提交输入并继续推进。`,
     kind: 'execution_control',
     params: zodObjectToParamList(SKILL_CONTROL_SCHEMAS.skill_submit_input),
   },
   {
     name: 'skill_submit_confirmation',
-    description: '提交 confirmation 结果并继续执行 skill workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}提交 confirmation 结果并继续执行 skill workflow。`,
     kind: 'execution_control',
     params: zodObjectToParamList(SKILL_CONTROL_SCHEMAS.skill_submit_confirmation),
   },
   {
     name: 'skill_submit_agent_result',
-    description: '向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。`,
     kind: 'execution_control',
     params: zodObjectToParamList(SKILL_CONTROL_SCHEMAS.skill_submit_agent_result),
   },
   {
     name: 'skill_restart_from_step',
-    description: '从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。`,
     kind: 'execution_control',
     params: zodObjectToParamList(SKILL_CONTROL_SCHEMAS.skill_restart_from_step),
   },
   {
     name: 'skill_cancel_execution',
-    description: '取消一个正在进行的 skill execution。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}取消一个正在进行的 skill execution。`,
     kind: 'execution_control',
     params: zodObjectToParamList(SKILL_CONTROL_SCHEMAS.skill_cancel_execution),
   },

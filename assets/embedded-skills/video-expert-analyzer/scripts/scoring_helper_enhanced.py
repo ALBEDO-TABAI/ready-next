@@ -5,6 +5,7 @@ Scene Scoring Helper - Enhanced Version
 """
 
 import json
+import math
 import sys
 import shutil
 from pathlib import Path
@@ -96,9 +97,23 @@ def rank_scenes(data: Dict) -> List[Dict]:
 
 
 def identify_best_shots(data: Dict, threshold: float = 7.5) -> List[Dict]:
-    """Identify scenes above threshold"""
+    """Identify best shots with MUST KEEP priority and a capped usable pool."""
     scenes = data.get("scenes", [])
-    return [s for s in scenes if s.get("weighted_score", 0) >= threshold]
+    must_keep = [scene for scene in scenes if "MUST KEEP" in str(scene.get("selection", ""))]
+    usable_candidates = [
+        scene
+        for scene in scenes
+        if "MUST KEEP" not in str(scene.get("selection", ""))
+        and float(scene.get("weighted_score", 0) or 0) >= max(threshold, 8.0)
+    ]
+    must_keep.sort(key=lambda scene: float(scene.get("weighted_score", 0) or 0), reverse=True)
+    usable_candidates.sort(key=lambda scene: float(scene.get("weighted_score", 0) or 0), reverse=True)
+
+    cap = max(6, min(20, math.ceil(len(scenes) * 0.15))) if scenes else 0
+    selected = must_keep[:cap]
+    if len(selected) < cap:
+        selected.extend(usable_candidates[: max(cap - len(selected), 0)])
+    return selected
 
 
 def get_best_shots_dir(scores_path: Path) -> Path:
@@ -157,8 +172,11 @@ def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]
 
 ## 入选标准
 
-- 加权总分 ≥ 7.5
-- 或任意单项得分 = 10 (极致长板)
+- 所有 `MUST KEEP` 镜头直接入选
+- `USABLE` 镜头需满足加权总分 ≥ 8.0 才进入候选
+- 入选总量上限 = 总场景数的 15%
+- 入选总量下限 = 6 个
+- 入选总量上限封顶 = 20 个
 
 ## 精选片段列表
 
@@ -178,6 +196,12 @@ def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]
 - 宣传片高光时刻
 - 作品集展示
 - 二次创作素材
+
+## 未入选的常见原因
+
+- 不是 `MUST KEEP`
+- 加权总分未达到 8.0
+- 虽达到可用标准，但在总量上限内未进入前列
 
 ---
 

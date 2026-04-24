@@ -41,6 +41,7 @@ interface RunCapabilityBaseParams {
     enabledChannelTypes?: string[]
     connectedChannelTypes?: string[]
   }
+  sessionId?: string
 }
 
 export interface PreparedRunCapabilities {
@@ -148,6 +149,7 @@ function resolveRunCapabilities(
     browserDecisionMode: baseParams.browserDecisionMode,
     browserHostAvailable: baseParams.runtimeAvailability.browserHostAvailable,
     feishuConnected: baseParams.runtimeAvailability.feishuConnected,
+    sessionId: baseParams.sessionId,
   })
 
   const { conflicts, demotedBrowserDecisionMode, skillPassthroughApplied } = resolvePolicyConflicts({

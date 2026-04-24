@@ -61,15 +61,19 @@ export class ToolGateway {
     return `${groupId}:${format}`
   }
 
-  private resolveGroupToolDefinitions(groupId: CapabilityGroupId): ToolDefinition[] {
-    return this.registry.getToolDefinitionsForGroup(groupId)
+  private resolveGroupToolDefinitions(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[] {
+    return this.registry.getToolDefinitionsForGroup(groupId, sessionId)
   }
 
-  private resolveGroupToolSchemasDetailed(groupId: CapabilityGroupId, format: ToolSchemaFormat): ToolSchemaResolution {
+  private resolveGroupToolSchemasDetailed(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): ToolSchemaResolution {
     const errorKey = this.resolutionErrorKey(groupId, format)
     this.lastSchemaResolutionErrors.delete(errorKey)
     try {
-      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format)
+      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format, sessionId)
       const errorMessage = resolution.error || null
       if (errorMessage) {
         this.lastSchemaResolutionErrors.set(errorKey, errorMessage)
@@ -95,12 +99,16 @@ export class ToolGateway {
     }
   }
 
-  private resolveGroupToolSchemas(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemasDetailed(groupId, format).tools
+  private resolveGroupToolSchemas(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): Array<Record<string, unknown>> {
+    return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId).tools
   }
 
-  private resolveGroupToolNames(groupId: CapabilityGroupId): string[] {
-    return this.resolveGroupToolDefinitions(groupId).map((tool) => tool.name)
+  private resolveGroupToolNames(groupId: CapabilityGroupId, sessionId?: string): string[] {
+    return this.resolveGroupToolDefinitions(groupId, sessionId).map((tool) => tool.name)
   }
 
   private buildCapabilityGroupEntry(groupId: CapabilityGroupId): CapabilityGroupRegistryEntry {
@@ -163,19 +171,27 @@ export class ToolGateway {
     return Array.from(names)
   }
 
-  getToolSchemasForGroup(groupId: CapabilityGroupId, format: ToolSchemaFormat): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemas(groupId, format)
+  getToolSchemasForGroup(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): Array<Record<string, unknown>> {
+    return this.resolveGroupToolSchemas(groupId, format, sessionId)
   }
 
   getLastSchemaResolutionError(groupId: CapabilityGroupId, format: ToolSchemaFormat): string | null {
     return this.lastSchemaResolutionErrors.get(this.resolutionErrorKey(groupId, format)) || null
   }
 
-  getToolSchemaResolutionForGroups(groupIds: CapabilityGroupId[], format: ToolSchemaFormat): ToolGroupResolutionResult {
+  getToolSchemaResolutionForGroups(
+    groupIds: CapabilityGroupId[],
+    format: ToolSchemaFormat,
+    sessionId?: string,
+  ): ToolGroupResolutionResult {
     const tools = new Map<string, Record<string, unknown>>()
     const groupResolutions: ToolGroupResolutionEntry[] = []
     for (const groupId of groupIds) {
-      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format)
+      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format, sessionId)
       for (const tool of resolution.tools) {
         const name = format === 'anthropic'
           ? (typeof tool.name === 'string' ? tool.name : null)
@@ -200,12 +216,18 @@ export class ToolGateway {
     }
   }
 
-  getAnthropicToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic').tools
+  getAnthropicToolsForGroups(
+    groupIds: CapabilityGroupId[],
+    sessionId?: string,
+  ): Array<Record<string, unknown>> {
+    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic', sessionId).tools
   }
 
-  getOpenAIToolsForGroups(groupIds: CapabilityGroupId[]): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'openai').tools
+  getOpenAIToolsForGroups(
+    groupIds: CapabilityGroupId[],
+    sessionId?: string,
+  ): Array<Record<string, unknown>> {
+    return this.getToolSchemaResolutionForGroups(groupIds, 'openai', sessionId).tools
   }
 
   getToolDefinition(id: string): ToolDefinition | null {

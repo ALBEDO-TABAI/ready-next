@@ -29,9 +29,11 @@ import { FEISHU_SCHEMAS } from './feishu-schemas'
 import { BROWSER_INTERACTION_SCHEMAS } from './browser-interaction-schemas'
 import { BROWSER_CONTENT_SCHEMAS } from './browser-content-schemas'
 import { SYSTEM_SCHEMAS } from './system-schemas'
+import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SKILL_CONTROL_SCHEMAS,
+  ...SKILL_PRIMITIVE_SCHEMAS,
   ...MEMORY_SCHEMAS,
   ...RSS_SCHEMAS,
   ...CALENDAR_SCHEMAS,

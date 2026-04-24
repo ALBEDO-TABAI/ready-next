@@ -2,14 +2,22 @@
   "id": "lets-go-rss",
   "name": "Let's Go RSS",
   "description": "Multi-platform subscription aggregation, incremental updates, and digest reports.",
-  "version": "2026.03.15",
-  "defaultAction": "rss_update",
+  "version": "2026.04.23",
+  "defaultAction": "read_skill",
   "requirementsFile": "requirements.txt",
   "execution": {
     "mode": "advisory",
     "autoAdvance": false
   },
   "actions": [
+    {
+      "name": "read_skill",
+      "description": "读取并应用该技能的说明与方法（包含 Bot 推送规范）完成当前任务。",
+      "runtime": "reference",
+      "entry": "SKILL.md",
+      "visibility": "internal",
+      "params": []
+    },
     {
       "name": "rss_add",
       "description": "添加一个订阅源 URL。",

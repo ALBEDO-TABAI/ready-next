@@ -71,10 +71,21 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 优先通过共享能力层判断协议、wire API、tools/vision/video 能力
 - 若通道不支持原生 tools，应优先复用文本工具桥接，而不是继续写 provider 特判
 
-### 6.7 技能中心原则
+### 6.7 技能中心原则（全量同步 CLAUDE.md）
 - 系统级 embedded skills 与用户 custom skills 要分层管理
 - Agent 调用 skill 时优先走统一 `skill_*` 工具，而不是绕到手工网页流程
 - 更新 skill 管理逻辑时，要同时考虑运行时、UI、默认命令与说明文案
+- LLM-facing 的 `skill_submit_input / skill_submit_confirmation / skill_submit_agent_result / skill_restart_from_step / skill_cancel_execution` 5 个工具按 session 状态动态曝光：当 `ToolPolicy.sessionId` 提供且该 session 无 active execution 时必须被过滤掉，只保留只读的 `skill_get_state`；入口在 `skill-tool-session-gate.ts::filterExecutionControlToolsBySession`
+- 这 5 个工具的 description 前置固定子句 `ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0".`，防止模型在 reference 技能场景下编造 executionId；文案变更由 `src/__tests__/skill-zod-golden-snapshot.test.ts` 锁定
+- Reference 技能（`runtime: reference` / `execution.mode: advisory`）被内联注入时，orchestrator 必须调 `skill-reference-hints.rememberLastReferenceSkill(sessionId, {id,name})` 登记；`buildSkillExecutionMissingOutput` 检测到 `lastReferenceSkill` 后会用「不要再调 skill_submit_*」文案替代通用 `skill_get_state` 引导
+- Reference 技能内联注入走直读路径（`SkillContextOrchestrator.tryInlineReferenceSkillDoc` 读 `<managedPath>/SKILL.md` → role:'system' 注入，截断 12K 字符、emit `skill_reference_inlined` metric）；只有 readFileSync 失败或无 managedPath 时才回退到旧的 `skill_*_read_skill` tool-call 路径
+- Embedded skill 迁移到 reference/advisory（Phase 2 起的 `video-copy-analyzer` 是首例）时，manifest 至少保留 `read_skill` action（`runtime: reference`, `visibility: internal`），删掉 `execution.workflowFile` 与 `skill.workflow.json`；SKILL.md 要按 Claude Skill 协议声明 `name / description / when-to-use` frontmatter
+- 是否在 SKILL.md 正文里硬编码 `skill_run_shell` 的精确命令分两种：
+  - **轻量方法论型**（如 `video-copy-analyzer`）：不写死命令，留给模型决定调用时机与参数
+  - **prescriptive 长流程型**（如 `video-expert-analyzer-vnext`：staged 续跑、OpenClaw 接力、19 类视频路由）：允许 SKILL.md 内嵌精确命令；淡化 LLM 自由度反而会导致跳步
+- Phase 3 后所有 embedded skill 都已迁移完毕：`video-copy-analyzer` / `video-expert-analyzer (vnext swap)` / `lets-go-rss (混合：read_skill default + 5 retained public python actions)`，仓库内不再有 `skill.workflow.json`；混合形态的判定标准 = 是否有非 LLM 产品代码直接 `runSkill(skillId, action)`（如 `item-analysis-manager.ts` 调 `video_expert_pipeline` / `video_expert_ai_analyze`，UI 快捷键 `/skill lets-go-rss rss_update {…}`），有就把对应 action 留作 `visibility: 'public'` 或 `'internal'`（按是否需要 LLM 看见决定），并写好 `scripts/ready_compat.py` 这类 entry-script 翻译层把旧 `--payload-json` 契约翻译成新 entry script 的 CLI 形态
+- `custom-skill-registry.ts` 自动生成的 `read_skill` action 默认 `visibility: 'internal'`（避免 LLM 看到 `skill_<id>_read_skill` 并在循环里反复调用）；manifest 显式声明 `visibility: 'public'` 继续被尊重
+- `skill_ask_user` 通过独立 IPC（`skill:askUserQuestion` push + `skills:askUser:submit` invoke）驱动渲染端 `SkillAskUserPrompt` 胶囊；ephemeral 状态存于 `EphemeralExecutionStore`（内存，不写 `skill_executions` 表），executionId 用 `eau-<8hex>` 前缀区分；24h 超时 / AbortSignal 抗抖 / session 关闭都会清 pending 记录
 
 ### 6.8 文档多资源任务原则
 - 文档任务里的附件、`@[文件]`、当前文档上下文、引用片段都必须先进入结构化资源层，不能在入口阶段直接拼平成一段大文本
@@ -115,6 +126,17 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行（`running / blocked`）永不清理；sweep 在 `SkillsRuntimeManager` 启动后 30s 首跑、之后每小时跑一次，`tool-error-metrics.ttlSwept` 打点
 - `skill_executions` 表所在的 DB 没有开 `PRAGMA foreign_keys = ON`，`ON DELETE CASCADE` 实际不生效；任何清理跨表数据的逻辑必须显式删子表行（`skill_execution_steps` / `skill_execution_artifacts`）
 - 所有新 executionId 使用 `e-{8hex}` 前缀（`generateSkillExecutionId()`）；旧 UUID 行继续兼容，不做回填；`getExecution` 用 `WHERE id = ?` format-agnostic，`Zod` schema `z.string().trim().min(1)` 不加 UUID 断言
+
+### 6.12 Skill 原语沙箱边界（B Phase 1）
+- `skill_run_shell` 的命令白名单（Phase 1）：`python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / mkdir / rm / cp / mv / echo / awk / sed`，维护在 `src/main/modules/tools/skill-primitives/run-shell.ts::SHELL_ALLOWLIST`；扩展机制为 PR 级别修改白名单常量，**不**提供用户配置开关；遇到 embedded skill 需要的命令打点 `skillPrimitiveRejected{reason:'cmd_not_allowlisted'}` 再统一评估
+- `parseCommand` 只支持双引号分词：命令里出现 POSIX 单引号或不平衡的双引号时抛 `CommandParseError`，handler 转换为 `errorKind: 'command_parse_failed'`；不做 shell 展开、不走 `shell: true`，所以 `$(…)` / `&&` / `|` 等元字符按字面量传递
+- `skill_run_shell` 的超时 kill：Unix 走 `spawn({ detached: true })` 并用 `process.kill(-pid, SIGTERM)` 杀整个进程组，覆盖 bash/sh 孕育的孙进程；5s 后若仍存活升级 `SIGKILL`；Windows 回退到 `child.kill`
+- stdout / stderr 默认上限 8K 字符，超出时把完整内容写入 `<artifactRoot>/.logs/shell-<ts>-<uuid>-<stream>.txt` 并返回 `stdoutArtifactPath` / `stderrArtifactPath`；overflow 写入失败不吞掉命令主结果，通过 `stdoutArtifactError` / `stderrArtifactError` 暴露，同时 emit `skillPrimitiveRejected{reason:'overflow_artifact_write_failed'}`
+- `skill_write_artifact` 只能写 `<artifactRoot>` 子树；绝对路径 / `..` 穿越 / symlink 逃逸 / 保留文件（`SKILL.md` / `ready-skill.json` / `skill.workflow.json` / `MANIFEST.json`，大小写不敏感）一律拒绝；单次写入字节上限 `WRITE_ARTIFACT_HARD_CAP_BYTES = 50 MB`，超出返回 `errorKind: 'size_limit'`
+- `skill_read_artifact` 允许读 `<artifactRoot>` 下的任何文件；默认读 32 KB，最大 1 MB（Zod `.max(1_048_576)` + 运行时 `HARD_CAP_BYTES`）；缺失文件返回 `errorKind: 'not_found'`，目录返回 `not_a_file`
+- 原语 Phase 1 **不提供并发锁**：同一 skill 对同一 path 的 `skill_write_artifact` 并发写以最后赢家为准；若未来某 skill 证实需要原子性，按需引入文件锁或 `mkdtemp + rename`
+- 原语曝光受 `filterSkillPrimitivesBySession` 管控：只有当 session 有 active execution 或者 `skill-reference-hints` 登记过 `lastReferenceSkill` 时才对 LLM 可见；`clearAllReferenceSkillHints` 在 `cleanupAgentRuntime`（app 退出）触发，`sweepExpiredReferenceSkillHints` 随 `SkillsRuntimeManager` 的小时级 TTL sweep 一并跑，idle 超过 30 分钟的 hint 被淘汰
+- `skill_run_shell` 的子进程 `PATH` 由 dispatch 层（`skills-tools.ts`）自动前置共享 venv bin（`SkillsRuntimeManager.getSharedVenvBinDir()` → `<venvRoot>/bin` Unix / `<venvRoot>/Scripts` Windows），确保 `requirements.txt` 驱动安装到共享 venv 的 Python 依赖可被脚本 `import` 到；handler 本身不做 venv 解析，venvBinDir 缺失时走 no-op
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

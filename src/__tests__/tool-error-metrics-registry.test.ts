@@ -15,12 +15,14 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 7 documented keys', () => {
+test('registry exposes the 9 documented keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'inputValidation',
     'resolutionViolation',
     'skillExecutionMissing',
+    'skillPrimitiveRejected',
+    'skillPrimitiveUsed',
     'surfaced',
     'toolSnapshotMismatch',
     'ttlSwept',
@@ -50,4 +52,7 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillExecutionMissing, 'skill_execution_missing')
   assert.equal(TOOL_ERROR_METRICS.ttlSwept, 'skill_executions_ttl_swept')
   assert.equal(TOOL_ERROR_METRICS.toolSnapshotMismatch, 'tool_snapshot_mismatch')
+  // B Phase 1 — skill primitives
+  assert.equal(TOOL_ERROR_METRICS.skillPrimitiveUsed, 'skill_primitive_used')
+  assert.equal(TOOL_ERROR_METRICS.skillPrimitiveRejected, 'skill_primitive_rejected')
 })

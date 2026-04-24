@@ -15,6 +15,12 @@ import {
   toOpenAITool,
 } from '../main/modules/tools/skill-execution-tool-defs'
 
+// P0-T2 (B plan Phase 0): 5 of the 6 control tools now prefix their
+// description with an ONLY-call guard to stop LLMs from fabricating an
+// executionId like "new". `skill_get_state` is read-only and unchanged.
+const EXECUTION_CONTROL_ONLY_PREFIX =
+  'ONLY call this if a previous skill_* tool returned an explicit executionId. Never fabricate an id like "new" or "0". '
+
 const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   skill_get_state: {
     name: 'skill_get_state',
@@ -30,7 +36,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_input: {
     name: 'skill_submit_input',
-    description: '向一个被 need_input 阻塞的 execution 提交输入并继续推进。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向一个被 need_input 阻塞的 execution 提交输入并继续推进。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -42,7 +48,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_confirmation: {
     name: 'skill_submit_confirmation',
-    description: '提交 confirmation 结果并继续执行 skill workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}提交 confirmation 结果并继续执行 skill workflow。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -55,7 +61,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_submit_agent_result: {
     name: 'skill_submit_agent_result',
-    description: '向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}向 need_agent_result 阶段提交 Claude 生成的正文和结构化输出，并继续推进 workflow。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -69,7 +75,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_restart_from_step: {
     name: 'skill_restart_from_step',
-    description: '从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}从指定 step 重新开始 skill execution，并删除该步及后续步骤的状态与产物。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -82,7 +88,7 @@ const EXPECTED_ANTHROPIC_TOOLS: Record<string, unknown> = {
   },
   skill_cancel_execution: {
     name: 'skill_cancel_execution',
-    description: '取消一个正在进行的 skill execution。',
+    description: `${EXECUTION_CONTROL_ONLY_PREFIX}取消一个正在进行的 skill execution。`,
     input_schema: {
       type: 'object',
       properties: {
@@ -139,4 +145,35 @@ test('toOpenAITool wraps the same shape under { type: function, function: { name
       `${def.name} OpenAI schema drifted — expected ${JSON.stringify(openaiExpected, null, 2)}\n  got ${JSON.stringify(actual, null, 2)}`,
     )
   }
+})
+
+// Patch A3 — the OpenAI snapshot already covers description byte-equality via
+// deepEqual above, but we add an explicit substring check so a future
+// "helpful" refactor that drops the ONLY prefix from the OpenAI wire format
+// (while leaving Anthropic intact) would fail loudly here rather than hiding
+// in diffing noise.
+test('toOpenAITool preserves ONLY-call prefix on the 5 gated tools (OpenAI wire)', () => {
+  const gated = [
+    'skill_submit_input',
+    'skill_submit_confirmation',
+    'skill_submit_agent_result',
+    'skill_restart_from_step',
+    'skill_cancel_execution',
+  ]
+  for (const name of gated) {
+    const def = EXECUTION_TOOL_DEFS.find((d) => d.name === name)
+    assert.ok(def, `expected ${name} in EXECUTION_TOOL_DEFS`)
+    const openai = toOpenAITool(def!) as { function: { description: string } }
+    assert.ok(
+      openai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
+      `${name} OpenAI description is missing the ONLY-call prefix: ${openai.function.description.slice(0, 80)}…`,
+    )
+  }
+  // Read-only tool must NOT carry the prefix.
+  const getStateDef = EXECUTION_TOOL_DEFS.find((d) => d.name === 'skill_get_state')!
+  const getStateOpenai = toOpenAITool(getStateDef) as { function: { description: string } }
+  assert.ok(
+    !getStateOpenai.function.description.startsWith(EXECUTION_CONTROL_ONLY_PREFIX),
+    'skill_get_state must remain unprefixed — it is a safe read',
+  )
 })

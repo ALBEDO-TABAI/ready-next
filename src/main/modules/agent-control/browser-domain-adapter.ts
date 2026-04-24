@@ -37,7 +37,7 @@ interface BrowserDomainOrchestratorLike {
     phase: 'blocked' | 'done'
     summary: string
     blockedReason?: string | null
-    waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background'
+    waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification'
     resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
     recentEvidence?: string[] | null
   }) => Record<string, unknown>
