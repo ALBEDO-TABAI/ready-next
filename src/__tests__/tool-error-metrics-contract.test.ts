@@ -49,24 +49,27 @@ test('turn-engine.ts uses TOOL_ERROR_METRICS.resolutionViolation', () => {
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_resolution_violation_post_arbitration['"]/)
 })
 
-test('runtime-manager.ts emits ttlSwept metric with deleted/retentionDays/cutoff', () => {
+test('runtime-manager.ts retired the skill_executions TTL sweep (Phase 4 PR3)', () => {
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-  assert.match(source, /from ['"]\.\.\/agent-control\/tool-error-metrics['"]/)
-  assert.match(source, /store\.purgeExpiredExecutions\(/)
-  const sweepBlock = source.match(/logAgentMetric\(TOOL_ERROR_METRICS\.ttlSwept,[\s\S]*?\}\)/)
-  assert.ok(sweepBlock, 'ttlSwept emit block must be present')
-  const body = sweepBlock![0]
-  assert.match(body, /deleted/)
-  assert.match(body, /retentionDays/)
-  assert.match(body, /cutoff/)
+  // The `skill_executions` table + its TTL sweep are removed. The
+  // `purgeExpiredExecutions` call, the `ttlSwept` metric emit, and the
+  // `TTL_RETENTION_DAYS / TTL_SWEEP_INTERVAL_MS / TTL_BOOT_DELAY_MS` trio
+  // must all be gone.
+  assert.doesNotMatch(source, /purgeExpiredExecutions/)
+  assert.doesNotMatch(source, /TOOL_ERROR_METRICS\.ttlSwept/)
+  assert.doesNotMatch(source, /TTL_RETENTION_DAYS/)
+  assert.doesNotMatch(source, /TTL_SWEEP_INTERVAL_MS/)
+  assert.doesNotMatch(source, /TTL_BOOT_DELAY_MS/)
+  assert.doesNotMatch(source, /startTtlSweep/)
 })
 
-test('runtime-manager.ts schedules TTL sweep with boot delay + hourly interval', () => {
+test('runtime-manager.ts keeps reference-hint sweep on its own schedule', () => {
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-  assert.match(source, /TTL_RETENTION_DAYS\s*=\s*7/)
-  assert.match(source, /TTL_SWEEP_INTERVAL_MS\s*=\s*60\s*\*\s*60_?000/)
-  assert.match(source, /TTL_BOOT_DELAY_MS/)
-  assert.match(source, /startTtlSweep\(\)/)
-  assert.match(source, /setTimeout\(sweep, SkillsRuntimeManager\.TTL_BOOT_DELAY_MS\)/)
-  assert.match(source, /setInterval\(sweep, SkillsRuntimeManager\.TTL_SWEEP_INTERVAL_MS\)/)
+  // PR3 split the reference-hint sweep away from the retired TTL sweep.
+  // It still runs at the same cadence (30s boot delay + hourly interval)
+  // but through a dedicated `startReferenceHintSweep()` method.
+  assert.match(source, /startReferenceHintSweep\(\)/)
+  assert.match(source, /REFERENCE_HINT_SWEEP_INTERVAL_MS/)
+  assert.match(source, /REFERENCE_HINT_BOOT_DELAY_MS/)
+  assert.match(source, /sweepExpiredReferenceSkillHints\(\)/)
 })

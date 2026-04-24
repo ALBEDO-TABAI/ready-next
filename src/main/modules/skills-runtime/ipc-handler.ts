@@ -73,18 +73,26 @@ export function setupSkillsIPC(): void {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    executionMode?: 'auto' | 'workflow' | 'direct'
+    // B Phase 4 PR3: `'workflow'` option retired. Accept the legacy
+    // string so existing renderer callers don't error; silently collapse
+    // to `undefined` (manifest-declared default) at the runtime-manager
+    // boundary.
+    executionMode?: 'auto' | 'direct' | 'workflow'
   }): Promise<SkillsIPCResponse> => {
     try {
       const skillId = payload?.skillId
       if (!skillId) return { success: false, error: 'Missing skillId' }
+      const normalizedExecutionMode: 'auto' | 'direct' | undefined =
+        payload.executionMode === 'auto' || payload.executionMode === 'direct'
+          ? payload.executionMode
+          : undefined
       const result = await manager.runSkill({
         skillId,
         action: payload.action,
         params: payload.params,
         timeoutMs: payload.timeoutMs,
         sessionId: payload.sessionId,
-        executionMode: payload.executionMode || 'workflow',
+        executionMode: normalizedExecutionMode,
       })
       return result.success
         ? { success: true, data: result }
@@ -103,113 +111,12 @@ export function setupSkillsIPC(): void {
     }
   })
 
-  ipcMain.handle('skills:executions:list', (_, payload?: {
-    limit?: number
-    sessionId?: string
-    activeOnly?: boolean
-  }): SkillsIPCResponse => {
-    try {
-      return {
-        success: true,
-        data: manager.listExecutions(payload?.limit, payload?.sessionId, Boolean(payload?.activeOnly)),
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:get', (_, payload: { id: string }): SkillsIPCResponse => {
-    try {
-      if (!payload?.id) return { success: false, error: 'Missing id' }
-      const detail = manager.getExecution(payload.id)
-      return detail ? { success: true, data: detail } : { success: false, error: `Execution not found: ${payload.id}` }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:submitInput', async (_, payload: {
-    executionId: string
-    inputs: Record<string, unknown>
-  }): Promise<SkillsIPCResponse> => {
-    try {
-      if (!payload?.executionId) return { success: false, error: 'Missing executionId' }
-      return {
-        success: true,
-        data: await manager.submitExecutionInput(payload.executionId, (payload.inputs || {}) as Record<string, SkillInputValue>),
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:submitConfirmation', async (_, payload: {
-    executionId: string
-    stepId: string
-    confirmed: boolean
-  }): Promise<SkillsIPCResponse> => {
-    try {
-      if (!payload?.executionId || !payload?.stepId) return { success: false, error: 'Missing executionId or stepId' }
-      return {
-        success: true,
-        data: await manager.submitExecutionConfirmation(payload.executionId, payload.stepId, Boolean(payload.confirmed)),
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:submitAgentResult', async (_, payload: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, unknown>
-  }): Promise<SkillsIPCResponse> => {
-    try {
-      if (!payload?.executionId || !payload?.stepId) return { success: false, error: 'Missing executionId or stepId' }
-      return {
-        success: true,
-        data: await manager.submitExecutionAgentResult({
-          executionId: payload.executionId,
-          stepId: payload.stepId,
-          textContent: payload.textContent,
-          outputs: (payload.outputs || {}) as Record<string, SkillInputValue>,
-        }),
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:restartFromStep', async (_, payload: {
-    executionId: string
-    stepId: string
-    inputs?: Record<string, unknown>
-  }): Promise<SkillsIPCResponse> => {
-    try {
-      if (!payload?.executionId || !payload?.stepId) return { success: false, error: 'Missing executionId or stepId' }
-      return {
-        success: true,
-        data: await manager.restartExecutionFromStep(
-          payload.executionId,
-          payload.stepId,
-          (payload.inputs || {}) as Record<string, SkillInputValue>,
-        ),
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('skills:executions:cancel', (_, payload: { executionId: string }): SkillsIPCResponse => {
-    try {
-      if (!payload?.executionId) return { success: false, error: 'Missing executionId' }
-      const detail = manager.cancelExecution(payload.executionId)
-      return detail ? { success: true, data: detail } : { success: false, error: `Execution not found: ${payload.executionId}` }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // B Phase 4 PR3: the 7 `skills:executions:*` IPC handlers are retired
+  // alongside SkillsRuntimeManager's state machine. No renderer surfaces
+  // invoked `electronAPI.skills.executions.*`, so this cut is
+  // non-breaking. Tracker-driven resumption (PR1 projection shape +
+  // `continuationIntent.todoId`) rides the generic
+  // `agent.resumeRun / respondToInteraction` channel instead.
 
   ipcMain.handle('skills:schedules:list', (): SkillsIPCResponse => {
     try {

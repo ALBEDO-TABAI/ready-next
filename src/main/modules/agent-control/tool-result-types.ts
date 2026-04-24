@@ -57,11 +57,21 @@ export function getToolExecutionText(output: ToolExecutionResultLike): string {
 
 export function serializeToolExecutionOutput(output: ToolExecutionResultLike): string {
   const normalized = normalizeToolExecutionOutput(output)
+  // B Phase 4 PR3: prefer `text` when both `text` and `projectionPatch`
+  // are set. Previously a non-empty patch unconditionally won and the
+  // model saw the UI-oriented JSON as the tool_result body — fine for
+  // workflow skills (where "execution state" WAS the result) but
+  // misleading for primitive tool calls (where the model needs stdout or
+  // an ask_user answer). Patches remain the UI-facing projection source;
+  // the tool_result body stays stdout-shaped.
+  if (normalized.text) {
+    return normalized.text
+  }
   if (normalized.projectionPatch) {
     return JSON.stringify(normalized.projectionPatch)
   }
-  if (normalized.shape === 'json' && normalized.data && !normalized.text) {
+  if (normalized.shape === 'json' && normalized.data) {
     return JSON.stringify(normalized.data)
   }
-  return normalized.text
+  return ''
 }

@@ -43,7 +43,9 @@ import {
 } from '../../modules/workbench/panel-motion'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
-import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
+// B Phase 4 PR3: `createTaskPatchFromSkillExecutionDetail` import retired
+// alongside `applySkillExecutionDetailToScope` (both are dead code now
+// that the state machine is gone).
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
@@ -2367,60 +2369,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     []
   )
 
-  const applySkillExecutionDetailToScope = useCallback(
-    (
-      scopeId: string,
-      detail: {
-        id: string
-        skillId: string
-        status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-        startedAt: string
-        updatedAt: string
-        currentStepId?: string | null
-        blocker?: { type: string; message: string } | null
-        steps: Array<{ stepId: string; status: string }>
-        artifacts: Array<{ id?: string; label?: string; path?: string }>
-      }
-    ) => {
-      const patch = createTaskPatchFromSkillExecutionDetail(detail)
-      const nextPhase: ScopeRunState['phase'] =
-        detail.status === 'completed'
-          ? 'done'
-          : detail.status === 'failed'
-            ? 'error'
-            : detail.status === 'cancelled'
-              ? 'cancelled'
-              : detail.status === 'blocked'
-                ? 'checkpoint'
-                : 'tool_running'
-
-      patchScopeRun(
-        scopeId,
-        (previous) =>
-          ({
-            ...(previous ||
-              useAgent.getState().scopeRunStates[scopeId] || {
-                ...useAgent.getState().scopeRunStates[scopeId]
-              }),
-            ...patch,
-            scopeId,
-            agent: previous?.agent || currentAgent,
-            phase: nextPhase,
-            updatedAt: detail.updatedAt,
-            taskSummary: patch.taskSummary || previous?.taskSummary || null,
-            recentArtifacts: patch.recentArtifacts || previous?.recentArtifacts || [],
-            resumableActions: patch.resumableActions || previous?.resumableActions || [],
-            waitingFor: patch.waitingFor || previous?.waitingFor || 'none',
-            memoryCapture: previous?.memoryCapture || null,
-            toolTrace: previous?.toolTrace || [],
-            startedAt: previous?.startedAt || detail.startedAt,
-            responseBuffer: previous?.responseBuffer || '',
-            stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null }
-          }) as ScopeRunState
-      )
-    },
-    [currentAgent, patchScopeRun]
-  )
+  // B Phase 4 PR3: `applySkillExecutionDetailToScope` retired. Its only
+  // caller was the `handleRetryTask` branch that invoked
+  // `skills.restartFromStep` — both were deleted together in PR3 when the
+  // state machine IPC went away.
 
   const buildRunContinuationIntent = useCallback(
     (
@@ -2519,29 +2471,21 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
 
   const handleRetryTask = useCallback(
     async (scopeId: string) => {
+      // B Phase 4 PR3: the direct `skills.restartFromStep` IPC path is
+      // retired alongside the state machine. Retry now always goes through
+      // a composer-draft prompt — the agent layer picks up the
+      // `continuationIntent` (now carrying `todoId` / `todoTitle`, PR1)
+      // and regenerates the tool calls for the referenced todo.
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
-      const continuation = run?.taskContinuation
-      if (continuation?.executionId && continuation.stepId) {
-        const result = await window.electronAPI.skills
-          .restartFromStep({
-            executionId: continuation.executionId,
-            stepId: continuation.stepId
-          })
-          .catch(() => null)
-        if (result?.success && result.data) {
-          applySkillExecutionDetailToScope(scopeId, result.data)
-          return
-        }
-      }
       setComposerDraft(
         '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
         buildRunContinuationIntent(run) || null,
       )
       focusInputWithResize()
     },
-    [applySkillExecutionDetailToScope, buildRunContinuationIntent, focusInputWithResize, mergedTaskRuns, setComposerDraft]
+    [buildRunContinuationIntent, focusInputWithResize, mergedTaskRuns, setComposerDraft]
   )
 
   const handleOpenTaskArtifact = useCallback(async (path: string) => {

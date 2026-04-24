@@ -15,10 +15,11 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 8 documented keys post-Phase 4 PR2', () => {
+test('registry exposes the 7 documented keys post-Phase 4 PR3', () => {
   // B Phase 4 PR2 retired `skillExecutionMissing` alongside the 6 LLM-facing
-  // execution-control tools. `ttlSwept` stays until PR3 removes the state
-  // machine + TTL sweep entirely.
+  // execution-control tools. B Phase 4 PR3 retired `ttlSwept` alongside
+  // the `skill_executions` state machine; the reference-hint sweep now
+  // emits via `skill-reference-hints.ts`'s own metric outside this registry.
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'inputValidation',
@@ -27,7 +28,6 @@ test('registry exposes the 8 documented keys post-Phase 4 PR2', () => {
     'skillPrimitiveUsed',
     'surfaced',
     'toolSnapshotMismatch',
-    'ttlSwept',
     'unknownSurfaced',
   ])
 })
@@ -51,7 +51,6 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.unknownSurfaced, 'tool_error_unknown_surfaced')
   assert.equal(TOOL_ERROR_METRICS.inputValidation, 'tool_input_validation_failed')
   assert.equal(TOOL_ERROR_METRICS.resolutionViolation, 'tool_resolution_violation_post_arbitration')
-  assert.equal(TOOL_ERROR_METRICS.ttlSwept, 'skill_executions_ttl_swept')
   assert.equal(TOOL_ERROR_METRICS.toolSnapshotMismatch, 'tool_snapshot_mismatch')
   // B Phase 1 — skill primitives
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveUsed, 'skill_primitive_used')

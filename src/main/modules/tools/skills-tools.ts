@@ -2,10 +2,7 @@ import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
-import type {
-  SkillActionDefinition,
-  SkillExecutionDetail,
-} from '../../../shared/skill-execution-types'
+import type { SkillActionDefinition } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
 import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
@@ -134,10 +131,12 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   // dynamic `skill_<id>_<action>` tools and the 4 primitives reach the
   // LLM surface.
   //
-  // The `hasActiveExecution` signal is still read by `filterSkillPrimitivesBySession`
-  // for primitive gating; PR3 retires the state machine entirely and
-  // rewires this to `() => false`.
-  const hasActiveExecution = (sid: string) => findExecutionForSession(sid) !== null
+  // B Phase 4 PR3 — `hasActiveExecution` is now permanently `false`: the
+  // `skill_executions` state machine is retired, so the only way
+  // `filterSkillPrimitivesBySession` exposes primitives is when the
+  // session has a reference-skill hint. Kept as an arrow for API
+  // stability with the predicate-shaped gating helper.
+  const hasActiveExecution = (_sid: string) => false
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
 
   const primitiveTools = filterSkillPrimitivesBySession(
@@ -266,19 +265,10 @@ function formatRunResult(result: {
   outputDir?: string
   error?: string
   command: string[]
-  mode?: 'direct' | 'workflow' | 'reference'
+  mode?: 'direct' | 'reference'
   skillId?: string
   action?: string
-  execution?: SkillExecutionDetail | null
-  blocker?: { type: string; message: string } | null
 }): string {
-  // B Phase 4 PR2: the `workflow` return branch no longer has a bespoke
-  // text formatter — `formatExecutionDetail` was retired alongside the
-  // state-machine tools. If `runSkill` still returns `mode: 'workflow'`
-  // (legacy manifest declarations), fall through to the generic
-  // stdout/stderr framing below. PR3 removes the `workflow` branch at the
-  // source (SkillsRuntimeManager.runSkill).
-
   // Reference-mode skills (`runtime: reference`, typically advisory SKILL.md
   // loads) are NOT subprocess executions — they read a markdown guidance file.
   // Wrapping their content in `Command:` / `STDOUT:` envelopes misleads the
@@ -305,7 +295,8 @@ function formatRunResult(result: {
   if (result.command.length > 0) sections.push(`Command: ${result.command.join(' ')}`)
   if (result.stdout.trim()) sections.push(`STDOUT:\n${result.stdout.trim()}`)
   if (result.stderr.trim()) sections.push(`STDERR:\n${result.stderr.trim()}`)
-  if (result.blocker) sections.push(`Blocker: ${result.blocker.type} - ${result.blocker.message}`)
+  // B Phase 4 PR3: `result.blocker` lived on the workflow path and has
+  // been dropped from SkillRunResult alongside the state machine.
   return sections.join('\n\n') || 'Skill execution completed.'
 }
 
@@ -322,23 +313,12 @@ function asString(value: unknown): string {
  */
 function resolvePrimitiveSkillId(sessionId?: string): string | null {
   if (!sessionId) return null
-  const active = findExecutionForSession(sessionId)
-  if (active && active.skillId) return active.skillId
+  // B Phase 4 PR3: the `skill_executions` state machine is retired, so
+  // the former "active execution wins over reference-skill hint" priority
+  // rule collapses — only the hint path remains.
   const hint = getLastReferenceSkill(sessionId)
   if (hint && hint.id) return hint.id
   return null
-}
-
-function findExecutionForSession(sessionId?: string, executionId?: string, skillId?: string): SkillExecutionDetail | null {
-  const manager = getSkillsRuntimeManager()
-  if (executionId) {
-    return manager.getExecution(executionId)
-  }
-  if (!sessionId) return null
-  const active = manager.listExecutions(10, sessionId, true)
-  const matched = skillId ? active.find((item) => item.skillId === skillId) : active[0]
-  if (!matched) return null
-  return manager.getExecution(matched.id)
 }
 
 /**
@@ -390,7 +370,15 @@ async function trackPrimitive(
     } else {
       tracker.markBlocked(todoId, classification.reason || 'unknown')
     }
-    return output
+    // B Phase 4 PR3: attach the tracker-derived projection patch to the
+    // tool output so `turn-engine.emitStructuredPayload` pushes the UI
+    // update through. `serializeToolExecutionOutput` was updated in the
+    // same PR to prefer `text` over `projectionPatch` — the model still
+    // sees stdout / answer as the tool_result body.
+    const projectionPatch = buildSkillTaskProjectionPatch(params.sessionId, params.skillId)
+    return projectionPatch
+      ? { ...output, projectionPatch, shape: 'projection_patch' as const }
+      : output
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     tracker.markBlocked(todoId, message)
@@ -563,8 +551,12 @@ export async function executeSkillTool(
   // skill_action path — dispatches to SkillsRuntimeManager.runSkill for
   // manifest-declared actions. B Phase 4 PR3 will strip the workflow
   // cleanup branch; PR2 keeps it to minimize diff scope and because
-  // `runSkill` is still callable even though no embedded skill uses
-  // `executionMode: 'workflow'` post-Phase 3.
+  // B Phase 4 PR3: no more `executionMode: 'workflow'` injection — the
+  // state machine is retired, and `runSkill` now only does direct
+  // subprocess / reference-doc fetches. `registerRunCleanup` no longer
+  // has anything skill-side to cancel (run_shell has its own AbortSignal
+  // plumbing wired through `trackPrimitive`'s caller context).
+  void registerRunCleanup
   const result = await manager.runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
@@ -572,21 +564,7 @@ export async function executeSkillTool(
     timeoutMs: tool.timeoutMs,
     triggerType: 'tool',
     sessionId,
-    executionMode: 'workflow',
   })
-  if (
-    registerRunCleanup
-    && result.mode === 'workflow'
-    && result.execution?.id
-    && result.execution.status !== 'completed'
-    && result.execution.status !== 'failed'
-    && result.execution.status !== 'cancelled'
-  ) {
-    const executionId = result.execution.id
-    registerRunCleanup(() => {
-      manager.cancelExecution(executionId)
-    })
-  }
   const formatted = formatRunResult(result)
   rememberSkillRun(sessionId, {
     toolName,

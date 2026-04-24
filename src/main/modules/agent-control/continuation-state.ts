@@ -169,6 +169,14 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
     stepId: normalizeOptionalContinuationText(value.stepId),
     blockedReason: normalizeOptionalContinuationText(value.blockedReason),
     responseText: normalizeOptionalContinuationText(value.responseText),
+    // B Phase 4 PR3: tracker-anchored fields. `todoId` is the id assigned by
+    // `SkillTaskTracker.startTodo()` (pattern `st-<8hex>`); `todoTitle` is
+    // the human-readable line the renderer task card rendered. Both travel
+    // through continuation state so `direct-chat.ts` can synthesize a
+    // "请继续执行 todo「…」" / "请重新执行 todo「…」" user message
+    // when no `executionId` is present.
+    todoId: normalizeOptionalContinuationText(value.todoId),
+    todoTitle: normalizeOptionalContinuationText(value.todoTitle),
   }
 }
 

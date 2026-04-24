@@ -412,25 +412,18 @@ const skillsAPI = {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    executionMode?: 'auto' | 'workflow' | 'direct'
+    // Matches ElectronSkillsAPI.run signature in `electron.d.ts`. Legacy
+    // `'workflow'` is still accepted; skills:run handler in main process
+    // normalises it to `undefined` (manifest-declared default).
+    executionMode?: 'auto' | 'direct' | 'workflow'
   }) => ipcRenderer.invoke('skills:run', payload),
   listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
-  listExecutions: (payload?: { limit?: number; sessionId?: string; activeOnly?: boolean }) =>
-    ipcRenderer.invoke('skills:executions:list', payload || {}),
-  getExecution: (payload: { id: string }) => ipcRenderer.invoke('skills:executions:get', payload),
-  submitInput: (payload: { executionId: string; inputs: Record<string, unknown> }) =>
-    ipcRenderer.invoke('skills:executions:submitInput', payload),
-  submitConfirmation: (payload: { executionId: string; stepId: string; confirmed: boolean }) =>
-    ipcRenderer.invoke('skills:executions:submitConfirmation', payload),
-  submitAgentResult: (payload: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, unknown>
-  }) => ipcRenderer.invoke('skills:executions:submitAgentResult', payload),
-  restartFromStep: (payload: { executionId: string; stepId: string; inputs?: Record<string, unknown> }) =>
-    ipcRenderer.invoke('skills:executions:restartFromStep', payload),
-  cancelExecution: (payload: { executionId: string }) => ipcRenderer.invoke('skills:executions:cancel', payload),
+  // B Phase 4 PR3: `listExecutions / getExecution / submitInput /
+  // submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution` + their `skills:executions:*` IPC handlers are retired
+  // alongside the SkillsRuntimeManager state machine. No renderer code
+  // referenced `electronAPI.skills.executions.*`, so this delete is
+  // non-breaking for product surfaces.
   // B Phase 1 PR2 — ask_user: submit the user's answer to a pending ephemeral
   // question. Question metadata is pushed separately via `skill:askUserQuestion`.
   submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>

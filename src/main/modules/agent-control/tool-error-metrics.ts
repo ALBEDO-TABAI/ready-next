@@ -26,11 +26,11 @@ export const TOOL_ERROR_METRICS = {
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
   // B Phase 4 PR2: `skillExecutionMissing` retired alongside the 6
-  // `skill_submit_*` / `skill_get_state` / restart / cancel tools. The
-  // stale-executionId recovery path (`kind === 'skill_execution_missing'`)
-  // is unreachable once the model cannot fabricate an executionId.
-  /** skill_executions TTL sweep 完成一次（Phase 4 新增；PR3 将随状态机一同退役） */
-  ttlSwept: 'skill_executions_ttl_swept',
+  // `skill_submit_*` / `skill_get_state` / restart / cancel tools.
+  // B Phase 4 PR3: `ttlSwept` retired — the `skill_executions` state
+  // machine + its TTL sweep are gone. The only periodic in-memory sweep
+  // that survives is reference-skill hints, and it emits via its own
+  // metric in `skill-reference-hints.ts` (not this registry).
   /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
    * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明

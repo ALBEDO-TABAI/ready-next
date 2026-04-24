@@ -1660,55 +1660,11 @@ interface SkillState {
   sourcePath?: string
 }
 
-interface SkillExecutionBlocker {
-  type: 'need_input' | 'need_confirmation' | 'need_agent_result' | 'completed' | 'failed'
-  executionId: string
-  skillId: string
-  stepId?: string
-  message: string
-  agentTask?: {
-    prompt: string
-  }
-}
-
-interface SkillExecutionStepRecord {
-  id: string
-  executionId: string
-  stepId: string
-  attempt: number
-  status: 'running' | 'success' | 'failed' | 'blocked' | 'cancelled'
-  startedAt: string
-  finishedAt?: string | null
-  message?: string | null
-}
-
-interface SkillArtifactRecord {
-  id: string
-  label?: string
-  kind?: string
-  path?: string
-  mimeType?: string
-  metadata?: Record<string, unknown>
-}
-
-interface SkillExecutionDetail {
-  id: string
-  skillId: string
-  entryAction: string
-  sessionId?: string | null
-  source: SkillSource
-  status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-  startedAt: string
-  updatedAt: string
-  finishedAt?: string | null
-  currentStepId?: string | null
-  blocker?: SkillExecutionBlocker | null
-  stepOutputs: Record<string, Record<string, unknown>>
-  confirmations: Record<string, boolean>
-  inputs: Record<string, unknown>
-  steps: SkillExecutionStepRecord[]
-  artifacts: SkillArtifactRecord[]
-}
+// B Phase 4 PR3: `SkillExecutionBlocker / SkillExecutionStepRecord /
+// SkillArtifactRecord / SkillExecutionDetail` renderer-side types are
+// retired alongside the `skill_executions` state machine. Task cards now
+// consume the tracker-sourced projection patch (see
+// `buildSkillTaskProjectionPatch` in `skills-tools.ts`).
 
 interface SkillInstallResult {
   success: boolean
@@ -1727,9 +1683,9 @@ interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  mode?: 'direct' | 'workflow'
-  execution?: SkillExecutionDetail | null
-  blocker?: SkillExecutionBlocker | null
+  // B Phase 4 PR3: `mode: 'workflow'` dropped; `execution` / `blocker`
+  // fields retired alongside the state machine.
+  mode?: 'direct' | 'reference'
 }
 
 interface SkillJobRecord {
@@ -1790,36 +1746,17 @@ interface ElectronSkillsAPI {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    executionMode?: 'auto' | 'workflow' | 'direct'
+    // B Phase 4 PR3: `'workflow'` is accepted for backward-compat but
+    // silently collapsed at the runtime boundary. Prefer omitting the
+    // flag; the manifest-declared runtime kind picks the path.
+    executionMode?: 'auto' | 'direct' | 'workflow'
   }) => Promise<IPCResponse<SkillRunResult>>
   listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
-  listExecutions: (payload?: {
-    limit?: number
-    sessionId?: string
-    activeOnly?: boolean
-  }) => Promise<IPCResponse<SkillExecutionDetail[]>>
-  getExecution: (payload: { id: string }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitInput: (payload: {
-    executionId: string
-    inputs: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitConfirmation: (payload: {
-    executionId: string
-    stepId: string
-    confirmed: boolean
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitAgentResult: (payload: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  restartFromStep: (payload: {
-    executionId: string
-    stepId: string
-    inputs?: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  cancelExecution: (payload: { executionId: string }) => Promise<IPCResponse<SkillExecutionDetail>>
+  // B Phase 4 PR3: `listExecutions / getExecution / submitInput /
+  // submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution` + their `skills:executions:*` IPC are retired.
+  // Renderer code that needs stepwise progress reads it off the task-card
+  // projection patch (sourced from `SkillTaskTracker`, PR1).
   listSchedules: () => Promise<IPCResponse<SkillScheduleRecord[]>>
   createSchedule: (payload: {
     skillId: string

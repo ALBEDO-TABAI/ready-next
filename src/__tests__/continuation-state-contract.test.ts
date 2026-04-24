@@ -152,8 +152,31 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
     stepId: 'approve',
     blockedReason: '等待确认',
     responseText: '可以继续',
+    // B Phase 4 PR3: tracker-anchored continuation fields. Always normalize
+    // to `undefined` when omitted so existing `{ executionId, stepId, … }`
+    // callers don't accidentally forward stale todo state.
+    todoId: undefined,
+    todoTitle: undefined,
   })
   assert.equal(normalizeContinuationIntent({ taskId: '   ' }), null)
+})
+
+test('normalizeContinuationIntent preserves todoId + todoTitle for tracker-anchored resumption', () => {
+  const normalized = normalizeContinuationIntent({
+    taskId: 'task-tracker',
+    todoId: '  st-abc12345  ',
+    todoTitle: '  运行命令: python3 scripts/analyze.py  ',
+  })
+
+  assert.deepEqual(normalized, {
+    taskId: 'task-tracker',
+    executionId: undefined,
+    stepId: undefined,
+    blockedReason: undefined,
+    responseText: undefined,
+    todoId: 'st-abc12345',
+    todoTitle: '运行命令: python3 scripts/analyze.py',
+  })
 })
 
 test('applyContinuationIntentToState keeps task identity while applying explicit continuation overrides', () => {

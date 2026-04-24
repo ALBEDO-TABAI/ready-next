@@ -53,11 +53,14 @@ test('runtime-manager reference branch uses mode="reference" and empty command',
 })
 
 test('SkillRunResult.mode type includes "reference"', () => {
+  // B Phase 4 PR3 dropped `'workflow'` from `SkillRunResult.mode`; the
+  // reference branch must still be there — it's the payload shape the
+  // model sees when it triggers a reference-advisory skill inline.
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
 
   assert.match(
     source,
-    /mode\?:\s*'direct'\s*\|\s*'workflow'\s*\|\s*'reference'/,
+    /mode\?:\s*'direct'\s*\|\s*'reference'/,
     'SkillRunResult must allow mode: "reference"',
   )
 })

@@ -562,6 +562,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       stepId?: string
       blockedReason?: string
       responseText?: string
+      // B Phase 4 PR3: tracker-anchored resumption. `direct-chat.ts`
+      // normalizeContinuationIntent handles the todoId → user-message
+      // synthesis (no executionId lookup against the retired state
+      // machine).
+      todoId?: string
+      todoTitle?: string
     } | null
   }): Promise<IPCResponse> => {
     try {
@@ -598,6 +604,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       stepId?: string
       blockedReason?: string
       responseText?: string
+      todoId?: string
+      todoTitle?: string
     } | null
   }): Promise<IPCResponse> => {
     try {
@@ -619,6 +627,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       stepId?: string
       blockedReason?: string
       responseText?: string
+      todoId?: string
+      todoTitle?: string
     } | null
   }): Promise<IPCResponse> => {
     try {

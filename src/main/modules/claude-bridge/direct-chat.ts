@@ -718,12 +718,33 @@ export class DirectChatEngine extends EventEmitter {
         requestEnvelope: executionOptions?.requestEnvelope || null,
       })
       : null
-    const normalizedContent: string | MultimodalBlock[] = sanitizedContinuationRequest
+    let normalizedContent: string | MultimodalBlock[] = sanitizedContinuationRequest
       ? sanitizedContinuationRequest.content
       : content
     const normalizedRequestEnvelope = sanitizedContinuationRequest
       ? sanitizedContinuationRequest.requestEnvelope
       : executionOptions?.requestEnvelope
+
+    // B Phase 4 PR3: tracker-anchored continuation. When the task-card
+    // "continue" / "retry" buttons fire, the renderer forwards
+    // `continuationIntent.todoId` + `todoTitle` (from
+    // `buildSkillTaskProjectionPatch`). There is no executionId to
+    // rehydrate against — the state machine is retired — so we prepend a
+    // directive line to the user content that tells the agent which todo
+    // to pick up. Only applies when the incoming content is a plain string
+    // (multimodal continuations are expected to carry the anchor in their
+    // own envelope).
+    if (
+      typeof normalizedContent === 'string'
+      && normalizedContinuationIntent?.todoId
+      && normalizedContinuationIntent.todoTitle
+      && !normalizedContinuationIntent.executionId
+    ) {
+      const todoHintLine = `（针对 todo「${normalizedContinuationIntent.todoTitle}」，id=${normalizedContinuationIntent.todoId}）`
+      normalizedContent = normalizedContent.trim().length > 0
+        ? `${todoHintLine}\n\n${normalizedContent}`
+        : todoHintLine
+    }
     if (session.abortController) {
       try {
         this.cancelPendingToolActions?.(name, sessionId)

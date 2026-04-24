@@ -21,13 +21,10 @@ import { getDatabase } from '../database'
 import { getWhichCommand } from '../../utils/platform'
 import { EMBEDDED_SKILLS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
 import type {
-  ExecutionBlocker,
   SkillActionDefinition,
   SkillActionResult,
   SkillDefinition,
-  SkillExecutionDetail,
   SkillExecutionMode,
-  SkillExecutionState,
   SkillInputValue,
   SkillParamDefinition,
   SkillRuntimeKind,
@@ -42,11 +39,11 @@ import {
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
 import { SkillLoader } from './skill-loader'
-import { ExecutionStateStore } from './execution-state-store'
-import { ExecutionCoordinator } from './execution-coordinator'
-import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
-import { isWorkflowStarterAction } from './guardrails'
+// B Phase 4 PR3: the `skill_executions` state machine is retired.
+// `ExecutionStateStore`, `ExecutionCoordinator`, `NextActionResolver`, and
+// every `submit* / restart / cancel / listExecutions / getExecution` API
+// that sat on top of them are removed. Only the `skills:run` / `runSkill`
+// fire-and-forget path + scheduler + manifest management survive.
 import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
 
 const execFileAsync = promisify(execFile)
@@ -152,9 +149,10 @@ export interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  mode?: 'direct' | 'workflow' | 'reference'
-  execution?: SkillExecutionDetail | null
-  blocker?: ExecutionBlocker | null
+  // B Phase 4 PR3: `mode: 'workflow'` and the `execution` / `blocker`
+  // fields are retired; `runSkill` now only returns direct / reference
+  // runs. Models drive long-form work through primitives + todo tracker.
+  mode?: 'direct' | 'reference'
 }
 
 export interface SkillRunRequest {
@@ -166,7 +164,11 @@ export interface SkillRunRequest {
   scheduleId?: string
   env?: Record<string, string>
   sessionId?: string
-  executionMode?: 'auto' | 'workflow' | 'direct'
+  // B Phase 4 PR3: `'workflow'` option retired. `'direct'` keeps the
+  // subprocess launch shape; omitting the flag falls through to whatever
+  // the action's manifest declares (still subprocess-style for python
+  // actions, `readFileSync` for reference actions).
+  executionMode?: 'auto' | 'direct'
 }
 
 interface SkillJobRow {
@@ -307,17 +309,18 @@ export class SkillsRuntimeManager {
   private readonly pipCache: string
   private readonly outputsRoot: string
   private loader: SkillLoader | null = null
-  private executionStore: ExecutionStateStore | null = null
-  private executionCoordinator: ExecutionCoordinator | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
-  private ttlBootTimer: NodeJS.Timeout | null = null
-  private ttlIntervalTimer: NodeJS.Timeout | null = null
+  private referenceHintBootTimer: NodeJS.Timeout | null = null
+  private referenceHintIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
 
-  private static readonly TTL_RETENTION_DAYS = 7
-  private static readonly TTL_SWEEP_INTERVAL_MS = 60 * 60_000
-  private static readonly TTL_BOOT_DELAY_MS = 30_000
+  // B Phase 4 PR3: the `skill_executions` TTL sweep is retired along with
+  // the state machine. The `reference-skill hints` sweep — formerly
+  // piggy-backed on the same timer — now owns its own schedule so the
+  // cleanup semantics are decoupled from DB concerns.
+  private static readonly REFERENCE_HINT_SWEEP_INTERVAL_MS = 60 * 60_000
+  private static readonly REFERENCE_HINT_BOOT_DELAY_MS = 30_000
 
   constructor() {
     this.runtimeRoot = join(app.getPath('userData'), 'skill-runtime')
@@ -330,35 +333,18 @@ export class SkillsRuntimeManager {
     this.pipCache = join(this.cacheRoot, 'pip')
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
     this.startScheduler()
-    this.startTtlSweep()
+    this.startReferenceHintSweep()
   }
 
   /**
-   * Phase 4 — periodically purge terminal skill_executions rows older than
-   * the retention window. Runs once 30s after boot (avoid blocking startup)
-   * and then hourly. Each run is best-effort — a failure logs to stderr and
-   * the next tick tries again.
+   * Standalone reference-skill hint sweep. Was previously tied to the
+   * retired `skill_executions` TTL sweep; now runs independently at the
+   * same cadence (30s boot delay + hourly interval). Idle hints beyond
+   * `REFERENCE_SKILL_HINT_TTL_MS` are dropped so error messages do not
+   * mention long-stale skills.
    */
-  private startTtlSweep(): void {
+  private startReferenceHintSweep(): void {
     const sweep = (): void => {
-      try {
-        const store = this.getExecutionStore()
-        const { deleted, cutoff } = store.purgeExpiredExecutions(
-          SkillsRuntimeManager.TTL_RETENTION_DAYS,
-        )
-        logAgentMetric(TOOL_ERROR_METRICS.ttlSwept, {
-          deleted,
-          retentionDays: SkillsRuntimeManager.TTL_RETENTION_DAYS,
-          cutoff,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('[SkillsRuntimeManager] TTL sweep failed:', message)
-      }
-      // Patch A1 — piggy-back the reference-skill hint sweep on this same
-      // cadence. Idle hints older than REFERENCE_SKILL_HINT_TTL_MS would
-      // otherwise linger in-process indefinitely; a live app without
-      // periodic cleanup ends up mis-reporting stale skills in error hints.
       try {
         sweepExpiredReferenceSkillHints()
       } catch (error) {
@@ -366,8 +352,14 @@ export class SkillsRuntimeManager {
         console.error('[SkillsRuntimeManager] reference-hint sweep failed:', message)
       }
     }
-    this.ttlBootTimer = setTimeout(sweep, SkillsRuntimeManager.TTL_BOOT_DELAY_MS)
-    this.ttlIntervalTimer = setInterval(sweep, SkillsRuntimeManager.TTL_SWEEP_INTERVAL_MS)
+    this.referenceHintBootTimer = setTimeout(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
+    )
+    this.referenceHintIntervalTimer = setInterval(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
+    )
   }
 
   private getSkillLoader(): SkillLoader {
@@ -433,83 +425,13 @@ export class SkillsRuntimeManager {
       : join(this.venvRoot, 'bin')
   }
 
-  private getExecutionStore(): ExecutionStateStore {
-    if (!this.executionStore) {
-      const db = this.getRawDatabase()
-      if (!db) {
-        throw new Error('Database not available')
-      }
-      this.executionStore = new ExecutionStateStore(db)
-    }
-    return this.executionStore
-  }
-
-  private getExecutionCoordinator(): ExecutionCoordinator {
-    if (!this.executionCoordinator) {
-      this.executionCoordinator = new ExecutionCoordinator(
-        this.getExecutionStore(),
-        {
-          executeRuntimeAction: ({ definition, actionName, step, args, sessionId }) =>
-            this.executeWorkflowRuntimeAction({
-              definition,
-              actionName,
-              stepId: step.id,
-              params: args,
-              sessionId,
-            }),
-        },
-        this.outputsRoot,
-      )
-    }
-    return this.executionCoordinator
-  }
-
-  listExecutions(limit = 30, sessionId?: string, activeOnly = false): SkillExecutionDetail[] {
-    this.ensureRuntimeDirs()
-    return this.getExecutionStore()
-      .listExecutions(limit, sessionId, activeOnly)
-      .map((item) => this.getExecutionStore().getExecution(item.id))
-      .filter((item): item is SkillExecutionDetail => Boolean(item))
-  }
-
-  getExecution(executionId: string): SkillExecutionDetail | null {
-    this.ensureRuntimeDirs()
-    return this.getExecutionStore().getExecution(executionId)
-  }
-
-  async submitExecutionInput(executionId: string, inputs: Record<string, SkillInputValue>): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitInput(executionId, inputs)
-  }
-
-  async submitExecutionConfirmation(executionId: string, stepId: string, confirmed: boolean): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitConfirmation(executionId, stepId, confirmed)
-  }
-
-  async submitExecutionAgentResult(params: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, SkillInputValue>
-  }): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitAgentResult(params)
-  }
-
-  async restartExecutionFromStep(
-    executionId: string,
-    stepId: string,
-    inputs?: Record<string, SkillInputValue>,
-  ): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().restartFromStep(executionId, stepId, inputs)
-  }
-
-  cancelExecution(executionId: string): SkillExecutionDetail | null {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().cancelExecution(executionId)
-  }
+  // B Phase 4 PR3: `ExecutionStateStore` / `ExecutionCoordinator` getters
+  // and the 7 execution APIs (`listExecutions / getExecution /
+  // submitExecutionInput / submitExecutionConfirmation /
+  // submitExecutionAgentResult / restartExecutionFromStep /
+  // cancelExecution`) are retired alongside the state machine. Callers
+  // that need stepwise progress tracking use `SkillTaskTracker` in
+  // `agent-control/skill-task-tracker.ts`.
 
   async runEmbeddedPython(params: {
     code?: string
@@ -645,21 +567,11 @@ export class SkillsRuntimeManager {
         return finish(this.invalidParams(resolved.definition.id, request.action, `Unknown action: ${request.action}`))
       }
 
-      const shouldStartWorkflow =
-        resolved.definition.executionMode === 'workflow' &&
-        isWorkflowStarterAction(resolved.definition, request.action) &&
-        request.executionMode !== 'direct' &&
-        (request.executionMode === 'workflow' || request.executionMode === 'auto' || request.executionMode === undefined)
-
-      if (shouldStartWorkflow) {
-        const execution = await this.getExecutionCoordinator().startExecution({
-          definition: resolved.definition,
-          entryAction: request.action,
-          inputs: (request.params || {}) as Record<string, SkillInputValue>,
-          sessionId: request.sessionId || null,
-        })
-        return finish(this.toWorkflowRunResult(resolved.definition.id, request.action, execution))
-      }
+      // B Phase 4 PR3: the `shouldStartWorkflow` branch (route the action
+      // through ExecutionCoordinator to create a `skill_executions` row)
+      // is gone. Every `runSkill` call now goes through direct subprocess
+      // or reference-doc path. Manifest `executionMode: 'workflow'`
+      // declarations are tolerated but inert — they fall through here.
 
       return finish(await this.runDefinitionActionDirect(
         resolved.definition,
@@ -822,102 +734,10 @@ export class SkillsRuntimeManager {
     return this.toDirectRunResult(skillId, action.name, executed)
   }
 
-  async executeWorkflowRuntimeAction(params: {
-    definition: SkillDefinition
-    actionName: string
-    stepId: string
-    params: Record<string, SkillInputValue>
-    sessionId?: string | null
-  }): Promise<SkillActionResult> {
-    const resolved = await this.resolveSkillForExecution(params.definition.id)
-    if (!resolved) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: `Unknown skill: ${params.definition.id}` },
-      }
-    }
-    const action = resolved.definition.actions.find((entry) => entry.name === params.actionName)
-    if (!action) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: `Unknown action: ${params.actionName}` },
-      }
-    }
-    if (action.runtime === 'reference') {
-      const stdout = readFileSync(join(
-        resolved.definition.source === 'embedded'
-          ? this.getSkillRuntimePath(resolved.definition.id)
-          : (resolved.definition.managedPath || resolved.definition.sourcePath),
-        action.entry,
-      ), 'utf-8')
-      return {
-        ok: true,
-        status: 'success',
-        outputs: {
-          textContent: stdout,
-        },
-        artifacts: [],
-        logs: { stdout: truncateOutput(stdout), stderr: '' },
-      }
-    }
-
-    const skillPath = resolved.definition.source === 'embedded'
-      ? this.getSkillRuntimePath(resolved.definition.id)
-      : (resolved.definition.managedPath || resolved.definition.sourcePath)
-    const entryPath = join(skillPath, action.entry)
-    const args = this.buildActionArgs(params.params as Record<string, unknown>, action)
-    if (action.runtime === 'python' && !resolved.installResult.venvPython) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: 'Python skill runtime is unavailable' },
-      }
-    }
-    const executed = await this.executeProcessWithStructuredResult({
-      skillId: resolved.definition.id,
-      actionName: action.name,
-      runtime: action.runtime,
-      cwd: skillPath,
-      commandBin: action.runtime === 'python'
-        ? (resolved.installResult.venvPython || '')
-        : action.runtime === 'node'
-          ? 'node'
-          : entryPath,
-      commandArgs: action.runtime === 'python' || action.runtime === 'node'
-        ? [entryPath, ...args]
-        : args,
-      timeoutMs: Math.max(3_000, action.timeoutMs || DEFAULT_TIMEOUT_MS),
-      preferStructuredResult: true,
-      envOverrides: {
-        ...(params.sessionId ? { READY_SKILL_SESSION_ID: params.sessionId } : {}),
-      },
-    })
-    if (executed.structuredResult) {
-      return executed.structuredResult
-    }
-    return {
-      ok: executed.success,
-      status: executed.success ? 'success' : 'failed',
-      outputs: executed.outputDir ? { outputDir: executed.outputDir } : {},
-      artifacts: [],
-      logs: {
-        stdout: executed.stdout,
-        stderr: executed.stderr,
-      },
-      error: executed.success ? undefined : { message: executed.error || `Step ${params.stepId} failed` },
-    }
-  }
+  // B Phase 4 PR3: `executeWorkflowRuntimeAction` retired. It was the
+  // callback `ExecutionCoordinator` invoked per step; with the coordinator
+  // gone the helper is orphan. Direct-mode action execution happens via
+  // `runDefinitionActionDirect`.
 
   private createStructuredResultPath(skillId: string, actionName: string): string {
     const dir = join(this.runtimeRoot, 'results')
@@ -1030,25 +850,9 @@ export class SkillsRuntimeManager {
     }
   }
 
-  private toWorkflowRunResult(skillId: string, actionName: string, execution: SkillExecutionDetail): SkillRunResult {
-    const summary = [
-      `Execution ID: ${execution.id}`,
-      `Status: ${execution.status}`,
-      execution.currentStepId ? `Current step: ${execution.currentStepId}` : '',
-      execution.blocker ? `Blocker: ${execution.blocker.type} - ${execution.blocker.message}` : '',
-    ].filter(Boolean).join('\n')
-    return {
-      success: execution.status !== 'failed' && execution.status !== 'cancelled',
-      skillId,
-      action: actionName,
-      stdout: summary,
-      stderr: '',
-      command: [],
-      mode: 'workflow',
-      execution,
-      blocker: execution.blocker || null,
-    }
-  }
+  // B Phase 4 PR3: `toWorkflowRunResult` retired. Workflow execution
+  // records are no longer produced — `runSkill` now always returns a
+  // direct-mode or reference-mode result.
 
   listJobs(limit = 80): SkillJobRecord[] {
     const db = this.getRawDatabase()
