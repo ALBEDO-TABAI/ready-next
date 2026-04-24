@@ -124,6 +124,65 @@ test('truncates to 12000 chars when SKILL.md exceeds the cap', async () => {
   }
 })
 
+test('inline injection still fires when read_skill is internal and resolveSkillToolByAction returns null', async () => {
+  // Regression — `video-expert-analyzer`'s read_skill action is
+  // `visibility: internal`, so `findSkillToolBySkillAction` (which powers the
+  // dep here) returns null. Before the fix this silently skipped the whole
+  // skill, leaving the user with no SKILL.md injection and no toast; the
+  // model then defaulted to unrelated tools. Now the orchestrator reads
+  // SKILL.md from managedPath regardless.
+  _resetLastReferenceSkillHintsForTests()
+  const managedPath = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-ref-internal-')))
+  try {
+    writeFileSync(join(managedPath, 'SKILL.md'), '# Expert Rails\n视频深度分析方法论正文。', 'utf-8')
+
+    const skill = {
+      id: 'video-expert-analyzer',
+      name: 'Video Expert Analyzer (VNext)',
+      description: '长视频深度分析',
+      defaultAction: 'read_skill',
+      executionMode: 'advisory',
+      managedPath,
+      actions: [
+        { name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] },
+        { name: 'video_expert_pipeline', visibility: 'internal', runtime: 'python', params: [] },
+      ],
+    } as any
+
+    const orchestrator = new SkillContextOrchestrator({
+      extractPrimaryUserInstruction: (raw) => raw,
+      listSkills: () => [skill],
+      // Mimics production `findSkillToolBySkillAction` filtering out internal
+      // actions → returns null for read_skill.
+      resolveSkillToolByAction: () => null,
+    })
+
+    const session: any = { messages: [] }
+    let toolCalls = 0
+    await orchestrator.maybeInjectExplicitSkillContext({
+      userText: '用 video-expert-analyzer 分析这个视频 URL',
+      session,
+      sessionId: 'session-internal',
+      emitOutput: () => {},
+      emitToolAction: () => { toolCalls += 1 },
+      executeTool: async () => {
+        toolCalls += 1
+        return { text: '', shape: 'text', data: null, projectionPatch: null, interactionHint: null }
+      },
+    })
+
+    assert.equal(toolCalls, 0, 'inline path must not fabricate a tool_use event')
+    assert.equal(session.messages.length, 1, 'SKILL.md should be inlined as a system message')
+    const msg = session.messages[0] as { role: string; content: string }
+    assert.equal(msg.role, 'system')
+    assert.ok(msg.content.includes('已加载技能'))
+    assert.ok(msg.content.includes('视频深度分析方法论正文'))
+    assert.equal(getLastReferenceSkill('session-internal')?.id, 'video-expert-analyzer')
+  } finally {
+    rmSync(managedPath, { recursive: true, force: true })
+  }
+})
+
 test('falls back to the tool-call path when managedPath is missing and SKILL.md cannot be read', async () => {
   _resetLastReferenceSkillHintsForTests()
   const orchestrator = buildOrchestrator(makeSkill(null))

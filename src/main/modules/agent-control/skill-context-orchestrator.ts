@@ -128,11 +128,24 @@ export class SkillContextOrchestrator {
     // single inline-injection path below. PR3 drops the runtime state
     // machine; this change decouples orchestrator cleanup from that work.
     for (const skill of explicitSkills) {
-      const tool = this.deps.resolveSkillToolByAction(skill.id, skill.defaultAction || '')
-      const actionDef = skill.actions.find((action) => action.name === (tool?.action || skill.defaultAction || ''))
-      if (!tool || !actionDef) continue
+      // `resolveSkillToolByAction` filters out `visibility: internal` actions
+      // (see `skills-tools.ts::getSkillActionToolDefs`), so embedded skills
+      // whose `read_skill` is internal (e.g. `video-expert-analyzer`) would
+      // return `null` here and silently skip injection. The inline-injection
+      // branch below only needs `actionDef` + `skill.managedPath`, not a
+      // LLM-facing tool name — pull `actionDef` from `skill.actions` directly
+      // so visibility doesn't gate the doc read.
+      const actionName = skill.defaultAction || ''
+      const actionDef = skill.actions.find((action) => action.name === actionName)
+      if (!actionDef) continue
 
-      if (actionDef.runtime !== 'reference' || (tool.params || []).some((param) => param.required)) {
+      const tool = this.deps.resolveSkillToolByAction(skill.id, actionName)
+      const paramsRequired = (actionDef.params || []).some((param) => param.required)
+      const isReferenceAction = actionDef.runtime === 'reference'
+
+      if (!isReferenceAction || paramsRequired) {
+        // Hint-injection path — needs a LLM-callable tool name to mention.
+        if (!tool) continue
         params.session.messages.push({
           role: 'user',
           content: [
@@ -179,6 +192,23 @@ export class SkillContextOrchestrator {
       // Fallback — direct read unavailable (no managedPath, or the file was
       // missing). Keep the legacy tool-call shape so embedded skills that
       // still ship without a readable SKILL.md continue to work.
+      if (!tool) {
+        // Reference-runtime skill whose read_skill is internal AND has no
+        // readable SKILL.md on disk. There's no tool name to emit_tool_use
+        // against without fabricating one, so leave a terse system note and
+        // move on. In practice this is unreachable (every embedded reference
+        // skill ships SKILL.md), but keeping the branch explicit avoids a
+        // silent skip if a future skill misconfigures itself.
+        params.session.messages.push({
+          role: 'system',
+          content: [
+            `系统补充：用户提到了 skill "${skill.name}"，但其 SKILL.md 无法读取。`,
+            skill.description ? `技能目标：${skill.description}` : '',
+          ].filter(Boolean).join('\n'),
+        })
+        rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
+        continue
+      }
       const args: Record<string, unknown> = {}
       params.emitToolAction(tool.name || '', args)
       params.emitOutput(`${tool.name}(${JSON.stringify(args)})`, 'tool_use')
