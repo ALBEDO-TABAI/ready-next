@@ -29,8 +29,6 @@ export const TOOL_ERROR_METRICS = {
   skillExecutionMissing: 'skill_execution_missing',
   /** skill_executions TTL sweep 完成一次（Phase 4 新增） */
   ttlSwept: 'skill_executions_ttl_swept',
-  /** skill ephemeral ask-user TTL sweep 完成一次（PR2 新增） */
-  skillEphemeralAskUserTtlSwept: 'skill_ephemeral_ask_user_ttl_swept',
   /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
    * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明
