@@ -1383,6 +1383,35 @@ const migrations: Migration[] = [
         'CREATE INDEX IF NOT EXISTS idx_skill_executions_status_finished_at ON skill_executions(status, finished_at DESC)'
       )
     }
+  },
+
+  // ------------------------------------------------------------------ 029
+  //
+  // B Phase 4 PR4 — retire the `skill_executions` state machine tables.
+  // PR3 already deleted the state-machine runtime, the 6 LLM-facing
+  // execution-control tools, the `skills:executions:*` IPC, and the
+  // renderer shim. This migration drops the three DB tables + the TTL
+  // index added in 028.
+  //
+  // `PRAGMA foreign_keys` is NOT enabled on this DB (§6.11), so
+  // `ON DELETE CASCADE` never actually fired. Drop order must be
+  // child → parent to avoid dangling rows on partial failure —
+  // `artifacts` → `steps` → parent `skill_executions`. `IF EXISTS` is
+  // defensive so a re-run on an already-migrated DB is a no-op.
+  //
+  // Irreversible by design: the `skill_executions` rows had no product
+  // value after Phase 2/3 (every embedded skill moved to advisory/reference)
+  // so no archival export is attempted. Recovery anchor:
+  // `backup/main-before-b-merge-20260424` preserves the pre-B-merge tree;
+  // pair it with a DB restore from user backup if a rollback is ever needed.
+  {
+    name: '029_drop_skill_execution_tables',
+    up: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_skill_executions_status_finished_at')
+      db.exec('DROP TABLE IF EXISTS skill_execution_artifacts')
+      db.exec('DROP TABLE IF EXISTS skill_execution_steps')
+      db.exec('DROP TABLE IF EXISTS skill_executions')
+    }
   }
 ]
 
