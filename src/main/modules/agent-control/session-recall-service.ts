@@ -49,6 +49,10 @@ interface SessionRecallVectorRow {
 }
 
 const SESSION_RECALL_VECTOR_VERSION = 'hashing-v1'
+// D4: Cap session_recall_vectors growth — keep at most this many most-recent
+// rows per write. vector_json can be sizable (per-conv hashing vectors); without
+// a cap, table grows linearly with conversation count for the lifetime of the app.
+const SESSION_RECALL_VECTORS_LRU_CAP = 200
 const SESSION_RECALL_VECTOR_DIMENSIONS = 256
 
 export class SessionRecallService {
@@ -536,6 +540,20 @@ export class SessionRecallService {
       JSON.stringify(vector),
       metadata.updated_at,
     )
+    // D4: LRU eviction — keep only most-recent SESSION_RECALL_VECTORS_LRU_CAP rows.
+    // Cheap (O(N log N) once per upsert; uses idx_session_recall_vectors_updated).
+    try {
+      db.prepare(`
+        DELETE FROM session_recall_vectors
+        WHERE conversation_id NOT IN (
+          SELECT conversation_id FROM session_recall_vectors
+          ORDER BY updated_at DESC LIMIT ?
+        )
+      `).run?.(SESSION_RECALL_VECTORS_LRU_CAP)
+    } catch (err) {
+      // Don't let LRU cleanup failure break vector upsert; log and continue.
+      console.warn('[session-recall] vector LRU eviction failed:', err)
+    }
     return vector
   }
 
