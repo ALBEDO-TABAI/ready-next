@@ -37,6 +37,12 @@ export interface BeforeQuitCleanupDeps {
    * `timeoutMs`. Optional for tests / environments without the worker.
    */
   cleanupDbWorker?: () => Promise<void> | void
+  /**
+   * Closes any active chokidar file watchers (perf-rescue B7). Optional —
+   * tests + environments that never opened a watcher can skip this. Runs in
+   * parallel with the other runtime cleanups.
+   */
+  cleanupFileWatchers?: () => Promise<void> | void
   /** Closes the SQLite handle. Runs last. */
   closeDatabase: () => void
   /** Optional logger override (defaults to console). */
@@ -101,6 +107,9 @@ export async function runBeforeQuitCleanup(
   }
   if (deps.cleanupDbWorker) {
     tasks.push(safeInvoke(deps.cleanupDbWorker, 'cleanupDbWorker', logger))
+  }
+  if (deps.cleanupFileWatchers) {
+    tasks.push(safeInvoke(deps.cleanupFileWatchers, 'cleanupFileWatchers', logger))
   }
   const cleanupPromise = Promise.allSettled(tasks)
 

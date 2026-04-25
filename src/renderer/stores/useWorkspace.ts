@@ -209,6 +209,48 @@ const resolveCreationBaseDir = (state: Pick<
   return state.currentPath || '/'
 }
 
+// perf-rescue B7: keep the active chokidar watcher in sync with the workspace
+// root. Module-scoped so we don't leak a watcher when the user switches
+// workspaces — switching always stops the previous before starting the new
+// one. Failures during start are silent: the indexer keeps working, just
+// without delta updates (user can manually reindex).
+let activeWatcherId: string | null = null
+let activeWatcherRoot: string | null = null
+async function syncFileWatcher(nextRoot: string | null): Promise<void> {
+  if (typeof window === 'undefined' || !window.electronAPI?.document) return
+  const doc = window.electronAPI.document
+  // No-op when the root didn't actually change. Avoids a stop+start cycle on
+  // unrelated state transitions that touch workspaceRoot.
+  if (nextRoot === activeWatcherRoot) return
+  // Stop the previous watcher first so chokidar releases its FSEvents/inotify
+  // handles before we open new ones.
+  if (activeWatcherId && doc.stopWatcher) {
+    const prevId = activeWatcherId
+    activeWatcherId = null
+    activeWatcherRoot = null
+    try {
+      await doc.stopWatcher({ watcherId: prevId })
+    } catch (error) {
+      console.warn('[workspace] stopWatcher failed:', error)
+    }
+  }
+  if (nextRoot && doc.startWatcher) {
+    try {
+      const result = await doc.startWatcher({ workspaceRoot: nextRoot })
+      if (result?.success && result.data?.watcherId) {
+        activeWatcherId = result.data.watcherId
+        activeWatcherRoot = nextRoot
+      } else if (result && !result.success) {
+        // ENOSPC on Linux is the common case worth surfacing — leave it to the
+        // toast layer to read result.errorKind/hint when we wire UX.
+        console.warn('[workspace] startWatcher rejected:', result.errorKind, result.error, result.hint)
+      }
+    } catch (error) {
+      console.warn('[workspace] startWatcher failed:', error)
+    }
+  }
+}
+
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
 const SKILLS_SPLIT_RATIO_KEY = 'ready-skills-split-ratio-v2'
 const SIDE_PANEL_VARIANT_KEY = 'ready-side-panel-variant-v1'
@@ -427,6 +469,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     }
     set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
     writeStorage('ready-workspace-root', path)
+    // perf-rescue B7: chokidar delta indexing — start watcher on root change.
+    void syncFileWatcher(path)
     get().refreshFiles()
     return validation
   },
@@ -471,6 +515,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     })
     removeStorage('ready-workspace-root')
     removeStorage('ready-pinned-folders')
+    // perf-rescue B7: stop the chokidar watcher when the workspace closes.
+    void syncFileWatcher(null)
   },
 
   addPinnedFolder: (path) => {
@@ -526,6 +572,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         console.warn('[workspace] loadSavedWorkspace dropped unsafe primary:', validation.reason, validation.message)
       }
     }
+    // perf-rescue B7: keep the watcher in sync when a saved workspace loads.
+    void syncFileWatcher(safePrimary)
     get().refreshFiles()
   },
 

@@ -342,6 +342,11 @@ const documentAPI = {
     ipcRenderer.invoke('document:getBacklinks', payload),
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) =>
     ipcRenderer.invoke('document:getGraph', payload),
+  // perf-rescue B7 — chokidar watcher for delta incremental indexing.
+  startWatcher: (payload: { workspaceRoot: string }) =>
+    ipcRenderer.invoke('document:startWatcher', payload),
+  stopWatcher: (payload: { watcherId: string }) =>
+    ipcRenderer.invoke('document:stopWatcher', payload),
 }
 
 // RSS API

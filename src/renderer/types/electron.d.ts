@@ -1235,6 +1235,24 @@ interface ElectronDocumentAPI {
   listSources: () => Promise<DocumentListSourcesResponse>
   getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) => Promise<DocumentGraphResponse>
+  startWatcher: (payload: { workspaceRoot: string }) => Promise<DocumentStartWatcherResponse>
+  stopWatcher: (payload: { watcherId: string }) => Promise<DocumentStopWatcherResponse>
+}
+
+interface DocumentStartWatcherResponse {
+  success: boolean
+  data?: { watcherId: string; workspaceRoot: string }
+  error?: string
+  /** When success=false, surfaces why so the renderer can show the right toast. */
+  errorKind?: 'invalid_root' | 'enospc' | 'failed' | 'engine_unavailable'
+  /** Linux ENOSPC advisory string — `sudo sysctl fs.inotify.max_user_watches=…`. */
+  hint?: string
+}
+
+interface DocumentStopWatcherResponse {
+  success: boolean
+  data?: { stopped: boolean }
+  error?: string
 }
 
 interface DocumentBacklinkReference {

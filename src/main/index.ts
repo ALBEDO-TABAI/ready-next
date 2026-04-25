@@ -14,7 +14,7 @@ import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
-import { setupSearchIPC } from './modules/search-engine/ipc-handler'
+import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
@@ -623,6 +623,7 @@ app.on('before-quit', (event) => {
       }
     },
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
+    cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
   }).catch((err) => {
     console.error('[before-quit] cleanup error', err)

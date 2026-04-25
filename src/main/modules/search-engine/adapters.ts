@@ -92,7 +92,9 @@ async function mapBounded<T, R>(
 
 // Directories never worth indexing — package manager output, build artifacts,
 // virtual envs, IDE caches. Cheaper to filter at walk-time than per-file.
-const IGNORED_DIR_NAMES: ReadonlySet<string> = new Set<string>([
+// Exported so the chokidar file-watcher (B7) can apply the same blocklist as
+// the indexer's directory walker — keeps a single source of truth.
+export const IGNORED_DIR_NAMES: ReadonlySet<string> = new Set<string>([
   // VCS / metadata
   '.DS_Store', '.git', '.hg', '.svn',
   // Package managers / vendored deps

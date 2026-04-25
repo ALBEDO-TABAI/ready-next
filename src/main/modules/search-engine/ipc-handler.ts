@@ -8,6 +8,11 @@ import {
   type ReindexAllSourcesResult,
   type ReindexWorkspaceResult,
 } from './indexer'
+import {
+  createFileWatcher,
+  FileWatcherRegistry,
+  isInotifyExhaustionError,
+} from './file-watcher'
 import type { SearchHit } from './query'
 
 interface SearchIPCResponse<T> {
@@ -18,8 +23,19 @@ interface SearchIPCResponse<T> {
 
 let searchEngine: SearchEngine | null = null
 
+// perf-rescue B7: process-wide registry of active chokidar watchers. Keyed
+// by the id we hand back to the renderer (`wch-<hex>`). The registry is
+// intentionally module-scoped because watchers outlive any single IPC call —
+// the renderer starts on workspace open and stops on workspace close, which
+// could be hours later. Tests construct their own registries.
+const fileWatchers = new FileWatcherRegistry()
+
 export function getSearchEngine(): SearchEngine | null {
   return searchEngine
+}
+
+export function getFileWatcherRegistry(): FileWatcherRegistry {
+  return fileWatchers
 }
 
 export function setupSearchIPC(): void {
@@ -237,4 +253,110 @@ export function setupSearchIPC(): void {
       }
     },
   )
+
+  // -------------------------------------------------------------------------
+  // perf-rescue B7: chokidar file watcher for delta incremental indexing.
+  // Renderer calls startWatcher when a workspace becomes active (A2 picker)
+  // and stopWatcher on workspace close. The handler routes file change events
+  // to single-file `indexDocument` calls — no full rescans.
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(
+    'document:startWatcher',
+    async (
+      _event,
+      payload: { workspaceRoot: string },
+    ): Promise<SearchIPCResponse<{ watcherId: string; workspaceRoot: string }> & {
+      errorKind?: 'invalid_root' | 'enospc' | 'failed' | 'engine_unavailable'
+      hint?: string
+    }> => {
+      if (!searchEngine) {
+        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
+      }
+      if (!payload || typeof payload.workspaceRoot !== 'string' || payload.workspaceRoot.length === 0) {
+        return { success: false, error: 'workspaceRoot required', errorKind: 'invalid_root' }
+      }
+
+      const result = await createFileWatcher({
+        workspaceRoot: payload.workspaceRoot,
+        onChange: async ({ filePath, kind, workspaceRoot }) => {
+          if (!searchEngine) return
+          try {
+            if (kind === 'unlink') {
+              // Delete the row from documents (+ FTS via cascade trigger).
+              // ensureWorkspace is idempotent — INSERT OR IGNORE + SELECT —
+              // and we already validated the root before starting the watcher
+              // so the workspace is guaranteed to exist by this point.
+              const repo = searchEngine.getRepository()
+              const wsId = repo.ensureWorkspace(workspaceRoot)
+              repo.deletePath(wsId, filePath)
+              return
+            }
+            // add / change → re-index this single file. The indexer's own
+            // `decideFileForIndex` filter will reject binary / oversized
+            // files, so we don't pre-filter here.
+            await searchEngine.indexDocument(workspaceRoot, filePath)
+          } catch (error) {
+            // Per-event errors must not crash the watcher. Logged inside the
+            // indexer via `logSearch`; we just swallow here.
+            void error
+          }
+        },
+      })
+
+      // Discriminate handle vs error by the presence of `id` (handle) /
+      // `kind` (error). Using `'kind' in result` narrows correctly because
+      // FileWatcherHandle has no `kind` property.
+      if ('kind' in result) {
+        const hint = result.kind === 'enospc'
+          ? 'Linux inotify watch limit exhausted — run: sudo sysctl fs.inotify.max_user_watches=524288'
+          : undefined
+        return {
+          success: false,
+          error: result.message,
+          errorKind: result.kind,
+          ...(hint ? { hint } : {}),
+        }
+      }
+
+      fileWatchers.add(result)
+      return {
+        success: true,
+        data: { watcherId: result.id, workspaceRoot: result.workspaceRoot },
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'document:stopWatcher',
+    async (
+      _event,
+      payload: { watcherId: string },
+    ): Promise<SearchIPCResponse<{ stopped: boolean }>> => {
+      if (!payload || typeof payload.watcherId !== 'string') {
+        return { success: false, error: 'watcherId required' }
+      }
+      try {
+        const stopped = await fileWatchers.stop(payload.watcherId)
+        return { success: true, data: { stopped } }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // ENOSPC during close shouldn't happen in practice (close releases
+        // descriptors) but if some platform raises it we still report ok=false.
+        if (isInotifyExhaustionError(error)) {
+          return { success: false, error: `inotify error during close: ${message}` }
+        }
+        return { success: false, error: message }
+      }
+    },
+  )
+}
+
+/**
+ * Cleanly close every active watcher. Called from `before-quit` so chokidar
+ * releases its kqueue/FSEvents/inotify handles before Electron tears the
+ * process down.
+ */
+export async function shutdownFileWatchers(): Promise<number> {
+  return fileWatchers.stopAll()
 }

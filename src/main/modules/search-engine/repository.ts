@@ -54,6 +54,13 @@ export class SearchRepository {
   private readonly insertAttachmentStmt: DatabaseStatement
   private readonly resolveLinkTargetsStmt: DatabaseStatement
   private readonly markResolvedFlagStmt: DatabaseStatement
+  // perf-rescue B8: per-document wikilink resolution. Avoids the full-workspace
+  // re-scan on every single-file save. See resolveWikilinkTargetsForDocument().
+  private readonly resolveOutgoingLinksStmt: DatabaseStatement
+  private readonly markOutgoingResolvedFlagStmt: DatabaseStatement
+  private readonly selectDocumentByIdStmt: DatabaseStatement
+  private readonly resolveIncomingLinksByNameStmt: DatabaseStatement
+  private readonly markIncomingResolvedByNameStmt: DatabaseStatement
 
   constructor(private readonly db: DatabaseConnection, private readonly ftsAvailable: boolean) {
     this.ensureWorkspaceStmt = db.prepare(
@@ -120,6 +127,74 @@ export class SearchRepository {
       UPDATE doc_links
       SET resolved = CASE WHEN target_doc_id IS NULL THEN 0 ELSE 1 END
       WHERE src_doc_id IN (SELECT id FROM documents WHERE workspace_id = ?)
+    `)
+    // perf-rescue B8: narrow per-document resolvers. Used on the single-file
+    // save path so we don't re-scan every wikilink in the workspace just
+    // because one file changed.
+    //
+    // (A) Outgoing — re-resolve only links emitted by this document. The
+    //     target lookup stays the same as the workspace-wide variant; only
+    //     the WHERE on src_doc_id is narrowed.
+    this.resolveOutgoingLinksStmt = db.prepare(`
+      UPDATE doc_links
+      SET target_doc_id = (
+        SELECT d.id FROM documents d
+        WHERE d.workspace_id = ?
+          AND (d.name = doc_links.target_text
+               OR d.name = doc_links.target_text || '.md'
+               OR lower(d.name) = lower(doc_links.target_text)
+               OR lower(d.name) = lower(doc_links.target_text) || '.md')
+        LIMIT 1
+      )
+      WHERE kind = 'wikilink' AND src_doc_id = ?
+    `)
+    this.markOutgoingResolvedFlagStmt = db.prepare(`
+      UPDATE doc_links
+      SET resolved = CASE WHEN target_doc_id IS NULL THEN 0 ELSE 1 END
+      WHERE src_doc_id = ?
+    `)
+    this.selectDocumentByIdStmt = db.prepare(
+      'SELECT id, workspace_id, name FROM documents WHERE id = ?'
+    )
+    // (B) Incoming — when this doc is newly created/renamed, ghost-links from
+    //     other docs in the same workspace whose target_text matches this
+    //     doc's name should bind to this doc's id. We restrict to wikilinks
+    //     that are still unresolved (target_doc_id IS NULL) so we don't
+    //     overwrite an already-bound resolution.
+    //
+    //     The match logic is symmetric with the workspace resolver:
+    //     given the *workspace* resolver matches a target_text against
+    //     d.name across (=, =||.md, lower=, lower=||.md), the incoming
+    //     resolver tries every spelling of d.name a target_text could have
+    //     used. Concretely we accept target_text in {name, basename(name),
+    //     name without .md, name + .md} compared case-(in)sensitively.
+    //
+    //     Bind params (fed by resolveWikilinkTargetsForDocument):
+    //       1. documentId      (the new target_doc_id)
+    //       2. workspaceId     (scope filter)
+    //       3. name            (exact)
+    //       4. nameNoMd        (name with trailing .md stripped, or = name)
+    //       5. name            (lower-compare)
+    //       6. nameNoMd        (lower-compare)
+    this.resolveIncomingLinksByNameStmt = db.prepare(`
+      UPDATE doc_links
+      SET target_doc_id = ?
+      WHERE kind = 'wikilink'
+        AND target_doc_id IS NULL
+        AND src_doc_id IN (SELECT id FROM documents WHERE workspace_id = ?)
+        AND (
+          target_text = ?
+          OR target_text = ?
+          OR lower(target_text) = lower(?)
+          OR lower(target_text) = lower(?)
+        )
+    `)
+    this.markIncomingResolvedByNameStmt = db.prepare(`
+      UPDATE doc_links
+      SET resolved = 1
+      WHERE kind = 'wikilink'
+        AND target_doc_id = ?
+        AND resolved = 0
     `)
   }
 
@@ -223,6 +298,52 @@ export class SearchRepository {
   resolveWikilinkTargets(workspaceId: number): void {
     this.resolveLinkTargetsStmt.run(workspaceId, workspaceId)
     this.markResolvedFlagStmt.run(workspaceId)
+  }
+
+  /**
+   * perf-rescue B8: resolve wikilinks for a single document.
+   *
+   * Two narrow updates instead of the workspace-wide resolver:
+   *  (A) outgoing — links from this doc may now bind to existing targets;
+   *  (B) incoming — ghost-links in OTHER docs that point at this doc's name
+   *      now bind to this doc's id.
+   *
+   * Edge cases the per-doc path can't catch (so the caller should still
+   * schedule a debounced workspace resolve as backup):
+   *  - A doc was renamed and its old name was the target of ghost-links: the
+   *    incoming pass binds them to the *new* name, but ghost-links targeting
+   *    the *old* name in some unrelated rename history won't unbind here.
+   *  - A doc was deleted and an ON DELETE SET NULL fired: the resolved flag
+   *    was not flipped back to 0 by SQLite trigger (we don't have one).
+   *  - Ambiguous names where multiple documents share `name` — the workspace
+   *    resolver's `LIMIT 1` is non-deterministic; per-doc agrees on a single
+   *    binding direction but cross-doc ties aren't reconciled.
+   */
+  resolveWikilinkTargetsForDocument(documentId: number): void {
+    const doc = this.selectDocumentByIdStmt.get<{ id: number; workspace_id: number; name: string }>(documentId)
+    if (!doc) return
+    // (A) outgoing — bind/refresh this doc's own wikilinks
+    this.resolveOutgoingLinksStmt.run(doc.workspace_id, documentId)
+    this.markOutgoingResolvedFlagStmt.run(documentId)
+    // (B) incoming — bind ghost-links in same workspace targeting this doc's name
+    if (doc.name && doc.name.length > 0) {
+      // Try both spellings the link author might have written:
+      //   - the doc's name verbatim (e.g. [[Foo.md]] when name="Foo.md")
+      //   - the basename without .md (e.g. [[Foo]] when name="Foo.md")
+      // Both compared case-(in)sensitively. See SQL above for the param order.
+      const nameNoMd = doc.name.toLowerCase().endsWith('.md')
+        ? doc.name.slice(0, -3)
+        : doc.name
+      this.resolveIncomingLinksByNameStmt.run(
+        documentId,
+        doc.workspace_id,
+        doc.name,
+        nameNoMd,
+        doc.name,
+        nameNoMd,
+      )
+      this.markIncomingResolvedByNameStmt.run(documentId)
+    }
   }
 
   deletePath(workspaceId: number, path: string): void {
