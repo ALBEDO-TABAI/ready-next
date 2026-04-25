@@ -1,13 +1,14 @@
 import { ipcMain, dialog, shell, BrowserWindow, type WebContents } from 'electron'
 import {
   readFileSync, writeFileSync, readdirSync, statSync, existsSync,
-  mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, type FSWatcher
+  mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, accessSync, constants as fsConstants, type FSWatcher
 } from 'fs'
 import { readFile, readdir, stat } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
+import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
@@ -965,8 +966,14 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  // Open folder dialog — let user choose a workspace directory
-  ipcMain.handle('document:openFolder', async () => {
+  // Open folder dialog — let user choose a workspace directory.
+  //
+  // Optional payload `{ validateAsWorkspace: true }` runs the shared
+  // `validateWorkspaceRoot` check (with an fs.accessSync read probe) before
+  // returning the path. Callers that pick a folder for *non*-workspace
+  // purposes (e.g. RSS download dir, skill import) pass no payload and get
+  // the legacy unconditional behavior.
+  ipcMain.handle('document:openFolder', async (_event, payload?: { validateAsWorkspace?: boolean }) => {
     try {
       const win = BrowserWindow.getFocusedWindow()
       if (!win) return { success: false, error: 'No window' }
@@ -977,7 +984,29 @@ export function setupDocumentIPC(useMock = false): void {
       if (result.canceled || result.filePaths.length === 0) {
         return { success: false, error: 'cancelled' }
       }
-      return { success: true, path: result.filePaths[0] }
+      const picked = result.filePaths[0]
+      if (payload?.validateAsWorkspace) {
+        const validation = validateWorkspaceRoot(picked, {
+          homeDir: homedir(),
+          accessCheck: (p) => {
+            try {
+              accessSync(p, fsConstants.R_OK)
+              return true
+            } catch {
+              return false
+            }
+          },
+        })
+        if (!validation.ok) {
+          return {
+            success: false,
+            error: validation.message || `不能将 ${picked} 设为工作区。`,
+            validationReason: validation.reason,
+            attemptedPath: picked,
+          }
+        }
+      }
+      return { success: true, path: picked }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

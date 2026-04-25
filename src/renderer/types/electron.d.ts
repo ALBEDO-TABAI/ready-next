@@ -1157,6 +1157,10 @@ interface DocumentOpenFolderResponse {
   success: boolean
   path?: string
   error?: string
+  /** Present when validateAsWorkspace failed; mirrors WorkspaceValidationReason. */
+  validationReason?: string
+  /** The path the user picked, even if validation rejected it. */
+  attemptedPath?: string
 }
 
 /** Get home directory response */
@@ -1193,7 +1197,7 @@ interface ElectronDocumentAPI {
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
-  openFolder: () => Promise<DocumentOpenFolderResponse>
+  openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
   getHome: () => Promise<DocumentHomeResponse>
   showInFolder: (path: string) => Promise<DocumentOperationResponse>
   openPath: (path: string) => Promise<DocumentOperationResponse>

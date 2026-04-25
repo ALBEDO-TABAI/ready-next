@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 import { readJsonStorage, readStorage, removeStorage, writeJsonStorage, writeStorage } from '../utils/storage'
+import {
+  validateWorkspaceRoot,
+  type WorkspaceValidationResult,
+} from '../../shared/workspace-validation'
 
 export interface FileItem {
   name: string
@@ -50,7 +54,8 @@ interface WorkspaceState {
   loadDirChildren: (path: string) => Promise<FileItem[]>
 
   // Workspace
-  setWorkspaceRoot: (path: string) => void
+  setWorkspaceRoot: (path: string) => WorkspaceValidationResult
+  pickWorkspaceRoot: () => Promise<WorkspaceValidationResult>
   clearWorkspace: () => void
   openFolderDialog: () => Promise<void>
   addPinnedFolder: (path: string) => void
@@ -412,9 +417,43 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   },
 
   setWorkspaceRoot: (path) => {
+    // Reject dangerous / overly-broad roots before they reach the FTS5 indexer.
+    // The renderer can't do an fs read-permission probe; main-process callers
+    // get an additional accessCheck via the IPC layer.
+    const validation = validateWorkspaceRoot(path)
+    if (!validation.ok) {
+      console.warn('[workspace] setWorkspaceRoot rejected:', validation.reason, validation.message)
+      return validation
+    }
     set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
     writeStorage('ready-workspace-root', path)
     get().refreshFiles()
+    return validation
+  },
+
+  pickWorkspaceRoot: async () => {
+    if (typeof window === 'undefined' || !window.electronAPI?.document?.openFolder) {
+      return { ok: false, reason: 'empty', message: '当前环境未提供文件夹选择能力。' }
+    }
+    try {
+      // validateAsWorkspace=true asks the main process to run validation
+      // (with an fs read-permission probe) before returning the path.
+      const result = await window.electronAPI.document.openFolder({ validateAsWorkspace: true })
+      if (!result.success || !result.path) {
+        // Either user cancelled (error: 'cancelled') or validation rejected
+        // the pick. In the validation-reject case, `validationReason` is
+        // populated and `error` carries the user-facing message.
+        return {
+          ok: false,
+          reason: (result.validationReason as WorkspaceValidationResult['reason']) || 'empty',
+          message: result.error || '已取消选择。',
+        }
+      }
+      return get().setWorkspaceRoot(result.path)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, reason: 'empty', message }
+    }
   },
 
   clearWorkspace: () => {
@@ -463,17 +502,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   },
 
   loadSavedWorkspace: (folders) => {
+    // If the saved workspace's primary folder is dangerous (e.g. a legacy
+    // pre-validation entry that pointed at home), refuse to set it as the
+    // workspace root. We still keep the pinned folder list so the user can
+    // see what was saved.
+    const primary = folders[0]
+    const validation = primary ? validateWorkspaceRoot(primary) : null
+    const safePrimary = validation && validation.ok ? primary : null
     set({
       pinnedFolders: folders,
       expandedDirs: new Set(),
       dirChildren: new Map(),
       selectedFile: null,
-      workspaceRoot: folders[0] || null,
-      currentPath: folders[0] || '/',
+      workspaceRoot: safePrimary,
+      currentPath: safePrimary || '/',
     })
     writeJsonStorage('ready-pinned-folders', folders)
-    if (folders[0]) {
-      writeStorage('ready-workspace-root', folders[0])
+    if (safePrimary) {
+      writeStorage('ready-workspace-root', safePrimary)
+    } else {
+      removeStorage('ready-workspace-root')
+      if (validation && !validation.ok) {
+        console.warn('[workspace] loadSavedWorkspace dropped unsafe primary:', validation.reason, validation.message)
+      }
     }
     get().refreshFiles()
   },

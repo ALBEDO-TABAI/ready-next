@@ -27,6 +27,9 @@ export interface DatabaseConnection {
   exec(sql: string): void
   prepare(sql: string): DatabaseStatement
   close(): void
+  // better-sqlite3 exposes pragma() at runtime; declared optional so mocks /
+  // in-memory fallbacks that omit it stay structurally compatible.
+  pragma?(source: string, options?: { simple?: boolean }): unknown
 }
 
 type BetterSqliteConstructor = new (path: string) => DatabaseConnection
@@ -326,6 +329,39 @@ function deriveBrowserDomain(url: string): string {
   }
 }
 
+// SQLite PRAGMA tuning. Defaults (cache_size=2000 pages ~8MB, journal=DELETE,
+// synchronous=FULL, mmap_size=0) cause cache miss on every query for a multi-GB
+// DB. Each pragma runs in its own try/catch so a single platform-specific
+// failure (e.g. WAL on a Windows network drive) does not block the others.
+const PERFORMANCE_PRAGMAS: ReadonlyArray<{ name: string; value: string }> = [
+  { name: 'journal_mode', value: 'WAL' },
+  { name: 'synchronous', value: 'NORMAL' },
+  { name: 'cache_size', value: '-65536' },     // 64 MB cache (negative = KB)
+  { name: 'mmap_size', value: '2147483648' },  // 2 GB mmap window
+  { name: 'temp_store', value: 'MEMORY' },
+]
+
+export function applyPerformancePragmas(db: DatabaseConnection): void {
+  if (typeof db.pragma !== 'function') {
+    logDatabase('pragma() unavailable on db; skipping performance tuning')
+    return
+  }
+  for (const { name, value } of PERFORMANCE_PRAGMAS) {
+    try {
+      const result = db.pragma(`${name} = ${value}`)
+      logDatabase(`pragma applied ${name}=${value} result=${JSON.stringify(result)}`)
+    } catch (error) {
+      logDatabase(`pragma failed ${name}=${value} error=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  try {
+    const userVersion = db.pragma('user_version', { simple: true })
+    logDatabase(`pragma user_version=${JSON.stringify(userVersion)}`)
+  } catch (error) {
+    logDatabase(`pragma user_version read failed error=${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 export class DatabaseManager {
   private db: DatabaseConnection | null = null
   private dbPath: string
@@ -360,6 +396,7 @@ export class DatabaseManager {
 
       logDatabase(`opening database path=${this.dbPath}`)
       this.db = new DatabaseConstructor(this.dbPath)
+      applyPerformancePragmas(this.db)
       this.createTables()
       logDatabase(`database initialized path=${this.dbPath}`)
     } catch (error) {

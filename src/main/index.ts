@@ -22,6 +22,8 @@ import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loade
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
+import { reapOrphans } from './modules/process-cleanup/boot-reaper'
+import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
 import { getDatabase } from './modules/database'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import pkg from 'electron-updater'
@@ -423,6 +425,23 @@ app.whenReady().then(() => {
   applyAppIcon()
   setupApplicationMenu()
 
+  // Reap any orphaned child processes from a previous Ready instance that was
+  // force-quit / crashed. Must run BEFORE rsshub / skill runtime spawns so we
+  // don't accidentally kill our own fresh children.
+  try {
+    const result = reapOrphans()
+    if (result.skipped) {
+      console.log(`[boot-reaper] skipped (${result.skipped})`)
+    } else {
+      console.log(`[boot-reaper] reaped=${result.reaped.length} errors=${result.errors.length}`)
+      for (const err of result.errors) {
+        console.warn(`[boot-reaper] ${err}`)
+      }
+    }
+  } catch (err) {
+    console.warn('[boot-reaper] failed:', err instanceof Error ? err.message : String(err))
+  }
+
   console.log('[Main] App ready, registering protocol handler...')
 
   // Register local-file:// protocol handler for serving local files to the renderer
@@ -578,10 +597,25 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Clean up before quit
-app.on('before-quit', () => {
-  void cleanupAgentRuntime()
-  getDatabase().close()
-  agentManager.cleanup()
-  rsshubManager.cleanup()
+// Clean up before quit. Previous version fired the runtime cleanup with `void`
+// and then synchronously closed the DB, so the process could exit mid-cleanup
+// and leave sidecar / chrome / rsshub orphans. We now defer the quit, await an
+// ordered shutdown (bounded by a 5s timeout so a stuck sidecar can't hang the
+// app), then re-trigger quit. The `isQuitting` guard prevents the second
+// `app.quit()` from re-entering this handler.
+let isQuitting = false
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  isQuitting = true
+  event.preventDefault()
+  void runBeforeQuitCleanup({
+    cleanupAgentRuntime,
+    cleanupAgentManager: () => agentManager.cleanup(),
+    cleanupRsshubManager: () => rsshubManager.cleanup(),
+    closeDatabase: () => getDatabase().close(),
+  }).catch((err) => {
+    console.error('[before-quit] cleanup error', err)
+  }).finally(() => {
+    app.quit()
+  })
 })
