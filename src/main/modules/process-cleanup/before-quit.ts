@@ -26,6 +26,17 @@ export interface BeforeQuitCleanupDeps {
   cleanupAgentManager: () => Promise<void> | void
   /** Force-kills the embedded RSSHub child process. */
   cleanupRsshubManager: () => Promise<void> | void
+  /**
+   * Closes any Puppeteer browsers registered via `launchManagedBrowser`.
+   * Optional — environments without direct puppeteer use can omit it.
+   */
+  cleanupManagedBrowsers?: () => Promise<void> | void
+  /**
+   * Tears down the DB worker_thread (perf-rescue B1). Runs in parallel with
+   * the other runtime cleanups so a stuck worker can't block quit beyond
+   * `timeoutMs`. Optional for tests / environments without the worker.
+   */
+  cleanupDbWorker?: () => Promise<void> | void
   /** Closes the SQLite handle. Runs last. */
   closeDatabase: () => void
   /** Optional logger override (defaults to console). */
@@ -80,11 +91,18 @@ export async function runBeforeQuitCleanup(
     }
   })
 
-  const cleanupPromise = Promise.allSettled([
+  const tasks: Array<Promise<void>> = [
     safeInvoke(deps.cleanupAgentRuntime, 'cleanupAgentRuntime', logger),
     safeInvoke(deps.cleanupAgentManager, 'agentManager.cleanup', logger),
     safeInvoke(deps.cleanupRsshubManager, 'rsshubManager.cleanup', logger),
-  ])
+  ]
+  if (deps.cleanupManagedBrowsers) {
+    tasks.push(safeInvoke(deps.cleanupManagedBrowsers, 'cleanupManagedBrowsers', logger))
+  }
+  if (deps.cleanupDbWorker) {
+    tasks.push(safeInvoke(deps.cleanupDbWorker, 'cleanupDbWorker', logger))
+  }
+  const cleanupPromise = Promise.allSettled(tasks)
 
   const winner = await Promise.race([cleanupPromise, timeoutPromise])
   if (timeoutHandle) clearTimeout(timeoutHandle)

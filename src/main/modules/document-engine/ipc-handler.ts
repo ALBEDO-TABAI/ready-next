@@ -9,6 +9,7 @@ import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
+import { BINARY_EXTENSIONS } from './binary-extensions'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
@@ -47,20 +48,10 @@ async function getDocx(): Promise<typeof import('docx') | null> {
 
 // --- Binary file detection ---
 
-export const BINARY_EXTENSIONS = new Set([
-  // Images
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif',
-  // Video
-  '.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v',
-  // Audio
-  '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma',
-  // Documents (binary)
-  '.pdf', '.docx', '.xlsx', '.xls', '.pptx', '.ppt', '.doc',
-  // Archives
-  '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2',
-  // Other binary
-  '.exe', '.dmg', '.app', '.so', '.dylib', '.dll', '.woff', '.woff2', '.ttf', '.otf', '.eot'
-])
+// BINARY_EXTENSIONS lives in `./binary-extensions` so test files (and the
+// search-engine adapter) can import it without pulling `electron` through
+// this module. Re-export here to preserve the existing public surface.
+export { BINARY_EXTENSIONS }
 
 const TEXT_WRITE_BLOCKED_EXTENSIONS = new Set([
   '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf',

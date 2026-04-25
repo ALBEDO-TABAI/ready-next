@@ -3,7 +3,7 @@ import { promisify } from 'util'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { join, delimiter } from 'path'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
 // string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
@@ -48,12 +48,24 @@ import {
   type SkillHostController,
   type SpawnContextHandle,
 } from './skill-host-controller'
+import { spawnWithTreeKill, type SpawnWithTreeKillError } from '../process-cleanup/spawn-with-tree-kill'
 
 const execFileAsync = promisify(execFile)
 
 const INSTALL_STATE_FILENAME = '.ready-install-state.json'
 const EMBEDDED_SYNC_STATE_FILENAME = '.ready-embedded-sync-state.json'
 const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
+/**
+ * C6 — per-stream in-memory cap before output spills to a `.logs/` artifact
+ * under `<runtimeRoot>/outputs/<skillId>/`. Long-running video / audio skills
+ * (e.g. ffmpeg progress, scenedetect noise) routinely produce tens of MiB of
+ * stderr; buffering it all in the renderer's tool-result envelope blows the
+ * IPC payload and historically caused OOM. 1 MiB matches the run-shell
+ * primitive's "first 8K + spill" pattern but with a higher in-memory ceiling
+ * because direct actions return their result to the LLM only once (vs.
+ * repeatedly through chat), so we can afford a bigger inline preview.
+ */
+const DIRECT_ACTION_INMEMORY_CAP = 1 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000
 const SCHEDULER_INTERVAL_MS = 60_000
 
@@ -159,6 +171,19 @@ export interface SkillRunResult {
    * 'error' on failure (mirrors the legacy mapping in skills-tools.ts:477).
    */
   status?: 'done' | 'error' | 'blocked'
+  /**
+   * C6 — when stdout/stderr exceeded the in-memory cap (1 MiB per stream),
+   * the surplus is appended to a per-action artifact under
+   * `<runtimeRoot>/outputs/<skillId>/.logs/skill-action-<id>-<stream>.txt`.
+   * The in-memory `stdout`/`stderr` carries a clear truncation marker pointing
+   * at this path. `*ArtifactError` is set instead when the disk write itself
+   * failed (mkdir / append errors); the command result is still returned
+   * intact so a single log spill never breaks a long-running skill.
+   */
+  stdoutArtifactPath?: string
+  stderrArtifactPath?: string
+  stdoutArtifactError?: string
+  stderrArtifactError?: string
 }
 
 export interface SkillRunRequest {
@@ -886,6 +911,17 @@ export class SkillsRuntimeManager {
     error?: string
     outputDir?: string
     structuredResult?: SkillActionResult
+    /**
+     * C6 — populated when stdout/stderr exceeded the in-memory cap and surplus
+     * was spilled to a per-action `.logs/` artifact under
+     * `<runtimeRoot>/outputs/<skillId>/`. `*Error` is populated instead when
+     * the disk write itself failed; the command result is still returned in
+     * either case so the caller never sees a thrown error from a log spill.
+     */
+    stdoutArtifactPath?: string
+    stderrArtifactPath?: string
+    stdoutArtifactError?: string
+    stderrArtifactError?: string
   }> {
     const command = [params.commandBin, ...params.commandArgs]
     const resultPath = params.preferStructuredResult ? this.createStructuredResultPath(params.skillId, params.actionName) : null
@@ -895,12 +931,108 @@ export class SkillsRuntimeManager {
       ...(resultPath ? { READY_SKILL_RESULT_PATH: resultPath } : {}),
     }
 
+    // C6 — overflow-to-disk plumbing. We pre-compute the per-stream artifact
+    // paths under `<outputsRoot>/<skillId>/.logs/` and lazy-create the directory
+    // on the first spilled chunk (so skills whose output stays under 1 MiB
+    // never touch the filesystem). The sinks close over the dir-creation state
+    // so a single mkdir failure short-circuits subsequent appends without
+    // taking the command down with it.
+    const logId = `${Date.now()}-${randomUUID().slice(0, 8)}`
+    const logsDir = join(this.outputsRoot, params.skillId, '.logs')
+    const stdoutLogPath = join(logsDir, `skill-action-${logId}-stdout.txt`)
+    const stderrLogPath = join(logsDir, `skill-action-${logId}-stderr.txt`)
+
+    let logsDirReady: boolean | null = null // null = untried; true = ok; false = mkdir failed
+    let logsDirError: string | null = null
+    const ensureLogsDir = (): boolean => {
+      if (logsDirReady !== null) return logsDirReady
+      try {
+        mkdirSync(logsDir, { recursive: true })
+        logsDirReady = true
+      } catch (err) {
+        logsDirReady = false
+        logsDirError = err instanceof Error ? err.message : String(err)
+        console.warn('[SkillsRuntimeManager] failed to create skill log dir', logsDir, ':', logsDirError)
+      }
+      return logsDirReady
+    }
+
+    let stdoutWritten = false
+    let stderrWritten = false
+    let stdoutWriteError: string | null = null
+    let stderrWriteError: string | null = null
+
+    const stdoutSink = (chunk: string): void => {
+      if (!ensureLogsDir()) {
+        if (!stdoutWriteError) stdoutWriteError = logsDirError || 'logs directory unavailable'
+        return
+      }
+      try {
+        appendFileSync(stdoutLogPath, chunk, 'utf-8')
+        stdoutWritten = true
+      } catch (err) {
+        if (!stdoutWriteError) stdoutWriteError = err instanceof Error ? err.message : String(err)
+      }
+    }
+    const stderrSink = (chunk: string): void => {
+      if (!ensureLogsDir()) {
+        if (!stderrWriteError) stderrWriteError = logsDirError || 'logs directory unavailable'
+        return
+      }
+      try {
+        appendFileSync(stderrLogPath, chunk, 'utf-8')
+        stderrWritten = true
+      } catch (err) {
+        if (!stderrWriteError) stderrWriteError = err instanceof Error ? err.message : String(err)
+      }
+    }
+
+    // NOTE: switched from execFileAsync's built-in `timeout` to spawnWithTreeKill
+    // because execFile only sends SIGTERM to the immediate child. Skill scripts
+    // routinely fork ffmpeg / yt-dlp / browsers, and those grandchildren get
+    // orphaned on timeout. The shared helper spawns with `detached:true` on
+    // Unix so we can `process.kill(-pid, SIGTERM)` the whole group, then
+    // escalate to SIGKILL after a 5s grace. Windows falls back to `child.kill`
+    // (no process groups). Return shape kept identical for upstream callers.
+    //
+    // C6 — also wires per-stream caps + sinks so output beyond 1 MiB per
+    // stream spills to `<outputsRoot>/<skillId>/.logs/skill-action-<id>-<stream>.txt`
+    // instead of buffering up to 24 MiB in memory (or worse, OOMing on a
+    // multi-hour ffmpeg run).
+    // Truncate first, THEN append the marker — `truncateOutput` (the legacy
+    // 18K-char head used by tool-result envelopes) would otherwise eat the
+    // marker because `raw` is up to 1 MiB.
+    const buildResultStdout = (raw: string, overflowed: boolean): string => {
+      const head = truncateOutput(raw)
+      if (!overflowed) return head
+      const target = stdoutWritten
+        ? `(... output truncated; full log at: ${stdoutLogPath})`
+        : stdoutWriteError
+          ? `(... output truncated; overflow log write failed: ${stdoutWriteError})`
+          : `(... output truncated)`
+      return `${head}\n${target}`
+    }
+    const buildResultStderr = (raw: string, overflowed: boolean): string => {
+      const head = truncateOutput(raw)
+      if (!overflowed) return head
+      const target = stderrWritten
+        ? `(... output truncated; full log at: ${stderrLogPath})`
+        : stderrWriteError
+          ? `(... output truncated; overflow log write failed: ${stderrWriteError})`
+          : `(... output truncated)`
+      return `${head}\n${target}`
+    }
+
     try {
-      const { stdout, stderr } = await execFileAsync(params.commandBin, params.commandArgs, {
+      const result = await spawnWithTreeKill(params.commandBin, params.commandArgs, {
         cwd: params.cwd,
-        timeout: params.timeoutMs,
-        maxBuffer: MAX_COMMAND_BUFFER,
         env,
+        timeoutMs: params.timeoutMs,
+        maxBuffer: MAX_COMMAND_BUFFER,
+        inMemoryStdoutCap: DIRECT_ACTION_INMEMORY_CAP,
+        inMemoryStderrCap: DIRECT_ACTION_INMEMORY_CAP,
+        stdoutOverflowSink: stdoutSink,
+        stderrOverflowSink: stderrSink,
       })
       const structuredResult = resultPath && existsSync(resultPath)
         ? this.parseJson<SkillActionResult>(readFileSync(resultPath, 'utf-8'), undefined as never)
@@ -910,14 +1042,18 @@ export class SkillsRuntimeManager {
         : undefined
       return {
         success: true,
-        stdout: truncateOutput(stdout || structuredResult?.logs.stdout || ''),
-        stderr: truncateOutput(stderr || structuredResult?.logs.stderr || ''),
+        stdout: buildResultStdout(result.stdout || structuredResult?.logs.stdout || '', result.stdoutOverflowed),
+        stderr: buildResultStderr(result.stderr || structuredResult?.logs.stderr || '', result.stderrOverflowed),
         command,
         outputDir,
         structuredResult,
+        stdoutArtifactPath: stdoutWritten ? stdoutLogPath : undefined,
+        stderrArtifactPath: stderrWritten ? stderrLogPath : undefined,
+        stdoutArtifactError: result.stdoutOverflowed && !stdoutWritten ? (stdoutWriteError ?? undefined) : undefined,
+        stderrArtifactError: result.stderrOverflowed && !stderrWritten ? (stderrWriteError ?? undefined) : undefined,
       }
     } catch (error) {
-      const err = error as Error & { stdout?: string; stderr?: string }
+      const err = error as SpawnWithTreeKillError
       const structuredResult = resultPath && existsSync(resultPath)
         ? this.parseJson<SkillActionResult>(readFileSync(resultPath, 'utf-8'), undefined as never)
         : undefined
@@ -926,14 +1062,18 @@ export class SkillsRuntimeManager {
         : undefined
       return {
         success: structuredResult?.ok || false,
-        stdout: truncateOutput(err.stdout || structuredResult?.logs.stdout || ''),
-        stderr: truncateOutput(err.stderr || structuredResult?.logs.stderr || ''),
+        stdout: buildResultStdout((err.stdout as string | undefined) || structuredResult?.logs.stdout || '', err.stdoutOverflowed === true),
+        stderr: buildResultStderr((err.stderr as string | undefined) || structuredResult?.logs.stderr || '', err.stderrOverflowed === true),
         command,
         outputDir,
         structuredResult,
         error: params.runtime === 'node' && err.message.includes('ENOENT')
           ? 'Node.js runtime not found. Please install Node.js or use python/shell based custom skills.'
           : (structuredResult?.error?.message || err.message),
+        stdoutArtifactPath: stdoutWritten ? stdoutLogPath : undefined,
+        stderrArtifactPath: stderrWritten ? stderrLogPath : undefined,
+        stdoutArtifactError: err.stdoutOverflowed && !stdoutWritten ? (stdoutWriteError ?? undefined) : undefined,
+        stderrArtifactError: err.stderrOverflowed && !stderrWritten ? (stderrWriteError ?? undefined) : undefined,
       }
     }
   }
@@ -949,6 +1089,10 @@ export class SkillsRuntimeManager {
       error?: string
       outputDir?: string
       structuredResult?: SkillActionResult
+      stdoutArtifactPath?: string
+      stderrArtifactPath?: string
+      stdoutArtifactError?: string
+      stderrArtifactError?: string
     },
   ): SkillRunResult {
     const structured = executed.structuredResult
@@ -970,6 +1114,10 @@ export class SkillsRuntimeManager {
       command: executed.command,
       error: structured?.ok ? undefined : (structured?.error?.message || executed.error),
       mode: 'direct',
+      stdoutArtifactPath: executed.stdoutArtifactPath,
+      stderrArtifactPath: executed.stderrArtifactPath,
+      stdoutArtifactError: executed.stdoutArtifactError,
+      stderrArtifactError: executed.stderrArtifactError,
     }
   }
 

@@ -1,8 +1,8 @@
-import { readFile, readdir, stat } from 'fs/promises'
+import { readFile, readdir, stat, open } from 'fs/promises'
 import { createHash } from 'crypto'
 import { basename, extname, join } from 'path'
 import { appendFileSync } from 'fs'
-import { BINARY_EXTENSIONS } from '../document-engine/ipc-handler'
+import { BINARY_EXTENSIONS } from '../document-engine/binary-extensions'
 import { getLogPath } from '../../utils/platform'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import type { SearchRepository } from './repository'
@@ -37,15 +37,132 @@ export interface AdapterContext {
   signal?: AbortSignal
 }
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024
+// Hardened 2026-04-25 (perf-rescue B5): bumped from 2MB → 5MB so legitimate
+// large markdown/SQL dumps fit. Anything beyond is skipped + logged.
+const MAX_FILE_BYTES = 5 * 1024 * 1024
+
 const BATCH_SIZE = 500
-const IGNORED_DIR_NAMES = new Set([
-  '.git', '.hg', '.svn', '.DS_Store',
-  'node_modules', '__pycache__',
-  '.next', '.nuxt', '.cache', '.turbo', '.parcel-cache',
-  'dist', 'build', 'out', 'target',
-  '.venv', 'venv',
+
+// Directories never worth indexing — package manager output, build artifacts,
+// virtual envs, IDE caches. Cheaper to filter at walk-time than per-file.
+const IGNORED_DIR_NAMES: ReadonlySet<string> = new Set<string>([
+  // VCS / metadata
+  '.DS_Store', '.git', '.hg', '.svn',
+  // Package managers / vendored deps
+  'node_modules', 'vendor',
+  // Python tooling
+  '__pycache__', '.pytest_cache', '.tox', '.venv', 'venv',
+  // JS framework build / cache dirs
+  '.cache', '.next', '.nuxt', '.parcel-cache', '.svelte-kit', '.turbo',
+  // Build / dist outputs (JVM, Rust, JS)
+  'build', 'dist', 'out', 'target',
+  // JVM build tools
+  '.gradle', '.mvn',
+  // Coverage reports
+  'coverage',
 ])
+
+// Path segments that, if present anywhere in a file's path, should disqualify
+// it. Separate from IGNORED_DIR_NAMES because we also defend at loadFile time
+// (in case a path arrives via syncOne / external override that bypassed the
+// directory walker).
+const BLOCKED_PATH_SEGMENTS: ReadonlySet<string> = new Set<string>([
+  '.cache', '.git', '.next', '.nuxt', '.parcel-cache', '.svelte-kit',
+  '.turbo', '.venv', '__pycache__', 'build', 'coverage', 'dist',
+  'node_modules', 'out', 'target', 'vendor', 'venv',
+])
+
+/** macOS bundle directory test (e.g. `Foo.app`, `Quartz.framework`). */
+function isMacBundleDirectory(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.app') || lower.endsWith('.framework')
+}
+
+/** True if any path segment matches a blocked name (cross-platform separator). */
+function hasBlockedPathSegment(filePath: string): boolean {
+  const normalized = filePath.split(/[\\/]/g)
+  for (const segment of normalized) {
+    if (!segment) continue
+    if (BLOCKED_PATH_SEGMENTS.has(segment)) return true
+    if (isMacBundleDirectory(segment)) return true
+  }
+  return false
+}
+
+/**
+ * Heuristic binary sniff for files with missing or unknown extensions. Reads
+ * the first 256 bytes and rejects:
+ *   - any buffer containing a NUL byte (textbook binary marker)
+ *   - any buffer where >30% of bytes are control chars (excluding 9/10/13)
+ *
+ * Buffers that look like valid printable text (incl. UTF-8 multibyte) pass.
+ * Empty buffers are accepted (zero-byte files are harmless to index).
+ */
+export function isLikelyTextContent(buf: Buffer): boolean {
+  if (buf.length === 0) return true
+  let controlChars = 0
+  for (let i = 0; i < buf.length; i += 1) {
+    const byte = buf[i]
+    if (byte === 0x00) return false
+    // Tab (9), LF (10), CR (13) are legitimate; other <32 are control chars.
+    // 0x7F (DEL) also counts as control.
+    const isControl = (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 0x7f
+    if (isControl) controlChars += 1
+  }
+  return controlChars / buf.length <= 0.3
+}
+
+/** Read up to `cap` bytes from the head of `filePath` without slurping. */
+async function readHeadBytes(filePath: string, cap: number): Promise<Buffer> {
+  const handle = await open(filePath, 'r')
+  try {
+    const buffer = Buffer.alloc(cap)
+    const { bytesRead } = await handle.read(buffer, 0, cap, 0)
+    return bytesRead === cap ? buffer : buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Single-source-of-truth filter decision for one file path. Cheap-first order:
+ *   1. blocked path segment (no IO)
+ *   2. binary extension (no IO)
+ *   3. size cap (one stat)
+ *   4. binary sniff for ext-less / unknown-ext files (one 256-byte read)
+ *
+ * Returns the parsed file metadata on accept, `null` on reject.
+ */
+export type FileFilterDecision =
+  | { accept: true }
+  | { accept: false; reason: 'blocked_segment' | 'binary_ext' | 'oversized' | 'binary_sniff' | 'not_a_file' | 'stat_failed' }
+
+export async function decideFileForIndex(
+  filePath: string,
+  fileStat: { size: number; isFile(): boolean } | null,
+): Promise<FileFilterDecision> {
+  if (hasBlockedPathSegment(filePath)) return { accept: false, reason: 'blocked_segment' }
+  const ext = extname(filePath).toLowerCase()
+  if (ext && BINARY_EXTENSIONS.has(ext)) return { accept: false, reason: 'binary_ext' }
+  if (fileStat) {
+    if (!fileStat.isFile()) return { accept: false, reason: 'not_a_file' }
+    if (fileStat.size > MAX_FILE_BYTES) return { accept: false, reason: 'oversized' }
+  }
+  // Sniff bytes for files lacking a known text extension. We treat any ext
+  // not in BINARY_EXTENSIONS as "unknown" — even an explicit '.md' is known
+  // text and skips the read. This catches the common ext-less binary case
+  // (config dumps, lock files, opaque blobs) without paying I/O for the
+  // 99% of legitimate text files that have a real extension.
+  if (!ext) {
+    try {
+      const head = await readHeadBytes(filePath, 256)
+      if (!isLikelyTextContent(head)) return { accept: false, reason: 'binary_sniff' }
+    } catch {
+      return { accept: false, reason: 'stat_failed' }
+    }
+  }
+  return { accept: true }
+}
 
 /** Canonical filesystem adapter — the original single-source reindex behavior. */
 export class FileSystemAdapter implements IndexSourceAdapter {
@@ -137,13 +254,19 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       for (const entry of entries) {
         const fullPath = join(current, entry.name)
         if (entry.isDirectory()) {
+          // Cheapest filter first: well-known build/cache/vcs directories.
           if (IGNORED_DIR_NAMES.has(entry.name)) continue
+          // macOS bundles (.app, .framework) are directories that contain a
+          // sea of opaque resources — treat the whole tree as binary.
+          if (isMacBundleDirectory(entry.name)) continue
           stack.push(fullPath)
           continue
         }
         if (!entry.isFile()) continue
+        // Per-file cheap filters (no IO beyond what the parent readdir gave us).
+        // Heavy filters (binary sniff) happen lazily in loadFile.
         const ext = extname(entry.name).toLowerCase()
-        if (BINARY_EXTENSIONS.has(ext)) continue
+        if (ext && BINARY_EXTENSIONS.has(ext)) continue
         results.push(fullPath)
       }
     }
@@ -153,16 +276,26 @@ export class FileSystemAdapter implements IndexSourceAdapter {
   private async loadFile(filePath: string, rawOverride?: string): Promise<LoadedFile | null> {
     try {
       const ext = extname(filePath).toLowerCase()
-      if (BINARY_EXTENSIONS.has(ext)) return null
       const fileStat = await stat(filePath).catch(() => null)
+      // When we have an override (e.g. live in-memory edit being re-indexed)
+      // skip the on-disk binary sniff — caller already has the bytes — but
+      // still enforce extension + path-segment blocks.
+      const decision = rawOverride !== undefined
+        ? decideOverrideOnly(filePath)
+        : await decideFileForIndex(filePath, fileStat)
+      if (!decision.accept) {
+        if (decision.reason === 'oversized' && fileStat) {
+          logSearch(`skip oversized path=${filePath} size=${fileStat.size}`)
+        } else if (decision.reason === 'binary_sniff') {
+          logSearch(`skip binary-sniffed path=${filePath}`)
+        } else if (decision.reason === 'blocked_segment') {
+          logSearch(`skip blocked-segment path=${filePath}`)
+        }
+        return null
+      }
       let size = 0
       let mtime = 0
       if (fileStat) {
-        if (!fileStat.isFile()) return null
-        if (fileStat.size > MAX_FILE_BYTES) {
-          logSearch(`skip oversized path=${filePath} size=${fileStat.size}`)
-          return null
-        }
         size = fileStat.size
         mtime = Math.floor(fileStat.mtimeMs)
       }
@@ -193,6 +326,18 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       return null
     }
   }
+}
+
+/**
+ * Synchronous slice of decideFileForIndex used when the caller already has
+ * the file body in memory (e.g. live commit re-index). Skips IO and the
+ * size cap (caller is responsible — the body is bounded by editor limits).
+ */
+function decideOverrideOnly(filePath: string): FileFilterDecision {
+  if (hasBlockedPathSegment(filePath)) return { accept: false, reason: 'blocked_segment' }
+  const ext = extname(filePath).toLowerCase()
+  if (ext && BINARY_EXTENSIONS.has(ext)) return { accept: false, reason: 'binary_ext' }
+  return { accept: true }
 }
 
 export interface LoadedFile {

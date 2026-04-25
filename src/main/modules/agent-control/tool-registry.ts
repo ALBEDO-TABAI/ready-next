@@ -18,11 +18,20 @@ import {
   getBrowserOpenAITools,
 } from '../tools/browser-tool-catalog'
 import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../tools/document-tools'
+// Import the metadata-only entry point (`file-management-tool-defs`) rather than
+// the executor entry (`file-management-tools`). The executor module transitively
+// pulls in `search-engine/ipc-handler` -> `document-engine/ipc-handler` ->
+// `electron` (BrowserWindow), which crashes 13 test files on module load under
+// `tsx --test` where `electron` is a stub. This mirrors how
+// `STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` is imported from `skills-tools-static`
+// instead of `skills-tools` for the same reason. See lines 35-46 above for why
+// lazyRequire is NOT used here (electron-vite bundle resolution regressed
+// `createRequire(import.meta.url)`-based paths in production).
 import {
   FILE_MANAGEMENT_TOOL_NAMES,
   getFileManagementAnthropicTools,
   getFileManagementOpenAITools,
-} from '../tools/file-management-tools'
+} from '../tools/file-management-tool-defs'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'

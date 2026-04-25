@@ -1680,6 +1680,16 @@ interface SkillRunResult {
   // Phase 4: 'workflow' mode retired; only 'direct' (subprocess / in-process)
   // and 'reference' (SKILL.md inline) survive.
   mode?: 'direct' | 'reference'
+  /**
+   * C6 — when stdout/stderr exceeded the in-memory cap, surplus bytes are
+   * appended to a per-action `.logs/` artifact under
+   * `<runtimeRoot>/outputs/<skillId>/`. `*Error` is set when the disk write
+   * itself failed; the command result is still returned in either case.
+   */
+  stdoutArtifactPath?: string
+  stderrArtifactPath?: string
+  stdoutArtifactError?: string
+  stderrArtifactError?: string
 }
 
 interface SkillJobRecord {

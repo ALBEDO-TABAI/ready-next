@@ -15,6 +15,10 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           'rsshub-worker': resolve(__dirname, 'src/main/modules/rss-engine/rsshub-worker.mjs'),
+          // perf-rescue B1: dedicated worker_thread for heavy DB queries
+          // (graph BFS, FTS scan, reindex). The main bundle never imports
+          // this file at runtime; worker-bridge.ts spawns it via Worker(path).
+          'db-worker': resolve(__dirname, 'src/main/modules/database/worker.ts'),
         }
       }
     }

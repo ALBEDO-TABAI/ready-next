@@ -35,20 +35,54 @@ export interface UseForceLayoutOptions {
   centerGravity?: number
   /** Velocity damping per tick */
   damping?: number
+  /**
+   * Power-user escape hatch: when true, the per-tick O(N²) cap is removed and
+   * the layout runs regardless of node count. Intended only for the explicit
+   * "show full graph anyway" confirmation flow in `GraphView`.
+   */
+  bypassNodeCap?: boolean
 }
+
+/** Hard ceiling above which force layout refuses to run (renderer-thread protection). */
+export const MAX_NODES_BEFORE_DEGRADE = 500
+
+export interface ForceLayoutOk {
+  status: 'ok'
+  nodes: LayoutNode[]
+  positions: LayoutNode[]
+  pin: (id: string, x: number, y: number) => void
+  release: (id: string) => void
+}
+
+export interface ForceLayoutDegraded {
+  status: 'degraded'
+  reason: 'too_many_nodes'
+  nodeCount: number
+  maxSupported: number
+  pin: (id: string, x: number, y: number) => void
+  release: (id: string) => void
+}
+
+export type ForceLayoutResult = ForceLayoutOk | ForceLayoutDegraded
 
 /**
  * Lightweight force-directed layout. Runs `iterations` Verlet ticks inside a
  * single effect and returns the stabilized node positions. For interactive
  * dragging, consumers can call `pin(id, x, y)` before the next render.
  *
- * Complexity is O(N²) per tick; designed for graphs with ≤ 500 nodes.
+ * Complexity is O(N²) per tick; designed for graphs with ≤ 500 nodes. When
+ * the node count exceeds `MAX_NODES_BEFORE_DEGRADE`, the hook returns a
+ * `degraded` result instead of running the simulation, so the renderer thread
+ * stays responsive on large workspaces (e.g. 681K-node knowledge graphs).
+ * Consumers should switch to focus mode (server-side 2-hop BFS via the IPC's
+ * `centerPath` parameter) and surface a banner. The escape hatch is the
+ * `bypassNodeCap` option, gated behind a confirmation dialog in the consumer.
  */
 export function useForceLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
   options: UseForceLayoutOptions = {},
-): { nodes: LayoutNode[]; pin: (id: string, x: number, y: number) => void; release: (id: string) => void } {
+): ForceLayoutResult {
   const {
     width = 800,
     height = 600,
@@ -58,12 +92,16 @@ export function useForceLayout(
     springLength = 110,
     centerGravity = 0.012,
     damping = 0.82,
+    bypassNodeCap = false,
   } = options
 
   const pinnedRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   const [, setTick] = useState(0)
 
+  const overCap = nodes.length > MAX_NODES_BEFORE_DEGRADE && !bypassNodeCap
+
   const initial = useMemo<LayoutNode[]>(() => {
+    if (overCap) return []
     const count = nodes.length
     const ring = Math.min(width, height) * 0.38
     return nodes.map((node, idx) => {
@@ -76,9 +114,10 @@ export function useForceLayout(
         vy: 0,
       }
     })
-  }, [nodes, width, height])
+  }, [nodes, width, height, overCap])
 
   const simulated = useMemo(() => {
+    if (overCap) return []
     if (nodes.length === 0) return []
     const laid = runForceLayout(initial, edges, {
       iterations,
@@ -101,7 +140,7 @@ export function useForceLayout(
       }
     }
     return laid
-  }, [initial, edges, iterations, repulsion, springStiffness, springLength, centerGravity, damping, width, height, nodes])
+  }, [initial, edges, iterations, repulsion, springStiffness, springLength, centerGravity, damping, width, height, nodes, overCap])
 
   useEffect(() => { setTick((n) => n + 1) }, [nodes.length])
 
@@ -114,7 +153,18 @@ export function useForceLayout(
     setTick((n) => n + 1)
   }
 
-  return { nodes: simulated, pin, release }
+  if (overCap) {
+    return {
+      status: 'degraded',
+      reason: 'too_many_nodes',
+      nodeCount: nodes.length,
+      maxSupported: MAX_NODES_BEFORE_DEGRADE,
+      pin,
+      release,
+    }
+  }
+
+  return { status: 'ok', nodes: simulated, positions: simulated, pin, release }
 }
 
 interface RunForceLayoutOptions {

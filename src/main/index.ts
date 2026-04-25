@@ -24,7 +24,9 @@ import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handle
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
 import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
+import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { getDatabase } from './modules/database'
+import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
@@ -612,6 +614,13 @@ app.on('before-quit', (event) => {
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
     cleanupRsshubManager: () => rsshubManager.cleanup(),
+    cleanupManagedBrowsers: async () => {
+      const result = await closeAllBrowsers()
+      if (result.errors.length > 0) {
+        console.warn('[before-quit] closeAllBrowsers errors', result.errors)
+      }
+    },
+    cleanupDbWorker: () => shutdownWorkerDbBridge(),
     closeDatabase: () => getDatabase().close(),
   }).catch((err) => {
     console.error('[before-quit] cleanup error', err)

@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDatabase } from '../database'
 import { setDocumentWriteIndexHook } from '../document-engine/ipc-handler'
+import { getWorkerDbBridge } from '../database/worker-bridge'
 import {
   SearchEngine,
   probeFts5Availability,
@@ -52,11 +53,18 @@ export function setupSearchIPC(): void {
       if (typeof root !== 'string' || root.length === 0) {
         return { success: false, error: 'root path required' }
       }
+      // perf-rescue B1: reindex walks the full workspace + writes batches.
+      // Run in worker; on bridge failure fall back to in-process engine.
       try {
-        const result = await searchEngine.reindexWorkspace(root)
+        const result = await getWorkerDbBridge().reindexWorkspace({ root })
         return { success: true, data: result }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      } catch {
+        try {
+          const result = await searchEngine.reindexWorkspace(root)
+          return { success: true, data: result }
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
       }
     },
   )
@@ -77,15 +85,26 @@ export function setupSearchIPC(): void {
       if (!payload || typeof payload.query !== 'string') {
         return { success: false, error: 'query required' }
       }
+      // perf-rescue B1: FTS scan on multi-GB index — offload to worker.
       try {
-        const result = await searchEngine.search(payload.query, {
+        const result = await getWorkerDbBridge().searchDocuments({
+          query: payload.query,
           limit: payload.limit,
           workspaceRoot: payload.workspaceRoot,
           sources: payload.sources,
         })
         return { success: true, data: result }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      } catch {
+        try {
+          const result = await searchEngine.search(payload.query, {
+            limit: payload.limit,
+            workspaceRoot: payload.workspaceRoot,
+            sources: payload.sources,
+          })
+          return { success: true, data: result }
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
       }
     },
   )
@@ -97,11 +116,17 @@ export function setupSearchIPC(): void {
       if (typeof root !== 'string' || root.length === 0) {
         return { success: false, error: 'root path required' }
       }
+      // perf-rescue B1: full multi-source reindex — offload to worker.
       try {
-        const result = await searchEngine.reindexAllSources(root)
+        const result = await getWorkerDbBridge().reindexAllSources({ root })
         return { success: true, data: result }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      } catch {
+        try {
+          const result = await searchEngine.reindexAllSources(root)
+          return { success: true, data: result }
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
       }
     },
   )
@@ -183,86 +208,14 @@ export function setupSearchIPC(): void {
     }>> => {
       if (!searchEngine) return { success: false, error: 'search engine unavailable' }
       const depth = typeof payload?.depth === 'number' ? Math.max(1, Math.min(6, payload.depth)) : 2
-      const centerPath = typeof payload?.centerPath === 'string' ? payload.centerPath : null
-      const workspaceRoot = typeof payload?.workspaceRoot === 'string' ? payload.workspaceRoot : null
+      const centerPath = typeof payload?.centerPath === 'string' ? payload.centerPath : undefined
+      const workspaceRoot = typeof payload?.workspaceRoot === 'string' ? payload.workspaceRoot : undefined
+      // perf-rescue B1: graph reads can hit 681K rows + N BFS round-trips.
+      // Offload to worker; renderer doesn't need the in-process fallback path
+      // because callers handle the structured error.
       try {
-        const db = searchEngine.getRepository().getConnection()
-        const baseQuery = `SELECT id, path, name, source_type AS sourceType FROM documents`
-        const documents = workspaceRoot
-          ? db
-              .prepare(`${baseQuery} WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?)`)
-              .all<{ id: number; path: string; name: string; sourceType: string }>(workspaceRoot)
-          : db
-              .prepare(baseQuery)
-              .all<{ id: number; path: string; name: string; sourceType: string }>()
-
-        let includedIds: Set<number> | null = null
-        if (centerPath) {
-          const center = documents.find((d) => d.path === centerPath)
-          if (!center) return { success: true, data: { nodes: [], edges: [] } }
-          includedIds = new Set([center.id])
-          let frontier = new Set([center.id])
-          for (let level = 0; level < depth; level += 1) {
-            if (frontier.size === 0) break
-            const ph = Array.from(frontier).map(() => '?').join(',')
-            const neighbors = db
-              .prepare(
-                `SELECT src_doc_id AS a, target_doc_id AS b FROM doc_links WHERE target_doc_id IS NOT NULL AND (src_doc_id IN (${ph}) OR target_doc_id IN (${ph}))`,
-              )
-              .all<{ a: number; b: number }>(...Array.from(frontier), ...Array.from(frontier))
-            const next = new Set<number>()
-            for (const edge of neighbors) {
-              if (edge.a && !includedIds.has(edge.a)) { includedIds.add(edge.a); next.add(edge.a) }
-              if (edge.b && !includedIds.has(edge.b)) { includedIds.add(edge.b); next.add(edge.b) }
-            }
-            frontier = next
-          }
-        }
-
-        const allowedDocs = includedIds ? documents.filter((d) => includedIds!.has(d.id)) : documents
-        const idList = allowedDocs.map((d) => d.id)
-        const allowedIdSet = new Set(idList)
-        const nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }> = []
-        for (const doc of allowedDocs) {
-          nodes.push({ id: `doc:${doc.id}`, type: 'doc', label: doc.name, sourceType: doc.sourceType })
-        }
-        if (idList.length === 0) return { success: true, data: { nodes, edges: [] } }
-
-        const ph = idList.map(() => '?').join(',')
-        const linkRows = db
-          .prepare(
-            `SELECT src_doc_id AS src, target_doc_id AS tgt, kind, target_text AS label FROM doc_links WHERE src_doc_id IN (${ph})`,
-          )
-          .all<{ src: number; tgt: number | null; kind: string; label: string }>(...idList)
-        const tagRows = db
-          .prepare(`SELECT doc_id AS src, tag FROM tags WHERE doc_id IN (${ph})`)
-          .all<{ src: number; tag: string }>(...idList)
-
-        const edges: Array<{ source: string; target: string; kind: string }> = []
-        const ghostLabels = new Map<string, string>()
-        const tagLabels = new Map<string, string>()
-
-        for (const link of linkRows) {
-          if (link.tgt && allowedIdSet.has(link.tgt)) {
-            edges.push({ source: `doc:${link.src}`, target: `doc:${link.tgt}`, kind: link.kind })
-          } else if (!link.tgt && link.kind === 'wikilink') {
-            const ghostId = `ghost:${link.label}`
-            if (!ghostLabels.has(ghostId)) ghostLabels.set(ghostId, link.label)
-            edges.push({ source: `doc:${link.src}`, target: ghostId, kind: 'wikilink' })
-          }
-        }
-        for (const row of tagRows) {
-          const tagId = `tag:${row.tag.toLowerCase()}`
-          tagLabels.set(tagId, row.tag)
-          edges.push({ source: `doc:${row.src}`, target: tagId, kind: 'tag-of' })
-        }
-        for (const [id, label] of tagLabels.entries()) {
-          nodes.push({ id, type: 'tag', label })
-        }
-        for (const [id, label] of ghostLabels.entries()) {
-          nodes.push({ id, type: 'ghost', label })
-        }
-        return { success: true, data: { nodes, edges } }
+        const result = await getWorkerDbBridge().getDocumentGraph({ depth, centerPath, workspaceRoot })
+        return { success: true, data: { nodes: result.nodes, edges: result.edges } }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
