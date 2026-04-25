@@ -41,7 +41,54 @@ export interface AdapterContext {
 // large markdown/SQL dumps fit. Anything beyond is skipped + logged.
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
-const BATCH_SIZE = 500
+// perf-rescue B6: streaming reindex.
+//   - BATCH_SIZE 500 → 50: keeps the per-batch transaction tight so a slow
+//     workspace doesn't pin the worker on a single sync write for seconds.
+//   - BATCH_CONCURRENCY 4: bounded loadFile parallelism per batch (was
+//     Promise.all of the whole 500-file batch — could spawn hundreds of
+//     concurrent reads + binary sniffs on a cold cache).
+//   - After each (loadFile + insert) we yield via setImmediate so the worker
+//     event loop can service abort/cancel posts mid-batch.
+const BATCH_SIZE = 50
+const BATCH_CONCURRENCY = 4
+
+/** Cancellation marker. Distinguished by `name === 'AbortError'`. */
+export class AbortError extends Error {
+  readonly name = 'AbortError'
+  constructor(message = 'reindex aborted') {
+    super(message)
+  }
+}
+
+/**
+ * Bounded-concurrency map. Equivalent to `Promise.all(items.map(fn))` but
+ * with at most `concurrency` in-flight at a time. Preserves input order in
+ * the resulting array. Used so a 50-file batch sniffs/reads at most 4 files
+ * concurrently instead of all 50 at once.
+ */
+async function mapBounded<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const workers: Array<Promise<void>> = []
+  const limit = Math.min(Math.max(1, concurrency), items.length)
+  for (let w = 0; w < limit; w += 1) {
+    workers.push((async () => {
+      while (true) {
+        const idx = cursor
+        cursor += 1
+        if (idx >= items.length) return
+        results[idx] = await fn(items[idx], idx)
+      }
+    })())
+  }
+  await Promise.all(workers)
+  return results
+}
 
 // Directories never worth indexing — package manager output, build artifacts,
 // virtual envs, IDE caches. Cheaper to filter at walk-time than per-file.
@@ -171,10 +218,16 @@ export class FileSystemAdapter implements IndexSourceAdapter {
 
   async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
     const result: AdapterReindexResult = { indexed: 0, skipped: 0, removed: 0, scanned: 0 }
+    // Early-exit when the caller passes an already-aborted signal — don't
+    // even stat the root. Throws so the caller's catch handler can route to
+    // the partial-result branch.
+    if (ctx.signal?.aborted) throw new AbortError()
+
     try {
       const rootStat = await stat(ctx.workspaceRoot)
       if (!rootStat.isDirectory()) throw new Error(`root is not a directory: ${ctx.workspaceRoot}`)
     } catch (error) {
+      if (error instanceof AbortError) throw error
       logSearch(`FileSystemAdapter: root invalid ${ctx.workspaceRoot} ${error instanceof Error ? error.message : String(error)}`)
       return result
     }
@@ -188,10 +241,28 @@ export class FileSystemAdapter implements IndexSourceAdapter {
     result.scanned = filePaths.length
 
     for (let offset = 0; offset < filePaths.length; offset += BATCH_SIZE) {
-      if (ctx.signal?.aborted) throw new Error('aborted')
+      // Signal-check at batch boundary. Earlier batches already committed
+      // remain in the DB — partial index is a feature, not a bug, since the
+      // caller can resume by re-running reindex.
+      if (ctx.signal?.aborted) throw new AbortError()
       const batch = filePaths.slice(offset, offset + BATCH_SIZE)
+
+      // Bounded-parallel load (4 concurrent reads/sniffs) instead of a
+      // 50-wide Promise.all. Yields to the event loop after each individual
+      // file so the worker can process incoming abort/cancel posts mid-batch.
       // eslint-disable-next-line no-await-in-loop
-      const parsedBatch = await Promise.all(batch.map((p) => this.loadFile(p)))
+      const parsedBatch = await mapBounded(batch, BATCH_CONCURRENCY, async (p) => {
+        const parsed = await this.loadFile(p)
+        // Per-file yield. setImmediate runs on the macrotask queue, giving
+        // any pending message handler (cancel posts) a chance to set the
+        // abort flag before we stat/read the next file.
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        return parsed
+      })
+
+      // Re-check signal before opening the write transaction — a cancel
+      // arriving during loadFile shouldn't blow another sync write.
+      if (ctx.signal?.aborted) throw new AbortError()
 
       ctx.repository.transaction(() => {
         for (const parsed of parsedBatch) {
@@ -217,11 +288,16 @@ export class FileSystemAdapter implements IndexSourceAdapter {
         }
       })
 
+      // Inter-batch yield. Combined with the per-file yield above, this is
+      // belt-and-suspenders for cancel responsiveness on huge workspaces.
       // eslint-disable-next-line no-await-in-loop
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
 
     if (existingPaths.size > 0) {
+      // Even orphan-cleanup deserves a signal check — if the caller cancelled
+      // we don't want to spend N round-trips deleting rows.
+      if (ctx.signal?.aborted) throw new AbortError()
       ctx.repository.transaction(() => {
         for (const path of existingPaths.keys()) {
           ctx.repository.deletePath(ctx.workspaceId, path)

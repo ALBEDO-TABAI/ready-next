@@ -1,15 +1,39 @@
 import { ipcMain, dialog, shell, BrowserWindow, type WebContents } from 'electron'
 import {
-  readFileSync, writeFileSync, readdirSync, statSync, existsSync,
-  mkdirSync, renameSync, copyFileSync, unlinkSync, rmSync, cpSync, watch, accessSync, constants as fsConstants, type FSWatcher
+  writeFileSync, statSync, existsSync,
+  copyFileSync, watch, accessSync, constants as fsConstants, type FSWatcher
 } from 'fs'
-import { readFile, readdir, stat } from 'fs/promises'
+import { readFile, readdir, stat, writeFile, rename, cp, mkdir, unlink, rm, copyFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { BINARY_EXTENSIONS } from './binary-extensions'
+import {
+  ATTACHMENT_HARD_CAP_BYTES,
+  IMAGE_INLINE_CAP_BYTES,
+  VIDEO_INLINE_CAP_BYTES,
+  base64DecodedLength,
+  categoryFromSuggestedName,
+  decideAttachmentSize,
+  decideReadAttachmentSize,
+} from './attachment-size-guards'
+
+// Re-export the perf size-guard surface so existing import paths keep working.
+export {
+  ATTACHMENT_HARD_CAP_BYTES,
+  IMAGE_INLINE_CAP_BYTES,
+  VIDEO_INLINE_CAP_BYTES,
+  base64DecodedLength,
+  categoryFromSuggestedName,
+  decideAttachmentSize,
+  decideReadAttachmentSize,
+}
+export type {
+  AttachmentSizeDecision,
+  ReadAttachmentDecision,
+} from './attachment-size-guards'
 
 // Lazy-loaded libraries
 let mammothLib: typeof import('mammoth') | null = null
@@ -301,6 +325,7 @@ function shouldHideInternalBackup(name: string): boolean {
   )
 }
 
+
 export type DocumentWriteIndexHook = (path: string, content: string) => void
 
 let documentWriteIndexHook: DocumentWriteIndexHook | null = null
@@ -353,7 +378,7 @@ export async function writeDocumentEditableText(
         error: `无法直接以纯文本保存到 ${ext || 'binary'} 文件。请另存为 .md/.txt，避免损坏原文件。`,
       }
     }
-    writeFileSync(filePath, content, 'utf-8')
+    await writeFile(filePath, content, 'utf-8')
     return { success: true }
   } catch (error) {
     return {
@@ -368,7 +393,17 @@ async function saveDocumentWithDialog(payload: {
   contentBase64?: string
   suggestedName?: string
   defaultPath?: string | null
-}): Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }> {
+}): Promise<{
+  success: boolean
+  path?: string
+  canceled?: boolean
+  error?: string
+  errorCode?: string
+  /** When refused due to a size guard, the configured max byte cap. */
+  max?: number
+  /** When refused due to a size guard, the actual decoded byte length. */
+  actual?: number
+}> {
   try {
     const win = BrowserWindow.getFocusedWindow()
     if (!win) return { success: false, error: 'No window' }
@@ -399,14 +434,47 @@ async function saveDocumentWithDialog(payload: {
     }
 
     if (payload.contentBase64) {
-      writeFileSync(saveResult.filePath, Buffer.from(payload.contentBase64, 'base64'))
+      // D2 perf guard: refuse oversized base64 payloads instead of blocking the
+      // main thread inside Buffer.from for tens of MB. Renderer should switch
+      // to a streamed path for these.
+      const approxBytes = base64DecodedLength(payload.contentBase64)
+      const category = categoryFromSuggestedName(payload.suggestedName || saveResult.filePath)
+      const decision = decideAttachmentSize(approxBytes, category)
+      if (decision.kind === 'attachment_too_large') {
+        return {
+          success: false,
+          error: 'attachment_too_large',
+          errorCode: 'ATTACHMENT_TOO_LARGE',
+          max: decision.max,
+          actual: decision.actual,
+        }
+      }
+      if (decision.kind === 'video_too_large_for_base64') {
+        return {
+          success: false,
+          error: 'video_too_large_for_base64',
+          errorCode: 'VIDEO_TOO_LARGE_FOR_BASE64',
+          max: decision.max,
+          actual: decision.actual,
+        }
+      }
+      if (decision.kind === 'image_too_large_for_base64') {
+        return {
+          success: false,
+          error: 'image_too_large_for_base64',
+          errorCode: 'IMAGE_TOO_LARGE_FOR_BASE64',
+          max: decision.max,
+          actual: decision.actual,
+        }
+      }
+      await writeFile(saveResult.filePath, Buffer.from(payload.contentBase64, 'base64'))
       return { success: true, path: saveResult.filePath }
     }
 
     if (extname(saveResult.filePath).toLowerCase() === '.html') {
       const title = basename(saveResult.filePath, '.html') || 'Document Snapshot'
       const html = buildDocumentHtmlSnapshotExport(payload.content || '', title)
-      writeFileSync(saveResult.filePath, html, 'utf-8')
+      await writeFile(saveResult.filePath, html, 'utf-8')
       return { success: true, path: saveResult.filePath }
     }
 
@@ -568,21 +636,52 @@ export function setupDocumentIPC(useMock = false): void {
       if (isBinaryFile(path)) {
         const category = getFileCategory(path)
         const extension = extname(path).toLowerCase()
+        // Pre-stat to size-guard inline byte loads and flag oversized media
+        // so the renderer can fall back to a streaming/<video src=local-file://>
+        // path instead of rehydrating tens of MB through structured clone.
+        const stats = await stat(path)
+        const decision = decideReadAttachmentSize(stats.size, category)
+        if (decision.kind === 'attachment_too_large') {
+          return {
+            success: false,
+            error: 'attachment_too_large',
+            errorCode: 'ATTACHMENT_TOO_LARGE',
+            max: decision.max,
+            actual: decision.actual,
+          }
+        }
+        if (decision.kind === 'pdf_too_large_for_inline_bytes') {
+          return {
+            success: false,
+            error: 'pdf_too_large_for_inline_bytes',
+            errorCode: 'PDF_TOO_LARGE_FOR_INLINE_BYTES',
+            max: decision.max,
+            actual: decision.actual,
+          }
+        }
         const data: {
           type: 'binary'
           category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
           localUrl: string
           extension: string
           bytes?: Uint8Array
+          size: number
+          /** Set when the file is too large to inline — renderer should stream from `localUrl`. */
+          kind?: 'large_video_ref' | 'large_image_ref'
         } = {
           type: 'binary',
           category,
           localUrl: toLocalFileUrl(path),
           extension,
+          size: stats.size,
         }
 
-        // react-pdf reads raw bytes more reliably than fetching a custom protocol URL.
-        if (category === 'pdf') {
+        if (decision.kind === 'large_video_ref') {
+          data.kind = 'large_video_ref'
+        } else if (decision.kind === 'large_image_ref') {
+          data.kind = 'large_image_ref'
+        } else if (decision.kind === 'ok' && decision.loadInlineBytes) {
+          // react-pdf reads raw bytes more reliably than fetching a custom protocol URL.
           data.bytes = new Uint8Array(await readFile(path))
         }
 
@@ -855,7 +954,7 @@ export function setupDocumentIPC(useMock = false): void {
   ipcMain.handle('document:mkdir', async (_, path: string) => {
     try {
       if (useMock) return { success: true, mock: true }
-      mkdirSync(path, { recursive: true })
+      await mkdir(path, { recursive: true })
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -868,7 +967,7 @@ export function setupDocumentIPC(useMock = false): void {
       if (useMock) return { success: true, mock: true }
       if (!existsSync(oldPath)) return { success: false, error: 'Source not found' }
       if (existsSync(newPath)) return { success: false, error: 'Target already exists' }
-      renameSync(oldPath, newPath)
+      await rename(oldPath, newPath)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -880,11 +979,11 @@ export function setupDocumentIPC(useMock = false): void {
     try {
       if (useMock) return { success: true, mock: true }
       if (!existsSync(path)) return { success: false, error: 'Not found' }
-      const stats = statSync(path)
+      const stats = await stat(path)
       if (stats.isDirectory()) {
-        rmSync(path, { recursive: true, force: true })
+        await rm(path, { recursive: true, force: true })
       } else {
-        unlinkSync(path)
+        await unlink(path)
       }
       return { success: true }
     } catch (error) {
@@ -897,11 +996,11 @@ export function setupDocumentIPC(useMock = false): void {
     try {
       if (useMock) return { success: true, mock: true }
       if (!existsSync(src)) return { success: false, error: 'Source not found' }
-      const stats = statSync(src)
+      const stats = await stat(src)
       if (stats.isDirectory()) {
-        cpSync(src, dest, { recursive: true })
+        await cp(src, dest, { recursive: true })
       } else {
-        copyFileSync(src, dest)
+        await copyFile(src, dest)
       }
       return { success: true }
     } catch (error) {
@@ -914,7 +1013,7 @@ export function setupDocumentIPC(useMock = false): void {
     try {
       if (useMock) return { success: true, mock: true }
       if (!existsSync(src)) return { success: false, error: 'Source not found' }
-      renameSync(src, dest)
+      await rename(src, dest)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -1034,7 +1133,7 @@ export function setupDocumentIPC(useMock = false): void {
     try {
       if (useMock) return { success: true, mock: true }
       if (existsSync(path)) return { success: false, error: 'File already exists' }
-      writeFileSync(path, '', 'utf-8')
+      await writeFile(path, '', 'utf-8')
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

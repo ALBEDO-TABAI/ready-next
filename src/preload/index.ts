@@ -488,7 +488,11 @@ const appAPI = {
     }): void => callback(data)
     ipcRenderer.on('app:shortcut', handler)
     return () => ipcRenderer.removeListener('app:shortcut', handler)
-  }
+  },
+  // D1: cache stats + cleanup
+  getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
+  clearCache: (opts?: { includePuppeteer?: boolean }) =>
+    ipcRenderer.invoke('app:clearCache', opts ?? {}),
 }
 
 // Window API

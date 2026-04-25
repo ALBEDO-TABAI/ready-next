@@ -293,14 +293,35 @@ async function searchDocuments(args: SearchDocumentsArgs): Promise<SearchPayload
 interface ReindexWorkspaceArgs { root: string }
 interface ReindexAllSourcesArgs { root: string }
 
+// perf-rescue B6: per-request abort controllers for in-flight reindex jobs.
+// Keyed by message id so concurrent reindexes (e.g. one workspace + one
+// shared) can be cancelled independently. `cancelReindex` aborts all entries.
+// We don't track other commands (search/graph) since those return in <100ms
+// and aren't worth the bookkeeping.
+const activeReindexes = new Map<number, AbortController>()
+
 port.on('message', (raw: unknown) => {
   const msg = raw as IncomingMessage
   if (!msg || typeof msg.id !== 'number' || typeof msg.cmd !== 'string') return
 
   if (msg.cmd === 'shutdown') {
+    // Abort any in-flight reindex so we don't leak a pending sqlite write
+    // through the close call. The reindex promise will reject with AbortError
+    // but its reply has already been racing — we just want the worker to
+    // exit cleanly.
+    for (const ctrl of activeReindexes.values()) ctrl.abort()
+    activeReindexes.clear()
     try { db.close() } catch { /* ignore */ }
     reply({ id: msg.id, ok: true })
     setTimeout(() => process.exit(0), 0)
+    return
+  }
+
+  if (msg.cmd === 'cancelReindex') {
+    const cancelled = activeReindexes.size
+    for (const ctrl of activeReindexes.values()) ctrl.abort()
+    activeReindexes.clear()
+    reply({ id: msg.id, ok: true, data: cancelled })
     return
   }
 
@@ -319,12 +340,24 @@ port.on('message', (raw: unknown) => {
           break
         case 'reindexWorkspace': {
           const a = (msg.args ?? {}) as ReindexWorkspaceArgs
-          result = await engine.reindexWorkspace(a.root)
+          const controller = new AbortController()
+          activeReindexes.set(msg.id, controller)
+          try {
+            result = await engine.reindexWorkspace({ root: a.root, signal: controller.signal })
+          } finally {
+            activeReindexes.delete(msg.id)
+          }
           break
         }
         case 'reindexAllSources': {
           const a = (msg.args ?? {}) as ReindexAllSourcesArgs
-          result = await engine.reindexAllSources(a.root)
+          const controller = new AbortController()
+          activeReindexes.set(msg.id, controller)
+          try {
+            result = await engine.reindexAllSources({ root: a.root, signal: controller.signal })
+          } finally {
+            activeReindexes.delete(msg.id)
+          }
           break
         }
         default:

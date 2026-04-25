@@ -60,7 +60,7 @@ export function setupSearchIPC(): void {
         return { success: true, data: result }
       } catch {
         try {
-          const result = await searchEngine.reindexWorkspace(root)
+          const result = await searchEngine.reindexWorkspace({ root })
           return { success: true, data: result }
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -122,7 +122,7 @@ export function setupSearchIPC(): void {
         return { success: true, data: result }
       } catch {
         try {
-          const result = await searchEngine.reindexAllSources(root)
+          const result = await searchEngine.reindexAllSources({ root })
           return { success: true, data: result }
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -136,6 +136,22 @@ export function setupSearchIPC(): void {
     async (): Promise<SearchIPCResponse<{ sources: string[] }>> => {
       if (!searchEngine) return { success: false, error: 'search engine unavailable' }
       return { success: true, data: { sources: searchEngine.listSourceTypes() } }
+    },
+  )
+
+  // perf-rescue B6: cancel any in-flight reindex inside the db-worker. The
+  // worker tracks active reindex AbortControllers by request id and aborts
+  // them all when this command arrives. No-op if no reindex is running, so
+  // it's safe to call defensively (e.g. on workspace close / app quit).
+  ipcMain.handle(
+    'document:cancelReindex',
+    async (): Promise<SearchIPCResponse<{ cancelled: number }>> => {
+      try {
+        const cancelled = await getWorkerDbBridge().cancelReindex()
+        return { success: true, data: { cancelled } }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
     },
   )
 

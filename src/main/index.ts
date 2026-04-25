@@ -19,6 +19,7 @@ import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-h
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
+import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -248,6 +249,7 @@ function setupGlobalIPC(): void {
   setupRSSIPC(RSS_USE_MOCK)
   setupCalendarIPC(CALENDAR_USE_MOCK)
   setupSettingsIPC()
+  setupAppCacheIPC()
   setupSkillsIPC()
   setupMemoryManagementIPC()
 

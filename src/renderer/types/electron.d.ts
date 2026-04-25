@@ -1037,6 +1037,13 @@ interface DocumentReadBinaryData {
   extension: string
   /** Raw bytes are currently attached for PDF previews to avoid custom-protocol fetch issues. */
   bytes?: Uint8Array | ArrayBuffer | number[]
+  /** File byte size from a pre-read stat (added by the D2 perf size guard). */
+  size?: number
+  /**
+   * Set when the file is too large to inline — renderer should stream via `localUrl`
+   * (e.g. `<video src={localUrl}>`) instead of attempting a base64/byte fetch.
+   */
+  kind?: 'large_video_ref' | 'large_image_ref'
 }
 
 /** Read file response */
@@ -1047,6 +1054,10 @@ interface DocumentReadResponse {
   content?: string
   error?: string
   errorCode?: string
+  /** When refused due to a size guard, the configured max byte cap. */
+  max?: number
+  /** When refused due to a size guard, the actual byte size. */
+  actual?: number
   mock?: boolean
 }
 
@@ -1062,6 +1073,11 @@ interface DocumentSaveAsResponse {
   path?: string
   canceled?: boolean
   error?: string
+  errorCode?: string
+  /** When refused due to a size guard (D2 perf), the configured max byte cap. */
+  max?: number
+  /** When refused due to a size guard, the actual decoded byte length. */
+  actual?: number
   mock?: boolean
 }
 
@@ -1819,6 +1835,22 @@ interface ElectronAppAPI {
   installUpdate: () => Promise<void>
   onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
   onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
+  // D1: cache stats + cleanup
+  getCacheStats: () => Promise<{
+    success: boolean
+    error?: string
+    data?: {
+      codeCacheBytes: number
+      cacheBytes: number
+      puppeteerCacheBytes: number
+      sharedCacheBytes: number
+    }
+  }>
+  clearCache: (opts?: { includePuppeteer?: boolean }) => Promise<{
+    success: boolean
+    error?: string
+    data?: { clearedBytes: number; errors: string[] }
+  }>
 }
 
 // =============================================================================

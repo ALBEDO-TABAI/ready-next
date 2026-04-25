@@ -5,6 +5,7 @@ import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
 import {
+  AbortError,
   AgentMessageAdapter,
   BookmarkAdapter,
   CalendarAdapter,
@@ -77,7 +78,8 @@ export class SearchEngine {
     return Array.from(this.adaptersByType.keys())
   }
 
-  async reindexWorkspace(root: string): Promise<ReindexWorkspaceResult> {
+  async reindexWorkspace(opts: { root: string; signal?: AbortSignal }): Promise<ReindexWorkspaceResult> {
+    const { root, signal } = opts
     const started = Date.now()
     const result: ReindexWorkspaceResult = {
       ok: false,
@@ -98,6 +100,7 @@ export class SearchEngine {
         workspaceId,
         workspaceRoot: root,
         repository: this.repository,
+        signal,
       })
       result.indexed = adapterResult.indexed
       result.skipped = adapterResult.skipped
@@ -106,7 +109,14 @@ export class SearchEngine {
       this.repository.touchWorkspace(workspaceId, Math.floor(Date.now() / 1000))
       result.ok = true
     } catch (error) {
-      result.error = error instanceof Error ? error.message : String(error)
+      // perf-rescue B6: AbortError is a first-class signal for callers; we
+      // still log it but surface a structured `aborted: true` flag so the
+      // worker can distinguish cancellation from a real failure.
+      const message = error instanceof Error ? error.message : String(error)
+      result.error = message
+      if (error instanceof AbortError) {
+        ;(result as ReindexWorkspaceResult & { aborted?: boolean }).aborted = true
+      }
     }
     result.elapsedMs = Date.now() - started
     logSearch(
@@ -115,12 +125,13 @@ export class SearchEngine {
     return result
   }
 
-  async reindexAllSources(root: string): Promise<ReindexAllSourcesResult> {
+  async reindexAllSources(opts: { root: string; signal?: AbortSignal }): Promise<ReindexAllSourcesResult> {
+    const { root, signal } = opts
     const started = Date.now()
     const perSource: Record<string, AdapterReindexResult & { error?: string }> = {}
 
     // Filesystem (per-root) runs first
-    const fsResult = await this.reindexWorkspace(root)
+    const fsResult = await this.reindexWorkspace({ root, signal })
     perSource[this.fsAdapter.sourceType] = {
       indexed: fsResult.indexed,
       skipped: fsResult.skipped,
@@ -129,15 +140,26 @@ export class SearchEngine {
       ...(fsResult.error ? { error: fsResult.error } : {}),
     }
 
+    // If the FS pass was aborted, skip shared adapters too — caller wants
+    // the whole reindex stopped, not partially advanced into bookmark/RSS.
+    if ((fsResult as ReindexWorkspaceResult & { aborted?: boolean }).aborted || signal?.aborted) {
+      return { ok: false, perSource, elapsedMs: Date.now() - started }
+    }
+
     // Shared adapters run under the @shared workspace
     const sharedWorkspaceId = this.repository.ensureWorkspace(SHARED_WORKSPACE_ROOT)
     for (const adapter of this.sharedAdapters) {
+      if (signal?.aborted) {
+        perSource[adapter.sourceType] = { indexed: 0, skipped: 0, removed: 0, scanned: 0, error: 'aborted' }
+        continue
+      }
       try {
         // eslint-disable-next-line no-await-in-loop
         const r = await adapter.reindex({
           workspaceId: sharedWorkspaceId,
           workspaceRoot: SHARED_WORKSPACE_ROOT,
           repository: this.repository,
+          signal,
         })
         perSource[adapter.sourceType] = r
       } catch (error) {

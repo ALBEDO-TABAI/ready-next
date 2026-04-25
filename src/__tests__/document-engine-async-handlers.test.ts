@@ -10,7 +10,7 @@ describe('document engine async handlers', () => {
       'utf8',
     )
 
-    assert.match(source, /import \{ readFile, readdir, stat \} from 'fs\/promises'/)
+    assert.match(source, /import \{[^}]*\breadFile\b[^}]*\breaddir\b[^}]*\bstat\b[^}]*\} from 'fs\/promises'/)
     assert.match(source, /ipcMain\.handle\('document:read'[\s\S]*const content = await readFile\(path, 'utf-8'\)/)
     assert.match(source, /ipcMain\.handle\('document:read'[\s\S]*data\.bytes = new Uint8Array\(await readFile\(path\)\)/)
     assert.match(source, /ipcMain\.handle\('document:list'[\s\S]*const items = \(await readdir\(dir\)\)/)
