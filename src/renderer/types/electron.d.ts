@@ -1652,55 +1652,9 @@ interface SkillState {
   sourcePath?: string
 }
 
-interface SkillExecutionBlocker {
-  type: 'need_input' | 'need_confirmation' | 'need_agent_result' | 'completed' | 'failed'
-  executionId: string
-  skillId: string
-  stepId?: string
-  message: string
-  agentTask?: {
-    prompt: string
-  }
-}
-
-interface SkillExecutionStepRecord {
-  id: string
-  executionId: string
-  stepId: string
-  attempt: number
-  status: 'running' | 'success' | 'failed' | 'blocked' | 'cancelled'
-  startedAt: string
-  finishedAt?: string | null
-  message?: string | null
-}
-
-interface SkillArtifactRecord {
-  id: string
-  label?: string
-  kind?: string
-  path?: string
-  mimeType?: string
-  metadata?: Record<string, unknown>
-}
-
-interface SkillExecutionDetail {
-  id: string
-  skillId: string
-  entryAction: string
-  sessionId?: string | null
-  source: SkillSource
-  status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-  startedAt: string
-  updatedAt: string
-  finishedAt?: string | null
-  currentStepId?: string | null
-  blocker?: SkillExecutionBlocker | null
-  stepOutputs: Record<string, Record<string, unknown>>
-  confirmations: Record<string, boolean>
-  inputs: Record<string, unknown>
-  steps: SkillExecutionStepRecord[]
-  artifacts: SkillArtifactRecord[]
-}
+// Phase 4: SkillExecutionBlocker / SkillExecutionStepRecord /
+// SkillArtifactRecord / SkillExecutionDetail retired along with the
+// skill_executions state machine.
 
 interface SkillInstallResult {
   success: boolean
@@ -1719,9 +1673,9 @@ interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  mode?: 'direct' | 'workflow'
-  execution?: SkillExecutionDetail | null
-  blocker?: SkillExecutionBlocker | null
+  // Phase 4: 'workflow' mode retired; only 'direct' (subprocess / in-process)
+  // and 'reference' (SKILL.md inline) survive.
+  mode?: 'direct' | 'reference'
 }
 
 interface SkillJobRecord {
@@ -1785,33 +1739,10 @@ interface ElectronSkillsAPI {
     executionMode?: 'auto' | 'workflow' | 'direct'
   }) => Promise<IPCResponse<SkillRunResult>>
   listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
-  listExecutions: (payload?: {
-    limit?: number
-    sessionId?: string
-    activeOnly?: boolean
-  }) => Promise<IPCResponse<SkillExecutionDetail[]>>
-  getExecution: (payload: { id: string }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitInput: (payload: {
-    executionId: string
-    inputs: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitConfirmation: (payload: {
-    executionId: string
-    stepId: string
-    confirmed: boolean
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  submitAgentResult: (payload: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  restartFromStep: (payload: {
-    executionId: string
-    stepId: string
-    inputs?: Record<string, unknown>
-  }) => Promise<IPCResponse<SkillExecutionDetail>>
-  cancelExecution: (payload: { executionId: string }) => Promise<IPCResponse<SkillExecutionDetail>>
+  // Phase 4: skills:executions:* API surface retired along with the
+  // skill_executions state machine. Removed: listExecutions / getExecution /
+  // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution. Progress now exposed via in-memory todo projection.
   listSchedules: () => Promise<IPCResponse<SkillScheduleRecord[]>>
   createSchedule: (payload: {
     skillId: string

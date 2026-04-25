@@ -68,7 +68,9 @@ export class RunCoordinator {
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
-    const primaryTrigger = prepared.triggerHits[0]
+    const primaryTrigger = prepared.intentClassification?.primaryDomain === 'skill'
+      ? prepared.triggerHits.find((trigger) => trigger.blocking)
+      : prepared.triggerHits[0]
     const planningTaskTitle = primaryTrigger?.label || '正在理解需求'
     const planningTaskSummary = primaryTrigger
       ? `准备开始 ${primaryTrigger.label}`

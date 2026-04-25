@@ -3,7 +3,7 @@ import { promisify } from 'util'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { join, delimiter } from 'path'
-import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
 // string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
@@ -19,15 +19,12 @@ const electronModule = (() => {
 const { app } = electronModule
 import { getDatabase } from '../database'
 import { getWhichCommand } from '../../utils/platform'
-import { EMBEDDED_SKILLS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
+import { EMBEDDED_SKILLS, EMBEDDED_SKILL_IDS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
 import type {
-  ExecutionBlocker,
   SkillActionDefinition,
   SkillActionResult,
   SkillDefinition,
-  SkillExecutionDetail,
   SkillExecutionMode,
-  SkillExecutionState,
   SkillInputValue,
   SkillParamDefinition,
   SkillRuntimeKind,
@@ -42,65 +39,37 @@ import {
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
 import { SkillLoader } from './skill-loader'
-import { ExecutionStateStore } from './execution-state-store'
-import { ExecutionCoordinator } from './execution-coordinator'
-import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
-import { isWorkflowStarterAction } from './guardrails'
+// Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
+// skill_executions state machine. The imports (and the files) are removed in
+// PR1-E.
 import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
+import {
+  getSkillHostController,
+  type SkillHostController,
+  type SpawnContextHandle,
+} from './skill-host-controller'
 
 const execFileAsync = promisify(execFile)
 
 const INSTALL_STATE_FILENAME = '.ready-install-state.json'
+const EMBEDDED_SYNC_STATE_FILENAME = '.ready-embedded-sync-state.json'
 const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000
 const SCHEDULER_INTERVAL_MS = 60_000
 
-const DOUYIN_COMPAT_SHIM = `#!/usr/bin/env python3
-"""
-Compatibility adapter for pipeline_enhanced.py.
-The project now ships download_douyin.py, while pipeline imports douyin_downloader.
-This shim keeps the expected class interface.
-"""
-
-from pathlib import Path
-import sys
-
-_scripts_dir = Path(__file__).parent
-if str(_scripts_dir) not in sys.path:
-    sys.path.insert(0, str(_scripts_dir))
-
-from download_douyin import (  # type: ignore
-    is_douyin_url,
-    get_redirect_url,
-    extract_render_data,
-    extract_video_url,
-    download_douyin_video,
-)
-
-
-class DouyinDownloader:
-    @staticmethod
-    def is_douyin_url(url: str) -> bool:
-        return bool(is_douyin_url(url))
-
-    def get_redirect_url(self, url: str):
-        result = get_redirect_url(url)
-        if not isinstance(result, tuple):
-            return None, None
-        if len(result) >= 2:
-            return result[0], result[1]
-        return None, None
-
-    def extract_render_data(self, html: str):
-        return extract_render_data(html)
-
-    def extract_video_url(self, data):
-        return extract_video_url(data)
-
-    def download(self, url: str, output_path) -> bool:
-        return bool(download_douyin_video(url, str(output_path)))
-`
+/**
+ * B-arch-4 — explicit allowlist of embedded skill ids that have been retired
+ * (or are slated to be) and whose stale on-disk artifacts should be cleaned
+ * up via the host controller on app launch. Adding an id here is a deliberate
+ * "yes please cleanup" signal — without this gate, the orphan sweep would
+ * pick up any folder that's not in the current `EMBEDDED_SKILLS` list, which
+ * is dangerous if a custom-skill manifest hasn't been re-imported yet.
+ *
+ * Initially contains `'video-expert-analyzer'` per plan §3.4. The skill is
+ * still embedded today, so this is effectively a no-op until/unless we drop
+ * it from EMBEDDED_SKILLS.
+ */
+const RETIRED_EMBEDDED_SKILL_IDS: ReadonlySet<string> = new Set(['video-expert-analyzer'])
 
 type SkillTriggerType = 'manual' | 'tool' | 'schedule'
 export type SkillId = string
@@ -119,6 +88,12 @@ export interface SkillState {
   executionMode: SkillExecutionMode
   managedPath?: string
   sourcePath?: string
+  /**
+   * B-arch-4 — pass-through of the validated host_requirements block from the
+   * compiled SkillDefinition. The dispatch layer (skills-tools.ts) reads this
+   * to compute the effective shell allowlist for skill_run_shell.
+   */
+  hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements
 }
 
 export interface SkillsRuntimeInfo {
@@ -133,6 +108,26 @@ interface SkillInstallState {
   version: string
   requirementsDigest: string
   installedAt: string
+}
+
+export interface SkillsRuntimeManagerOptions {
+  runtimeRoot?: string
+  embeddedSkillsRoot?: string
+  startBackgroundTasks?: boolean
+  /**
+   * B-arch-4 — inject a SkillHostController for tests. Production path uses
+   * the singleton (`getSkillHostController()`) so prepare/restore + status
+   * detection apply uniformly across every skill run.
+   */
+  hostController?: SkillHostController
+  /**
+   * B-arch-4 — override the retired-embedded-skill allowlist for tests. The
+   * production constant is `RETIRED_EMBEDDED_SKILL_IDS` (currently just
+   * `'video-expert-analyzer'`), which is still embedded today and therefore
+   * exercises only the no-op branch in real boot. Tests inject a synthetic
+   * id matching their fixture so the cleanup branch runs deterministically.
+   */
+  retiredEmbeddedSkillIds?: ReadonlySet<string>
 }
 
 export interface SkillInstallResult {
@@ -152,9 +147,18 @@ export interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  mode?: 'direct' | 'workflow' | 'reference'
-  execution?: SkillExecutionDetail | null
-  blocker?: ExecutionBlocker | null
+  // Phase 4: 'workflow' mode retired along with the skill_executions state
+  // machine. Reference skills still return mode='reference' (inlined SKILL.md
+  // guidance); everything else is 'direct' (subprocess or in-process action).
+  mode?: 'direct' | 'reference'
+  /**
+   * B-arch-4 — populated by `SkillHostController.detectStatus`. When the skill
+   * declares `host_requirements.status_detection` (stdout JSON / sentinel file),
+   * this can be 'blocked' even if exit_code is 0 (the run is paused waiting on
+   * the user). Without host_requirements, defaults to 'done' on success and
+   * 'error' on failure (mirrors the legacy mapping in skills-tools.ts:477).
+   */
+  status?: 'done' | 'error' | 'blocked'
 }
 
 export interface SkillRunRequest {
@@ -306,21 +310,25 @@ export class SkillsRuntimeManager {
   private readonly modelscopeCache: string
   private readonly pipCache: string
   private readonly outputsRoot: string
+  private readonly embeddedSkillsRootOverride?: string
+  private readonly hostControllerOverride?: SkillHostController
+  private readonly retiredEmbeddedSkillIdsOverride?: ReadonlySet<string>
   private loader: SkillLoader | null = null
-  private executionStore: ExecutionStateStore | null = null
-  private executionCoordinator: ExecutionCoordinator | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
-  private ttlBootTimer: NodeJS.Timeout | null = null
-  private ttlIntervalTimer: NodeJS.Timeout | null = null
+  private referenceHintBootTimer: NodeJS.Timeout | null = null
+  private referenceHintIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
+  private orphanCleanupRan = false
 
-  private static readonly TTL_RETENTION_DAYS = 7
-  private static readonly TTL_SWEEP_INTERVAL_MS = 60 * 60_000
-  private static readonly TTL_BOOT_DELAY_MS = 30_000
+  // Phase 4: reference-skill hint TTL sweep runs independently of the retired
+  // skill_executions state machine. Boot delay prevents blocking startup; the
+  // hourly cadence matches the previous combined sweep.
+  private static readonly REFERENCE_HINT_BOOT_DELAY_MS = 30_000
+  private static readonly REFERENCE_HINT_SWEEP_INTERVAL_MS = 60 * 60_000
 
-  constructor() {
-    this.runtimeRoot = join(app.getPath('userData'), 'skill-runtime')
+  constructor(options: SkillsRuntimeManagerOptions = {}) {
+    this.runtimeRoot = options.runtimeRoot || join(app.getPath('userData'), 'skill-runtime')
     this.skillsRoot = join(this.runtimeRoot, 'skills')
     this.customSkillsRoot = join(this.runtimeRoot, 'custom-skills')
     this.venvRoot = join(this.runtimeRoot, 'python')
@@ -329,36 +337,35 @@ export class SkillsRuntimeManager {
     this.modelscopeCache = join(this.cacheRoot, 'modelscope')
     this.pipCache = join(this.cacheRoot, 'pip')
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
-    this.startScheduler()
-    this.startTtlSweep()
+    this.embeddedSkillsRootOverride = options.embeddedSkillsRoot
+    this.hostControllerOverride = options.hostController
+    this.retiredEmbeddedSkillIdsOverride = options.retiredEmbeddedSkillIds
+    if (options.startBackgroundTasks !== false) {
+      this.startScheduler()
+      this.startReferenceHintSweep()
+      // B-arch-4 — best-effort one-shot orphan cleanup. Failures must not block
+      // boot, so swallow + log internally. Test mode (startBackgroundTasks=false)
+      // skips this so tests don't accidentally rm fixture skill dirs.
+      void this.cleanupOrphanedSkillArtifactsOnce().catch((error) => {
+        console.warn('[SkillsRuntimeManager] orphan cleanup failed:', error instanceof Error ? error.message : String(error))
+      })
+    }
+  }
+
+  private getHostController(): SkillHostController {
+    return this.hostControllerOverride ?? getSkillHostController()
   }
 
   /**
-   * Phase 4 — periodically purge terminal skill_executions rows older than
-   * the retention window. Runs once 30s after boot (avoid blocking startup)
-   * and then hourly. Each run is best-effort — a failure logs to stderr and
-   * the next tick tries again.
+   * Phase 4 — prune idle reference-skill hints on an independent cadence now
+   * that the skill_executions state machine (and its TTL sweep) is retired.
+   * Runs once 30s after boot to avoid blocking startup, then hourly.
+   * Best-effort; a failure logs to stderr and the next tick retries. The
+   * metric name changed from `skill_executions_ttl_swept` to
+   * `skill_reference_hint_ttl_swept` — see CHANGELOG.md.
    */
-  private startTtlSweep(): void {
+  private startReferenceHintSweep(): void {
     const sweep = (): void => {
-      try {
-        const store = this.getExecutionStore()
-        const { deleted, cutoff } = store.purgeExpiredExecutions(
-          SkillsRuntimeManager.TTL_RETENTION_DAYS,
-        )
-        logAgentMetric(TOOL_ERROR_METRICS.ttlSwept, {
-          deleted,
-          retentionDays: SkillsRuntimeManager.TTL_RETENTION_DAYS,
-          cutoff,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('[SkillsRuntimeManager] TTL sweep failed:', message)
-      }
-      // Patch A1 — piggy-back the reference-skill hint sweep on this same
-      // cadence. Idle hints older than REFERENCE_SKILL_HINT_TTL_MS would
-      // otherwise linger in-process indefinitely; a live app without
-      // periodic cleanup ends up mis-reporting stale skills in error hints.
       try {
         sweepExpiredReferenceSkillHints()
       } catch (error) {
@@ -366,8 +373,25 @@ export class SkillsRuntimeManager {
         console.error('[SkillsRuntimeManager] reference-hint sweep failed:', message)
       }
     }
-    this.ttlBootTimer = setTimeout(sweep, SkillsRuntimeManager.TTL_BOOT_DELAY_MS)
-    this.ttlIntervalTimer = setInterval(sweep, SkillsRuntimeManager.TTL_SWEEP_INTERVAL_MS)
+    this.referenceHintBootTimer = setTimeout(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
+    )
+    this.referenceHintIntervalTimer = setInterval(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
+    )
+  }
+
+  stopReferenceHintSweep(): void {
+    if (this.referenceHintBootTimer) {
+      clearTimeout(this.referenceHintBootTimer)
+      this.referenceHintBootTimer = null
+    }
+    if (this.referenceHintIntervalTimer) {
+      clearInterval(this.referenceHintIntervalTimer)
+      this.referenceHintIntervalTimer = null
+    }
   }
 
   private getSkillLoader(): SkillLoader {
@@ -396,6 +420,7 @@ export class SkillsRuntimeManager {
       executionMode: definition.executionMode,
       managedPath: definition.source === 'embedded' ? skillPath : definition.managedPath,
       sourcePath: definition.sourcePath,
+      hostRequirements: definition.hostRequirements,
     }
   }
 
@@ -403,7 +428,11 @@ export class SkillsRuntimeManager {
     this.ensureRuntimeDirs()
     const loader = this.getSkillLoader()
     return [
-      ...loader.listEmbeddedSkills().map((definition) => this.toSkillState(definition)),
+      ...loader.listEmbeddedSkills().map((definition) => {
+        const manifest = getEmbeddedSkillManifest(definition.id)
+        if (manifest) this.syncEmbeddedSkill(manifest)
+        return this.toSkillState(definition)
+      }),
       ...loader.listCustomSkills().map((definition) => this.toSkillState(definition)),
     ]
   }
@@ -433,83 +462,21 @@ export class SkillsRuntimeManager {
       : join(this.venvRoot, 'bin')
   }
 
-  private getExecutionStore(): ExecutionStateStore {
-    if (!this.executionStore) {
-      const db = this.getRawDatabase()
-      if (!db) {
-        throw new Error('Database not available')
-      }
-      this.executionStore = new ExecutionStateStore(db)
-    }
-    return this.executionStore
+  getRuntimeBinDir(): string {
+    return this.runtimeBin
   }
 
-  private getExecutionCoordinator(): ExecutionCoordinator {
-    if (!this.executionCoordinator) {
-      this.executionCoordinator = new ExecutionCoordinator(
-        this.getExecutionStore(),
-        {
-          executeRuntimeAction: ({ definition, actionName, step, args, sessionId }) =>
-            this.executeWorkflowRuntimeAction({
-              definition,
-              actionName,
-              stepId: step.id,
-              params: args,
-              sessionId,
-            }),
-        },
-        this.outputsRoot,
-      )
-    }
-    return this.executionCoordinator
-  }
-
-  listExecutions(limit = 30, sessionId?: string, activeOnly = false): SkillExecutionDetail[] {
-    this.ensureRuntimeDirs()
-    return this.getExecutionStore()
-      .listExecutions(limit, sessionId, activeOnly)
-      .map((item) => this.getExecutionStore().getExecution(item.id))
-      .filter((item): item is SkillExecutionDetail => Boolean(item))
-  }
-
-  getExecution(executionId: string): SkillExecutionDetail | null {
-    this.ensureRuntimeDirs()
-    return this.getExecutionStore().getExecution(executionId)
-  }
-
-  async submitExecutionInput(executionId: string, inputs: Record<string, SkillInputValue>): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitInput(executionId, inputs)
-  }
-
-  async submitExecutionConfirmation(executionId: string, stepId: string, confirmed: boolean): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitConfirmation(executionId, stepId, confirmed)
-  }
-
-  async submitExecutionAgentResult(params: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, SkillInputValue>
-  }): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().submitAgentResult(params)
-  }
-
-  async restartExecutionFromStep(
-    executionId: string,
-    stepId: string,
-    inputs?: Record<string, SkillInputValue>,
-  ): Promise<SkillExecutionDetail> {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().restartFromStep(executionId, stepId, inputs)
-  }
-
-  cancelExecution(executionId: string): SkillExecutionDetail | null {
-    this.ensureRuntimeDirs()
-    return this.getExecutionCoordinator().cancelExecution(executionId)
-  }
+  // Phase 4: the skill_executions state machine is retired. The following
+  // APIs have been removed along with the private store/coordinator getters:
+  //   listExecutions / getExecution / submitExecutionInput /
+  //   submitExecutionConfirmation / submitExecutionAgentResult /
+  //   restartExecutionFromStep / cancelExecution / getExecutionStore /
+  //   getExecutionCoordinator / executeWorkflowRuntimeAction /
+  //   toWorkflowRunResult
+  //
+  // All skill actions now run through runDefinitionActionDirect (direct
+  // subprocess) or tryInlineReferenceSkillDoc (SKILL.md load). Progress
+  // tracking moves to the in-memory SkillTaskTracker in PR2.
 
   async runEmbeddedPython(params: {
     code?: string
@@ -645,30 +612,71 @@ export class SkillsRuntimeManager {
         return finish(this.invalidParams(resolved.definition.id, request.action, `Unknown action: ${request.action}`))
       }
 
-      const shouldStartWorkflow =
-        resolved.definition.executionMode === 'workflow' &&
-        isWorkflowStarterAction(resolved.definition, request.action) &&
-        request.executionMode !== 'direct' &&
-        (request.executionMode === 'workflow' || request.executionMode === 'auto' || request.executionMode === undefined)
+      // Phase 4: workflow-start branch retired. All skill actions now run
+      // through runDefinitionActionDirect. Callers that still pass
+      // executionMode='workflow' get a direct run — the requested semantics
+      // mapped 1:1 onto direct runs for Phase 2/3 migrated embedded skills
+      // anyway, since there are no skill.workflow.json files left.
 
-      if (shouldStartWorkflow) {
-        const execution = await this.getExecutionCoordinator().startExecution({
-          definition: resolved.definition,
-          entryAction: request.action,
-          inputs: (request.params || {}) as Record<string, SkillInputValue>,
-          sessionId: request.sessionId || null,
-        })
-        return finish(this.toWorkflowRunResult(resolved.definition.id, request.action, execution))
+      // B-arch-4 — Skill Host Contract wiring. When the skill manifest declares
+      // host_requirements, prepare the declarative spawn environment (config
+      // file write, secondary files, env overrides, mutex acquisition) BEFORE
+      // running the action; restore exactly once on completion. Skills that
+      // don't opt into the contract bypass the wrap entirely so we don't pay
+      // the agent-context read cost when there's nothing to do.
+      const controller = this.getHostController()
+      const hostRequirements = resolved.definition.hostRequirements ?? null
+      const skillAssetRoot = resolved.installResult.skillPath || ''
+      const effectiveTimeout = Math.max(
+        3_000,
+        controller.getEffectiveActionTimeout(
+          hostRequirements,
+          request.timeoutMs || action.timeoutMs,
+          DEFAULT_TIMEOUT_MS,
+        ),
+      )
+
+      let spawnHandle: SpawnContextHandle | null = null
+      if (hostRequirements) {
+        spawnHandle = await controller.prepareSpawnContext(
+          resolved.definition.id,
+          resolved.definition.name,
+          skillAssetRoot,
+          hostRequirements,
+          jobId,
+          undefined, // outputDir is not yet wired per-action; controller falls back to exit_code
+        )
       }
 
-      return finish(await this.runDefinitionActionDirect(
-        resolved.definition,
-        action,
-        request.params || {},
-        Math.max(3_000, request.timeoutMs || action.timeoutMs || DEFAULT_TIMEOUT_MS),
-        request.env,
-        resolved.installResult.venvPython,
-      ))
+      const mergedEnv = spawnHandle?.envOverrides
+        ? { ...spawnHandle.envOverrides, ...(request.env || {}) }
+        : request.env
+
+      try {
+        const result = await this.runDefinitionActionDirect(
+          resolved.definition,
+          action,
+          request.params || {},
+          effectiveTimeout,
+          mergedEnv,
+          resolved.installResult.venvPython,
+          hostRequirements,
+        )
+        return finish(result)
+      } finally {
+        if (spawnHandle) {
+          try {
+            await controller.restoreSpawnContext(spawnHandle)
+          } catch (error) {
+            console.warn(
+              '[SkillsRuntimeManager] restoreSpawnContext failed for',
+              resolved.definition.id,
+              ':',
+              error instanceof Error ? error.message : String(error),
+            )
+          }
+        }
+      }
     } catch (error) {
       return finish(this.invalidParams(
         request.skillId,
@@ -726,10 +734,6 @@ export class SkillsRuntimeManager {
     if (!installResult.success || !installResult.skillPath) {
       return null
     }
-    const manifest = getEmbeddedSkillManifest(skillId)
-    if (manifest) {
-      this.ensureSkillCompatibilityFiles(manifest.id, installResult.skillPath)
-    }
     const definition = this.getSkillLoader().loadSkill(skillId, installResult.skillPath)
     if (!definition) {
       return null
@@ -744,12 +748,14 @@ export class SkillsRuntimeManager {
     timeoutMs: number,
     envOverrides?: Record<string, string>,
     venvPython?: string,
+    hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements | null,
   ): Promise<SkillRunResult> {
     const skillPath = definition.source === 'embedded'
       ? this.getSkillRuntimePath(definition.id)
       : (definition.managedPath || definition.sourcePath)
     const entryPath = join(skillPath, action.entry)
 
+    let result: SkillRunResult
     if (action.runtime === 'reference') {
       // Reference skills are advisory/guidance loads — readFileSync of SKILL.md
       // with no subprocess, no side-effects, no execution state to track. The
@@ -761,7 +767,7 @@ export class SkillsRuntimeManager {
       // render the file content with a compact guidance header instead.
       try {
         const stdout = readFileSync(entryPath, 'utf-8')
-        return {
+        result = {
           success: true,
           skillId: definition.id,
           action: action.name,
@@ -771,7 +777,7 @@ export class SkillsRuntimeManager {
           mode: 'reference',
         }
       } catch (error) {
-        return {
+        result = {
           success: false,
           skillId: definition.id,
           action: action.name,
@@ -782,21 +788,51 @@ export class SkillsRuntimeManager {
           mode: 'reference',
         }
       }
-    }
-
-    const args = this.buildActionArgs(params, action)
-    if (action.runtime === 'python') {
-      if (!venvPython) {
-        return this.invalidParams(definition.id, action.name, 'Python skill runtime is unavailable')
+    } else {
+      const args = this.buildActionArgs(params, action)
+      if (action.runtime === 'python') {
+        if (!venvPython) {
+          return this.invalidParams(definition.id, action.name, 'Python skill runtime is unavailable')
+        }
+        result = await this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides)
+      } else if (action.runtime === 'node') {
+        result = await this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides)
+      } else {
+        result = await this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides)
       }
-      return this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides)
     }
 
-    if (action.runtime === 'node') {
-      return this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides)
+    // B-arch-4 — backfill SkillRunResult.status via the host controller's
+    // detectStatus. Without host_requirements this defaults to exit_code
+    // mapping (success → 'done', failure → 'error'), preserving legacy
+    // semantics. With host_requirements declaring `status_detection`, the
+    // controller can return 'blocked' even when exitCode === 0 — e.g. a
+    // staged pipeline that wrote `{"status":"blocked"}` to its sentinel
+    // file because it's waiting on a user decision. Reference actions go
+    // through this path too so a reference skill that declares
+    // status_detection still benefits from the override (rare but allowed).
+    try {
+      const controller = this.getHostController()
+      const inferredExitCode = result.success ? 0 : 1
+      const status = await controller.detectStatus(
+        hostRequirements ?? null,
+        { exitCode: inferredExitCode, stdout: result.stdout || '', stderr: result.stderr || '' },
+        result.outputDir,
+      )
+      result.status = status.status
+    } catch (error) {
+      // detectStatus must never break the skill run — fall back to legacy
+      // success-mapping. Telemetry surfaces via the warn log.
+      console.warn(
+        '[SkillsRuntimeManager] detectStatus failed for',
+        definition.id,
+        action.name,
+        ':',
+        error instanceof Error ? error.message : String(error),
+      )
+      result.status = result.success ? 'done' : 'error'
     }
-
-    return this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides)
+    return result
   }
 
   private async runDirectScript(
@@ -822,102 +858,9 @@ export class SkillsRuntimeManager {
     return this.toDirectRunResult(skillId, action.name, executed)
   }
 
-  async executeWorkflowRuntimeAction(params: {
-    definition: SkillDefinition
-    actionName: string
-    stepId: string
-    params: Record<string, SkillInputValue>
-    sessionId?: string | null
-  }): Promise<SkillActionResult> {
-    const resolved = await this.resolveSkillForExecution(params.definition.id)
-    if (!resolved) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: `Unknown skill: ${params.definition.id}` },
-      }
-    }
-    const action = resolved.definition.actions.find((entry) => entry.name === params.actionName)
-    if (!action) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: `Unknown action: ${params.actionName}` },
-      }
-    }
-    if (action.runtime === 'reference') {
-      const stdout = readFileSync(join(
-        resolved.definition.source === 'embedded'
-          ? this.getSkillRuntimePath(resolved.definition.id)
-          : (resolved.definition.managedPath || resolved.definition.sourcePath),
-        action.entry,
-      ), 'utf-8')
-      return {
-        ok: true,
-        status: 'success',
-        outputs: {
-          textContent: stdout,
-        },
-        artifacts: [],
-        logs: { stdout: truncateOutput(stdout), stderr: '' },
-      }
-    }
-
-    const skillPath = resolved.definition.source === 'embedded'
-      ? this.getSkillRuntimePath(resolved.definition.id)
-      : (resolved.definition.managedPath || resolved.definition.sourcePath)
-    const entryPath = join(skillPath, action.entry)
-    const args = this.buildActionArgs(params.params as Record<string, unknown>, action)
-    if (action.runtime === 'python' && !resolved.installResult.venvPython) {
-      return {
-        ok: false,
-        status: 'failed',
-        outputs: {},
-        artifacts: [],
-        logs: { stdout: '', stderr: '' },
-        error: { message: 'Python skill runtime is unavailable' },
-      }
-    }
-    const executed = await this.executeProcessWithStructuredResult({
-      skillId: resolved.definition.id,
-      actionName: action.name,
-      runtime: action.runtime,
-      cwd: skillPath,
-      commandBin: action.runtime === 'python'
-        ? (resolved.installResult.venvPython || '')
-        : action.runtime === 'node'
-          ? 'node'
-          : entryPath,
-      commandArgs: action.runtime === 'python' || action.runtime === 'node'
-        ? [entryPath, ...args]
-        : args,
-      timeoutMs: Math.max(3_000, action.timeoutMs || DEFAULT_TIMEOUT_MS),
-      preferStructuredResult: true,
-      envOverrides: {
-        ...(params.sessionId ? { READY_SKILL_SESSION_ID: params.sessionId } : {}),
-      },
-    })
-    if (executed.structuredResult) {
-      return executed.structuredResult
-    }
-    return {
-      ok: executed.success,
-      status: executed.success ? 'success' : 'failed',
-      outputs: executed.outputDir ? { outputDir: executed.outputDir } : {},
-      artifacts: [],
-      logs: {
-        stdout: executed.stdout,
-        stderr: executed.stderr,
-      },
-      error: executed.success ? undefined : { message: executed.error || `Step ${params.stepId} failed` },
-    }
-  }
+  // Phase 4: executeWorkflowRuntimeAction removed along with the
+  // skill_executions state machine. All skill actions run through
+  // runDefinitionActionDirect now.
 
   private createStructuredResultPath(skillId: string, actionName: string): string {
     const dir = join(this.runtimeRoot, 'results')
@@ -1030,25 +973,8 @@ export class SkillsRuntimeManager {
     }
   }
 
-  private toWorkflowRunResult(skillId: string, actionName: string, execution: SkillExecutionDetail): SkillRunResult {
-    const summary = [
-      `Execution ID: ${execution.id}`,
-      `Status: ${execution.status}`,
-      execution.currentStepId ? `Current step: ${execution.currentStepId}` : '',
-      execution.blocker ? `Blocker: ${execution.blocker.type} - ${execution.blocker.message}` : '',
-    ].filter(Boolean).join('\n')
-    return {
-      success: execution.status !== 'failed' && execution.status !== 'cancelled',
-      skillId,
-      action: actionName,
-      stdout: summary,
-      stderr: '',
-      command: [],
-      mode: 'workflow',
-      execution,
-      blocker: execution.blocker || null,
-    }
-  }
+  // Phase 4: toWorkflowRunResult removed along with the skill_executions
+  // state machine.
 
   listJobs(limit = 80): SkillJobRecord[] {
     const db = this.getRawDatabase()
@@ -1396,6 +1322,7 @@ export class SkillsRuntimeManager {
   }
 
   private resolveEmbeddedSkillsRoot(): string {
+    if (this.embeddedSkillsRootOverride) return this.embeddedSkillsRootOverride
     const candidates = [
       join(process.resourcesPath, 'embedded-skills'),
       join(app.getAppPath(), 'assets', 'embedded-skills'),
@@ -1415,8 +1342,33 @@ export class SkillsRuntimeManager {
       throw new Error(`Embedded skill source missing: ${source}`)
     }
     const destination = this.getSkillRuntimePath(manifest.id)
+    const syncStatePath = join(destination, EMBEDDED_SYNC_STATE_FILENAME)
+    const currentSyncState = (() => {
+      try {
+        return JSON.parse(readFileSync(syncStatePath, 'utf-8')) as { version?: string }
+      } catch {
+        return null
+      }
+    })()
+    if (
+      currentSyncState?.version === manifest.version
+      && existsSync(join(destination, 'SKILL.md'))
+      && existsSync(join(destination, 'ready-skill.json'))
+    ) {
+      return destination
+    }
+    rmSync(destination, { recursive: true, force: true })
     mkdirSync(destination, { recursive: true })
     cpSync(source, destination, { recursive: true, force: true })
+    writeFileSync(
+      syncStatePath,
+      JSON.stringify({
+        version: manifest.version,
+        sourcePath: source,
+        syncedAt: new Date().toISOString(),
+      }, null, 2),
+      'utf-8',
+    )
     return destination
   }
 
@@ -1515,17 +1467,82 @@ export class SkillsRuntimeManager {
     return outputDir
   }
 
-  private ensureSkillCompatibilityFiles(skillId: SkillId, skillPath: string): void {
-    if (skillId !== 'video-expert-analyzer') return
-    const scriptsDir = join(skillPath, 'scripts')
-    const downloadScript = join(scriptsDir, 'download_douyin.py')
-    const compatScript = join(scriptsDir, 'douyin_downloader.py')
-    if (!existsSync(downloadScript) || existsSync(compatScript)) return
+  /**
+   * B-arch-4 — one-shot orphan-skill artifact cleanup. Scans the runtime
+   * skills directory for sub-folders that are NOT in the current embedded
+   * manifest list AND NOT registered in the custom-skill registry. Each
+   * candidate is then gated against `RETIRED_EMBEDDED_SKILL_IDS` (a small
+   * explicit allowlist of ids we know used to ship embedded but no longer do)
+   * before invoking `controller.cleanupSkillArtifacts`. This avoids
+   * accidentally rm'ing a custom skill the user is actively using or an
+   * embedded skill we're about to re-add.
+   *
+   * Logs every action — including no-ops — so a curious operator can verify
+   * the sweep ran. Idempotent: only runs once per process. Marked `public` so
+   * tests can invoke it deterministically without relying on the constructor
+   * side-effect; production callers should not invoke it directly (the
+   * constructor handles it under `startBackgroundTasks !== false`).
+   */
+  async cleanupOrphanedSkillArtifactsOnce(): Promise<void> {
+    if (this.orphanCleanupRan) return
+    this.orphanCleanupRan = true
+    this.ensureRuntimeDirs()
+    const controller = this.getHostController()
+    const customIds = new Set<string>(
+      listManagedCustomSkills(this.customSkillsRoot).map((skill) => skill.id),
+    )
+
+    let dirNames: string[]
     try {
-      writeFileSync(compatScript, DOUYIN_COMPAT_SHIM, 'utf-8')
-      console.log('[skills-runtime] repaired missing douyin_downloader.py compatibility shim')
+      dirNames = readdirSync(this.skillsRoot)
     } catch (error) {
-      console.warn('[skills-runtime] failed to repair douyin_downloader.py', error)
+      console.warn('[SkillsRuntimeManager] orphan cleanup: failed to scan skills root:', error instanceof Error ? error.message : String(error))
+      return
+    }
+
+    const candidates: string[] = []
+    for (const name of dirNames) {
+      if (EMBEDDED_SKILL_IDS.has(name as EmbeddedSkillId)) continue
+      if (customIds.has(name)) continue
+      try {
+        if (!statSync(join(this.skillsRoot, name)).isDirectory()) continue
+      } catch {
+        continue
+      }
+      candidates.push(name)
+    }
+
+    if (candidates.length === 0) {
+      console.log('[SkillsRuntimeManager] orphan cleanup: no candidates found')
+      return
+    }
+
+    const retiredIds = this.retiredEmbeddedSkillIdsOverride ?? RETIRED_EMBEDDED_SKILL_IDS
+    for (const skillId of candidates) {
+      const isRetired = retiredIds.has(skillId)
+      if (!isRetired) {
+        console.log('[SkillsRuntimeManager] orphan cleanup: skipping', skillId, '(not in RETIRED_EMBEDDED_SKILL_IDS)')
+        continue
+      }
+      const skillAssetRoot = join(this.skillsRoot, skillId)
+      try {
+        const result = await controller.cleanupSkillArtifacts(skillId, skillId, skillAssetRoot, null)
+        console.log(
+          '[SkillsRuntimeManager] orphan cleanup: ran cleanupSkillArtifacts for',
+          skillId,
+          '— removed:',
+          result.removedPaths.length,
+          'errors:',
+          result.errors.length,
+        )
+      } catch (error) {
+        console.warn(
+          '[SkillsRuntimeManager] orphan cleanup: cleanupSkillArtifacts threw for',
+          skillId,
+          ':',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
     }
   }
 

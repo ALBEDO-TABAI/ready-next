@@ -113,7 +113,7 @@ export function resolveTaskType(params: {
 
   if (params.intent.primaryDomain === 'skill') {
     return {
-      taskType: 'short_task',
+      taskType: 'multi_step_task',
       executionChain: 'domain_executor',
       requiresPlanner: false,
       preferredExecutor: 'skill',

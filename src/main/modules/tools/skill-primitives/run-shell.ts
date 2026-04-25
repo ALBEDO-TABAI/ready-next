@@ -1,15 +1,10 @@
 /**
  * Handler for `skill_run_shell`.
  *
- * Phase 1 design: the handler splits `args.command` on whitespace to extract
- * the leading executable, checks it against an allowlist, then `spawn`s it
- * directly with the remaining tokens. That deliberately forgoes full shell
- * semantics (no quoting, pipes, `&&`, globs, $VAR expansion) — but it stops
- * the model from chaining `&& rm -rf /`, and every test we care about
- * (python scripts, cat a file, ls the output dir) uses a single command.
- *
- * If a skill legitimately needs shell features, the user/author can add a
- * wrapper script under `<managedPath>/scripts/` and invoke that.
+ * Phase 1 design: simple commands are split into argv and spawned directly.
+ * Real skill docs also contain common shell-style snippets (`cd`, `$VAR`,
+ * `&&`, pipes, redirection), so those are routed through `bash -c` while
+ * keeping an explicit deny-list for destructive file commands.
  */
 
 import { spawn } from 'node:child_process'
@@ -42,13 +37,28 @@ export const SHELL_ALLOWLIST: ReadonlySet<string> = new Set([
   'tail',
   'grep',
   'find',
+  'which',
   'mkdir',
-  'rm',
-  'cp',
-  'mv',
+  'pwd',
   'echo',
   'awk',
   'sed',
+  'yt-dlp',
+  'ffmpeg',
+  'ffprobe',
+  'scenedetect',
+])
+
+const SINGLE_QUOTE_SHELL_COMPAT_BINS: ReadonlySet<string> = new Set([
+  'python',
+  'python3',
+  'node',
+  'grep',
+  'find',
+  'awk',
+  'sed',
+  'yt-dlp',
+  'scenedetect',
 ])
 
 export interface RunShellArgs {
@@ -61,14 +71,60 @@ export interface RunShellHandlerDeps {
   skillId: string
   signal?: AbortSignal
   lookupSkillRoots?: LookupSkillRoots
+  runtimeBinDir?: string | null
   venvBinDir?: string | null
   // Test injection — swap the actual spawn for a mock.
   spawnFn?: typeof spawn
+  /**
+   * B-arch-4 — effective allowlist for the current session. Computed by the
+   * dispatcher (skills-tools.ts) via
+   * `SkillHostController.getEffectiveShellAllowlist(sessionId, refSkillId,
+   * SHELL_ALLOWLIST, hostRequirements)` so a reference-skill that declares
+   * `shell_allowlist_extensions` in host_requirements gets those commands
+   * temporarily honored. Defaults to `SHELL_ALLOWLIST` when omitted (the
+   * common case for tests + non-skill code paths).
+   */
+  effectiveAllowlist?: ReadonlySet<string>
 }
 
 interface ParsedCommand {
   bin: string
   args: string[]
+}
+
+function shouldUseShell(command: string): boolean {
+  const trimmed = command.trim()
+  const startsWithShell = /^(bash|sh)\s+/i.test(trimmed)
+  if (startsWithShell && trimmed.includes("'")) return true
+  if (startsWithShell) return false
+  if (trimmed.includes("'") && SINGLE_QUOTE_SHELL_COMPAT_BINS.has((trimmed.match(/^\S+/)?.[0] || '').toLowerCase())) {
+    return true
+  }
+  return /^\s*cd(?:\s|$)/.test(trimmed)
+    || /\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]+\}/.test(trimmed)
+    || /&&|\|\||[|;<>]/.test(trimmed)
+    || /\\\s/.test(trimmed)
+}
+
+function findDeniedShellCommand(command: string): string | null {
+  const matched = command.match(/(?:^|[;&|]\s*|\|\|\s*|&&\s*)(?:sudo\s+)?(rm|cp|mv)\b/)
+    || command.match(/-exec\s+(?:sudo\s+)?(rm|cp|mv)\b/)
+  return matched?.[1] || null
+}
+
+function assertShellCommandAllowed(command: string): void {
+  const denied = findDeniedShellCommand(command)
+  if (!denied) return
+  logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+    primitive: 'skill_run_shell',
+    reason: 'cmd_not_allowlisted',
+    bin: denied,
+  })
+  throw new ToolDomainError(
+    'cmd_not_allowlisted',
+    `skill_run_shell: command "${denied}" is not allowed inside shell snippets.`,
+    { bin: denied, allowlist: Array.from(SHELL_ALLOWLIST) },
+  )
 }
 
 /**
@@ -127,13 +183,18 @@ export function parseCommand(command: string): ParsedCommand | null {
   return { bin, args }
 }
 
-function buildEnv(env: NodeJS.ProcessEnv, roots: { assetRoot: string; artifactRoot: string }, venvBinDir?: string | null): NodeJS.ProcessEnv {
+function buildEnv(
+  env: NodeJS.ProcessEnv,
+  roots: { assetRoot: string; artifactRoot: string },
+  runtimeBinDir?: string | null,
+  venvBinDir?: string | null,
+): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = { ...env }
   next.CLAUDE_SKILL_DIR = roots.assetRoot
   next.CLAUDE_SKILL_OUTPUT_DIR = roots.artifactRoot
-  if (venvBinDir) {
+  if (runtimeBinDir || venvBinDir) {
     const sep = process.platform === 'win32' ? ';' : ':'
-    next.PATH = `${venvBinDir}${sep}${env.PATH || ''}`
+    next.PATH = [runtimeBinDir, venvBinDir, env.PATH || ''].filter(Boolean).join(sep)
   }
   return next
 }
@@ -181,18 +242,23 @@ export async function executeRunShell(
   }
 
   let parsed: ParsedCommand | null
-  try {
-    parsed = parseCommand(args.command)
-  } catch (error) {
-    if (error instanceof CommandParseError) {
-      logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
-        primitive: 'skill_run_shell',
-        reason: 'command_parse_failed',
-        detail: error.reason,
-      })
-      throw new ToolDomainError('command_parse_failed', error.message, { detail: error.reason })
+  if (shouldUseShell(args.command)) {
+    assertShellCommandAllowed(args.command)
+    parsed = { bin: 'bash', args: ['-c', args.command] }
+  } else {
+    try {
+      parsed = parseCommand(args.command)
+    } catch (error) {
+      if (error instanceof CommandParseError) {
+        logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+          primitive: 'skill_run_shell',
+          reason: 'command_parse_failed',
+          detail: error.reason,
+        })
+        throw new ToolDomainError('command_parse_failed', error.message, { detail: error.reason })
+      }
+      throw error
     }
-    throw error
   }
   if (!parsed) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
@@ -202,7 +268,13 @@ export async function executeRunShell(
     throw new ToolDomainError('command_empty', 'skill_run_shell.command is empty after tokenization.')
   }
 
-  if (!SHELL_ALLOWLIST.has(parsed.bin)) {
+  // B-arch-4 — when the dispatcher passes an `effectiveAllowlist` (computed
+  // from the active reference-skill's host_requirements.shell_allowlist_extensions),
+  // honor it; otherwise fall back to the Phase 1 base allowlist. The metric
+  // payload still surfaces the FULL allowlist the model was checked against so
+  // operators can debug why a command was rejected.
+  const allowlistInUse = deps.effectiveAllowlist ?? SHELL_ALLOWLIST
+  if (!allowlistInUse.has(parsed.bin)) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_run_shell',
       reason: 'cmd_not_allowlisted',
@@ -211,7 +283,7 @@ export async function executeRunShell(
     throw new ToolDomainError(
       'cmd_not_allowlisted',
       `skill_run_shell: command "${parsed.bin}" is not in the Phase 1 allowlist.`,
-      { bin: parsed.bin, allowlist: Array.from(SHELL_ALLOWLIST) },
+      { bin: parsed.bin, allowlist: Array.from(allowlistInUse) },
     )
   }
 
@@ -231,7 +303,7 @@ export async function executeRunShell(
     HARD_CAP_TIMEOUT_MS,
   )
 
-  const env = buildEnv(process.env, roots, deps.venvBinDir)
+  const env = buildEnv(process.env, roots, deps.runtimeBinDir, deps.venvBinDir)
   const spawnFn = deps.spawnFn || spawn
   const started = Date.now()
 

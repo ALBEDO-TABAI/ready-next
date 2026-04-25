@@ -10,6 +10,13 @@ import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
 import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
+import {
+  clearAllReferenceSkillHints,
+  clearLastReferenceSkill,
+} from '../agent-control/skill-reference-hints'
+import { clearSkillTaskProjection } from '../agent-control/skill-task-tracker'
+import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -72,19 +79,24 @@ export interface IPCResponse<T = unknown> {
 let runtime: AgentControlRuntime | null = null
 const chatRepository = new ChatRepository()
 
-export async function cleanupAgentRuntime(): Promise<void> {
-  if (!runtime) return
-  await runtime.stop()
-  runtime = null
-  // Patch A1 — drop every session-scoped reference-skill hint when the
-  // runtime is torn down. The in-memory map is otherwise only pruned by the
-  // idle TTL sweep, which has a 30-minute granularity.
-  const { clearAllReferenceSkillHints } = await import('../agent-control/skill-reference-hints')
+function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
+  if (sessionId) {
+    clearLastReferenceSkill(sessionId)
+    clearSkillTaskProjection(sessionId)
+    getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
+    return
+  }
   clearAllReferenceSkillHints()
-  // B Phase 1 PR2 — drop any pending ask_user records so their awaiting
-  // Promises reject with a synthetic shutdown error rather than hanging.
-  const { getEphemeralExecutionStore } = await import('../tools/skill-primitives/ephemeral-execution-store')
+  clearSkillTaskProjection()
   getEphemeralExecutionStore().clear()
+}
+
+export async function cleanupAgentRuntime(): Promise<void> {
+  if (runtime) {
+    await runtime.stop()
+    runtime = null
+  }
+  cleanupSkillSessionState(undefined, 'Agent runtime shut down')
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
@@ -97,8 +109,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can
   // be unit-tested under `tsx --test`.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { registerAskUserQuestionEmitter } = require('../agent-control/ask-user-bridge') as typeof import('../agent-control/ask-user-bridge')
   registerAskUserQuestionEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:askUserQuestion', event)
@@ -114,8 +124,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (!executionId) {
       return { success: false, error: 'executionId is required' }
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
     const store = getEphemeralExecutionStore()
     const resolved = store.resolve(executionId, answer)
     if (!resolved) {
@@ -124,8 +132,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     return { success: true }
   })
   ipcMain.handle('skills:askUser:pending', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getEphemeralExecutionStore } = require('../tools/skill-primitives/ephemeral-execution-store') as typeof import('../tools/skill-primitives/ephemeral-execution-store')
     return getEphemeralExecutionStore().list()
   })
   const orchestrator = runtime.getOrchestrator()
@@ -274,6 +280,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
       cancelToolActionRequestsBySession(agent, sessionId)
+      cleanupSkillSessionState(sessionId, 'Agent session was reset')
       orchestrator.newSession(agent, sessionId)
       return { success: true, data: { cleared: true } }
     } catch (error) {
@@ -288,6 +295,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
       cancelToolActionRequestsBySession(agent, sessionId)
+      cleanupSkillSessionState(sessionId, 'Agent generation was stopped')
       orchestrator.kill(agent, sessionId)
       return { success: true, data: { killed: true } }
     } catch (error) {

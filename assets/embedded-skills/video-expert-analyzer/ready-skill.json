@@ -45,5 +45,36 @@
         { "name": "mode", "type": "string", "description": "评分模式（兼容字段，vnext 自动选择）", "required": false }
       ]
     }
-  ]
+  ],
+  "host_requirements": {
+    "spawn_context": {
+      "config_file": {
+        "path": "~/.config/video-expert-analyzer-vnext/config.json",
+        "format": "json",
+        "preserve_existing": true,
+        "fields": {
+          "/auto_scoring/preferred_model": "${agent.provider}/${agent.model_id}",
+          "/auto_scoring/fallback_models": "${agent.fallback_chain}",
+          "/auto_scoring/models_json_path": "${spawn.tmp_dir}/vea-models-${spawn.job_id}.json"
+        }
+      },
+      "secondary_files": [
+        {
+          "path": "${spawn.tmp_dir}/vea-models-${spawn.job_id}.json",
+          "content_template": "{\"providers\":{\"${agent.provider}\":{\"baseUrl\":\"${agent.base_url}\",\"apiKey\":\"${agent.api_key}\",\"api\":\"${agent.api_kind}\",\"authHeader\":true,\"models\":[{\"id\":\"${agent.model_id}\",\"name\":\"${agent.model_id}\",\"api\":\"${agent.api_kind}\",\"reasoning\":true,\"input\":[\"text\",\"image\"],\"contextWindow\":256000,\"maxTokens\":32000}]}}}"
+        }
+      ]
+    },
+    "shell_allowlist_extensions": ["wc"],
+    "default_action_timeout_ms": 1800000,
+    "status_detection": {
+      "method": "sentinel_file",
+      "file_path": "${output_dir}/run_state.json",
+      "json_field": "status",
+      "blocked_values": ["blocked", "pending_review", "awaiting_input"]
+    },
+    "lifecycle": {
+      "on_uninstall_remove": ["~/.config/video-expert-analyzer-vnext"]
+    }
+  }
 }

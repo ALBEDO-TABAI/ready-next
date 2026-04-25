@@ -5,6 +5,7 @@ export const DEFAULT_TOOL_EXECUTION_TIMEOUT_MS = 15_000
 export const DOCUMENT_WRITE_TOOL_TIMEOUT_MS = 30_000
 export const BROWSER_INTERACTIVE_TOOL_TIMEOUT_MS = 60_000
 export const SKILL_TOOL_TIMEOUT_MS = 120_000
+export const SKILL_LONG_TOOL_TIMEOUT_MS = 600_000
 export const FEISHU_TOOL_TIMEOUT_MS = 30_000
 
 export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProfile): number {
@@ -15,6 +16,8 @@ export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProf
       return DOCUMENT_WRITE_TOOL_TIMEOUT_MS
     case 'skill':
       return SKILL_TOOL_TIMEOUT_MS
+    case 'skill_long':
+      return SKILL_LONG_TOOL_TIMEOUT_MS
     case 'feishu':
       return FEISHU_TOOL_TIMEOUT_MS
     default:
@@ -32,6 +35,9 @@ export function resolveToolExecutionTimeoutMs(toolName: string): number {
     return resolveToolExecutionTimeoutMsForProfile('document_write')
   }
   if (tag.domain === 'skill') {
+    if (toolName === 'skill_run_shell') {
+      return resolveToolExecutionTimeoutMsForProfile('skill_long')
+    }
     return resolveToolExecutionTimeoutMsForProfile('skill')
   }
   if (tag.domain === 'feishu') {

@@ -100,10 +100,16 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
     .getConnection()
     .prepare('SELECT id, source_type FROM documents WHERE path = ? LIMIT 1')
     .get<{ id: number; source_type: string }>(path)
-  if (!row) return toJsonString({ ok: false, error: 'path not in index' })
+  let sourceType = row?.source_type || 'document'
+  if (!row) {
+    const guard = assertInsideWorkspace(path, engine)
+    if (!guard.ok) return toJsonString({ ok: false, error: 'path not in index', detail: guard.error })
+    await engine.indexDocument(guard.root, path)
+    sourceType = 'document'
+  }
 
-  if (row.source_type !== 'document') {
-    return toJsonString({ ok: true, path, sourceType: row.source_type, note: 'non-filesystem source; open via host UI' })
+  if (sourceType !== 'document') {
+    return toJsonString({ ok: true, path, sourceType, note: 'non-filesystem source; open via host UI' })
   }
 
   try {

@@ -5,6 +5,10 @@
 // static-names path resolves at bundle time without falling back to the
 // hardcoded list that was triggering `Cannot find module '../tools/skills-tools'`
 // noise in `ready-agent-metrics.log`.
+//
+// Phase 4: the 6 execution-control tool names (skill_get_state /
+// skill_submit_* / skill_restart_from_step / skill_cancel_execution) were
+// removed from the registry along with the skill_executions state machine.
 
 const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
@@ -17,35 +21,10 @@ const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
 
-/**
- * Session-gated workflow-control tools (5 names). When the static fallback
- * path runs during early boot — before the runtime-manager is ready — we
- * deliberately REFUSE to advertise these names: the model would otherwise see
- * `skill_submit_input` while no execution exists yet, fabricate an id, and
- * loop. Patch A2.
- */
-const EXECUTION_CONTROL_GATED_TOOL_NAMES: string[] = [
-  'skill_submit_input',
-  'skill_submit_confirmation',
-  'skill_submit_agent_result',
-  'skill_restart_from_step',
-  'skill_cancel_execution',
-]
-
-/** Read-only execution tool — always safe to advertise. */
-const EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES: string[] = [
-  'skill_get_state',
-]
-
-const EXECUTION_CONTROL_TOOL_NAMES: string[] = [
-  ...EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES,
-  ...EXECUTION_CONTROL_GATED_TOOL_NAMES,
-]
-
-// B Phase 1 — skill primitives are also kind='execution_control' from the
-// registry's perspective, but are session-gated separately. Names included
-// here so static-fallback tool enumeration still lists them when the runtime
-// manager isn't ready yet (boot path). Phase 1 PR2 adds `skill_ask_user`.
+// B Phase 1 — skill primitives names. Session-gated at runtime via
+// `filterSkillPrimitivesBySession` (only exposed when a reference-skill hint
+// is armed). Names included here so static-fallback tool enumeration still
+// lists them when the runtime manager isn't ready yet (boot path).
 const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_ask_user',
   'skill_run_shell',
@@ -54,27 +33,18 @@ const PRIMITIVE_TOOL_NAMES: string[] = [
 ]
 
 /**
- * Full static tool list — includes the 5 gated tools. Use for documentation,
- * snapshot comparisons, or callers that will subsequently filter by session
- * state. Do NOT feed this directly to the LLM during early boot; use
- * `STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` instead.
+ * Full static tool list — skill_action + 4 primitives. Boot-path callers
+ * (ToolRegistry static fallback) use this unchanged; session-aware filtering
+ * runs at dispatch time through filterSkillPrimitivesBySession.
  */
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
-  ...EXECUTION_CONTROL_TOOL_NAMES,
   ...PRIMITIVE_TOOL_NAMES,
 ]
 
 /**
- * Boot-safe subset: skill action tools + `skill_get_state` + primitives, but
- * excludes the 5 gated submit/restart/cancel tools. This is what the
- * ToolRegistry's static fallback advertises while the runtime-manager is
- * booting. The gated tools re-appear dynamically via session-aware providers
- * (`filterExecutionControlToolsBySession`) once a session actually has an
- * active execution. Patch A2.
+ * Boot-safe subset (identical to STATIC_SKILL_TOOL_NAMES since Phase 4
+ * retired the gated execution-control tools). Kept as a separate export for
+ * backward compatibility with the tool-registry import site.
  */
-export const STATIC_SKILL_TOOL_NAMES_BOOT_SAFE: string[] = [
-  ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
-  ...EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES,
-  ...PRIMITIVE_TOOL_NAMES,
-]
+export const STATIC_SKILL_TOOL_NAMES_BOOT_SAFE: string[] = STATIC_SKILL_TOOL_NAMES

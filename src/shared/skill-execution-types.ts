@@ -149,6 +149,13 @@ export interface SkillDefinition {
   executionMode: SkillExecutionMode
   workflow?: SkillWorkflow
   manifestValid: boolean
+  /**
+   * Optional Skill Host Contract requirements. Validated at manifest-load time
+   * by `SkillHostRequirementsSchema` (see `src/shared/skill-host-contract.ts`).
+   * Null/undefined when the manifest does not opt into the host contract.
+   * Imported as a structural type to avoid pulling the Zod schema into shared.
+   */
+  hostRequirements?: import('./skill-host-contract').SkillHostRequirements
 }
 
 export interface SkillArtifact {
@@ -180,100 +187,9 @@ export interface SkillSourceMaterial {
   content: string
 }
 
-export interface ExecutionFrame {
-  executionId: string
-  skillId: string
-  stepId: string
-  title: string
-  description: string
-  prompt?: string
-  sourceMaterials?: SkillSourceMaterial[]
-}
-
-export interface ExecutionBlockerInputField {
-  key: string
-  label?: string
-  description: string
-  required?: boolean
-  type: string
-  enum?: string[]
-}
-
-export interface ExecutionBlocker {
-  type:
-    | 'need_input'
-    | 'need_confirmation'
-    | 'need_agent_result'
-    // B Phase 1 PR2 T1-7: a new blocker subtype for `skill_ask_user`. Lives
-    // alongside the workflow-oriented blockers but does NOT advance any
-    // `skill_executions` step — it's a one-shot question whose resume path
-    // is driven by the primitive handler's Promise rather than by
-    // ExecutionCoordinator.
-    | 'primitive_ask_user'
-    | 'completed'
-    | 'failed'
-  executionId: string
-  skillId: string
-  stepId?: string
-  message: string
-  inputs?: ExecutionBlockerInputField[]
-  confirmation?: {
-    confirmLabel?: string
-    denyLabel?: string
-  }
-  agentTask?: {
-    prompt: string
-    outputKey?: string
-    generatedFiles?: SkillGeneratedFileDefinition[]
-    sourceMaterials?: SkillSourceMaterial[]
-  }
-  primitiveAskUser?: {
-    question: string
-    options?: string[]
-    placeholder?: string
-    askedAt: number
-  }
-}
-
-export interface SkillExecutionError {
-  stepId?: string
-  message: string
-  timestamp: string
-}
-
-export interface SkillExecutionStepRecord {
-  id: string
-  executionId: string
-  stepId: string
-  attempt: number
-  status: 'running' | 'success' | 'failed' | 'blocked' | 'cancelled'
-  startedAt: string
-  finishedAt?: string | null
-  result?: SkillActionResult | null
-  message?: string | null
-}
-
-export interface SkillExecutionState {
-  id: string
-  skillId: string
-  entryAction: string
-  sessionId?: string | null
-  source: SkillSource
-  status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-  startedAt: string
-  updatedAt: string
-  finishedAt?: string | null
-  currentStepId?: string | null
-  compiledSkill: SkillDefinition
-  blocker?: ExecutionBlocker | null
-  lastFrame?: ExecutionFrame | null
-  errors: SkillExecutionError[]
-  stepOutputs: Record<string, Record<string, SkillInputValue>>
-  confirmations: Record<string, boolean>
-  inputs: Record<string, SkillInputValue>
-}
-
-export interface SkillExecutionDetail extends SkillExecutionState {
-  steps: SkillExecutionStepRecord[]
-  artifacts: SkillArtifact[]
-}
+// Phase 4: ExecutionFrame / ExecutionBlocker / ExecutionBlockerInputField /
+// SkillExecutionError / SkillExecutionStepRecord / SkillExecutionState /
+// SkillExecutionDetail retired along with the skill_executions state machine.
+// The in-memory SkillTaskTracker (PR2) replaces the persistent projection
+// model; ephemeral ask_user state is tracked by EphemeralExecutionStore
+// instead of these types.

@@ -17,6 +17,9 @@
  * B plan Phase 0 — P0-T3.
  */
 
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+
 export interface ReferenceSkillHint {
   id: string
   name: string
@@ -88,6 +91,15 @@ export function sweepExpiredReferenceSkillHints(): number {
       removed += 1
     }
   }
+  // Phase 4: emit a dedicated metric — this sweep used to piggyback on
+  // `skill_executions_ttl_swept`, but that table + metric were retired along
+  // with the state machine. `skill_reference_hint_ttl_swept` is the replacement
+  // and is registered in TOOL_ERROR_METRICS.
+  logAgentMetric(TOOL_ERROR_METRICS.skillReferenceHintTtlSwept, {
+    removed,
+    ttlMs: REFERENCE_SKILL_HINT_TTL_MS,
+    cutoffAt: at,
+  })
   return removed
 }
 

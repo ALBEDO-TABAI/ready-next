@@ -30,7 +30,7 @@
  * paths. Dependency injection happens in skill-primitives/root-resolver.ts.
  */
 
-import { resolve, sep, isAbsolute, basename } from 'node:path'
+import { resolve, sep, isAbsolute, basename, relative } from 'node:path'
 import { realpathSync } from 'node:fs'
 
 /**
@@ -165,6 +165,26 @@ export function resolveWithinRoot(root: string, rel: string): string {
   }
 
   return absPath
+}
+
+/**
+ * Read helpers can receive absolute paths from previous tool results
+ * (notably skill_run_shell overflow logs). Accept them only when they still
+ * point inside the same root, then reuse the normal relative-path validator.
+ */
+export function resolveReadableWithinRoot(root: string, path: string): string {
+  const cleanPath = assertNonEmpty(path)
+  if (!isAbsolute(cleanPath)) return resolveWithinRoot(root, cleanPath)
+
+  const canonRoot = canonicalizeRoot(root)
+  const absPath = resolve(cleanPath)
+  if (!normalizedStartsWithRoot(absPath, canonRoot)) {
+    throw new PathSandboxError(
+      'path_escape',
+      `Absolute path ${absPath} escapes sandbox root ${canonRoot}`,
+    )
+  }
+  return resolveWithinRoot(canonRoot, relative(canonRoot, absPath))
 }
 
 function findDeepestExistingAncestor(absPath: string): string | null {

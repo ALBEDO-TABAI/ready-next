@@ -15,30 +15,76 @@ function createOrchestrator() {
         actions: [{ name: 'video_copy_analyze', visibility: 'public' }],
       } as any,
     ],
-    listExecutions: (_limit, sessionId, activeOnly) =>
-      sessionId === 'scope-1' && activeOnly
-        ? [{ id: 'exec-1', skillId: 'video-copy-analyzer', entryAction: 'video_copy_analyze' }] as any
-        : [],
     resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
     executeTool: async (_tool, _args) => 'STDOUT:\n技能说明',
   })
 }
 
-test('SkillContextOrchestrator keeps tools available for explicit skill or active execution', () => {
+test('SkillContextOrchestrator keeps tools available for explicit skill only (Phase 4: no active-execution fallback)', () => {
   const orchestrator = createOrchestrator()
 
   assert.equal(orchestrator.shouldKeepToolsWithVideo('使用 video copy analyzer skill', undefined), true)
-  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), true)
+  // Phase 4: the active-execution stub branch is gone; generic text without a
+  // skill/python signal no longer keeps skill tools alive just because the
+  // session had a running execution.
+  assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-1'), false)
   assert.equal(orchestrator.shouldKeepToolsWithVideo('普通视频分析', 'scope-2'), false)
 })
 
-test('SkillContextOrchestrator builds preferred skill tool names from explicit and active skills', () => {
+test('SkillContextOrchestrator builds preferred skill tool names from explicit skills', () => {
   const orchestrator = createOrchestrator()
 
   const toolNames = orchestrator.buildPreferredSkillToolNames('使用 video copy analyzer skill', 'scope-1')
 
-  assert.ok(toolNames.includes('skill_get_state'))
+  for (const retired of [
+    'skill_get_state',
+    'skill_submit_input',
+    'skill_submit_confirmation',
+    'skill_submit_agent_result',
+    'skill_restart_from_step',
+    'skill_cancel_execution',
+  ]) {
+    assert.equal(toolNames.includes(retired), false, `${retired} must stay retired`)
+  }
   assert.ok(toolNames.includes('skill_video_copy_analyze'))
+  for (const primitive of [
+    'skill_ask_user',
+    'skill_run_shell',
+    'skill_write_artifact',
+    'skill_read_artifact',
+  ]) {
+    assert.ok(toolNames.includes(primitive), `${primitive} should be preferred for explicit reference-skill turns`)
+  }
+})
+
+test('SkillContextOrchestrator does not prefer the legacy embedded-python runner for reference skills', () => {
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      {
+        id: 'video-expert-analyzer',
+        name: 'Video Expert Analyzer (VNext)',
+        description: 'video analysis',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      } as any,
+    ],
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
+  })
+
+  const toolNames = orchestrator.buildPreferredSkillToolNames('再重试使用 Video Expert Analyzer (VNext)', 'scope-1')
+
+  assert.equal(toolNames.includes('system_run_embedded_python'), false)
+  assert.equal(toolNames.includes('skill_video_expert_analyzer_read_skill'), false)
+  for (const primitive of [
+    'skill_ask_user',
+    'skill_run_shell',
+    'skill_write_artifact',
+    'skill_read_artifact',
+  ]) {
+    assert.ok(toolNames.includes(primitive), `${primitive} should stay available for reference skills`)
+  }
 })
 
 test('SkillContextOrchestrator also recognizes 用 xxx style explicit skill requests', () => {
@@ -80,7 +126,6 @@ test('SkillContextOrchestrator filters out short skill tokens below length thres
         actions: [{ name: 'run', visibility: 'public' }],
       } as any,
     ],
-    listExecutions: () => [],
     resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
     executeTool: async () => 'STDOUT:\n技能说明',
   })

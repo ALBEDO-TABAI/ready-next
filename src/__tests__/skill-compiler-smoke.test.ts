@@ -1,38 +1,39 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
 
-const ROOT = '/Users/user/Documents/ready-cowork/assets/embedded-skills'
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'embedded-skills')
 
 describe('skill compiler smoke', () => {
-  it('compiles workflow embedded skills with internal/public action visibility', () => {
+  it('compiles video-copy-analyzer as advisory hybrid (read_skill default + video_copy_analyze internal)', () => {
     const definition = compileSkillDefinition({
       folderPath: join(ROOT, 'video-copy-analyzer'),
       source: 'embedded',
     })
 
-    assert.strictEqual(definition.executionMode, 'workflow')
-    assert.strictEqual(definition.defaultAction, 'video_copy_analyze')
-    assert.ok(definition.workflow)
-    assert.strictEqual(definition.workflow?.initialStep, 'prepare_input')
-    assert.ok(definition.actions.some((action) => action.name === 'video_copy_analyze' && action.visibility === 'public'))
-    assert.ok(definition.actions.some((action) => action.name === 'video_copy_extract_subtitle' && action.visibility === 'internal'))
+    assert.strictEqual(definition.executionMode, 'advisory')
+    assert.strictEqual(definition.defaultAction, 'read_skill')
+    assert.strictEqual(definition.workflow, undefined)
+    assert.ok(definition.actions.some((action) => action.name === 'read_skill' && action.visibility === 'internal'))
+    assert.ok(definition.actions.some((action) => action.name === 'video_copy_analyze' && action.visibility === 'internal'))
   })
 
-  it('keeps lets-go-rss as advisory/direct utility surface', () => {
+  it('keeps lets-go-rss as advisory hybrid (read_skill default + retained typed actions)', () => {
     const definition = compileSkillDefinition({
       folderPath: join(ROOT, 'lets-go-rss'),
       source: 'embedded',
     })
 
     assert.strictEqual(definition.executionMode, 'advisory')
-    assert.strictEqual(definition.defaultAction, 'rss_update')
+    assert.strictEqual(definition.defaultAction, 'read_skill')
     assert.strictEqual(definition.workflow, undefined)
-    assert.ok(definition.actions.every((action) => action.visibility !== 'internal'))
+    assert.ok(definition.actions.some((action) => action.name === 'read_skill' && action.visibility === 'internal'))
+    assert.ok(definition.actions.some((action) => action.name === 'rss_update' && action.visibility === 'public'))
   })
 
   it('falls back to advisory read_skill for README-only custom skills', () => {
@@ -46,6 +47,35 @@ describe('skill compiler smoke', () => {
 
     assert.strictEqual(definition.executionMode, 'advisory')
     assert.strictEqual(definition.actions[0]?.name, 'read_skill')
+    assert.strictEqual(definition.actions[0]?.visibility, 'internal')
+  })
+
+  it('normalizes legacy public reference read_skill actions to internal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ready-skill-ref-public-'))
+    writeFileSync(join(dir, 'SKILL.md'), '# Demo Skill\n\nUse this skill to review drafts.\n', 'utf-8')
+    writeFileSync(join(dir, 'ready-skill.json'), JSON.stringify({
+      id: 'legacy-public-read-skill',
+      name: 'Legacy Public Read Skill',
+      runtime: 'reference',
+      defaultAction: 'read_skill',
+      actions: [
+        {
+          name: 'read_skill',
+          runtime: 'reference',
+          entry: 'SKILL.md',
+          visibility: 'public',
+        },
+      ],
+    }, null, 2), 'utf-8')
+
+    const definition = compileSkillDefinition({
+      folderPath: dir,
+      source: 'custom',
+    })
+
+    assert.strictEqual(definition.executionMode, 'advisory')
+    assert.strictEqual(definition.actions[0]?.name, 'read_skill')
+    assert.strictEqual(definition.actions[0]?.visibility, 'internal')
   })
 
   it('compiles custom workflow skills when workflow contract is present', () => {

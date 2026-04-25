@@ -60,9 +60,12 @@ export interface SidePanelSlots {
 
 const IMPORTED_SKILL_KEY = 'ready-imported-skill-folders'
 
+// Reference/advisory skills (video-expert-analyzer, video-copy-analyzer) expose
+// only `internal` actions to the LLM tool surface; their typed actions are
+// invoked by product code (e.g. RSS item-analysis-manager) and must not be
+// surfaced as user-typed slash defaults. Only public-action skills like
+// lets-go-rss keep an explicit default command here.
 const DEFAULT_SYSTEM_COMMANDS: Record<string, string> = {
-  'video-expert-analyzer': '/skill video-expert-analyzer video_expert_pipeline {"url":""}',
-  'video-copy-analyzer': '/skill video-copy-analyzer video_copy_analyze {"input":""}',
   'lets-go-rss': '/skill lets-go-rss rss_update {"digest":true,"noLlm":true}',
 }
 
@@ -134,7 +137,7 @@ function putSkillDragData(
   })
   e.dataTransfer.setData('application/x-ready-drag', data)
   e.dataTransfer.setData('application/x-ready-skill', data)
-  e.dataTransfer.setData('text/plain', payload.defaultCommand || payload.path)
+  e.dataTransfer.setData('text/plain', `@[${payload.name}]`)
   e.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -540,7 +543,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           source: 'system',
                           defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
+                        title="拖拽到 Agent 输入框可插入 @skill 引用"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />
@@ -640,7 +643,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           source: 'imported',
                           defaultCommand: buildDefaultCommand(skill),
                         })}
-                        title="拖拽到 Agent 输入框可直接生成 /skill 命令"
+                        title="拖拽到 Agent 输入框可插入 @skill 引用"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />

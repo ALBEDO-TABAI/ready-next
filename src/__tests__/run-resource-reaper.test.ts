@@ -37,5 +37,9 @@ test('orchestrator cancellation path and tool contexts are wired to the run clea
   assert.match(toolContextBuilder, /registerRunCleanup\?: \(cleanup: \(\) => void \| Promise<void>\) => void/)
   assert.match(toolExecutor, /executeSkillTool\(toolName, args, context\.sessionId, context\.registerRunCleanup\)/)
   assert.match(skillTools, /registerRunCleanup\?: \(cleanup: \(\) => void \| Promise<void>\) => void/)
-  assert.match(skillTools, /registerRunCleanup\(\(\) => \{\s*manager\.cancelExecution\(executionId\)/)
+  // Phase 4: the `registerRunCleanup(() => manager.cancelExecution(...))`
+  // pattern was removed when the skill_executions state machine was retired.
+  // Skill primitives (run_shell / ask_user / artifacts) don't need a cleanup
+  // hook because they either complete in-line or bind their lifetime to the
+  // AbortSignal already wired through the tool context.
 })

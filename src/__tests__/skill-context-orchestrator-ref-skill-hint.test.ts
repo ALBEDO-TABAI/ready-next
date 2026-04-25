@@ -57,7 +57,6 @@ function buildOrchestrator(skill: any) {
   return new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skill],
-    listExecutions: () => [],
     resolveSkillToolByAction: (_skillId, action) => ({
       name: `skill_${skill.id.replace(/-/g, '_')}_${action}`,
       action,
@@ -115,6 +114,35 @@ test('workflow skill injection does NOT write a reference hint', async () => {
   })
 
   assert.equal(getLastReferenceSkill('session-B'), null)
+})
+
+test('explicit reference skill can arm a session hint before inline injection', () => {
+  _resetLastReferenceSkillHintsForTests()
+  const orchestrator = buildOrchestrator(referenceSkill())
+
+  const remembered = orchestrator.rememberExplicitReferenceSkillHint(
+    '使用 Novel Writer System 写一段场景',
+    'session-preflight',
+  )
+
+  assert.equal(remembered, true)
+  const hint = getLastReferenceSkill('session-preflight')
+  assert.ok(hint)
+  assert.equal(hint?.id, 'novel_writer_system')
+  assert.equal(hint?.name, 'Novel Writer System')
+})
+
+test('explicit workflow skill does not arm the reference primitive hint', () => {
+  _resetLastReferenceSkillHintsForTests()
+  const orchestrator = buildOrchestrator(workflowSkill())
+
+  const remembered = orchestrator.rememberExplicitReferenceSkillHint(
+    '用 Video Copy Analyzer 分析这个视频',
+    'session-workflow-preflight',
+  )
+
+  assert.equal(remembered, false)
+  assert.equal(getLastReferenceSkill('session-workflow-preflight'), null)
 })
 
 test('hints are scoped per session — session-A hint does not leak into session-C', async () => {

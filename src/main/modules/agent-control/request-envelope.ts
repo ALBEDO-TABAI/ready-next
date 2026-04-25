@@ -98,7 +98,9 @@ const CONTEXT_MARKERS = [
   '### 文档引用',
   '### 浏览页面引用',
   '### 文件夹引用',
+  '### 技能目录引用',
   '--- 引用设计项目:',
+  '--- 引用技能目录:',
   '--- 文档摘要开始 ---',
   '--- 文档内容开始 ---',
   '--- 引用文件:',
@@ -118,6 +120,8 @@ const STRUCTURED_MARKERS: Array<{ marker: string; source: InputChunkSource }> = 
   { marker: '### 文档引用', source: 'ui_resource_ref' },
   { marker: '### 浏览页面引用', source: 'ui_resource_ref' },
   { marker: '### 文件夹引用', source: 'ui_resource_ref' },
+  { marker: '### 技能目录引用', source: 'ui_resource_ref' },
+  { marker: '--- 引用技能目录:', source: 'ui_resource_ref' },
   { marker: '--- 引用文件:', source: 'attachment_body' },
   { marker: '--- 附件:', source: 'attachment_body' },
 ]

@@ -37,6 +37,15 @@ function resolveTaskId(summary: ScopeRunSummary, payload: ScopeRunEventPayload):
   return summary.taskId || payload.taskId || summary.taskProjectionId || payload.taskProjectionId || payload.runId || null
 }
 
+function isTaskProjectionUniqueRace(error: unknown): boolean {
+  const record = error as { code?: unknown; message?: unknown } | null | undefined
+  const code = typeof record?.code === 'string' ? record.code : ''
+  const message = typeof record?.message === 'string' ? record.message : ''
+  return code === 'SQLITE_CONSTRAINT_PRIMARYKEY'
+    || code === 'SQLITE_CONSTRAINT'
+    || /UNIQUE constraint failed: task_projections\.task_id/.test(message)
+}
+
 function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState {
   if (summary.interactionState) return summary.interactionState
   if (summary.phase === 'takeover') return 'human_takeover'
@@ -333,13 +342,22 @@ export async function syncTaskProjection(
   const taskId = resolveTaskId(summary, payload)
   if (!taskId) return null
   const previous = await store.get(taskId)
-  const next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)
+  let next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)
   if (!next) return null
 
   if (previous) {
     await store.update(taskId, next)
   } else {
-    await store.create(next)
+    try {
+      await store.create(next)
+    } catch (error) {
+      if (!isTaskProjectionUniqueRace(error)) throw error
+      const concurrentPrevious = await store.get(taskId)
+      if (!concurrentPrevious) throw error
+      next = buildTaskProjectionRecord(summary, payload, concurrentPrevious, projectionTruth)
+      if (!next) return null
+      await store.update(taskId, next)
+    }
   }
   if (
     next.status === 'blocked'

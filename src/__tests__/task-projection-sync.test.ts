@@ -163,6 +163,52 @@ test('syncTaskProjection creates and then updates projection records from scope 
   assert.equal(updated?.updatedAt, '2026-04-16T11:01:00.000Z')
 })
 
+test('syncTaskProjection falls back to update when create loses a concurrent insert race', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const existing = {
+    ...createSummary(),
+    taskId: 'task-1',
+  } as never as TaskProjectionRecord
+  records.set('task-1', existing)
+  let getCount = 0
+  let updateCount = 0
+  const store: TaskProjectionStore = {
+    create() {
+      const error = new Error('UNIQUE constraint failed: task_projections.task_id') as NodeJS.ErrnoException
+      error.code = 'SQLITE_CONSTRAINT_PRIMARYKEY'
+      throw error
+    },
+    update(taskId, patch) {
+      updateCount += 1
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      getCount += 1
+      return getCount === 1 ? null : records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const summary = {
+    ...createSummary(),
+    taskSummary: '并发后更新成功',
+    updatedAt: '2026-04-16T11:05:00.000Z',
+  }
+  const result = await syncTaskProjection(store, summary, createPayload())
+
+  assert.equal(updateCount, 1)
+  assert.equal(result?.taskSummary, '并发后更新成功')
+  assert.equal(records.get('task-1')?.taskSummary, '并发后更新成功')
+})
+
 test('syncTaskProjection keeps older blocked continuation snapshots when a newer task finishes', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const store: TaskProjectionStore = {

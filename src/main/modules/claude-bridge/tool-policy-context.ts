@@ -1,7 +1,7 @@
 import { inferDocumentWidgetTaskKind, shouldForceDocumentToolCall } from './tool-policy-heuristics'
 
 const RETRY_ONLY_PATTERN =
-  /^(再试一次|再试|重试|继续|继续试试|继续一下|重新试一次|重新来|再来一次|retry|try again|again|continue)$/i
+  /^(再试一次|再试|重试|再重试|再重试一次|继续|继续试试|继续一下|重新试一次|重新来|再来一次|retry|try again|again|continue)$/i
 const HOST_INJECTED_USER_PATTERN =
   /^(系统检查：|\[tool_result\]|请基于以上工具结果继续下一步)/i
 const CONTEXT_DEPENDENT_EDIT_PATTERN =

@@ -348,7 +348,7 @@ export async function buildComposedAgentInput(params: {
             `- 名称: ${att.name}`,
             att.skillId ? `- skillId: ${att.skillId}` : null,
             `- 路径: ${att.skillFolderPath || att.path}`,
-            '如果需要执行这个 skill，请优先直接调用真实的 `skill_* / skill_get_state / skill_submit_*` 工具，不要把 `/skill ...` 当作普通文本回复。',
+            '如果需要执行这个 skill，请优先直接调用当前工具列表里真实存在的 `skill_*` 工具，不要把 `/skill ...` 当作普通文本回复。',
           ].filter(Boolean)
           blocks.push({ type: 'text', text: `\n\n${skillLines.join('\n')}` })
           continue

@@ -1,68 +1,32 @@
 /**
- * Pure gating logic for skill execution-control tools.
+ * Pure gating logic for skill_* tools.
+ *
+ * Phase 4: the 6 execution-control tools retired along with the
+ * skill_executions state machine. Only the 4 skill primitives need
+ * session-aware gating now — they're exposed only when the session has a
+ * reference-skill hint armed by the orchestrator.
  *
  * Separate from `skills-tools.ts` so that:
  *   - Tests can import this without pulling in electron / runtime-manager via
  *     the skills-tools → runtime-manager chain.
  *   - The logic lives in exactly one place; both getSkillToolDefs and any
- *     future skill_* tool surface (e.g. the primitives in Phase 1) can reuse
- *     the same gate.
- *
- * Behavior (B plan Phase 0 — P0-T1):
- *   - Legacy callers with no sessionId keep the full tool list. This preserves
- *     the static fallback path used during boot when the runtime manager is
- *     not yet available.
- *   - When a sessionId is supplied and the session has NO active execution,
- *     submit_* / restart_from_step / cancel_execution are filtered out of the
- *     tool list (LLM never sees them — stops it from fabricating
- *     `executionId: "new"`).
- *   - `skill_get_state` is NEVER gated — it is a read-only probe that stays
- *     safe in every state.
+ *     future skill_* tool surface can reuse the same gate.
  */
-
-export const SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'skill_submit_input',
-  'skill_submit_confirmation',
-  'skill_submit_agent_result',
-  'skill_restart_from_step',
-  'skill_cancel_execution',
-])
-
-export function shouldExposeExecutionControlTool(
-  toolName: string,
-  sessionId: string | undefined,
-  hasActiveExecution: (sessionId: string) => boolean,
-): boolean {
-  if (!sessionId) return true
-  if (!SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES.has(toolName)) return true
-  return hasActiveExecution(sessionId)
-}
-
-// Convenience: filter a caller-supplied list of tool definitions. `T` is the
-// tool-def shape (SkillToolDef or any superset exposing `.name`).
-export function filterExecutionControlToolsBySession<T extends { name: string }>(
-  defs: readonly T[],
-  sessionId: string | undefined,
-  hasActiveExecution: (sessionId: string) => boolean,
-): T[] {
-  return defs.filter((def) =>
-    shouldExposeExecutionControlTool(def.name, sessionId, hasActiveExecution),
-  )
-}
 
 /**
  * B Phase 1 — skill primitives gating.
  *
  * Primitives (`skill_ask_user` / `skill_run_shell` / `skill_write_artifact` /
- * `skill_read_artifact`) are only exposed to the LLM when one of:
- *   1. The session has an active skill execution (workflow in progress), OR
- *   2. The session has a `lastReferenceSkill` hint from the orchestrator
- *      (a reference skill was just inlined this turn).
- *
- * Rationale: these are powerful tools (shell exec, disk write) and we don't
- * want them surfaced to every generic chat. Legacy sessionId-less callers
+ * `skill_read_artifact`) are only exposed to the LLM when the session has a
+ * reference-skill hint registered by the orchestrator (i.e. a reference skill
+ * was inlined in this session recently). Legacy sessionId-less callers
  * (boot-time introspection, static fallback) keep the full list so the tool
  * surface inventory stays stable.
+ *
+ * Phase 4 simplification: `hasActiveExecution` is permanently false since
+ * skill_executions no longer exists, so the primitive gate is driven entirely
+ * by the reference-skill hint. The parameter is retained for call-site
+ * compatibility in case a future gate wants to layer additional signals.
  */
 export function shouldExposeSkillPrimitive(
   sessionId: string | undefined,

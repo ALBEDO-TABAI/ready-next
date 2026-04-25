@@ -52,13 +52,15 @@ test('runtime-manager reference branch uses mode="reference" and empty command',
   )
 })
 
-test('SkillRunResult.mode type includes "reference"', () => {
+test('SkillRunResult.mode type includes "reference" (Phase 4: workflow mode retired)', () => {
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
 
+  // Phase 4: 'workflow' mode retired along with the skill_executions state
+  // machine. The union is now just 'direct' | 'reference'.
   assert.match(
     source,
-    /mode\?:\s*'direct'\s*\|\s*'workflow'\s*\|\s*'reference'/,
-    'SkillRunResult must allow mode: "reference"',
+    /mode\?:\s*'direct'\s*\|\s*'reference'/,
+    'SkillRunResult must allow mode: "direct" | "reference"',
   )
 })
 

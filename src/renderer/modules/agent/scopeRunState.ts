@@ -379,12 +379,18 @@ function parseMemoryCapture(input: unknown): ScopeRunMemoryCapture | null {
 function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
-  const executionId = String(record.executionId || '').trim()
-  if (!executionId) return null
+  // Phase 4: executionId is optional — skill continuations post-retirement
+  // of skill_executions may only carry taskId/stepId/blockerType.
+  const executionId = String(record.executionId || '').trim() || null
+  const taskId = typeof record.taskId === 'string' ? record.taskId : null
+  const stepId = typeof record.stepId === 'string' ? record.stepId : null
+  const blockerType = typeof record.blockerType === 'string' ? record.blockerType : null
+  if (!executionId && !taskId && !stepId && !blockerType) return null
   return {
     executionId,
-    stepId: typeof record.stepId === 'string' ? record.stepId : null,
-    blockerType: typeof record.blockerType === 'string' ? record.blockerType : null
+    taskId,
+    stepId,
+    blockerType,
   }
 }
 
@@ -399,81 +405,11 @@ function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
   return blockerType ? 'background' : 'none'
 }
 
-interface SkillExecutionTaskInput {
-  executionId: string
-  skillId: string
-  status: string
-  currentStepId?: string | null
-  blockerType?: string | null
-  blockerMessage?: string | null
-  steps: ScopeRunTaskStep[]
-  artifacts: AgentArtifact[]
-}
-
-function buildTaskPatchFromSkillExecutionTask(
-  input: SkillExecutionTaskInput
-): Partial<ScopeRunState> {
-  const waitingFor = toSkillWaitingFor(input.blockerType || null)
-  const resumableActions: ScopeRunResumableAction[] = []
-  if (waitingFor !== 'none') resumableActions.push('continue')
-  if (input.artifacts.length > 0) resumableActions.push('open_artifact')
-  if (input.status === 'failed' || input.status === 'cancelled') resumableActions.push('retry')
-  resumableActions.push('cancel')
-
-  return {
-    taskTitle: `技能执行 · ${input.skillId}`,
-    taskSummary: input.blockerMessage || `当前步骤：${input.currentStepId || '进行中'}`,
-    steps: input.steps,
-    currentStepId: input.currentStepId || null,
-    waitingFor,
-    resumableActions,
-    taskContinuation: {
-      executionId: input.executionId,
-      stepId: input.currentStepId || null,
-      blockerType: input.blockerType || null
-    },
-    recentArtifacts: buildRecentArtifacts(input.artifacts)
-  }
-}
-
-export function createTaskPatchFromSkillExecutionDetail(
-  detail: {
-    id: string
-    skillId: string
-    status: string
-    currentStepId?: string | null
-    blocker?: { type: string; message: string } | null
-    steps?: Array<{ stepId: string; status: string }>
-    artifacts?: Array<{ id?: string; label?: string; path?: string | null }>
-  },
-  timestamp = new Date().toISOString()
-): Partial<ScopeRunState> {
-  return buildTaskPatchFromSkillExecutionTask({
-    executionId: detail.id,
-    skillId: detail.skillId,
-    status: detail.status,
-    currentStepId: detail.currentStepId || null,
-    blockerType: detail.blocker?.type || null,
-    blockerMessage: detail.blocker?.message || null,
-    steps: (detail.steps || []).map((step) => ({
-      id: step.stepId,
-      title: step.stepId,
-      status: toTaskStepStatus(step.status),
-      updatedAt: timestamp
-    })),
-    artifacts: (detail.artifacts || []).map((artifact) => ({
-      id: String(artifact.id || generateArtifactId()),
-      module: 'system',
-      kind: 'artifact',
-      label: String(artifact.label || artifact.path || artifact.id || 'artifact'),
-      path: typeof artifact.path === 'string' ? artifact.path : null,
-      url: null,
-      mimeType: null,
-      sourceRunId: detail.id,
-      createdAt: timestamp
-    }))
-  })
-}
+// Phase 4: createTaskPatchFromSkillExecutionDetail and its helpers were the
+// renderer-side reducer for the retired skill_executions state machine. The
+// new todo-based projection is built in main process
+// (skills-tools.buildSkillProjectionPatch, rewritten in PR2); the renderer
+// consumes the projection patch directly.
 
 function finalizeTaskState(
   phase: ScopeRunState['phase'],

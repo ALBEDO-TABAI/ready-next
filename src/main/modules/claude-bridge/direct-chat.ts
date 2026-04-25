@@ -246,7 +246,7 @@ show-widget 规则：
 如果工具列表里出现新的自定义 skill_* 工具，也把它们视为可直接执行的技能能力。
 当用户明确提出这些任务时，优先调用对应 skill_* 工具，不要只给口头建议；若已有匹配 skill，则优先复用它而不是改走手工网页路径。
 当用户明确点名某个 skill（例如“使用 lifepho skill”）时，必须先调用对应的 skill_* 工具或读取其说明，再把 skill 的方法真正用到后续浏览器/文档任务里。
-不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用真实 skill_* 工具或 execution 管理工具。
+不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用当前工具列表里真实存在的 skill_* 工具。
 如果用户只提到站点名（例如“即梦”）但没有给 URL，且当前页也不能明确复用，先搜索该站点的官方入口并确认，再继续；若搜索结果仍不唯一，先向用户澄清，不要在无关页面反复进出。
 当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似”openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
 当用户提到“上次那轮对话 / 之前讨论过 / 历史会话 / 旧会话里怎么说的 / 找找以前那次”时，优先使用 session_search 检索历史会话，再基于返回的会话摘要继续回答或引用，不要把 memory_search 当成历史聊天检索。
@@ -321,7 +321,6 @@ export class DirectChatEngine extends EventEmitter {
     this.skillContextOrchestrator = new SkillContextOrchestrator({
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),
-      listExecutions: (limit, sessionId, activeOnly) => getSkillsRuntimeManager().listExecutions(limit, sessionId, activeOnly),
       resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
     })
     this.anthropicExecutionClient = new AnthropicExecutionClient({
@@ -982,6 +981,12 @@ export class DirectChatEngine extends EventEmitter {
         isChannelTypeAvailable: (channelType: string) =>
           this.runtime?.isChannelTypeAvailable(channelType as any) ?? false,
         getConversationScope: (sessionId: string) => this.runtime?.getConversationScope(sessionId) || null,
+        getMemoryRepository: () => this.runtime?.getMemoryRepository() || null,
+        getPromptAssembly: () => this.runtime?.getPromptAssembly() || null,
+        searchSessionRecall: (payload?: Record<string, unknown>) =>
+          this.runtime?.searchSessionRecall(payload as any) ?? [],
+        listRecentSessions: (payload?: Record<string, unknown>) =>
+          this.runtime?.listRecentSessions(payload as any) ?? [],
       },
       requestModuleToolAction: params.requestModuleToolAction,
       registerRunCleanup: (cleanup: () => void | Promise<void>) => {

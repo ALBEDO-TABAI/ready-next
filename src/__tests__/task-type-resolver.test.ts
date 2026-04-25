@@ -120,7 +120,7 @@ test('task type resolver routes explicit skill workflow requests into the skill 
     capabilities: createCapabilities(),
   })
 
-  assert.equal(result.taskType, 'short_task')
+  assert.equal(result.taskType, 'multi_step_task')
   assert.equal(result.executionChain, 'domain_executor')
   assert.equal(result.preferredExecutor, 'skill')
 })

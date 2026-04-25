@@ -3,8 +3,9 @@
  * Verifies:
  *   - When managedPath contains SKILL.md the orchestrator reads it directly
  *     and injects a `role: 'system'` message (no tool_use round-trip)
- *   - The injection header carries the "don't call skill_submit_* tools"
- *     guidance
+ *   - The injection header points the model at the surviving primitive tools
+ *     (skill_ask_user / skill_run_shell / ...) without naming retired
+ *     execution-control tools (Phase 4 cleanup)
  *   - The hint store gets populated with the skill id
  *   - Oversized SKILL.md is truncated to 12000 chars (Phase 2: raised from 6K)
  *   - When SKILL.md is missing, the legacy tool-call path still runs
@@ -45,7 +46,6 @@ function buildOrchestrator(skill: any) {
   return new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skill],
-    listExecutions: () => [],
     resolveSkillToolByAction: () => ({
       name: 'skill_novel_writer_system_read_skill',
       action: 'read_skill',
@@ -86,7 +86,14 @@ test('direct readFileSync path skips the tool call when SKILL.md exists', async 
     const msg = session.messages[0] as { role: string; content: string }
     assert.equal(msg.role, 'system')
     assert.ok(msg.content.includes('已加载技能'))
-    assert.ok(msg.content.includes('skill_submit_*'), 'mentions the workflow tools the model should NOT call')
+    assert.ok(
+      !msg.content.includes('skill_submit_'),
+      'must not name retired execution-control tools after Phase 4',
+    )
+    assert.ok(
+      !msg.content.includes('skill_restart_') && !msg.content.includes('skill_cancel_execution'),
+      'must not name retired execution-control tools after Phase 4',
+    )
     assert.ok(msg.content.includes('skill_ask_user'), 'points the model at the ask_user primitive instead')
     assert.ok(msg.content.includes('写作指南正文内容'))
 

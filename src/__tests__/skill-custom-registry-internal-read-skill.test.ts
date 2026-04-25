@@ -1,8 +1,8 @@
 /**
  * B Phase 1 PR2 T1-9 — the auto-generated `read_skill` action now defaults
- * to `visibility: 'internal'`. Manifests that explicitly declare
- * `'public'` continue to be honored. Uses a real filesystem fixture so the
- * registry's SKILL.md detection runs.
+ * to `visibility: 'internal'`. Legacy manifests that explicitly declared
+ * reference `read_skill` as public are also normalized at load time so the
+ * LLM cannot keep replaying `skill_<id>_read_skill`.
  */
 
 import assert from 'node:assert/strict'
@@ -38,7 +38,7 @@ test('auto-generated read_skill action defaults to visibility: internal', () => 
   })
 })
 
-test('explicit visibility: public in manifest is preserved', () => {
+test('legacy visibility: public on reference read_skill is normalized to internal', () => {
   withFixture((dir) => {
     writeFileSync(join(dir, 'SKILL.md'), '# body', 'utf-8')
     writeFileSync(
@@ -60,6 +60,30 @@ test('explicit visibility: public in manifest is preserved', () => {
     const manifest = loadCustomSkillManifestFromFolder(dir)
     assert.ok(manifest)
     const readAction = manifest!.actions.find((a) => a.name === 'read_skill')
-    assert.equal(readAction?.visibility, 'public')
+    assert.equal(readAction?.visibility, 'internal')
+  })
+})
+
+test('non-reference public actions are preserved', () => {
+  withFixture((dir) => {
+    writeFileSync(join(dir, 'SKILL.md'), '# body', 'utf-8')
+    writeFileSync(
+      join(dir, 'ready-skill.json'),
+      JSON.stringify({
+        id: 'typed-public',
+        name: 'Typed Public',
+        actions: [
+          {
+            name: 'run_report',
+            runtime: 'python',
+            visibility: 'public',
+            entry: 'scripts/report.py',
+          },
+        ],
+      }),
+      'utf-8',
+    )
+    const manifest = loadCustomSkillManifestFromFolder(dir)
+    assert.equal(manifest.actions.find((a) => a.name === 'run_report')?.visibility, 'public')
   })
 })

@@ -12,6 +12,7 @@ test('chat panel wires session recall search and attach APIs into the inline cha
   const chatHeader = readWorkspaceFile('src/renderer/components/agent/ChatHeader.tsx')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
+  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
 
   assert.match(chatPanel, /searchSessionRecall/)
   assert.match(chatPanel, /listAttachedSessionRecallContexts/)
@@ -36,4 +37,9 @@ test('chat panel wires session recall search and attach APIs into the inline cha
   assert.match(electronTypes, /listAttachedSessionRecallContexts:/)
   assert.match(electronTypes, /attachSessionRecallContext:/)
   assert.match(electronTypes, /detachSessionRecallContext:/)
+
+  assert.match(directChat, /searchSessionRecall:\s*\(payload/)
+  assert.match(directChat, /listRecentSessions:\s*\(payload/)
+  assert.match(directChat, /getMemoryRepository:\s*\(\)/)
+  assert.match(directChat, /getPromptAssembly:\s*\(\)/)
 })

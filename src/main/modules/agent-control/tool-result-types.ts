@@ -57,6 +57,9 @@ export function getToolExecutionText(output: ToolExecutionResultLike): string {
 
 export function serializeToolExecutionOutput(output: ToolExecutionResultLike): string {
   const normalized = normalizeToolExecutionOutput(output)
+  if (normalized.text) {
+    return normalized.text
+  }
   if (normalized.projectionPatch) {
     return JSON.stringify(normalized.projectionPatch)
   }

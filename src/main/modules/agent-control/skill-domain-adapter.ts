@@ -162,7 +162,17 @@ export class SkillDomainAdapter implements DomainAdapter {
 
   buildProjectionPatch(params: Parameters<DomainAdapter['buildProjectionPatch']>[0]): Record<string, unknown> | null {
     const state = createState(params.domainState)
-    if (!state.latestProjectionPatch) return null
+    if (!state.latestProjectionPatch) {
+      if (!params.projection) return null
+      return {
+        module: 'skill',
+        taskTitle: 'Skill 任务',
+        taskSummary: params.projection.summary,
+        waitingFor: params.projection.waitingFor ?? 'none',
+        resumableActions: params.projection.resumableActions ?? [],
+        blockedReason: params.projection.blockedReason ?? null,
+      }
+    }
     return {
       ...state.latestProjectionPatch,
       module: 'skill',

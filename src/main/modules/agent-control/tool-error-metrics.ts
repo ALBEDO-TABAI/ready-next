@@ -25,10 +25,8 @@ export const TOOL_ERROR_METRICS = {
   inputValidation: 'tool_input_validation_failed',
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
-  /** stale executionId 被 skill-execution-missing 识别并回灌（Phase 4 新增） */
-  skillExecutionMissing: 'skill_execution_missing',
-  /** skill_executions TTL sweep 完成一次（Phase 4 新增） */
-  ttlSwept: 'skill_executions_ttl_swept',
+  /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
+  skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
   /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
    * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明

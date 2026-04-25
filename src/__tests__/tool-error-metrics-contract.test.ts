@@ -1,9 +1,16 @@
 /**
  * Phase 4 — source-level contracts for TOOL_ERROR_METRICS usage.
  *
- * Ensures the 4 existing emit sites reference the enum (not hardcoded
- * strings), that the two new emit sites exist, and that the sweep site
- * fires ttlSwept with the expected payload keys.
+ * Ensures the emit sites reference the enum (not hardcoded strings) and that
+ * the reference-hint TTL sweep site fires the new
+ * skillReferenceHintTtlSwept metric with the expected payload keys.
+ *
+ * Phase 4 retirement notes:
+ *   - `skill_execution_missing` metric + emit branch deleted along with
+ *     skill-execution-missing.ts and the skill_executions state machine
+ *   - `skill_executions_ttl_swept` renamed to `skill_reference_hint_ttl_swept`
+ *     because the sweep now only prunes reference-skill hints (skill_executions
+ *     table is dropped in migration 029)
  */
 
 import assert from 'node:assert/strict'
@@ -25,14 +32,6 @@ test('tool-executor.ts imports TOOL_ERROR_METRICS and uses .inputValidation + .s
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_error_surfaced['"]/)
 })
 
-test('tool-executor.ts emits skill_execution_missing metric when kind matches', () => {
-  const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
-  assert.match(
-    source,
-    /if\s*\(kind\s*===\s*['"]skill_execution_missing['"]\)[\s\S]*logAgentMetric\(TOOL_ERROR_METRICS\.skillExecutionMissing/,
-  )
-})
-
 test('tool-runtime.ts uses TOOL_ERROR_METRICS.unknownSurfaced', () => {
   const source = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
   assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
@@ -47,24 +46,18 @@ test('turn-engine.ts uses TOOL_ERROR_METRICS.resolutionViolation', () => {
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_resolution_violation_post_arbitration['"]/)
 })
 
-test('runtime-manager.ts emits ttlSwept metric with deleted/retentionDays/cutoff', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-  assert.match(source, /from ['"]\.\.\/agent-control\/tool-error-metrics['"]/)
-  assert.match(source, /store\.purgeExpiredExecutions\(/)
-  const sweepBlock = source.match(/logAgentMetric\(TOOL_ERROR_METRICS\.ttlSwept,[\s\S]*?\}\)/)
-  assert.ok(sweepBlock, 'ttlSwept emit block must be present')
-  const body = sweepBlock![0]
-  assert.match(body, /deleted/)
-  assert.match(body, /retentionDays/)
-  assert.match(body, /cutoff/)
+test('skill-reference-hints.ts emits skillReferenceHintTtlSwept on sweep', () => {
+  const source = readWorkspaceFile('src/main/modules/agent-control/skill-reference-hints.ts')
+  assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
+  assert.match(
+    source,
+    /logAgentMetric\(TOOL_ERROR_METRICS\.skillReferenceHintTtlSwept/,
+  )
 })
 
-test('runtime-manager.ts schedules TTL sweep with boot delay + hourly interval', () => {
+test('runtime-manager.ts schedules reference-hint sweep with boot delay + hourly interval', () => {
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-  assert.match(source, /TTL_RETENTION_DAYS\s*=\s*7/)
-  assert.match(source, /TTL_SWEEP_INTERVAL_MS\s*=\s*60\s*\*\s*60_?000/)
-  assert.match(source, /TTL_BOOT_DELAY_MS/)
-  assert.match(source, /startTtlSweep\(\)/)
-  assert.match(source, /setTimeout\(sweep, SkillsRuntimeManager\.TTL_BOOT_DELAY_MS\)/)
-  assert.match(source, /setInterval\(sweep, SkillsRuntimeManager\.TTL_SWEEP_INTERVAL_MS\)/)
+  assert.match(source, /REFERENCE_HINT_SWEEP_INTERVAL_MS\s*=\s*60\s*\*\s*60_?000/)
+  assert.match(source, /REFERENCE_HINT_BOOT_DELAY_MS/)
+  assert.match(source, /startReferenceHintSweep\(\)/)
 })

@@ -9,7 +9,7 @@
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
-interface MigrationDatabase {
+export interface MigrationDatabase {
   exec(sql: string): void
   prepare(sql: string): {
     run(...params: unknown[]): unknown
@@ -665,7 +665,7 @@ const migrations: Migration[] = [
           ('browser-upload', '浏览器上传流程', 'browser', '(上传|发送|提交|浏览器|网页)', 0, 0),
           ('document-write', '文档改写操作', 'document', '(文档|文件).*(写|改|保存|格式)', 0, 0),
           ('video-render', '视频渲染操作', 'video', '(视频|剪辑|渲染|导出)', 0, 0),
-          ('rss-analysis', 'RSS 分析操作', 'rss', '(rss|订阅|抓取|分析)', 0, 0),
+          ('rss-analysis', 'RSS 分析操作', 'rss', '(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)', 0, 0),
           ('calendar-write', '日程写入操作', 'calendar', '(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程', 1, 0)
         ON CONFLICT(id) DO NOTHING
       `)
@@ -1381,6 +1381,52 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(
         'CREATE INDEX IF NOT EXISTS idx_skill_executions_status_finished_at ON skill_executions(status, finished_at DESC)'
+      )
+    }
+  },
+
+  // Phase 4 — retire the skill_executions state machine. The 3 tables +
+  // their indexes are dropped together. Order matters: child tables first,
+  // then parent, because PRAGMA foreign_keys is NOT enabled on this DB
+  // (see CLAUDE.md §6.11) so CASCADE does not fire. All DROPs are IF EXISTS
+  // so the migration is idempotent on fresh DBs that never built the tables.
+  //
+  // Release note: legacy rows (historical workflow state) are permanently
+  // lost on migration. Phase 3 finished migrating every embedded skill to
+  // reference/direct modes, so the surviving rows have no runtime meaning.
+  {
+    name: '029_drop_skill_execution_tables',
+    up: (db) => {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_skill_execution_artifacts_artifact_id;
+        DROP INDEX IF EXISTS idx_skill_execution_artifacts_execution_step;
+        DROP INDEX IF EXISTS idx_skill_execution_steps_execution_step;
+        DROP INDEX IF EXISTS idx_skill_executions_status_finished_at;
+        DROP INDEX IF EXISTS idx_skill_executions_session_status;
+        DROP INDEX IF EXISTS idx_skill_executions_updated_at;
+        DROP TABLE IF EXISTS skill_execution_artifacts;
+        DROP TABLE IF EXISTS skill_execution_steps;
+        DROP TABLE IF EXISTS skill_executions;
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 030
+  // The original RSS trigger matched the generic action word "分析", which
+  // mislabeled explicit non-RSS skill requests (for example Video Expert
+  // analysis) as RSS tasks. Keep RSS routing object-bound on upgrade.
+  {
+    name: '030_tighten_rss_analysis_trigger',
+    up: (db) => {
+      db.prepare(`
+        UPDATE agent_triggers
+        SET pattern = ?,
+            pattern_flags = 'i',
+            updated_at = unixepoch()
+        WHERE id = 'rss-analysis'
+          AND pattern = '(rss|订阅|抓取|分析)'
+      `).run(
+        '(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)'
       )
     }
   }

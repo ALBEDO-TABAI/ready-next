@@ -23,6 +23,7 @@ test('turn-engine probes primaryInstruction AND pureUserText AND contextualUserI
 
   // The three input channels must all be fed into findExplicitlyRequestedSkills
   // via a dedupe'd collection.
+  assert.match(turnEngine, /buildSkillDetectionInputs/)
   assert.match(turnEngine, /skillDetectionInputs/)
   assert.match(turnEngine, /requestEnvelope\.primaryInstruction/)
   assert.match(turnEngine, /requestEnvelope\.pureUserText/)
@@ -40,12 +41,21 @@ test('turn-engine probes primaryInstruction AND pureUserText AND contextualUserI
 
 test('turn-engine chooses the matched input text when handing to buildPreferredSkillToolNames', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  // buildPreferredSkillToolNames should be called with firstSkillMatch.text
-  // when an explicit skill was matched, not unconditionally with contextualUserInput.
-  // This keeps the downstream action-tool lookup consistent with the matching text.
-  assert.match(turnEngine, /buildPreferredSkillToolNames\(\s*firstSkillMatch/)
+  // The matched text is captured once and reused by preflight hint arming,
+  // preferred tool derivation, and inline context injection.
+  assert.match(turnEngine, /const skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
+  assert.match(turnEngine, /rememberExplicitReferenceSkillHint\?\.\(\s*skillContextInjectionText,/)
+  assert.match(turnEngine, /buildPreferredSkillToolNames\(\s*skillContextInjectionText,/)
   // Still fallback to contextualUserInput when the active-execution branch kicks in.
   assert.match(turnEngine, /firstSkillMatch\s*\?\s*firstSkillMatch\.text\s*:\s*contextualUserInput/)
+})
+
+test('turn-engine injects explicit skill context from the matched history input on retry turns', () => {
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+
+  assert.match(turnEngine, /previousPureUserInputs/)
+  assert.match(turnEngine, /maybeInjectExplicitSkillContext\(\{[\s\S]*?userText:\s*skillContextInjectionText,/)
+  assert.match(turnEngine, /const skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
 })
 
 test('turn-engine emits a [skill_detection] log line for observability', () => {
@@ -57,6 +67,7 @@ test('turn-engine emits a [skill_detection] log line for observability', () => {
   assert.match(turnEngine, /\[skill_detection\][\s\S]*contextualMatched=/)
   assert.match(turnEngine, /\[skill_detection\][\s\S]*pureMatched=/)
   assert.match(turnEngine, /\[skill_detection\][\s\S]*preferredSkillToolCount=/)
+  assert.match(turnEngine, /\[skill_detection\][\s\S]*preferredSkillTools=/)
 })
 
 test('turn-engine preserves the active-execution fallback branch', () => {
@@ -67,4 +78,12 @@ test('turn-engine preserves the active-execution fallback branch', () => {
   // if the user's current turn is a bare "继续" / "嗯".
   assert.match(turnEngine, /hasExplicitSkill\s*\|\|\s*hasActiveSkill/)
   assert.match(turnEngine, /hasActiveSkillExecution\(request\.sessionId\)/)
+})
+
+test('turn-engine suppresses implicit continuation lookup when a retry resolves to an explicit skill', () => {
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+
+  assert.match(turnEngine, /shouldSuppressImplicitContinuation/)
+  assert.match(turnEngine, /hasExplicitSkill/)
+  assert.match(turnEngine, /!\s*shouldSuppressImplicitContinuation[\s\S]*?\(继续\|接着\|恢复\|上次\|重试\)/)
 })

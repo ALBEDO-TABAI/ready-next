@@ -143,7 +143,7 @@ export async function executeToolCall(
           return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
 
         case 'skill':
-          return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup)
+          return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal)
 
         case 'system':
           return executeSystemTool(toolName, args)
@@ -175,19 +175,10 @@ export async function executeToolCall(
       errorKind: kind,
       message: message.slice(0, 200),
     })
-    // Phase 4: skill_execution_missing is the stale-executionId recovery
-    // path. It's surfaced via errorKind today but was never emitted as its
-    // own metric, so long-tail frequency is invisible. Emit it alongside
-    // the generic `surfaced` metric so log aggregations can bucket it.
-    if (kind === 'skill_execution_missing') {
-      const detailRecord = detail && typeof detail === 'object' ? (detail as Record<string, unknown>) : null
-      const executionIdRaw = detailRecord ? detailRecord.executionId : null
-      logAgentMetric(TOOL_ERROR_METRICS.skillExecutionMissing, {
-        toolName,
-        sessionId: context.sessionId || null,
-        executionId: typeof executionIdRaw === 'string' ? executionIdRaw : null,
-      })
-    }
+    // Phase 4: skill_execution_missing metric retired with the
+    // skill_executions state machine. The errorKind still exists for other
+    // callers but no longer has a dedicated bucketed metric.
+    void detail
     return createToolExecutionOutput(`工具 ${toolName} 失败：${message}`, {
       shape: 'json',
       data: {

@@ -10,6 +10,8 @@ import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-
 import type { ToolSnapshot } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
+import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
+import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { buildTextToolResultMessage, parseTextToolBridgeResponse } from './tool-bridge'
@@ -814,33 +816,8 @@ export class OpenAIExecutionClient {
   }
 
   private repairOpenAIToolMessageHistory(messages: OpenAIChatMessage[]): Array<Record<string, unknown>> {
-    const rawMessages = messages.map((message) => ({ ...(message as unknown as Record<string, unknown>) }))
-    const openToolCallIds = new Set<string>()
-
-    for (const message of rawMessages) {
-      if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
-        for (const toolCall of message.tool_calls as Array<Record<string, unknown>>) {
-          if (typeof toolCall.id === 'string') {
-            openToolCallIds.add(toolCall.id)
-          }
-        }
-        continue
-      }
-      if (message.role === 'tool') {
-        const toolCallId = typeof message.tool_call_id === 'string' ? message.tool_call_id : null
-        if (toolCallId) {
-          openToolCallIds.delete(toolCallId)
-        }
-      }
-    }
-
-    if (openToolCallIds.size === 0) return rawMessages
-    return rawMessages.filter((message) => {
-      if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) return true
-      return (message.tool_calls as Array<Record<string, unknown>>).every((toolCall) => {
-        const id = typeof toolCall.id === 'string' ? toolCall.id : null
-        return !id || !openToolCallIds.has(id)
-      })
+    return sanitizeOpenAICompatibleMessageHistory(messages, {
+      validToolNames: resolveRegisteredToolNamesLazily(),
     })
   }
 

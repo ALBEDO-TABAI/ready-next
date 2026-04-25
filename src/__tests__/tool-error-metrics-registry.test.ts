@@ -15,17 +15,16 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 9 documented keys', () => {
+test('registry exposes the 8 documented keys (Phase 4: skill_executions metrics retired)', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'inputValidation',
     'resolutionViolation',
-    'skillExecutionMissing',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
+    'skillReferenceHintTtlSwept',
     'surfaced',
     'toolSnapshotMismatch',
-    'ttlSwept',
     'unknownSurfaced',
   ])
 })
@@ -49,8 +48,9 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.unknownSurfaced, 'tool_error_unknown_surfaced')
   assert.equal(TOOL_ERROR_METRICS.inputValidation, 'tool_input_validation_failed')
   assert.equal(TOOL_ERROR_METRICS.resolutionViolation, 'tool_resolution_violation_post_arbitration')
-  assert.equal(TOOL_ERROR_METRICS.skillExecutionMissing, 'skill_execution_missing')
-  assert.equal(TOOL_ERROR_METRICS.ttlSwept, 'skill_executions_ttl_swept')
+  // Phase 4: skillExecutionMissing + ttlSwept retired alongside the
+  // skill_executions state machine. Reference-hint sweep gets its own metric.
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceHintTtlSwept, 'skill_reference_hint_ttl_swept')
   assert.equal(TOOL_ERROR_METRICS.toolSnapshotMismatch, 'tool_snapshot_mismatch')
   // B Phase 1 — skill primitives
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveUsed, 'skill_primitive_used')

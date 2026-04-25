@@ -43,7 +43,6 @@ import {
 } from '../../modules/workbench/panel-motion'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
-import { createTaskPatchFromSkillExecutionDetail } from '../../modules/agent/scopeRunState'
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
@@ -2367,60 +2366,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     []
   )
 
-  const applySkillExecutionDetailToScope = useCallback(
-    (
-      scopeId: string,
-      detail: {
-        id: string
-        skillId: string
-        status: 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled'
-        startedAt: string
-        updatedAt: string
-        currentStepId?: string | null
-        blocker?: { type: string; message: string } | null
-        steps: Array<{ stepId: string; status: string }>
-        artifacts: Array<{ id?: string; label?: string; path?: string }>
-      }
-    ) => {
-      const patch = createTaskPatchFromSkillExecutionDetail(detail)
-      const nextPhase: ScopeRunState['phase'] =
-        detail.status === 'completed'
-          ? 'done'
-          : detail.status === 'failed'
-            ? 'error'
-            : detail.status === 'cancelled'
-              ? 'cancelled'
-              : detail.status === 'blocked'
-                ? 'checkpoint'
-                : 'tool_running'
-
-      patchScopeRun(
-        scopeId,
-        (previous) =>
-          ({
-            ...(previous ||
-              useAgent.getState().scopeRunStates[scopeId] || {
-                ...useAgent.getState().scopeRunStates[scopeId]
-              }),
-            ...patch,
-            scopeId,
-            agent: previous?.agent || currentAgent,
-            phase: nextPhase,
-            updatedAt: detail.updatedAt,
-            taskSummary: patch.taskSummary || previous?.taskSummary || null,
-            recentArtifacts: patch.recentArtifacts || previous?.recentArtifacts || [],
-            resumableActions: patch.resumableActions || previous?.resumableActions || [],
-            waitingFor: patch.waitingFor || previous?.waitingFor || 'none',
-            memoryCapture: previous?.memoryCapture || null,
-            toolTrace: previous?.toolTrace || [],
-            startedAt: previous?.startedAt || detail.startedAt,
-            responseBuffer: previous?.responseBuffer || '',
-            stepMetrics: previous?.stepMetrics || { toolCalls: 0, toolResults: 0, lastToolAt: null }
-          }) as ScopeRunState
-      )
-    },
-    [currentAgent, patchScopeRun]
-  )
+  // Phase 4: applySkillExecutionDetailToScope removed — the only caller was
+  // handleRetryTask's restartFromStep branch, also retired.
 
   const buildRunContinuationIntent = useCallback(
     (
@@ -2522,26 +2469,16 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
-      const continuation = run?.taskContinuation
-      if (continuation?.executionId && continuation.stepId) {
-        const result = await window.electronAPI.skills
-          .restartFromStep({
-            executionId: continuation.executionId,
-            stepId: continuation.stepId
-          })
-          .catch(() => null)
-        if (result?.success && result.data) {
-          applySkillExecutionDetailToScope(scopeId, result.data)
-          return
-        }
-      }
+      // Phase 4: skill_executions state machine retired — the legacy
+      // `restartFromStep` IPC bridge is gone. Retry now always goes through
+      // the composer draft path; the LLM re-plans from the current state.
       setComposerDraft(
         '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
         buildRunContinuationIntent(run) || null,
       )
       focusInputWithResize()
     },
-    [applySkillExecutionDetailToScope, buildRunContinuationIntent, focusInputWithResize, mergedTaskRuns, setComposerDraft]
+    [buildRunContinuationIntent, focusInputWithResize, mergedTaskRuns, setComposerDraft]
   )
 
   const handleOpenTaskArtifact = useCallback(async (path: string) => {
@@ -2857,15 +2794,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
               }
             ])
 
-            const command =
-              data.defaultCommand || (inferredSkillId ? `/skill ${inferredSkillId}` : '')
+            const mention = `@[${data.name}]`
             const currentInput = useAgent.getState().inputValue.trim()
-            if (command) {
-              setInputValue(currentInput ? `${currentInput}\n${command}` : command)
-            } else {
-              const snippet = `### 技能目录引用\n- 名称: ${data.name}\n- 路径: ${data.path}`
-              setInputValue(currentInput ? `${currentInput}\n${snippet}` : snippet)
-            }
+            setInputValue(currentInput ? `${currentInput}\n${mention}` : mention)
             focusInputWithResize()
           } else if (data.type === 'browser-tab' && data.url) {
             void (async () => {

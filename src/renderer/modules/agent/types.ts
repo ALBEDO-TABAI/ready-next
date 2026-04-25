@@ -182,7 +182,10 @@ export interface ScopeRunTaskStep {
 
 export interface ScopeRunTaskContinuation {
   taskId?: string | null
-  executionId: string
+  // Phase 4: executionId is optional — the skill_executions state machine is
+  // retired, so skill-sourced continuations no longer carry an executionId.
+  // Kept optional for backward compatibility with other continuation sources.
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null

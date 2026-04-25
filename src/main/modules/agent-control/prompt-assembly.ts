@@ -89,6 +89,8 @@ const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
+const RSS_TRIGGER_PATTERN =
+  /(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)/i
 
 const DEFAULT_FILES: Record<string, string> = {
   'MEMORY.md': [
@@ -183,7 +185,7 @@ const TRIGGERS: TriggerDefinition[] = [
     id: 'rss-analysis',
     label: 'RSS 分析操作',
     module: 'rss',
-    pattern: /(rss|订阅|抓取|分析)/i,
+    pattern: RSS_TRIGGER_PATTERN,
     blocking: false,
     refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }]
   },
@@ -206,17 +208,44 @@ function clip(text: string, maxChars: number): string {
 function sanitizeCommandLikeContent(text: string): string {
   if (!text) return ''
   const patterns = [
+    /\b(?:system|document|browser|skill|memory|session|file)_[a-z0-9_]+:\d+>\s*\{[^\n]*\}/gi,
+    /\b(?:system|document|browser|skill|memory|session|file)_[a-z0-9_]+:\d+>[^\n]*/gi,
     /\bsystem_run_[a-z0-9_]+\([^)]*\)/gi,
     /\bdocument_[a-z0-9_]+\([^)]*\)/gi,
     /\bbrowser_[a-z0-9_]+\([^)]*\)/gi,
     /\bskill_[a-z0-9_]+\([^)]*\)/gi,
     /\bopenclaw\s+pairing\s+[^\n]+/gi,
+    /--cookies-from-browser\s+\S+/gi,
+    /\bcookies-from-browser\b/gi,
+    /\b(?:chrome|safari|firefox|edge|browser)\s+cookies?\b/gi,
   ]
   let sanitized = String(text)
   for (const pattern of patterns) {
-    sanitized = sanitized.replace(pattern, '[命令回显已隐藏]')
+    sanitized = sanitized.replace(
+      pattern,
+      pattern.source.includes('cookies') || pattern.source.includes('cookies-from-browser')
+        ? '[浏览器凭据已隐藏]'
+        : '[命令回显已隐藏]',
+    )
   }
   return sanitized.replace(/(?:\[命令回显已隐藏\]\s*){2,}/g, '[命令回显已隐藏]\n').trim()
+}
+
+function hasCurrentExplicitResourceRefs(envelope: RequestEnvelope): boolean {
+  if (envelope.referencedResources.some((ref) => ref.kind === 'mention')) return true
+  if (envelope.resources.some((resource) =>
+    resource.kind === 'attachment'
+    || resource.kind === 'browser_reference'
+    || resource.kind === 'folder_reference'
+    || resource.kind === 'widget_target',
+  )) {
+    return true
+  }
+  return envelope.chunks.some((chunk) =>
+    chunk.source === 'attachment_body'
+    || (chunk.source === 'ui_resource_ref'
+      && /(技能目录引用|浏览页面引用|文件夹引用|引用技能目录)/.test(chunk.text)),
+  )
 }
 
 function formatMemorySection(title: string, body: string): string {
@@ -302,6 +331,36 @@ async function defaultGetScopeMessages(
     role: item.role,
     content: String(item.content || '')
   }))
+}
+
+function shouldSkipTriggerForIntent(
+  trigger: { id: string; module?: PromptTriggerHit['module'] },
+  intentClassification?: IntentClassification,
+): boolean {
+  if (
+    trigger.module &&
+    intentClassification?.excludedDomains?.includes(
+      trigger.module as Exclude<IntentClassification['primaryDomain'], 'generic'>,
+    )
+  ) {
+    logAgentMetric('trigger_disagreement_rate', {
+      triggerId: trigger.id,
+      triggerModule: trigger.module,
+      primaryDomain: intentClassification.primaryDomain,
+      reason: 'excluded_domain',
+    })
+    return true
+  }
+  if (trigger.module && intentClassification?.primaryDomain === 'skill' && trigger.module !== 'system') {
+    logAgentMetric('trigger_disagreement_rate', {
+      triggerId: trigger.id,
+      triggerModule: trigger.module,
+      primaryDomain: intentClassification.primaryDomain,
+      reason: 'explicit_skill_primary',
+    })
+    return true
+  }
+  return false
 }
 
 export class PromptAssemblyService {
@@ -508,7 +567,8 @@ export class PromptAssemblyService {
   }
 
   private async loadL1(
-    scope: ConversationScope
+    scope: ConversationScope,
+    options: { includeDailyMemory?: boolean } = {},
   ): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number; historyCompressed: boolean }> {
     // Load from file-based system (backward compatibility)
     const messages = (await this.getScopeMessages(scope.id)).slice(-4)
@@ -524,14 +584,19 @@ export class PromptAssemblyService {
     const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
     const memoryRoot = this.getMemoryRoot()
     const dayFiles = [`memory/${day}.md`, `memory/${yesterday}.md`]
-    dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
-    const dailySections = dayFiles
-      .map((path) => {
-        const content = sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)).trim()
-        return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
-      })
-      .filter(Boolean)
-      .join('\n\n')
+    const includeDailyMemory = options.includeDailyMemory !== false
+    if (includeDailyMemory) {
+      dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
+    }
+    const dailySections = includeDailyMemory
+      ? dayFiles
+        .map((path) => {
+          const content = sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)).trim()
+          return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
+        })
+        .filter(Boolean)
+        .join('\n\n')
+      : ''
 
     const sections: string[] = [
       formatMemorySection(
@@ -554,15 +619,17 @@ export class PromptAssemblyService {
         null,
         `Scope ${scope.title} 的最近会话摘要`
       ),
-      ...dayFiles.map((path) =>
-        this.makeMemoryRef(
-          'l1',
-          'scope_memory',
-          path.split('/').pop() || path,
-          path,
-          '当日操作日志'
+      ...(includeDailyMemory
+        ? dayFiles.map((path) =>
+          this.makeMemoryRef(
+            'l1',
+            'scope_memory',
+            path.split('/').pop() || path,
+            path,
+            '当日操作日志'
+          )
         )
-      )
+        : [])
     ]
 
     // Load from database if enabled
@@ -634,6 +701,12 @@ export class PromptAssemblyService {
           const pattern = new RegExp(dbTrigger.pattern, dbTrigger.patternFlags)
           pattern.lastIndex = 0
           if (!pattern.test(text)) continue
+          if (shouldSkipTriggerForIntent({
+            id: dbTrigger.id,
+            module: dbTrigger.module as TriggerDefinition['module'],
+          }, intentClassification)) {
+            continue
+          }
 
           await this.deps.memoryRepository.incrementTriggerHitCount(dbTrigger.id)
 
@@ -685,17 +758,7 @@ export class PromptAssemblyService {
     for (const trigger of TRIGGERS) {
       trigger.pattern.lastIndex = 0
       if (!trigger.pattern.test(text)) continue
-      if (
-        trigger.module &&
-        intentClassification?.excludedDomains?.includes(trigger.module as Exclude<IntentClassification['primaryDomain'], 'generic'>)
-      ) {
-        logAgentMetric('trigger_disagreement_rate', {
-          triggerId: trigger.id,
-          triggerModule: trigger.module,
-          primaryDomain: intentClassification.primaryDomain,
-        })
-        continue
-      }
+      if (shouldSkipTriggerForIntent(trigger, intentClassification)) continue
       const sections: string[] = []
       const refs: PromptMemoryRef[] = []
       for (const ref of trigger.refs) {
@@ -825,11 +888,12 @@ export class PromptAssemblyService {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
   }): Promise<PromptAssemblyResult> {
-    const l0 = await this.loadL0(params.scope)
-    const l1 = await this.loadL1(params.scope)
     const userText = extractTextFromMessage(params.message)
     const requestEnvelope = buildRequestEnvelope({ userText })
     const intentClassification = classifyIntent(requestEnvelope)
+    const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
+    const l0 = await this.loadL0(params.scope)
+    const l1 = await this.loadL1(params.scope, { includeDailyMemory: !hasExplicitResourceRefs })
     const documentExcerptCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'document_excerpt').length
     const attachmentBodyCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'attachment_body').length
     if (documentExcerptCount > 0 || attachmentBodyCount > 0) {
@@ -840,10 +904,12 @@ export class PromptAssemblyService {
       })
     }
     const recall = await this.loadSessionRecall(params.scope)
-    const autoRecall = await this.loadAutomaticSessionRecall(
-      params.scope,
-      requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
-    )
+    const autoRecall = hasExplicitResourceRefs
+      ? { text: '', refs: [] }
+      : await this.loadAutomaticSessionRecall(
+        params.scope,
+        requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
+      )
     if (autoRecall.refs.length > 0) {
       logAgentMetric('recall_influence_rate', {
         scopeId: params.scope.id,
@@ -917,13 +983,14 @@ export class PromptAssemblyService {
     const day = this.now().toISOString().slice(0, 10)
     const memoryDir = join(this.getMemoryRoot(), 'memory')
     const path = join(memoryDir, `${day}.md`)
+    const safeSummary = sanitizeCommandLikeContent(params.finalText).trim()
     const lines = [
       `## ${this.now().toISOString()}`,
       `- scope: ${params.scope.title}`,
       `- success: ${params.success ? 'yes' : 'no'}`,
       params.usedTools.length > 0 ? `- tools: ${params.usedTools.join(', ')}` : null,
-      params.finalText.trim()
-        ? `- summary: ${clip(params.finalText.trim(), 600).replace(/\n+/g, ' ')}`
+      safeSummary
+        ? `- summary: ${clip(safeSummary, 600).replace(/\n+/g, ' ')}`
         : null,
       ''
     ].filter(Boolean)

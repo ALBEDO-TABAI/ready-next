@@ -381,6 +381,66 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('does not inject ambient history when the current request has explicit resource refs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-current-resource-isolation-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(
+      join(root, 'memory', '2026-04-25.md'),
+      '## prior run\n- summary: 3E5P8DLjnOQ failed after Chrome cookies',
+      'utf8',
+    )
+
+    let autoRecallCalled = false
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      getAutoSessionRecallCapsules: async () => {
+        autoRecallCalled = true
+        return [
+          {
+            conversationId: 'conv-stale-video',
+            lineageRootId: 'conv-stale-video',
+            resumeTitle: '旧视频分析',
+            title: '旧视频分析',
+            sourceKind: 'local',
+            sourceId: 'app',
+            threadKey: 'conv-stale-video',
+            summary: '上次误用了 3E5P8DLjnOQ，并尝试 Chrome cookies。',
+            latestTaskTitle: '技能执行',
+            latestTaskSummary: '旧任务失败',
+            attachmentNames: [],
+            updatedAt: '2026-04-25T03:25:00.000Z',
+          },
+        ]
+      },
+      now: () => new Date('2026-04-25T12:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: [
+        '使用@[Video Expert Analyzer (VNext)]分析@[Inside Notion SF Office - YouTube]，输出到@[测试]',
+        '',
+        '### 浏览页面引用',
+        '- 标题: Inside Notion SF Office - YouTube',
+        '- 链接: https://www.youtube.com/watch?v=4qkyxm4jppc',
+        '',
+        '### 文件夹引用',
+        '- 名称: 测试',
+        '- 路径: /Users/user/Documents/实验田/测试',
+      ].join('\n'),
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.equal(autoRecallCalled, false)
+    assert.doesNotMatch(joinedBootstrap, /自动跨会话回看/)
+    assert.doesNotMatch(joinedBootstrap, /3E5P8DLjnOQ/)
+    assert.doesNotMatch(joinedBootstrap, /Chrome cookies/i)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('uses the primary instruction for triggers and automatic recall instead of mixed document context text', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-primary-instruction-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
@@ -422,6 +482,50 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('does not treat generic video analysis wording as an RSS trigger', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-video-skill-rss-guard-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), '# RSS\nRSS only.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '使用@[Video Expert Analyzer (VNext)]分析@[Inside Notion SF Office - YouTube]，输出到@[测试]'
+    })
+
+    assert.ok(!result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('still loads the RSS trigger when an RSS object is explicitly mentioned', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-rss-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), '# RSS\nRSS rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '帮我抓取这个 RSS 订阅源的最近文章并生成分析报告'
+    })
+
+    assert.ok(result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('sanitizes command-like recall content before injecting it back into prompts', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-sanitized-recall-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
@@ -459,6 +563,32 @@ describe('PromptAssemblyService', () => {
     assert.doesNotMatch(joinedBootstrap, /openclaw pairing approve feishu FNXQH9PN/)
     assert.doesNotMatch(joinedBootstrap, /system_run_openclaw/)
     assert.match(joinedBootstrap, /\[命令回显已隐藏\]/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('redacts browser cookie details from persisted run summaries', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-cookie-redaction-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-25T12:00:00.000Z'),
+    })
+
+    service.recordRunOutcome({
+      scope: createScope(),
+      finalText: 'yt-dlp --cookies-from-browser chrome failed; Chrome cookies were unavailable.',
+      usedTools: ['skill_run_shell'],
+      success: false,
+    })
+
+    const content = readFileSync(join(root, 'memory', '2026-04-25.md'), 'utf8')
+    assert.doesNotMatch(content, /--cookies-from-browser/)
+    assert.doesNotMatch(content, /Chrome cookies/i)
+    assert.match(content, /浏览器凭据/)
 
     rmSync(root, { recursive: true, force: true })
   })

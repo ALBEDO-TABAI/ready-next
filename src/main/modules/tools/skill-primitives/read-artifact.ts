@@ -11,7 +11,7 @@ import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
-import { PathSandboxError, resolveWithinRoot } from './path-sandbox'
+import { PathSandboxError, resolveReadableWithinRoot } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
 const DEFAULT_MAX_BYTES = 32_768
@@ -48,7 +48,7 @@ export async function executeReadArtifact(
 
   let absPath: string
   try {
-    absPath = resolveWithinRoot(roots.artifactRoot, args.relativePath)
+    absPath = resolveReadableWithinRoot(roots.artifactRoot, args.relativePath)
   } catch (error) {
     if (error instanceof PathSandboxError) {
       logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {

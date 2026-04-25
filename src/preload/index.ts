@@ -415,22 +415,12 @@ const skillsAPI = {
     executionMode?: 'auto' | 'workflow' | 'direct'
   }) => ipcRenderer.invoke('skills:run', payload),
   listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
-  listExecutions: (payload?: { limit?: number; sessionId?: string; activeOnly?: boolean }) =>
-    ipcRenderer.invoke('skills:executions:list', payload || {}),
-  getExecution: (payload: { id: string }) => ipcRenderer.invoke('skills:executions:get', payload),
-  submitInput: (payload: { executionId: string; inputs: Record<string, unknown> }) =>
-    ipcRenderer.invoke('skills:executions:submitInput', payload),
-  submitConfirmation: (payload: { executionId: string; stepId: string; confirmed: boolean }) =>
-    ipcRenderer.invoke('skills:executions:submitConfirmation', payload),
-  submitAgentResult: (payload: {
-    executionId: string
-    stepId: string
-    textContent?: string
-    outputs?: Record<string, unknown>
-  }) => ipcRenderer.invoke('skills:executions:submitAgentResult', payload),
-  restartFromStep: (payload: { executionId: string; stepId: string; inputs?: Record<string, unknown> }) =>
-    ipcRenderer.invoke('skills:executions:restartFromStep', payload),
-  cancelExecution: (payload: { executionId: string }) => ipcRenderer.invoke('skills:executions:cancel', payload),
+  // Phase 4: skills:executions:* preload methods retired along with the
+  // skill_executions state machine (listExecutions / getExecution /
+  // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution). Task card progress now lives in the in-memory todo
+  // tracker + primitive projection patch.
+
   // B Phase 1 PR2 — ask_user: submit the user's answer to a pending ephemeral
   // question. Question metadata is pushed separately via `skill:askUserQuestion`.
   submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>

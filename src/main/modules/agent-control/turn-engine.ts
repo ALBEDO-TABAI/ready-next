@@ -4,6 +4,7 @@ import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
+import { buildSkillDetectionInputs } from './skill-detection-inputs'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import {
   selectDomainAdapter,
@@ -75,6 +76,7 @@ interface SkillContextOrchestratorLike {
   findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId: string }>
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
+  rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
   listRegisteredSkillTokens?: () => string[]
 }
@@ -429,9 +431,10 @@ export class TurnEngine {
       const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
+      const previousPureUserInputs = host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
-        previousInputs: host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
+        previousInputs: previousPureUserInputs,
         lastDocumentContextInput: session.lastDocumentContextInput,
         intentClassification: request.intentClassification || classifyIntent(requestEnvelope, {
           registeredSkillTokens,
@@ -459,19 +462,27 @@ export class TurnEngine {
       // drops preferredSkillToolNames to null and the skill filter strips the
       // user's intended skill tools. primaryInstruction comes from the current
       // turn verbatim and is the correct primary signal.
-      const skillDetectionInputs = Array.from(new Set([
+      const skillDetectionInputs = buildSkillDetectionInputs({
         contextualUserInput,
-        requestEnvelope.primaryInstruction,
-        requestEnvelope.pureUserText,
-      ].filter((value): value is string => Boolean(value))))
+        primaryInstruction: requestEnvelope.primaryInstruction,
+        pureUserText: requestEnvelope.pureUserText,
+        previousPureUserInputs,
+      })
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
       const hasExplicitSkill = Boolean(firstSkillMatch)
       const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
+      const skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
+      const referenceSkillHintArmed = hasExplicitSkill
+        ? Boolean(skillContextOrchestrator.rememberExplicitReferenceSkillHint?.(
+          skillContextInjectionText,
+          request.sessionId,
+        ))
+        : false
       const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
-          firstSkillMatch ? firstSkillMatch.text : contextualUserInput,
+          skillContextInjectionText,
           request.sessionId,
         )
         : null
@@ -485,7 +496,7 @@ export class TurnEngine {
         } pureMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.pureUserText)?.skills.length
             ? 'true' : 'false'
-        } activeExecution=${hasActiveSkill} preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
+        } activeExecution=${hasActiveSkill} referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
       )
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
@@ -560,10 +571,16 @@ export class TurnEngine {
         || userText
       const providedContinuationState = request.continuationState || null
       const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
+      const shouldSuppressImplicitContinuation = hasExplicitSkill
+        && !providedContinuationState
+        && !explicitTaskId
       const shouldResolveContinuation =
         Boolean(providedContinuationState)
         || Boolean(explicitTaskId)
-        || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
+        || (!shouldSuppressImplicitContinuation && /(继续|接着|恢复|上次|重试)/.test(continuationHintText))
+      if (shouldSuppressImplicitContinuation) {
+        host.log('[skill_detection] suppressed implicit continuation because an explicit skill request was resolved')
+      }
       const continuationProjection = providedContinuationState
         ? null
         : host.resolveContinuationProjection(request.sessionId, continuationLookupText, {
@@ -596,7 +613,7 @@ export class TurnEngine {
       if (hasTools) {
         const preparedToolContext = buildHostToolContext(preparedRunCapabilities.allowedToolNames)
         await skillContextOrchestrator.maybeInjectExplicitSkillContext({
-          userText,
+          userText: skillContextInjectionText,
           session,
           sessionId: request.sessionId,
           emitOutput: (chunk: string, type: string) => transcript.emitOutput(chunk, type),

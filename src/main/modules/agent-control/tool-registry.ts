@@ -249,6 +249,7 @@ function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
 function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: ToolKind): ToolTimeoutProfile {
   if (domain === 'browser') return 'browser_interactive'
   if (domain === 'document' && kind === 'write') return 'document_write'
+  if (toolName === 'skill_run_shell') return 'skill_long'
   if (domain === 'skill') return 'skill'
   if (domain === 'feishu') return 'feishu'
   return 'default'
@@ -676,3 +677,13 @@ export class ToolRegistry implements ToolRegistryReader {
 }
 
 export const defaultToolRegistry = new ToolRegistry()
+
+/**
+ * Phase 4 cleanup helper: returns the set of tool names currently advertised
+ * by the registry. Used by `sanitizeOpenAICompatibleMessageHistory` to drop
+ * `tool_calls[]` entries (and matching `role:'tool'` follow-ups) referencing
+ * retired tool names that may still live in recalled session histories.
+ */
+export function getRegisteredToolNames(): Set<string> {
+  return new Set(defaultToolRegistry.listToolDefinitions().map((tool) => tool.name))
+}

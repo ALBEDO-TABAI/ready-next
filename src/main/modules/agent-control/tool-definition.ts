@@ -21,6 +21,7 @@ export type ToolTimeoutProfile =
   | 'browser_interactive'
   | 'document_write'
   | 'skill'
+  | 'skill_long'
   | 'feishu'
 
 export interface ToolProjectionHint {

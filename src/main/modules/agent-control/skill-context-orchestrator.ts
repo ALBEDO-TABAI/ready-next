@@ -21,6 +21,12 @@ const REFERENCE_SKILL_DOC_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.m
  * `skill_read_artifact` if needed.
  */
 const REFERENCE_SKILL_INLINE_CAP_CHARS = 12_000
+const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+]
 
 interface SkillToolRef {
   name?: string
@@ -36,7 +42,6 @@ export class SkillContextOrchestrator {
   constructor(private readonly deps: {
     extractPrimaryUserInstruction: (raw: string) => string
     listSkills: () => SkillState[]
-    listExecutions: (limit: number, sessionId?: string, activeOnly?: boolean) => Array<{ id: string; skillId: string; entryAction: string }>
     resolveSkillToolByAction: (skillId: string, actionName: string) => SkillToolRef | null
   }) {}
 
@@ -67,9 +72,12 @@ export class SkillContextOrchestrator {
     return Array.from(tokens)
   }
 
-  shouldKeepToolsWithVideo(userText: string, sessionId?: string): boolean {
+  shouldKeepToolsWithVideo(userText: string, _sessionId?: string): boolean {
     const primary = this.deps.extractPrimaryUserInstruction(userText)
-    if (!primary) return this.hasActiveSkillExecution(sessionId)
+    // Phase 4: no active skill execution concept — callers previously got
+    // `this.hasActiveSkillExecution(sessionId)` as the fallback; now fall
+    // back to false when no textual signal matches.
+    if (!primary) return false
     const normalized = primary.toLowerCase()
     if (normalized.includes('/skill')) return true
     if (/(skill_|skill\s+get\s+state|skill_submit_|skill_restart_|skill_cancel_|技能|重跑|重做某一步|继续执行|继续这个 skill)/i.test(primary)) {
@@ -81,19 +89,11 @@ export class SkillContextOrchestrator {
     if (this.findExplicitlyRequestedSkills(primary).length > 0) {
       return true
     }
-    return this.hasActiveSkillExecution(sessionId)
+    return false
   }
 
-  buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
-    const toolNames = new Set<string>([
-      'skill_get_state',
-      'skill_submit_input',
-      'skill_submit_confirmation',
-      'skill_submit_agent_result',
-      'skill_restart_from_step',
-      'skill_cancel_execution',
-      'system_run_embedded_python',
-    ])
+  buildPreferredSkillToolNames(userText: string, _sessionId?: string): string[] {
+    const toolNames = new Set<string>(REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES)
 
     const explicitSkills = this.findExplicitlyRequestedSkills(userText)
     for (const skill of explicitSkills) {
@@ -103,24 +103,28 @@ export class SkillContextOrchestrator {
       }
     }
 
-    if (sessionId) {
-      const activeExecutions = this.deps.listExecutions(10, sessionId, true)
-      for (const execution of activeExecutions) {
-        const tool = this.deps.resolveSkillToolByAction(execution.skillId, execution.entryAction)
-        if (tool?.name) toolNames.add(tool.name)
-      }
-    }
+    // Phase 4: no active execution concept — the legacy block that added
+    // running-execution tool names via listExecutions(sessionId,true) is gone.
 
     return Array.from(toolNames)
   }
 
-  hasActiveSkillExecution(sessionId?: string): boolean {
+  rememberExplicitReferenceSkillHint(userText: string, sessionId?: string): boolean {
     if (!sessionId) return false
-    try {
-      return this.deps.listExecutions(5, sessionId, true).length > 0
-    } catch {
-      return false
+    let remembered = false
+    for (const skill of this.findExplicitlyRequestedSkills(userText)) {
+      if (!this.isReferenceLikeSkill(skill)) continue
+      rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+      remembered = true
     }
+    return remembered
+  }
+
+  hasActiveSkillExecution(_sessionId?: string): boolean {
+    // Phase 4: skill_executions state machine is being retired; there is no
+    // notion of an "active execution" anymore. Kept as a no-op for callers
+    // still reading the signal; will be removed in PR1 main body.
+    return false
   }
 
   async maybeInjectExplicitSkillContext(params: {
@@ -135,25 +139,8 @@ export class SkillContextOrchestrator {
     if (explicitSkills.length === 0) return
 
     for (const skill of explicitSkills) {
-      const activeExecution = params.sessionId
-        ? this.deps.listExecutions(10, params.sessionId, true).find((item) => item.skillId === skill.id)
-        : null
-      if (activeExecution) {
-        const args: Record<string, unknown> = { executionId: activeExecution.id }
-        params.emitToolAction('skill_get_state', args)
-        params.emitOutput(`skill_get_state(${JSON.stringify(args)})`, 'tool_use')
-        const result = await params.executeTool('skill_get_state', args)
-        params.emitOutput(result.text.slice(0, 600), 'tool_result')
-        params.session.messages.push({
-          role: 'user',
-          content: [
-            `系统补充：技能 "${skill.name}" 在当前会话已有活跃 execution。`,
-            '必须先基于以下 execution 状态继续推进，而不是重新启动一个新的 workflow：',
-            result.text,
-          ].join('\n'),
-        })
-        continue
-      }
+      // Phase 4: no active execution concept — the legacy "resume active
+      // execution" branch that injected an execution-state probe is gone.
 
       const tool = this.deps.resolveSkillToolByAction(skill.id, skill.defaultAction || '')
       const actionDef = skill.actions.find((action) => action.name === (tool?.action || skill.defaultAction || ''))
@@ -222,10 +209,9 @@ export class SkillContextOrchestrator {
         bytesInjected: skillContent.length,
         truncated: skillContent.length < this.extractSkillReferenceContent(result.text).length,
       })
-      // P0-T3: remember this reference skill so that if the LLM still tries to
-      // fabricate a skill_submit_* call, the error message can tell it the
-      // loaded skill has no workflow state rather than the generic
-      // "call skill_get_state" guidance.
+      // P0-T3: remember this reference skill so the primitive tools
+      // (skill_ask_user / skill_run_shell / ...) stay session-gated correctly
+      // and the next turn knows which skill methodology was loaded.
       rememberLastReferenceSkill(params.sessionId, { id: skill.id, name: skill.name })
     }
   }
@@ -264,9 +250,14 @@ export class SkillContextOrchestrator {
   }
 
   private composeReferenceSystemInjection(skill: SkillState, docText: string): string {
-    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果，不要调 skill_*_read_skill 或 skill_submit_* / skill_restart_* / skill_cancel_execution 工具。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact。`
+    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact。`
     const goal = skill.description ? `技能目标：${skill.description}` : ''
     return [header, goal, '技能说明正文：', docText].filter(Boolean).join('\n')
+  }
+
+  private isReferenceLikeSkill(skill: SkillState): boolean {
+    if (skill.executionMode === 'advisory') return true
+    return skill.actions.some((action) => action.runtime === 'reference')
   }
 
   private extractSkillReferenceContent(resultText: string): string {
