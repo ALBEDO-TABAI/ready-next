@@ -34,6 +34,8 @@ import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contra
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
 import { forgetSession } from './session-continuity'
+import { isRetryOnlyTurn } from './skill-detection-inputs'
+import { logAgentMetric } from './metrics'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -643,6 +645,11 @@ export class AgentControlRuntime extends EventEmitter {
     // before any skill detection runs, so resumed sessions don't lose context
     // after Ready restart (in-memory Map alone wouldn't survive).
     this.restoreReferenceHintFromScope(scope, payload.scopeId)
+    // skill-resume E1: when the user fires a bare retry/continue intent on a
+    // scope with no manually-attached recall context, auto-attach the top
+    // predecessors in the same lineage so prompt assembly has prior context
+    // when it runs.
+    this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
     const normalizedContinuationIntent = (() => {
       const intent = normalizeContinuationIntent(payload.continuationIntent || null)
       if (!intent) return null
@@ -1467,6 +1474,45 @@ export class AgentControlRuntime extends EventEmitter {
       restoreLastReferenceSkill(scopeId, persisted)
     } catch (error) {
       console.warn('[AgentControlRuntime] restoreReferenceHintFromScope failed', error)
+    }
+  }
+
+  private extractTextFromMessage(message: string | MultimodalBlock[]): string {
+    if (typeof message === 'string') return message
+    if (!Array.isArray(message)) return ''
+    return message
+      .map((block) => {
+        if (!block || typeof block !== 'object') return ''
+        if (typeof (block as { text?: unknown }).text === 'string') {
+          return (block as { text?: string }).text || ''
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  private maybeAutoAttachSessionRecallOnResume(
+    scopeId: string,
+    message: string | MultimodalBlock[],
+  ): void {
+    try {
+      const text = this.extractTextFromMessage(message)
+      if (!text || !isRetryOnlyTurn(text)) return
+      const result = this.sessionRecallService.autoAttachOnResume({
+        currentScopeId: scopeId,
+        intent: 'continue',
+        limit: 3,
+      })
+      if (result.attached.length > 0) {
+        logAgentMetric('session_recall_auto_attached', {
+          scopeId,
+          attachedCount: result.attached.length,
+          attachedConversationIds: result.attached.map((c) => c.conversationId),
+        })
+      }
+    } catch (error) {
+      console.warn('[AgentControlRuntime] maybeAutoAttachSessionRecallOnResume failed', error)
     }
   }
 

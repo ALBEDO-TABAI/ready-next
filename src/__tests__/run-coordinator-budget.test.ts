@@ -161,16 +161,18 @@ test('run budget policy seeds different iteration budgets for direct, short, and
 
   assert.equal(direct.maxIterations, 8)
   assert.equal(short.maxIterations, 24)
-  assert.equal(multi.maxIterations, 60)
+  // skill-resume C2: multi_step_task budget reduced 60→40 to suppress runaway tool loops
+  assert.equal(multi.maxIterations, 40)
   assert.equal(media.maxIterations, 60)
   assert.equal(short.maxParallelToolGroups, 5)
 })
 
 test('run budget policy computes a stable usage percentage from the active budget counters', () => {
   const seed = createRunBudgetSeed('multi_step_task')
+  // skill-resume C2: multi_step_task budget reduced 60→40, so 20/40 = 50%
   const usage = {
-    iterationsUsed: 30,
-    toolCallsUsed: 15,
+    iterationsUsed: 20,
+    toolCallsUsed: 10,
     parallelToolGroupsUsed: 2,
   }
 
@@ -188,11 +190,12 @@ test('run budget policy creates and refunds step budget iterations', () => {
     }),
   })
 
+  // skill-resume C2: multi_step_task=40, stepCount=3 → ceil(40/3)=14 per step
   runtime = consumeIterationBudget(runtime)
-  assert.equal(runtime.stepBudget?.remainingIterations, 19)
+  assert.equal(runtime.stepBudget?.remainingIterations, 13)
 
   runtime = refundIterationBudget(runtime)
-  assert.equal(runtime.stepBudget?.remainingIterations, 20)
+  assert.equal(runtime.stepBudget?.remainingIterations, 14)
   assert.equal(runtime.usage.iterationsUsed, 0)
 })
 

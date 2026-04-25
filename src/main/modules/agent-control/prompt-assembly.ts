@@ -794,6 +794,11 @@ export class PromptAssemblyService {
       return { text: '', refs: [] }
     }
 
+    // skill-resume E2 — emit a recognizable [session-recall-context] marker so
+    // the LLM treats this block as continuation context (e.g. when the user
+    // just said "继续 …" without re-stating what to continue). Section bodies
+    // include latestTaskSummary so the model can see what tool calls / outputs
+    // led to the prior conversation's last state.
     const sections = capsules.slice(0, 4).map((capsule) => {
       const attachmentLine =
         capsule.attachmentNames.length > 0
@@ -803,7 +808,7 @@ export class PromptAssemblyService {
         ? `- 最近任务: ${sanitizeCommandLikeContent(capsule.latestTaskSummary)}`
         : null
       return [
-        `### ${capsule.title}`,
+        `### [session-recall-context] ${capsule.title}`,
         `- 会话 ID: ${capsule.conversationId}`,
         `- 来源: ${capsule.sourceKind}:${capsule.sourceId}`,
         `- 线程: ${capsule.threadKey}`,
@@ -827,8 +832,9 @@ export class PromptAssemblyService {
           capsule.conversationId
         )
       )
+    const header = '以下条目带有 [session-recall-context] 标记，是用户之前会话的续做上下文（含上次工具调用与产出摘要），请优先据此理解"继续/接着"等指令。'
     return {
-      text: clip(sections.join('\n\n'), 3200),
+      text: clip([header, ...sections].join('\n\n'), 4000),
       refs
     }
   }

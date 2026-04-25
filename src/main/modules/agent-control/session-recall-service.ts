@@ -215,6 +215,54 @@ export class SessionRecallService {
     return { scope: updatedScope }
   }
 
+  /**
+   * skill-resume E1 — when the user issues a bare retry/continue intent
+   * ("继续 / 接着 / 恢复 ...") on a scope that has no manually-attached recall
+   * refs, auto-attach the top-N predecessors in the same lineage_root so the
+   * prompt assembler picks up prior context (which the LLM needs to know what
+   * "继续" actually means). No-op when:
+   *   - scope already has attached refs (user/UI already chose),
+   *   - scope is the only conv in its lineage (no peers to attach), or
+   *   - DB is unreachable.
+   * Returns the actually-attached capsules so the caller can emit a metric /
+   * surface them in UI.
+   */
+  autoAttachOnResume(params: {
+    currentScopeId: string
+    intent: 'continue'
+    limit?: number
+  }): { attached: SessionRecallCapsule[] } {
+    const limit = Math.max(1, Math.min(5, Number(params.limit ?? 3)))
+    const scope = this.db.getConversationScope(params.currentScopeId)
+    if (!scope) return { attached: [] }
+    const existingRefs = this.readSessionRecallContextRefs(scope)
+    if (existingRefs.length > 0) return { attached: [] }
+    const lineageRootId = scope.lineage_root_id || scope.id
+    const db = this.db.getRawDb()
+    if (!db) return { attached: [] }
+    const candidates = db.prepare(`
+      SELECT *
+      FROM session_recall_metadata
+      WHERE lineage_root_id = ? AND conversation_id != ?
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all<SessionRecallMetadataRow>(lineageRootId, params.currentScopeId, limit)
+    if (candidates.length === 0) return { attached: [] }
+    const attached: SessionRecallCapsule[] = []
+    for (const row of candidates) {
+      try {
+        const result = this.attachSessionRecallContext({
+          currentScopeId: params.currentScopeId,
+          conversationId: row.conversation_id,
+        })
+        attached.push(result.capsule)
+      } catch {
+        // Skip individual attach failures; auto-attach is best-effort.
+      }
+    }
+    return { attached }
+  }
+
   resumeSessionCandidate(params: { conversationId?: string; resumeTitle?: string }): SessionRecallHit | null {
     if (params.conversationId) {
       const metadata = this.getMetadataRow(params.conversationId)

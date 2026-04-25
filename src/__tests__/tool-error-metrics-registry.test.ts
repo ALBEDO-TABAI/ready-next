@@ -15,12 +15,13 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 10 documented keys (Phase 4: skill_executions metrics retired)', () => {
+test('registry exposes the 11 documented keys (Phase 4: skill_executions metrics retired; skill-resume E1 added sessionRecallAutoAttached)', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'domainToolNarrowingApplied',
     'inputValidation',
     'resolutionViolation',
+    'sessionRecallAutoAttached',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
     'skillReferenceHintTtlSwept',
@@ -61,4 +62,6 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.domainToolNarrowingApplied, 'domain_tool_narrowing_applied')
   // Tool-loop repetition guardrail (skill-resume work)
   assert.equal(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, 'tool_loop_repetition_detected')
+  // skill-resume E1 — auto-attach historical recall capsules on retry intent
+  assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
 })

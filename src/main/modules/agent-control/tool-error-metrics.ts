@@ -58,6 +58,13 @@ export const TOOL_ERROR_METRICS = {
    * 触发后 ring buffer 会被清空，避免每一轮都重复 emit / 重复注入提醒。
    */
   toolLoopRepetitionDetected: 'tool_loop_repetition_detected',
+  /**
+   * skill-resume E1 — runtime 在用户发起 bare retry intent（"继续 / 接着 ..."）且
+   * 当前 scope 没有手动附加的 sessionRecallContext 时，自动按 lineage_root 回挂
+   * top-N 历史 capsule。emit 时附 `{ scopeId, attachedCount, attachedConversationIds }`，
+   * 让用户在 UI 与日志里都能看到这次"自动回挂"动作。无候选 / 已有手动附加 → 不 emit。
+   */
+  sessionRecallAutoAttached: 'session_recall_auto_attached',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]
