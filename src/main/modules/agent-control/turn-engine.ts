@@ -33,7 +33,11 @@ import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
-import { buildSkillDetectionInputs, isRetryOnlyTurn } from './skill-detection-inputs'
+import {
+  buildSkillDetectionInputs,
+  collectRecentAssistantSkillToolUses,
+  isRetryOnlyTurn,
+} from './skill-detection-inputs'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import {
   selectDomainAdapter,
@@ -491,11 +495,19 @@ export class TurnEngine {
       // drops preferredSkillToolNames to null and the skill filter strips the
       // user's intended skill tools. primaryInstruction comes from the current
       // turn verbatim and is the correct primary signal.
+      // skill-resume A2: scan recent assistant tool_use blocks for skill_*
+      // names so a bare retry ("继续") can re-discover the skill the agent was
+      // using before — even when the user's current text doesn't name it.
+      const previousAssistantSkillToolUses = collectRecentAssistantSkillToolUses(
+        session.messages.slice(0, -1) as Array<{ role?: string; content?: unknown }>,
+        5,
+      )
       const skillDetectionInputs = buildSkillDetectionInputs({
         contextualUserInput,
         primaryInstruction: requestEnvelope.primaryInstruction,
         pureUserText: requestEnvelope.pureUserText,
         previousPureUserInputs,
+        previousAssistantSkillToolUses,
       })
       // D3: detect a bare retry/continue intent so narrowing domain adapters
       // (currently SkillDomainAdapter) can widen their prefix list to keep

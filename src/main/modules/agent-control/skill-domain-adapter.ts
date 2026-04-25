@@ -35,6 +35,27 @@ const RETRY_INTENT_TOOL_PREFIXES = [
 ] as const
 const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使用 skill_* 工具推进，不要退回无关的通用工具。'
 
+/**
+ * skill-resume D2 — when the prefix narrowing actually drops tools, append a
+ * note to the system instruction so the LLM knows which tools are unavailable
+ * this turn (instead of trying them and getting silent rejections).
+ *
+ * Returns the original INSTRUCTION when nothing was dropped, OR a
+ * concatenated INSTRUCTION + addendum listing up to 5 dropped names.
+ */
+export function buildSkillDomainInstruction(
+  inputAllowed: ReadonlyArray<string> | null | undefined,
+  outputAllowed: ReadonlyArray<string> | null | undefined,
+): string {
+  if (!inputAllowed || inputAllowed.length === 0) return INSTRUCTION
+  const kept = new Set(outputAllowed || [])
+  const dropped = inputAllowed.filter((name) => !kept.has(name))
+  if (dropped.length === 0) return INSTRUCTION
+  const sample = dropped.slice(0, 5).join('、')
+  const more = dropped.length > 5 ? `（共 ${dropped.length} 个）` : ''
+  return `${INSTRUCTION}\n\n⚠️ 本回合限定 skill domain，已暂停 ${dropped.length} 个工具${more}：${sample}。如确实需要 file_search/document_* 等通用工具，请用普通指令（不带"继续/重试"等关键词）让系统切回通用域。`
+}
+
 interface SkillAdapterState {
   latestProjectionPatch: Record<string, unknown> | null
   dispatchedAt: string | null
@@ -113,9 +134,12 @@ export class SkillDomainAdapter implements DomainAdapter {
     if (params.host?.log) {
       logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, prefixes as unknown as string[])
     }
+    // skill-resume D2: dynamic instruction tells LLM which tools were dropped
+    // this turn, so it doesn't blindly retry them and waste iterations.
+    const instruction = buildSkillDomainInstruction(params.allowedToolNames, narrowed)
     return {
       allowedToolNames: narrowed,
-      sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
+      sessionMessages: params.hasTools ? [{ role: 'user', content: instruction }] : [],
       domainState: { latestProjectionPatch: null, dispatchedAt: null } satisfies SkillAdapterState,
     }
   }
