@@ -78,6 +78,18 @@ export const SkillHostRequirementsSchema = z
     status_detection: StatusDetectionSchema.optional(),
     lifecycle: LifecycleSchema.optional(),
     concurrency: ConcurrencySchema.optional(),
+    /**
+     * Action names from this skill's manifest that should be exposed to the LLM
+     * even if their visibility is 'internal', BUT only when the reference-skill
+     * hint is armed for this skill in the current session. Used by skills like
+     * video-expert-analyzer that have internal-by-design typed actions which
+     * should still be invokable on session resume.
+     *
+     * Action name format: lowercase a-z, 0-9, underscore. Match by exact string.
+     */
+    expose_when_hint_armed: z
+      .array(z.string().regex(/^[a-z][a-z0-9_]*$/))
+      .optional(),
   })
   .strict()
 

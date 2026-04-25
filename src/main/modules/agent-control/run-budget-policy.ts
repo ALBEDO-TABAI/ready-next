@@ -22,8 +22,13 @@ const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterati
     maxToolCalls: 24,
   },
   multi_step_task: {
-    maxIterations: 60,
-    maxToolCalls: 60,
+    // Reduced 60→40 (skill-resume plan C2): a healthy multi-step task should
+    // make visible progress within 40 tool calls. The recent RSS-loop bug ran
+    // 35+ iterations without progress because there was no dedup; with C1's
+    // dedup detector + this lower ceiling, runaway loops surface much sooner
+    // and the user is asked to intervene (via the 70% warning + ask_user inject).
+    maxIterations: 40,
+    maxToolCalls: 40,
   },
   media_task: {
     maxIterations: 60,

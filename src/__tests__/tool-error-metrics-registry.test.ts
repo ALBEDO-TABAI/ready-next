@@ -15,15 +15,17 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 8 documented keys (Phase 4: skill_executions metrics retired)', () => {
+test('registry exposes the 10 documented keys (Phase 4: skill_executions metrics retired)', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
+    'domainToolNarrowingApplied',
     'inputValidation',
     'resolutionViolation',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
     'skillReferenceHintTtlSwept',
     'surfaced',
+    'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
   ])
@@ -55,4 +57,8 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   // B Phase 1 — skill primitives
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveUsed, 'skill_primitive_used')
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveRejected, 'skill_primitive_rejected')
+  // Domain adapter prefix narrowing (post-Phase 4 telemetry)
+  assert.equal(TOOL_ERROR_METRICS.domainToolNarrowingApplied, 'domain_tool_narrowing_applied')
+  // Tool-loop repetition guardrail (skill-resume work)
+  assert.equal(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, 'tool_loop_repetition_detected')
 })

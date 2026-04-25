@@ -10,7 +10,7 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
   return result
 }
 
-function isRetryOnlyTurn(text: string): boolean {
+export function isRetryOnlyTurn(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
   if (normalized.length > 32) return false

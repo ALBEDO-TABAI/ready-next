@@ -228,3 +228,29 @@ test('SkillHostRequirementsSchema rejects invalid manifest_version', () => {
   const result = SkillHostRequirementsSchema.safeParse({ manifest_version: 2 })
   assert.equal(result.success, false)
 })
+
+test('SkillHostRequirementsSchema accepts expose_when_hint_armed with valid action names', () => {
+  const result = SkillHostRequirementsSchema.safeParse({
+    expose_when_hint_armed: ['video_expert_pipeline', 'video_expert_ai_analyze'],
+  })
+  assert.equal(result.success, true, JSON.stringify(result.error?.issues))
+  if (!result.success) return
+  assert.deepEqual(result.data.expose_when_hint_armed, [
+    'video_expert_pipeline',
+    'video_expert_ai_analyze',
+  ])
+})
+
+test('SkillHostRequirementsSchema rejects expose_when_hint_armed with invalid action names', () => {
+  const result = SkillHostRequirementsSchema.safeParse({
+    expose_when_hint_armed: ['Bad-Name!'],
+  })
+  assert.equal(result.success, false)
+})
+
+test('SkillHostRequirementsSchema treats expose_when_hint_armed as optional (omitted)', () => {
+  const result = SkillHostRequirementsSchema.safeParse({})
+  assert.equal(result.success, true, JSON.stringify(result.error?.issues))
+  if (!result.success) return
+  assert.equal(result.data.expose_when_hint_armed, undefined)
+})

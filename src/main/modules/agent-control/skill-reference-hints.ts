@@ -27,6 +27,18 @@ export interface ReferenceSkillHint {
 }
 
 /**
+ * Serializable shape persisted to `chat_conversations.meta_json.lastReferenceSkill`
+ * so the hint survives a Ready restart. Same field set as the in-memory
+ * `ReferenceSkillHint`; kept under its own name to make the persistence
+ * boundary explicit at call sites.
+ */
+export interface PersistedReferenceSkillHint {
+  id: string
+  name: string
+  at: number
+}
+
+/**
  * Idle TTL for a reference-skill hint. A session that hasn't reloaded its
  * reference skill in this window is assumed to have moved on — the hint is
  * purged so the skill-execution-missing error branch falls back to the generic
@@ -110,6 +122,52 @@ export function sweepExpiredReferenceSkillHints(): number {
  */
 export function clearAllReferenceSkillHints(): void {
   lastReferenceSkillBySession.clear()
+}
+
+/**
+ * Patch A1 — return a serializable copy of the in-memory hint for a session,
+ * or `null` if the session has no live hint (never armed, expired, or already
+ * cleared). The returned object can be written to `chat_conversations.meta_json`
+ * so the hint survives a Ready restart.
+ */
+export function snapshotLastReferenceSkill(
+  sessionId: string | undefined,
+): PersistedReferenceSkillHint | null {
+  const hint = getLastReferenceSkill(sessionId)
+  if (!hint) return null
+  return { id: hint.id, name: hint.name, at: hint.at }
+}
+
+/**
+ * Patch A1 — replay a previously persisted hint into the in-memory map. Used
+ * on scope-load (`AgentControlRuntime.sendScoped`) to restore the hint after
+ * a Ready restart. Stale hints (older than `REFERENCE_SKILL_HINT_TTL_MS`) are
+ * rejected so we don't lie to skill detection about a long-since-abandoned
+ * reference skill.
+ *
+ * Returns `true` when the hint was restored, `false` otherwise. Call sites do
+ * not generally branch on the result — it's exposed for telemetry and tests.
+ */
+export function restoreLastReferenceSkill(
+  sessionId: string | undefined,
+  hint: PersistedReferenceSkillHint | null | undefined,
+): boolean {
+  if (!sessionId) return false
+  if (!hint || typeof hint !== 'object') return false
+  const id = typeof hint.id === 'string' ? hint.id.trim() : ''
+  const name = typeof hint.name === 'string' ? hint.name.trim() : ''
+  const at = typeof hint.at === 'number' && Number.isFinite(hint.at) ? hint.at : 0
+  if (!id || !at) return false
+  if (now() - at > REFERENCE_SKILL_HINT_TTL_MS) return false
+  // Preserve the original `at` so TTL math survives across restarts; we
+  // intentionally bypass `rememberLastReferenceSkill` because that one stamps
+  // a fresh `at`.
+  lastReferenceSkillBySession.set(sessionId, {
+    id,
+    name: name || id,
+    at,
+  })
+  return true
 }
 
 // Exposed for tests only — do not call from production code paths.

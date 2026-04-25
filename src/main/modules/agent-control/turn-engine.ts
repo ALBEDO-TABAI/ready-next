@@ -1,10 +1,11 @@
+import { createHash } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
-import { buildSkillDetectionInputs } from './skill-detection-inputs'
+import { buildSkillDetectionInputs, isRetryOnlyTurn } from './skill-detection-inputs'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import {
   selectDomainAdapter,
@@ -468,6 +469,16 @@ export class TurnEngine {
         pureUserText: requestEnvelope.pureUserText,
         previousPureUserInputs,
       })
+      // D3: detect a bare retry/continue intent so narrowing domain adapters
+      // (currently SkillDomainAdapter) can widen their prefix list to keep
+      // file_/document_ tools accessible. Probe the same input channels as
+      // skill detection so we don't miss a retry hidden under a widget
+      // context inheritance.
+      const isRetryOnlyTurnDetected = [
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        contextualUserInput,
+      ].some((text) => isRetryOnlyTurn(String(text || '')))
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null

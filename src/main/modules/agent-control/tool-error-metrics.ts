@@ -45,6 +45,19 @@ export const TOOL_ERROR_METRICS = {
    *   not_found | not_a_file
    */
   skillPrimitiveRejected: 'skill_primitive_rejected',
+  /**
+   * Domain adapter 的二段 prefix narrowing 实际丢弃了工具时打点（附 domain /
+   * droppedCount / droppedSample 维度）。pass-through（输入为空或全部保留）不发，
+   * 否则会淹没仪表盘。配合 `[domain_adapter_prefix_narrowing] ...` host.log 行使用。
+   */
+  domainToolNarrowingApplied: 'domain_tool_narrowing_applied',
+  /**
+   * Turn-engine 检测到模型在主工具循环里以相同参数连续调用同一个工具达到阈值
+   * （默认：最近 5 次里出现 ≥3 次）。emit 时附 `{ tool, repetitions, sessionId }`，
+   * 同时往 session.messages 注入一段系统提醒，引导模型改用 skill_ask_user 或换路径。
+   * 触发后 ring buffer 会被清空，避免每一轮都重复 emit / 重复注入提醒。
+   */
+  toolLoopRepetitionDetected: 'tool_loop_repetition_detected',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

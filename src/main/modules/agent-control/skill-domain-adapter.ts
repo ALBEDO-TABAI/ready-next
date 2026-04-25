@@ -22,7 +22,17 @@ import type { RunProjectionPatch } from './run-contracts'
 // filtered list is empty, so an allowedToolNames input that happens to contain
 // zero skill_*/memory_*/session_* tools falls through to passthrough rather
 // than locking the adapter into an empty list.
-const TOOL_PREFIXES = ['skill_', 'memory_', 'session_']
+//
+// D3 retry widening: when isRetryOnlyTurn === true (bare "继续/重试" intent),
+// we widen the prefix list to also keep file_*/document_* so the agent can
+// rediscover what was happening before re-attempting. Without this, retry
+// turns drop those tools and the agent has no way to inspect prior state.
+const BASE_TOOL_PREFIXES = ['skill_', 'memory_', 'session_'] as const
+const RETRY_INTENT_TOOL_PREFIXES = [
+  ...BASE_TOOL_PREFIXES,
+  'file_',
+  'document_',
+] as const
 const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使用 skill_* 工具推进，不要退回无关的通用工具。'
 
 interface SkillAdapterState {
@@ -98,9 +108,10 @@ export class SkillDomainAdapter implements DomainAdapter {
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
-    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    const prefixes = params.isRetryOnlyTurn ? RETRY_INTENT_TOOL_PREFIXES : BASE_TOOL_PREFIXES
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, prefixes as unknown as string[])
     if (params.host?.log) {
-      logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+      logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, prefixes as unknown as string[])
     }
     return {
       allowedToolNames: narrowed,

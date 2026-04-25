@@ -1,6 +1,8 @@
 import type { RequestEnvelope } from './request-envelope'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { normalizeToolExecutionOutput, type ToolExecutionOutput } from './tool-result-types'
 import type {
   RunBudgetHint,
@@ -92,6 +94,14 @@ export interface DomainAdapterPrepareParams<TSession extends TurnEngineSession =
   hasTools: boolean
   toolPolicy: ToolPolicy
   allowedToolNames: string[] | null
+  /**
+   * D3: Indicates the current turn is a bare retry/continue intent (e.g.
+   * "继续", "重试", "try again"). When true, narrowing domain adapters may
+   * widen their prefix list to keep file_/document_ tools accessible so the
+   * agent can re-discover prior context before re-attempting the action.
+   * Computed by skill-detection-inputs.isRetryOnlyTurn.
+   */
+  isRetryOnlyTurn?: boolean
 }
 
 export interface DomainAdapterPrepareResult {
@@ -194,16 +204,24 @@ export function logPrefixNarrowing(
   const outputDescription = narrowedAllowedToolNames === null
     ? 'unrestricted_passthrough'
     : `${narrowedCount}`
-  const droppedSample = inputAllowedToolNames
-    ? inputAllowedToolNames
-      .filter((name) => !prefixes.some((prefix) => name.startsWith(prefix)))
-      .slice(0, 3)
+  const droppedAll = inputAllowedToolNames
+    ? inputAllowedToolNames.filter((name) => !prefixes.some((prefix) => name.startsWith(prefix)))
     : []
+  const droppedSample = droppedAll.slice(0, 3)
   log(
     `[domain_adapter_prefix_narrowing] domain=${domainId} inputCount=${inputCount} `
     + `outputCount=${outputDescription} prefixes=${prefixes.join('|')} `
     + `droppedSample=${droppedSample.join(',') || 'none'}`,
   )
+  // Observability: only emit when narrowing actually dropped tools. A pass-through
+  // narrowing (no input or every tool kept) is uninteresting noise for dashboards.
+  if (droppedAll.length > 0) {
+    logAgentMetric(TOOL_ERROR_METRICS.domainToolNarrowingApplied, {
+      domain: domainId,
+      droppedCount: droppedAll.length,
+      droppedSample,
+    })
+  }
 }
 
 export function selectDomainAdapter(
