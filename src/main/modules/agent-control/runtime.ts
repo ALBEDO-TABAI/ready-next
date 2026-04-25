@@ -23,6 +23,11 @@ import {
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
+import {
+  snapshotLastReferenceSkill,
+  restoreLastReferenceSkill,
+  type PersistedReferenceSkillHint,
+} from './skill-reference-hints'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
@@ -634,6 +639,10 @@ export class AgentControlRuntime extends EventEmitter {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }
     const scope = this.mapConversationRow(scopeRow)
+    // skill-resume A1: restore reference-skill hint from persisted conv meta
+    // before any skill detection runs, so resumed sessions don't lose context
+    // after Ready restart (in-memory Map alone wouldn't survive).
+    this.restoreReferenceHintFromScope(scope, payload.scopeId)
     const normalizedContinuationIntent = (() => {
       const intent = normalizeContinuationIntent(payload.continuationIntent || null)
       if (!intent) return null
@@ -1422,7 +1431,68 @@ export class AgentControlRuntime extends EventEmitter {
       timestamp,
       payload.meta
     )
+    // skill-resume A1: snapshot reference-skill hint after each assistant
+    // message and persist it to the conversation's meta_json so a Ready
+    // restart can re-arm the in-memory hint on session resume.
+    if (payload.role === 'assistant') {
+      this.persistReferenceHintToScope(scopeId)
+    }
     return this.mapMessageRow(this.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
+  }
+
+  // ---------------------------------------------------------------------------
+  // skill-resume A1: reference-skill hint persistence helpers
+  // ---------------------------------------------------------------------------
+
+  private parseScopeMeta(scope: ConversationScope | null | undefined): Record<string, unknown> {
+    const raw = (scope?.meta as unknown as string | Record<string, unknown> | null | undefined)
+    if (!raw) return {}
+    if (typeof raw === 'object') return { ...raw } as Record<string, unknown>
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw) as unknown
+        if (parsed && typeof parsed === 'object') return { ...(parsed as Record<string, unknown>) }
+      } catch { /* fallthrough */ }
+    }
+    return {}
+  }
+
+  private restoreReferenceHintFromScope(scope: ConversationScope, scopeId: string): void {
+    try {
+      const meta = this.parseScopeMeta(scope)
+      const hint = meta['lastReferenceSkill']
+      if (!hint || typeof hint !== 'object') return
+      const persisted = hint as PersistedReferenceSkillHint
+      if (typeof persisted.id !== 'string' || typeof persisted.name !== 'string' || typeof persisted.at !== 'number') return
+      restoreLastReferenceSkill(scopeId, persisted)
+    } catch (error) {
+      console.warn('[AgentControlRuntime] restoreReferenceHintFromScope failed', error)
+    }
+  }
+
+  private persistReferenceHintToScope(scopeId: string): void {
+    try {
+      const hint = snapshotLastReferenceSkill(scopeId)
+      if (!hint) return
+      const scopeRow = this.db.getConversationScope(scopeId)
+      if (!scopeRow) return
+      const scope = this.mapConversationRow(scopeRow)
+      const meta = this.parseScopeMeta(scope)
+      const existing = meta['lastReferenceSkill'] as PersistedReferenceSkillHint | undefined
+      // Avoid noisy DB writes: skip if persisted hint is identical (same id+name+at).
+      if (
+        existing
+        && existing.id === hint.id
+        && existing.name === hint.name
+        && existing.at === hint.at
+      ) {
+        return
+      }
+      meta['lastReferenceSkill'] = hint
+      this.db.updateConversationScopeMeta(scopeId, meta)
+    } catch (error) {
+      console.warn('[AgentControlRuntime] persistReferenceHintToScope failed', error)
+    }
   }
 
   private emitConversationEvent(payload: ConversationEventPayload): void {

@@ -71,11 +71,55 @@ function buildSkillToolDescription(skill: SkillState, action: SkillActionDefinit
   return `${skill.name} · ${skill.description} · ${action.description}`
 }
 
-function getSkillActionToolDefs(): SkillToolDef[] {
+/**
+ * skill-resume B2 — pure predicate for the visibility filter exception.
+ * Exported for direct unit testing without mocking the runtime manager.
+ *
+ * Returns true if `action` should be exposed to the LLM under the current
+ * reference-skill hint state. When the action is non-internal, always true.
+ * When internal, true only when (a) hint armed for this exact skillId AND
+ * (b) action name appears in the skill's expose_when_hint_armed whitelist.
+ */
+export function shouldExposeSkillAction(args: {
+  actionVisibility: string
+  actionName: string
+  skillId: string
+  referenceHintSkillId: string | null
+  exposeWhenHintArmed: string[]
+}): boolean {
+  if (args.actionVisibility !== 'internal') return true
+  if (args.referenceHintSkillId === null) return false
+  if (args.referenceHintSkillId !== args.skillId) return false
+  return args.exposeWhenHintArmed.includes(args.actionName)
+}
+
+/**
+ * skill-resume B2 — visibility filter respects expose_when_hint_armed.
+ *
+ * When the reference-skill hint is armed for a specific skill in the current
+ * session AND that skill's host_requirements declares an action name in
+ * `expose_when_hint_armed`, the action is exposed to the LLM even though it's
+ * marked `visibility: 'internal'`. Used by video-expert-analyzer so that
+ * `skill_video_expert_pipeline` becomes invokable on session resume (when the
+ * hint is restored from chat_conversations.meta_json by A1).
+ *
+ * This is a NARROW exception: 3 conditions must all hold (hint armed, skill.id
+ * matches the armed hint, action name appears in the manifest's whitelist).
+ * Any other internal action stays hidden.
+ */
+function getSkillActionToolDefs(opts?: { referenceHintSkillId?: string | null }): SkillToolDef[] {
   const manager = getSkillsRuntimeManager()
-  return manager.listSkills().flatMap((skill) =>
-    skill.actions
-      .filter((action) => action.visibility !== 'internal')
+  const hintSkillId = opts?.referenceHintSkillId ?? null
+  return manager.listSkills().flatMap((skill) => {
+    const exposeWhenArmed = skill.hostRequirements?.expose_when_hint_armed ?? []
+    return skill.actions
+      .filter((action) => shouldExposeSkillAction({
+        actionVisibility: action.visibility ?? 'public',
+        actionName: action.name,
+        skillId: skill.id,
+        referenceHintSkillId: hintSkillId,
+        exposeWhenHintArmed: exposeWhenArmed,
+      }))
       .map((action) => ({
         name: buildToolName(skill.id, action.name),
         description: buildSkillToolDescription(skill, action),
@@ -84,8 +128,8 @@ function getSkillActionToolDefs(): SkillToolDef[] {
         action: action.name,
         timeoutMs: action.timeoutMs,
         params: action.params,
-      })),
-  )
+      }))
+  })
 }
 
 // Dynamic-skill-action Zod schema cache (Phase 2.5 PR 12). Keyed by tool name
@@ -147,7 +191,10 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
     () => false,
     hasReferenceHint,
   )
-  return [...getSkillActionToolDefs(), ...primitiveTools]
+  // B2: pass referenceHintSkillId through so internal actions whitelisted
+  // via host_requirements.expose_when_hint_armed surface for the LLM.
+  const referenceHintSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
+  return [...getSkillActionToolDefs({ referenceHintSkillId }), ...primitiveTools]
 }
 
 /**

@@ -1,5 +1,33 @@
 import { createHash } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
+
+/**
+ * skill-resume C1 — pure helper for tool-repetition detection.
+ * Exported for direct unit testing.
+ *
+ * Returns the count of identical (name, argsHash) entries matching the LAST
+ * entry in the ring buffer. Caller compares to a threshold to decide whether
+ * to fire the ask-user nudge.
+ *
+ * Used inline in the tool loop after each iteration's tool batch executes.
+ */
+export function countToolRepetitions(ring: ReadonlyArray<{ name: string; argsHash: string }>): number {
+  if (ring.length === 0) return 0
+  const last = ring[ring.length - 1]
+  return ring.filter(c => c.name === last.name && c.argsHash === last.argsHash).length
+}
+
+/**
+ * skill-resume C3 — pure helper computing the 70% iteration warning threshold.
+ * Returns the iteration count at which the once-per-run warning should fire.
+ *
+ * Floor + min-1 ensures even tiny budgets (e.g. direct_answer max=8) still
+ * have a single warning trigger.
+ */
+export function computeBudgetWarningThreshold(maxIterations: number): number {
+  return Math.max(1, Math.floor(Math.max(0, maxIterations) * 0.7))
+}
+
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
@@ -734,6 +762,7 @@ export class TurnEngine {
               hasTools,
               toolPolicy,
               allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+              isRetryOnlyTurn: isRetryOnlyTurnDetected,
             })
             : null
       const shouldHideBrowserProcessText =
@@ -997,6 +1026,16 @@ export class TurnEngine {
       let budgetLimitedBeforeCompletion = false
       let convergencePromptInjected = false
       let preferTextToolBridgeOnce = false
+      // skill-resume C1: ring buffer of recent tool calls for repetition detection.
+      // When the same tool is called with the same args ≥3 times in the last 5
+      // iterations, we inject an ask-user nudge to break the loop.
+      const recentToolCalls: Array<{ name: string; argsHash: string }> = []
+      const RECENT_TOOL_CALLS_RING_SIZE = 5
+      const REPETITION_THRESHOLD = 3
+      // skill-resume C3: prepend a system warning when 70% of the iteration
+      // budget is consumed, reminding the LLM to summarize and consult the user.
+      let warned70Pct = false
+      const warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
       const toolGuidance = buildToolGuidance(toolPolicy as any)
       const toolLoopSession = toolGuidance
         ? {
@@ -1039,6 +1078,14 @@ export class TurnEngine {
         }
         state.syncBudgetWarning()
 
+        // skill-resume C3: 70% iteration warning — fire ONCE per run.
+        if (!warned70Pct && iterations >= warningThreshold) {
+          warned70Pct = true
+          session.messages.push({
+            role: 'user',
+            content: `系统提醒：已用 ${iterations}/${effectiveMaxToolIterations} 次工具调用。请总结当前进度并询问用户是否继续，或在确认下一步方向后再继续调用工具。`,
+          })
+        }
         const scope = request.sessionId ? host.runtime?.getConversationScope?.(request.sessionId) : undefined
         const toolContext = buildHostToolContext(routedAllowedToolNames, scope)
         const toolLoopRequestSnapshot = buildHostToolSnapshot({
@@ -1348,6 +1395,34 @@ export class TurnEngine {
             assistantContent.push({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: toolCall.input })
           }
           session.messages.push({ role: 'assistant', content: assistantContent })
+          // skill-resume C1: record each tool call this iteration to ring
+          // buffer + check repetition. We hash args so identical args repeats
+          // are detected, but different args of same tool are not (legitimate
+          // exploration like file_search with different queries).
+          for (const toolCall of toolCallsForIteration) {
+            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
+            recentToolCalls.push({ name: toolCall.name, argsHash })
+            if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
+          }
+          // Check repetition: same name+argsHash appearing ≥REPETITION_THRESHOLD
+          // times in the ring buffer. Emit metric + inject ask-user nudge.
+          const last = recentToolCalls[recentToolCalls.length - 1]
+          if (last) {
+            const matchCount = countToolRepetitions(recentToolCalls)
+            if (matchCount >= REPETITION_THRESHOLD) {
+              logAgentMetric(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, {
+                tool: last.name,
+                repetitions: matchCount,
+                sessionId: request.sessionId,
+              })
+              session.messages.push({
+                role: 'user',
+                content: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
+              })
+              // Reset buffer to avoid re-firing every subsequent iteration.
+              recentToolCalls.length = 0
+            }
+          }
           const executedToolBatch = await executeBatch()
           const toolResults: Array<Record<string, unknown>> = []
           consumeExecutedToolBatch(executedToolBatch, {
