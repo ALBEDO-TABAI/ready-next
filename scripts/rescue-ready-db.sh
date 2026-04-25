@@ -90,6 +90,14 @@ DROP TABLE IF EXISTS tags;
 DROP TABLE IF EXISTS documents;
 -- workspaces was the parent of documents — its rows linger now; clear them
 DELETE FROM workspaces;
+-- CRITICAL: also delete the migration tracking rows so the next Ready launch
+-- re-runs migrations 026/027 and re-creates the tables we just dropped.
+-- Without this, SearchEngine constructor will throw `no such table: documents`
+-- on startup. (Discovered 2026-04-25 when first launch after rescue crashed.)
+DELETE FROM migrations WHERE name IN (
+  '026_create_search_index_tables',
+  '027_documents_multi_source'
+);
 
 -- Prune old chat messages (keep last 5 days)
 DELETE FROM chat_messages WHERE julianday(timestamp) < julianday('now', '-5 days');
