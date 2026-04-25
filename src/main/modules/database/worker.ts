@@ -96,10 +96,19 @@ function reply(msg: OutgoingMessage): void {
   port.postMessage(msg)
 }
 
+// B3: graph endpoint hard caps to prevent main-thread OOM (681K rows would
+// blow the IPC payload to ~67MB; renderer force-layout caps at 500 anyway).
+const GRAPH_DEFAULT_LIMIT = 1000
+const GRAPH_MAX_LIMIT = 5000
+const GRAPH_DEGRADED_THRESHOLD = 500
+
 interface GetDocumentGraphArgs {
   workspaceRoot?: string
   centerPath?: string
   depth?: number
+  limit?: number
+  cursor?: { afterId: number }
+  mode?: 'full' | 'focus'
 }
 
 interface GraphNode {
@@ -109,19 +118,71 @@ interface GraphNode {
   sourceType?: string
 }
 interface GraphEdge { source: string; target: string; kind: string }
-interface GraphResult { nodes: GraphNode[]; edges: GraphEdge[]; note?: string }
+interface GraphResult {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  note?: string
+  degraded?: boolean       // true when total docs > GRAPH_DEGRADED_THRESHOLD without focus
+  totalDocs?: number       // present in non-focus mode for renderer to size warnings
+  nextCursor?: { afterId: number } | null  // present when more pages exist
+}
 
 function getDocumentGraph(args: GetDocumentGraphArgs): GraphResult {
   const depth = typeof args.depth === 'number' ? Math.max(1, Math.min(6, args.depth)) : 2
   const centerPath = typeof args.centerPath === 'string' ? args.centerPath : null
   const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : null
+  const limit = Math.min(
+    GRAPH_MAX_LIMIT,
+    Math.max(1, typeof args.limit === 'number' ? args.limit : GRAPH_DEFAULT_LIMIT),
+  )
+  const afterId = typeof args.cursor?.afterId === 'number' ? args.cursor.afterId : null
+  const mode: 'full' | 'focus' = args.mode === 'focus' ? 'focus' : 'full'
 
-  const baseQuery = `SELECT id, path, name, source_type AS sourceType FROM documents`
-  const documents: Array<{ id: number; path: string; name: string; sourceType: string }> = workspaceRoot
-    ? db
-        .prepare(`${baseQuery} WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?)`)
-        .all<{ id: number; path: string; name: string; sourceType: string }>(workspaceRoot)
-    : db.prepare(baseQuery).all<{ id: number; path: string; name: string; sourceType: string }>()
+  // Refuse focus mode without a centerPath — caller signaled focus but gave no center.
+  if (mode === 'focus' && !centerPath) {
+    return { nodes: [], edges: [], note: 'centerPath_required_in_focus', degraded: true, totalDocs: 0 }
+  }
+
+  // Pre-compute total when no centerPath so we can set degraded flag.
+  // This is a single COUNT(*) — index-backed; cheap even on 681K rows.
+  let totalDocs: number | undefined
+  if (!centerPath) {
+    const countRow = workspaceRoot
+      ? db
+          .prepare(`SELECT COUNT(*) AS n FROM documents WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?)`)
+          .get<{ n: number }>(workspaceRoot)
+      : db.prepare(`SELECT COUNT(*) AS n FROM documents`).get<{ n: number }>()
+    totalDocs = countRow?.n ?? 0
+  }
+
+  const baseSelect = `SELECT id, path, name, source_type AS sourceType FROM documents`
+  // Build the documents fetch:
+  //  - centerPath: fetch ALL docs for BFS (kept legacy behavior; expected caller
+  //    has a small workspace OR is already focused). The BFS itself bounds the
+  //    output set tightly, so memory is OK once we know we have a center.
+  //  - no centerPath: cap with LIMIT + cursor pagination.
+  const documents: Array<{ id: number; path: string; name: string; sourceType: string }> = (() => {
+    if (centerPath) {
+      return workspaceRoot
+        ? db
+            .prepare(`${baseSelect} WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?)`)
+            .all<{ id: number; path: string; name: string; sourceType: string }>(workspaceRoot)
+        : db.prepare(baseSelect).all<{ id: number; path: string; name: string; sourceType: string }>()
+    }
+    // No centerPath: paginate
+    const cursorClause = afterId !== null ? `AND id > ?` : ''
+    const cursorParams = afterId !== null ? [afterId] : []
+    if (workspaceRoot) {
+      return db
+        .prepare(
+          `${baseSelect} WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?) ${cursorClause} ORDER BY id LIMIT ?`,
+        )
+        .all<{ id: number; path: string; name: string; sourceType: string }>(workspaceRoot, ...cursorParams, limit)
+    }
+    return db
+      .prepare(`${baseSelect} ${afterId !== null ? 'WHERE id > ?' : ''} ORDER BY id LIMIT ?`)
+      .all<{ id: number; path: string; name: string; sourceType: string }>(...cursorParams, limit)
+  })()
 
   let includedIds: Set<number> | null = null
   if (centerPath) {
@@ -189,7 +250,23 @@ function getDocumentGraph(args: GetDocumentGraphArgs): GraphResult {
   for (const [id, label] of tagLabels.entries()) nodes.push({ id, type: 'tag', label })
   for (const [id, label] of ghostLabels.entries()) nodes.push({ id, type: 'ghost', label })
 
-  return { nodes, edges }
+  // B3: signal degraded + paginate hint when no centerPath and total exceeds threshold.
+  const result: GraphResult = { nodes, edges }
+  if (!centerPath) {
+    result.totalDocs = totalDocs
+    if ((totalDocs ?? 0) > GRAPH_DEGRADED_THRESHOLD) {
+      result.degraded = true
+      // Suggest using centerPath instead of pagination for huge graphs:
+      result.note = `Graph has ${totalDocs} documents (>${GRAPH_DEGRADED_THRESHOLD}); use centerPath to focus, or paginate via cursor.`
+    }
+    // Cursor for next page: last fetched id (callers can pass this back as cursor.afterId)
+    if (documents.length > 0 && documents.length === limit) {
+      result.nextCursor = { afterId: documents[documents.length - 1].id }
+    } else {
+      result.nextCursor = null
+    }
+  }
+  return result
 }
 
 interface SearchDocumentsArgs {

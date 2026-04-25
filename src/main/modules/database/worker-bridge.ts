@@ -60,6 +60,10 @@ export interface GraphResult {
   nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }>
   edges: Array<{ source: string; target: string; kind: string }>
   note?: string
+  // B3: degrade signal + pagination cursor.
+  degraded?: boolean
+  totalDocs?: number
+  nextCursor?: { afterId: number } | null
 }
 
 export type SearchResult = SearchHit & {
@@ -74,7 +78,14 @@ export interface SearchPayload {
 }
 
 export interface WorkerDbBridge {
-  getDocumentGraph(opts: { workspaceRoot?: string; centerPath?: string; depth?: number }): Promise<GraphResult>
+  getDocumentGraph(opts: {
+    workspaceRoot?: string
+    centerPath?: string
+    depth?: number
+    limit?: number
+    cursor?: { afterId: number }
+    mode?: 'full' | 'focus'
+  }): Promise<GraphResult>
   searchDocuments(opts: { query: string; workspaceRoot?: string; limit?: number; sources?: string[] }): Promise<SearchPayload>
   reindexWorkspace(opts: { root: string }): Promise<ReindexWorkspaceResult>
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult>
@@ -198,7 +209,14 @@ export class WorkerDbBridgeImpl implements WorkerDbBridge {
     return promise
   }
 
-  getDocumentGraph(opts: { workspaceRoot?: string; centerPath?: string; depth?: number }): Promise<GraphResult> {
+  getDocumentGraph(opts: {
+    workspaceRoot?: string
+    centerPath?: string
+    depth?: number
+    limit?: number
+    cursor?: { afterId: number }
+    mode?: 'full' | 'focus'
+  }): Promise<GraphResult> {
     return this.send<GraphResult>('getDocumentGraph', opts ?? {})
   }
 

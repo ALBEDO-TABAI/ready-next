@@ -11,6 +11,21 @@ import {
   detectBrowserPlatform,
   Browser,
 } from '@puppeteer/browsers'
+import {
+  buildWorkerForkOptions,
+  killWorkerProcessTree,
+  type KillFn,
+} from './rsshub-process-cleanup'
+
+/**
+ * Production kill seam for the worker. Wraps `process.kill` so the helper
+ * sees a uniform `(pid, signal) => boolean` shape and ESRCH is reflected as
+ * a thrown error (which the helper treats as "already gone").
+ */
+const processKillFn: KillFn = (pid, signal) => {
+  process.kill(pid, signal)
+  return true
+}
 
 type RSSHubState = 'stopped' | 'starting' | 'running' | 'error'
 
@@ -343,11 +358,16 @@ class RSSHubManager {
     const workerCwd = await this.getWorkerCwd()
     return new Promise<number>((resolve, reject) => {
       const workerPath = this.getWorkerPath()
-      const child = fork(workerPath, [], {
+      // `detached: true` (Unix only) makes the worker its own process-group
+      // leader so we can SIGTERM/SIGKILL Chromium grandchildren via -pid in
+      // `cleanup`. IPC channel is preserved for the ready/error/shutdown
+      // message protocol — see `rsshub-process-cleanup.ts` for rationale.
+      const forkOptions = buildWorkerForkOptions({
         env: workerEnv,
         cwd: workerCwd,
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        platform: process.platform,
       })
+      const child = fork(workerPath, [], forkOptions)
       this.child = child
       this.externalWorker = false
 
@@ -363,7 +383,18 @@ class RSSHubManager {
           this.lastError = `RSSHub start timed out after ${START_TIMEOUT_MS}ms`
           this.lastStartupError = this.lastError
           this.state = 'error'
-          child.kill('SIGKILL')
+          // Use process-group kill so any Chromium grandchildren the worker
+          // already booted during the long startup are reaped too. The
+          // promise rejection happens immediately; the SIGKILL escalation
+          // runs in the background and never blocks the caller.
+          void killWorkerProcessTree({
+            pid: child.pid,
+            hasProcessGroup: process.platform !== 'win32',
+            killFn: processKillFn,
+          }).catch(() => {
+            // best-effort: if the helper itself blows up we'd already have
+            // logged via the killFn errors path
+          })
           reject(new Error(this.lastError))
         })
       }, START_TIMEOUT_MS)
@@ -509,7 +540,19 @@ class RSSHubManager {
       }
 
       const forceKill = setTimeout(() => {
-        child.kill('SIGKILL')
+        // The graceful 'shutdown' message didn't reap the worker in time —
+        // fall back to a process-group kill so Chromium grandchildren spawned
+        // by RSSHub's internal puppeteer are reaped too. We resolve as soon
+        // as SIGTERM is dispatched; the SIGKILL escalation runs in the
+        // background under killWorkerProcessTree.
+        void killWorkerProcessTree({
+          pid: child.pid,
+          hasProcessGroup: process.platform !== 'win32',
+          killFn: processKillFn,
+        }).catch(() => {
+          // best-effort: errors are recorded inside the helper via the
+          // returned result; nothing to do at the stop() boundary.
+        })
         resolve()
       }, STOP_TIMEOUT_MS)
 
@@ -615,16 +658,37 @@ class RSSHubManager {
     }
   }
 
-  /** Synchronous cleanup for app before-quit — force kills immediately */
-  cleanup(): void {
+  /**
+   * Cleanup for app before-quit — force kills the worker AND its Chromium
+   * grandchildren by sending SIGTERM/SIGKILL to the worker's process group.
+   *
+   * Was previously synchronous + `child.kill('SIGKILL')`, which only
+   * signalled the immediate Node child and orphaned every Chromium subprocess
+   * that RSSHub's internal puppeteer had booted. Users observed 14+ leaked
+   * Chrome processes after a single quit cycle. The `before-quit` cleanup
+   * orchestrator (`runBeforeQuitCleanup`) already supports a `Promise<void>`
+   * return, so the cost of awaiting the SIGTERM→SIGKILL escalation is bounded
+   * by the orchestrator's outer 5s timeout.
+   */
+  async cleanup(): Promise<void> {
     this.stopping = true
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
     }
-    if (this.child) {
-      this.child.kill('SIGKILL')
+    const child = this.child
+    if (child) {
       this.child = null
+      try {
+        await killWorkerProcessTree({
+          pid: child.pid,
+          hasProcessGroup: process.platform !== 'win32',
+          killFn: processKillFn,
+        })
+      } catch {
+        // The helper itself swallows ESRCH; any error here is unexpected and
+        // already recorded in the helper's result. Best-effort during quit.
+      }
     }
     this.externalWorker = false
     this.port = 0
