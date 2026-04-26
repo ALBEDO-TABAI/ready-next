@@ -77,10 +77,20 @@ export function getLastReferenceSkill(
   if (!sessionId) return null
   const hint = lastReferenceSkillBySession.get(sessionId)
   if (!hint) return null
-  if (isExpired(hint, now())) {
+  const at = now()
+  if (isExpired(hint, at)) {
     lastReferenceSkillBySession.delete(sessionId)
     return null
   }
+  // skill-resume G8 — bump `at` on every read so an active session keeps the
+  // hint alive past the 30-min TTL window. Without this a long pipeline
+  // (which can take 10-30+ min wall clock) loses the hint mid-flow, the
+  // typed actions disappear from preferredSkillToolNames, and the LLM falls
+  // back to forking python via skill_run_shell which then 10-min-times-out.
+  // Persistence (chat_conversations.meta_json) still snapshots `at` after
+  // each assistant message via persistReferenceHintToScope, so resume math
+  // remains consistent across restarts.
+  hint.at = at
   return hint
 }
 
@@ -173,4 +183,17 @@ export function restoreLastReferenceSkill(
 // Exposed for tests only — do not call from production code paths.
 export function _resetLastReferenceSkillHintsForTests(): void {
   lastReferenceSkillBySession.clear()
+}
+
+/**
+ * Test-only peek that does NOT bump `at` (unlike the production
+ * `getLastReferenceSkill` which refreshes TTL on every read per G8). Used by
+ * persistence/snapshot tests that need to verify the in-memory `at` value
+ * AFTER restoration but BEFORE any active read mutates it.
+ */
+export function _peekLastReferenceSkillForTests(
+  sessionId: string | undefined,
+): ReferenceSkillHint | null {
+  if (!sessionId) return null
+  return lastReferenceSkillBySession.get(sessionId) ?? null
 }

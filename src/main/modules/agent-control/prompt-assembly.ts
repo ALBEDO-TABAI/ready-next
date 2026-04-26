@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { AgentRepository } from '../repositories/agent-repository'
 import { MemoryRepository, type MemorySourceType } from '../repositories/memory-repository'
 import type { ConversationScope } from './types'
@@ -1039,10 +1040,23 @@ export class PromptAssemblyService {
       const db = dbManager.getRawDb()
       if (!db) return null
 
-      db.prepare('INSERT INTO agent_knowledge (key, value, created_at) VALUES (?, ?, ?)').run(
+      // skill-resume G7 — agent_knowledge has `id PRIMARY KEY` and
+      // `agent_name NOT NULL` columns (migration 003); the legacy 3-column
+      // INSERT silently failed every memory_create with a NOT NULL constraint
+      // error which the catch below swallowed into "Failed to create memory".
+      // Always include id + agent_name; ON CONFLICT for the rare case the
+      // contentKey collides (Date.now+random gives ~12 bits of entropy).
+      db.prepare(
+        `INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(
+        `kn-${randomUUID()}`,
+        'memory',
         contentKey,
         params.content,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
+        Math.floor(Date.now() / 1000),
       )
 
       // Create memory metadata

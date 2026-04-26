@@ -9,6 +9,7 @@ import {
   clearAllReferenceSkillHints,
   REFERENCE_SKILL_HINT_TTL_MS,
   _resetLastReferenceSkillHintsForTests,
+  _peekLastReferenceSkillForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
 
 // skill-resume plan A1 — verify the persistence shim that lets the in-memory
@@ -85,9 +86,13 @@ describe('skill-resume A1 persistence helpers', () => {
         name: 'Video Expert',
         at: originalAt,
       })
-      const hint = getLastReferenceSkill('sess-6')
-      assert.ok(hint)
-      assert.equal(hint!.at, originalAt, 'restore preserves at, does not stamp fresh')
+      // skill-resume G8: getLastReferenceSkill bumps `at` on read (so active
+      // sessions don't lose hint mid-flow). To verify restore PRESERVED the
+      // snapshotted at, peek without bumping. Production code is unaffected —
+      // the first active read will refresh the TTL anyway.
+      const peeked = _peekLastReferenceSkillForTests('sess-6')
+      assert.ok(peeked)
+      assert.equal(peeked!.at, originalAt, 'restore preserves at, does not stamp fresh')
     })
 
     it('rejects when sessionId is empty/undefined', () => {

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import type { SkillState } from '../skills-runtime/runtime-manager'
 import type { ToolExecutionOutput } from './tool-result-types'
-import { rememberLastReferenceSkill } from './skill-reference-hints'
+import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from './metrics'
 
 /**
@@ -106,12 +106,29 @@ export class SkillContextOrchestrator {
     return false
   }
 
-  buildPreferredSkillToolNames(userText: string, _sessionId?: string): string[] {
+  buildPreferredSkillToolNames(userText: string, sessionId?: string): string[] {
     const toolNames = new Set<string>(REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES)
+
+    // skill-resume G6 — when a reference-skill hint is armed for THIS session,
+    // any of that skill's `expose_when_hint_armed`-whitelisted internal actions
+    // must also be in the preference list. Otherwise downstream
+    // `filterPreferredSkillAnthropicTools` (execution-tool-skill-filters.ts)
+    // sees a 4-primitive preference set and strips the typed actions out of
+    // allowedToolNames — even though B2's exposure filter would have admitted
+    // them. This is what made `skill_video_expert_pipeline` invisible after
+    // G3 synthesized a context text on retry intent.
+    const armedHint = sessionId ? getLastReferenceSkill(sessionId) : null
 
     const explicitSkills = this.findExplicitlyRequestedSkills(userText)
     for (const skill of explicitSkills) {
-      for (const action of skill.actions.filter((item) => item.visibility !== 'internal')) {
+      const exposeWhenArmed = skill.hostRequirements?.expose_when_hint_armed ?? []
+      for (const action of skill.actions) {
+        const isPublic = action.visibility !== 'internal'
+        const armedForThisSkill = armedHint?.id === skill.id
+        const whitelistedInternal = action.visibility === 'internal'
+          && armedForThisSkill
+          && exposeWhenArmed.includes(action.name)
+        if (!isPublic && !whitelistedInternal) continue
         const tool = this.deps.resolveSkillToolByAction(skill.id, action.name)
         if (tool?.name) toolNames.add(tool.name)
       }
