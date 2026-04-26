@@ -12,6 +12,25 @@ when-to-use: |
 
 面向长任务的视频分析 skill。目标不是改输出，而是让长视频、长会话、OpenClaw 接力这类场景更稳、更省上下文、更容易续跑，同时尽量避免漏做。
 
+## 工具调用规约（必读 — 不照做会卡 10 分钟超时）
+
+下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**typed action 已经把它们包好了，30 分钟超时 + `run_state.json` 状态追踪都已接好**。LLM 看到工具名时按下表对应：
+
+- **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ typed action**
+  - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，30 min 超时
+  - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，30 min 超时
+- **快速探针（cat 文件 / ls 目录 / 看 run_state.json / wc 输出）→ `skill_run_shell`**
+  - 默认 60 秒，硬上限 10 分钟，超时即 SIGTERM 整个进程组
+- **读 artifact** → `skill_read_artifact`；**写临时报告/scratchpad** → `skill_write_artifact`
+
+反模式（真踩过的坑，不要再重复）：
+- ❌ `skill_run_shell({"command": "python3 scripts/pipeline_enhanced.py <url>"})` — 必超时
+- ❌ `skill_run_shell({"command": "cd <dir> && python3 scripts/orchestrate_vnext.py ..."})` — 同上
+- ✅ `skill_video_expert_pipeline({"url": "<url>", "outputDir": "<dir>"})`
+- ✅ 想看进度：`skill_read_artifact({"relativePath": "<videoSlug>/run_state.json"})`
+
+如果当前会话里**没看到** `skill_video_expert_pipeline` / `skill_video_expert_ai_analyze` 这两个工具：说明 reference-skill hint 还没 arm 上。在回复里显式提到 "video-expert-analyzer" 或 "VEA" 让 hint 上线，下一回合就会看到。
+
 ## 先看什么
 
 先读这个文件拿到主规则。只有在确实需要时，再按需读取：

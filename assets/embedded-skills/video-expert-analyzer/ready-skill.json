@@ -19,7 +19,7 @@
     },
     {
       "name": "video_expert_pipeline",
-      "description": "执行视频深度分析（pipeline 阶段）。仅供产品代码（如 RSS item-analysis-manager）直接调用，不对 LLM 暴露。",
+      "description": "执行视频深度分析 pipeline（prepare→score→finalize 一体化）。30 分钟超时，运行期写 run_state.json。供产品代码（item-analysis-manager）直接调用；当 reference-skill hint 为 video-expert-analyzer 时也对 LLM 暴露（参见 host_requirements.expose_when_hint_armed）——LLM 应优先用本 typed action 跑长链路，而不是用 skill_run_shell 直接 fork python（后者只 10 分钟）。",
       "runtime": "python",
       "entry": "scripts/ready_compat.py",
       "visibility": "internal",
@@ -34,7 +34,7 @@
     },
     {
       "name": "video_expert_ai_analyze",
-      "description": "对 scene_scores.json 跑 AI 视觉评分。仅供产品代码直接调用，不对 LLM 暴露。",
+      "description": "对 scene_scores.json 跑 AI 视觉评分（score_batches / merge_validate 阶段）。30 分钟超时；运行期靠 run_state.json 状态追踪。供产品代码直接调用；当 reference-skill hint 为 video-expert-analyzer 时也对 LLM 暴露 —— LLM 应优先用本 typed action，而不是用 skill_run_shell 跑 ai_analyzer.py（后者只 10 分钟）。",
       "runtime": "python",
       "entry": "scripts/ready_compat.py",
       "visibility": "internal",
