@@ -14,7 +14,19 @@ export function isRetryOnlyTurn(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
   if (normalized.length > 32) return false
-  return /^(再?重试(一次|一下)?|再试(一次|一下)?|再来(一次|一下)?|重新(试|来|开始)|继续(一下|处理|执行|刚才|上次|当前|这个|任务)?|接着(来|做|处理|执行)?|恢复(上次|刚才|当前)?|try again|retry|continue)$/i.test(normalized)
+  // Strict short forms (historical contract — kept verbatim)
+  const strictTail = /^(再?重试(一次|一下)?|再试(一次|一下)?|再来(一次|一下)?|重新(试|来|开始)|继续(一下|处理|执行|刚才|上次|当前|这个|任务)?|接着(来|做|处理|执行)?|恢复(上次|刚才|当前)?|try again|retry|continue|resume)$/i
+  if (strictTail.test(normalized)) return true
+  // skill-resume G1 — liberal extension for natural Chinese continuation
+  // phrasings that the strict regex misses, e.g.
+  //   "继续之前任务", "继续上次的视频分析", "接着上次做",
+  //   "继续未完成的任务", "继续完成视频分析"
+  // Constraints to avoid false positives: short text (≤24 chars), starts with
+  // a continuation root, contains no question/fresh-request markers.
+  if (normalized.length > 24) return false
+  if (!/^(继续|接着|恢复|再来|重做|继续完成|接着做|接着完成)/.test(normalized)) return false
+  if (/[?？!!@()<>《》【】\[\]]|帮(我|忙)|请(帮|你|给)|我想|我要|可以吗|能不能|怎么|为什么|什么|哪个|多少|搜索|查询|查一下|搜一下|换个|换成|换一/.test(normalized)) return false
+  return true
 }
 
 export function buildSkillDetectionInputs(params: {

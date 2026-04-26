@@ -101,7 +101,7 @@ import {
 } from '../agent-control/session-continuity'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { executeToolCall } from '../tools'
-import { findSkillToolBySkillAction } from '../tools/skills-tools'
+import { findSkillToolBySkillAction, findSkillToolByName } from '../tools/skills-tools'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import {
   buildTextToolResultMessage,
@@ -322,6 +322,10 @@ export class DirectChatEngine extends EventEmitter {
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),
       resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
+      // skill-resume G2 — reverse `skill_<id>_<action>` → SkillToolRef so the
+      // orchestrator can re-arm the reference-skill hint from prior assistant
+      // tool_use blocks even when the user typed only "继续 / 接着 ...".
+      resolveSkillToolByName: (toolName) => findSkillToolByName(toolName),
     })
     this.anthropicExecutionClient = new AnthropicExecutionClient({
       fetchWithTimeout: (url, init, signal, label, timeoutMs) => this.fetchWithTimeout(url, init, signal, label, timeoutMs),

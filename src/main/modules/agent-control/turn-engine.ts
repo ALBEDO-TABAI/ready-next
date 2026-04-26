@@ -110,6 +110,14 @@ interface SkillContextOrchestratorLike {
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
+  // skill-resume G2/G3 — reverse-resolve `skill_*` tool names from prior
+  // assistant tool_use blocks back to a reference-like skill and arm the
+  // hint, so a bare retry intent ("继续") can re-expose internal/primitive
+  // tools even when the user didn't name the skill.
+  rememberReferenceSkillFromPriorToolUses?: (
+    priorToolNames: string[],
+    sessionId?: string,
+  ) => { armed: boolean; skillId?: string; skillName?: string }
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
   listRegisteredSkillTokens?: () => string[]
 }
@@ -522,14 +530,35 @@ export class TurnEngine {
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
-      const hasExplicitSkill = Boolean(firstSkillMatch)
+      let hasExplicitSkill = Boolean(firstSkillMatch)
       const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
-      const skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
+      let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
+      // skill-resume G2/G3 — when the user fired a bare retry intent and the
+      // substring-based skill match failed but the assistant recently used a
+      // skill_* tool_use, reverse-resolve the tool name back to its skill and
+      // re-arm the reference-skill hint. We then synthesize a context text so
+      // the rest of the turn (preferredSkillToolNames, maybeInjectExplicitSkillContext)
+      // flows naturally as if the user had named the skill.
+      let lookbackRearmedSkill: { skillId?: string; skillName?: string } | null = null
+      if (!hasExplicitSkill && isRetryOnlyTurnDetected && previousAssistantSkillToolUses.length > 0) {
+        const rearmed = skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
+          previousAssistantSkillToolUses,
+          request.sessionId,
+        )
+        if (rearmed?.armed && rearmed.skillName) {
+          lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
+          skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
+          )
+        }
+      }
       const referenceSkillHintArmed = hasExplicitSkill
         ? Boolean(skillContextOrchestrator.rememberExplicitReferenceSkillHint?.(
           skillContextInjectionText,
           request.sessionId,
-        ))
+        )) || Boolean(lookbackRearmedSkill)
         : false
       const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(

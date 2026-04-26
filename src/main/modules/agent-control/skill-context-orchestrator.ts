@@ -32,6 +32,13 @@ interface SkillToolRef {
   name?: string
   action?: string
   params?: Array<{ required?: boolean }>
+  /**
+   * skill-resume G2 — populated by `findSkillToolByName` (real production
+   * resolver) so the orchestrator can reverse `skill_<id>_<action>` →
+   * owning skill. Optional because callers that only do action-name lookup
+   * (e.g. `findSkillToolBySkillAction`) don't need to round-trip the id.
+   */
+  skillId?: string
 }
 
 interface SkillSessionLike {
@@ -43,6 +50,13 @@ export class SkillContextOrchestrator {
     extractPrimaryUserInstruction: (raw: string) => string
     listSkills: () => SkillState[]
     resolveSkillToolByAction: (skillId: string, actionName: string) => SkillToolRef | null
+    /**
+     * skill-resume G2 — reverse lookup `skill_<id>_<action>` (or any registered
+     * skill tool name) → SkillToolRef so the orchestrator can map an
+     * assistant's prior tool_use back to the skill that owns it. Optional so
+     * existing test mocks that don't need lookback can omit it.
+     */
+    resolveSkillToolByName?: (toolName: string) => SkillToolRef | null
   }) {}
 
   findExplicitlyRequestedSkills(userText: string): SkillState[] {
@@ -118,6 +132,43 @@ export class SkillContextOrchestrator {
       remembered = true
     }
     return remembered
+  }
+
+  /**
+   * skill-resume G2 — re-arm the reference-skill hint by reverse-resolving
+   * skill_* tool_use names from prior assistant messages. Used by turn-engine
+   * when the user fires a bare retry intent ("继续") and the in-memory hint
+   * was lost (process restart, fresh session, expired TTL) but the assistant
+   * recently used a reference-like skill in this session.
+   *
+   * Why this can't be done by `findExplicitlyRequestedSkills`: that path does
+   * substring matching against normalized skill ids/names. A canonical tool
+   * name like `skill_video_expert_pipeline` normalizes to
+   * `skillvideoexpertpipeline` which does NOT contain
+   * `videoexpertanalyzer` (the skill id) — so the lookback always failed
+   * silently before this method existed.
+   *
+   * Returns the first armed skill (priority = newest tool_use wins, since
+   * callers pass tool names in newest-first order).
+   */
+  rememberReferenceSkillFromPriorToolUses(
+    priorToolNames: string[],
+    sessionId?: string,
+  ): { armed: boolean; skillId?: string; skillName?: string } {
+    if (!sessionId || !priorToolNames.length) return { armed: false }
+    const resolveByName = this.deps.resolveSkillToolByName
+    if (!resolveByName) return { armed: false }
+    const skills = this.deps.listSkills()
+    for (const toolName of priorToolNames) {
+      const def = resolveByName(toolName)
+      if (!def?.skillId) continue
+      const skill = skills.find((entry) => entry.id === def.skillId)
+      if (!skill) continue
+      if (!this.isReferenceLikeSkill(skill)) continue
+      rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+      return { armed: true, skillId: skill.id, skillName: skill.name }
+    }
+    return { armed: false }
   }
 
   hasActiveSkillExecution(_sessionId?: string): boolean {

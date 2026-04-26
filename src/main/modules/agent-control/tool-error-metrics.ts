@@ -65,6 +65,14 @@ export const TOOL_ERROR_METRICS = {
    * 让用户在 UI 与日志里都能看到这次"自动回挂"动作。无候选 / 已有手动附加 → 不 emit。
    */
   sessionRecallAutoAttached: 'session_recall_auto_attached',
+  /**
+   * skill-resume G4 — last-recourse hint recovery for OLD conversations:
+   * meta_json 没有 `lastReferenceSkill`、session.messages 是空（重启后），
+   * 但 auto-attach 的 capsule 文本里出现了规范化的 `skill_<id>_<action>` tool
+   * 名。runtime 反向解析回 reference-like skill 并 arm hint 时打这条。emit 附
+   * `{ scopeId, skillId, skillName }`。无匹配 / 不是 reference-like → 不 emit。
+   */
+  skillReferenceHintRecoveredFromCapsule: 'skill_reference_hint_recovered_from_capsule',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

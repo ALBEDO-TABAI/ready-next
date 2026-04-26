@@ -26,8 +26,13 @@ import { RunCoordinator } from './run-coordinator'
 import {
   snapshotLastReferenceSkill,
   restoreLastReferenceSkill,
+  rememberLastReferenceSkill,
+  getLastReferenceSkill,
   type PersistedReferenceSkillHint,
 } from './skill-reference-hints'
+import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
+import { findSkillToolByName } from '../tools/skills-tools'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
@@ -1510,9 +1515,52 @@ export class AgentControlRuntime extends EventEmitter {
           attachedCount: result.attached.length,
           attachedConversationIds: result.attached.map((c) => c.conversationId),
         })
+        // skill-resume G4 — last-recourse hint recovery for OLD conversations.
+        // If neither the meta_json restore nor the in-process lookback armed a
+        // hint, scan the just-attached capsule texts for canonical skill_*
+        // tool names. This is the only signal we have about prior skill usage
+        // when the conversation predates A1 persistence.
+        if (!getLastReferenceSkill(scopeId)) {
+          this.maybeArmReferenceHintFromCapsules(scopeId, result.attached)
+        }
       }
     } catch (error) {
       console.warn('[AgentControlRuntime] maybeAutoAttachSessionRecallOnResume failed', error)
+    }
+  }
+
+  private maybeArmReferenceHintFromCapsules(
+    scopeId: string,
+    capsules: Array<{
+      summary?: string | null
+      latestTaskTitle?: string | null
+      latestTaskSummary?: string | null
+      title?: string | null
+      resumeTitle?: string | null
+    }>,
+  ): void {
+    try {
+      const texts: string[] = []
+      for (const capsule of capsules) {
+        if (typeof capsule.summary === 'string') texts.push(capsule.summary)
+        if (typeof capsule.latestTaskSummary === 'string') texts.push(capsule.latestTaskSummary)
+        if (typeof capsule.latestTaskTitle === 'string') texts.push(capsule.latestTaskTitle)
+        if (typeof capsule.title === 'string') texts.push(capsule.title)
+        if (typeof capsule.resumeTitle === 'string') texts.push(capsule.resumeTitle)
+      }
+      const recovered = findSkillHintInCapsuleTexts(texts, {
+        resolveToolByName: (name) => findSkillToolByName(name),
+        listSkills: () => getSkillsRuntimeManager().listSkills(),
+      })
+      if (!recovered) return
+      rememberLastReferenceSkill(scopeId, { id: recovered.skillId, name: recovered.skillName })
+      logAgentMetric('skill_reference_hint_recovered_from_capsule', {
+        scopeId,
+        skillId: recovered.skillId,
+        skillName: recovered.skillName,
+      })
+    } catch (error) {
+      console.warn('[AgentControlRuntime] maybeArmReferenceHintFromCapsules failed', error)
     }
   }
 

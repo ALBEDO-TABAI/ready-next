@@ -15,7 +15,7 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 11 documented keys (Phase 4: skill_executions metrics retired; skill-resume E1 added sessionRecallAutoAttached)', () => {
+test('registry exposes the 12 documented keys (skill-resume G4 added skillReferenceHintRecoveredFromCapsule)', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'domainToolNarrowingApplied',
@@ -24,6 +24,7 @@ test('registry exposes the 11 documented keys (Phase 4: skill_executions metrics
     'sessionRecallAutoAttached',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
+    'skillReferenceHintRecoveredFromCapsule',
     'skillReferenceHintTtlSwept',
     'surfaced',
     'toolLoopRepetitionDetected',
@@ -64,4 +65,6 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, 'tool_loop_repetition_detected')
   // skill-resume E1 — auto-attach historical recall capsules on retry intent
   assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
+  // skill-resume G4 — last-recourse hint recovery from auto-attached capsule text
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
 })

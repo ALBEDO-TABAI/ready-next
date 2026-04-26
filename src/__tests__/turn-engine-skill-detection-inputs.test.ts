@@ -43,7 +43,7 @@ test('turn-engine chooses the matched input text when handing to buildPreferredS
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   // The matched text is captured once and reused by preflight hint arming,
   // preferred tool derivation, and inline context injection.
-  assert.match(turnEngine, /const skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
+  assert.match(turnEngine, /(?:const|let) skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
   assert.match(turnEngine, /rememberExplicitReferenceSkillHint\?\.\(\s*skillContextInjectionText,/)
   assert.match(turnEngine, /buildPreferredSkillToolNames\(\s*skillContextInjectionText,/)
   // Still fallback to contextualUserInput when the active-execution branch kicks in.
@@ -55,7 +55,7 @@ test('turn-engine injects explicit skill context from the matched history input 
 
   assert.match(turnEngine, /previousPureUserInputs/)
   assert.match(turnEngine, /maybeInjectExplicitSkillContext\(\{[\s\S]*?userText:\s*skillContextInjectionText,/)
-  assert.match(turnEngine, /const skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
+  assert.match(turnEngine, /(?:const|let) skillContextInjectionText = firstSkillMatch \? firstSkillMatch\.text : contextualUserInput/)
 })
 
 test('turn-engine emits a [skill_detection] log line for observability', () => {
