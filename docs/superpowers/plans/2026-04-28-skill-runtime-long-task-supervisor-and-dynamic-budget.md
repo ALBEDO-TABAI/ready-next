@@ -684,7 +684,8 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 - Integration test a 200-step progressing fixture through bounded renewals until done.
 - Integration test a stalled unchanged `run_state` loop until it reaches `budget_paused`.
 - Integration test weak live background work: one short renewal at most, then `handoff_background` unless progress changes.
-- Verify `budgetRuntime.lease` appears in diagnostics and can be restored with the runtime state.
+- Verify `budgetRuntime.lease` appears in diagnostics while the foreground turn is active.
+- Do not require lease persistence across restart. Restart recovery restores durable continuation handles (`taskRunId`, `detachedTaskId`, `runStatePath`, `outputDir`, `skillId`, `action`), then creates a fresh foreground lease if the user continues.
 
 ## Phase 5: UI And Continuation Semantics
 
@@ -692,14 +693,16 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 
 **Main Changes:**
 
-- Extend run/task types with:
-  - `paused`
-  - `background_running`
-  - `budget_paused`
-  - `awaiting_progress`
+- Keep `background_running` and `budget_paused` as derived runtime/view-model labels, not new persistent DB status enum values.
+- Extend only continuation/view-model surfaces with the data needed to render and resume:
   - `pauseReason`
-  - `backgroundTaskRefs`
-  - `lastProgressAt`
+  - `detachedTaskId`
+  - `taskRunId`
+  - `runStatePath`
+  - `outputDir`
+  - `skillId`
+  - `action`
+  - `progressFingerprint`
 - Update task projection and renderer state normalization:
   - `blockedReason: null` must clear old blocker.
   - `done + blocker` is invalid.
@@ -747,11 +750,9 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 
 **Verification Sources:**
 
-- Renderer task projection.
-- SQLite `skill_task_runs`.
-- detached task JSON.
-- run_state fixture.
-- agent logs and tool logs.
+- Verified in fixture harness: Renderer task projection, SQLite `skill_task_runs`, detached task JSON, run_state fixture, and task-card view-model derivation.
+- Still needs native DB gate before claiming real app closure: app DB-backed supervisor/session-continuity, ready logs, tool logs, and actual button click loop.
+- If `better-sqlite3` ABI mismatch appears after `npm run rebuild:native`, record the DB-backed slice as unproven instead of counting fixture evidence as production DB evidence.
 
 ## Phase 7: Baseline Cleanup And Documentation
 
@@ -763,9 +764,48 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
   - already completed B-plan fixes
   - new long-task supervisor work
   - unrelated churn
+- Record freeze evidence before editing:
+  - `git status --short`
+  - `git branch --show-current`
+  - `git merge-base main HEAD`
+  - `git log --oneline --reverse main..HEAD`
 - Keep commits or PR slices aligned to phases above.
+- PR/commit slicing for the current branch:
+  - B-plan baseline: `e952452`
+  - unrelated perf/db/search/rss/cache: `b8419c8..07fc9e3` and should not be mixed into the long-task supervisor review
+  - skill-resume completed fixes: `aad7f26..cd60126`
+  - long-task supervisor mainline: `90282d3..e3c0688`
+  - Phase 7 cleanup: only long-task supervisor closure plus necessary docs/skill guidance corrections
 - Update AGENTS/CLAUDE docs only when behavior rules change.
+- Required documentation updates for Phase 7:
+  - `PROJECT_OVERVIEW.md`
+  - `DOCUMENTATION.md`
+  - `LESSONS_LEARNED.md`
+  - `CHANGELOG.md`
+  - VEA `SKILL.md`
 - List non-skill test failures separately.
+- Preserve these decisions:
+  - no `skill_executions` restoration
+  - no new skill task DB status enum
+  - no delivery_report-as-live-progress shortcut
+  - no shell monitor success closing parent tasks
+  - no foreground lease persistence across restart
+
+**Phase 7 Audit Backfill:**
+
+- Phase 0-2:
+  - Add explicit `runStatePath + blank task_id + expectedTaskId` coverage; explicit legacy blank ids are accepted only when the caller supplied the exact path.
+  - Add `ready_compat.py` no-identity multi-candidate coverage; result must be structured `blocked/ambiguous`, not unresolved output dir guessing.
+  - Add four-source conflict coverage: SQLite terminal, detached running, run_state running, and projection done must preserve recoverability.
+  - Update VEA guidance so progress inspection starts with `skill_inspect_run_state`; `skill_read_artifact` and shell are fallback only.
+- Phase 3-4:
+  - Add real TurnEngine long-loop coverage with 100+ tool loops, repeated lease renewals, and final completion only after supervisor `closeAllowed`.
+  - Add stalled TurnEngine coverage for unchanged run_state reads leading to `budget_paused` before the hard cap.
+  - Align TurnEngine lease sampling with the controller model: evaluate at `currentLeaseEndIteration - 2`.
+- Phase 5-6:
+  - ChatPanel detached continue must set a structured continuation intent, not just a text draft.
+  - TaskPanel/ChatPanel contracts must cover continue, retry, cancel, and artifact actions after projection restore.
+  - Document fixture evidence separately from unproven real app DB/log/button evidence when native DB loading is broken.
 
 **Verification Commands:**
 
@@ -773,11 +813,21 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 npx tsx --test src/__tests__/skill-task-run-repository.test.ts
 npx tsx --test src/__tests__/skill-runtime-structured-result.test.ts
 npx tsx --test src/__tests__/embedded-skill-vea-runtime-failure-paths.test.ts
+npx tsx --test src/__tests__/run-state-selection.test.ts
+npx tsx --test src/__tests__/skill-task-supervisor.test.ts
+npx tsx --test src/__tests__/turn-engine-route.test.ts
+npx tsx --test src/__tests__/chat-task-projection-contract.test.ts
+npx tsx --test src/__tests__/task-panel-task-projection-actions-contract.test.ts
+npx tsx --test src/__tests__/skill-runtime-user-acceptance.test.ts
 npx tsx --test src/__tests__/skill-resume-end-to-end.test.ts
 npx tsx --test src/__tests__/skill-tool-gating-by-session.test.ts
 npx tsx --test src/__tests__/run-coordinator-budget.test.ts
+npm run rebuild:native
 npm run typecheck
 npm run test:skill
+git diff --check
+git diff --cached --check
+git clean -nd
 ```
 
 ## 3. Suggested Stage Split For Execution
@@ -806,6 +856,7 @@ Do not start with dynamic budget. Without Stage 1 and Stage 2, the budget contro
 - Do use Skill Runtime as the proving ground for C-style generic scheduling.
 - For Phase 3, map paused/background skill work to existing checkpoint/background fields instead of adding new DB status values.
 - `closeAllowed` from the supervisor is the gate for parent task completion.
+- Budget lease is foreground runtime state only; durable restart recovery is handle-based, not lease-based.
 
 ## 5. Resolved And Open Questions For Phase-Level Refinement
 
@@ -814,10 +865,10 @@ Resolved for Phase 3:
 1. `paused/background_running` should not become new top-level phases in Phase 3. Use existing `checkpoint + suspended + waitingFor: background` projection fields.
 2. Ready owns task identity. VEA reads it from env/payload and writes it into `run_state.task_id`; VEA should not generate a separate durable id.
 3. Parent task completion is allowed only through supervisor `closeAllowed`, not through primitive step success.
+4. Phase 7 keeps `budget_paused/background_running` as view-model labels derived from checkpoint/background fields; do not add first-class DB statuses.
 
 Still open for later phases:
 
 1. How much process liveness should be trusted after app restart on macOS, where child process ownership can be ambiguous?
 2. Should progress/waste scoring be skill-specific at first, or a generic scorer with optional skill adapters?
 3. Should supervisor actively poll in the background, or only refresh on user-visible events and task card reads?
-4. Should Phase 5 introduce first-class UI labels for `budget_paused/background_running`, or keep them as view-model labels derived from checkpoint/background fields?

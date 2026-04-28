@@ -27,6 +27,19 @@ test('task panel exposes continue and retry actions from task projections', () =
   assert.doesNotMatch(source, /Execution ID:/)
 })
 
+test('task panel exposes projection cancel and artifact actions after restart projection restore', () => {
+  const source = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
+
+  assert.match(source, /const handleCancelProjection = useCallback\(/)
+  assert.match(source, /activeProjection\.continuationRef\?\.detachedTaskId/)
+  assert.match(source, /window\.electronAPI\.agent\.cancelDetachedSkillTask\(detachedTaskId, activeProjection\.scopeId\)/)
+  assert.match(source, /window\.electronAPI\.agent\.suspendRun\(/)
+  assert.match(source, /activeProjection\?\.recentArtifacts/)
+  assert.match(source, /function revealArtifact\(/)
+  assert.match(source, /window\.electronAPI\.document\.showInFolder\(path\)/)
+  assert.match(source, /void revealArtifact\(artifact\)/)
+})
+
 test('task panel lets projection clear stale active run blockers', () => {
   const source = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
 

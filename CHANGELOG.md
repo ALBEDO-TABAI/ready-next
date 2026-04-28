@@ -1,6 +1,16 @@
 # Ready V5 - 更新日志
 
-## [Unreleased] - 2026-04-23
+## [Unreleased] - 2026-04-28
+
+### Skill Runtime B — Phase 7 long-task supervisor 收口
+
+- **Phase 3 lifecycle separation 补齐回审缺口**：新增四源冲突 supervisor fixture，覆盖 `skill_task_runs` 已 done、detached 仍 running、`run_state.json` 仍 running、projection 显示 done 的组合；监督器保持 `background_running`、禁止 close，并保留恢复句柄。
+- **Phase 4 dynamic budget lease 收口**：TurnEngine 现在在 `currentLeaseEndIteration - 2` 开始采样评估 lease；补真实长循环测试（100+ 次工具循环、进度推进、多次 renew、最终只在 supervisor close 后结束）和 stalled loop 测试（重复读取不变 run_state 后进入 `budget_paused`，不续到硬上限）。
+- **Phase 5 continuation state 收口**：ChatPanel 的“继续后台任务”改为写入结构化 continuation intent，优先携带 projection / task run 中的 `taskRunId / detachedTaskId / runStatePath / outputDir / skillId / action / pauseReason`，不再只塞一段纯文本。
+- **Phase 6 acceptance gates 加固**：补 TaskPanel projection action 合同，覆盖 continue / retry / cancel / artifact；acceptance fixture 继续验证 `skill_task_runs`、task projections、detached JSON、`run_state.json` 与任务卡 view-model 的同一 task identity。
+- **Phase 0-2 回审补洞**：显式 `runStatePath` 中 legacy blank `task_id` 允许作为恢复锚点；`ready_compat.py` 在无身份多候选输出目录时返回 `blocked + ambiguous` 结构化结果；VEA `SKILL.md` 把查看进度的首选工具改为 `skill_inspect_run_state`。
+- **收口边界**：`background_running / budget_paused` 仍是 view-model 派生状态，不新增 DB status enum；budget lease 不跨重启持久化，重启只恢复 durable continuation handles。
+- **验收状态**：Phase 7 focused group 55/55 通过；仍观察到 `better-sqlite3` Node ABI mismatch 日志，真实 app DB-backed 闭环与 ready 日志关联仍不能声明已证明。
 
 ### Skill Runtime B — Phase 0 补洞 + Phase 1 VEA Progress Contract
 

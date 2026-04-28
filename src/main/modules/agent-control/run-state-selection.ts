@@ -159,7 +159,7 @@ export function selectRunStateCandidate(params: {
         candidates: resolved && explicitCandidate ? dedupeCandidatesByPath([explicitCandidate, resolved]) : [],
       }
     }
-    if (explicitCandidate?.taskId === expectedTaskId) {
+    if (explicitCandidate && (!explicitCandidate.taskId || explicitCandidate.taskId === expectedTaskId)) {
       const resolved = resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId)
       return { path: resolved.path, ambiguous: false, candidates: dedupeCandidatesByPath([explicitCandidate, resolved]) }
     }

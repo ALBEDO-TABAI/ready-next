@@ -1550,7 +1550,10 @@ export class TurnEngine {
           state.interactionState = 'suspended'
           break
         }
-        if (skillBudgetLeaseState && iterations >= skillBudgetLeaseState.currentLeaseEndIteration) {
+        const leaseEvaluationIteration = skillBudgetLeaseState
+          ? Math.max(0, skillBudgetLeaseState.currentLeaseEndIteration - 2)
+          : Number.POSITIVE_INFINITY
+        if (skillBudgetLeaseState && iterations >= leaseEvaluationIteration) {
           const evaluation = evaluateSkillBudgetLease({
             state: skillBudgetLeaseState,
             iteration: iterations,

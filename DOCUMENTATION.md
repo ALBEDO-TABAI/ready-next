@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-04-18
+> 更新时间: 2026-04-28
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -397,7 +397,7 @@ Ready 采用 Electron 三层架构：
 ### 7.1b Scope Run 摘要
 - 主进程会为最近 scope run 维护任务摘要，供聊天面板刷新后恢复最近任务。
 - 统一任务字段包括：`taskTitle / taskSummary / steps / currentStepId / waitingFor / resumableActions / recentArtifacts / memoryCapture`
-- Browser Agent V7 阶段会直接投影成步骤；workflow skill blocker 会映射成 `input / confirmation / agent_result` 等等待态。
+- Browser Agent V7 阶段会直接投影成步骤；skill task blocker 会映射成 `background / clarification / confirmation / agent_result` 等等待态。
 - renderer 在收到最终 `done / error / cancelled` scope run 事件后，会再次回写 assistant 消息快照，确保消息上的任务卡不会冻结在较早的运行中状态。
 
 ### 7.1c 会话回看主链
@@ -445,9 +445,9 @@ Ready 采用 Electron 三层架构：
 - 导入/移除 custom skill
 - 调度 Python / Node / Shell skill action
 - 记录 jobs / schedules / stats
-- 编译 `ready-skill.json + skill.workflow.json + SKILL.md`
-- 持久化 workflow execution / step history / artifacts
-- 对 workflow skill 提供 blocker-based resume / restart-from-step
+- 编译 `ready-skill.json + SKILL.md`，并兼容历史 custom skill 的旧 `skill.workflow.json`
+- 通过 `SkillTaskTracker` 持久化 `skill_task_runs`、步骤、最近产物与 continuation handle
+- 通过 task projection + detached task + `run_state.json` 对长任务提供后台继续、预算暂停和恢复入口
 
 ### 8.3 UI
 技能中心当前支持：
@@ -455,8 +455,8 @@ Ready 采用 Electron 三层架构：
 - 拖拽导入技能目录
 - 默认命令生成
 - 技能说明更新与删除/移除操作
-- Recent Executions 区域，展示 status / current step / blocker / recent artifacts
-- 在 blocker 为 `need_input / need_confirmation / need_agent_result` 时直接继续提交 execution
+- 任务卡与聊天面板展示 status / current step / blocker / recent artifacts
+- 对 `background_running / budget_paused / awaiting_*` 任务提供 continue / retry / cancel / artifact 操作
 
 ### 8.3b ChatPanel 任务区
 - Agent 聊天面板新增 `当前任务 / 后台任务` 两块任务视图，不再只靠 tool trace 胶囊表达进度。
@@ -643,21 +643,19 @@ npm run verify
 | `unknownSurfaced` | `tool_error_unknown_surfaced` | tool-runtime 遇到 unknown-kind 错误但仍 surface（少数未分类路径） |
 | `inputValidation` | `tool_input_validation_failed` | dispatch 入口 Zod 拒绝参数 |
 | `resolutionViolation` | `tool_resolution_violation_post_arbitration` | 策略裁决层后仍出现 invariant 失谐 |
-| `skillExecutionMissing` | `skill_execution_missing` | stale executionId 被识别并回灌 |
-| `ttlSwept` | `skill_executions_ttl_swept` | TTL sweep 完成一次（每小时 + 启动后 30s 首跑） |
+| `skillReferenceHintTtlSwept` | `skill_reference_hint_ttl_swept` | reference-skill hint sweep 完成一次（每小时 + 启动后 30s 首跑） |
 
 日志位置：`<系统临时目录>/ready-agent-metrics.log`（macOS：`/tmp/ready-agent-metrics.log`）。
 
 ### 生命周期
 
-- `skill_executions` 终态行（`completed / failed / cancelled`）7 天清理；活跃行永不清理
-- Sweep 启动 30s 后首跑、之后每小时跑一次
-- **重要约束**：DB 未开启 `PRAGMA foreign_keys = ON`，所以 Migration 018 的 `ON DELETE CASCADE` 实际不生效；任何跨表清理必须显式先删 `skill_execution_steps` + `skill_execution_artifacts`，再删 `skill_executions`
-- 新 executionId 是 `e-{8hex}` 前缀；旧 UUID 行继续兼容（`getExecution` 用 `WHERE id = ?` format-agnostic）
+- 旧 `skill_executions` 状态机已退役；Phase 4 之后不再写 workflow execution / step / artifact 表
+- `reference-skill hint` 是内存态，启动 30s 后首跑 sweep，之后每小时清理一次过期 hint
+- 长任务事实来源拆分为 `skill_task_runs`、detached task JSON、`run_state.json` 与 task projections；`background_running / budget_paused` 是前端 view-model 派生态，不新增 DB status enum
+- budget lease 只存在于当前前台 turn 的 task budget runtime 中，重启后只恢复 durable continuation handle（taskRunId / detachedTaskId / runStatePath / outputDir 等），不恢复 lease 本身
 
 ### 调试入口
 
 - `grep 'tool_error_surfaced' /tmp/ready-agent-metrics.log` — 最近被吞的 handler 抛错
 - `grep 'tool_input_validation_failed' /tmp/ready-agent-metrics.log | jq '.toolName'` — 哪些工具的输入校验最常被模型搞错
-- `grep 'skill_execution_missing' /tmp/ready-agent-metrics.log` — 哪些 skill 经常遇到 stale executionId
-- `grep 'skill_executions_ttl_swept' /tmp/ready-agent-metrics.log | tail -5` — sweep 跑过几次，每次清了多少行
+- `grep 'skill_reference_hint_ttl_swept' /tmp/ready-agent-metrics.log | tail -5` — reference hint sweep 跑过几次，每次清了多少条 hint

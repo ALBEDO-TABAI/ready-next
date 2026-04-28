@@ -369,6 +369,60 @@ test('VEA ready_compat rejects mismatched root output when no matching task outp
   }
 })
 
+test('VEA ready_compat reports ambiguous output when identity is missing and multiple candidates exist', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vea-compat-ambiguous-'))
+  try {
+    const fakeOrchestrator = join(root, 'fake_orchestrator.py')
+    const resultPath = join(root, 'result.json')
+    const harness = join(root, 'harness.py')
+
+    writeFileSync(fakeOrchestrator, [
+      'import json, sys, time',
+      'from pathlib import Path',
+      'args = sys.argv[1:]',
+      'out_root = Path(args[args.index("-o") + 1]) if "-o" in args else Path.cwd()',
+      'first = out_root / "first-video"',
+      'second = out_root / "second-video"',
+      'for path, task_id in ((first, "dst-first"), (second, "dst-second")):',
+      '    path.mkdir(parents=True, exist_ok=True)',
+      '    (path / "scene_scores.json").write_text("{}", encoding="utf-8")',
+      '    (path / "run_state.json").write_text(json.dumps({"task_id":task_id,"status":"running"}), encoding="utf-8")',
+      '    time.sleep(0.02)',
+      'print(f"Output Dir: {out_root}")',
+      'raise SystemExit(0)',
+      '',
+    ].join('\n'), 'utf8')
+
+    writeFileSync(harness, [
+      'import importlib.util, os, sys',
+      'from pathlib import Path',
+      `spec = importlib.util.spec_from_file_location("ready_compat", ${JSON.stringify(READY_COMPAT)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      `module.ORCHESTRATOR = Path(${JSON.stringify(fakeOrchestrator)})`,
+      `os.environ["READY_SKILL_RESULT_PATH"] = ${JSON.stringify(resultPath)}`,
+      `sys.argv = ["ready_compat.py", "--action", "video_expert_pipeline", "--payload-json", ${JSON.stringify(JSON.stringify({ url: 'https://example.test/video', outputDir: join(root, 'outputs') }))}]`,
+      'raise SystemExit(module.main())',
+      '',
+    ].join('\n'), 'utf8')
+
+    execFileSync('python3', [harness], { encoding: 'utf8' })
+
+    const payload = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      ok: boolean
+      status: string
+      error?: { message?: string }
+    }
+
+    assert.equal(payload.ok, false)
+    assert.equal(payload.status, 'blocked')
+    assert.match(payload.error?.message || '', /ambiguous|multiple/i)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('runtime-manager treats structured ok:false as a failed direct action even when process exits 0', async () => {
   const root = mkdtempSync(join(tmpdir(), 'skill-structured-result-'))
   try {

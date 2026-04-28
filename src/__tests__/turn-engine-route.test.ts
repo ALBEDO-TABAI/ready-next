@@ -8,7 +8,7 @@ import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
-import { SkillTaskSupervisor } from '../main/modules/agent-control/skill-task-supervisor'
+import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
   rememberLastReferenceSkill,
@@ -224,6 +224,49 @@ function createHost(overrides?: Record<string, unknown>) {
       budgetLimited: false,
       recoveryHistory: [],
     }),
+    ...overrides,
+  }
+}
+
+function makeSkillSnapshot(overrides?: Partial<SkillTaskSupervisorSnapshot>): SkillTaskSupervisorSnapshot {
+  const progress = overrides?.progress || {}
+  return {
+    taskRunId: 'str-loop',
+    detachedTaskId: 'dst-loop',
+    skillId: 'video-expert-analyzer',
+    scopeId: 'scope-test',
+    sessionId: 'scope-test',
+    action: 'video_expert_pipeline',
+    status: 'background_running',
+    hasLiveWork: true,
+    hasRecentProgress: true,
+    closeAllowed: false,
+    ambiguous: false,
+    stale: false,
+    outputDir: '/tmp/ready/output',
+    runStatePath: '/tmp/ready/output/run_state.json',
+    sceneScoresPath: '/tmp/ready/output/scene_scores.json',
+    deliveryReportPath: '/tmp/ready/output/delivery_report.json',
+    progress: {
+      currentStage: 'score_batches',
+      totalScenes: 120,
+      completedScenes: 0,
+      coverageRatio: 0,
+      updatedAt: '2026-04-28T02:00:00.000Z',
+      ...progress,
+    },
+    blockers: [],
+    pauseReason: null,
+    resumePayload: {
+      taskRunId: 'str-loop',
+      detachedTaskId: 'dst-loop',
+      outputDir: '/tmp/ready/output',
+      runStatePath: '/tmp/ready/output/run_state.json',
+    },
+    sourceObservations: [],
+    progressFingerprint: 'fp-loop',
+    observedAt: '2026-04-28T02:00:00.000Z',
+    lastProgressAt: '2026-04-28T02:00:00.000Z',
     ...overrides,
   }
 }
@@ -1907,6 +1950,293 @@ test('TurnEngine proves executeToolBatch budgetLimited through real run_state su
   } finally {
     restoreLongToolDefinition()
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('TurnEngine evaluates skill budget leases two iterations before lease end', async () => {
+  const engine = new TurnEngine()
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  let executedBatches = 0
+  try {
+    const { request } = createRequest({
+      userText: '继续视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            ambiguous: true,
+            progressFingerprint: 'fp-stalled',
+          }),
+        },
+        requestToolLoopResponse: async () => {
+          const nextBatch = executedBatches + 1
+          return {
+            text: '继续执行',
+            toolCalls: [{ id: `tool-${nextBatch}`, name: 'skill_video_expert_pipeline', input: { batch: nextBatch } }],
+            stopReason: 'tool_calls',
+          }
+        },
+        executeToolBatch: async () => {
+          executedBatches += 1
+          return {
+            results: [{
+              id: `tool-${executedBatches}`,
+              name: 'skill_video_expert_pipeline',
+              input: { batch: executedBatches },
+              result: {
+                text: '仍在运行',
+                data: { currentStage: 'score_batches', status: 'running' },
+              },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(executedBatches, 18)
+    assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
+    assert.equal(result.skillTaskLifecycle?.phase, 'checkpoint')
+  } finally {
+    restoreLongToolDefinition()
+  }
+})
+
+test('TurnEngine renews a progressing long skill lease and closes only when supervisor allows', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  let executedBatches = 0
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const { request } = createRequest({
+      userText: '继续视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => {
+            const closeAllowed = executedBatches >= 100
+            return makeSkillSnapshot({
+              status: closeAllowed ? 'done' : 'background_running',
+              hasLiveWork: !closeAllowed,
+              closeAllowed,
+              progress: {
+                currentStage: closeAllowed ? 'completed' : 'score_batches',
+                totalScenes: 120,
+                completedScenes: executedBatches,
+                coverageRatio: executedBatches / 120,
+                updatedAt: new Date(Date.parse('2026-04-28T02:00:00.000Z') + executedBatches * 1000).toISOString(),
+              },
+              progressFingerprint: `fp-${executedBatches}`,
+            })
+          },
+        },
+        requestToolLoopResponse: async () => {
+          const nextBatch = executedBatches + 1
+          return {
+            text: '继续执行',
+            toolCalls: [{ id: `tool-${nextBatch}`, name: 'skill_video_expert_pipeline', input: { batch: nextBatch } }],
+            stopReason: 'tool_calls',
+          }
+        },
+        executeToolBatch: async () => {
+          executedBatches += 1
+          return {
+            results: [{
+              id: `tool-${executedBatches}`,
+              name: 'skill_video_expert_pipeline',
+              input: { batch: executedBatches },
+              result: {
+                text: '仍在运行',
+                data: {
+                  currentStage: 'score_batches',
+                  completedScenes: executedBatches,
+                  runStatePath: '/tmp/ready/output/run_state.json',
+                },
+              },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(result.success, true)
+    assert.equal(result.skillTaskLifecycle, null)
+    assert.ok(executedBatches >= 100 && executedBatches < 220)
+    assert.ok(metrics.filter((event) =>
+      event.metric === 'skill_budget_lease_decision' && event.decision === 'renew'
+    ).length >= 4)
+    assert.ok(metrics.some((event) =>
+      event.metric === 'skill_budget_lease_decision' && event.decision === 'close'
+    ))
+  } finally {
+    restoreLongToolDefinition()
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('TurnEngine pauses a stalled long skill lease before the hard cap', async () => {
+  const engine = new TurnEngine()
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  let executedBatches = 0
+  try {
+    const { request } = createRequest({
+      userText: '继续视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            progress: {
+              currentStage: 'score_batches',
+              totalScenes: 120,
+              completedScenes: 12,
+              coverageRatio: 0.1,
+              updatedAt: '2026-04-28T02:00:00.000Z',
+            },
+            progressFingerprint: 'fp-static',
+          }),
+        },
+        requestToolLoopResponse: async () => ({
+          text: '继续检查',
+          toolCalls: [{
+            id: `tool-${executedBatches + 1}`,
+            name: 'skill_inspect_run_state',
+            input: { runStatePath: '/tmp/ready/output/run_state.json' },
+          }],
+          stopReason: 'tool_calls',
+        }),
+        executeToolBatch: async () => {
+          executedBatches += 1
+          return {
+            results: [{
+              id: `tool-${executedBatches}`,
+              name: 'skill_inspect_run_state',
+              input: { runStatePath: '/tmp/ready/output/run_state.json' },
+              result: {
+                text: '状态未变化',
+                data: {
+                  currentStage: 'score_batches',
+                  runStatePath: '/tmp/ready/output/run_state.json',
+                },
+              },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
+    assert.equal(result.interactionState, 'suspended')
+    assert.ok(executedBatches < 20)
+  } finally {
+    restoreLongToolDefinition()
   }
 })
 

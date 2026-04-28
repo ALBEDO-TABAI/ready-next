@@ -137,3 +137,23 @@ test('run_state selection verifies explicit paths unless they are marked trusted
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('run_state selection accepts explicit legacy blank task id paths', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-explicit-blank-'))
+  try {
+    const path = join(root, 'run_state.json')
+    writeFileSync(path, JSON.stringify({ status: 'running', current_stage: 'score_batches' }), 'utf8')
+
+    const selected = selectRunStateCandidate({
+      rootDir: root,
+      explicitRunStatePath: path,
+      expectedTaskId: 'dst-expected',
+    })
+
+    assert.equal(selected.path, path)
+    assert.equal(selected.ambiguous, false)
+    assert.equal(selected.candidates.length, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

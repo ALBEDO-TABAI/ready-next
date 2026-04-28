@@ -2597,9 +2597,28 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     if (currentScopeId !== scopeId) {
       void loadConversation(scopeId)
     }
-    setInputValue(`继续后台任务 ${detachedTaskId}`, { preserveContinuationIntent: true })
+    const run =
+      useAgent.getState().scopeRunStates[scopeId] ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId && (
+        item.taskId === taskId ||
+        item.taskId === detachedTaskId ||
+        item.taskContinuation?.detachedTaskId === detachedTaskId ||
+        item.taskContinuation?.taskId === detachedTaskId
+      )) ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuationRun: Pick<ScopeRunState, 'taskId' | 'taskContinuation' | 'blockedReason'> = run || {
+      taskId: detachedTaskId,
+      blockedReason: '后台任务仍在运行',
+      taskContinuation: {
+        taskId: detachedTaskId,
+        detachedTaskId,
+        pauseReason: 'background_running',
+        blockerType: 'background_running',
+      },
+    }
+    setComposerDraft(`继续后台任务 ${detachedTaskId}`, buildRunContinuationIntent(continuationRun) || null)
     focusInputWithResize()
-  }, [currentScopeId, focusInputWithResize, loadConversation, setInputValue])
+  }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
 
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =

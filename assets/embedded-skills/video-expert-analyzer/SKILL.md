@@ -19,16 +19,19 @@ when-to-use: |
 - **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ 必须优先 typed action**
   - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，30 min 超时
   - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，30 min 超时
-- **快速探针（cat 文件 / ls 目录 / 看 run_state.json / wc 输出）→ `skill_run_shell`**
-  - 只用于轻量诊断；它不是长链路的等价 fallback。默认 60 秒，硬上限 10 分钟，超时即 SIGTERM 整个进程组
+- **查看进度 → 优先 `skill_inspect_run_state`**
+  - 传 `runStatePath` 或 `outputDir`，让 Ready 判断 running / background_running / budget_paused / done，不要先绕 shell。
+- **低级诊断 → `skill_read_artifact` 或 `skill_run_shell`**
+  - 只在 inspect 不够用时 fallback；不是长链路 fallback。shell 默认 60 秒，硬上限 10 分钟。
 - **读 artifact** → `skill_read_artifact`；**写临时报告/scratchpad** → `skill_write_artifact`
 
 反模式（真踩过的坑，不要再重复）：
 - ❌ `skill_run_shell({"command": "python3 scripts/pipeline_enhanced.py <url>"})` — 必超时
 - ❌ `skill_run_shell({"command": "cd <dir> && python3 scripts/orchestrate_vnext.py ..."})` — 同上
 - ❌ typed action 失败后立刻改用 shell 重跑长链路 — 会丢失结构化状态与 30 分钟动作契约
+- ❌ 看进度先 `cat run_state.json` 或 tail 日志 — 易错过 detached / projection / lease 状态
 - ✅ `skill_video_expert_pipeline({"url": "<url>", "outputDir": "<dir>"})`
-- ✅ 想看进度：`skill_read_artifact({"relativePath": "<videoSlug>/run_state.json"})`
+- ✅ 想看进度：`skill_inspect_run_state({"runStatePath": "<outputDir>/run_state.json"})`
 
 如果当前会话里**没看到** `skill_video_expert_pipeline` / `skill_video_expert_ai_analyze` 这两个工具：说明 reference-skill hint 还没 arm 上。在回复里显式提到 "video-expert-analyzer" 或 "VEA" 让 hint 上线，下一回合就会看到。
 

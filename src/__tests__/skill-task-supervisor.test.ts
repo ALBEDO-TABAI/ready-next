@@ -491,6 +491,75 @@ test('SkillTaskSupervisor marks detached done vs run_state blocked as ambiguous'
   }
 })
 
+test('SkillTaskSupervisor preserves recovery when all durable sources conflict', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-four-source',
+      status: 'running',
+      current_stage: 'score_batches',
+      completed_scenes: 7,
+      updated_at: '2026-04-28T01:59:00.000Z',
+    })
+    const taskRun = makeRun({
+      id: 'str-four-source',
+      status: 'done',
+      detachedTaskId: 'dst-four-source',
+      outputDir: root,
+      runStatePath,
+      resumePayload: {
+        detachedTaskId: 'dst-four-source',
+        runStatePath,
+        outputDir: root,
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+      },
+      finishedAt: '2026-04-28T01:45:00.000Z',
+    })
+    const detached = makeDetached({
+      id: 'dst-four-source',
+      status: 'running',
+      outputDir: root,
+      runStatePath,
+    })
+
+    const snapshot = makeSupervisor({
+      readProjection: () => ({
+        module: 'skill',
+        taskId: 'skill:scope-supervisor:video-expert-analyzer',
+        taskTitle: '技能执行',
+        taskSummary: '投影显示已完成',
+        steps: [{ id: 'done', title: 'done', status: 'done', updatedAt: '2026-04-28T01:50:00.000Z' }],
+        currentStepId: 'done',
+        waitingFor: 'none',
+        resumableActions: ['none'],
+        blockedReason: null,
+        taskContinuation: null,
+        recentArtifacts: [],
+      }),
+    }).inspectSkillTask({
+      taskRun,
+      detachedTask: detached,
+      taskRunId: taskRun.id,
+      detachedTaskId: detached.id,
+      sessionId: 'scope-supervisor',
+      expectedTaskId: 'dst-four-source',
+    })
+
+    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.hasLiveWork, true)
+    assert.equal(snapshot.ambiguous, true)
+    assert.equal(snapshot.closeAllowed, false)
+    assert.equal(snapshot.taskRunId, 'str-four-source')
+    assert.equal(snapshot.detachedTaskId, 'dst-four-source')
+    assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
+    assert.equal(snapshot.resumePayload?.outputDir, root)
+    assert.equal(snapshot.sourceObservations.some((item) => item.source === 'projection'), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('SkillTaskSupervisor keeps failed detached output paths', () => {
   const failed = makeDetached({
     id: 'dst-failed',

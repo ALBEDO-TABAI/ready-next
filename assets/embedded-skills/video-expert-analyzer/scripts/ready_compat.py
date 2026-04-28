@@ -149,9 +149,9 @@ def _resolve_active_candidate(candidate: Path, expected_task_id: str = "") -> Pa
     return candidate
 
 
-def _find_video_output_dir(output_root: Path, started_at: float, expected_task_id: str = "") -> Optional[Path]:
+def _find_video_output_dir_result(output_root: Path, started_at: float, expected_task_id: str = "") -> tuple[Optional[Path], str]:
     if not output_root.exists():
-        return None
+        return None, ""
 
     candidates: list[tuple[float, Path, str]] = []
     seen: set[str] = set()
@@ -174,44 +174,53 @@ def _find_video_output_dir(output_root: Path, started_at: float, expected_task_i
         seen.add(candidate_key)
         candidates.append((newest_mtime, candidate, _state_task_id(candidate)))
     if not candidates:
-        return None
+        return None, ""
     if expected_task_id:
         matches = [item for item in candidates if item[2] == expected_task_id]
         if matches:
             matches.sort(key=lambda item: item[0], reverse=True)
-            return matches[0][1]
-        return None
+            return matches[0][1], ""
+        return None, ""
     candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1] if len(candidates) == 1 else None
+    if len(candidates) == 1:
+        return candidates[0][1], ""
+    candidate_list = ", ".join(str(item[1]) for item in candidates[:5])
+    return None, f"ready_compat: ambiguous output directory; multiple run_state candidates found without task identity: {candidate_list}"
 
 
-def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, started_at: float) -> Optional[Path]:
+def _find_video_output_dir(output_root: Path, started_at: float, expected_task_id: str = "") -> Optional[Path]:
+    output_dir, _resolution_error = _find_video_output_dir_result(output_root, started_at, expected_task_id)
+    return output_dir
+
+
+def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, started_at: float) -> tuple[Optional[Path], str]:
     if action == "video_expert_ai_analyze":
         scores = (payload.get("sceneScoresPath") or payload.get("source") or "").strip()
-        return Path(scores).expanduser().resolve().parent if scores else None
+        return (Path(scores).expanduser().resolve().parent, "") if scores else (None, "")
 
     expected_task_id = os.environ.get("READY_SKILL_TASK_ID", "").strip()
     detected = _candidate_from_output(f"{stdout}\n{stderr}")
     if detected and _is_video_output_dir(detected.expanduser().resolve()):
         detected_root = detected.expanduser().resolve()
-        if expected_task_id:
-            found = _find_video_output_dir(detected_root, started_at, expected_task_id)
-            if found:
-                return found
-        else:
-            return detected_root
+        found, resolution_error = _find_video_output_dir_result(detected_root, started_at, expected_task_id)
+        if found:
+            return found, ""
+        if resolution_error:
+            return None, resolution_error
 
     output_root = payload.get("outputDir")
     if output_root:
-        found = _find_video_output_dir(
+        found, resolution_error = _find_video_output_dir_result(
             Path(str(output_root)).expanduser().resolve(),
             started_at,
             expected_task_id,
         )
         if found:
-            return found
+            return found, ""
+        if resolution_error:
+            return None, resolution_error
 
-    return detected.expanduser().resolve() if detected and not expected_task_id else None
+    return (detected.expanduser().resolve(), "") if detected and not expected_task_id else (None, "")
 
 
 def _build_outputs(output_dir: Optional[Path]) -> dict[str, str]:
@@ -271,7 +280,9 @@ def _validate_delivery_report(report_path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def _classify_result(return_code: int, output_dir: Optional[Path], stderr: str) -> tuple[bool, str, str]:
+def _classify_result(return_code: int, output_dir: Optional[Path], stderr: str, resolution_error: str = "") -> tuple[bool, str, str]:
+    if resolution_error:
+        return False, "blocked", resolution_error
     if not output_dir:
         return False, "failed", stderr.strip() or "ready_compat: output directory was not resolved"
 
@@ -358,9 +369,9 @@ def main() -> int:
         )
         stdout = completed.stdout or ""
         stderr = completed.stderr or ""
-        output_dir = _resolve_output_dir(action, payload, stdout, stderr, started_at)
+        output_dir, resolution_error = _resolve_output_dir(action, payload, stdout, stderr, started_at)
         outputs = _build_outputs(output_dir)
-        ok, status, error_message = _classify_result(completed.returncode, output_dir, stderr)
+        ok, status, error_message = _classify_result(completed.returncode, output_dir, stderr, resolution_error)
         _write_structured_result(
             ok=ok,
             status=status,

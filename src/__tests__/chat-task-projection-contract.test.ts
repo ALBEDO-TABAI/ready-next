@@ -63,3 +63,15 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(viewModel, /recoveryHistory\?:/)
   assert.match(viewModel, /recentArtifacts\?:/)
 })
+
+test('chat detached continue preserves structured continuation handles', () => {
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+
+  assert.match(chatPanel, /const handleContinueDetachedTask = useCallback/)
+  assert.match(chatPanel, /item\.taskContinuation\?\.detachedTaskId === detachedTaskId/)
+  assert.match(chatPanel, /item\.taskContinuation\?\.taskId === detachedTaskId/)
+  assert.match(chatPanel, /pauseReason: 'background_running'/)
+  assert.match(chatPanel, /const continuationRun:/)
+  assert.match(chatPanel, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
+  assert.doesNotMatch(chatPanel, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
+})
