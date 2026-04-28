@@ -405,6 +405,9 @@ export class SkillHostController {
       if (errorValues.includes(valueStr)) {
         return { status: 'error', detail: valueStr }
       }
+      if (valueStr === 'running' || valueStr === 'in_progress' || valueStr === 'waiting_for_batches') {
+        return { status: 'blocked', detail: valueStr }
+      }
       return { status: 'done', detail: valueStr }
     }
 

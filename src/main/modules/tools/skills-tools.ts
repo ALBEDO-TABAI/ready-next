@@ -1045,6 +1045,7 @@ export async function executeSkillTool(
         const output = await executeInspectRunState({
           outputDir: typeof args.outputDir === 'string' ? args.outputDir : undefined,
           taskId: typeof args.taskId === 'string' ? args.taskId : undefined,
+          expectedTaskId: typeof args.expectedTaskId === 'string' ? args.expectedTaskId : undefined,
           maxRawBytes: typeof args.maxRawBytes === 'number' ? args.maxRawBytes : undefined,
         })
         const status = inferSkillRunStatusFromOutput(output)

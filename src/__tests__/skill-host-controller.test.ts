@@ -468,6 +468,11 @@ test('detectStatus stdout_json_line: parses last JSON line and maps blocked/erro
   const done = await c.detectStatus(requirements, { exitCode: 0, stdout: doneOut, stderr: '' })
   assert.equal(done.status, 'done')
 
+  const runningOut = '{"status":"running"}'
+  const running = await c.detectStatus(requirements, { exitCode: 0, stdout: runningOut, stderr: '' })
+  assert.equal(running.status, 'blocked')
+  assert.equal(running.detail, 'running')
+
   // No JSON line + exit 0 → done.
   const noJson = await c.detectStatus(requirements, { exitCode: 0, stdout: 'plain text', stderr: '' })
   assert.equal(noJson.status, 'done')

@@ -7,7 +7,11 @@ const SEARCH_DEPTH_LIMIT = 1
 const MAX_ARTIFACTS = 6
 
 interface RunStateSummary {
+  currentStage: string | null
   currentStep: string | null
+  totalScenes: string | null
+  completedScenes: string | null
+  coverageRatio: string | null
   completedSteps: string | null
   waitingFor: string | null
   lastError: string | null
@@ -49,7 +53,11 @@ function stringifyStateValue(value: unknown): string | null {
 function extractRunStateSummary(parsed: unknown): RunStateSummary {
   if (!parsed || typeof parsed !== 'object') {
     return {
+      currentStage: null,
       currentStep: null,
+      totalScenes: null,
+      completedScenes: null,
+      coverageRatio: null,
       completedSteps: null,
       waitingFor: null,
       lastError: null,
@@ -65,7 +73,11 @@ function extractRunStateSummary(parsed: unknown): RunStateSummary {
     return null
   }
   return {
+    currentStage: pick('current_stage', 'currentStage'),
     currentStep: pick('current_step', 'currentStep', 'step'),
+    totalScenes: pick('total_scenes', 'totalScenes'),
+    completedScenes: pick('completed_scenes', 'completedScenes'),
+    coverageRatio: pick('coverage_ratio', 'coverageRatio'),
     completedSteps: pick('completed_steps', 'completedSteps'),
     waitingFor: pick('waiting_for', 'waitingFor', 'pending', 'pendingHandoff'),
     lastError: pick('last_error', 'lastError', 'error'),
@@ -242,6 +254,12 @@ export function buildLongSkillRunningProjection(params: {
   const probeDirs = collectProbeDirs(params.toolInput)
   const runStatePath = probeDirs.map(findRunStateFile).find(Boolean) || null
   const runState = readRunState(runStatePath)
+  const progressText = runState?.totalScenes && runState?.completedScenes
+    ? `${runState.completedScenes}/${runState.totalScenes}`
+    : runState?.coverageRatio
+      ? `${Math.round(Number(runState.coverageRatio) * 100)}%`
+      : null
+  const stageText = runState?.currentStage || runState?.currentStep || null
   const artifacts = collectArtifacts({
     probeDirs: runStatePath ? [dirname(runStatePath), ...probeDirs] : probeDirs,
     runStatePath,
@@ -250,11 +268,11 @@ export function buildLongSkillRunningProjection(params: {
   })
 
   const confirmations = [
-    runState?.currentStep ? `阶段：${runState.currentStep}` : null,
-    !runState?.currentStep && runState?.status ? `状态：${runState.status}` : null,
+    stageText ? `阶段：${stageText}` : null,
+    progressText ? `进度：${progressText}` : null,
+    !stageText && runState?.status ? `状态：${runState.status}` : null,
     runState?.waitingFor ? `等待：${runState.waitingFor}` : null,
     artifacts.length > 0 ? `已发现 ${artifacts.length} 个中间文件` : null,
-    !runState && artifacts.length === 0 ? '工具仍在运行' : null,
   ].filter(Boolean)
   const detail = `正在执行技能工具，已运行 ${elapsed}${confirmations.length > 0 ? `；${confirmations.join('；')}` : ''}`
   const stepDetail = runState?.lastError
@@ -267,7 +285,7 @@ export function buildLongSkillRunningProjection(params: {
     taskSummary: detail,
     steps: [{
       id: params.toolName,
-      title: runState?.currentStep ? `执行：${runState.currentStep}` : '执行技能工具',
+      title: stageText ? `执行：${stageText}` : '执行技能工具',
       status: 'running',
       detail: stepDetail,
       updatedAt,

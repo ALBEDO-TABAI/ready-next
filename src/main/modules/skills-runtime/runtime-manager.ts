@@ -748,9 +748,11 @@ export class SkillsRuntimeManager {
         )
       }
 
-      const mergedEnv = spawnHandle?.envOverrides
-        ? { ...spawnHandle.envOverrides, ...(request.env || {}) }
-        : request.env
+      const mergedEnv = {
+        ...(spawnHandle?.envOverrides || {}),
+        READY_SKILL_TASK_ID: jobId,
+        ...(request.env || {}),
+      }
 
       try {
         const result = await this.runDefinitionActionDirect(

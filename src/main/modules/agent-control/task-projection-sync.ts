@@ -82,7 +82,17 @@ function resolveResumableActions(
   status: TaskProjectionRecord['status'],
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['resumableActions'] {
-  if (summary.resumableActions && summary.resumableActions.length > 0) return summary.resumableActions
+  if (summary.resumableActions && summary.resumableActions.length > 0) {
+    if (
+      status === 'blocked'
+      && summary.resumableActions.length === 1
+      && summary.resumableActions[0] === 'none'
+      && (summary.waitingFor === 'background' || summary.taskContinuation || previous?.continuationRef)
+    ) {
+      return ['continue', 'cancel']
+    }
+    return summary.resumableActions
+  }
   if (status === 'failed') return ['retry']
   if (status === 'blocked') {
     if (previous?.resumableActions && previous.resumableActions.length > 0) return previous.resumableActions

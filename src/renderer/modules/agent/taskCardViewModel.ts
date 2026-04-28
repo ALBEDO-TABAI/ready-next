@@ -185,12 +185,15 @@ export function buildTaskCardViewModel(
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
   const summary = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
+  const statusLabel = run.blockedReason && run.resumableActions?.includes('none')
+    ? '等待继续'
+    : taskStatusLabel(run.status) || taskPhaseLabel(run.phase)
 
   return {
     key: run.scopeId,
     title: run.taskTitle || run.title || '任务',
     phase: run.phase,
-    statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase),
+    statusLabel,
     summary,
     currentStep,
     sections: {

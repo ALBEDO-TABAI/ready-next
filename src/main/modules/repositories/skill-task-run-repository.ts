@@ -277,17 +277,19 @@ export class SkillTaskRunRepository {
       filters.push('skill_id = ?')
       values.push(params.skillId)
     }
-    const statuses = params.includeDone
-      ? "'running', 'blocked', 'failed', 'done'"
-      : "'running', 'blocked', 'failed'"
-    filters.push(`status IN (${statuses})`)
-    const where = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : ''
-    const row = db.prepare(`
-      SELECT * FROM skill_task_runs
-      ${where}
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `).get<SkillTaskRunRow>(...values)
+    const query = (statuses: string): SkillTaskRunRow | undefined => {
+      const scopedFilters = [...filters, `status IN (${statuses})`]
+      const where = scopedFilters.length > 0 ? `WHERE ${scopedFilters.join(' AND ')}` : ''
+      return db.prepare(`
+        SELECT * FROM skill_task_runs
+        ${where}
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `).get<SkillTaskRunRow>(...values)
+    }
+    const row = params.includeDone
+      ? query("'running', 'blocked'") || query("'failed', 'done'")
+      : query("'running', 'blocked', 'failed'")
     return row ? this.mapRow(row) : null
   }
 

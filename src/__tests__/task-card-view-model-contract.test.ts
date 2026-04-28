@@ -132,3 +132,19 @@ test('task card view model surfaces skill output artifacts', () => {
   assert.equal(vm.sections.artifacts.count, 2)
   assert.equal(vm.sections.artifacts.summary, 'run_state.json')
 })
+
+test('task card view model does not show blocked background work as completed', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-skill-background',
+    phase: 'done',
+    title: '视频分析',
+    taskTitle: '技能执行 · Video Expert Analyzer',
+    taskSummary: '预算耗尽但后台仍在跑',
+    waitingFor: 'background',
+    resumableActions: ['none'],
+    blockedReason: '预算耗尽但后台仍在跑',
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.statusLabel, '等待继续')
+})

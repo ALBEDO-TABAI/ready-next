@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -103,4 +103,20 @@ test('skill_inspect_run_state returns ambiguity instead of silently choosing new
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('skill_inspect_run_state exposes expectedTaskId through schema and dispatch', () => {
+  const schemaSource = readFileSync(
+    new URL('../main/modules/tools/skill-primitives/primitive-schemas.ts', import.meta.url),
+    'utf-8',
+  )
+  const dispatchSource = readFileSync(
+    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
+    'utf-8',
+  )
+
+  assert.match(schemaSource, /expectedTaskId/)
+  assert.match(schemaSource, /run_state\.json\.task_id/)
+  assert.match(dispatchSource, /expectedTaskId/)
+  assert.match(dispatchSource, /executeInspectRunState\(\{[\s\S]*expectedTaskId/)
 })

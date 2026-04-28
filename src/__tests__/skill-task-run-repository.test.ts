@@ -163,6 +163,14 @@ function createRepositoryHarness() {
                 candidates = candidates.filter((row) =>
                   ['running', 'blocked', 'failed'].includes(String(row.status)),
                 )
+              } else if (sql.includes("'running', 'blocked'")) {
+                candidates = candidates.filter((row) =>
+                  ['running', 'blocked'].includes(String(row.status)),
+                )
+              } else if (sql.includes("'failed', 'done'")) {
+                candidates = candidates.filter((row) =>
+                  ['failed', 'done'].includes(String(row.status)),
+                )
               }
               return byUpdatedDesc(candidates)[0] as any
             },
@@ -282,7 +290,7 @@ test('SkillTaskRunRepository active lookup excludes terminal tasks', () => {
 
   assert.deepEqual(active.map((item) => item.id), ['str-active'])
   assert.equal(recoverable?.id, 'str-active')
-  assert.equal(recoverableIncludingDone?.id, 'str-done')
+  assert.equal(recoverableIncludingDone?.id, 'str-active')
 })
 
 test('SkillTaskRunRepository finds detached task archive rows', () => {

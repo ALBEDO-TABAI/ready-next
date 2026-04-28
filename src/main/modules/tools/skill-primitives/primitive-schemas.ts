@@ -94,6 +94,12 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .min(1)
       .optional()
       .describe('detached task id；从该任务的 outputDir 解析 run_state.json，与 outputDir 二选一。'),
+    expectedTaskId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe('期望匹配的 run_state.json.task_id；用于一个 outputDir 下存在多个任务时避免按最新 mtime 误选。'),
     maxRawBytes: z
       .number()
       .int()

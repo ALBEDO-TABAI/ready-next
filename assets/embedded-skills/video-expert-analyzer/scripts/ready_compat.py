@@ -127,6 +127,12 @@ def _is_video_output_dir(path: Path) -> bool:
 
 def _find_video_output_dir(output_root: Path, started_at: float) -> Optional[Path]:
     if _is_video_output_dir(output_root):
+        state = _safe_read_json(output_root / "run_state.json")
+        active = str(state.get("active_output_dir") or "").strip()
+        if active:
+            active_path = Path(active).expanduser().resolve()
+            if _is_video_output_dir(active_path):
+                return active_path
         return output_root
     if not output_root.exists():
         return None
@@ -143,6 +149,12 @@ def _find_video_output_dir(output_root: Path, started_at: float) -> Optional[Pat
         )
         if newest_mtime + 1 < started_at:
             continue
+        state = _safe_read_json(candidate / "run_state.json")
+        active = str(state.get("active_output_dir") or "").strip()
+        if active:
+            active_path = Path(active).expanduser().resolve()
+            if _is_video_output_dir(active_path):
+                candidate = active_path
         candidates.append((newest_mtime, candidate))
     if not candidates:
         return None

@@ -339,6 +339,9 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
   ].slice(-12)
   const paths = inferOutputPaths(event)
   const runStatus = statusToRunStatus(event.status)
+  const preserveActiveParent = event.runKind === 'primitive'
+    && runStatus === 'done'
+    && (current.status === 'running' || current.status === 'blocked')
   try {
     repository.update(current.id, {
       scopeId: event.scopeId || current.scopeId,
@@ -348,9 +351,9 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
       skillName: event.skillName ?? current.skillName,
       action: event.action || current.action,
       toolName: event.toolName,
-      runKind: event.runKind || current.runKind,
-      status: runStatus,
-      interactionState: interactionStateFor(event.status),
+      runKind: preserveActiveParent ? current.runKind : event.runKind || current.runKind,
+      status: preserveActiveParent ? current.status : runStatus,
+      interactionState: preserveActiveParent ? current.interactionState : interactionStateFor(event.status),
       goalText: event.goalText ?? current.goalText ?? null,
       resourceRefs: event.resourceRefs ?? current.resourceRefs ?? [],
       params: event.params || current.params,
@@ -368,7 +371,11 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
       resumePayload: buildResumePayload(event, stepId),
       startedAt: current.startedAt || (event.status === 'running' ? nowIso : null),
       updatedAt: nowIso,
-      finishedAt: runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled' ? nowIso : null,
+      finishedAt: preserveActiveParent
+        ? current.finishedAt ?? null
+        : runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled'
+          ? nowIso
+          : null,
     })
   } catch {
     // Projection updates must keep working even if SQLite is temporarily unavailable.
@@ -520,6 +527,8 @@ export function getLatestActiveSkillTaskRun(sessionId?: string): SkillTaskRunRec
 
 export function getLatestRecoverableSkillTaskRun(sessionId?: string): SkillTaskRunRecord | null {
   if (!sessionId) return null
+  const active = getLatestActiveSkillTaskRun(sessionId)
+  if (active) return active
   const repository = getTaskRunRepository()
   if (!repository) return null
   try {

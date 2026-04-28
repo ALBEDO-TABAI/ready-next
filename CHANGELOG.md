@@ -2,6 +2,15 @@
 
 ## [Unreleased] - 2026-04-23
 
+### Skill Runtime B — Phase 0 补洞 + Phase 1 VEA Progress Contract
+
+- **VEA `run_state.json` 公共契约落地**：`run_state.py` 写入 `schema_version / task_id / pid / started_at / active_output_dir`，并保留 `status / current_stage / completed_stages / total_scenes / completed_scenes / coverage_ratio / updated_at`；`READY_SKILL_TASK_ID` 作为本阶段唯一强身份通道，缺失时不再用输出目录名冒充任务身份
+- **实时进度更早、更稳**：`pipeline_enhanced.py` 在 `video_output_dir` 确定后立即写 `active_output_dir`；`ai_analyzer.py` 在 batch/scene 回写中 touch 顶层 `updated_at` 并同步场景覆盖率；`ready_compat.py` 把 `active_output_dir` 纳入输出目录事实来源，但不把 `delivery_report.json` 当实时进度真值
+- **Ready 读取侧不再静默选最新文件**：`skill_inspect_run_state` 新增 `expectedTaskId`，输出 `schemaVersion/taskId/pid/startedAt/activeOutputDir/currentStage/...` summary 字段；多候选且无身份时返回 `ambiguous: true`、`runStatePath: null` 和候选列表，而不是按 mtime 猜任务
+- **detached 恢复与投影最小修正**：重启恢复优先匹配 `run_state.task_id`，无身份多候选时进入 blocked/ambiguous；长技能运行投影读取 VEA `current_stage` 和场景覆盖率，只改摘要文案，不引入新 UI 状态
+- **Phase 0 补洞测试同步**：补住 running stdout 不得映射 done、primitive monitor 不得关闭 typed parent、recoverable 查询优先 live task、`["none"]` 背景阻塞归一、任务卡不显示“已完成但无法继续”等回归
+- **验证记录**：Phase 1 合并验收 17/17 通过；补洞支撑套件含 `turn-engine-route` 60/60 通过；`run-coordinator-budget` 仍有 2 条预算耗尽红测留给后续 Phase；本机测试仍打印已知 `better-sqlite3` Node ABI 警告
+
 ### Skill Runtime B — Phase 4 PR2（工具曝光与任务卡收口）
 
 - **显式点名 skill 的工具清单收口**：`SkillContextOrchestrator.buildPreferredSkillToolNames` 不再把 `skill_get_state / skill_submit_* / skill_restart_* / skill_cancel_execution` 放回偏好列表；显式点名 reference skill 时同轮保留 `skill_ask_user / skill_run_shell / skill_write_artifact / skill_read_artifact` 四个 primitive，避免“读了 skill 但下一轮仍拿不到原语”
