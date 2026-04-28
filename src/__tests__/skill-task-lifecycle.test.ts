@@ -128,3 +128,43 @@ test('terminal close-allowed snapshots can close as done', () => {
   assert.equal(signal.waitingFor, 'none')
   assert.equal(signal.taskContinuation, null)
 })
+
+test('failed and cancelled close-allowed snapshots keep recovery handles out of the success path', () => {
+  const failed = buildSkillTaskLifecycleSignal({
+    reason: 'budget_exhausted',
+    snapshot: makeSnapshot({
+      taskRunId: 'str-failed',
+      detachedTaskId: 'dst-failed',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      status: 'failed',
+      closeAllowed: true,
+      outputDir: '/tmp/failed',
+      runStatePath: '/tmp/failed/run_state.json',
+      blockers: ['provider rejected request'],
+    }),
+  })
+
+  assert.ok(failed)
+  assert.equal(failed.phase, 'error')
+  assert.deepEqual(failed.resumableActions, ['retry', 'cancel'])
+  assert.equal(failed.taskContinuation?.taskRunId, 'str-failed')
+  assert.equal(failed.taskContinuation?.detachedTaskId, 'dst-failed')
+  assert.equal(failed.taskContinuation?.runStatePath, '/tmp/failed/run_state.json')
+
+  const cancelled = buildSkillTaskLifecycleSignal({
+    reason: 'budget_exhausted',
+    snapshot: makeSnapshot({
+      taskRunId: 'str-cancelled',
+      skillId: 'video-expert-analyzer',
+      status: 'cancelled',
+      closeAllowed: true,
+      outputDir: '/tmp/cancelled',
+    }),
+  })
+
+  assert.ok(cancelled)
+  assert.equal(cancelled.phase, 'cancelled')
+  assert.equal(cancelled.taskContinuation?.taskRunId, 'str-cancelled')
+  assert.equal(cancelled.taskContinuation?.outputDir, '/tmp/cancelled')
+})

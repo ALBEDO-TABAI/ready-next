@@ -1198,6 +1198,7 @@ const migrations: Migration[] = [
           task_summary TEXT,
           status TEXT NOT NULL,
           interaction_state TEXT NOT NULL,
+          waiting_for TEXT,
           steps_json TEXT NOT NULL,
           current_step_id TEXT,
           budget_json TEXT,
@@ -1483,6 +1484,16 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_skill_task_runs_detached_task_id
           ON skill_task_runs(detached_task_id);
       `)
+    }
+  },
+  {
+    name: '032_extend_task_projection_store_for_waiting_for',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE task_projections ADD COLUMN waiting_for TEXT')
+      } catch {
+        // column already exists
+      }
     }
   }
 ]

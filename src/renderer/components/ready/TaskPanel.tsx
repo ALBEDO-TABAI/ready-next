@@ -384,7 +384,7 @@ export default function TaskPanel() {
       title: activeProjection.taskTitle || '任务',
       taskTitle: activeProjection.taskTitle,
       taskSummary: activeProjection.taskSummary,
-      waitingFor: activeProjection.status === 'blocked' ? 'background' : 'none',
+      waitingFor: activeProjection.waitingFor || 'none',
       resumableActions: activeProjection.resumableActions,
       recentArtifacts: activeProjection.recentArtifacts,
       taskContinuation: activeProjection.continuationRef,

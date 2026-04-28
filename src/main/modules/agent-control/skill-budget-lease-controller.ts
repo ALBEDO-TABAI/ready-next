@@ -58,6 +58,8 @@ export function createSkillBudgetLeaseState(params?: {
     leasesWithoutFingerprintChange: 0,
     repeatedUnchangedObservations: 0,
     repeatedRecoverableErrors: 0,
+    repeatedRecoverableErrorKind: null,
+    repeatedToolCallStreak: 0,
     pidOnlyRenewalsUsed: 0,
     decision: 'active',
     reason: null,
@@ -81,9 +83,16 @@ export function evaluateSkillBudgetLease(params: {
   state.repeatedUnchangedObservations = params.waste.repeatedUnchangedObservation
     ? state.repeatedUnchangedObservations + 1
     : 0
-  state.repeatedRecoverableErrors = params.waste.repeatedRecoverableError
-    ? state.repeatedRecoverableErrors + 1
-    : 0
+  state.repeatedToolCallStreak = params.waste.repeatedToolCallStreak || 0
+  if (params.waste.recoverableErrorKind) {
+    state.repeatedRecoverableErrors = state.repeatedRecoverableErrorKind === params.waste.recoverableErrorKind
+      ? state.repeatedRecoverableErrors + params.waste.recoverableErrorCount
+      : params.waste.recoverableErrorCount
+    state.repeatedRecoverableErrorKind = params.waste.recoverableErrorKind
+  } else {
+    state.repeatedRecoverableErrors = 0
+    state.repeatedRecoverableErrorKind = null
+  }
 
   const finish = (decision: SkillBudgetLeaseDecision, reason: string): SkillBudgetLeaseEvaluation => {
     state.decision = decision
@@ -92,7 +101,10 @@ export function evaluateSkillBudgetLease(params: {
     return { state, decision, reason }
   }
 
-  if (snapshot?.closeAllowed) return finish('close', 'supervisor_close_allowed')
+  if (snapshot?.closeAllowed && snapshot.status === 'done') return finish('close', 'supervisor_close_allowed')
+  if (snapshot?.closeAllowed && snapshot.status === 'failed') return finish('pause', 'supervisor_failed')
+  if (snapshot?.closeAllowed && snapshot.status === 'cancelled') return finish('pause', 'supervisor_cancelled')
+  if (state.repeatedToolCallStreak >= 3) return finish('pause', 'tool_repetition')
   if (state.repeatedUnchangedObservations >= 3) return finish('pause', 'unchanged_observation_repeated')
   if (state.repeatedRecoverableErrors >= 3) return finish('pause', 'recoverable_error_repeated')
   if (snapshot?.ambiguous) return finish('pause', 'supervisor_ambiguous')
@@ -136,6 +148,7 @@ export function evaluateSkillBudgetLease(params: {
         state.currentLeaseEndIteration + state.leaseSizeIterations,
         state.hardCapIteration,
       )
+      state.leasesWithoutFingerprintChange = 0
       return finish('renew', 'pid_alive_short_renewal')
     }
     return finish('handoff_background', 'live_work_weak_progress')

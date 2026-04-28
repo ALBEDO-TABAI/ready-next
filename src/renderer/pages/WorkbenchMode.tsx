@@ -57,15 +57,11 @@ export default function WorkbenchMode() {
     renamingPath,
     creatingType,
   } = useWorkspace()
-  const workspaceRoot = useWorkspace((s) => s.workspaceRoot)
-  const pickWorkspaceRoot = useWorkspace((s) => s.pickWorkspaceRoot)
   const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode } = useMode()
   const navigate = useNavigate()
   const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const [workspaceInitError, setWorkspaceInitError] = useState<string | null>(null)
-  const [workspacePickerError, setWorkspacePickerError] = useState<string | null>(null)
-  const [isPickingWorkspace, setIsPickingWorkspace] = useState(false)
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
@@ -112,9 +108,8 @@ export default function WorkbenchMode() {
         console.warn('[workspace] Dropped persisted root:', result.reason, result.message)
       }
 
-      // No (valid) saved root → leave workspaceRoot null so the renderer
-      // shows the first-time picker prompt. NEVER auto-fallback to homedir;
-      // that triggers the bb529f1 681K-file index storm.
+      // No (valid) saved root → leave workspaceRoot null. NEVER auto-fallback
+      // to homedir; that triggers the bb529f1 681K-file index storm.
       setWorkspaceInitError(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -126,23 +121,6 @@ export default function WorkbenchMode() {
   useEffect(() => {
     void initializeWorkspace()
   }, [initializeWorkspace])
-
-  const handlePickWorkspace = useCallback(async () => {
-    setIsPickingWorkspace(true)
-    setWorkspacePickerError(null)
-    try {
-      const result = await pickWorkspaceRoot()
-      if (!result.ok) {
-        // 'empty' with message 'cancelled' / '已取消选择。' = user dismissed picker
-        const cancelled = result.message === 'cancelled' || result.message === '已取消选择。'
-        if (!cancelled) {
-          setWorkspacePickerError(result.message || '工作区目录不被允许，请换一个。')
-        }
-      }
-    } finally {
-      setIsPickingWorkspace(false)
-    }
-  }, [pickWorkspaceRoot])
 
   const handleIconClick = (icon: string) => {
     if (icon === 'settings') {
@@ -329,39 +307,6 @@ export default function WorkbenchMode() {
                 }}
               >
                 重试
-              </button>
-            </div>
-          )}
-
-          {!workspaceInitError && !workspaceRoot && (
-            <div
-              className="glass-surface-floating mx-3 mt-2 flex items-center justify-between gap-3 rounded-[12px] px-3 py-2 text-[12px]"
-              style={{
-                border: '1px solid var(--color-blue, #3b82f6)',
-                color: 'var(--text-secondary)',
-                background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
-              }}
-            >
-              <div className="flex flex-col gap-1">
-                <span style={{ color: 'var(--text-body)', fontWeight: 500 }}>
-                  请选择一个工作区目录
-                </span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                  {workspacePickerError || '选择项目目录后才能启用文件搜索与索引。请避免选择主目录或系统目录。'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handlePickWorkspace()}
-                disabled={isPickingWorkspace}
-                className="rounded-[8px] px-3 py-1.5 text-[12px] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-60"
-                style={{
-                  border: '1px solid var(--color-blue, #3b82f6)',
-                  color: 'var(--text-body)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {isPickingWorkspace ? '选择中…' : '选择目录'}
               </button>
             </div>
           )}

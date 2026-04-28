@@ -7,6 +7,9 @@ export interface SkillWasteScore {
   reasons: string[]
   repeatedUnchangedObservation: boolean
   repeatedRecoverableError: boolean
+  repeatedToolCallStreak: number
+  recoverableErrorKind: string | null
+  recoverableErrorCount: number
 }
 export interface SkillWasteScorerInput {
   toolCalls?: Array<Pick<TurnToolCall, 'name' | 'input'>>
@@ -47,6 +50,17 @@ function isRecoverableLoopError(kind: string): boolean {
   ].includes(kind)
 }
 
+function longestTrailingKindStreak(kinds: string[]): { kind: string | null; count: number } {
+  const last = kinds[kinds.length - 1] || null
+  if (!last) return { kind: null, count: 0 }
+  let count = 0
+  for (let index = kinds.length - 1; index >= 0; index -= 1) {
+    if (kinds[index] !== last) break
+    count += 1
+  }
+  return { kind: last, count }
+}
+
 export function scoreSkillWaste(input: SkillWasteScorerInput): SkillWasteScore {
   const reasons: string[] = []
   let score = 0
@@ -55,9 +69,10 @@ export function scoreSkillWaste(input: SkillWasteScorerInput): SkillWasteScore {
     recent.push({ name: toolCall.name, argsHash: hashInput(toolCall.input) })
   }
   const last = recent[recent.length - 1]
+  let repeatedToolCallStreak = 0
   if (last) {
-    const repeats = recent.filter((item) => item.name === last.name && item.argsHash === last.argsHash).length
-    if (repeats >= 3) {
+    repeatedToolCallStreak = recent.filter((item) => item.name === last.name && item.argsHash === last.argsHash).length
+    if (repeatedToolCallStreak >= 3) {
       score += 2
       reasons.push('repeated_tool_call')
     }
@@ -78,7 +93,10 @@ export function scoreSkillWaste(input: SkillWasteScorerInput): SkillWasteScore {
     .map((tool) => errorKindFromOutput(tool.result))
     .filter((kind): kind is string => Boolean(kind))
   const recoveryKinds = (input.recoveryHistory || []).map((item) => item.kind)
-  const repeatedError = [...toolErrorKinds, ...recoveryKinds].some((kind) => isRecoverableLoopError(kind))
+  const recoverableKinds = [...toolErrorKinds, ...recoveryKinds]
+    .filter((kind) => isRecoverableLoopError(kind))
+  const recoverableStreak = longestTrailingKindStreak(recoverableKinds)
+  const repeatedError = recoverableStreak.count >= 3
   if (repeatedError) {
     score += 2
     reasons.push('recoverable_error_repeated')
@@ -89,5 +107,8 @@ export function scoreSkillWaste(input: SkillWasteScorerInput): SkillWasteScore {
     reasons,
     repeatedUnchangedObservation: repeatedObservation,
     repeatedRecoverableError: repeatedError,
+    repeatedToolCallStreak,
+    recoverableErrorKind: recoverableStreak.kind,
+    recoverableErrorCount: recoverableStreak.count,
   }
 }

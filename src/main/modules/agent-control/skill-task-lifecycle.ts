@@ -122,6 +122,7 @@ export function buildSkillTaskLifecycleSignal(params: {
   }
 
   if (snapshot.closeAllowed && snapshot.status === 'cancelled') {
+    const taskContinuation = buildTaskContinuation(snapshot, 'cancelled')
     return {
       state: 'cancelled',
       reason: 'cancelled',
@@ -130,11 +131,12 @@ export function buildSkillTaskLifecycleSignal(params: {
       waitingFor: 'none',
       resumableActions: ['none'],
       blockedReason: null,
-      taskContinuation: null,
+      taskContinuation: hasContinuationHandle(taskContinuation) ? taskContinuation : null,
     }
   }
 
   if (snapshot.closeAllowed && snapshot.status === 'failed') {
+    const taskContinuation = buildTaskContinuation(snapshot, 'failed')
     return {
       state: 'failed',
       reason: 'failed',
@@ -143,7 +145,7 @@ export function buildSkillTaskLifecycleSignal(params: {
       waitingFor: 'none',
       resumableActions: ['retry', 'cancel'],
       blockedReason: buildBlockedReason(snapshot, '技能任务失败'),
-      taskContinuation: null,
+      taskContinuation: hasContinuationHandle(taskContinuation) ? taskContinuation : null,
     }
   }
 

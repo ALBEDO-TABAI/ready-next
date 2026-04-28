@@ -1814,6 +1814,159 @@ test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhau
   assert.equal((result.projectionTruth?.projectionPatch?.taskContinuation as Record<string, unknown>)?.taskRunId, 'str-budget')
 })
 
+test('TurnEngine routes failed close-allowed skill snapshots to lifecycle error instead of done', async () => {
+  const engine = new TurnEngine()
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  let executedBatches = 0
+  try {
+    const { request } = createRequest({
+      userText: '继续视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            status: 'failed',
+            hasLiveWork: false,
+            hasRecentProgress: false,
+            closeAllowed: true,
+            blockers: ['provider rejected request'],
+            outputDir: '/tmp/failed',
+            runStatePath: '/tmp/failed/run_state.json',
+            progressFingerprint: 'failed-fp',
+          }),
+        },
+        requestToolLoopResponse: async () => ({
+          text: '继续执行',
+          toolCalls: [{ id: `tool-${executedBatches + 1}`, name: 'skill_video_expert_pipeline', input: { batch: executedBatches + 1 } }],
+          stopReason: 'tool_calls',
+        }),
+        executeToolBatch: async () => {
+          executedBatches += 1
+          return {
+            results: [{
+              id: `tool-${executedBatches}`,
+              name: 'skill_video_expert_pipeline',
+              input: { batch: executedBatches },
+              result: { text: 'failed' },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(result.skillTaskLifecycle?.state, 'failed')
+    assert.equal(result.skillTaskLifecycle?.phase, 'error')
+    assert.equal(result.status, 'checkpoint')
+    assert.notEqual(result.status, 'done')
+    assert.equal(result.skillTaskLifecycle?.taskContinuation?.runStatePath, '/tmp/failed/run_state.json')
+  } finally {
+    restoreLongToolDefinition()
+  }
+})
+
+test('TurnEngine creates a skill lease from a recoverable supervisor snapshot even without a long typed action trigger', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const { request } = createRequest({
+      userText: '继续之前的视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        confidence: 'high',
+      }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_get_state'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            status: 'background_running',
+            hasLiveWork: true,
+            closeAllowed: false,
+            detachedTaskId: 'dst-observed',
+            taskRunId: 'str-observed',
+          }),
+        },
+        requestToolLoopResponse: async () => ({
+          text: '检查状态',
+          toolCalls: [],
+          stopReason: 'stop',
+        }),
+      },
+    })
+
+    await engine.execute(request)
+
+    assert.ok(metrics.some((event) =>
+      event.metric === 'skill_budget_lease_created'
+      && event.reason === 'observed_supervisor_snapshot'
+    ))
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
 test('TurnEngine proves executeToolBatch budgetLimited through real run_state supervisor input', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-turn-budget-limited-'))
   const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()

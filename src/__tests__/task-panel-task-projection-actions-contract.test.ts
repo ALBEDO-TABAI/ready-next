@@ -19,6 +19,8 @@ test('task panel exposes continue and retry actions from task projections', () =
   assert.match(source, /outputDir:\s*ref\?\.outputDir/)
   assert.match(source, /projectionRuntimeState\?\.statusLabel/)
   assert.match(source, /activeProjection\?\.resumableActions/)
+  assert.match(source, /activeProjection\.waitingFor/)
+  assert.doesNotMatch(source, /waitingFor:\s*activeProjection\.status === 'blocked'/)
   assert.match(source, /setComposerDraft\(/)
   assert.match(source, /continuationIntent:/)
   assert.match(source, /继续运行/)

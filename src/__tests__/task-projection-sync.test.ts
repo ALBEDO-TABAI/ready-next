@@ -136,6 +136,7 @@ test('syncTaskProjection creates and then updates projection records from scope 
   assert.equal(created?.taskSummary, '正在上传附件')
   assert.equal(created?.taskType, 'media_task')
   assert.equal(created?.status, 'running')
+  assert.equal(created?.waitingFor, 'none')
   assert.equal(created?.budgetUsagePercent, 35)
   assert.equal(created?.budget?.stepBudget?.stepId, 'upload')
   assert.equal(created?.steps[0]?.status, 'running')
@@ -145,6 +146,7 @@ test('syncTaskProjection creates and then updates projection records from scope 
     ...summary,
     phase: 'takeover',
     interactionState: 'human_takeover',
+    waitingFor: 'confirmation',
     blockedReason: '等待用户输入验证码',
     updatedAt: '2026-04-16T11:01:00.000Z',
   }
@@ -158,6 +160,7 @@ test('syncTaskProjection creates and then updates projection records from scope 
   const updated = records.get('task-1')
   assert.equal(updated?.status, 'blocked')
   assert.equal(updated?.interactionState, 'human_takeover')
+  assert.equal(updated?.waitingFor, 'confirmation')
   assert.equal(updated?.blockedReason, '等待用户输入验证码')
   assert.equal(updated?.createdAt, '2026-04-16T11:00:00.000Z')
   assert.equal(updated?.updatedAt, '2026-04-16T11:01:00.000Z')
@@ -392,6 +395,7 @@ test('syncTaskProjection does not materialize blocked background work with only 
   })
 
   assert.equal(result?.status, 'blocked')
+  assert.equal(result?.waitingFor, 'background')
   assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
 })
 
@@ -477,6 +481,7 @@ test('syncTaskProjection keeps parent blocked while a detached child is still ru
   const parent = records.get('parent-task')
   assert.equal(parent?.status, 'blocked')
   assert.equal(parent?.interactionState, 'suspended')
+  assert.equal(parent?.waitingFor, 'background')
   assert.equal(parent?.blockedReason, '后台仍在运行')
   assert.deepEqual(parent?.resumableActions, ['continue', 'cancel'])
   assert.equal(parent?.continuationRef?.detachedTaskId, 'dst-child')

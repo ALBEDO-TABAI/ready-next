@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
@@ -9,6 +10,10 @@ import {
   evaluateSkillBudgetLease,
 } from '../main/modules/agent-control/skill-budget-lease-controller'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+
+function hashInput(input: unknown): string {
+  return createHash('sha1').update(JSON.stringify(input ?? null)).digest('hex').slice(0, 16)
+}
 
 function snapshot(overrides: Partial<SkillTaskSupervisorSnapshot>): SkillTaskSupervisorSnapshot {
   return {
@@ -91,15 +96,17 @@ test('progress scorer builds a stable fingerprint from typed milestone outputs',
   assert.match(score.fingerprint || '', /\/tmp\/vea\/out\/run_state\.json/)
 })
 test('waste scorer flags repeated tools, unchanged observations, and recoverable errors', () => {
+  const input = { outputDir: '/tmp/out' }
+  const argsHash = hashInput(input)
   const waste = scoreSkillWaste({
     recentToolCalls: [
-      { name: 'skill_inspect_run_state', argsHash: 'same' },
-      { name: 'skill_inspect_run_state', argsHash: 'same' },
+      { name: 'skill_inspect_run_state', argsHash },
+      { name: 'skill_inspect_run_state', argsHash },
     ],
-    toolCalls: [{ name: 'skill_inspect_run_state', input: { outputDir: '/tmp/out' } }],
+    toolCalls: [{ name: 'skill_inspect_run_state', input }],
     executedTools: [{
       name: 'skill_inspect_run_state',
-      input: { outputDir: '/tmp/out' },
+      input,
       result: createToolExecutionOutput('', {
         data: { errorKind: 'input_validation' },
       }),
@@ -109,9 +116,88 @@ test('waste scorer flags repeated tools, unchanged observations, and recoverable
   })
 
   assert.ok(waste.score >= 2)
+  assert.equal(waste.repeatedToolCallStreak, 3)
   assert.equal(waste.repeatedUnchangedObservation, true)
-  assert.equal(waste.repeatedRecoverableError, true)
+  assert.equal(waste.recoverableErrorKind, 'input_validation')
+  assert.equal(waste.recoverableErrorCount, 1)
+  assert.equal(waste.repeatedRecoverableError, false)
+  assert.ok(waste.reasons.includes('repeated_tool_call'))
   assert.ok(waste.reasons.includes('unchanged_run_state_or_artifact'))
+})
+
+test('waste scorer only treats the third same recoverable error as repeated', () => {
+  const first = scoreSkillWaste({
+    executedTools: [{
+      name: 'skill_run_shell',
+      result: createToolExecutionOutput('', { data: { errorKind: 'input_validation' } }),
+    }],
+  })
+  assert.equal(first.recoverableErrorKind, 'input_validation')
+  assert.equal(first.recoverableErrorCount, 1)
+  assert.equal(first.repeatedRecoverableError, false)
+  assert.doesNotMatch(first.reasons.join(','), /recoverable_error_repeated/)
+
+  let lease = createSkillBudgetLeaseState({ iteration: 0 })
+  lease = evaluateSkillBudgetLease({
+    state: lease,
+    iteration: 1,
+    progress: { score: 0, reasons: [], fingerprint: null, fingerprintChanged: false, milestoneChanged: false },
+    waste: first,
+  }).state
+  lease = evaluateSkillBudgetLease({
+    state: lease,
+    iteration: 2,
+    progress: { score: 0, reasons: [], fingerprint: null, fingerprintChanged: false, milestoneChanged: false },
+    waste: scoreSkillWaste({
+      executedTools: [{
+        name: 'skill_run_shell',
+        result: createToolExecutionOutput('', { data: { errorKind: 'cmd_not_allowlisted' } }),
+      }],
+    }),
+  }).state
+  assert.notEqual(lease.decision, 'pause')
+
+  const sameKind = scoreSkillWaste({
+    executedTools: [{
+      name: 'skill_run_shell',
+      result: createToolExecutionOutput('', { data: { errorKind: 'input_validation' } }),
+    }],
+  })
+  lease = createSkillBudgetLeaseState({ iteration: 0 })
+  for (let i = 0; i < 3; i += 1) {
+    lease = evaluateSkillBudgetLease({
+      state: lease,
+      iteration: i + 1,
+      progress: { score: 0, reasons: [], fingerprint: null, fingerprintChanged: false, milestoneChanged: false },
+      waste: sameKind,
+    }).state
+  }
+  assert.equal(lease.decision, 'pause')
+  assert.equal(lease.reason, 'recoverable_error_repeated')
+})
+
+test('lease controller pauses repeated tool calls immediately', () => {
+  const lease = createSkillBudgetLeaseState({ iteration: 0 })
+  const input = { outputDir: '/tmp/out' }
+  const argsHash = hashInput(input)
+  const waste = scoreSkillWaste({
+    recentToolCalls: [
+      { name: 'skill_inspect_run_state', argsHash },
+      { name: 'skill_inspect_run_state', argsHash },
+    ],
+    toolCalls: [{ name: 'skill_inspect_run_state', input }],
+  })
+
+  const evaluation = evaluateSkillBudgetLease({
+    state: lease,
+    iteration: 1,
+    progress: { score: 0, reasons: [], fingerprint: null, fingerprintChanged: false, milestoneChanged: false },
+    waste,
+  })
+
+  assert.equal(waste.repeatedToolCallStreak, 3)
+  assert.equal(evaluation.decision, 'pause')
+  assert.equal(evaluation.reason, 'tool_repetition')
 })
 
 test('lease controller renews on progress, pauses loops, and hands off weak live work', () => {
@@ -165,4 +251,33 @@ test('lease controller renews on progress, pauses loops, and hands off weak live
     }),
   })
   assert.equal(handoff.decision, 'handoff_background')
+})
+
+test('lease controller does not close failed or cancelled terminal snapshots as success', () => {
+  const noWaste = {
+    score: 0,
+    reasons: [],
+    repeatedToolCallStreak: 0,
+    repeatedUnchangedObservation: false,
+    recoverableErrorKind: null,
+    recoverableErrorCount: 0,
+    repeatedRecoverableError: false,
+  }
+  for (const status of ['failed', 'cancelled'] as const) {
+    const evaluation = evaluateSkillBudgetLease({
+      state: createSkillBudgetLeaseState({ iteration: 0 }),
+      iteration: 1,
+      progress: { score: 0, reasons: [], fingerprint: null, fingerprintChanged: false, milestoneChanged: false },
+      waste: noWaste,
+      snapshot: snapshot({
+        status,
+        closeAllowed: true,
+        hasLiveWork: false,
+        hasRecentProgress: false,
+      }),
+    })
+
+    assert.equal(evaluation.decision, 'pause')
+    assert.equal(evaluation.reason, `supervisor_${status}`)
+  }
 })

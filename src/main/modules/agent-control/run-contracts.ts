@@ -148,6 +148,8 @@ export interface SkillBudgetLeaseState {
   leasesWithoutFingerprintChange: number
   repeatedUnchangedObservations: number
   repeatedRecoverableErrors: number
+  repeatedRecoverableErrorKind: string | null
+  repeatedToolCallStreak: number
   pidOnlyRenewalsUsed: number
   decision: SkillBudgetLeaseDecision
   reason: string | null
@@ -260,6 +262,7 @@ export interface UnifiedTaskState {
   taskType: TaskType
   status: 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
   interactionState: TaskInteractionState
+  waitingFor: ScopeRunWaitingFor
   steps: TaskStep[]
   currentStepId?: string | null
   budget?: TaskBudget | null
@@ -279,6 +282,7 @@ export interface TaskProjectionRecord {
   taskSummary?: string | null
   status: UnifiedTaskState['status']
   interactionState: TaskInteractionState
+  waitingFor?: ScopeRunWaitingFor
   steps: TaskStep[]
   currentStepId?: string | null
   budget?: TaskBudget | null
@@ -423,6 +427,7 @@ export interface ExecutionHostResult {
 
 export interface ExecutionTurnResult {
   success: boolean
+  status?: 'done' | 'error' | 'cancelled' | 'checkpoint'
   finalText: string
   cancelled: boolean
   usedTools: string[]
@@ -446,11 +451,14 @@ export type SkillTaskLifecycleState =
 
 export type SkillTaskLifecycleReason =
   | 'background_running'
+  | 'background_handoff'
   | 'budget_exhausted'
   | 'blocked'
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'primitive_observation'
+  | 'supervisor_close'
 
 export interface SkillTaskLifecycleSignal {
   state: SkillTaskLifecycleState

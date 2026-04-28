@@ -1,8 +1,12 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type {
   ScopeRunResumableAction,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
 } from './types'
+import type { SkillTaskLifecycleReason } from './run-contracts'
+import { normalizeRunStateStatus, type NormalizedRunStateStatus } from './run-state-selection'
 import { getRepositoryDatabase } from '../repositories/database-accessor'
 import {
   SkillTaskRunRepository,
@@ -21,12 +25,7 @@ export type SkillParentTaskLifecycleState =
   | 'done'
   | 'failed'
   | 'cancelled'
-export type SkillParentTaskLifecycleReason =
-  | 'budget_exhausted'
-  | 'background_handoff'
-  | 'primitive_observation'
-  | 'supervisor_close'
-  | string
+export type SkillParentTaskLifecycleReason = SkillTaskLifecycleReason
 
 export interface SkillTaskEvent {
   scopeId?: string
@@ -435,6 +434,10 @@ function findTaskRunForLifecycleEvent(
   repository: SkillTaskRunRepository,
   event: SkillParentTaskLifecycleEvent,
 ): SkillTaskRunRecord | null {
+  if (event.taskRunId) {
+    const exact = repository.get(event.taskRunId)
+    if (exact) return exact
+  }
   if (event.detachedTaskId) {
     const detached = repository.findByDetachedTaskId(event.detachedTaskId)
     if (detached) return detached
@@ -855,6 +858,30 @@ export function hasActiveSkillTaskRun(sessionId?: string): boolean {
   return getLatestActiveSkillTaskRun(sessionId) !== null
 }
 
+type DetachedRunStatus = NormalizedRunStateStatus
+
+function isDetachedTerminalStatus(status: DetachedRunStatus): boolean {
+  return status === 'done' || status === 'failed' || status === 'cancelled'
+}
+
+function readLiveRunStateStatus(runStatePath?: string | null, outputDir?: string | null): DetachedRunStatus | null {
+  const candidates = [
+    runStatePath || null,
+    outputDir ? join(outputDir, 'run_state.json') : null,
+  ].filter((item): item is string => Boolean(item && item.trim()))
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue
+      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Record<string, unknown>
+      const status = normalizeRunStateStatus(parsed.status ?? parsed.state ?? parsed.phase)
+      if (status === 'running' || status === 'blocked') return status
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
 export function upsertDetachedSkillTaskRun(record: {
   id: string
   scopeId?: string | null
@@ -863,7 +890,7 @@ export function upsertDetachedSkillTaskRun(record: {
   skillId: string
   action: string
   params: Record<string, unknown>
-  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+  status: DetachedRunStatus
   outputDir?: string | null
   runStatePath?: string | null
   sceneScoresPath?: string | null
@@ -882,30 +909,39 @@ export function upsertDetachedSkillTaskRun(record: {
     return
   }
   const stepId = 'detached_task#1'
+  const liveStatus = isDetachedTerminalStatus(record.status)
+    ? readLiveRunStateStatus(record.runStatePath ?? existing?.runStatePath ?? null, record.outputDir ?? existing?.outputDir ?? null)
+    : null
+  const effectiveStatus = liveStatus || record.status
   const step: SkillTaskRunStep = {
     id: stepId,
     title: '后台技能任务',
-    status: record.status === 'failed' ? 'error' : record.status === 'cancelled' ? 'done' : record.status,
+    status: effectiveStatus === 'failed' ? 'error' : effectiveStatus === 'cancelled' ? 'done' : effectiveStatus,
     detail: record.error || null,
     updatedAt: record.updatedAt,
   }
-  const resumePayload = record.status === 'failed'
+  const continuationPayload = {
+    taskId: record.id,
+    stepId,
+    skillId: record.skillId,
+    action: record.action,
+    detachedTaskId: record.id,
+    outputDir: record.outputDir ?? existing?.outputDir ?? null,
+    runStatePath: record.runStatePath ?? existing?.runStatePath ?? null,
+  }
+  const resumePayload = effectiveStatus === 'failed'
     ? {
-      taskId: record.id,
-      stepId,
-      skillId: record.skillId,
-      action: record.action,
+      ...continuationPayload,
       resumableActions: ['retry', 'cancel'],
     }
-    : record.status === 'blocked'
+    : effectiveStatus === 'blocked' || effectiveStatus === 'running'
       ? {
-        taskId: record.id,
-        stepId,
-        skillId: record.skillId,
-        action: record.action,
+        ...continuationPayload,
         resumableActions: ['continue', 'cancel'],
       }
       : null
+  const finishedAt = isDetachedTerminalStatus(effectiveStatus) ? record.finishedAt ?? null : null
+  const interactionState = effectiveStatus === 'running' || effectiveStatus === 'blocked' ? 'suspended' : 'running'
   if (!existing) {
     try {
       repository.create({
@@ -919,8 +955,8 @@ export function upsertDetachedSkillTaskRun(record: {
       action: record.action,
       toolName: 'skill_start_detached',
       runKind: 'detached',
-      status: record.status,
-      interactionState: record.status === 'blocked' ? 'suspended' : 'running',
+      status: effectiveStatus,
+      interactionState,
       goalText: typeof record.params?.goal === 'string' ? record.params.goal : null,
       resourceRefs: [],
       params: record.params,
@@ -931,15 +967,15 @@ export function upsertDetachedSkillTaskRun(record: {
       runStatePath: record.runStatePath ?? null,
       sceneScoresPath: record.sceneScoresPath ?? null,
       deliveryReportPath: record.deliveryReportPath ?? null,
-      failureKind: record.status === 'failed' ? 'detached_task_failed' : null,
-      failureDetail: record.status === 'failed' ? record.error ?? null : null,
+      failureKind: effectiveStatus === 'failed' ? 'detached_task_failed' : null,
+      failureDetail: effectiveStatus === 'failed' ? record.error ?? null : null,
       jobId: record.id,
       detachedTaskId: record.id,
       resumePayload,
       createdAt: record.startedAt,
       startedAt: record.startedAt,
       updatedAt: record.updatedAt,
-      finishedAt: record.finishedAt ?? null,
+      finishedAt,
       })
     } catch {
       // JSON persistence remains the source of last resort if SQLite is unavailable.
@@ -951,8 +987,8 @@ export function upsertDetachedSkillTaskRun(record: {
     scopeId: record.scopeId ?? existing.scopeId,
     sessionId: record.sessionId ?? existing.sessionId,
     agent: record.agent ?? existing.agent,
-    status: record.status,
-    interactionState: record.status === 'blocked' ? 'suspended' : 'running',
+    status: effectiveStatus,
+    interactionState,
     params: record.params,
     steps: existing.steps.some((item) => item.id === stepId)
       ? existing.steps.map((item) => (item.id === stepId ? step : item))
@@ -962,11 +998,11 @@ export function upsertDetachedSkillTaskRun(record: {
     runStatePath: record.runStatePath ?? existing.runStatePath ?? null,
     sceneScoresPath: record.sceneScoresPath ?? existing.sceneScoresPath ?? null,
     deliveryReportPath: record.deliveryReportPath ?? existing.deliveryReportPath ?? null,
-    failureKind: record.status === 'failed' ? 'detached_task_failed' : null,
-    failureDetail: record.status === 'failed' ? record.error ?? null : null,
+    failureKind: effectiveStatus === 'failed' ? 'detached_task_failed' : null,
+    failureDetail: effectiveStatus === 'failed' ? record.error ?? null : null,
     resumePayload,
     updatedAt: record.updatedAt,
-    finishedAt: record.finishedAt ?? null,
+    finishedAt,
     })
   } catch {
     // JSON persistence remains the source of last resort if SQLite is unavailable.

@@ -177,10 +177,10 @@ function resolveProjectionWaitingFor(
   fallback?: ScopeRunState['waitingFor'],
 ): ScopeRunState['waitingFor'] {
   if (!projection) return fallback || 'none'
+  if (projection?.waitingFor) return projection.waitingFor
   if (projection.interactionState === 'awaiting_confirmation') return 'confirmation'
   if (projection.interactionState === 'awaiting_clarification') return 'clarification'
   if (projection.interactionState === 'human_takeover') return 'agent_result'
-  if (projection.status === 'blocked') return 'background'
   return fallback || 'none'
 }
 
@@ -2069,7 +2069,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
-        waitingFor: projection?.status === 'blocked'
+        waitingFor: projection
           ? resolveProjectionWaitingFor(projection, run.waitingFor)
           : run.waitingFor,
         resumableActions:
@@ -2115,7 +2115,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
-        waitingFor: projection?.status === 'blocked'
+        waitingFor: projection
           ? resolveProjectionWaitingFor(projection, run.waitingFor)
           : run.waitingFor,
         resumableActions:

@@ -55,6 +55,14 @@ function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState
   return 'running'
 }
 
+function resolveWaitingFor(
+  summary: ScopeRunSummary,
+  previous?: TaskProjectionRecord | null,
+): TaskProjectionRecord['waitingFor'] {
+  if (summary.waitingFor) return summary.waitingFor
+  return previous?.waitingFor || 'none'
+}
+
 function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status'] {
   const interactionState = resolveInteractionState(summary)
   const waitingForBlocker = Boolean(summary.waitingFor && summary.waitingFor !== 'none')
@@ -281,6 +289,7 @@ async function syncParentProjectionFromChild(
     ? {
       status: 'blocked' as const,
       interactionState: 'suspended' as const,
+      waitingFor: 'background' as const,
       blockedReason: child.blockedReason || child.taskSummary || '后台任务仍在运行',
       resumableActions: child.resumableActions?.length ? child.resumableActions : (['continue', 'cancel'] as TaskProjectionRecord['resumableActions']),
       continuationRef: child.continuationRef || parent.continuationRef || {
@@ -379,6 +388,7 @@ export function buildTaskProjectionRecord(
     taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
     status,
     interactionState: resolveInteractionState(effectiveSummary),
+    waitingFor: resolveWaitingFor(effectiveSummary, previous),
     steps: mapSteps(effectiveSummary, previous),
     currentStepId: effectiveSummary.currentStepId || null,
     budget: resolveTaskBudget(effectiveSummary),

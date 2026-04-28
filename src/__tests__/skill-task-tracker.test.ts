@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -8,6 +11,7 @@ import {
   recordSkillTaskEvent,
   registerSkillTaskRunRepository,
   readSkillTaskProjection,
+  upsertDetachedSkillTaskRun,
 } from '../main/modules/agent-control/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 
@@ -42,8 +46,13 @@ function createTaskRunRepositoryHarness() {
         .filter((row) => statuses.has(row.status))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || null
     },
-    findByDetachedTaskId() {
-      return null
+    get(id: string) {
+      return rows.get(id) || null
+    },
+    findByDetachedTaskId(detachedTaskId: string) {
+      return Array.from(rows.values())
+        .filter((row) => row.detachedTaskId === detachedTaskId)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || null
     },
   }
   return { repository: repository as unknown as SkillTaskRunRepository, rows }
@@ -506,6 +515,96 @@ test('SkillTaskTracker maps budget paused lifecycle to existing blocked suspende
     assert.equal(stored?.resumePayload?.blockerType, 'budget_exhausted')
   } finally {
     registerSkillTaskRunRepository(null)
+  }
+})
+
+test('SkillTaskTracker applies lifecycle events to the explicit taskRunId before latest active fallback', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-skill-explicit-task-run')
+  try {
+    rows.set('str-other', makeStoredRun({
+      id: 'str-other',
+      sessionId: 'scope-skill-explicit-task-run',
+      scopeId: 'scope-skill-explicit-task-run',
+      status: 'running',
+      updatedAt: '2026-04-28T00:05:00.000Z',
+    }))
+    rows.set('str-target', makeStoredRun({
+      id: 'str-target',
+      sessionId: 'scope-skill-explicit-task-run',
+      scopeId: 'scope-skill-explicit-task-run',
+      status: 'running',
+      updatedAt: '2026-04-28T00:01:00.000Z',
+    }))
+
+    recordSkillParentTaskLifecycleEvent({
+      sessionId: 'scope-skill-explicit-task-run',
+      scopeId: 'scope-skill-explicit-task-run',
+      skillId: 'video-expert-analyzer',
+      state: 'budget_paused',
+      reason: 'budget_exhausted',
+      message: '预算暂停，等待继续',
+      taskRunId: 'str-target',
+      runStatePath: '/tmp/target/run_state.json',
+    })
+
+    assert.equal(rows.get('str-target')?.currentStepId, 'skill_lifecycle#1')
+    assert.equal(rows.get('str-target')?.status, 'blocked')
+    assert.equal(rows.get('str-target')?.resumePayload?.runStatePath, '/tmp/target/run_state.json')
+    assert.notEqual(rows.get('str-other')?.currentStepId, 'skill_lifecycle#1')
+    assert.equal(rows.get('str-other')?.status, 'running')
+  } finally {
+    registerSkillTaskRunRepository(null)
+  }
+})
+
+test('SkillTaskTracker does not mark a detached task done while run_state still reports live work', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-detached-terminal-guard-'))
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  try {
+    mkdirSync(root, { recursive: true })
+    const runStatePath = join(root, 'run_state.json')
+    writeFileSync(runStatePath, JSON.stringify({
+      task_id: 'dst-terminal-guard',
+      status: 'running',
+      current_stage: 'finalize',
+    }), 'utf8')
+    rows.set('str-detached', makeStoredRun({
+      id: 'str-detached',
+      sessionId: 'scope-skill-detached-terminal',
+      scopeId: 'scope-skill-detached-terminal',
+      runKind: 'detached',
+      status: 'running',
+      detachedTaskId: 'dst-terminal-guard',
+      jobId: 'dst-terminal-guard',
+      outputDir: root,
+      runStatePath,
+    }))
+
+    upsertDetachedSkillTaskRun({
+      id: 'dst-terminal-guard',
+      scopeId: 'scope-skill-detached-terminal',
+      sessionId: 'scope-skill-detached-terminal',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      params: { outputDir: root },
+      status: 'done',
+      outputDir: root,
+      runStatePath,
+      startedAt: '2026-04-28T00:00:00.000Z',
+      updatedAt: '2026-04-28T00:10:00.000Z',
+      finishedAt: '2026-04-28T00:10:00.000Z',
+    })
+
+    const stored = rows.get('str-detached')
+    assert.equal(stored?.status, 'running')
+    assert.equal(stored?.finishedAt, null)
+    assert.equal(stored?.resumePayload?.runStatePath, runStatePath)
+  } finally {
+    registerSkillTaskRunRepository(null)
+    rmSync(root, { recursive: true, force: true })
   }
 })
 

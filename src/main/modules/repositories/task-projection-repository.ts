@@ -26,6 +26,7 @@ interface TaskProjectionRow {
   task_summary: string | null
   status: TaskProjectionRecord['status']
   interaction_state: TaskProjectionRecord['interactionState']
+  waiting_for: TaskProjectionRecord['waitingFor'] | null
   steps_json: string
   current_step_id: string | null
   budget_json: string | null
@@ -59,11 +60,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
 
     db.prepare(`
       INSERT INTO task_projections (
-        task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state,
+        task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, recent_artifacts_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -76,6 +77,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.taskSummary ?? null,
       record.status,
       record.interactionState,
+      record.waitingFor ?? 'none',
       JSON.stringify(record.steps || []),
       record.currentStepId ?? null,
       record.budget ? JSON.stringify(record.budget) : null,
@@ -111,6 +113,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('taskSummary' in patch) assign('task_summary', patch.taskSummary)
     if ('status' in patch) assign('status', patch.status)
     if ('interactionState' in patch) assign('interaction_state', patch.interactionState)
+    if ('waitingFor' in patch) assign('waiting_for', patch.waitingFor)
     if ('steps' in patch) assign('steps_json', JSON.stringify(patch.steps || []))
     if ('currentStepId' in patch) assign('current_step_id', patch.currentStepId)
     if ('budget' in patch) assign('budget_json', patch.budget ? JSON.stringify(patch.budget) : null)
@@ -178,6 +181,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       taskSummary: row.task_summary ?? null,
       status: row.status,
       interactionState: row.interaction_state,
+      waitingFor: row.waiting_for || 'none',
       steps: safeParse(row.steps_json, []),
       currentStepId: row.current_step_id ?? null,
       budget: safeParse(row.budget_json, null),

@@ -21,6 +21,13 @@ test('topbar module switcher uses stable widths and avoids vertical position jit
   assert.match(iconRail, /hover:bg-\[var\(--bg-hover\)\]/)
 })
 
+test('workbench shell does not show the default no-workspace reminder banner', () => {
+  const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+
+  assert.doesNotMatch(workbenchMode, /请选择一个工作区目录/)
+  assert.doesNotMatch(workbenchMode, /选择项目目录后才能启用文件搜索与索引/)
+})
+
 test('browser rss and calendar shells align their left edge with the shared workbench canvas contract', () => {
   const browserHeader = readWorkspaceFile('src/renderer/components/browser/BrowserHeader.tsx')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')

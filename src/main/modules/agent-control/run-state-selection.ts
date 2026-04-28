@@ -18,9 +18,21 @@ export interface RunStateSelection {
   ambiguous: boolean
   candidates: RunStateCandidate[]
 }
+export type NormalizedRunStateStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+export function normalizeRunStateStatus(value: unknown): NormalizedRunStateStatus | null {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (!raw) return null
+  if (raw === 'done' || raw === 'completed' || raw === 'complete' || raw === 'success' || raw === 'succeeded') return 'done'
+  if (raw === 'failed' || raw === 'error') return 'failed'
+  if (raw === 'cancelled' || raw === 'canceled') return 'cancelled'
+  if (raw === 'blocked' || raw === 'paused' || raw === 'awaiting_input' || raw === 'pending_review') return 'blocked'
+  if (raw === 'running' || raw === 'in_progress' || raw === 'processing' || raw === 'pending') return 'running'
+  return null
 }
 
 function statFile(path: string): { isFile: boolean; isDirectory: boolean; mtimeMs: number } | null {

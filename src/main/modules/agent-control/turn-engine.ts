@@ -344,6 +344,7 @@ function appendSessionMessages<TSession extends TurnEngineSession>(
 }
 
 type RecentSkillRunForResume = SkillRunRecord
+const SUPERVISOR_SNAPSHOT_TOOL_NAME = '__skill_task_supervisor_snapshot__'
 
 function skillRunFromSupervisorSnapshot(
   snapshot: SkillTaskSupervisorSnapshot | null | undefined,
@@ -358,7 +359,7 @@ function skillRunFromSupervisorSnapshot(
     snapshot.outputDir ? `输出目录：${snapshot.outputDir}` : null,
   ].filter(Boolean).join(' · ') || snapshot.status
   return {
-    toolName: snapshot.action || 'skill_task_supervisor',
+    toolName: snapshot.action || SUPERVISOR_SNAPSHOT_TOOL_NAME,
     skillId: snapshot.skillId,
     action: snapshot.action || '',
     success: snapshot.closeAllowed && snapshot.status === 'done',
@@ -380,6 +381,7 @@ function isSameSkillRunForResume(left: SkillRunRecord | null | undefined, right:
   if (left.taskRunId && right.taskRunId && left.taskRunId === right.taskRunId) return true
   if (left.detachedTaskId && right.detachedTaskId && left.detachedTaskId === right.detachedTaskId) return true
   if (left.jobId && right.jobId && left.jobId === right.jobId) return true
+  if (left.toolName === SUPERVISOR_SNAPSHOT_TOOL_NAME || right.toolName === SUPERVISOR_SNAPSHOT_TOOL_NAME) return false
   return left.skillId === right.skillId
     && left.action === right.action
     && left.toolName === right.toolName
@@ -629,7 +631,8 @@ export class TurnEngine {
     }) => {
       const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents())
       transcript.emitOutput('', params.doneEventType || 'done')
-      transcript.emitStatus(params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error'))
+      const status = params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error')
+      transcript.emitStatus(status)
       return {
         ...state.buildResult({
           success: params.success,
@@ -638,6 +641,7 @@ export class TurnEngine {
           finalText: transcript.getFinalText(),
           usedTools: transcript.getUsedTools(),
         }),
+        status,
         projectionTruth,
         skillTaskLifecycle: params.skillTaskLifecycle || null,
       }
@@ -1489,14 +1493,16 @@ export class TurnEngine {
         reasons: [],
         repeatedUnchangedObservation: false,
         repeatedRecoverableError: false,
+        repeatedToolCallStreak: 0,
+        recoverableErrorKind: null,
+        recoverableErrorCount: 0,
       }
       let leaseLifecycleReason: 'budget_exhausted' | 'background_running' | null = null
-      const shouldUseSkillBudgetLease =
+      const hasPlannedLeaseTrigger =
         shouldUseLongSkillResumeBudget
         || hasLongTypedSkillAction(preferredSkillToolNames)
-        || Boolean(skillBudgetLeaseState)
       const sampleSkillLeaseSnapshot = (force = false): SkillTaskSupervisorSnapshot | null => {
-        if (!force && !shouldUseSkillBudgetLease && !skillBudgetLeaseState) return null
+        if (!force && !hasPlannedLeaseTrigger && !skillBudgetLeaseState) return null
         try {
           return inspectLatestSkillTaskForHost({
             sessionId: request.sessionId,
@@ -1507,15 +1513,36 @@ export class TurnEngine {
           return null
         }
       }
+      const hasRecoverableSkillLeaseSnapshot = (snapshot: SkillTaskSupervisorSnapshot | null): boolean => {
+        if (!snapshot) return false
+        if (snapshot.closeAllowed && snapshot.status === 'done') return false
+        return Boolean(
+          snapshot.hasLiveWork
+            || snapshot.hasRecentProgress
+            || snapshot.runStatePath
+            || snapshot.outputDir
+            || snapshot.detachedTaskId
+            || snapshot.taskRunId
+            || snapshot.resumePayload,
+        )
+      }
+      const observedLeaseSnapshot = hasPlannedLeaseTrigger || skillBudgetLeaseState
+        ? null
+        : sampleSkillLeaseSnapshot(true)
+      const hasLeaseTrigger = hasPlannedLeaseTrigger || hasRecoverableSkillLeaseSnapshot(observedLeaseSnapshot)
       const publishSkillBudgetLease = (): void => {
         if (!skillBudgetLeaseState) return
         if (!state.effectiveRunBudget) state.effectiveRunBudget = createRunBudgetSeed('multi_step_task')
+        const leaseEndIteration = Math.min(
+          skillBudgetLeaseState.currentLeaseEndIteration,
+          skillBudgetLeaseState.hardCapIteration,
+        )
         state.effectiveRunBudget = {
           ...state.effectiveRunBudget,
-          maxIterations: Math.max(state.effectiveRunBudget.maxIterations, skillBudgetLeaseState.hardCapIteration),
-          maxToolCalls: Math.max(state.effectiveRunBudget.maxToolCalls, skillBudgetLeaseState.hardCapIteration),
+          maxIterations: Math.max(state.effectiveRunBudget.maxIterations, leaseEndIteration),
+          maxToolCalls: Math.max(state.effectiveRunBudget.maxToolCalls, leaseEndIteration),
         }
-        effectiveMaxToolIterations = Math.max(effectiveMaxToolIterations, skillBudgetLeaseState.hardCapIteration)
+        effectiveMaxToolIterations = Math.max(effectiveMaxToolIterations, leaseEndIteration)
         warningThreshold = computeBudgetWarningThreshold(skillBudgetLeaseState.currentLeaseEndIteration)
         state.taskBudgetRuntime = {
           ...(state.syncTaskBudgetRuntime() || createTaskBudgetRuntime('multi_step_task', {
@@ -1527,7 +1554,7 @@ export class TurnEngine {
         }
         state.syncBudgetWarning()
       }
-      const ensureSkillBudgetLease = (reason: 'planned' | 'observed_long_skill_action'): void => {
+      const ensureSkillBudgetLease = (reason: 'planned' | 'observed_long_skill_action' | 'observed_supervisor_snapshot'): void => {
         if (skillBudgetLeaseState) return
         skillBudgetLeaseState = createSkillBudgetLeaseState({ iteration: iterations })
         logAgentMetric('skill_budget_lease_created', {
@@ -1539,8 +1566,12 @@ export class TurnEngine {
           reason,
         })
       }
-      if (shouldUseSkillBudgetLease) {
-        ensureSkillBudgetLease('planned')
+      if (hasLeaseTrigger) {
+        ensureSkillBudgetLease(observedLeaseSnapshot ? 'observed_supervisor_snapshot' : 'planned')
+        if (observedLeaseSnapshot) {
+          previousLeaseSnapshot = observedLeaseSnapshot
+          lastLeaseSnapshot = observedLeaseSnapshot
+        }
       }
       publishSkillBudgetLease()
 
@@ -1834,6 +1865,28 @@ export class TurnEngine {
         }
         const toolCallsForIteration = designToolFilter.toolCalls
           .map((toolCall) => designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
+        const recentToolCallsBeforeIteration = [...recentToolCalls]
+        const recordRecentToolCallsForIteration = (): void => {
+          for (const toolCall of toolCallsForIteration) {
+            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
+            recentToolCalls.push({ name: toolCall.name, argsHash })
+            if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
+          }
+          const last = recentToolCalls[recentToolCalls.length - 1]
+          if (!last) return
+          const matchCount = countToolRepetitions(recentToolCalls)
+          if (matchCount < REPETITION_THRESHOLD) return
+          logAgentMetric(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, {
+            tool: last.name,
+            repetitions: matchCount,
+            sessionId: request.sessionId,
+          })
+          session.messages.push({
+            role: 'user',
+            content: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
+          })
+          recentToolCalls.length = 0
+        }
         if (toolCallsForIteration.some((toolCall) => isLongTypedSkillActionName(toolCall.name))) {
           ensureSkillBudgetLease('observed_long_skill_action')
           publishSkillBudgetLease()
@@ -2012,7 +2065,7 @@ export class TurnEngine {
               serializedResult,
             })
           }
-          if (skillBudgetLeaseState && (batchHasLongTypedSkillAction || shouldUseSkillBudgetLease)) {
+          if (skillBudgetLeaseState) {
             const currentSnapshot = sampleSkillLeaseSnapshot()
             const currentFingerprint = currentSnapshot?.progressFingerprint || skillBudgetLeaseState.lastFingerprint
             lastLeaseProgress = scoreSkillProgress({
@@ -2026,7 +2079,7 @@ export class TurnEngine {
             })
             lastLeaseWaste = scoreSkillWaste({
               toolCalls: toolCallsForIteration,
-              recentToolCalls,
+              recentToolCalls: recentToolCallsBeforeIteration,
               executedTools: executedToolBatch.results.map((executedTool) => ({
                 name: executedTool.name,
                 input: executedTool.input,
@@ -2044,7 +2097,37 @@ export class TurnEngine {
               skillBudgetLeaseState.lastFingerprint = lastLeaseProgress.fingerprint
             }
             publishSkillBudgetLease()
+            if (lastLeaseWaste.repeatedToolCallStreak >= REPETITION_THRESHOLD || lastLeaseWaste.repeatedRecoverableError) {
+              const evaluation = evaluateSkillBudgetLease({
+                state: skillBudgetLeaseState,
+                iteration: iterations,
+                progress: lastLeaseProgress,
+                waste: lastLeaseWaste,
+                snapshot: currentSnapshot || lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
+              })
+              skillBudgetLeaseState = evaluation.state
+              publishSkillBudgetLease()
+              logAgentMetric('skill_budget_lease_decision', {
+                sessionId: request.sessionId,
+                leaseId: skillBudgetLeaseState.leaseId,
+                decision: evaluation.decision,
+                reason: evaluation.reason,
+                iteration: iterations,
+                renewalsUsed: skillBudgetLeaseState.renewalsUsed,
+                progressScore: skillBudgetLeaseState.progressScore,
+                wasteScore: skillBudgetLeaseState.wasteScore,
+              })
+              if (evaluation.decision === 'pause' || evaluation.decision === 'handoff_background') {
+                leaseLifecycleReason = evaluation.decision === 'handoff_background'
+                  ? 'background_running'
+                  : 'budget_exhausted'
+                budgetLimitedBeforeCompletion = true
+              } else if (evaluation.decision === 'close') {
+                finishedBeforeLimit = true
+              }
+            }
           }
+          recordRecentToolCallsForIteration()
         }
 
         if (host.providerContext.useAnthropicProtocol) {
@@ -2070,34 +2153,6 @@ export class TurnEngine {
             assistantContent.push({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: toolCall.input })
           }
           session.messages.push({ role: 'assistant', content: assistantContent })
-          // skill-resume C1: record each tool call this iteration to ring
-          // buffer + check repetition. We hash args so identical args repeats
-          // are detected, but different args of same tool are not (legitimate
-          // exploration like file_search with different queries).
-          for (const toolCall of toolCallsForIteration) {
-            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
-            recentToolCalls.push({ name: toolCall.name, argsHash })
-            if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
-          }
-          // Check repetition: same name+argsHash appearing ≥REPETITION_THRESHOLD
-          // times in the ring buffer. Emit metric + inject ask-user nudge.
-          const last = recentToolCalls[recentToolCalls.length - 1]
-          if (last) {
-            const matchCount = countToolRepetitions(recentToolCalls)
-            if (matchCount >= REPETITION_THRESHOLD) {
-              logAgentMetric(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, {
-                tool: last.name,
-                repetitions: matchCount,
-                sessionId: request.sessionId,
-              })
-              session.messages.push({
-                role: 'user',
-                content: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
-              })
-              // Reset buffer to avoid re-firing every subsequent iteration.
-              recentToolCalls.length = 0
-            }
-          }
           const executedToolBatch = await executeBatch()
           const toolResults: Array<Record<string, unknown>> = []
           consumeExecutedToolBatch(executedToolBatch, {
@@ -2370,7 +2425,7 @@ export class TurnEngine {
           })
         }
         if (
-          shouldUseSkillBudgetLease
+          hasLeaseTrigger
           || shouldUseLongSkillResumeBudget
           || Boolean(referenceSkillForMetrics)
           || (preferredSkillToolNames?.length || 0) > 0

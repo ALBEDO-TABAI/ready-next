@@ -425,6 +425,7 @@ interface TaskProjectionRecordData {
   taskSummary?: string | null
   status: TaskProjectionStatusData
   interactionState: TaskInteractionStateData
+  waitingFor?: ScopeRunWaitingForData
   steps: TaskProjectionStepData[]
   currentStepId?: string | null
   budget?: TaskBudgetData | null
