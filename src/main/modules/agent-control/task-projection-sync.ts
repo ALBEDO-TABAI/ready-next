@@ -357,9 +357,10 @@ export function buildTaskProjectionRecord(
   }
 
   const status = resolveStatus(effectiveSummary)
+  const blockedReasonWasCleared = truthPatch?.blockedReason === null || summary.blockedReason === null
   const blockedReason =
     effectiveSummary.blockedReason
-    || (status === 'blocked' ? previous?.blockedReason : null)
+    || (status === 'blocked' && !blockedReasonWasCleared ? previous?.blockedReason : null)
     || null
 
   return {

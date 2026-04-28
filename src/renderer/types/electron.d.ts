@@ -243,6 +243,15 @@ interface ScopeRunTaskContinuationData {
   targetUrl?: string | null
   todoId?: string | null
   todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
 }
 
 interface ContinuationIntentData {
@@ -253,6 +262,15 @@ interface ContinuationIntentData {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 interface ScopeRunMemoryCaptureItemData {

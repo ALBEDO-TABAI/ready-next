@@ -1915,6 +1915,15 @@ export class AgentControlRuntime extends EventEmitter {
       responseText: params.responseText || incoming?.responseText,
       todoId: incoming?.todoId || continuationRef?.todoId || undefined,
       todoTitle: incoming?.todoTitle || continuationRef?.todoTitle || undefined,
+      pauseReason: incoming?.pauseReason || continuationRef?.pauseReason || undefined,
+      detachedTaskId: incoming?.detachedTaskId || continuationRef?.detachedTaskId || undefined,
+      taskRunId: incoming?.taskRunId || continuationRef?.taskRunId || undefined,
+      jobId: incoming?.jobId || continuationRef?.jobId || undefined,
+      skillId: incoming?.skillId || continuationRef?.skillId || undefined,
+      action: incoming?.action || continuationRef?.action || undefined,
+      runStatePath: incoming?.runStatePath || continuationRef?.runStatePath || undefined,
+      outputDir: incoming?.outputDir || continuationRef?.outputDir || undefined,
+      progressFingerprint: incoming?.progressFingerprint || continuationRef?.progressFingerprint || undefined,
     })
   }
 

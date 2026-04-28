@@ -87,7 +87,8 @@ export function recoverLatestSkillRunFromTaskProjections(params: {
   for (const projection of sorted) {
     const skill = findSkillForProjection(projection, params.skills)
     if (!skill) continue
-    const action = pickActionName(skill)
+    const continuationRef = projection.continuationRef || null
+    const action = continuationRef?.action || pickActionName(skill)
     const toolName = action
       ? (params.resolveSkillToolByAction?.(skill.id, action)?.name || '')
       : ''
@@ -96,6 +97,15 @@ export function recoverLatestSkillRunFromTaskProjections(params: {
       skillId: skill.id,
       action,
       success: projection.status === 'done',
+      status: projection.status,
+      runKind: 'task_projection',
+      taskRunId: continuationRef?.taskRunId || undefined,
+      detachedTaskId: continuationRef?.detachedTaskId || undefined,
+      jobId: continuationRef?.jobId || undefined,
+      outputDir: continuationRef?.outputDir || undefined,
+      runStatePath: continuationRef?.runStatePath || undefined,
+      pauseReason: continuationRef?.pauseReason || undefined,
+      resumePayload: continuationRef ? { ...continuationRef } : undefined,
       summary: [
         `技能：${skill.name || skill.id}`,
         projection.taskTitle,

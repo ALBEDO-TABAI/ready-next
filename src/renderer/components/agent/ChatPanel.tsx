@@ -172,6 +172,49 @@ function resolveProjectionForTaskRun(
   ) || items[0] || null
 }
 
+function resolveProjectionWaitingFor(
+  projection: PersistedTaskProjection | null,
+  fallback?: ScopeRunState['waitingFor'],
+): ScopeRunState['waitingFor'] {
+  if (!projection) return fallback || 'none'
+  if (projection.interactionState === 'awaiting_confirmation') return 'confirmation'
+  if (projection.interactionState === 'awaiting_clarification') return 'clarification'
+  if (projection.interactionState === 'human_takeover') return 'agent_result'
+  if (projection.status === 'blocked') return 'background'
+  return fallback || 'none'
+}
+
+function resolveProjectionBlockedReason(
+  projection: PersistedTaskProjection | null,
+  fallback?: string | null,
+): string | null {
+  if (!projection) return fallback || null
+  return projection.blockedReason ?? null
+}
+
+function shouldPreferProjectionContinuation(projection: PersistedTaskProjection | null): boolean {
+  return Boolean(
+    projection?.continuationRef &&
+    (
+      projection.status === 'blocked' ||
+      projection.interactionState === 'suspended' ||
+      projection.continuationRef.pauseReason ||
+      projection.continuationRef.detachedTaskId ||
+      projection.continuationRef.taskRunId ||
+      projection.continuationRef.runStatePath ||
+      projection.continuationRef.outputDir
+    ),
+  )
+}
+
+function resolveTaskContinuationForProjection(
+  projection: PersistedTaskProjection | null,
+  fallback?: ScopeRunState['taskContinuation'],
+): ScopeRunState['taskContinuation'] {
+  if (shouldPreferProjectionContinuation(projection)) return projection?.continuationRef || null
+  return fallback || projection?.continuationRef || null
+}
+
 function memoryCaptureSourceLabel(
   sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule' | undefined
 ): string {
@@ -2026,16 +2069,18 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
-        waitingFor: run.waitingFor,
+        waitingFor: projection?.status === 'blocked'
+          ? resolveProjectionWaitingFor(projection, run.waitingFor)
+          : run.waitingFor,
         resumableActions:
-          (run.resumableActions && run.resumableActions.length > 0)
-            ? run.resumableActions
-            : (projection?.resumableActions || []),
+          (projection?.resumableActions && projection.resumableActions.length > 0)
+            ? projection.resumableActions
+            : (run.resumableActions || []),
         recentArtifacts:
           (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
-        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
+        taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
         memoryCapture: run.memoryCapture,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
@@ -2044,7 +2089,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: projection?.blockedReason || run.blockedReason,
+        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason),
         error: run.error,
         updatedAt: run.updatedAt,
         toolTrace: []
@@ -2070,15 +2115,18 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
+        waitingFor: projection?.status === 'blocked'
+          ? resolveProjectionWaitingFor(projection, run.waitingFor)
+          : run.waitingFor,
         resumableActions:
-          (run.resumableActions && run.resumableActions.length > 0)
-            ? run.resumableActions
-            : (projection?.resumableActions || []),
+          (projection?.resumableActions && projection.resumableActions.length > 0)
+            ? projection.resumableActions
+            : (run.resumableActions || []),
         recentArtifacts:
           (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
-        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
+        taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
@@ -2086,7 +2134,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: projection?.blockedReason || run.blockedReason
+        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason)
       })
     }
     return Array.from(merged.values()).sort(
@@ -2451,6 +2499,15 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         responseText: responseText || undefined,
         todoId: run?.taskContinuation?.todoId || undefined,
         todoTitle: run?.taskContinuation?.todoTitle || undefined,
+        pauseReason: run?.taskContinuation?.pauseReason || undefined,
+        detachedTaskId: run?.taskContinuation?.detachedTaskId || undefined,
+        taskRunId: run?.taskContinuation?.taskRunId || undefined,
+        jobId: run?.taskContinuation?.jobId || undefined,
+        skillId: run?.taskContinuation?.skillId || undefined,
+        action: run?.taskContinuation?.action || undefined,
+        runStatePath: run?.taskContinuation?.runStatePath || undefined,
+        outputDir: run?.taskContinuation?.outputDir || undefined,
+        progressFingerprint: run?.taskContinuation?.progressFingerprint || undefined,
       }
     },
     [],

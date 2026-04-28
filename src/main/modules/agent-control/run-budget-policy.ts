@@ -12,7 +12,7 @@ import type {
 import type { ContinuationState } from './continuation-state'
 
 const DEFAULT_MAX_PARALLEL_TOOL_GROUPS = 5
-const LONG_SKILL_TASK_MIN_ITERATIONS = 80
+const LONG_SKILL_TASK_HARD_CAP_ITERATIONS = 220
 const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterations' | 'maxToolCalls'>> = {
   direct_answer: {
     maxIterations: 8,
@@ -83,8 +83,8 @@ export function createContinuationRunBudgetSeed(
 export function applyLongSkillTaskBudgetSeed(seed: RunBudgetSeed): RunBudgetSeed {
   return {
     ...seed,
-    maxIterations: Math.max(seed.maxIterations, LONG_SKILL_TASK_MIN_ITERATIONS),
-    maxToolCalls: Math.max(seed.maxToolCalls, LONG_SKILL_TASK_MIN_ITERATIONS),
+    maxIterations: Math.max(seed.maxIterations, LONG_SKILL_TASK_HARD_CAP_ITERATIONS),
+    maxToolCalls: Math.max(seed.maxToolCalls, LONG_SKILL_TASK_HARD_CAP_ITERATIONS),
   }
 }
 

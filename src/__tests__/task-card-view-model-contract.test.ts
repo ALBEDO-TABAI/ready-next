@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildTaskCardViewModel } from '../renderer/modules/agent/taskCardViewModel'
+import { buildTaskCardViewModel, deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
 
 test('task card view model renders document tasks with generic step sections', () => {
   const vm = buildTaskCardViewModel({
@@ -91,7 +91,7 @@ test('task card view model prefers projection status and steps when available', 
     updatedAt: '2026-04-17T10:00:00.000Z',
   }, undefined)
 
-  assert.equal(vm.statusLabel, '等待继续')
+  assert.equal(vm.statusLabel, '等待补充')
   assert.equal(vm.currentStep?.status, 'blocked')
   assert.equal(vm.sections.plan.summary, '当前：章节改写')
 })
@@ -146,7 +146,7 @@ test('task card view model does not show blocked background work as completed', 
     updatedAt: '2026-04-28T01:00:00.000Z',
   }, undefined)
 
-  assert.equal(vm.statusLabel, '等待继续')
+  assert.equal(vm.statusLabel, '后台运行中')
 })
 
 test('task card view model does not show resumable background work as completed', () => {
@@ -162,7 +162,7 @@ test('task card view model does not show resumable background work as completed'
     updatedAt: '2026-04-28T01:00:00.000Z',
   }, undefined)
 
-  assert.equal(vm.statusLabel, '等待继续')
+  assert.equal(vm.statusLabel, '后台运行中')
 })
 
 test('task card view model does not show completed parent when a child task is still running', () => {
@@ -189,5 +189,94 @@ test('task card view model does not show completed parent when a child task is s
     updatedAt: '2026-04-28T01:05:00.000Z',
   }, undefined)
 
-  assert.equal(vm.statusLabel, '等待继续')
+  assert.equal(vm.statusLabel, '后台运行中')
+})
+
+test('task card runtime state distinguishes background running, budget paused, done, waiting, and failed', () => {
+  assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-background',
+    phase: 'done',
+    status: 'blocked',
+    title: '视频分析',
+    waitingFor: 'background',
+    taskContinuation: {
+      taskId: 'task-background',
+      blockerType: 'background_running',
+      detachedTaskId: 'dst-1234',
+    },
+    resumableActions: ['continue', 'cancel'],
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'background_running',
+    statusLabel: '后台运行中',
+    actionSet: ['continue', 'open_artifact', 'cancel'],
+  })
+
+  assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-budget',
+    phase: 'checkpoint',
+    status: 'blocked',
+    title: '视频分析',
+    waitingFor: 'background',
+    taskContinuation: {
+      taskId: 'task-budget',
+      blockerType: 'budget_paused',
+      pauseReason: 'budget_exhausted',
+      runStatePath: '/tmp/vea/run_state.json',
+    },
+    resumableActions: ['continue', 'retry', 'cancel'],
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'budget_paused',
+    statusLabel: '预算已暂停',
+    actionSet: ['continue', 'retry', 'cancel'],
+  })
+
+  assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-waiting',
+    phase: 'checkpoint',
+    status: 'blocked',
+    title: '等待确认',
+    waitingFor: 'confirmation',
+    resumableActions: ['continue', 'cancel'],
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'waiting',
+    statusLabel: '等待补充',
+    actionSet: ['continue', 'cancel'],
+  })
+
+  assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-done',
+    phase: 'done',
+    status: 'done',
+    title: '已完成',
+    waitingFor: 'none',
+    recentArtifacts: [{
+      id: 'artifact',
+      module: 'skill',
+      kind: 'artifact',
+      label: 'report.md',
+      path: '/tmp/report.md',
+      createdAt: '2026-04-28T01:00:00.000Z',
+    }],
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'done',
+    statusLabel: '已完成',
+    actionSet: ['open_artifact'],
+  })
+
+  assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-failed',
+    phase: 'error',
+    status: 'failed',
+    title: '失败',
+    error: 'API key invalid',
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'failed',
+    statusLabel: '失败',
+    actionSet: ['retry', 'cancel', 'open_artifact'],
+  })
 })

@@ -1,8 +1,16 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-22
+> 更新时间: 2026-04-28
 
 ## 当前真值摘要
+
+- `2026-04-28` **Skill Runtime Phase 5：长任务 UI 状态 + continuation durable handle 收口**：
+  - Phase 0-4 缺口已回填到执行面：`run_state` 选择改为 expected task id 优先，恢复路径 / tracker fallback / root `run_state.json` 不再把身份不匹配的输出当成功。
+  - 长任务预算模型已收口为 `220` 硬上限 + 前台 lease 窗口；TurnEngine 在实际观察到长耗时 skill action 时也会补上 lease，避免工具完成后没预算让模型总结。
+  - continuation 字段已贯通 main / preload / renderer：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint` 会随恢复、任务卡和 TaskPanel 继续入口保留。
+  - 任务卡新增统一状态派生：后台运行、预算暂停、等待用户、完成、失败互斥展示；完成态不再显示继续/重试，后台与预算暂停会用 projection 的 continuation handle 续到同一个任务。
+  - 已同步 `AGENTS.md` / `CLAUDE.md` 的 skill 长任务状态与续跑约定。
+  - 当前限制：已执行 `npm run rebuild:native`，但 Node/tsx 测试进程仍报告 `better-sqlite3` ABI 为 Electron 132、当前 Node 需要 127；因此 DB-backed 路径只能算未证明，不能标成已验收。
 
 0. Agent 核心重构已先落地第一段可上线基础层。
 

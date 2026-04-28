@@ -1485,7 +1485,7 @@ export class TurnEngine {
         || hasLongTypedSkillAction(preferredSkillToolNames)
         || Boolean(skillBudgetLeaseState)
       const sampleSkillLeaseSnapshot = (): SkillTaskSupervisorSnapshot | null => {
-        if (!shouldUseSkillBudgetLease) return null
+        if (!shouldUseSkillBudgetLease && !skillBudgetLeaseState) return null
         try {
           return (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
             sessionId: request.sessionId,
@@ -1516,7 +1516,8 @@ export class TurnEngine {
         }
         state.syncBudgetWarning()
       }
-      if (shouldUseSkillBudgetLease && !skillBudgetLeaseState) {
+      const ensureSkillBudgetLease = (reason: 'planned' | 'observed_long_skill_action'): void => {
+        if (skillBudgetLeaseState) return
         skillBudgetLeaseState = createSkillBudgetLeaseState({ iteration: iterations })
         logAgentMetric('skill_budget_lease_created', {
           sessionId: request.sessionId,
@@ -1524,7 +1525,11 @@ export class TurnEngine {
           leaseEndIteration: skillBudgetLeaseState.currentLeaseEndIteration,
           hardCapIteration: skillBudgetLeaseState.hardCapIteration,
           referenceSkillId: referenceSkillForMetrics?.id || null,
+          reason,
         })
+      }
+      if (shouldUseSkillBudgetLease) {
+        ensureSkillBudgetLease('planned')
       }
       publishSkillBudgetLease()
 
@@ -1815,6 +1820,10 @@ export class TurnEngine {
         }
         const toolCallsForIteration = designToolFilter.toolCalls
           .map((toolCall) => designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
+        if (toolCallsForIteration.some((toolCall) => isLongTypedSkillActionName(toolCall.name))) {
+          ensureSkillBudgetLease('observed_long_skill_action')
+          publishSkillBudgetLease()
+        }
         const remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
         if (remainingToolCallBudget < toolCallsForIteration.length) {
           budgetLimitedBeforeCompletion = true

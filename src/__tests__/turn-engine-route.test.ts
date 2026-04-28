@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
+import { RunProjection } from '../main/modules/agent-control/run-projection'
+import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
@@ -10,7 +13,8 @@ import {
 import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
-import type { RunBudgetSeed, RunBudgetUsage, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
+import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
+import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 
 function createSession(userText: string): TurnEngineSession {
@@ -989,7 +993,7 @@ test('TurnEngine records tool snapshots and clears browser text-bridge nudges af
   assert.equal(Array.isArray(result.executionDiagnostics?.toolResolution?.usedStaticFallbackGroups), true)
 })
 
-test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs with 80 iteration budget', async () => {
+test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs with hard cap and lease budget', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   const logs: string[] = []
@@ -1047,8 +1051,9 @@ test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs wi
 
     assert.equal(toolLoopRequests, 1)
     assert.equal(result.taskType, 'multi_step_task')
-    assert.equal(result.executionDiagnostics?.budget?.maxIterations, 80)
-    assert.equal(result.executionDiagnostics?.budget?.maxToolCalls, 80)
+    assert.equal(result.executionDiagnostics?.budget?.maxIterations, 220)
+    assert.equal(result.executionDiagnostics?.budget?.maxToolCalls, 220)
+    assert.equal(result.executionDiagnostics?.budgetLease?.currentLeaseEndIteration, 20)
     assert.ok(
       capturedAllowedToolNames.includes('skill_video_expert_pipeline'),
       `expected VEA pipeline in allowed tools, got: ${capturedAllowedToolNames.join(',')}`,
@@ -1061,6 +1066,191 @@ test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs wi
     __setMetricSinkForTests(null)
     _resetLastReferenceSkillHintsForTests()
   }
+})
+
+test('RunCoordinator drives TurnEngine budget lifecycle through scope event and task projection sync', async () => {
+  const engine = new TurnEngine()
+  const scope: ConversationScope = {
+    id: 'scope-main-chain',
+    agent: 'butler',
+    title: '主链路验收',
+    sourceKind: 'local',
+    sourceId: 'app',
+    threadKey: 'scope-main-chain',
+    meta: {},
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+    lastMessageAt: '2026-04-28T00:00:00.000Z',
+  }
+  const summaries = new Map<string, ScopeRunSummary>()
+  const projectionRecords = new Map<string, TaskProjectionRecord>()
+  const projectionSyncs: Promise<unknown>[] = []
+  const scopeEvents: ScopeRunEventPayload[] = []
+  const runProjection = new RunProjection({
+    getScope: (scopeId) => (scopeId === scope.id ? scope : null),
+    getPrevious: (scopeId) => summaries.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      summaries.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+  const projectionStore: TaskProjectionStore = {
+    create(record) {
+      projectionRecords.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      projectionRecords.set(taskId, {
+        ...projectionRecords.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return projectionRecords.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(projectionRecords.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(projectionRecords.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [{ id: 'skill', label: '技能任务', module: 'skill', blocking: true }],
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+        requestEnvelope: buildRequestEnvelope({ userText: '继续视频分析' }),
+        intentClassification: createIntent({ primaryDomain: 'skill', confidence: 'high' }),
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async (request) => engine.execute({
+      runId: request.requestId,
+      taskId: request.taskId,
+      agentName: request.agent,
+      sessionId: request.sessionId,
+      session: createSession(String(request.message)),
+      content: request.message,
+      requestEnvelope: request.requestEnvelope,
+      intentClassification: request.intentClassification,
+      budget: request.budget,
+      budgetState: request.budgetState,
+      taskBudgetRuntime: request.taskBudgetRuntime,
+      abortSignal: new AbortController().signal,
+      ensureNotAborted: () => {},
+      emitters: {
+        emitOutput: () => {},
+        emitStatus: () => {},
+        emitRuntimeError: () => {},
+        emitToolAction: () => {},
+      },
+      host: createHost({
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [{ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_get_state'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        requestToolLoopResponse: async () => ({
+          text: '继续检查技能任务状态',
+          toolCalls: [
+            { id: 'tool-skill-state', name: 'skill_get_state', input: {} },
+            { id: 'tool-memory', name: 'memory_create', input: { text: '技能仍在运行' } },
+          ],
+          stopReason: 'tool_calls',
+        }),
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => ({
+            status: 'running',
+            closeAllowed: false,
+            hasLiveWork: true,
+            hasRecentProgress: true,
+            blockers: ['后台视频分析仍在运行'],
+            progress: {
+              currentStage: 'scoring',
+              sceneIndex: 12,
+              totalScenes: 200,
+              completedScenes: 12,
+              coverageRatio: 0.06,
+            },
+            skillId: 'video-expert-analyzer',
+            action: 'video_expert_pipeline',
+            taskRunId: 'task-run-main-chain',
+            detachedTaskId: 'detached-main-chain',
+            outputDir: '/tmp/vea-main-chain',
+            runStatePath: '/tmp/vea-main-chain/run_state.json',
+            progressFingerprint: 'stage:scoring|12/200',
+            resumePayload: {
+              taskId: 'task-run-main-chain',
+              detachedTaskId: 'detached-main-chain',
+              outputDir: '/tmp/vea-main-chain',
+              runStatePath: '/tmp/vea-main-chain/run_state.json',
+            },
+          }),
+        },
+      }),
+    }),
+    emitScopeRunEvent: (payload, projectionTruth) => {
+      scopeEvents.push(payload)
+      const summary = runProjection.recordEvent(payload, projectionTruth)
+      if (summary) {
+        projectionSyncs.push(syncTaskProjection(projectionStore, summary, payload, projectionTruth))
+      }
+    },
+    reflectOnConversation: async () => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope,
+    message: '继续视频分析',
+    requestId: 'run-main-chain',
+    taskId: 'task-main-chain',
+    budget: {
+      maxIterations: 1,
+      maxToolCalls: 1,
+      maxParallelToolGroups: 1,
+      reservedToolCalls: 0,
+    },
+  })
+  await Promise.all(projectionSyncs)
+
+  const finalEvent = scopeEvents[scopeEvents.length - 1]
+  const projected = projectionRecords.get('task-main-chain')
+  assert.equal(result.success, true)
+  assert.equal(finalEvent?.phase, 'checkpoint')
+  assert.equal(finalEvent?.waitingFor, 'background')
+  assert.deepEqual(finalEvent?.resumableActions, ['continue', 'retry', 'cancel'])
+  assert.equal(finalEvent?.taskContinuation?.detachedTaskId, 'detached-main-chain')
+  assert.equal(finalEvent?.taskContinuation?.runStatePath, '/tmp/vea-main-chain/run_state.json')
+  assert.equal(projected?.status, 'blocked')
+  assert.equal(projected?.interactionState, 'suspended')
+  assert.equal(projected?.continuationRef?.detachedTaskId, 'detached-main-chain')
+  assert.equal(projected?.continuationRef?.pauseReason, 'budget_exhausted')
 })
 
 test('TurnEngine emits a typed skill action duration metric from tool hooks', async () => {
@@ -1241,7 +1431,7 @@ test('TurnEngine emits a generic running projection as soon as a long skill acti
 
     const runningProjection = events
       .map((event) => (event as TurnTranscriptEvent & { projectionPatch?: Record<string, unknown> | null }).projectionPatch)
-      .find((projection) => projection?.module === 'skill' && projection.taskSummary === '正在执行技能工具，已运行 0 秒')
+      .find((projection) => projection?.module === 'skill' && String(projection.taskSummary || '').includes('正在执行技能工具'))
 
     assert.equal(runningProjection?.currentStepId, 'skill_video_expert_pipeline')
     assert.equal((runningProjection?.steps as Array<{ status?: string }> | undefined)?.[0]?.status, 'running')

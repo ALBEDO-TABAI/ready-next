@@ -37,6 +37,15 @@ export interface ContinuationIntent {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 export interface ParsedContinuationControlText {
@@ -144,7 +153,28 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
   const record = value as Partial<ScopeRunTaskContinuation>
   const executionId = String(record.executionId || '').trim()
   const todoId = String(record.todoId || '').trim()
-  if (!executionId && !todoId) return null
+  const detachedTaskId = String(record.detachedTaskId || '').trim()
+  const taskRunId = String(record.taskRunId || '').trim()
+  const jobId = String(record.jobId || '').trim()
+  const skillId = String(record.skillId || '').trim()
+  const action = String(record.action || '').trim()
+  const runStatePath = String(record.runStatePath || '').trim()
+  const outputDir = String(record.outputDir || '').trim()
+  const progressFingerprint = String(record.progressFingerprint || '').trim()
+  if (
+    !executionId &&
+    !todoId &&
+    !detachedTaskId &&
+    !taskRunId &&
+    !jobId &&
+    !skillId &&
+    !action &&
+    !runStatePath &&
+    !outputDir &&
+    !progressFingerprint
+  ) {
+    return null
+  }
   return {
     taskId: String(record.taskId || taskId || '').trim() || taskId,
     executionId: executionId || null,
@@ -153,6 +183,15 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     targetUrl: typeof record.targetUrl === 'string' ? record.targetUrl : null,
     todoId: todoId || null,
     todoTitle: typeof record.todoTitle === 'string' ? record.todoTitle : null,
+    pauseReason: typeof record.pauseReason === 'string' ? record.pauseReason : null,
+    detachedTaskId: detachedTaskId || null,
+    taskRunId: taskRunId || null,
+    jobId: jobId || null,
+    skillId: skillId || null,
+    action: action || null,
+    runStatePath: runStatePath || null,
+    outputDir: outputDir || null,
+    progressFingerprint: progressFingerprint || null,
   }
 }
 
@@ -165,15 +204,27 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
   if (!value) return null
   const taskId = String(value.taskId || '').trim()
   if (!taskId) return null
-  return {
-    taskId,
-    executionId: normalizeOptionalContinuationText(value.executionId),
-    stepId: normalizeOptionalContinuationText(value.stepId),
-    blockedReason: normalizeOptionalContinuationText(value.blockedReason),
-    responseText: normalizeOptionalContinuationText(value.responseText),
-    todoId: normalizeOptionalContinuationText(value.todoId),
-    todoTitle: normalizeOptionalContinuationText(value.todoTitle),
+  const normalized: ContinuationIntent = { taskId }
+  const copy = (key: Exclude<keyof ContinuationIntent, 'taskId'>): void => {
+    const text = normalizeOptionalContinuationText(value[key])
+    if (text) normalized[key] = text
   }
+  copy('executionId')
+  copy('stepId')
+  copy('blockedReason')
+  copy('responseText')
+  copy('todoId')
+  copy('todoTitle')
+  copy('pauseReason')
+  copy('detachedTaskId')
+  copy('taskRunId')
+  copy('jobId')
+  copy('skillId')
+  copy('action')
+  copy('runStatePath')
+  copy('outputDir')
+  copy('progressFingerprint')
+  return normalized
 }
 
 export function applyContinuationIntentToState(
@@ -186,7 +237,17 @@ export function applyContinuationIntentToState(
   }
 
   const currentStepId = normalizedIntent.stepId || baseState.currentStepId || null
-  const continuationRef = (baseState.continuationRef || normalizedIntent.executionId || normalizedIntent.todoId)
+  const continuationRef = (
+    baseState.continuationRef
+    || normalizedIntent.executionId
+    || normalizedIntent.todoId
+    || normalizedIntent.detachedTaskId
+    || normalizedIntent.taskRunId
+    || normalizedIntent.jobId
+    || normalizedIntent.skillId
+    || normalizedIntent.runStatePath
+    || normalizedIntent.outputDir
+  )
     ? normalizeContinuationRef({
       ...(baseState.continuationRef || {}),
       taskId: baseState.taskId,
@@ -194,6 +255,15 @@ export function applyContinuationIntentToState(
       stepId: normalizedIntent.stepId || baseState.continuationRef?.stepId || currentStepId,
       todoId: normalizedIntent.todoId || baseState.continuationRef?.todoId,
       todoTitle: normalizedIntent.todoTitle || baseState.continuationRef?.todoTitle,
+      pauseReason: normalizedIntent.pauseReason || baseState.continuationRef?.pauseReason,
+      detachedTaskId: normalizedIntent.detachedTaskId || baseState.continuationRef?.detachedTaskId,
+      taskRunId: normalizedIntent.taskRunId || baseState.continuationRef?.taskRunId,
+      jobId: normalizedIntent.jobId || baseState.continuationRef?.jobId,
+      skillId: normalizedIntent.skillId || baseState.continuationRef?.skillId,
+      action: normalizedIntent.action || baseState.continuationRef?.action,
+      runStatePath: normalizedIntent.runStatePath || baseState.continuationRef?.runStatePath,
+      outputDir: normalizedIntent.outputDir || baseState.continuationRef?.outputDir,
+      progressFingerprint: normalizedIntent.progressFingerprint || baseState.continuationRef?.progressFingerprint,
     }, baseState.taskId, currentStepId)
     : null
 

@@ -208,7 +208,7 @@ test('DetachedSkillTaskTracker marks running tasks blocked after restart', () =>
   const root = mkdtempSync(join(tmpdir(), 'ready-detached-skill-out-'))
   const videoDir = join(root, 'video-slug')
   mkdirSync(videoDir, { recursive: true })
-  writeFileSync(join(videoDir, 'run_state.json'), '{"status":"blocked"}', 'utf-8')
+  writeFileSync(join(videoDir, 'run_state.json'), '{"task_id":"dst-restart","status":"blocked"}', 'utf-8')
   writeFileSync(path, JSON.stringify({
     tasks: [{
       id: 'dst-restart',
@@ -320,6 +320,44 @@ test('DetachedSkillTaskTracker restart recovery skips mismatched root run_state'
     const restored = tracker.inspect('dst-root-mismatch')
     assert.equal(restored?.outputDir, targetDir)
     assert.equal(restored?.runStatePath, targetRunState)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('DetachedSkillTaskTracker restart recovery does not fall back to mismatched root run_state', () => {
+  const path = storagePath()
+  const root = mkdtempSync(join(tmpdir(), 'ready-detached-skill-out-'))
+  try {
+    const rootRunState = join(root, 'run_state.json')
+    writeFileSync(rootRunState, JSON.stringify({
+      task_id: 'other-task',
+      current_stage: 'completed',
+    }), 'utf-8')
+    writeFileSync(path, JSON.stringify({
+      tasks: [{
+        id: 'dst-no-match',
+        scopeId: 'scope-long',
+        sessionId: 'scope-long',
+        skillId: 'long-report-skill',
+        action: 'run_report',
+        params: { outputDir: root, taskId: 'expected-task' },
+        status: 'running',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        updatedAt: '2026-04-28T00:00:00.000Z',
+      }],
+    }), 'utf-8')
+
+    const tracker = new DetachedSkillTaskTracker({
+      storagePath: path,
+      runSkill: async (request) => successfulLongSkillResult(request),
+    })
+
+    const restored = tracker.inspect('dst-no-match')
+    assert.equal(restored?.status, 'blocked')
+    assert.equal(restored?.outputDir, null)
+    assert.equal(restored?.runStatePath, null)
+    assert.match(restored?.error || '', /No run_state path was found/i)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

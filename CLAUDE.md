@@ -136,6 +136,14 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 原语曝光受 `filterSkillPrimitivesBySession` 管控：Phase 4 起 session 的"有 active execution"信号永久 false（`skill_executions` 已退役），**primitive 的曝光条件 = session 有 reference-skill hint**；`clearAllReferenceSkillHints` 在 `cleanupAgentRuntime`（app 退出）触发，`sweepExpiredReferenceSkillHints` 由 `startReferenceHintSweep` 独立 setInterval 驱动（不再挂在 skill_executions TTL sweep 上），idle 超过 30 分钟的 hint 被淘汰，emit `skillReferenceHintTtlSwept` metric
 - `skill_run_shell` 的子进程 `PATH` 由 dispatch 层（`skills-tools.ts`）自动前置 runtime bin + 共享 venv bin（`SkillsRuntimeManager.getRuntimeBinDir()` → `<runtimeRoot>/bin`，`getSharedVenvBinDir()` → `<venvRoot>/bin` Unix / `<venvRoot>/Scripts` Windows），确保 `ffmpeg/ffprobe` symlink 和 `requirements.txt` 驱动安装到共享 venv 的 Python 依赖都可被脚本找到；handler 本身不做路径解析，缺失时走 no-op
 
+### 6.13 Skill 长任务状态与续跑
+- `run_state` / VEA 输出目录选择必须以 expected task id 为第一身份；恢复路径、tracker fallback、root `run_state.json` 只有在 task id 匹配或被标记为可信显式路径时才能算命中
+- 长任务预算模型固定为 `220` 硬上限 + 前台 lease 可续租窗口；UI 与任务投影不得把预算暂停或后台存活误判为完成
+- continuation 全链路必须保留 durable skill handle：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint`；即使没有 `executionId / todoId`，只要有这些 handle，也必须能构造继续入口
+- 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
+- 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
+- SQLite-backed 验收前必须先跑 `npm run rebuild:native`；若 `better-sqlite3` ABI 与当前 Node/Electron 不匹配，只能标记为 DB 路径未证明，不能算验收通过
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

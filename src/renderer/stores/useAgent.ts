@@ -47,6 +47,15 @@ export interface PendingContinuationIntent {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 interface AgentState {

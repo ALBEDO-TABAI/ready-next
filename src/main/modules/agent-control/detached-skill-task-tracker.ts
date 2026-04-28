@@ -125,7 +125,7 @@ function inferOutputPathsFromParams(params: Record<string, unknown>, fallbackTas
   const runStatePath = selectRunStatePath(outputDirParam, expectedTaskId)
   if (!runStatePath) {
     const directRunState = `${outputDirParam}/run_state.json`
-    if (!existsSync(directRunState)) return {}
+    if (!existsSync(directRunState) || expectedTaskId) return {}
     return {
       outputDir: outputDirParam,
       runStatePath: directRunState,

@@ -101,6 +101,7 @@ export function collectRunStateCandidates(params: {
 export function selectRunStateCandidate(params: {
   rootDir?: string | null
   explicitRunStatePath?: string | null
+  trustExplicitRunStatePath?: boolean
   expectedTaskId?: string | null
   fileName?: string
   searchDepth?: number
@@ -109,7 +110,13 @@ export function selectRunStateCandidate(params: {
   const expectedTaskId = nonEmptyString(params.expectedTaskId)
   const explicitRunStatePath = nonEmptyString(params.explicitRunStatePath)
   if (explicitRunStatePath && existsSync(explicitRunStatePath) && statFile(explicitRunStatePath)?.isFile) {
-    return { path: explicitRunStatePath, ambiguous: false, candidates: [] }
+    if (params.trustExplicitRunStatePath || !expectedTaskId) {
+      return { path: explicitRunStatePath, ambiguous: false, candidates: [] }
+    }
+    const explicitCandidate = readRunStateCandidate(explicitRunStatePath, fileName)
+    if (explicitCandidate?.taskId === expectedTaskId) {
+      return { path: explicitRunStatePath, ambiguous: false, candidates: explicitCandidate ? [explicitCandidate] : [] }
+    }
   }
 
   const rootDir = nonEmptyString(params.rootDir)
@@ -124,10 +131,6 @@ export function selectRunStateCandidate(params: {
   if (expectedTaskId) {
     const matches = candidates.filter((candidate) => candidate.taskId === expectedTaskId)
     if (matches.length > 0) return { path: matches[0].path, ambiguous: false, candidates }
-    const legacyUnidentified = candidates.filter((candidate) => !candidate.taskId)
-    if (candidates.length === 1 && legacyUnidentified.length === 1) {
-      return { path: candidates[0].path, ambiguous: false, candidates }
-    }
     return { path: null, ambiguous: candidates.length > 1, candidates }
   }
 

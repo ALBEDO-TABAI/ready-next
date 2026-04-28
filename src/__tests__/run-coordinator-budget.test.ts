@@ -434,14 +434,14 @@ test('run budget policy seeds different iteration budgets for direct, short, and
   assert.equal(short.maxParallelToolGroups, 5)
 })
 
-test('run budget policy grants long skill resume tasks 80 iterations without changing short task preset', () => {
+test('run budget policy grants long skill resume tasks the hard cap without changing short task preset', () => {
   const short = createRunBudgetSeed('short_task')
   const longSkill = applyLongSkillTaskBudgetSeed(short)
 
   assert.equal(short.maxIterations, 24)
   assert.equal(short.maxToolCalls, 24)
-  assert.equal(longSkill.maxIterations, 80)
-  assert.equal(longSkill.maxToolCalls, 80)
+  assert.equal(longSkill.maxIterations, 220)
+  assert.equal(longSkill.maxToolCalls, 220)
 })
 
 test('run budget policy computes a stable usage percentage from the active budget counters', () => {

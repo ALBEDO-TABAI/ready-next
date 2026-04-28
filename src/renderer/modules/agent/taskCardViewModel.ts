@@ -69,6 +69,22 @@ export interface TaskCardViewModel {
   detailGroups: TaskEventGroupViewModel[]
 }
 
+export type TaskCardVisualState =
+  | 'background_running'
+  | 'budget_paused'
+  | 'waiting'
+  | 'done'
+  | 'failed'
+  | 'running'
+
+export type TaskCardAction = 'continue' | 'retry' | 'open_artifact' | 'cancel'
+
+export interface TaskCardRuntimeState {
+  visualState: TaskCardVisualState
+  statusLabel: string
+  actionSet: TaskCardAction[]
+}
+
 export interface TaskDisplayGroup {
   kind: 'group'
   key: string
@@ -160,6 +176,61 @@ function hasActiveChildTask(run: TaskCardRunLike): boolean {
   })
 }
 
+function hasRecentArtifact(run: TaskCardRunLike): boolean {
+  return (run.recentArtifacts || []).length > 0
+}
+
+function hasBackgroundSignal(run: TaskCardRunLike): boolean {
+  return run.waitingFor === 'background'
+    || run.taskContinuation?.blockerType === 'background_running'
+    || hasActiveChildTask(run)
+}
+
+function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
+  return run.taskContinuation?.pauseReason === 'budget_exhausted'
+    || run.taskContinuation?.blockerType === 'budget_paused'
+    || run.degradationReason === 'budget_exhausted'
+}
+
+export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
+  const hasLiveBackground = hasBackgroundSignal(run)
+  const hasBudgetPaused = hasBudgetPausedSignal(run)
+  const isFailed = (run.phase === 'error' || run.status === 'failed') && !hasLiveBackground && !hasBudgetPaused
+  if (isFailed) {
+    return { visualState: 'failed', statusLabel: '失败', actionSet: ['retry', 'cancel', 'open_artifact'] }
+  }
+  if (hasBudgetPaused) {
+    return { visualState: 'budget_paused', statusLabel: '预算已暂停', actionSet: ['continue', 'retry', 'cancel'] }
+  }
+  if (hasLiveBackground) {
+    return { visualState: 'background_running', statusLabel: '后台运行中', actionSet: ['continue', 'open_artifact', 'cancel'] }
+  }
+  if (
+    (run.waitingFor && run.waitingFor !== 'none')
+    || run.status === 'blocked'
+    || run.interactionState === 'awaiting_clarification'
+    || run.interactionState === 'awaiting_confirmation'
+    || run.interactionState === 'human_takeover'
+  ) {
+    const actions = (run.resumableActions || []).filter((action): action is TaskCardAction =>
+      action === 'continue' || action === 'retry' || action === 'open_artifact' || action === 'cancel',
+    )
+    return {
+      visualState: 'waiting',
+      statusLabel: '等待补充',
+      actionSet: actions.length > 0 ? actions : ['continue', 'cancel'],
+    }
+  }
+  if (run.phase === 'done' || run.status === 'done') {
+    return {
+      visualState: 'done',
+      statusLabel: '已完成',
+      actionSet: hasRecentArtifact(run) ? ['open_artifact'] : [],
+    }
+  }
+  return { visualState: 'running', statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase), actionSet: ['cancel'] }
+}
+
 export function createDefaultTaskDisclosureState(run: TaskCardRunLike): TaskDisclosureState {
   return {
     overview: true,
@@ -195,12 +266,8 @@ export function buildTaskCardViewModel(
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
   const summary = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
-  const hasRecoverableWait = Boolean(
-    (run.waitingFor && run.waitingFor !== 'none') || run.blockedReason,
-  )
-  const statusLabel = (hasRecoverableWait || hasActiveChildTask(run)) && run.phase !== 'error' && run.phase !== 'cancelled'
-    ? '等待继续'
-    : taskStatusLabel(run.status) || taskPhaseLabel(run.phase)
+  const runtimeState = deriveTaskCardRuntimeState(run)
+  const statusLabel = run.phase === 'cancelled' ? taskPhaseLabel(run.phase) : runtimeState.statusLabel
 
   return {
     key: run.scopeId,

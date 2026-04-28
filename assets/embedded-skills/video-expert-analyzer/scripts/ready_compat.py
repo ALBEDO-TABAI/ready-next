@@ -179,9 +179,6 @@ def _find_video_output_dir(output_root: Path, started_at: float, expected_task_i
         if matches:
             matches.sort(key=lambda item: item[0], reverse=True)
             return matches[0][1]
-        unidentified = [item for item in candidates if not item[2]]
-        if len(candidates) == 1 and len(unidentified) == 1:
-            return candidates[0][1]
         return None
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1] if len(candidates) == 1 else None
@@ -213,7 +210,7 @@ def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, st
         if found:
             return found
 
-    return detected.expanduser().resolve() if detected else None
+    return detected.expanduser().resolve() if detected and not expected_task_id else None
 
 
 def _build_outputs(output_dir: Optional[Path]) -> dict[str, str]:
