@@ -125,19 +125,31 @@ def _is_video_output_dir(path: Path) -> bool:
     )
 
 
-def _find_video_output_dir(output_root: Path, started_at: float) -> Optional[Path]:
+def _state_task_id(path: Path) -> str:
+    state = _safe_read_json(path / "run_state.json")
+    return str(state.get("task_id") or state.get("taskId") or "").strip()
+
+
+def _resolve_active_candidate(candidate: Path) -> Path:
+    state = _safe_read_json(candidate / "run_state.json")
+    active = str(state.get("active_output_dir") or "").strip()
+    if active:
+        active_path = Path(active).expanduser().resolve()
+        if _is_video_output_dir(active_path):
+            return active_path
+    return candidate
+
+
+def _find_video_output_dir(output_root: Path, started_at: float, expected_task_id: str = "") -> Optional[Path]:
     if _is_video_output_dir(output_root):
-        state = _safe_read_json(output_root / "run_state.json")
-        active = str(state.get("active_output_dir") or "").strip()
-        if active:
-            active_path = Path(active).expanduser().resolve()
-            if _is_video_output_dir(active_path):
-                return active_path
-        return output_root
+        task_id = _state_task_id(output_root)
+        if expected_task_id and task_id and task_id != expected_task_id:
+            return None
+        return _resolve_active_candidate(output_root)
     if not output_root.exists():
         return None
 
-    candidates: list[tuple[float, Path]] = []
+    candidates: list[tuple[float, Path, str]] = []
     for scores_path in output_root.rglob("scene_scores.json"):
         candidate = scores_path.parent
         if not _is_video_output_dir(candidate):
@@ -149,15 +161,15 @@ def _find_video_output_dir(output_root: Path, started_at: float) -> Optional[Pat
         )
         if newest_mtime + 1 < started_at:
             continue
-        state = _safe_read_json(candidate / "run_state.json")
-        active = str(state.get("active_output_dir") or "").strip()
-        if active:
-            active_path = Path(active).expanduser().resolve()
-            if _is_video_output_dir(active_path):
-                candidate = active_path
-        candidates.append((newest_mtime, candidate))
+        candidate = _resolve_active_candidate(candidate)
+        candidates.append((newest_mtime, candidate, _state_task_id(candidate)))
     if not candidates:
         return None
+    if expected_task_id:
+        matches = [item for item in candidates if item[2] == expected_task_id]
+        if matches:
+            matches.sort(key=lambda item: item[0], reverse=True)
+            return matches[0][1]
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1]
 
@@ -173,7 +185,11 @@ def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, st
 
     output_root = payload.get("outputDir")
     if output_root:
-        found = _find_video_output_dir(Path(str(output_root)).expanduser().resolve(), started_at)
+        found = _find_video_output_dir(
+            Path(str(output_root)).expanduser().resolve(),
+            started_at,
+            os.environ.get("READY_SKILL_TASK_ID", "").strip(),
+        )
         if found:
             return found
 

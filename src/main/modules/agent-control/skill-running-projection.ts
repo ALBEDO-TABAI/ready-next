@@ -19,6 +19,18 @@ interface RunStateSummary {
   updatedAt: string | null
 }
 
+interface RunStateCandidate {
+  path: string
+  mtimeMs: number
+  taskId: string | null
+}
+
+interface RunStateSelection {
+  path: string | null
+  ambiguous: boolean
+  candidates: RunStateCandidate[]
+}
+
 interface ArtifactRef {
   id: string
   module: string
@@ -94,15 +106,30 @@ function safeStat(path: string) {
   }
 }
 
-function findRunStateFile(rootDir: string): string | null {
+function collectRunStateCandidates(rootDir: string): RunStateCandidate[] {
+  const candidates: RunStateCandidate[] = []
+  const addCandidate = (path: string): void => {
+    const stat = safeStat(path)
+    if (!stat?.isFile()) return
+    let taskId: string | null = null
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+      const rec = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+      taskId = asNonEmptyString(rec.task_id) || asNonEmptyString(rec.taskId)
+    } catch {
+      taskId = null
+    }
+    candidates.push({ path, mtimeMs: stat.mtimeMs, taskId })
+  }
   const direct = join(rootDir, RUN_STATE_FILENAME)
   const directStat = safeStat(direct)
-  if (directStat?.isFile()) return direct
+  if (directStat?.isFile()) {
+    addCandidate(direct)
+    return candidates
+  }
   const rootStat = safeStat(rootDir)
-  if (!rootStat?.isDirectory()) return null
+  if (!rootStat?.isDirectory()) return candidates
 
-  let bestPath: string | null = null
-  let bestMtime = -1
   const visit = (dir: string, depth: number): void => {
     if (depth > SEARCH_DEPTH_LIMIT) return
     let entries: Dirent[]
@@ -114,18 +141,28 @@ function findRunStateFile(rootDir: string): string | null {
     for (const entry of entries) {
       const full = join(dir, String(entry.name))
       if (entry.isFile() && entry.name === RUN_STATE_FILENAME) {
-        const stat = safeStat(full)
-        if (stat && stat.mtimeMs > bestMtime) {
-          bestPath = full
-          bestMtime = stat.mtimeMs
-        }
+        addCandidate(full)
       } else if (entry.isDirectory() && depth < SEARCH_DEPTH_LIMIT) {
         visit(full, depth + 1)
       }
     }
   }
   visit(rootDir, 0)
-  return bestPath
+  return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)
+}
+
+function selectRunStateFile(rootDir: string, expectedTaskId: string | null): RunStateSelection {
+  const candidates = collectRunStateCandidates(rootDir)
+  if (candidates.length === 0) return { path: null, ambiguous: false, candidates }
+  const direct = join(rootDir, RUN_STATE_FILENAME)
+  const directCandidate = candidates.find((candidate) => candidate.path === direct)
+  if (directCandidate) return { path: directCandidate.path, ambiguous: false, candidates }
+  if (expectedTaskId) {
+    const match = candidates.find((candidate) => candidate.taskId === expectedTaskId)
+    if (match) return { path: match.path, ambiguous: false, candidates }
+  }
+  if (candidates.length === 1) return { path: candidates[0].path, ambiguous: false, candidates }
+  return { path: null, ambiguous: true, candidates }
 }
 
 function readRunState(path: string | null): RunStateSummary | null {
@@ -148,6 +185,13 @@ function collectProbeDirs(toolInput?: Record<string, unknown>): string[] {
   const sceneScoresPath = asNonEmptyString(toolInput?.sceneScoresPath) || asNonEmptyString(toolInput?.scene_scores_path)
   if (sceneScoresPath) pushDir(dirname(sceneScoresPath))
   return dirs
+}
+
+function collectExpectedTaskId(toolInput?: Record<string, unknown>): string | null {
+  return asNonEmptyString(toolInput?.taskId)
+    || asNonEmptyString(toolInput?.task_id)
+    || asNonEmptyString(toolInput?.detachedTaskId)
+    || asNonEmptyString(toolInput?.detached_task_id)
 }
 
 function isInterestingArtifactName(name: string): boolean {
@@ -252,7 +296,10 @@ export function buildLongSkillRunningProjection(params: {
   const elapsed = formatElapsedDuration(params.now - params.startedAt)
   const updatedAt = new Date(params.now).toISOString()
   const probeDirs = collectProbeDirs(params.toolInput)
-  const runStatePath = probeDirs.map(findRunStateFile).find(Boolean) || null
+  const expectedTaskId = collectExpectedTaskId(params.toolInput)
+  const selections = probeDirs.map((dir) => selectRunStateFile(dir, expectedTaskId))
+  const ambiguousSelection = selections.find((selection) => selection.ambiguous)
+  const runStatePath = selections.map((selection) => selection.path).find(Boolean) || null
   const runState = readRunState(runStatePath)
   const progressText = runState?.totalScenes && runState?.completedScenes
     ? `${runState.completedScenes}/${runState.totalScenes}`
@@ -261,13 +308,18 @@ export function buildLongSkillRunningProjection(params: {
       : null
   const stageText = runState?.currentStage || runState?.currentStep || null
   const artifacts = collectArtifacts({
-    probeDirs: runStatePath ? [dirname(runStatePath), ...probeDirs] : probeDirs,
+    probeDirs: runStatePath
+      ? [dirname(runStatePath), ...probeDirs]
+      : ambiguousSelection
+        ? []
+        : probeDirs,
     runStatePath,
     createdAt: updatedAt,
     toolName: params.toolName,
   })
 
   const confirmations = [
+    ambiguousSelection ? `发现多个 run_state.json，需提供 taskId 才能确认当前任务` : null,
     stageText ? `阶段：${stageText}` : null,
     progressText ? `进度：${progressText}` : null,
     !stageText && runState?.status ? `状态：${runState.status}` : null,

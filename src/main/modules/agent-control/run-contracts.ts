@@ -14,6 +14,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
+import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 
@@ -378,6 +379,7 @@ export interface ExecutionHostResult {
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
   projectionTruth?: ProjectionTruthSnapshot | null
+  skillTaskLifecycle?: SkillTaskLifecycleSignal | null
 }
 
 export interface ExecutionTurnResult {
@@ -392,6 +394,34 @@ export interface ExecutionTurnResult {
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
   projectionTruth?: ProjectionTruthSnapshot | null
+  skillTaskLifecycle?: SkillTaskLifecycleSignal | null
+}
+
+export type SkillTaskLifecycleState =
+  | 'background_running'
+  | 'budget_paused'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+export type SkillTaskLifecycleReason =
+  | 'background_running'
+  | 'budget_exhausted'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface SkillTaskLifecycleSignal {
+  state: SkillTaskLifecycleState
+  reason: SkillTaskLifecycleReason
+  phase: ScopeRunEventPayload['phase']
+  interactionState: TaskInteractionState
+  waitingFor: ScopeRunWaitingFor
+  resumableActions: ScopeRunResumableAction[]
+  blockedReason: string | null
+  taskContinuation: ScopeRunTaskContinuation | null
 }
 
 export interface ProjectionTruthSnapshot {
@@ -547,6 +577,13 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
     summary: string
     updatedAt: number
   } | null
+  skillTaskSupervisor?: {
+    inspectLatestSkillTask: (params: {
+      sessionId?: string | null
+      scopeId?: string | null
+      skillId?: string | null
+    }) => SkillTaskSupervisorSnapshot
+  } | null
   getIncomingAttachmentHints: (content: RunMessage) => { count: number; latestName?: string }
   collectRecentPureUserInputs: (messages: TurnEngineSessionMessage[], limit?: number) => string[]
   sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean
@@ -610,6 +647,8 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
 export interface TurnEngineRequest<TSession extends TurnEngineSession = TurnEngineSession> {
   runId: string
   taskId: string
+  parentTaskId?: string
+  parentStepId?: string
   agentName: string
   sessionId?: string
   session: TSession

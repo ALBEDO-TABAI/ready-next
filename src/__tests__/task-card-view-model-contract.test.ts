@@ -148,3 +148,46 @@ test('task card view model does not show blocked background work as completed', 
 
   assert.equal(vm.statusLabel, '等待继续')
 })
+
+test('task card view model does not show resumable background work as completed', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-skill-background-continue',
+    phase: 'done',
+    title: '视频分析',
+    taskTitle: '技能执行 · Video Expert Analyzer',
+    taskSummary: '预算耗尽但后台仍在跑',
+    waitingFor: 'background',
+    resumableActions: ['continue', 'cancel'],
+    blockedReason: '预算耗尽但后台仍在跑',
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.statusLabel, '等待继续')
+})
+
+test('task card view model does not show completed parent when a child task is still running', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-parent-with-running-child',
+    phase: 'done',
+    status: 'done',
+    title: '视频分析',
+    taskTitle: '技能执行 · Video Expert Analyzer',
+    taskSummary: '父任务已交接',
+    steps: [{
+      id: 'parent-step',
+      title: '后台分析',
+      status: 'done',
+      updatedAt: '2026-04-28T01:00:00.000Z',
+      childTasks: [{
+        taskId: 'detached-child',
+        taskType: 'multi_step_task',
+        status: 'running',
+        summary: '后台仍在运行',
+        updatedAt: '2026-04-28T01:05:00.000Z',
+      }],
+    } as any],
+    updatedAt: '2026-04-28T01:05:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.statusLabel, '等待继续')
+})

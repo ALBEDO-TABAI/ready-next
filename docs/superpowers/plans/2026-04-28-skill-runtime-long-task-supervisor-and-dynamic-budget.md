@@ -47,6 +47,43 @@ This phase is complete only when these five conditions are true:
 | 6 | Simulated User Acceptance | Exercise the full user path without waiting for manual screenshots | Phase 4 and 5 | CLI/UI harness confirms logs, SQLite, detached JSON, and projection agree |
 | 7 | Baseline Cleanup And Documentation | Make the branch reviewable and prepare the next split plan | All previous | Skill tests/typecheck pass or non-skill failures are listed separately |
 
+## 2.1 Current Audit Snapshot Before Phase 3
+
+This plan is being refined against the current `codex/skill-runtime-b-plan` worktree state, not a clean baseline.
+
+- The worktree already contains mixed tests and implementation for parts of Phase 0-2. Do not claim Phase 0 was completed as a pure red-test phase unless the implementing agent records the original failing behavior.
+- Phase 1 is partly implemented on the Ready side: richer `run_state` fields, `expectedTaskId`, detached task id fallback, and ambiguity results exist. The remaining risk is selection precedence: a root-level `run_state.json` must not bypass `expectedTaskId` when it belongs to another task.
+- VEA `run_state.py` already defines `schema_version`, `task_id`, `pid`, `started_at`, `active_output_dir`, stage, scene counts, coverage, and heartbeat timestamps. The plan should verify those fields through real entry points instead of asking to recreate them.
+- Phase 2 has a `skill-task-supervisor.ts` draft and tests, but it is not yet wired into `turn-engine`, `run-coordinator`, `session-continuity`, or the tool-result close path. Treat it as a read-only supervisor contract until Phase 3 connects it.
+- Phase 3 has partial guard rails in `run-coordinator.ts` and renderer card normalization, but the main lifecycle split is still missing: budget exhaustion still falls through toward a done turn, primitive monitor success can still flatten projection state, and session continuity still stores skill runs mostly as `success: boolean`.
+
+## 2.2 Phase 3 Assumptions And Completion Standard
+
+Phase 3 must be surgical. It should prevent false completion and preserve recovery, but it should not implement dynamic lease renewal yet.
+
+**Chosen state mapping for Phase 3:**
+
+- Do not add new database status enum values in Phase 3.
+- Keep `skill_task_runs.status` within the existing set: `queued | running | blocked | done | failed | cancelled`.
+- Treat supervisor-only states such as `background_running` and `budget_paused` as observation/lifecycle states, then project them through existing UI fields:
+  - `phase: checkpoint`
+  - `interactionState: suspended`
+  - `waitingFor: background`
+  - `resumableActions: ["continue", "cancel"]` or `["continue", "retry", "cancel"]` when retry is meaningful
+  - `blockedReason` / `taskContinuation` carrying `pauseReason`, `detachedTaskId`, `taskRunId`, `runStatePath`, and `outputDir`
+- A task may become `done` only when the supervisor says `closeAllowed === true`, or when there is no skill task snapshot relevant to the turn.
+- Do not treat an empty supervisor result as relevant work. A snapshot is relevant only if at least one durable handle exists: `taskRunId`, `detachedTaskId`, `skillId`, `runStatePath`, `outputDir`, or `resumePayload`. `status: "unknown" + closeAllowed: false` by itself must not block ordinary chat or non-skill turns.
+- `background_running` means live work or recent progress exists. `budget_paused` means the turn stopped because of budget, no live process/recent progress is visible, but the task has a durable resume handle and should not be marked done.
+
+**Phase 3 is complete only when:**
+
+- The real budget-exhausted path asks the supervisor before returning final state.
+- Live or recently progressing skill work ends the agent turn as checkpoint/background, not done.
+- Primitive monitor success appends a step but cannot clear parent task background/blocked state.
+- `RunCoordinator` has an explicit lifecycle signal to prefer over `result.success`.
+- Session continuity can persist and restore skill task status, run kind, and detached/task ids without losing compatibility with older `success` records.
+- Detached task cards and parent turn cards are linked well enough that one cannot show done while the other is still running.
+
 ## Phase 0: Baseline And Red Tests
 
 **Purpose:** Lock the real failure modes into tests before touching behavior. This prevents "fix one symptom, create another" churn.
@@ -56,34 +93,63 @@ This phase is complete only when these five conditions are true:
 - Add tests under `src/__tests__/`
 - Existing likely targets:
   - `src/__tests__/run-coordinator-budget.test.ts`
+  - `src/__tests__/turn-engine-route.test.ts`
   - `src/__tests__/skill-task-tracker.test.ts`
   - `src/__tests__/skill-primitive-run-shell.test.ts`
   - `src/__tests__/skill-running-projection.test.ts`
+  - `src/__tests__/skill-inspect-run-state-vea-contract.test.ts`
+  - `src/__tests__/skill-task-supervisor.test.ts`
+  - `src/__tests__/session-continuity.test.ts`
   - `src/__tests__/task-projection-sync.test.ts`
   - `src/__tests__/task-card-view-model-contract.test.ts`
+
+**Current Audit Addendum:**
+
+- Some Phase 0 tests already exist in the current diff, but they were not captured as a clean red phase. Execution agents must either re-run against a baseline commit or mark them as regression guards with the failure mode written down.
+- Existing tests cover parts of `blockedReason: null`, background card labels, VEA inspector fields, and supervisor conflict handling. Do not duplicate those tests without adding a missing branch.
 
 **Key Tests To Add:**
 
 - [ ] Budget exhaustion while a skill task is active must not emit a completed task.
+- [ ] The real `budgetLimitedBeforeCompletion` / max-iteration path in `turn-engine.ts` must produce checkpoint/background when supervisor reports live work. A test that only pre-builds a projection patch is not enough.
 - [ ] A primitive shell monitor returning exit code 0 must not overwrite a detached running skill task as done.
 - [ ] `stdout` containing `status: running` must be classified as running/observation, not done.
+- [ ] A monitor-only primitive success with no active parent must not create a completed skill task or successful memory record by itself.
 - [ ] Two `run_state.json` files under one output root must not be selected by newest mtime alone when task identity is known.
+- [ ] A root-level `run_state.json` with a mismatched `task_id` must not be selected ahead of a matching child `run_state.json`.
 - [ ] VEA `current_stage`, `completed_scenes`, `total_scenes`, and `coverage_ratio` must be extracted by `skill_inspect_run_state`.
 - [ ] `blockedReason: null` must clear a previous blocker.
 - [ ] A task card cannot materialize `done + blockedReason + resumableActions: ["none"]`.
 - [ ] Recovery must prefer detached/background running task over primitive shell success.
+- [ ] Projection-level state must remain live/background after primitive `done`, not only the SQLite parent row.
 
 **Verification:**
 
-Run the new targeted tests before implementation and confirm they fail for the expected reasons. Do not proceed if a test fails for unrelated setup issues.
+Run the targeted tests before implementation and record, next to each test or in the phase commit note, the exact old behavior it catches. If the current dirty worktree already makes a test pass, mark it as a regression guard and add the missing red case instead of pretending the original red run happened.
+
+Suggested commands:
+
+```bash
+npx tsx --test src/__tests__/skill-inspect-run-state-vea-contract.test.ts
+npx tsx --test src/__tests__/skill-task-supervisor.test.ts
+npx tsx --test src/__tests__/skill-task-tracker.test.ts
+npx tsx --test src/__tests__/run-coordinator-budget.test.ts
+npx tsx --test src/__tests__/turn-engine-route.test.ts
+```
 
 ## Phase 1: VEA Progress Contract
 
 **Purpose:** Fix the "sensor" layer. Dynamic budget cannot work until Ready can see real task progress.
 
+**Current Audit Addendum:**
+
+- `assets/embedded-skills/video-expert-analyzer/scripts/run_state.py` already has the baseline fields this plan needs. Phase 1 should verify and tighten them, not rebuild the helper.
+- `assets/embedded-skills/video-expert-analyzer/scripts/ready_compat.py` already tries to select output dirs by `READY_SKILL_TASK_ID`.
+- `src/main/modules/tools/skill-primitives/inspect-run-state.ts` already exposes `expectedTaskId` and richer VEA fields, but direct root-file selection must also respect identity.
+
 **VEA Changes:**
 
-- Extend `assets/embedded-skills/video-expert-analyzer/scripts/run_state.py` default state with:
+- Verify `assets/embedded-skills/video-expert-analyzer/scripts/run_state.py` default state contains and preserves:
   - `schema_version`
   - `task_id`
   - `pid`
@@ -97,6 +163,13 @@ Run the new targeted tests before implementation and confirm they fail for the e
   - `completed_scenes`
   - `coverage_ratio`
 - Keep `delivery_report.json` as final delivery validation, not live progress truth.
+
+**Identity Contract:**
+
+- Detached tasks use the detached task id, such as `dst-*`, as the Ready task identity and inject it through `READY_SKILL_TASK_ID`.
+- Typed skill actions must have one stable Ready-owned identity, either the task run id or the skill job id chosen by the action runtime. Do not let VEA invent a separate id after launch.
+- `run_state.task_id`, detached tracker `id`, `skill_task_runs.detachedTaskId` / `jobId`, and the `expectedTaskId` passed to inspectors must be traceable in tests.
+- When `expectedTaskId` is present, any `run_state.json` with a different non-empty `task_id` is ineligible, including a root-level direct file. A blank legacy `task_id` is not a match unless the caller passed an explicit `runStatePath`.
 
 **Ready Changes:**
 
@@ -115,12 +188,22 @@ Run the new targeted tests before implementation and confirm they fail for the e
   - `updatedAt`
 - Stop using newest mtime as the first-choice selector when task identity is available.
 - If identity is unavailable, return an explicit ambiguity result instead of silently picking a stale run.
+- Apply the same identity-first selection rule in:
+  - `src/main/modules/tools/skill-primitives/inspect-run-state.ts`
+  - `src/main/modules/tools/skill-primitives/tool-defs.ts`
+  - `src/main/modules/agent-control/skill-task-supervisor.ts`
+  - `src/main/modules/agent-control/skill-running-projection.ts`
+  - `assets/embedded-skills/video-expert-analyzer/scripts/ready_compat.py`
+- Update the `skill_inspect_run_state` tool description so the LLM sees the real fields it can rely on: `currentStage`, `totalScenes`, `completedScenes`, `coverageRatio`, `activeOutputDir`, `taskId`, and `expectedTaskId`, not only the older `currentStep/completedSteps` wording.
 
 **Verification:**
 
 - `skill_inspect_run_state` returns VEA stage and scene progress from a fixture run_state.
 - A root output directory with stale and fresh runs selects the run matching `task_id` or returns ambiguous.
+- A root-level `run_state.json` whose `task_id` does not match `expectedTaskId` is skipped, and a matching child run is selected.
+- A VEA pipeline fixture writes `active_output_dir` as soon as the video-specific output directory is known.
 - VEA fixture with `current_stage: score_batches` displays progress in task projection.
+- `src/__tests__/skill-execution-tools-removed.test.ts` or a dedicated tool-definition test proves `skill_inspect_run_state` tells the model about stage, scene count, coverage, active output directory, and task identity matching.
 
 ## Phase 2: Skill Task Supervisor
 
@@ -129,6 +212,12 @@ Run the new targeted tests before implementation and confirm they fail for the e
 **New Module:**
 
 - Create `src/main/modules/agent-control/skill-task-supervisor.ts`.
+
+**Current Audit Addendum:**
+
+- A draft supervisor module and tests already exist in the current worktree. Treat this phase as contract hardening unless the draft is missing in the execution branch.
+- The module is currently only referenced by tests. Phase 2 is not done until its contract is stable enough for Phase 3 to call; Phase 3 is where it becomes part of the real turn lifecycle.
+- `budget_paused` is currently a supervisor status name without a source of truth. Either define it in Phase 3 as a budget-exhausted lifecycle outcome, or keep it out of Phase 2 assertions.
 
 **Responsibilities:**
 
@@ -149,8 +238,15 @@ interface SkillTaskSupervisorSnapshot {
   status: 'running' | 'background_running' | 'budget_paused' | 'blocked' | 'failed' | 'done' | 'cancelled' | 'unknown'
   hasLiveWork: boolean
   hasRecentProgress: boolean
+  closeAllowed: boolean
+  ambiguous: boolean
+  stale: boolean
   outputDir: string | null
   runStatePath: string | null
+  lastProgressAt: string | null
+  pauseReason: string | null
+  resumePayload: Record<string, unknown> | null
+  progressFingerprint: string | null
   progress: {
     currentStage?: string | null
     totalScenes?: number | null
@@ -167,6 +263,9 @@ interface SkillTaskSupervisorSnapshot {
 - Any reliable live signal wins over a primitive monitor result.
 - Detached running wins over task projection done.
 - A shell monitor step can update step history but cannot close the parent skill task.
+- `closeAllowed` is the only permission Phase 3 may use to finish a parent skill task as done.
+- Projection is fallback context only. It cannot override SQLite/detached/run_state live evidence.
+- If `expectedTaskId` is provided, direct root `run_state.json` does not bypass identity matching.
 - If supervisor sees conflicting truth, it should preserve recoverability and mark the task blocked/background rather than done.
 
 **Verification:**
@@ -174,31 +273,275 @@ interface SkillTaskSupervisorSnapshot {
 - Supervisor reports live work when detached JSON says running even if SQLite latest row says done.
 - Supervisor reports live work when pid exists and run_state is stale.
 - Supervisor reports ambiguity instead of selecting stale output paths from another task.
+- Supervisor selects a matching child `run_state.json` over a mismatched root `run_state.json`.
+- Supervisor returns `closeAllowed: false` for every combination where detached JSON, pid, fresh heartbeat, output activity, or active task run says the work is still live.
+- Supervisor conflict fixture covers all four sources at once: SQLite terminal row, detached running record, run_state running, projection done.
+- Supervisor returns enough resume data for Phase 3: `detachedTaskId`, `taskRunId`, `runStatePath`, `outputDir`, `progressFingerprint`, and `pauseReason`.
 
 ## Phase 3: Lifecycle Separation
 
 **Purpose:** Make agent turn, tool step, and skill task independent.
 
-**Main Changes:**
+**Do Not Do In Phase 3:**
 
-- Update `turn-engine.ts` budget exhaustion path:
-  - Ask supervisor whether the skill task still has live work or recent progress.
-  - If yes, finish the agent turn as paused/background, not done.
-  - Emit a durable skill task event with `failureKind: budget_exhausted` or `pauseReason: background_handoff`.
-- Update `run-coordinator.ts`:
-  - Do not map `result.success` directly to `phase: done` when result carries pause/background state.
-  - Memory reflection must not reinforce `phase: done` for paused/background tasks.
-- Update `skill-task-tracker.ts`:
-  - Track tool step status separately from parent task status.
-  - Primitive events append steps but do not overwrite active typed/detached parent status unless supervisor agrees.
-- Update `session-continuity.ts`:
-  - Store `runKind`, `detachedTaskId`, and status, not just `success: boolean`.
+- Do not implement dynamic lease renewal. Phase 3 only prevents false completion and preserves resume handles.
+- Do not add new `skill_task_runs.status` enum values.
+- Do not treat `exitCode: 0` from a monitor command as proof that the parent skill task is complete.
+- Do not make `delivery_report.json` live progress truth.
+
+### Phase 3.1: Define The Lifecycle Projection Contract
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/run-contracts.ts`
+- Modify: `src/main/modules/agent-control/types.ts`
+- Modify: `src/renderer/modules/agent/scopeRunState.ts`
+- Create: `src/main/modules/agent-control/skill-task-lifecycle.ts`
+- Test: `src/__tests__/skill-task-lifecycle.test.ts`
+- Test: `src/__tests__/scope-run-state.test.ts`
+
+**Plan:**
+
+- [ ] Add one explicit optional lifecycle signal to turn results, for example:
+
+```ts
+interface SkillTaskLifecycleSignal {
+  state: 'background_running' | 'budget_paused' | 'blocked' | 'done' | 'failed'
+  reason: 'budget_exhausted' | 'background_handoff' | 'primitive_observation' | 'supervisor_close'
+  phase: 'checkpoint' | 'done' | 'error' | 'cancelled'
+  waitingFor: ScopeRunWaitingFor
+  interactionState: TaskInteractionState
+  resumableActions: ScopeRunResumableAction[]
+  blockedReason: string | null
+  taskContinuation: ScopeRunTaskContinuation | null
+}
+```
+
+- [ ] Extend `ScopeRunTaskContinuation` and the renderer parser to preserve the handles used for recovery:
+  - `pauseReason`
+  - `detachedTaskId`
+  - `taskRunId`
+  - `jobId`
+  - `skillId`
+  - `action`
+  - `runStatePath`
+  - `outputDir`
+  - `progressFingerprint`
+- [ ] Map supervisor snapshots to existing UI fields:
+  - `hasLiveWork || hasRecentProgress || closeAllowed === false` -> checkpoint/background.
+  - `closeAllowed === true && status === "done"` -> done.
+  - terminal failure with no live work -> error.
+- [ ] Add `isRelevantSkillTaskSnapshot(snapshot)` and require it before using `closeAllowed`. An empty `unknown` snapshot must be ignored.
+- [ ] Define `budget_paused` only for budget exhaustion plus a durable resume handle plus no live/recent progress.
+- [ ] Keep this mapper pure. It must not inspect files, read SQLite, or mutate projections.
 
 **Verification:**
 
-- Budget exhaustion with live detached task creates `status: blocked/background_running`, not done.
-- Shell monitor exit 0 appends a step but parent task remains running/background.
-- Memory capture after a paused skill task does not change the visible task to completed.
+```bash
+npx tsx --test src/__tests__/skill-task-lifecycle.test.ts
+npx tsx --test src/__tests__/scope-run-state.test.ts --test-name-pattern "taskContinuation|background"
+```
+
+Expected: lifecycle mapping tests pass without changing DB enums or `ScopeRunEventPayload.phase`.
+
+### Phase 3.2: Connect TurnEngine Budget Exhaustion To Supervisor
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/turn-engine.ts`
+- Modify if needed for dependency injection: `src/main/modules/agent-control/run-contracts.ts`
+- Test: `src/__tests__/turn-engine-route.test.ts`
+- Test: `src/__tests__/turn-engine-contract.test.ts`
+
+**Plan:**
+
+- [ ] Land this together with Phase 3.5, or land Phase 3.5's consumer test first as a failing test. Do not leave an intermediate state where TurnEngine emits a lifecycle signal that RunCoordinator ignores.
+- [ ] In the real budget exhaustion branch near the final `turn_budget_exhausted` metric, call `inspectLatestSkillTask({ sessionId: request.sessionId, scopeId: request.sessionId, skillId })` or an injected equivalent.
+- [ ] First check that the snapshot is relevant to this turn. Ignore empty `unknown` snapshots so ordinary tasks can still finish.
+- [ ] If the relevant snapshot says live/recent work exists, or `closeAllowed === false`, emit a structured skill projection with:
+  - `module: "skill"`
+  - `phase: "checkpoint"`
+  - `waitingFor: "background"`
+  - `resumableActions: ["continue", "cancel"]`
+  - `blockedReason: "本轮预算已用完，但技能任务仍在后台运行"`
+  - `taskContinuation` carrying the supervisor resume payload
+- [ ] Return `success: true` but include the explicit lifecycle signal from Phase 3.1. Do not rely only on the projection patch.
+- [ ] Only fall through to the existing done finish when supervisor returns no relevant skill task or a relevant snapshot with `closeAllowed === true`.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/turn-engine-route.test.ts --test-name-pattern "budget"
+npx tsx --test src/__tests__/turn-engine-contract.test.ts --test-name-pattern "budget"
+```
+
+Expected: a max-iteration or tool-budget-limited skill turn with live supervisor evidence ends as checkpoint/background, not done.
+
+### Phase 3.3: Add A Parent Skill Task Lifecycle Event
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/skill-task-tracker.ts`
+- Modify: `src/main/modules/repositories/skill-task-run-repository.ts` only if an update helper is missing; do not add new status values.
+- Test: `src/__tests__/skill-task-tracker.test.ts`
+- Test: `src/__tests__/skill-task-run-repository.test.ts`
+
+**Plan:**
+
+- [ ] Add a tracker entry point for parent lifecycle updates, separate from primitive tool-step events.
+- [ ] For `background_running`, keep the parent task run `status: "running"` and `interactionState: "suspended"` while setting projection `waitingFor: "background"`.
+- [ ] For `budget_paused` with no live process but a resumable task, use parent task run `status: "blocked"` and `interactionState: "suspended"`.
+- [ ] Append a lifecycle step such as `skill_lifecycle#N` so history records why the turn yielded, without pretending any primitive tool completed the whole task.
+- [ ] Preserve output paths and resume payload from the supervisor snapshot.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/skill-task-tracker.test.ts --test-name-pattern "lifecycle|primitive|background"
+npx tsx --test src/__tests__/skill-task-run-repository.test.ts
+```
+
+Expected: parent task status remains active/recoverable after budget handoff, and lifecycle events do not create terminal rows.
+
+### Phase 3.4: Stop Primitive Success From Flattening The Parent Projection
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/skill-task-tracker.ts`
+- Inspect only unless needed: `src/main/modules/tools/skills-tools.ts`
+- Test: `src/__tests__/skill-task-tracker.test.ts`
+- Test: `src/__tests__/skill-runtime-structured-result.test.ts`
+
+**Plan:**
+
+- [ ] Extend the existing DB-level `preserveActiveParent` rule to the in-memory projection.
+- [ ] When `event.runKind === "primitive"` and `event.status === "done"`:
+  - append or update the primitive step;
+  - do not clear parent `blockedReason`, `waitingFor`, `resumableActions`, or `taskContinuation` if the parent task is active/background/blocked;
+  - do not move the current parent lifecycle step to done unless supervisor close is allowed.
+- [ ] Ensure `stdout` or structured output indicating `status: running` remains an observation, not parent completion.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/skill-task-tracker.test.ts --test-name-pattern "primitive"
+npx tsx --test src/__tests__/skill-runtime-structured-result.test.ts --test-name-pattern "running"
+```
+
+Expected: primitive monitor exit 0 can be visible in step history while the parent projection still shows background/continue.
+
+### Phase 3.5: Make RunCoordinator Prefer Lifecycle Over Success
+
+This is the same execution slice as Phase 3.2. Splitting them across commits is allowed only if the first commit contains failing tests that prove an ignored lifecycle signal still becomes done.
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/run-coordinator.ts`
+- Modify: `src/main/modules/agent-control/run-contracts.ts`
+- Test: `src/__tests__/run-coordinator-budget.test.ts`
+
+**Plan:**
+
+- [ ] Compute final phase in this order:
+  1. cancellation
+  2. explicit lifecycle signal
+  3. recoverable projection wait
+  4. `result.success`
+- [ ] Keep memory reflection on the same final phase. A checkpoint/background task must not get a follow-up memory event with `phase: "done"`.
+- [ ] Keep `promptAssembly.recordRunOutcome` honest: use the final lifecycle state to avoid training future turns that a paused/background skill task was completed.
+- [ ] Preserve lifecycle `taskContinuation` fields all the way through emitted scope-run events. Tests must prove `pauseReason`, `detachedTaskId`, `taskRunId`, `runStatePath`, and `outputDir` survive.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/run-coordinator-budget.test.ts
+```
+
+Expected: `success: true` plus lifecycle checkpoint emits checkpoint in both the immediate final event and later memory-capture event.
+
+### Phase 3.6: Persist Skill Continuity Without Flattening To Success
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/session-continuity.ts`
+- Modify: `src/main/modules/tools/skills-tools.ts`
+- Modify: `src/main/modules/claude-bridge/direct-chat.ts` only if resume resolution needs the new fields.
+- Test: `src/__tests__/session-continuity.test.ts`
+- Test: `src/__tests__/skill-resume-end-to-end.test.ts`
+
+**Plan:**
+
+- [ ] Extend `SkillRunRecord` with optional fields:
+  - `status`
+  - `runKind`
+  - `taskRunId`
+  - `detachedTaskId`
+  - `jobId`
+  - `outputDir`
+  - `runStatePath`
+  - `pauseReason`
+  - `resumePayload`
+- [ ] Bump the persisted session-continuity payload version and keep the reader compatible with older records that only contain `success`.
+- [ ] Add a hydration test: write an old continuity file, load it, and prove it still returns a usable `SkillRunRecord`.
+- [ ] Add a round-trip test: write a background/budget-paused record with the new fields, reload from disk, and prove no resume handle is lost.
+- [ ] Update `rememberSkillRun` call sites so detached/background/budget-paused work is stored as recoverable, not as plain success.
+- [ ] Make resume lookup prefer active `skill_task_runs` / supervisor snapshot over old `recentSkillRuns`.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/session-continuity.test.ts
+npx tsx --test src/__tests__/skill-resume-end-to-end.test.ts --test-name-pattern "recent skill|resume|continuation"
+```
+
+Expected: app restart can restore a background or budget-paused skill task with its detached id/run state path intact.
+
+### Phase 3.7: Link Detached Task And Parent Turn Semantics
+
+**Files:**
+
+- Modify: `src/main/modules/agent-control/detached-skill-task-tracker.ts`
+- Modify: `src/main/modules/tools/skills-tools.ts`
+- Modify: `src/main/modules/agent-control/runtime.ts`
+- Test: `src/__tests__/detached-skill-task-tracker.test.ts`
+- Test: `src/__tests__/task-projection-sync.test.ts`
+- Test: `src/__tests__/task-card-view-model-contract.test.ts`
+
+**Plan:**
+
+- [ ] Use this minimal Phase 3 relationship: parent turn yields to the detached task and stays checkpoint/background until supervisor says close is allowed.
+- [ ] Carry `parentTaskId`, `parentStepId`, or `taskProjectionId` where already available so the renderer can avoid showing one card as done while the detached job is still running.
+- [ ] Do not do full UI grouping in Phase 3; just provide stable linkage data for Phase 5.
+- [ ] Ensure detached task status updates cannot overwrite the parent turn to done unless supervisor close is allowed.
+
+**Verification:**
+
+```bash
+npx tsx --test src/__tests__/detached-skill-task-tracker.test.ts
+npx tsx --test src/__tests__/task-projection-sync.test.ts --test-name-pattern "background|budget|detached"
+npx tsx --test src/__tests__/task-card-view-model-contract.test.ts
+```
+
+Expected: parent and detached projections are linked and never contradict each other as done plus running.
+
+### Phase 3 Final Verification
+
+Run the full Phase 3 slice:
+
+```bash
+npx tsx --test src/__tests__/skill-task-supervisor.test.ts
+npx tsx --test src/__tests__/skill-task-lifecycle.test.ts
+npx tsx --test src/__tests__/scope-run-state.test.ts --test-name-pattern "taskContinuation|background"
+npx tsx --test src/__tests__/skill-task-tracker.test.ts
+npx tsx --test src/__tests__/run-coordinator-budget.test.ts
+npx tsx --test src/__tests__/turn-engine-route.test.ts
+npx tsx --test src/__tests__/session-continuity.test.ts
+npx tsx --test src/__tests__/detached-skill-task-tracker.test.ts
+npx tsx --test src/__tests__/task-projection-sync.test.ts
+npm run typecheck
+```
+
+Phase 3 passes only if budget exhaustion with live work produces checkpoint/background and if no later memory/projection update turns it into done.
 
 ## Phase 4: Dynamic Budget Lease
 
@@ -270,7 +613,7 @@ interface SkillTaskSupervisorSnapshot {
   - Failed: actionable failure.
 - Continuation anchors:
   - budget paused: continue monitor / continue execution / cancel.
-  - background running: inspect / continue / cancel.
+  - background running: continue / open artifact / cancel.
   - failed: retry / restart / cancel.
 
 **Verification:**
@@ -340,7 +683,7 @@ npm run test:skill
 
 ## 3. Suggested Stage Split For Execution
 
-The safest split is seven stages:
+The safest split is eight stages, matching the phase map:
 
 1. Stage 0: red tests only.
 2. Stage 1: VEA progress schema and inspect parser.
@@ -348,7 +691,8 @@ The safest split is seven stages:
 4. Stage 3: lifecycle separation and task status protection.
 5. Stage 4: dynamic lease and anti-loop scoring.
 6. Stage 5: UI/continuation semantics.
-7. Stage 6: simulated user acceptance and cleanup.
+7. Stage 6: simulated user acceptance.
+8. Stage 7: cleanup, documentation, and review slicing.
 
 Do not start with dynamic budget. Without Stage 1 and Stage 2, the budget controller has no reliable progress signal and will only encode guesses.
 
@@ -361,13 +705,20 @@ Do not start with dynamic budget. Without Stage 1 and Stage 2, the budget contro
 - Do not treat `delivery_report.json` as live progress truth.
 - Do not make shell the VEA long-flow main path.
 - Do use Skill Runtime as the proving ground for C-style generic scheduling.
+- For Phase 3, map paused/background skill work to existing checkpoint/background fields instead of adding new DB status values.
+- `closeAllowed` from the supervisor is the gate for parent task completion.
 
-## 5. Open Questions For Phase-Level Refinement
+## 5. Resolved And Open Questions For Phase-Level Refinement
 
-These should be answered when expanding each phase into task-level implementation:
+Resolved for Phase 3:
 
-1. Should `paused/background_running` be new top-level phases, or should they be represented as `blocked` plus richer interaction state for minimum blast radius?
-2. How much process liveness should be trusted after app restart on macOS, where child process ownership can be ambiguous?
-3. Should VEA generate a Ready task id itself from env, or should Ready inject one into the action payload and env together?
-4. Should progress/waste scoring be skill-specific at first, or a generic scorer with optional skill adapters?
-5. Should supervisor actively poll in the background, or only refresh on user-visible events and task card reads?
+1. `paused/background_running` should not become new top-level phases in Phase 3. Use existing `checkpoint + suspended + waitingFor: background` projection fields.
+2. Ready owns task identity. VEA reads it from env/payload and writes it into `run_state.task_id`; VEA should not generate a separate durable id.
+3. Parent task completion is allowed only through supervisor `closeAllowed`, not through primitive step success.
+
+Still open for later phases:
+
+1. How much process liveness should be trusted after app restart on macOS, where child process ownership can be ambiguous?
+2. Should progress/waste scoring be skill-specific at first, or a generic scorer with optional skill adapters?
+3. Should supervisor actively poll in the background, or only refresh on user-visible events and task card reads?
+4. Should Phase 5 introduce first-class UI labels for `budget_paused/background_running`, or keep them as view-model labels derived from checkpoint/background fields?

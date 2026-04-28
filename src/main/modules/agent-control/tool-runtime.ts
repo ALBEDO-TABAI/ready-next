@@ -45,6 +45,10 @@ export interface ToolRuntimeContext {
   sessionId?: string
   scopeId?: string
   runId?: string
+  taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
+  taskProjectionId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
 }

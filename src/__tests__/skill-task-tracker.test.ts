@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   clearSkillTaskProjection,
   getLatestRecoverableSkillTaskRun,
+  recordSkillParentTaskLifecycleEvent,
   recordSkillTaskEvent,
   registerSkillTaskRunRepository,
   readSkillTaskProjection,
@@ -337,6 +338,172 @@ test('SkillTaskTracker records primitive monitor success without closing a runni
         { id: 'skill_run_shell#1', status: 'done' },
       ],
     )
+  } finally {
+    registerSkillTaskRunRepository(null)
+  }
+})
+
+test('SkillTaskTracker records parent lifecycle handoff without pretending a primitive completed the task', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-skill-lifecycle')
+  try {
+    recordSkillTaskEvent({
+      sessionId: 'scope-skill-lifecycle',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      toolName: 'skill_video_expert_pipeline',
+      action: 'video_expert_pipeline',
+      runKind: 'typed_action',
+      status: 'running',
+      message: '正在分析视频',
+      outputDir: '/tmp/vea/lifecycle',
+      runStatePath: '/tmp/vea/lifecycle/run_state.json',
+    })
+
+    const lifecycle = recordSkillParentTaskLifecycleEvent({
+      sessionId: 'scope-skill-lifecycle',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      state: 'background_running',
+      reason: 'budget_exhausted',
+      message: '本轮预算已用完，但技能任务仍在后台运行',
+      detachedTaskId: 'dst-lifecycle',
+      taskRunId: 'str-lifecycle-parent',
+      outputDir: '/tmp/vea/lifecycle',
+      runStatePath: '/tmp/vea/lifecycle/run_state.json',
+      progressFingerprint: 'score_batches:4/12',
+    })
+
+    const projection = readSkillTaskProjection({
+      sessionId: 'scope-skill-lifecycle',
+      skillId: 'video-expert-analyzer',
+    })
+    const stored = Array.from(rows.values())[0]
+
+    assert.equal(lifecycle.stepId, 'skill_lifecycle#1')
+    assert.equal(projection?.waitingFor, 'background')
+    assert.deepEqual(projection?.resumableActions, ['continue', 'cancel'])
+    assert.equal(projection?.blockedReason, '本轮预算已用完，但技能任务仍在后台运行')
+    assert.equal(projection?.currentStepId, 'skill_lifecycle#1')
+    assert.equal(projection?.taskContinuation?.blockerType, 'budget_exhausted')
+    assert.equal((projection?.taskContinuation as any)?.detachedTaskId, 'dst-lifecycle')
+    assert.equal((projection?.taskContinuation as any)?.runStatePath, '/tmp/vea/lifecycle/run_state.json')
+    assert.deepEqual(
+      projection?.steps.map((step) => ({ id: step.id, status: step.status })),
+      [
+        { id: 'skill_video_expert_pipeline#1', status: 'running' },
+        { id: 'skill_lifecycle#1', status: 'running' },
+      ],
+    )
+    assert.equal(stored?.status, 'running')
+    assert.equal(stored?.interactionState, 'suspended')
+    assert.equal(stored?.runKind, 'typed_action')
+    assert.equal(stored?.currentStepId, 'skill_lifecycle#1')
+    assert.equal(stored?.finishedAt, null)
+    assert.equal(stored?.resumePayload?.blockerType, 'budget_exhausted')
+    assert.equal(stored?.resumePayload?.detachedTaskId, 'dst-lifecycle')
+    assert.equal(stored?.resumePayload?.progressFingerprint, 'score_batches:4/12')
+  } finally {
+    registerSkillTaskRunRepository(null)
+  }
+})
+
+test('SkillTaskTracker keeps background parent state when primitive monitor exits 0', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-skill-background-observation')
+  try {
+    recordSkillTaskEvent({
+      sessionId: 'scope-skill-background-observation',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      toolName: 'skill_video_expert_pipeline',
+      action: 'video_expert_pipeline',
+      runKind: 'typed_action',
+      status: 'running',
+      message: '正在分析视频',
+    })
+    recordSkillParentTaskLifecycleEvent({
+      sessionId: 'scope-skill-background-observation',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      state: 'background_running',
+      reason: 'budget_exhausted',
+      message: '本轮预算已用完，但技能任务仍在后台运行',
+      detachedTaskId: 'dst-background',
+      runStatePath: '/tmp/vea/background/run_state.json',
+    })
+
+    recordSkillTaskEvent({
+      sessionId: 'scope-skill-background-observation',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      toolName: 'skill_run_shell',
+      runKind: 'primitive',
+      status: 'running',
+      message: 'monitor exit 0: status=running',
+    })
+
+    const projection = readSkillTaskProjection({
+      sessionId: 'scope-skill-background-observation',
+      skillId: 'video-expert-analyzer',
+    })
+    const stored = Array.from(rows.values())[0]
+
+    assert.equal(projection?.waitingFor, 'background')
+    assert.deepEqual(projection?.resumableActions, ['continue', 'cancel'])
+    assert.equal(projection?.blockedReason, '本轮预算已用完，但技能任务仍在后台运行')
+    assert.equal(projection?.taskContinuation?.blockerType, 'budget_exhausted')
+    assert.equal(projection?.currentStepId, 'skill_lifecycle#1')
+    assert.deepEqual(
+      projection?.steps.map((step) => ({ id: step.id, status: step.status })),
+      [
+        { id: 'skill_video_expert_pipeline#1', status: 'running' },
+        { id: 'skill_lifecycle#1', status: 'running' },
+        { id: 'skill_run_shell#1', status: 'running' },
+      ],
+    )
+    assert.equal(stored?.status, 'running')
+    assert.equal(stored?.interactionState, 'suspended')
+    assert.equal(stored?.currentStepId, 'skill_lifecycle#1')
+    assert.equal(stored?.resumePayload?.blockerType, 'budget_exhausted')
+    assert.equal(stored?.finishedAt, null)
+  } finally {
+    registerSkillTaskRunRepository(null)
+  }
+})
+
+test('SkillTaskTracker maps budget paused lifecycle to existing blocked suspended state', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-skill-budget-paused')
+  try {
+    recordSkillParentTaskLifecycleEvent({
+      sessionId: 'scope-skill-budget-paused',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      action: 'video_expert_pipeline',
+      state: 'budget_paused',
+      reason: 'budget_exhausted',
+      message: '预算暂停，等待继续',
+      outputDir: '/tmp/vea/budget-paused',
+      runStatePath: '/tmp/vea/budget-paused/run_state.json',
+    })
+
+    const projection = readSkillTaskProjection({
+      sessionId: 'scope-skill-budget-paused',
+      skillId: 'video-expert-analyzer',
+    })
+    const stored = Array.from(rows.values())[0]
+
+    assert.equal(projection?.waitingFor, 'background')
+    assert.deepEqual(projection?.resumableActions, ['continue', 'cancel'])
+    assert.equal(projection?.steps[0]?.status, 'blocked')
+    assert.equal(stored?.status, 'blocked')
+    assert.equal(stored?.interactionState, 'suspended')
+    assert.equal(stored?.finishedAt, null)
+    assert.equal(stored?.resumePayload?.blockerType, 'budget_exhausted')
   } finally {
     registerSkillTaskRunRepository(null)
   }

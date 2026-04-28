@@ -91,6 +91,39 @@ test('DetachedSkillTaskTracker starts a skill task and persists done outputs', a
   assert.equal(restored.inspect(started.id)?.status, 'done')
 })
 
+test('DetachedSkillTaskTracker preserves parent task linkage for detached handoff', async () => {
+  const path = storagePath()
+  const tracker = new DetachedSkillTaskTracker({
+    storagePath: path,
+    runSkill: async (request) => successfulLongSkillResult(request),
+  })
+
+  const started = tracker.start({
+    scopeId: 'scope-long',
+    sessionId: 'session-long',
+    agent: 'assistant',
+    skillId: 'long-report-skill',
+    action: 'run_report',
+    params: { url: 'https://example.test/video' },
+    parentTaskId: 'parent-task',
+    parentStepId: 'parent-step',
+    taskProjectionId: 'projection-parent',
+  })
+
+  assert.equal(started.parentTaskId, 'parent-task')
+  assert.equal(started.parentStepId, 'parent-step')
+  assert.equal(started.taskProjectionId, 'projection-parent')
+
+  await tracker.waitForTask(started.id)
+  const restored = new DetachedSkillTaskTracker({
+    storagePath: path,
+    runSkill: async (request) => successfulLongSkillResult(request),
+  })
+  assert.equal(restored.inspect(started.id)?.parentTaskId, 'parent-task')
+  assert.equal(restored.inspect(started.id)?.parentStepId, 'parent-step')
+  assert.equal(restored.inspect(started.id)?.taskProjectionId, 'projection-parent')
+})
+
 test('DetachedSkillTaskTracker cancel aborts the running skill action', async () => {
   const path = storagePath()
   let seenSignal: AbortSignal | undefined
@@ -242,6 +275,53 @@ test('DetachedSkillTaskTracker restart recovery uses task identity instead of ne
     })
 
     const restored = tracker.inspect('dst-task-identity')
+    assert.equal(restored?.outputDir, targetDir)
+    assert.equal(restored?.runStatePath, targetRunState)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('DetachedSkillTaskTracker restart recovery falls back to detached id as run_state identity', () => {
+  const path = storagePath()
+  const root = mkdtempSync(join(tmpdir(), 'ready-detached-skill-out-'))
+  try {
+    const targetDir = join(root, 'target')
+    const otherDir = join(root, 'other')
+    mkdirSync(targetDir, { recursive: true })
+    mkdirSync(otherDir, { recursive: true })
+    const targetRunState = join(targetDir, 'run_state.json')
+    const otherRunState = join(otherDir, 'run_state.json')
+    writeFileSync(targetRunState, JSON.stringify({
+      task_id: 'dst-fallback-id',
+      current_stage: 'score_batches',
+    }), 'utf-8')
+    writeFileSync(otherRunState, JSON.stringify({
+      task_id: 'other-task',
+      current_stage: 'completed',
+    }), 'utf-8')
+    utimesSync(targetRunState, new Date('2026-04-28T00:00:00.000Z'), new Date('2026-04-28T00:00:00.000Z'))
+    utimesSync(otherRunState, new Date('2026-04-28T00:05:00.000Z'), new Date('2026-04-28T00:05:00.000Z'))
+    writeFileSync(path, JSON.stringify({
+      tasks: [{
+        id: 'dst-fallback-id',
+        scopeId: 'scope-long',
+        sessionId: 'scope-long',
+        skillId: 'long-report-skill',
+        action: 'run_report',
+        params: { outputDir: root },
+        status: 'running',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        updatedAt: '2026-04-28T00:00:00.000Z',
+      }],
+    }), 'utf-8')
+
+    const tracker = new DetachedSkillTaskTracker({
+      storagePath: path,
+      runSkill: async (request) => successfulLongSkillResult(request),
+    })
+
+    const restored = tracker.inspect('dst-fallback-id')
     assert.equal(restored?.outputDir, targetDir)
     assert.equal(restored?.runStatePath, targetRunState)
   } finally {

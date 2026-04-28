@@ -395,6 +395,95 @@ test('syncTaskProjection does not materialize blocked background work with only 
   assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
 })
 
+test('syncTaskProjection keeps parent blocked while a detached child is still running', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  records.set('parent-task', {
+    taskId: 'parent-task',
+    scopeId: 'scope-1',
+    runId: 'run-parent',
+    taskType: 'multi_step_task',
+    module: 'skill',
+    taskTitle: '父任务',
+    taskSummary: '父任务已交接',
+    status: 'done',
+    interactionState: 'running',
+    steps: [{
+      id: 'parent-step',
+      title: '后台分析',
+      description: '后台分析',
+      status: 'done',
+      updatedAt: '2026-04-28T01:00:00.000Z',
+    }],
+    currentStepId: 'parent-step',
+    budget: null,
+    blockedReason: null,
+    resumableActions: ['none'],
+    continuationRef: null,
+    recentArtifacts: [],
+    createdAt: '2026-04-28T01:00:00.000Z',
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  })
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'detached-child',
+    taskProjectionId: 'detached-child',
+    phase: 'tool_running',
+    taskType: 'multi_step_task',
+    taskTitle: '后台技能任务',
+    taskSummary: '后台仍在运行',
+    waitingFor: 'background',
+    interactionState: 'suspended',
+    blockedReason: '后台仍在运行',
+    resumableActions: ['continue', 'cancel'],
+    taskContinuation: {
+      taskId: 'detached-child',
+      detachedTaskId: 'dst-child',
+      blockerType: 'background_running',
+    },
+    parentTaskId: 'parent-task',
+    parentStepId: 'parent-step',
+    updatedAt: '2026-04-28T01:05:00.000Z',
+  }, {
+    ...createPayload(),
+    taskId: 'detached-child',
+    runId: 'detached-child',
+    phase: 'tool_running',
+    parentTaskId: 'parent-task',
+    parentStepId: 'parent-step',
+    timestamp: '2026-04-28T01:05:00.000Z',
+  })
+
+  const parent = records.get('parent-task')
+  assert.equal(parent?.status, 'blocked')
+  assert.equal(parent?.interactionState, 'suspended')
+  assert.equal(parent?.blockedReason, '后台仍在运行')
+  assert.deepEqual(parent?.resumableActions, ['continue', 'cancel'])
+  assert.equal(parent?.continuationRef?.detachedTaskId, 'dst-child')
+  assert.equal(parent?.steps[0]?.childTasks?.[0]?.taskId, 'detached-child')
+  assert.equal(parent?.steps[0]?.childTasks?.[0]?.status, 'blocked')
+})
+
 test('syncTaskProjection preserves continuation data and retry action for failed projections', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const existing = {

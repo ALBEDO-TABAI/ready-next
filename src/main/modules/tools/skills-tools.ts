@@ -48,6 +48,10 @@ export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
 interface SkillToolRuntimeContext {
   scopeId?: string
   runId?: string
+  taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
+  taskProjectionId?: string
   agent?: string | null
 }
 
@@ -350,14 +354,16 @@ function resourceRefsFromParams(params?: Record<string, unknown> | null): unknow
   return refs
 }
 
-function normalizeRunStateStatus(value: unknown): 'blocked' | 'error' | null {
+function normalizeRunStateStatus(value: unknown): SkillTaskEventStatus | null {
   const status = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['running', 'in_progress', 'waiting_for_batches', 'ready_to_finalize'].includes(status)) return 'running'
+  if (['done', 'completed', 'complete', 'success', 'succeeded'].includes(status)) return 'done'
   if (['blocked', 'pending_review', 'awaiting_input'].includes(status)) return 'blocked'
   if (['failed', 'failure', 'error'].includes(status)) return 'error'
   return null
 }
 
-function findStatusInObject(value: unknown, depth = 0): 'blocked' | 'error' | null {
+function findStatusInObject(value: unknown, depth = 0): SkillTaskEventStatus | null {
   if (depth > 4 || !value || typeof value !== 'object') return null
   const rec = value as Record<string, unknown>
   const direct = normalizeRunStateStatus(rec.status)
@@ -367,6 +373,11 @@ function findStatusInObject(value: unknown, depth = 0): 'blocked' | 'error' | nu
     if (nested) return nested
   }
   return null
+}
+
+function findStatusInText(text: string): SkillTaskEventStatus | null {
+  const match = String(text || '').match(/(?:^|\n)\s*status\s*[:=]\s*([a-z0-9_-]+)/i)
+  return match ? normalizeRunStateStatus(match[1]) : null
 }
 
 function parseJsonCandidates(text: string): unknown[] {
@@ -416,7 +427,7 @@ function collectRunStatePaths(data: Record<string, unknown>, text: string): stri
   return Array.from(new Set(paths))
 }
 
-function readRunStateStatus(path: string): 'blocked' | 'error' | null {
+function readRunStateStatus(path: string): SkillTaskEventStatus | null {
   try {
     if (!existsSync(path)) return null
     const raw = readFileSync(path, 'utf-8')
@@ -456,6 +467,8 @@ export function inferSkillRunStatusFromOutput(output: ToolExecutionOutput): Skil
     const fromJson = findStatusInObject(parsed)
     if (fromJson) return fromJson
   }
+  const fromText = findStatusInText(combinedText)
+  if (fromText) return fromText
   for (const path of collectRunStatePaths(data, combinedText)) {
     const fromFile = readRunStateStatus(path)
     if (fromFile) return fromFile
@@ -479,6 +492,31 @@ function outputPathsFromToolOutput(output?: ToolExecutionOutput): {
     runStatePath,
     sceneScoresPath: stringFromRecord(data, 'sceneScoresPath') || stringFromRecord(data, 'scene_scores_path'),
     deliveryReportPath: stringFromRecord(data, 'deliveryReportPath') || stringFromRecord(data, 'delivery_report_path'),
+  }
+}
+
+function buildContinuityResumePayload(params: {
+  taskId?: string | null
+  stepId?: string | null
+  blockerType?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  outputDir?: string | null
+  runStatePath?: string | null
+}): Record<string, unknown> | undefined {
+  if (!params.blockerType && !params.detachedTaskId && !params.taskRunId && !params.jobId && !params.outputDir && !params.runStatePath) {
+    return undefined
+  }
+  return {
+    taskId: params.taskId || params.taskRunId || params.detachedTaskId || params.jobId || null,
+    stepId: params.stepId || null,
+    blockerType: params.blockerType || null,
+    detachedTaskId: params.detachedTaskId || null,
+    taskRunId: params.taskRunId || null,
+    jobId: params.jobId || null,
+    outputDir: params.outputDir || null,
+    runStatePath: params.runStatePath || null,
   }
 }
 
@@ -544,6 +582,7 @@ function recordPrimitiveOutcome(params: {
   params?: Record<string, unknown> | null
 }): { stepId: string } {
   const data = params.output?.data || {}
+  const paths = outputPathsFromToolOutput(params.output)
   const artifactPath = typeof data.absolutePath === 'string'
     ? data.absolutePath
     : typeof data.stdoutArtifactPath === 'string'
@@ -569,7 +608,7 @@ function recordPrimitiveOutcome(params: {
     resourceRefs: resourceRefsFromParams(params.params),
     artifactPath,
     artifactLabel: artifactLabel(artifactPath),
-    ...outputPathsFromToolOutput(params.output),
+    ...paths,
   })
   if (params.skillId && params.status !== 'running') {
     rememberSkillRun(params.sessionId, {
@@ -577,6 +616,18 @@ function recordPrimitiveOutcome(params: {
       skillId: params.skillId,
       action: params.toolName,
       success: params.status === 'done',
+      status: params.status,
+      runKind: 'primitive',
+      outputDir: paths.outputDir || undefined,
+      runStatePath: paths.runStatePath || undefined,
+      pauseReason: params.status === 'blocked' ? 'blocked' : undefined,
+      resumePayload: buildContinuityResumePayload({
+        taskId: params.skillId,
+        stepId: recorded.stepId,
+        blockerType: params.status === 'blocked' ? 'blocked' : params.status === 'error' ? 'error' : null,
+        outputDir: paths.outputDir,
+        runStatePath: paths.runStatePath,
+      }),
       summary: (params.message || params.output?.text || params.toolName).slice(0, 240),
     })
   }
@@ -832,6 +883,10 @@ export async function executeSkillTool(
         const record = tracker.start({
           scopeId: sessionId || null,
           sessionId: sessionId || null,
+          agent: runtimeContext?.agent || null,
+          parentTaskId: runtimeContext?.taskId || null,
+          parentStepId: runtimeContext?.parentStepId || null,
+          taskProjectionId: runtimeContext?.taskProjectionId || runtimeContext?.taskId || null,
           skillId,
           action,
           params,
@@ -1110,6 +1165,14 @@ export async function executeSkillTool(
     agentContext,
   })
   const formatted = formatRunResult(result)
+  const runStatus = result.status ?? (result.success ? 'done' : 'error')
+  const outputs = result.outputs && typeof result.outputs === 'object' ? result.outputs : {}
+  const outputDir = result.outputDir || outputs.outputDir || null
+  const runStatePath = outputs.runStatePath || null
+  const sceneScoresPath = outputs.sceneScoresPath || null
+  const deliveryReportPath = outputs.deliveryReportPath || null
+  const taskRunId = stringFromRecord(outputs, 'taskRunId') || stringFromRecord(outputs, 'task_run_id')
+  const detachedTaskId = stringFromRecord(outputs, 'detachedTaskId') || stringFromRecord(outputs, 'detached_task_id')
   recordSkillTaskEvent({
     scopeId: runtimeContext?.scopeId,
     sessionId,
@@ -1125,27 +1188,46 @@ export async function executeSkillTool(
     // SkillHostController.detectStatus, propagate it (so 'blocked' surfaces in
     // the task projection). Falls back to the legacy success-mapping when the
     // skill didn't opt into host_requirements.status_detection.
-    status: result.status ?? (result.success ? 'done' : 'error'),
+    status: runStatus,
     message: result.success ? undefined : result.error || result.stderr || '技能执行失败',
     artifactPath: result.outputDir || undefined,
     artifactLabel: result.outputDir ? '技能输出目录' : undefined,
     artifacts: buildSkillRunArtifacts(result, toolName),
     params: args,
-    outputDir: result.outputDir || result.outputs?.outputDir || null,
-    runStatePath: result.outputs?.runStatePath || null,
-    sceneScoresPath: result.outputs?.sceneScoresPath || null,
-    deliveryReportPath: result.outputs?.deliveryReportPath || null,
+    outputDir,
+    runStatePath,
+    sceneScoresPath,
+    deliveryReportPath,
     failureKind: result.success ? null : 'skill_action_failed',
     failureDetail: result.success ? null : result.error || result.stderr || null,
     goalText: goalTextFromParams(toolName, tool.action || '', args),
     resourceRefs: resourceRefsFromParams(args),
     jobId: result.jobId || null,
+    detachedTaskId,
   })
   rememberSkillRun(sessionId, {
     toolName,
     skillId: tool.skillId || '',
     action: tool.action || '',
     success: result.success,
+    status: runStatus,
+    runKind: 'typed_action',
+    taskRunId: taskRunId || undefined,
+    detachedTaskId: detachedTaskId || undefined,
+    jobId: result.jobId || undefined,
+    outputDir: outputDir || undefined,
+    runStatePath: runStatePath || undefined,
+    pauseReason: runStatus === 'blocked' ? 'blocked' : undefined,
+    resumePayload: buildContinuityResumePayload({
+      taskId: taskRunId || detachedTaskId || result.jobId || null,
+      stepId: started.stepId,
+      blockerType: runStatus === 'blocked' ? 'blocked' : runStatus === 'error' ? 'error' : null,
+      detachedTaskId,
+      taskRunId,
+      jobId: result.jobId || null,
+      outputDir,
+      runStatePath,
+    }),
     summary: formatted.slice(0, 240),
   })
   const projectionPatch = buildSkillProjectionPatch({

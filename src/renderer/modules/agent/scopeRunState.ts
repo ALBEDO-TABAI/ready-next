@@ -393,23 +393,29 @@ function parseMemoryCapture(input: unknown): ScopeRunMemoryCapture | null {
 function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
-  // Phase 4: executionId is optional — skill continuations post-retirement
-  // of skill_executions may only carry taskId/stepId/blockerType.
-  const executionId = String(record.executionId || '').trim() || null
-  const taskId = typeof record.taskId === 'string' ? record.taskId : null
-  const stepId = typeof record.stepId === 'string' ? record.stepId : null
-  const blockerType = typeof record.blockerType === 'string' ? record.blockerType : null
-  const todoId = typeof record.todoId === 'string' ? record.todoId : null
-  const todoTitle = typeof record.todoTitle === 'string' ? record.todoTitle : null
-  if (!executionId && !taskId && !stepId && !blockerType && !todoId) return null
-  return {
-    executionId,
-    taskId,
-    stepId,
-    blockerType,
-    todoId,
-    todoTitle,
+  const continuation: ScopeRunTaskContinuation = {}
+  const copyString = (key: keyof ScopeRunTaskContinuation): void => {
+    if (typeof record[key] !== 'string') return
+    const value = String(record[key]).trim()
+    if (value) continuation[key] = value
   }
+  copyString('executionId')
+  copyString('taskId')
+  copyString('stepId')
+  copyString('blockerType')
+  copyString('targetUrl')
+  copyString('todoId')
+  copyString('todoTitle')
+  copyString('pauseReason')
+  copyString('detachedTaskId')
+  copyString('taskRunId')
+  copyString('jobId')
+  copyString('skillId')
+  copyString('action')
+  copyString('runStatePath')
+  copyString('outputDir')
+  copyString('progressFingerprint')
+  return Object.keys(continuation).length > 0 ? continuation : null
 }
 
 function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
@@ -630,7 +636,9 @@ export function deriveScopeRunStatePatch(
         ? event.timestamp
         : previous?.lastEvidenceAt || null,
     blockedReason:
-      event.blockedReason ?? previous?.blockedReason ?? null,
+      'blockedReason' in event
+        ? event.blockedReason ?? null
+        : previous?.blockedReason ?? null,
     controllerId: previous?.controllerId ?? null,
     ownerTabId: previous?.ownerTabId ?? null,
     checkpointExpiresAt: previous?.checkpointExpiresAt ?? null,

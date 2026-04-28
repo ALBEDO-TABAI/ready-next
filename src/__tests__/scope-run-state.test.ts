@@ -160,6 +160,71 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.usedSectionAnchors, true)
   })
 
+  it('clears a stale blocker when a structured event sends blockedReason null', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-28T01:00:00.000Z',
+        blockedReason: null,
+        waitingFor: 'none',
+        resumableActions: ['cancel'],
+      },
+      {
+        scopeId: 'scope-skill-clear-blocker',
+        agent: 'assistant',
+        requestId: 'run-clear-blocker',
+        phase: 'checkpoint',
+        toolTrace: [],
+        startedAt: '2026-04-28T00:59:00.000Z',
+        updatedAt: '2026-04-28T00:59:00.000Z',
+        blockedReason: '预算耗尽但后台任务仍在运行',
+        waitingFor: 'background',
+        resumableActions: ['continue', 'cancel'],
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+      },
+    )
+
+    assert.strictEqual(patch.blockedReason, null)
+    assert.strictEqual(patch.waitingFor, 'none')
+  })
+
+  it('preserves background task continuation resume handles from structured events', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'checkpoint',
+        module: 'skill',
+        timestamp: '2026-04-28T01:30:00.000Z',
+        waitingFor: 'background',
+        resumableActions: ['continue', 'retry', 'cancel'],
+        taskContinuation: {
+          taskId: 'str-1',
+          taskRunId: 'str-1',
+          detachedTaskId: 'dst-1',
+          jobId: 'job-1',
+          outputDir: '/tmp/ready/output',
+          runStatePath: '/tmp/ready/output/run_state.json',
+          pauseReason: 'budget_exhausted',
+          progressFingerprint: 'fp-1',
+        },
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.waitingFor, 'background')
+    assert.deepStrictEqual(patch.resumableActions, ['continue', 'retry', 'cancel'])
+    assert.deepStrictEqual(patch.taskContinuation, {
+      taskId: 'str-1',
+      taskRunId: 'str-1',
+      detachedTaskId: 'dst-1',
+      jobId: 'job-1',
+      outputDir: '/tmp/ready/output',
+      runStatePath: '/tmp/ready/output/run_state.json',
+      pauseReason: 'budget_exhausted',
+      progressFingerprint: 'fp-1',
+    })
+  })
+
   it('does not derive browser workflow task metadata from legacy text-only events', () => {
     const planningPatch = deriveScopeRunStatePatch(
       {

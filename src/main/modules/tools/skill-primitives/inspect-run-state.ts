@@ -303,10 +303,11 @@ export async function executeInspectRunState(
     )
   }
 
+  const effectiveExpectedTaskId = args.expectedTaskId || resolvedFromTaskId || null
   const selection = selectRunStateFile({
     outputDir,
     explicitRunStatePath,
-    expectedTaskId: args.expectedTaskId,
+    expectedTaskId: effectiveExpectedTaskId,
   })
   if (selection.ambiguous) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
@@ -322,7 +323,7 @@ export async function executeInspectRunState(
         data: {
           outputDir,
           resolvedFromTaskId,
-          expectedTaskId: args.expectedTaskId || null,
+          expectedTaskId: effectiveExpectedTaskId,
           found: false,
           ambiguous: true,
           runStatePath: null,
@@ -348,7 +349,7 @@ export async function executeInspectRunState(
         data: {
           outputDir,
           resolvedFromTaskId,
-          expectedTaskId: args.expectedTaskId || null,
+          expectedTaskId: effectiveExpectedTaskId,
           found: false,
           ambiguous: false,
           runStatePath: null,
@@ -411,7 +412,7 @@ export async function executeInspectRunState(
       data: {
         outputDir,
         resolvedFromTaskId,
-        expectedTaskId: args.expectedTaskId || null,
+        expectedTaskId: effectiveExpectedTaskId,
         found: true,
         ambiguous: false,
         runStatePath,

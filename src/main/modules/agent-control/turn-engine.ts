@@ -109,7 +109,11 @@ import {
   isConfigRepairTurn,
   isRetryOnlyTurn,
 } from './skill-detection-inputs'
-import { getLatestSkillRun } from './session-continuity'
+import {
+  getLatestSkillRun,
+  resolveSkillRunForResume,
+  type SkillRunRecord,
+} from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import { defaultToolRegistry } from './tool-registry'
 import {
@@ -165,9 +169,14 @@ import {
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
 import { buildLongSkillRunningProjection } from './skill-running-projection'
+import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
+import { inspectLatestSkillTask } from './skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import type {
   RunBudgetHint,
+  SkillTaskLifecycleSignal,
   StepBudgetState,
   ToolSnapshot,
   TurnEngineRequest,
@@ -332,20 +341,47 @@ function appendSessionMessages<TSession extends TurnEngineSession>(
   session.messages.push(...messages)
 }
 
-type RecentSkillRunForResume = NonNullable<ReturnType<typeof getLatestSkillRun>>
+type RecentSkillRunForResume = SkillRunRecord
 
-function chooseRecentSkillRunForResume(
-  runs: Array<RecentSkillRunForResume | null | undefined>,
-): RecentSkillRunForResume | null {
-  const candidates = runs.filter((item): item is RecentSkillRunForResume => Boolean(item?.skillId))
-  if (candidates.length === 0) return null
-  const failedOrBlocked = candidates
-    .filter((item) => !item.success)
-    .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
-  if (failedOrBlocked.length > 0) return failedOrBlocked[0]
-  return candidates
-    .filter((item) => item.success)
-    .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))[0] || null
+function skillRunFromSupervisorSnapshot(
+  snapshot: SkillTaskSupervisorSnapshot | null | undefined,
+): SkillRunRecord | null {
+  if (!snapshot?.skillId) return null
+  const updatedAt = Number.isFinite(Date.parse(snapshot.observedAt))
+    ? Date.parse(snapshot.observedAt)
+    : Date.now()
+  const summary = [
+    snapshot.blockers[0],
+    snapshot.progress.currentStage ? `阶段：${snapshot.progress.currentStage}` : null,
+    snapshot.outputDir ? `输出目录：${snapshot.outputDir}` : null,
+  ].filter(Boolean).join(' · ') || snapshot.status
+  return {
+    toolName: snapshot.action || 'skill_task_supervisor',
+    skillId: snapshot.skillId,
+    action: snapshot.action || '',
+    success: snapshot.closeAllowed && snapshot.status === 'done',
+    status: snapshot.status,
+    runKind: snapshot.detachedTaskId ? 'detached' : 'typed_action',
+    taskRunId: snapshot.taskRunId || undefined,
+    detachedTaskId: snapshot.detachedTaskId || undefined,
+    outputDir: snapshot.outputDir || undefined,
+    runStatePath: snapshot.runStatePath || undefined,
+    pauseReason: snapshot.pauseReason || undefined,
+    resumePayload: snapshot.resumePayload || undefined,
+    summary,
+    updatedAt,
+  }
+}
+
+function isSameSkillRunForResume(left: SkillRunRecord | null | undefined, right: SkillRunRecord | null | undefined): boolean {
+  if (!left || !right) return false
+  if (left.taskRunId && right.taskRunId && left.taskRunId === right.taskRunId) return true
+  if (left.detachedTaskId && right.detachedTaskId && left.detachedTaskId === right.detachedTaskId) return true
+  if (left.jobId && right.jobId && left.jobId === right.jobId) return true
+  return left.skillId === right.skillId
+    && left.action === right.action
+    && left.toolName === right.toolName
+    && Number(left.updatedAt || 0) === Number(right.updatedAt || 0)
 }
 
 function buildSkillResumeContextPrompt(params: {
@@ -569,6 +605,10 @@ export class TurnEngine {
       requestModuleToolAction: host.requestModuleToolAction,
       abortSignal: request.abortSignal,
       sessionId: request.sessionId,
+      taskId: request.taskId,
+      parentTaskId: request.taskId,
+      parentStepId: request.parentStepId,
+      taskProjectionId: request.taskId,
       registerRunCleanup: (cleanup) => {
         host.registerRunCleanup?.(cleanup)
       },
@@ -583,6 +623,7 @@ export class TurnEngine {
       cancelled?: boolean
       status?: 'done' | 'error' | 'cancelled'
       doneEventType?: 'done' | 'error'
+      skillTaskLifecycle?: SkillTaskLifecycleSignal | null
     }) => {
       const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents())
       transcript.emitOutput('', params.doneEventType || 'done')
@@ -596,6 +637,7 @@ export class TurnEngine {
           usedTools: transcript.getUsedTools(),
         }),
         projectionTruth,
+        skillTaskLifecycle: params.skillTaskLifecycle || null,
       }
     }
 
@@ -717,20 +759,32 @@ export class TurnEngine {
       }
       if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
         const continuitySkillRun = getLatestSkillRun(request.sessionId)
+        const supervisorSnapshot = (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
+          sessionId: request.sessionId,
+          scopeId: request.sessionId,
+        })
+        const supervisorSkillRun = skillRunFromSupervisorSnapshot(supervisorSnapshot)
         const projectionSkillRun = host.resolveRecentSkillRun?.(request.sessionId) || null
         const taskRunSkillRun = (host as unknown as {
           resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
         }).resolveRecentSkillTaskRun?.(request.sessionId) || null
-        const latestSkillRun = chooseRecentSkillRunForResume([
-          continuitySkillRun,
-          taskRunSkillRun,
-          projectionSkillRun,
-        ])
-        const latestSkillRunSource = latestSkillRun === continuitySkillRun
+        const latestSkillRun = resolveSkillRunForResume({
+          sessionId: request.sessionId,
+          expectedTaskId: extractTaskIdFromText(currentTurnResumeText || contextualUserInput),
+          candidates: [
+            supervisorSkillRun,
+            taskRunSkillRun,
+            projectionSkillRun as RecentSkillRunForResume | null,
+            continuitySkillRun,
+          ],
+        })
+        const latestSkillRunSource = isSameSkillRunForResume(supervisorSkillRun, latestSkillRun)
+          ? 'supervisor'
+          : isSameSkillRunForResume(continuitySkillRun, latestSkillRun)
           ? 'session_continuity'
-          : latestSkillRun === taskRunSkillRun
+          : isSameSkillRunForResume(taskRunSkillRun, latestSkillRun)
             ? 'skill_task_run'
-            : latestSkillRun === projectionSkillRun
+            : isSameSkillRunForResume(projectionSkillRun as RecentSkillRunForResume | null, latestSkillRun)
               ? 'task_projection'
               : 'none'
         if (latestSkillRun?.skillId) {
@@ -2158,6 +2212,77 @@ export class TurnEngine {
             ? activeDomainState
             : limitResult.domainState
           appendSessionMessages(session, limitResult.sessionMessages)
+        }
+        const skillTaskSnapshot = (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
+          sessionId: request.sessionId,
+          scopeId: request.sessionId,
+          skillId: referenceSkillForMetrics?.id || null,
+        })
+        const skillTaskLifecycle = buildSkillTaskLifecycleSignal({
+          snapshot: skillTaskSnapshot,
+          reason: 'budget_exhausted',
+        })
+        if (skillTaskLifecycle) {
+          state.interactionState = skillTaskLifecycle.interactionState
+          state.syncBudgetWarning()
+          const lifecycleSummary =
+            skillTaskLifecycle.blockedReason || '本轮预算已用完，技能任务已暂停，可继续执行'
+          const lifecycleStepId =
+            skillTaskLifecycle.taskContinuation?.stepId
+            || state.runtimeCurrentStepId
+            || 'skill_lifecycle'
+          const lifecycleSteps = state.runtimeTaskSteps.length > 0
+            ? state.runtimeTaskSteps.map((step) => ({
+              id: step.id,
+              title: step.title || step.description,
+              status: step.id === lifecycleStepId ? 'blocked' : step.status || 'pending',
+              detail: step.detail || null,
+              updatedAt: step.updatedAt || new Date().toISOString(),
+            }))
+            : [{
+              id: lifecycleStepId,
+              title: '技能任务状态',
+              status: 'blocked' as const,
+              detail: lifecycleSummary,
+              updatedAt: new Date().toISOString(),
+            }]
+          emitStructuredTaskPayload({
+            module: 'skill',
+            phase: skillTaskLifecycle.phase,
+            taskTitle: referenceSkillForMetrics?.name
+              ? `技能执行 · ${referenceSkillForMetrics.name}`
+              : '技能任务',
+            taskSummary: lifecycleSummary,
+            steps: lifecycleSteps,
+            currentStepId: lifecycleStepId,
+            waitingFor: skillTaskLifecycle.waitingFor,
+            resumableActions: skillTaskLifecycle.resumableActions,
+            blockedReason: skillTaskLifecycle.blockedReason,
+            taskContinuation: skillTaskLifecycle.taskContinuation,
+          })
+          if (skillTaskSnapshot.skillId) {
+            recordSkillParentTaskLifecycleEvent({
+              scopeId: request.sessionId,
+              sessionId: request.sessionId,
+              runId: request.runId,
+              agent: request.agentName,
+              skillId: skillTaskSnapshot.skillId,
+              skillName: referenceSkillForMetrics?.name || skillTaskSnapshot.skillId,
+              action: skillTaskSnapshot.action || undefined,
+              state: skillTaskLifecycle.state,
+              reason: skillTaskLifecycle.reason,
+              message: lifecycleSummary,
+              outputDir: skillTaskSnapshot.outputDir,
+              runStatePath: skillTaskSnapshot.runStatePath,
+              sceneScoresPath: skillTaskSnapshot.sceneScoresPath,
+              deliveryReportPath: skillTaskSnapshot.deliveryReportPath,
+              detachedTaskId: skillTaskSnapshot.detachedTaskId,
+              taskRunId: skillTaskSnapshot.taskRunId,
+              progressFingerprint: skillTaskSnapshot.progressFingerprint,
+              resumePayload: skillTaskLifecycle.taskContinuation ? { ...skillTaskLifecycle.taskContinuation } : undefined,
+            })
+          }
+          return finish({ success: true, status: 'done', skillTaskLifecycle })
         }
         transcript.emitOutput(
           budgetLimitedBeforeCompletion

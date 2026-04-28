@@ -18,6 +18,10 @@ export function buildToolRuntimeContext(params: {
   sessionId?: string
   scopeId?: string
   runId?: string
+  taskId?: string
+  parentTaskId?: string
+  parentStepId?: string
+  taskProjectionId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
 }): ToolRuntimeContext {
@@ -34,6 +38,10 @@ export function buildToolRuntimeContext(params: {
     sessionId: params.sessionId,
     scopeId,
     runId: params.runId,
+    taskId: params.taskId,
+    parentTaskId: params.parentTaskId,
+    parentStepId: params.parentStepId,
+    taskProjectionId: params.taskProjectionId,
     registerRunCleanup: params.registerRunCleanup,
     agentContext: params.agentContext ?? null,
   }
@@ -52,6 +60,10 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     sessionId: context.sessionId,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
     runId: context.runId,
+    taskId: context.taskId,
+    parentTaskId: context.parentTaskId,
+    parentStepId: context.parentStepId,
+    taskProjectionId: context.taskProjectionId,
     registerRunCleanup: context.registerRunCleanup,
     agentContext: context.agentContext ?? null,
   }

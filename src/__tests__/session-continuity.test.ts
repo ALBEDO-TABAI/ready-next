@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
@@ -362,4 +362,123 @@ test('session continuity keeps loading legacy version 2 continuation snapshots',
   __reloadSessionContinuityFromDiskForTests()
 
   assert.equal(getContinuationState('scope-persisted')?.taskId, 'task-prev')
+})
+
+test('skill run continuity preserves resume fields while loading legacy success records', () => {
+  writeFileSync(TEST_STORAGE_PATH, JSON.stringify({
+    version: 3,
+    recentBrowserActions: [],
+    browserWorkflowStates: [],
+    recentSkillRuns: [
+      {
+        sessionId: 'scope-skill',
+        records: [
+          {
+            toolName: 'skill_video_expert_pipeline',
+            skillId: 'video-expert-analyzer',
+            action: 'video_expert_pipeline',
+            success: true,
+            summary: '旧 success 记录',
+            updatedAt: 1000,
+          },
+        ],
+      },
+    ],
+  }), 'utf8')
+
+  __reloadSessionContinuityFromDiskForTests()
+  assert.equal(getLatestSkillRun('scope-skill')?.success, true)
+
+  rememberSkillRun('scope-skill', {
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    success: false,
+    status: 'blocked',
+    runKind: 'detached',
+    taskRunId: 'str-budget',
+    detachedTaskId: 'dst-budget',
+    jobId: 'job-budget',
+    outputDir: '/tmp/vea-budget',
+    runStatePath: '/tmp/vea-budget/run_state.json',
+    pauseReason: 'budget_exhausted',
+    resumePayload: {
+      detachedTaskId: 'dst-budget',
+      runStatePath: '/tmp/vea-budget/run_state.json',
+      outputDir: '/tmp/vea-budget',
+    },
+    summary: '预算暂停，等待继续',
+    updatedAt: 2000,
+  })
+
+  __resetSessionContinuityForTests({ keepPersisted: true })
+  __reloadSessionContinuityFromDiskForTests()
+
+  const latest = getLatestSkillRun('scope-skill')
+  assert.equal(latest?.status, 'blocked')
+  assert.equal(latest?.runKind, 'detached')
+  assert.equal(latest?.taskRunId, 'str-budget')
+  assert.equal(latest?.detachedTaskId, 'dst-budget')
+  assert.equal(latest?.jobId, 'job-budget')
+  assert.equal(latest?.outputDir, '/tmp/vea-budget')
+  assert.equal(latest?.runStatePath, '/tmp/vea-budget/run_state.json')
+  assert.equal(latest?.pauseReason, 'budget_exhausted')
+  assert.equal(latest?.resumePayload?.detachedTaskId, 'dst-budget')
+  assert.equal(JSON.parse(readFileSync(TEST_STORAGE_PATH, 'utf8')).version, 4)
+})
+
+test('resume selection prefers active task handles over old recent skill runs and honors expected task identity', () => {
+  rememberSkillRun('scope-resume', {
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    success: false,
+    summary: '旧失败记录',
+    updatedAt: 3000,
+  })
+
+  const activeTaskRun = {
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    success: false,
+    status: 'running',
+    runKind: 'typed_action',
+    taskRunId: 'str-active',
+    outputDir: '/tmp/active',
+    runStatePath: '/tmp/active/run_state.json',
+    summary: '后台任务还在运行',
+    updatedAt: 1000,
+  }
+  const pausedSupervisor = {
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    success: false,
+    status: 'blocked',
+    runKind: 'detached',
+    taskRunId: 'str-paused',
+    detachedTaskId: 'dst-paused',
+    jobId: 'job-paused',
+    outputDir: '/tmp/paused',
+    runStatePath: '/tmp/paused/run_state.json',
+    pauseReason: 'budget_exhausted',
+    resumePayload: { detachedTaskId: 'dst-paused' },
+    summary: '预算暂停任务',
+    updatedAt: 500,
+  }
+
+  const selectedActive = (sessionContinuityModule as any).resolveSkillRunForResume({
+    sessionId: 'scope-resume',
+    candidates: [activeTaskRun],
+  })
+  assert.equal(selectedActive?.taskRunId, 'str-active')
+
+  const selectedByIdentity = (sessionContinuityModule as any).resolveSkillRunForResume({
+    sessionId: 'scope-resume',
+    expectedTaskId: 'dst-paused',
+    candidates: [activeTaskRun, pausedSupervisor],
+  })
+  assert.equal(selectedByIdentity?.detachedTaskId, 'dst-paused')
+  assert.equal(selectedByIdentity?.pauseReason, 'budget_exhausted')
 })

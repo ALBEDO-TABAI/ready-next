@@ -276,8 +276,22 @@ async function syncParentProjectionFromChild(
   if (!parent) return
   const nextSteps = mergeChildTaskIntoParentSteps(parent, child)
   if (!nextSteps) return
+  const childKeepsParentOpen = child.status === 'running' || child.status === 'blocked'
+  const parentHoldPatch = childKeepsParentOpen
+    ? {
+      status: 'blocked' as const,
+      interactionState: 'suspended' as const,
+      blockedReason: child.blockedReason || child.taskSummary || '后台任务仍在运行',
+      resumableActions: child.resumableActions?.length ? child.resumableActions : (['continue', 'cancel'] as TaskProjectionRecord['resumableActions']),
+      continuationRef: child.continuationRef || parent.continuationRef || {
+        taskId: child.taskId,
+        blockerType: 'background_running',
+      },
+    }
+    : {}
   await store.update(child.parentTaskId, {
     steps: nextSteps,
+    ...parentHoldPatch,
     updatedAt: child.updatedAt,
   })
 }

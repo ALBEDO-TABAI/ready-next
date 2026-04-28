@@ -526,6 +526,9 @@ export class AgentControlRuntime extends EventEmitter {
     scopeId?: string | null
     sessionId?: string | null
     agent?: string | null
+    parentTaskId?: string | null
+    parentStepId?: string | null
+    taskProjectionId?: string | null
     skillId: string
     action: string
     params?: Record<string, unknown>

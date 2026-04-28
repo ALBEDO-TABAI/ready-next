@@ -11,6 +11,9 @@ export interface DetachedSkillTaskRecord {
   scopeId?: string | null
   sessionId?: string | null
   agent?: string | null
+  parentTaskId?: string | null
+  parentStepId?: string | null
+  taskProjectionId?: string | null
   skillId: string
   action: string
   params: Record<string, unknown>
@@ -29,6 +32,9 @@ export interface DetachedSkillTaskStartRequest {
   scopeId?: string | null
   sessionId?: string | null
   agent?: string | null
+  parentTaskId?: string | null
+  parentStepId?: string | null
+  taskProjectionId?: string | null
   skillId: string
   action: string
   params?: Record<string, unknown>
@@ -140,7 +146,7 @@ function selectRunStatePath(root: string, expectedTaskId: string | null): string
   return null
 }
 
-function inferOutputPathsFromParams(params: Record<string, unknown>): Pick<
+function inferOutputPathsFromParams(params: Record<string, unknown>, fallbackTaskId?: string | null): Pick<
   DetachedSkillTaskRecord,
   'outputDir' | 'runStatePath' | 'sceneScoresPath' | 'deliveryReportPath'
 > {
@@ -159,7 +165,7 @@ function inferOutputPathsFromParams(params: Record<string, unknown>): Pick<
 
   const outputDirParam = pathFromParam(params, 'outputDir')
   if (!outputDirParam) return {}
-  const expectedTaskId = pathFromParam(params, 'taskId') || pathFromParam(params, 'task_id')
+  const expectedTaskId = pathFromParam(params, 'taskId') || pathFromParam(params, 'task_id') || fallbackTaskId || null
   const runStatePath = selectRunStatePath(outputDirParam, expectedTaskId)
   if (!runStatePath) {
     const directRunState = `${outputDirParam}/run_state.json`
@@ -205,6 +211,9 @@ function normalizeRecord(raw: unknown): DetachedSkillTaskRecord | null {
     scopeId: stringField(item.scopeId),
     sessionId: stringField(item.sessionId),
     agent: stringField(item.agent),
+    parentTaskId: stringField(item.parentTaskId),
+    parentStepId: stringField(item.parentStepId),
+    taskProjectionId: stringField(item.taskProjectionId),
     skillId,
     action,
     params: item.params && typeof item.params === 'object'
@@ -233,16 +242,20 @@ export class DetachedSkillTaskTracker {
 
   start(request: DetachedSkillTaskStartRequest): DetachedSkillTaskRecord {
     const nowIso = new Date().toISOString()
+    const id = `dst-${randomUUID().slice(0, 8)}`
     const record: DetachedSkillTaskRecord = {
-      id: `dst-${randomUUID().slice(0, 8)}`,
+      id,
       scopeId: request.scopeId || null,
       sessionId: request.sessionId || request.scopeId || null,
       agent: request.agent || null,
+      parentTaskId: request.parentTaskId || null,
+      parentStepId: request.parentStepId || null,
+      taskProjectionId: request.taskProjectionId || request.parentTaskId || null,
       skillId: request.skillId,
       action: request.action,
       params: { ...(request.params || {}) },
       status: 'running',
-      ...inferOutputPathsFromParams(request.params || {}),
+      ...inferOutputPathsFromParams(request.params || {}, id),
       error: null,
       startedAt: nowIso,
       updatedAt: nowIso,
@@ -358,7 +371,7 @@ export class DetachedSkillTaskTracker {
       const record = normalizeRecord(item)
       if (!record) continue
       if (record.status === 'running') {
-        const inferred = inferOutputPathsFromParams(record.params)
+        const inferred = inferOutputPathsFromParams(record.params, record.id)
         Object.assign(record, {
           outputDir: record.outputDir || inferred.outputDir || null,
           runStatePath: record.runStatePath || inferred.runStatePath || null,

@@ -46,6 +46,15 @@ export interface SkillRunRecord {
   skillId: string
   action: string
   success: boolean
+  status?: string
+  runKind?: string
+  taskRunId?: string
+  detachedTaskId?: string
+  jobId?: string
+  outputDir?: string
+  runStatePath?: string
+  pauseReason?: string
+  resumePayload?: Record<string, unknown>
   summary: string
   updatedAt: number
 }
@@ -71,7 +80,7 @@ function pruneToRecent<T extends { updatedAt: number }>(items: T[], limit: numbe
 }
 
 interface PersistedSessionContinuity {
-  version: 1 | 2 | 3
+  version: 1 | 2 | 3 | 4
   recentBrowserActions: Array<{ sessionId: string; records: BrowserActionRecord[] }>
   browserWorkflowStates: BrowserWorkflowState[]
   recentSkillRuns: Array<{ sessionId: string; records: SkillRunRecord[] }>
@@ -90,7 +99,7 @@ function resolveContinuityStoragePath(): string {
 
 function toPersistedPayload(): PersistedSessionContinuity {
   return {
-    version: 3,
+    version: 4,
     recentBrowserActions: Array.from(recentBrowserActions.entries()).map(([sessionId, records]) => ({ sessionId, records })),
     browserWorkflowStates: Array.from(browserWorkflowStates.values()),
     recentSkillRuns: Array.from(recentSkillRuns.entries()).map(([sessionId, records]) => ({ sessionId, records })),
@@ -233,15 +242,7 @@ function hydrateFromDisk(): void {
         const sessionId = normalizeWhitespace((item as { sessionId?: string }).sessionId || '')
         const records = Array.isArray((item as { records?: SkillRunRecord[] }).records)
           ? pruneToRecent(
-            (item as { records: SkillRunRecord[] }).records.map((record) => ({
-              ...record,
-              toolName: normalizeWhitespace(record.toolName),
-              skillId: normalizeWhitespace(record.skillId),
-              action: normalizeWhitespace(record.action),
-              summary: normalizeWhitespace(record.summary),
-              success: Boolean(record.success),
-              updatedAt: Number(record.updatedAt || 0),
-            })),
+            (item as { records: SkillRunRecord[] }).records.map((record) => normalizeSkillRunRecord(record)),
             4,
           )
           : []
@@ -322,6 +323,91 @@ function cloneContinuationStateRecords(records: ContinuationStateRecord[] | null
       }
     })
     .filter((record): record is ContinuationStateRecord => Boolean(record))
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  const normalized = normalizeWhitespace(typeof value === 'string' ? value : '')
+  return normalized || undefined
+}
+
+function normalizeResumePayload(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as Record<string, unknown>
+}
+
+function normalizeSkillRunRecord(record: Omit<SkillRunRecord, 'updatedAt'> & { updatedAt?: number }): SkillRunRecord {
+  const normalized: SkillRunRecord = {
+    toolName: normalizeWhitespace(record.toolName),
+    skillId: normalizeWhitespace(record.skillId),
+    action: normalizeWhitespace(record.action),
+    success: Boolean(record.success),
+    summary: normalizeWhitespace(record.summary),
+    updatedAt: Number(record.updatedAt || 0),
+  }
+  const status = normalizeOptionalString(record.status)
+  if (status) normalized.status = status
+  const runKind = normalizeOptionalString(record.runKind)
+  if (runKind) normalized.runKind = runKind
+  const taskRunId = normalizeOptionalString(record.taskRunId)
+  if (taskRunId) normalized.taskRunId = taskRunId
+  const detachedTaskId = normalizeOptionalString(record.detachedTaskId)
+  if (detachedTaskId) normalized.detachedTaskId = detachedTaskId
+  const jobId = normalizeOptionalString(record.jobId)
+  if (jobId) normalized.jobId = jobId
+  const outputDir = normalizeOptionalString(record.outputDir)
+  if (outputDir) normalized.outputDir = outputDir
+  const runStatePath = normalizeOptionalString(record.runStatePath)
+  if (runStatePath) normalized.runStatePath = runStatePath
+  const pauseReason = normalizeOptionalString(record.pauseReason)
+  if (pauseReason) normalized.pauseReason = pauseReason
+  const resumePayload = normalizeResumePayload(record.resumePayload)
+  if (resumePayload) normalized.resumePayload = resumePayload
+  return normalized
+}
+
+function skillRunIdentityTokens(record: SkillRunRecord): Set<string> {
+  const tokens = new Set<string>()
+  ;[
+    record.taskRunId,
+    record.detachedTaskId,
+    record.jobId,
+  ].forEach((value) => {
+    const normalized = normalizeOptionalString(value)
+    if (normalized) tokens.add(normalized)
+  })
+  const resumePayload = normalizeResumePayload(record.resumePayload)
+  if (resumePayload) {
+    ;[
+      resumePayload.taskRunId,
+      resumePayload.task_run_id,
+      resumePayload.taskId,
+      resumePayload.task_id,
+      resumePayload.expectedTaskId,
+      resumePayload.detachedTaskId,
+      resumePayload.detached_task_id,
+      resumePayload.jobId,
+      resumePayload.job_id,
+    ].forEach((value) => {
+      const normalized = normalizeOptionalString(value)
+      if (normalized) tokens.add(normalized)
+    })
+  }
+  return tokens
+}
+
+function isActiveSkillRunStatus(status: string | undefined): boolean {
+  return status === 'queued'
+    || status === 'running'
+    || status === 'blocked'
+    || status === 'background_running'
+    || status === 'budget_paused'
+}
+
+function skillRunResumePriority(record: SkillRunRecord, expectedTaskId: string): number {
+  if (expectedTaskId && skillRunIdentityTokens(record).has(expectedTaskId)) return 0
+  if (isActiveSkillRunStatus(record.status)) return 1
+  if (!record.success) return 2
+  return 3
 }
 
 export function rememberBrowserAction(
@@ -411,12 +497,7 @@ export function rememberSkillRun(
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return
   const nextRecord: SkillRunRecord = {
-    ...payload,
-    toolName: normalizeWhitespace(payload.toolName),
-    skillId: normalizeWhitespace(payload.skillId),
-    action: normalizeWhitespace(payload.action),
-    summary: normalizeWhitespace(payload.summary),
-    success: Boolean(payload.success),
+    ...normalizeSkillRunRecord(payload),
     updatedAt: payload.updatedAt || Date.now(),
   }
   const existing = recentSkillRuns.get(normalizedSessionId) || []
@@ -437,6 +518,42 @@ export function getLatestSkillRun(sessionId: string | undefined): SkillRunRecord
   const normalizedSessionId = normalizeWhitespace(sessionId || '')
   if (!normalizedSessionId) return null
   return (recentSkillRuns.get(normalizedSessionId) || [])[0] || null
+}
+
+export function resolveSkillRunForResume(params: {
+  sessionId?: string | undefined
+  expectedTaskId?: string | null
+  candidates?: Array<SkillRunRecord | null | undefined>
+}): SkillRunRecord | null {
+  hydrateFromDisk()
+  const expectedTaskId = normalizeWhitespace(params.expectedTaskId || '')
+  const candidates = [
+    ...(params.candidates || []),
+    getLatestSkillRun(params.sessionId),
+  ]
+    .filter((item): item is SkillRunRecord => Boolean(item?.skillId))
+    .map((item) => normalizeSkillRunRecord(item))
+
+  if (candidates.length === 0) return null
+  const seen = new Set<string>()
+  return candidates
+    .filter((candidate) => {
+      const identity = [
+        candidate.taskRunId,
+        candidate.detachedTaskId,
+        candidate.jobId,
+        candidate.toolName,
+        candidate.updatedAt,
+      ].filter(Boolean).join('|')
+      if (seen.has(identity)) return false
+      seen.add(identity)
+      return true
+    })
+    .sort((left, right) => {
+      const priorityDelta = skillRunResumePriority(left, expectedTaskId) - skillRunResumePriority(right, expectedTaskId)
+      if (priorityDelta !== 0) return priorityDelta
+      return Number(right.updatedAt || 0) - Number(left.updatedAt || 0)
+    })[0] || null
 }
 
 export function rememberContinuationState(

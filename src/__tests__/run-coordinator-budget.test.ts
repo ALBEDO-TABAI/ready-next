@@ -238,6 +238,62 @@ test('RunCoordinator does not mark an exhausted background skill task as done', 
   assert.deepEqual(finalEvent?.resumableActions, ['continue', 'cancel'])
 })
 
+test('RunCoordinator prioritizes lifecycle signal over a success result', async () => {
+  const events: ScopeRunEventPayload[] = []
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: 'success text',
+      cancelled: false,
+      usedTools: ['skill_run_shell'],
+      taskType: 'multi_step_task',
+      skillTaskLifecycle: {
+        state: 'budget_paused',
+        reason: 'budget_exhausted',
+        phase: 'checkpoint',
+        interactionState: 'suspended',
+        waitingFor: 'background',
+        resumableActions: ['continue', 'retry', 'cancel'],
+        blockedReason: '本轮预算已用完，技能任务已暂停，可继续执行',
+        taskContinuation: {
+          taskId: 'str-budget',
+          taskRunId: 'str-budget',
+          runStatePath: '/tmp/ready/run_state.json',
+          pauseReason: 'budget_exhausted',
+        },
+      },
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async () => null,
+  })
+
+  await coordinator.runScoped({
+    scope: createScope(),
+    message: '继续视频分析',
+    requestId: 'req-lifecycle-priority',
+  })
+
+  const finalEvent = events[events.length - 1]
+  assert.equal(finalEvent?.phase, 'checkpoint')
+  assert.equal(finalEvent?.interactionState, 'suspended')
+  assert.equal(finalEvent?.waitingFor, 'background')
+  assert.deepEqual(finalEvent?.resumableActions, ['continue', 'retry', 'cancel'])
+  assert.equal(finalEvent?.taskContinuation?.taskRunId, 'str-budget')
+})
+
 test('RunCoordinator memory reflection does not convert a paused background skill task to done', async () => {
   const events: ScopeRunEventPayload[] = []
   let memoryCaptured: (() => void) | null = null

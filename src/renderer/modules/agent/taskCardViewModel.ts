@@ -150,6 +150,16 @@ function buildDetailGroups(toolTrace: ToolTraceEvent[]): TaskEventGroupViewModel
   return groups
 }
 
+function hasActiveChildTask(run: TaskCardRunLike): boolean {
+  return (run.steps || []).some((step) => {
+    const childTasks = (step as unknown as {
+      childTasks?: Array<{ status?: string | null }>
+    }).childTasks
+    return Array.isArray(childTasks)
+      && childTasks.some((child) => child.status === 'running' || child.status === 'blocked' || child.status === 'queued')
+  })
+}
+
 export function createDefaultTaskDisclosureState(run: TaskCardRunLike): TaskDisclosureState {
   return {
     overview: true,
@@ -185,7 +195,10 @@ export function buildTaskCardViewModel(
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
   const summary = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
-  const statusLabel = run.blockedReason && run.resumableActions?.includes('none')
+  const hasRecoverableWait = Boolean(
+    (run.waitingFor && run.waitingFor !== 'none') || run.blockedReason,
+  )
+  const statusLabel = (hasRecoverableWait || hasActiveChildTask(run)) && run.phase !== 'error' && run.phase !== 'cancelled'
     ? '等待继续'
     : taskStatusLabel(run.status) || taskPhaseLabel(run.phase)
 

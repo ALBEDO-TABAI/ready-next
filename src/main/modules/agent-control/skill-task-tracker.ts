@@ -14,6 +14,19 @@ import {
 } from '../repositories/skill-task-run-repository'
 
 export type SkillTaskEventStatus = 'running' | 'done' | 'blocked' | 'error'
+export type SkillParentTaskLifecycleState =
+  | 'background_running'
+  | 'budget_paused'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+export type SkillParentTaskLifecycleReason =
+  | 'budget_exhausted'
+  | 'background_handoff'
+  | 'primitive_observation'
+  | 'supervisor_close'
+  | string
 
 export interface SkillTaskEvent {
   scopeId?: string
@@ -50,6 +63,52 @@ export interface SkillTaskEvent {
   resumePayload?: Record<string, unknown> | null
 }
 
+export interface SkillParentTaskLifecycleEvent {
+  scopeId?: string
+  sessionId?: string
+  runId?: string | null
+  agent?: string | null
+  skillId: string
+  skillName?: string
+  action?: string
+  state: SkillParentTaskLifecycleState
+  reason: SkillParentTaskLifecycleReason
+  message?: string
+  stepId?: string
+  outputDir?: string | null
+  runStatePath?: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+  failureKind?: string | null
+  failureDetail?: string | null
+  goalText?: string | null
+  resourceRefs?: unknown[]
+  params?: Record<string, unknown> | null
+  jobId?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  progressFingerprint?: string | null
+  resumePayload?: Record<string, unknown> | null
+}
+
+interface SkillTaskContinuationState {
+  taskId?: string | null
+  executionId?: string | null
+  stepId?: string | null
+  blockerType?: string | null
+  todoId?: string | null
+  todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
+}
+
 interface SkillTaskProjectionState {
   module: 'skill'
   taskId: string
@@ -60,14 +119,7 @@ interface SkillTaskProjectionState {
   waitingFor: ScopeRunWaitingFor
   resumableActions: ScopeRunResumableAction[]
   blockedReason: string | null
-  taskContinuation: {
-    taskId?: string | null
-    executionId?: string | null
-    stepId?: string | null
-    blockerType?: string | null
-    todoId?: string | null
-    todoTitle?: string | null
-  } | null
+  taskContinuation: SkillTaskContinuationState | null
   recentArtifacts: Array<{
     id: string
     module: string
@@ -185,6 +237,38 @@ function interactionStateFor(status: SkillTaskEventStatus): SkillTaskRunRecord['
   return 'running'
 }
 
+function lifecycleRunStatus(state: SkillParentTaskLifecycleState): SkillTaskRunStatus {
+  if (state === 'background_running') return 'running'
+  if (state === 'budget_paused' || state === 'blocked') return 'blocked'
+  if (state === 'failed') return 'failed'
+  return state
+}
+
+function lifecycleStepStatus(state: SkillParentTaskLifecycleState): ScopeRunTaskStep['status'] {
+  if (state === 'background_running') return 'running'
+  if (state === 'budget_paused' || state === 'blocked') return 'blocked'
+  if (state === 'failed') return 'error'
+  return 'done'
+}
+
+function lifecycleWaitingFor(state: SkillParentTaskLifecycleState): ScopeRunWaitingFor {
+  if (state === 'background_running' || state === 'budget_paused') return 'background'
+  if (state === 'blocked') return 'input'
+  return 'none'
+}
+
+function lifecycleResumableActions(state: SkillParentTaskLifecycleState): ScopeRunResumableAction[] {
+  if (state === 'background_running' || state === 'budget_paused' || state === 'blocked') return ['continue', 'cancel']
+  if (state === 'failed') return ['retry', 'cancel']
+  return ['none']
+}
+
+function lifecycleInteractionState(state: SkillParentTaskLifecycleState): SkillTaskRunRecord['interactionState'] {
+  if (state === 'background_running' || state === 'budget_paused') return 'suspended'
+  if (state === 'blocked') return 'awaiting_clarification'
+  return 'running'
+}
+
 function inferOutputPaths(event: SkillTaskEvent): Pick<
   SkillTaskRunRecord,
   'outputDir' | 'runStatePath' | 'sceneScoresPath' | 'deliveryReportPath'
@@ -225,6 +309,33 @@ function buildResumePayload(event: SkillTaskEvent, stepId: string): Record<strin
   }
 }
 
+function buildLifecycleResumePayload(
+  event: SkillParentTaskLifecycleEvent,
+  stepId: string,
+  taskId: string,
+): Record<string, unknown> | null {
+  if (event.resumePayload) return event.resumePayload
+  const actions = lifecycleResumableActions(event.state)
+  if (actions.length === 1 && actions[0] === 'none') return null
+  return {
+    taskId,
+    stepId,
+    blockerType: event.reason || event.state,
+    todoId: stepId,
+    todoTitle: '技能任务状态',
+    pauseReason: event.reason || null,
+    detachedTaskId: event.detachedTaskId ?? null,
+    taskRunId: event.taskRunId ?? null,
+    jobId: event.jobId ?? null,
+    skillId: event.skillId,
+    action: event.action ?? null,
+    runStatePath: event.runStatePath ?? null,
+    outputDir: event.outputDir ?? null,
+    progressFingerprint: event.progressFingerprint ?? null,
+    resumableActions: actions,
+  }
+}
+
 function createRunFromEvent(event: SkillTaskEvent, step: SkillTaskRunStep, nowIso: string): SkillTaskRunRecord | null {
   if (!event.skillId) return null
   const paths = inferOutputPaths(event)
@@ -260,6 +371,48 @@ function createRunFromEvent(event: SkillTaskEvent, step: SkillTaskRunStep, nowIs
   }
 }
 
+function createRunFromLifecycleEvent(
+  event: SkillParentTaskLifecycleEvent,
+  step: SkillTaskRunStep,
+  nowIso: string,
+  taskId: string,
+): SkillTaskRunRecord {
+  const runStatus = lifecycleRunStatus(event.state)
+  return {
+    id: createSkillTaskRunId(),
+    scopeId: event.scopeId || event.sessionId || null,
+    sessionId: event.sessionId || event.scopeId || null,
+    agent: event.agent ?? null,
+    runId: event.runId ?? null,
+    skillId: event.skillId,
+    skillName: event.skillName ?? event.skillId,
+    action: event.action || 'skill_lifecycle',
+    toolName: 'skill_lifecycle',
+    runKind: 'typed_action',
+    status: runStatus,
+    interactionState: lifecycleInteractionState(event.state),
+    goalText: event.goalText ?? null,
+    resourceRefs: event.resourceRefs || [],
+    params: event.params || null,
+    steps: [step],
+    currentStepId: step.id,
+    artifacts: [],
+    outputDir: event.outputDir ?? null,
+    runStatePath: event.runStatePath ?? null,
+    sceneScoresPath: event.sceneScoresPath ?? null,
+    deliveryReportPath: event.deliveryReportPath ?? null,
+    failureKind: event.state === 'failed' ? event.failureKind || 'skill_task_failed' : event.failureKind ?? null,
+    failureDetail: event.state === 'failed' ? event.failureDetail || event.message || null : event.failureDetail ?? null,
+    jobId: event.jobId ?? null,
+    detachedTaskId: event.detachedTaskId ?? null,
+    resumePayload: buildLifecycleResumePayload(event, step.id, taskId),
+    createdAt: nowIso,
+    startedAt: runStatus === 'running' ? nowIso : null,
+    updatedAt: nowIso,
+    finishedAt: runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled' ? nowIso : null,
+  }
+}
+
 function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTaskEvent): SkillTaskRunRecord | null {
   if (event.detachedTaskId) {
     const detached = repository.findByDetachedTaskId(event.detachedTaskId)
@@ -271,6 +424,26 @@ function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTas
     .find((run) => run.skillId === event.skillId)
   if (active) return active
   if (event.runKind === 'typed_action' && event.status === 'running') return null
+  return repository.findLatestRecoverable({
+    sessionId,
+    skillId: event.skillId,
+    includeDone: true,
+  })
+}
+
+function findTaskRunForLifecycleEvent(
+  repository: SkillTaskRunRepository,
+  event: SkillParentTaskLifecycleEvent,
+): SkillTaskRunRecord | null {
+  if (event.detachedTaskId) {
+    const detached = repository.findByDetachedTaskId(event.detachedTaskId)
+    if (detached) return detached
+  }
+  const sessionId = event.sessionId || event.scopeId
+  if (!sessionId || !event.skillId) return null
+  const active = repository.listActiveBySession(sessionId, 20)
+    .find((run) => run.skillId === event.skillId)
+  if (active) return active
   return repository.findLatestRecoverable({
     sessionId,
     skillId: event.skillId,
@@ -300,6 +473,15 @@ function buildRunArtifacts(event: SkillTaskEvent, stepId: string, nowIso: string
       createdAt: nowIso,
       meta: artifact.meta,
     }))
+}
+
+function shouldPreserveParentProjection(projection: SkillTaskProjectionState, event: SkillTaskEvent): boolean {
+  if (event.runKind !== 'primitive' || (event.status !== 'done' && event.status !== 'running')) return false
+  if (projection.waitingFor !== 'none' || projection.blockedReason || projection.taskContinuation) return true
+  const currentStep = projection.currentStepId
+    ? projection.steps.find((step) => step.id === projection.currentStepId)
+    : null
+  return currentStep?.status === 'running' || currentStep?.status === 'blocked'
 }
 
 function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: string): void {
@@ -340,8 +522,11 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
   const paths = inferOutputPaths(event)
   const runStatus = statusToRunStatus(event.status)
   const preserveActiveParent = event.runKind === 'primitive'
-    && runStatus === 'done'
+    && (runStatus === 'done' || runStatus === 'running')
     && (current.status === 'running' || current.status === 'blocked')
+  const nextResumePayload = preserveActiveParent
+    ? current.resumePayload ?? null
+    : buildResumePayload(event, stepId)
   try {
     repository.update(current.id, {
       scopeId: event.scopeId || current.scopeId,
@@ -358,17 +543,21 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
       resourceRefs: event.resourceRefs ?? current.resourceRefs ?? [],
       params: event.params || current.params,
       steps,
-      currentStepId: stepId,
+      currentStepId: preserveActiveParent ? current.currentStepId ?? stepId : stepId,
       artifacts,
       outputDir: paths.outputDir || current.outputDir || null,
       runStatePath: paths.runStatePath || current.runStatePath || null,
       sceneScoresPath: paths.sceneScoresPath || current.sceneScoresPath || null,
       deliveryReportPath: paths.deliveryReportPath || current.deliveryReportPath || null,
-      failureKind: event.status === 'error' ? event.failureKind || current.failureKind || 'tool_error' : event.failureKind ?? null,
-      failureDetail: event.status === 'error' ? event.failureDetail || event.message || current.failureDetail || null : event.failureDetail ?? null,
+      failureKind: preserveActiveParent
+        ? current.failureKind ?? null
+        : event.status === 'error' ? event.failureKind || current.failureKind || 'tool_error' : event.failureKind ?? null,
+      failureDetail: preserveActiveParent
+        ? current.failureDetail ?? null
+        : event.status === 'error' ? event.failureDetail || event.message || current.failureDetail || null : event.failureDetail ?? null,
       jobId: event.jobId ?? current.jobId ?? null,
       detachedTaskId: event.detachedTaskId ?? current.detachedTaskId,
-      resumePayload: buildResumePayload(event, stepId),
+      resumePayload: nextResumePayload,
       startedAt: current.startedAt || (event.status === 'running' ? nowIso : null),
       updatedAt: nowIso,
       finishedAt: preserveActiveParent
@@ -376,6 +565,80 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
         : runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled'
           ? nowIso
           : null,
+    })
+  } catch {
+    // Projection updates must keep working even if SQLite is temporarily unavailable.
+  }
+}
+
+function recordLifecycleTaskRunEvent(
+  event: SkillParentTaskLifecycleEvent,
+  step: ScopeRunTaskStep,
+  nowIso: string,
+  taskId: string,
+): void {
+  const repository = getTaskRunRepository()
+  if (!repository) return
+  const runStep: SkillTaskRunStep = {
+    id: step.id,
+    title: step.title,
+    status: step.status,
+    detail: step.detail,
+    updatedAt: step.updatedAt,
+  }
+  let current: SkillTaskRunRecord | null = null
+  try {
+    current = findTaskRunForLifecycleEvent(repository, event)
+  } catch {
+    return
+  }
+  if (!current) {
+    const created = createRunFromLifecycleEvent(event, runStep, nowIso, taskId)
+    try {
+      repository.create(created)
+    } catch {
+      // Projection updates must keep working even if SQLite is temporarily unavailable.
+    }
+    return
+  }
+
+  const runStatus = lifecycleRunStatus(event.state)
+  const existingStepIndex = current.steps.findIndex((item) => item.id === runStep.id)
+  const steps = existingStepIndex >= 0
+    ? current.steps.map((item, index) => (index === existingStepIndex ? runStep : item))
+    : [...current.steps, runStep]
+  try {
+    repository.update(current.id, {
+      scopeId: event.scopeId || current.scopeId,
+      sessionId: event.sessionId || current.sessionId,
+      agent: event.agent ?? current.agent,
+      runId: event.runId ?? current.runId,
+      skillName: event.skillName ?? current.skillName,
+      action: event.action || current.action,
+      toolName: 'skill_lifecycle',
+      runKind: current.runKind,
+      status: runStatus,
+      interactionState: lifecycleInteractionState(event.state),
+      goalText: event.goalText ?? current.goalText ?? null,
+      resourceRefs: event.resourceRefs ?? current.resourceRefs ?? [],
+      params: event.params || current.params,
+      steps,
+      currentStepId: runStep.id,
+      outputDir: event.outputDir ?? current.outputDir ?? null,
+      runStatePath: event.runStatePath ?? current.runStatePath ?? null,
+      sceneScoresPath: event.sceneScoresPath ?? current.sceneScoresPath ?? null,
+      deliveryReportPath: event.deliveryReportPath ?? current.deliveryReportPath ?? null,
+      failureKind: event.state === 'failed'
+        ? event.failureKind || current.failureKind || 'skill_task_failed'
+        : event.failureKind ?? null,
+      failureDetail: event.state === 'failed'
+        ? event.failureDetail || event.message || current.failureDetail || null
+        : event.failureDetail ?? null,
+      jobId: event.jobId ?? current.jobId ?? null,
+      detachedTaskId: event.detachedTaskId ?? current.detachedTaskId,
+      resumePayload: buildLifecycleResumePayload(event, runStep.id, taskId),
+      updatedAt: nowIso,
+      finishedAt: runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled' ? nowIso : null,
     })
   } catch {
     // Projection updates must keep working even if SQLite is temporarily unavailable.
@@ -394,6 +657,7 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
   const projection = getOrCreateProjection(event)
   const updatedAt = new Date().toISOString()
   const stepId = event.stepId || nextStepId(projection.steps, event.toolName)
+  const preserveParentProjection = shouldPreserveParentProjection(projection, event)
   const existingIndex = projection.steps.findIndex((step) => step.id === stepId)
   const step: ScopeRunTaskStep = {
     id: stepId,
@@ -409,28 +673,30 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
     projection.steps.push(step)
   }
 
-  projection.currentStepId = stepId
-  projection.taskSummary = event.message || titleForTool(event.toolName)
-  projection.blockedReason = event.status === 'blocked' || event.status === 'error'
-    ? event.message || (event.status === 'blocked' ? '等待用户补充信息' : '技能执行失败')
-    : null
-  projection.waitingFor = event.status === 'blocked' ? 'input' : 'none'
-  projection.resumableActions = event.status === 'blocked'
-    ? ['continue', 'cancel']
-    : event.status === 'error'
-      ? ['retry', 'cancel']
-      : event.artifactPath
-        ? ['open_artifact']
-        : ['none']
-  projection.taskContinuation = event.status === 'blocked' || event.status === 'error'
-    ? {
-      taskId: projection.taskId,
-      stepId,
-      blockerType: event.status === 'blocked' ? 'need_input' : 'error',
-      todoId: stepId,
-      todoTitle: step.title,
-    }
-    : null
+  if (!preserveParentProjection) {
+    projection.currentStepId = stepId
+    projection.taskSummary = event.message || titleForTool(event.toolName)
+    projection.blockedReason = event.status === 'blocked' || event.status === 'error'
+      ? event.message || (event.status === 'blocked' ? '等待用户补充信息' : '技能执行失败')
+      : null
+    projection.waitingFor = event.status === 'blocked' ? 'input' : 'none'
+    projection.resumableActions = event.status === 'blocked'
+      ? ['continue', 'cancel']
+      : event.status === 'error'
+        ? ['retry', 'cancel']
+        : event.artifactPath
+          ? ['open_artifact']
+          : ['none']
+    projection.taskContinuation = event.status === 'blocked' || event.status === 'error'
+      ? {
+        taskId: projection.taskId,
+        stepId,
+        blockerType: event.status === 'blocked' ? 'need_input' : 'error',
+        todoId: stepId,
+        todoTitle: step.title,
+      }
+      : null
+  }
 
   const artifacts = [
     ...(event.artifactPath
@@ -468,6 +734,50 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
     ].slice(-6)
   }
   recordTaskRunEvent(event, stepId, updatedAt)
+  return { stepId }
+}
+
+export function recordSkillParentTaskLifecycleEvent(event: SkillParentTaskLifecycleEvent): { stepId: string } {
+  const projection = getOrCreateProjection({
+    scopeId: event.scopeId,
+    sessionId: event.sessionId,
+    runId: event.runId,
+    agent: event.agent,
+    skillId: event.skillId,
+    skillName: event.skillName,
+    toolName: 'skill_lifecycle',
+    action: event.action,
+    runKind: 'typed_action',
+    status: event.state === 'failed' ? 'error' : event.state === 'done' ? 'done' : 'running',
+  })
+  const updatedAt = new Date().toISOString()
+  const stepId = event.stepId || nextStepId(projection.steps, 'skill_lifecycle')
+  const step: ScopeRunTaskStep = {
+    id: stepId,
+    title: '技能任务状态',
+    status: lifecycleStepStatus(event.state),
+    detail: event.message || null,
+    updatedAt,
+  }
+  const existingIndex = projection.steps.findIndex((item) => item.id === stepId)
+  if (existingIndex >= 0) {
+    projection.steps[existingIndex] = step
+  } else {
+    projection.steps.push(step)
+  }
+
+  const waitingFor = lifecycleWaitingFor(event.state)
+  const resumableActions = lifecycleResumableActions(event.state)
+  projection.currentStepId = stepId
+  projection.taskSummary = event.message || '技能任务状态已更新'
+  projection.waitingFor = waitingFor
+  projection.resumableActions = resumableActions
+  projection.blockedReason = waitingFor !== 'none' || event.state === 'failed'
+    ? event.message || (event.state === 'failed' ? '技能执行失败' : '技能任务等待继续')
+    : null
+  projection.taskContinuation = buildLifecycleResumePayload(event, stepId, projection.taskId) as SkillTaskContinuationState | null
+
+  recordLifecycleTaskRunEvent(event, step, updatedAt, projection.taskId)
   return { stepId }
 }
 

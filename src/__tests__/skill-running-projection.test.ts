@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -68,6 +68,77 @@ test('long skill running projection infers output directory from sceneScoresPath
     const artifacts = projection.recentArtifacts as Array<{ label: string; path?: string | null }>
     assert.ok(artifacts.some((artifact) => artifact.path === sceneScoresPath))
     assert.ok(artifacts.some((artifact) => artifact.path === runStatePath))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('long skill running projection does not select newest run_state without identity', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))
+  try {
+    const targetDir = join(root, 'target-task')
+    const otherDir = join(root, 'other-task')
+    mkdirSync(targetDir, { recursive: true })
+    mkdirSync(otherDir, { recursive: true })
+    const targetRunState = join(targetDir, 'run_state.json')
+    const otherRunState = join(otherDir, 'run_state.json')
+    writeFileSync(targetRunState, JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf8')
+    writeFileSync(otherRunState, JSON.stringify({
+      task_id: 'other',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf8')
+    utimesSync(targetRunState, new Date('2026-04-28T00:00:00.000Z'), new Date('2026-04-28T00:00:00.000Z'))
+    utimesSync(otherRunState, new Date('2026-04-28T00:05:00.000Z'), new Date('2026-04-28T00:05:00.000Z'))
+
+    const projection = buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: root },
+      startedAt: 0,
+      now: 65_000,
+    })
+
+    assert.doesNotMatch(String(projection.taskSummary), /completed/)
+    assert.match(String(projection.taskSummary), /多个 run_state/)
+    assert.deepEqual(projection.resumableActions, ['none'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('long skill running projection selects matching run_state when task identity is present', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))
+  try {
+    const targetDir = join(root, 'target-task')
+    const otherDir = join(root, 'other-task')
+    mkdirSync(targetDir, { recursive: true })
+    mkdirSync(otherDir, { recursive: true })
+    writeFileSync(join(targetDir, 'run_state.json'), JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf8')
+    writeFileSync(join(otherDir, 'run_state.json'), JSON.stringify({
+      task_id: 'other',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf8')
+
+    const projection = buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: root, taskId: 'target' },
+      startedAt: 0,
+      now: 65_000,
+    })
+
+    assert.match(String(projection.taskSummary), /score_batches/)
+    assert.doesNotMatch(String(projection.taskSummary), /多个 run_state/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

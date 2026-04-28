@@ -233,6 +233,15 @@ export interface ScopeRunTaskContinuation {
   targetUrl?: string | null
   todoId?: string | null
   todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {

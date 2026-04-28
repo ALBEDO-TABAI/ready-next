@@ -207,6 +207,61 @@ test('VEA ready_compat validates delivery_report before reporting success', () =
   }
 })
 
+test('VEA ready_compat prefers output dir matching READY_SKILL_TASK_ID over newest mtime', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vea-compat-task-id-'))
+  try {
+    const fakeOrchestrator = join(root, 'fake_orchestrator.py')
+    const resultPath = join(root, 'result.json')
+    const harness = join(root, 'harness.py')
+
+    writeFileSync(fakeOrchestrator, [
+      'import json, os, sys, time',
+      'from pathlib import Path',
+      'args = sys.argv[1:]',
+      'out_root = Path(args[args.index("-o") + 1]) if "-o" in args else Path.cwd()',
+      'target = out_root / "target-video"',
+      'other = out_root / "other-video"',
+      'for path in (target, other):',
+      '    path.mkdir(parents=True, exist_ok=True)',
+      '    (path / "scene_scores.json").write_text("{}", encoding="utf-8")',
+      '    (path / "delivery_report.json").write_text(json.dumps({"status":"completed","missing_outputs":[],"missing_screenshot_scenes":[],"missing_sample_scenes":[],"blocked_batches":[],"incomplete_scene_numbers":[],"required_outputs":{}}), encoding="utf-8")',
+      '(target / "run_state.json").write_text(json.dumps({"task_id":"dst-target","status":"completed"}), encoding="utf-8")',
+      'time.sleep(0.02)',
+      '(other / "run_state.json").write_text(json.dumps({"task_id":"dst-other","status":"completed"}), encoding="utf-8")',
+      'print(f"Output Dir: {out_root}")',
+      'raise SystemExit(0)',
+      '',
+    ].join('\n'), 'utf8')
+
+    writeFileSync(harness, [
+      'import importlib.util, os, sys',
+      'from pathlib import Path',
+      `spec = importlib.util.spec_from_file_location("ready_compat", ${JSON.stringify(READY_COMPAT)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      `module.ORCHESTRATOR = Path(${JSON.stringify(fakeOrchestrator)})`,
+      `os.environ["READY_SKILL_RESULT_PATH"] = ${JSON.stringify(resultPath)}`,
+      'os.environ["READY_SKILL_TASK_ID"] = "dst-target"',
+      `sys.argv = ["ready_compat.py", "--action", "video_expert_pipeline", "--payload-json", ${JSON.stringify(JSON.stringify({ url: 'https://example.test/video', outputDir: join(root, 'outputs') }))}]`,
+      'raise SystemExit(module.main())',
+      '',
+    ].join('\n'), 'utf8')
+
+    execFileSync('python3', [harness], { encoding: 'utf8' })
+
+    const payload = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      ok: boolean
+      outputs: Record<string, string>
+    }
+
+    assert.equal(payload.ok, true)
+    assert.equal(payload.outputs.outputDir, realpathSync(join(root, 'outputs', 'target-video')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('runtime-manager treats structured ok:false as a failed direct action even when process exits 0', async () => {
   const root = mkdtempSync(join(tmpdir(), 'skill-structured-result-'))
   try {

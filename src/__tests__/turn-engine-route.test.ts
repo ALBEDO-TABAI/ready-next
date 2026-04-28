@@ -1466,3 +1466,113 @@ test('TurnEngine emits budget warning and exhaustion metrics with skill context 
     _resetLastReferenceSkillHintsForTests()
   }
 })
+
+test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhausted', async () => {
+  const engine = new TurnEngine()
+  const { request } = createRequest({
+    userText: '继续视频分析',
+    intentClassification: createIntent({
+      primaryDomain: 'skill',
+      mentionedDomains: ['skill'],
+      objectSignals: ['skill-object'],
+      actionSignals: ['skill-action'],
+      confidence: 'high',
+    }),
+    budget: {
+      maxIterations: 1,
+      maxToolCalls: 1,
+      maxParallelToolGroups: 1,
+      reservedToolCalls: 0,
+    },
+    budgetState: {
+      iterationsUsed: 0,
+      toolCallsUsed: 0,
+      parallelToolGroupsUsed: 0,
+    },
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      skillContextOrchestrator: {
+        shouldKeepToolsWithVideo: () => false,
+        findExplicitlyRequestedSkills: () => [],
+        hasActiveSkillExecution: () => false,
+        getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+        rememberExplicitReferenceSkillHint: () => true,
+        buildPreferredSkillToolNames: () => ['skill_run_shell'],
+        maybeInjectExplicitSkillContext: async () => {},
+        listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+      },
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => ({
+          taskRunId: 'str-budget',
+          detachedTaskId: 'dst-budget',
+          skillId: 'video-expert-analyzer',
+          scopeId: 'scope-test',
+          sessionId: 'scope-test',
+          action: 'video_expert_pipeline',
+          status: 'background_running',
+          hasLiveWork: true,
+          hasRecentProgress: true,
+          closeAllowed: false,
+          ambiguous: false,
+          stale: false,
+          outputDir: '/tmp/ready/output',
+          runStatePath: '/tmp/ready/output/run_state.json',
+          sceneScoresPath: '/tmp/ready/output/scene_scores.json',
+          deliveryReportPath: '/tmp/ready/output/delivery_report.json',
+          progress: { currentStage: 'score_batches', updatedAt: '2026-04-28T02:00:00.000Z' },
+          blockers: [],
+          pauseReason: null,
+          resumePayload: {
+            taskRunId: 'str-budget',
+            detachedTaskId: 'dst-budget',
+            outputDir: '/tmp/ready/output',
+            runStatePath: '/tmp/ready/output/run_state.json',
+          },
+          sourceObservations: [],
+          progressFingerprint: 'fp-budget',
+          observedAt: '2026-04-28T02:00:00.000Z',
+          lastProgressAt: '2026-04-28T02:00:00.000Z',
+        }),
+      },
+      requestToolLoopResponse: async () => ({
+        text: '继续执行',
+        toolCalls: [{ id: 'tool-1', name: 'skill_run_shell', input: {} }],
+        stopReason: 'tool_calls',
+      }),
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'skill_run_shell',
+          input: {},
+          result: { text: 'monitor exited 0' },
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.success, true)
+  assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
+  assert.equal(result.skillTaskLifecycle?.phase, 'checkpoint')
+  assert.equal(result.interactionState, 'suspended')
+  assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
+  assert.equal((result.projectionTruth?.projectionPatch?.taskContinuation as Record<string, unknown>)?.taskRunId, 'str-budget')
+})

@@ -177,6 +177,30 @@ export class RunCoordinator {
       projectionPatch?.taskContinuation && typeof projectionPatch.taskContinuation === 'object'
         ? projectionPatch.taskContinuation as ScopeRunEventPayload['taskContinuation']
         : undefined
+    const lifecycleSignal = result.skillTaskLifecycle || null
+    const finalInteractionState = lifecycleSignal?.interactionState || result.interactionState
+    const finalWaitingFor = lifecycleSignal ? lifecycleSignal.waitingFor : projectionWaitingFor
+    const finalResumableActions = lifecycleSignal
+      ? lifecycleSignal.resumableActions
+      : projectionResumableActions as ScopeRunEventPayload['resumableActions'] | undefined
+    const finalBlockedReason = lifecycleSignal
+      ? lifecycleSignal.blockedReason
+      : projectionBlockedReason
+    const finalTaskContinuation = lifecycleSignal
+      ? lifecycleSignal.taskContinuation
+      : projectionTaskContinuation
+    const hasRecoverableWait = Boolean(
+      (finalWaitingFor && finalWaitingFor !== 'none')
+      || finalBlockedReason
+      || (finalInteractionState && finalInteractionState !== 'running'),
+    )
+    const finalPhase: ScopeRunEventPayload['phase'] = result.cancelled
+      ? 'cancelled'
+      : lifecycleSignal
+        ? lifecycleSignal.phase
+        : result.success
+        ? hasRecoverableWait ? 'checkpoint' : 'done'
+        : 'error'
 
     this.deps.emitScopeRunEvent({
       type: 'updated',
@@ -186,17 +210,17 @@ export class RunCoordinator {
       taskId,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,
-      phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
+      phase: finalPhase,
       taskType: result.taskType,
-      interactionState: result.interactionState,
+      interactionState: finalInteractionState,
       taskTitle: projectionTaskTitle,
       taskSummary: projectionTaskSummary,
       steps: projectionSteps as ScopeRunEventPayload['steps'],
       currentStepId: projectionCurrentStepId,
-      waitingFor: projectionWaitingFor,
-      resumableActions: projectionResumableActions as ScopeRunEventPayload['resumableActions'],
-      blockedReason: projectionBlockedReason,
-      taskContinuation: projectionTaskContinuation,
+      waitingFor: finalWaitingFor,
+      resumableActions: finalResumableActions,
+      blockedReason: finalBlockedReason,
+      taskContinuation: finalTaskContinuation,
       taskProjectionId: result.taskProjectionId || result.taskId || taskId,
       executionDiagnostics: {
         taskId: result.taskId || taskId,
@@ -232,7 +256,12 @@ export class RunCoordinator {
           agent: request.scope.agent,
           runId: request.requestId,
           taskId,
-          phase: 'done',
+          phase: finalPhase === 'checkpoint' ? 'checkpoint' : 'done',
+          interactionState: finalPhase === 'checkpoint' ? finalInteractionState : undefined,
+          waitingFor: finalPhase === 'checkpoint' ? finalWaitingFor : undefined,
+          resumableActions: finalPhase === 'checkpoint' ? finalResumableActions : undefined,
+          blockedReason: finalPhase === 'checkpoint' ? finalBlockedReason : undefined,
+          taskContinuation: finalPhase === 'checkpoint' ? finalTaskContinuation : undefined,
           memoryCapture,
           timestamp: new Date().toISOString(),
         })
