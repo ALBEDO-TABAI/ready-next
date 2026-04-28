@@ -112,6 +112,32 @@ test('skill_inspect_run_state skips mismatched root run_state when matching chil
   }
 })
 
+test('skill_inspect_run_state returns identity_mismatch with candidate summaries', async () => {
+  const root = makeTempDir()
+  try {
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      task_id: 'other-task',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf-8')
+
+    const data = outputData(await executeInspectRunState({
+      outputDir: root,
+      expectedTaskId: 'target-task',
+    } as any))
+
+    assert.equal(data.found, false)
+    assert.equal(data.ambiguous, false)
+    assert.equal(data.identityMismatch, true)
+    assert.equal(data.errorKind, 'identity_mismatch')
+    assert.equal(data.candidates.length, 1)
+    assert.equal(data.candidates[0].taskId, 'other-task')
+    assert.equal(data.summary, null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('skill_inspect_run_state uses detached task id as default expectedTaskId', async () => {
   const root = makeTempDir()
   try {

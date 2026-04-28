@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { SkillTaskSupervisor } from '../main/modules/agent-control/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
   rememberLastReferenceSkill,
@@ -1765,4 +1769,224 @@ test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhau
   assert.equal(result.interactionState, 'suspended')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
   assert.equal((result.projectionTruth?.projectionPatch?.taskContinuation as Record<string, unknown>)?.taskRunId, 'str-budget')
+})
+
+test('TurnEngine proves executeToolBatch budgetLimited through real run_state supervisor input', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-turn-budget-limited-'))
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  try {
+    mkdirSync(root, { recursive: true })
+    const runStatePath = join(root, 'run_state.json')
+    writeFileSync(runStatePath, JSON.stringify({
+      task_id: 'dst-budget-limited',
+      status: 'running',
+      current_stage: 'score_batches',
+      completed_scenes: 5,
+      total_scenes: 40,
+      coverage_ratio: 0.125,
+      updated_at: '2026-04-28T02:00:00.000Z',
+    }), 'utf8')
+    writeFileSync(join(root, 'scene_scores.json'), '{}', 'utf8')
+    const supervisor = new SkillTaskSupervisor({
+      now: () => Date.parse('2026-04-28T02:00:30.000Z'),
+      listActiveTaskRuns: () => [{
+        id: 'str-budget-limited',
+        scopeId: 'scope-test',
+        sessionId: 'scope-test',
+        agent: 'butler',
+        runId: 'run-test',
+        skillId: 'video-expert-analyzer',
+        skillName: 'Video Expert Analyzer',
+        action: 'video_expert_pipeline',
+        toolName: 'skill_video_expert_pipeline',
+        runKind: 'typed_action',
+        status: 'running',
+        interactionState: 'running',
+        goalText: null,
+        resourceRefs: [],
+        params: null,
+        steps: [{ id: 'skill_video_expert_pipeline#1', title: '视频分析', status: 'running', updatedAt: '2026-04-28T02:00:00.000Z' }],
+        currentStepId: 'skill_video_expert_pipeline#1',
+        artifacts: [],
+        outputDir: root,
+        runStatePath,
+        sceneScoresPath: join(root, 'scene_scores.json'),
+        deliveryReportPath: join(root, 'delivery_report.json'),
+        failureKind: null,
+        failureDetail: null,
+        jobId: null,
+        detachedTaskId: 'dst-budget-limited',
+        resumePayload: {
+          taskRunId: 'str-budget-limited',
+          detachedTaskId: 'dst-budget-limited',
+          outputDir: root,
+          runStatePath,
+        },
+        createdAt: '2026-04-28T01:59:00.000Z',
+        startedAt: '2026-04-28T01:59:00.000Z',
+        updatedAt: '2026-04-28T02:00:00.000Z',
+        finishedAt: null,
+      }],
+      listDetachedTasks: () => [],
+      findLatestRecoverableTaskRun: () => null,
+    })
+    const engine = new TurnEngine()
+    const { request } = createRequest({
+      userText: '继续视频分析',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      budget: {
+        maxIterations: 8,
+        maxToolCalls: 8,
+        maxParallelToolGroups: 1,
+        reservedToolCalls: 0,
+      },
+      budgetState: {
+        iterationsUsed: 0,
+        toolCallsUsed: 0,
+        parallelToolGroupsUsed: 0,
+      },
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: supervisor,
+        requestToolLoopResponse: async () => ({
+          text: '继续执行',
+          toolCalls: [{ id: 'tool-1', name: 'skill_video_expert_pipeline', input: { outputDir: root } }],
+          stopReason: 'tool_calls',
+        }),
+        executeToolBatch: async () => ({
+          results: [{
+            id: 'tool-1',
+            name: 'skill_video_expert_pipeline',
+            input: { outputDir: root },
+            result: { text: '仍在运行', data: { status: 'running', runStatePath } },
+          }],
+          budgetLimited: true,
+          recoveryHistory: [],
+        }),
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(result.success, true)
+    assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
+    assert.equal(result.interactionState, 'suspended')
+    assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
+    assert.equal((result.projectionTruth?.projectionPatch?.taskContinuation as Record<string, unknown>)?.taskRunId, 'str-budget-limited')
+  } finally {
+    restoreLongToolDefinition()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor throws', async () => {
+  const engine = new TurnEngine()
+  const { request } = createRequest({
+    userText: '继续视频分析',
+    intentClassification: createIntent({
+      primaryDomain: 'skill',
+      mentionedDomains: ['skill'],
+      objectSignals: ['skill-object'],
+      actionSignals: ['skill-action'],
+      confidence: 'high',
+    }),
+    budget: {
+      maxIterations: 1,
+      maxToolCalls: 1,
+      maxParallelToolGroups: 1,
+      reservedToolCalls: 0,
+    },
+    budgetState: {
+      iterationsUsed: 0,
+      toolCallsUsed: 0,
+      parallelToolGroupsUsed: 0,
+    },
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      skillContextOrchestrator: {
+        shouldKeepToolsWithVideo: () => false,
+        findExplicitlyRequestedSkills: () => [],
+        hasActiveSkillExecution: () => false,
+        getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+        rememberExplicitReferenceSkillHint: () => true,
+        buildPreferredSkillToolNames: () => ['skill_run_shell'],
+        maybeInjectExplicitSkillContext: async () => {},
+        listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+      },
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => {
+          throw new Error('supervisor unavailable')
+        },
+      },
+      requestToolLoopResponse: async () => ({
+        text: '继续执行',
+        toolCalls: [{ id: 'tool-1', name: 'skill_run_shell', input: {} }],
+        stopReason: 'tool_calls',
+      }),
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'skill_run_shell',
+          input: {},
+          result: { text: 'monitor exited 0' },
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.success, true)
+  assert.equal(result.skillTaskLifecycle, null)
+  assert.equal(result.interactionState, 'suspended')
+  assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
+  assert.equal(result.projectionTruth?.projectionPatch?.blockedReason, '本轮预算已用完，技能任务状态检查失败或暂时不可用')
 })

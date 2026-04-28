@@ -265,6 +265,31 @@ function isTerminal(status: SkillTaskSupervisorStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'cancelled'
 }
 
+function snapshotHasDurableHandle(snapshot: SkillTaskSupervisorSnapshot): boolean {
+  return Boolean(
+    snapshot.resumePayload
+      || snapshot.runStatePath
+      || snapshot.outputDir
+      || snapshot.detachedTaskId
+      || snapshot.taskRunId,
+  )
+}
+
+function scoreLatestSnapshot(snapshot: SkillTaskSupervisorSnapshot): number {
+  let score = 0
+  if (snapshot.hasLiveWork) score += 100
+  if (snapshot.status === 'background_running' || snapshot.status === 'running') score += 60
+  if (snapshot.status === 'blocked' || snapshot.status === 'budget_paused') score += 50
+  if (snapshotHasDurableHandle(snapshot)) score += 30
+  if (snapshot.hasRecentProgress) score += 20
+  if (!snapshot.stale) score += 5
+  if (snapshot.detachedTaskId) score += 4
+  if (snapshot.progressFingerprint) score += 3
+  const updatedAt = Date.parse(snapshot.lastProgressAt || snapshot.observedAt || '')
+  if (Number.isFinite(updatedAt)) score += Math.min(2, updatedAt / 10 ** 16)
+  return score
+}
+
 function buildProgressFingerprint(progress: SkillTaskSupervisorProgress, runStatePath: string | null): string | null {
   const parts = [
     runStatePath,
@@ -371,7 +396,11 @@ export class SkillTaskSupervisor {
     const detachedStatus = statusFromDetached(detached?.status)
     const taskRunStatus = statusFromTaskRun(taskRun?.status)
     const runStateStatus = statusFromRunState(runState?.status)
-    const terminalSeen = [detachedStatus, taskRunStatus, runStateStatus].some((status) => status && isTerminal(status))
+    const normalizedStatuses = [detachedStatus, taskRunStatus, runStateStatus].filter(Boolean) as SkillTaskSupervisorStatus[]
+    const terminalStatuses = normalizedStatuses.filter((status) => isTerminal(status))
+    const terminalSeen = terminalStatuses.length > 0
+    const terminalConflict = new Set(terminalStatuses).size > 1
+    const terminalLifecycleConflict = terminalSeen && normalizedStatuses.some((candidateStatus) => !isTerminal(candidateStatus))
     const liveByDetached = detached?.status === 'running'
     const liveByTaskRun = taskRun?.status === 'running'
     const blockedByTaskRun = taskRun?.status === 'blocked'
@@ -421,7 +450,18 @@ export class SkillTaskSupervisor {
         && runStateNonTerminal
         && hasDurableResumeHandle,
     )
-    const ambiguous = selection.ambiguous || Boolean(terminalSeen && hasLiveWork) || terminalOnlyByStore
+    if (terminalConflict) {
+      observations.push({
+        source: 'supervisor',
+        status: 'ambiguous_terminal_conflict',
+        message: `conflicting terminal states: ${Array.from(new Set(terminalStatuses)).join(', ')}`,
+      })
+    }
+    const ambiguous = selection.ambiguous
+      || terminalConflict
+      || Boolean(terminalLifecycleConflict && hasDurableResumeHandle)
+      || Boolean(terminalSeen && hasLiveWork)
+      || terminalOnlyByStore
     const closeAllowed = isTerminal(status) && !hasLiveWork && !ambiguous
 
     const projection = this.readProjection({ sessionId: params.sessionId || detached?.sessionId || taskRun?.sessionId || undefined, skillId: skillId || undefined })
@@ -457,22 +497,30 @@ export class SkillTaskSupervisor {
 
   inspectLatestSkillTask(params: { sessionId?: string | null; scopeId?: string | null; skillId?: string | null }): SkillTaskSupervisorSnapshot {
     const sessionId = nonEmpty(params.sessionId) || nonEmpty(params.scopeId)
-    const active = sessionId ? this.listActiveTaskRuns(sessionId, 20).find((run) => !params.skillId || run.skillId === params.skillId) : null
-    if (active) return this.inspectSkillTask({ taskRunId: active.id, taskRun: active, sessionId, skillId: params.skillId || active.skillId })
-    const detached = sessionId
-      ? this.listDetachedTasks({ scopeId: sessionId }).find((task) =>
-        (!params.skillId || task.skillId === params.skillId)
-        && (task.status === 'running' || task.status === 'blocked'),
-      )
-      : null
-    if (detached) return this.inspectSkillTask({ detachedTaskId: detached.id, detachedTask: detached, sessionId, skillId: params.skillId || detached.skillId })
+    const candidates: SkillTaskSupervisorSnapshot[] = []
+    const matchingSkill = (skillId?: string | null): boolean => !params.skillId || skillId === params.skillId
+    if (sessionId) {
+      for (const run of this.listActiveTaskRuns(sessionId, 20).filter((item) => matchingSkill(item.skillId))) {
+        candidates.push(this.inspectSkillTask({ taskRunId: run.id, taskRun: run, sessionId, skillId: params.skillId || run.skillId }))
+      }
+      for (const task of this.listDetachedTasks({ scopeId: sessionId }).filter((item) =>
+        matchingSkill(item.skillId) && (item.status === 'running' || item.status === 'blocked'),
+      )) {
+        candidates.push(this.inspectSkillTask({ detachedTaskId: task.id, detachedTask: task, sessionId, skillId: params.skillId || task.skillId }))
+      }
+    }
     const latest = this.findLatestRecoverableTaskRun({
       sessionId,
       scopeId: params.scopeId,
       skillId: params.skillId,
       includeDone: true,
     })
-    if (latest) return this.inspectSkillTask({ taskRunId: latest.id, taskRun: latest, sessionId, skillId: params.skillId || latest.skillId })
+    if (latest) candidates.push(this.inspectSkillTask({ taskRunId: latest.id, taskRun: latest, sessionId, skillId: params.skillId || latest.skillId }))
+    if (candidates.length > 0) {
+      return candidates
+        .slice()
+        .sort((left, right) => scoreLatestSnapshot(right) - scoreLatestSnapshot(left))[0]
+    }
     return this.emptySnapshot()
   }
 

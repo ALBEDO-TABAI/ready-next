@@ -121,7 +121,6 @@ def _is_video_output_dir(path: Path) -> bool:
     return (
         (path / "scene_scores.json").is_file()
         and (path / "run_state.json").is_file()
-        and (path / "delivery_report.json").is_file()
     )
 
 
@@ -130,12 +129,22 @@ def _state_task_id(path: Path) -> str:
     return str(state.get("task_id") or state.get("taskId") or "").strip()
 
 
-def _resolve_active_candidate(candidate: Path) -> Path:
+def _video_output_mtime(path: Path) -> float:
+    mtimes = [
+        (path / name).stat().st_mtime
+        for name in ("scene_scores.json", "run_state.json", "delivery_report.json")
+        if (path / name).is_file()
+    ]
+    return max(mtimes) if mtimes else path.stat().st_mtime
+
+
+def _resolve_active_candidate(candidate: Path, expected_task_id: str = "") -> Path:
     state = _safe_read_json(candidate / "run_state.json")
     active = str(state.get("active_output_dir") or "").strip()
     if active:
         active_path = Path(active).expanduser().resolve()
-        if _is_video_output_dir(active_path):
+        active_task_id = _state_task_id(active_path)
+        if _is_video_output_dir(active_path) and (not expected_task_id or not active_task_id or active_task_id == expected_task_id):
             return active_path
     return candidate
 
@@ -147,26 +156,18 @@ def _find_video_output_dir(output_root: Path, started_at: float, expected_task_i
     candidates: list[tuple[float, Path, str]] = []
     seen: set[str] = set()
     if _is_video_output_dir(output_root):
-        candidate = _resolve_active_candidate(output_root)
+        candidate = _resolve_active_candidate(output_root, expected_task_id)
         seen.add(str(candidate))
-        newest_mtime = max(
-            (candidate / "scene_scores.json").stat().st_mtime,
-            (candidate / "run_state.json").stat().st_mtime,
-            (candidate / "delivery_report.json").stat().st_mtime,
-        )
+        newest_mtime = _video_output_mtime(candidate)
         candidates.append((newest_mtime, candidate, _state_task_id(candidate)))
     for scores_path in output_root.rglob("scene_scores.json"):
         candidate = scores_path.parent
         if not _is_video_output_dir(candidate):
             continue
-        newest_mtime = max(
-            (candidate / "scene_scores.json").stat().st_mtime,
-            (candidate / "run_state.json").stat().st_mtime,
-            (candidate / "delivery_report.json").stat().st_mtime,
-        )
+        newest_mtime = _video_output_mtime(candidate)
         if newest_mtime + 1 < started_at:
             continue
-        candidate = _resolve_active_candidate(candidate)
+        candidate = _resolve_active_candidate(candidate, expected_task_id)
         candidate_key = str(candidate)
         if candidate_key in seen:
             continue

@@ -240,13 +240,18 @@ export async function executeInspectRunState(
 
   const runStatePath = selection.path
   if (!runStatePath) {
+    const identityMismatch = Boolean(effectiveExpectedTaskId && selection.candidates.length > 0)
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_inspect_run_state',
-      reason: 'run_state_not_found',
+      reason: identityMismatch ? 'identity_mismatch' : 'run_state_not_found',
       outputDir,
+      expectedTaskId: effectiveExpectedTaskId,
+      candidateCount: selection.candidates.length,
     })
     return createToolExecutionOutput(
-      `No run_state.json found under ${outputDir} (searched root + one level deep).`,
+      identityMismatch
+        ? `run_state.json candidates under ${outputDir} did not match expected task id ${effectiveExpectedTaskId}.`
+        : `No run_state.json found under ${outputDir} (searched root + one level deep).`,
       {
         shape: 'json',
         data: {
@@ -255,8 +260,10 @@ export async function executeInspectRunState(
           expectedTaskId: effectiveExpectedTaskId,
           found: false,
           ambiguous: false,
+          identityMismatch,
+          errorKind: identityMismatch ? 'identity_mismatch' : 'not_found',
           runStatePath: null,
-          candidates: [],
+          candidates: selection.candidates,
           summary: null,
           raw: null,
         },

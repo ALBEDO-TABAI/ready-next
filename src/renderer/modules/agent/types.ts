@@ -239,6 +239,16 @@ export interface ScopeRunExecutionDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  budgetLease?: {
+    leaseId: string
+    decision: 'active' | 'renew' | 'pause' | 'handoff_background' | 'close'
+    reason: string | null
+    renewalsUsed: number
+    progressScore: number
+    wasteScore: number
+    lastFingerprint: string | null
+    currentLeaseEndIteration: number
+  } | null
   recoveryHistory?: Array<{
     kind: string
     source: string

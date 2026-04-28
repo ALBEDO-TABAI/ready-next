@@ -59,7 +59,14 @@ export function scoreSkillProgress(input: SkillProgressScorerInput): SkillProgre
   let score = 0
   const current = input.currentSnapshot || null
   const previous = input.previousSnapshot || null
-  const fingerprint = current?.progressFingerprint || null
+  const artifacts = artifactPaths(input.executedTools)
+  const typedMilestone = milestoneFromToolResult(input.executedTools)
+  const fallbackFingerprintParts = [
+    typedMilestone,
+    ...artifacts,
+  ].filter(Boolean)
+  const fingerprint = current?.progressFingerprint
+    || (fallbackFingerprintParts.length > 0 ? JSON.stringify(fallbackFingerprintParts) : null)
   const fingerprintChanged = Boolean(fingerprint && fingerprint !== (input.previousFingerprint || null))
   if (fingerprintChanged) {
     score += 2
@@ -100,13 +107,11 @@ export function scoreSkillProgress(input: SkillProgressScorerInput): SkillProgre
     reasons.push('updated_at_changed')
   }
 
-  const artifacts = artifactPaths(input.executedTools)
   if (artifacts.length > 0) {
     score += 2
     reasons.push('artifact_path_returned')
   }
 
-  const typedMilestone = milestoneFromToolResult(input.executedTools)
   if (typedMilestone) {
     score += 2
     reasons.push('typed_action_milestone')

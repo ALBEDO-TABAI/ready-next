@@ -3,7 +3,7 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { AgentRepository } from '../repositories/agent-repository'
 import { MemoryRepository, type MemorySourceType } from '../repositories/memory-repository'
-import type { ConversationScope } from './types'
+import type { ConversationScope, ScopeRunEventPayload } from './types'
 import {
   buildCompressionReport,
   compressHistoryForPrompt,
@@ -986,6 +986,12 @@ export class PromptAssemblyService {
     finalText: string
     usedTools: string[]
     success: boolean
+    lifecyclePhase?: ScopeRunEventPayload['phase']
+    interactionState?: ScopeRunEventPayload['interactionState']
+    waitingFor?: ScopeRunEventPayload['waitingFor']
+    blockedReason?: string | null
+    resumableActions?: ScopeRunEventPayload['resumableActions']
+    taskContinuation?: ScopeRunEventPayload['taskContinuation']
   }): void {
     const day = this.now().toISOString().slice(0, 10)
     const memoryDir = join(this.getMemoryRoot(), 'memory')
@@ -995,6 +1001,10 @@ export class PromptAssemblyService {
       `## ${this.now().toISOString()}`,
       `- scope: ${params.scope.title}`,
       `- success: ${params.success ? 'yes' : 'no'}`,
+      params.lifecyclePhase ? `- lifecycle: ${params.lifecyclePhase}` : null,
+      params.interactionState ? `- interaction: ${params.interactionState}` : null,
+      params.waitingFor && params.waitingFor !== 'none' ? `- waiting_for: ${params.waitingFor}` : null,
+      params.blockedReason ? `- blocked: ${clip(params.blockedReason, 240).replace(/\n+/g, ' ')}` : null,
       params.usedTools.length > 0 ? `- tools: ${params.usedTools.join(', ')}` : null,
       safeSummary
         ? `- summary: ${clip(safeSummary, 600).replace(/\n+/g, ' ')}`

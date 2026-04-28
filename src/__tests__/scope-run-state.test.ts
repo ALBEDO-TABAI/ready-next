@@ -482,7 +482,7 @@ describe('scope run state helpers', () => {
     )
   })
 
-  it('keeps clarification blockers when a final event arrives as done', () => {
+  it('keeps clarification blockers as checkpoint when a final event arrives as done', () => {
     const patch = deriveScopeRunStatePatch(
       {
         phase: 'done',
@@ -503,7 +503,7 @@ describe('scope run state helpers', () => {
       null,
     )
 
-    assert.strictEqual(patch.phase, 'done')
+    assert.strictEqual(patch.phase, 'checkpoint')
     assert.strictEqual(patch.waitingFor, 'clarification')
     assert.strictEqual(patch.blockedReason, '需要选择输出格式')
     assert.deepStrictEqual(patch.resumableActions, ['continue', 'cancel'])
@@ -565,6 +565,62 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.taskSummary, '准备开始浏览器上传流程')
     assert.strictEqual(patch.executionDiagnostics?.compression?.historyCompressed, true)
     assert.strictEqual(patch.executionDiagnostics?.budget?.maxToolCalls, 24)
+  })
+
+  it('parses budget lease diagnostics for task cards', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'checkpoint',
+        taskTitle: '技能执行',
+        taskSummary: '预算已暂停',
+        waitingFor: 'background',
+        blockedReason: '本轮预算已用完',
+        executionDiagnostics: {
+          budgetLease: {
+            leaseId: 'sbl-1234',
+            decision: 'pause',
+            reason: 'unchanged_observation_repeated',
+            renewalsUsed: 2,
+            progressScore: 0,
+            wasteScore: 4,
+            lastFingerprint: 'fp-1',
+            currentLeaseEndIteration: 60
+          }
+        },
+        timestamp: '2026-04-28T01:00:00.000Z'
+      },
+      null
+    )
+
+    assert.strictEqual(patch.executionDiagnostics?.budgetLease?.leaseId, 'sbl-1234')
+    assert.strictEqual(patch.executionDiagnostics?.budgetLease?.decision, 'pause')
+    assert.strictEqual(patch.executionDiagnostics?.budgetLease?.reason, 'unchanged_observation_repeated')
+    assert.strictEqual(patch.executionDiagnostics?.budgetLease?.currentLeaseEndIteration, 60)
+  })
+
+  it('normalizes done events with blockers back to checkpoint state', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'done',
+        taskTitle: '技能执行',
+        taskSummary: '后台仍在运行',
+        waitingFor: 'background',
+        blockedReason: '后台仍在运行',
+        resumableActions: ['continue', 'cancel'],
+        taskContinuation: {
+          taskId: 'task-skill',
+          blockerType: 'background_running',
+          detachedTaskId: 'dst-skill'
+        },
+        timestamp: '2026-04-28T01:00:00.000Z'
+      },
+      null
+    )
+
+    assert.strictEqual(patch.phase, 'checkpoint')
+    assert.strictEqual(patch.blockedReason, '后台仍在运行')
+    assert.strictEqual(patch.waitingFor, 'background')
+    assert.strictEqual(patch.taskContinuation?.detachedTaskId, 'dst-skill')
   })
 
   it('accepts typed memory refs and keeps session recall separate from resident memory', () => {

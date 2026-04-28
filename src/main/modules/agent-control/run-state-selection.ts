@@ -1,6 +1,6 @@
 import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 
 const DEFAULT_RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_SEARCH_DEPTH = 1
@@ -11,6 +11,7 @@ export interface RunStateCandidate {
   taskId: string | null
   status: string | null
   currentStage: string | null
+  activeOutputDir: string | null
 }
 export interface RunStateSelection {
   path: string | null
@@ -50,7 +51,44 @@ function readRunStateCandidate(path: string, fileName: string): RunStateCandidat
       || nonEmptyString(rec.currentStage)
       || nonEmptyString(rec.current_step)
       || nonEmptyString(rec.currentStep),
+    activeOutputDir: nonEmptyString(rec.active_output_dir) || nonEmptyString(rec.activeOutputDir),
   }
+}
+
+function resolveActiveOutputPath(candidate: RunStateCandidate, fileName: string): string | null {
+  const activeOutputDir = nonEmptyString(candidate.activeOutputDir)
+  if (!activeOutputDir) return null
+  const activePath = isAbsolute(activeOutputDir)
+    ? activeOutputDir
+    : join(dirname(candidate.path), activeOutputDir)
+  return activePath.endsWith(fileName) ? activePath : join(activePath, fileName)
+}
+
+function followsExpectedTask(candidate: RunStateCandidate, expectedTaskId: string | null): boolean {
+  return !expectedTaskId || !candidate.taskId || candidate.taskId === expectedTaskId
+}
+
+function resolveActiveCandidate(
+  candidate: RunStateCandidate,
+  fileName: string,
+  expectedTaskId: string | null,
+): RunStateCandidate {
+  const activeRunStatePath = resolveActiveOutputPath(candidate, fileName)
+  if (!activeRunStatePath || activeRunStatePath === candidate.path) return candidate
+  const activeCandidate = readRunStateCandidate(activeRunStatePath, fileName)
+  if (!activeCandidate || !followsExpectedTask(activeCandidate, expectedTaskId)) return candidate
+  return activeCandidate
+}
+
+function dedupeCandidatesByPath(candidates: RunStateCandidate[]): RunStateCandidate[] {
+  const deduped = new Map<string, RunStateCandidate>()
+  for (const candidate of candidates) {
+    const existing = deduped.get(candidate.path)
+    if (!existing || candidate.mtimeMs > existing.mtimeMs) {
+      deduped.set(candidate.path, candidate)
+    }
+  }
+  return Array.from(deduped.values()).sort((left, right) => right.mtimeMs - left.mtimeMs)
 }
 
 export function collectRunStateCandidates(params: {
@@ -110,22 +148,30 @@ export function selectRunStateCandidate(params: {
   const expectedTaskId = nonEmptyString(params.expectedTaskId)
   const explicitRunStatePath = nonEmptyString(params.explicitRunStatePath)
   if (explicitRunStatePath && existsSync(explicitRunStatePath) && statFile(explicitRunStatePath)?.isFile) {
-    if (params.trustExplicitRunStatePath || !expectedTaskId) {
-      return { path: explicitRunStatePath, ambiguous: false, candidates: [] }
-    }
     const explicitCandidate = readRunStateCandidate(explicitRunStatePath, fileName)
+    if (params.trustExplicitRunStatePath || !expectedTaskId) {
+      const resolved = explicitCandidate
+        ? resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId)
+        : null
+      return {
+        path: resolved?.path || explicitRunStatePath,
+        ambiguous: false,
+        candidates: resolved && explicitCandidate ? dedupeCandidatesByPath([explicitCandidate, resolved]) : [],
+      }
+    }
     if (explicitCandidate?.taskId === expectedTaskId) {
-      return { path: explicitRunStatePath, ambiguous: false, candidates: explicitCandidate ? [explicitCandidate] : [] }
+      const resolved = resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId)
+      return { path: resolved.path, ambiguous: false, candidates: dedupeCandidatesByPath([explicitCandidate, resolved]) }
     }
   }
 
   const rootDir = nonEmptyString(params.rootDir)
   if (!rootDir) return { path: null, ambiguous: false, candidates: [] }
-  const candidates = collectRunStateCandidates({
+  const candidates = dedupeCandidatesByPath(collectRunStateCandidates({
     rootDir,
     fileName,
     searchDepth: params.searchDepth,
-  })
+  }).map((candidate) => resolveActiveCandidate(candidate, fileName, expectedTaskId)))
   if (candidates.length === 0) return { path: null, ambiguous: false, candidates }
 
   if (expectedTaskId) {

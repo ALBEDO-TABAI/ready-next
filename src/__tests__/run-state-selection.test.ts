@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { selectRunStateCandidate } from '../main/modules/agent-control/run-state-selection'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = join(__dirname, '..', '..')
+const READY_COMPAT = join(
+  REPO_ROOT,
+  'assets',
+  'embedded-skills',
+  'video-expert-analyzer',
+  'scripts',
+  'ready_compat.py',
+)
 
 test('run_state selection does not treat a blank legacy task id as expected task match', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-run-state-selection-'))
@@ -20,6 +33,81 @@ test('run_state selection does not treat a blank legacy task id as expected task
     assert.equal(selected.path, null)
     assert.equal(selected.ambiguous, false)
     assert.equal(selected.candidates.length, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('run_state selection follows active_output_dir to the active child run_state', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-active-output-'))
+  try {
+    const activeDir = join(root, 'active-output')
+    mkdirSync(activeDir)
+    const activeRunState = join(activeDir, 'run_state.json')
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      task_id: 'dst-active',
+      status: 'running',
+      current_stage: 'prepare',
+      active_output_dir: activeDir,
+    }), 'utf8')
+    writeFileSync(activeRunState, JSON.stringify({
+      task_id: 'dst-active',
+      status: 'running',
+      current_stage: 'score_batches',
+    }), 'utf8')
+
+    const selected = selectRunStateCandidate({
+      rootDir: root,
+      expectedTaskId: 'dst-active',
+    })
+
+    assert.equal(selected.path, activeRunState)
+    assert.equal(selected.candidates.length, 1)
+    assert.equal(selected.candidates[0]?.currentStage, 'score_batches')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('JS and ready_compat agree on active_output_dir selection without delivery_report', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-python-parity-'))
+  try {
+    const activeDir = join(root, 'active-output')
+    mkdirSync(activeDir)
+    const activeRunState = join(activeDir, 'run_state.json')
+    writeFileSync(join(root, 'scene_scores.json'), '{}', 'utf8')
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      task_id: 'dst-parity',
+      status: 'running',
+      active_output_dir: activeDir,
+    }), 'utf8')
+    writeFileSync(join(activeDir, 'scene_scores.json'), '{}', 'utf8')
+    writeFileSync(activeRunState, JSON.stringify({
+      task_id: 'dst-parity',
+      status: 'running',
+      current_stage: 'score_batches',
+    }), 'utf8')
+
+    const selected = selectRunStateCandidate({
+      rootDir: root,
+      expectedTaskId: 'dst-parity',
+    })
+    const harness = join(root, 'parity.py')
+    writeFileSync(harness, [
+      'import importlib.util',
+      'from pathlib import Path',
+      `spec = importlib.util.spec_from_file_location("ready_compat", ${JSON.stringify(READY_COMPAT)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      `found = module._find_video_output_dir(Path(${JSON.stringify(root)}), 0, "dst-parity")`,
+      'print(found)',
+      '',
+    ].join('\n'), 'utf8')
+    const pythonSelectedDir = execFileSync('python3', [harness], { encoding: 'utf8' }).trim()
+
+    assert.equal(selected.path, activeRunState)
+    assert.equal(pythonSelectedDir, realpathSync(activeDir))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

@@ -217,6 +217,25 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
           attempts: Number((record.fallback as Record<string, unknown>).attempts || 0)
         }
       : null
+  const budgetLease =
+    record.budgetLease && typeof record.budgetLease === 'object'
+      ? {
+          leaseId: String((record.budgetLease as Record<string, unknown>).leaseId || '').trim(),
+          decision: String((record.budgetLease as Record<string, unknown>).decision || '').trim() as NonNullable<ScopeRunExecutionDiagnostics['budgetLease']>['decision'],
+          reason:
+            typeof (record.budgetLease as Record<string, unknown>).reason === 'string'
+              ? String((record.budgetLease as Record<string, unknown>).reason)
+              : null,
+          renewalsUsed: Number((record.budgetLease as Record<string, unknown>).renewalsUsed || 0),
+          progressScore: Number((record.budgetLease as Record<string, unknown>).progressScore || 0),
+          wasteScore: Number((record.budgetLease as Record<string, unknown>).wasteScore || 0),
+          lastFingerprint:
+            typeof (record.budgetLease as Record<string, unknown>).lastFingerprint === 'string'
+              ? String((record.budgetLease as Record<string, unknown>).lastFingerprint)
+              : null,
+          currentLeaseEndIteration: Number((record.budgetLease as Record<string, unknown>).currentLeaseEndIteration || 0),
+        }
+      : null
   const pipeline =
     record.pipeline && typeof record.pipeline === 'object'
       ? {
@@ -244,8 +263,8 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
         }
       : null
 
-  if (!compression && !budget && !fallback && !pipeline) return null
-  return { compression, budget, fallback, pipeline }
+  if (!compression && !budget && !fallback && !pipeline && !budgetLease) return null
+  return { compression, budget, fallback, pipeline, budgetLease }
 }
 
 export function mergeArtifacts(
@@ -720,8 +739,14 @@ export function deriveScopeRunStatePatch(
     patch.phase = 'resuming'
     patch.blockedReason = null
     patch.checkpointExpiresAt = null
-  } else if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
-    const hasDoneBlocker = event.phase === 'done' && Boolean(
+  }
+
+  if (patch.phase === 'done' && Boolean((patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason)) {
+    patch.phase = 'checkpoint'
+  }
+
+  if (patch.phase === 'done' || patch.phase === 'error' || patch.phase === 'cancelled') {
+    const hasDoneBlocker = patch.phase === 'done' && Boolean(
       (patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason
     )
     if (!hasDoneBlocker) patch.blockedReason = null

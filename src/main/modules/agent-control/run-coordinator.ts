@@ -25,7 +25,18 @@ export class RunCoordinator {
     promptAssembly: {
       buildForScopedRun: (params: { scope: ConversationScope; message: RunMessage }) => Promise<PreparedRunPayload>
       applyToMessage: (message: RunMessage, prepared: PreparedRunPayload) => RunMessage
-      recordRunOutcome: (payload: { scope: ConversationScope; finalText: string; usedTools: string[]; success: boolean }) => void
+      recordRunOutcome: (payload: {
+        scope: ConversationScope
+        finalText: string
+        usedTools: string[]
+        success: boolean
+        lifecyclePhase?: ScopeRunEventPayload['phase']
+        interactionState?: ScopeRunEventPayload['interactionState']
+        waitingFor?: ScopeRunEventPayload['waitingFor']
+        blockedReason?: string | null
+        resumableActions?: ScopeRunEventPayload['resumableActions']
+        taskContinuation?: ScopeRunEventPayload['taskContinuation']
+      }) => void
     }
     executeAndCollect: (request: ExecutionHostRequest) => Promise<ExecutionHostResult>
     emitScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void
@@ -200,6 +211,12 @@ export class RunCoordinator {
       finalText: result.finalText,
       usedTools: result.usedTools,
       success: result.success && finalPhase === 'done',
+      lifecyclePhase: finalPhase,
+      interactionState: finalInteractionState,
+      waitingFor: finalWaitingFor,
+      blockedReason: finalBlockedReason,
+      resumableActions: finalResumableActions,
+      taskContinuation: finalTaskContinuation,
     })
 
     this.deps.emitScopeRunEvent({
@@ -257,12 +274,12 @@ export class RunCoordinator {
           agent: request.scope.agent,
           runId: request.requestId,
           taskId,
-          phase: finalPhase === 'checkpoint' ? 'checkpoint' : 'done',
-          interactionState: finalPhase === 'checkpoint' ? finalInteractionState : undefined,
-          waitingFor: finalPhase === 'checkpoint' ? finalWaitingFor : undefined,
-          resumableActions: finalPhase === 'checkpoint' ? finalResumableActions : undefined,
-          blockedReason: finalPhase === 'checkpoint' ? finalBlockedReason : undefined,
-          taskContinuation: finalPhase === 'checkpoint' ? finalTaskContinuation : undefined,
+          phase: finalPhase,
+          interactionState: finalPhase === 'done' ? undefined : finalInteractionState,
+          waitingFor: finalPhase === 'done' ? undefined : finalWaitingFor,
+          resumableActions: finalPhase === 'done' ? undefined : finalResumableActions,
+          blockedReason: finalPhase === 'done' ? undefined : finalBlockedReason,
+          taskContinuation: finalPhase === 'done' ? undefined : finalTaskContinuation,
           memoryCapture,
           timestamp: new Date().toISOString(),
         })

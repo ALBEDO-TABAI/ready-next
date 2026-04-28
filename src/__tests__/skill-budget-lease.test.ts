@@ -67,6 +67,29 @@ test('progress scorer rewards real stage, scene, coverage, artifact, and fingerp
   assert.ok(score.reasons.includes('completed_scenes_increased'))
   assert.ok(score.reasons.includes('artifact_path_returned'))
 })
+
+test('progress scorer builds a stable fingerprint from typed milestone outputs', () => {
+  const score = scoreSkillProgress({
+    previousFingerprint: null,
+    currentSnapshot: snapshot({ progressFingerprint: null }),
+    executedTools: [{
+      name: 'skill_video_expert_pipeline',
+      result: createToolExecutionOutput('', {
+        data: {
+          status: 'running',
+          currentStage: 'score_batches',
+          outputDir: '/tmp/vea/out',
+          runStatePath: '/tmp/vea/out/run_state.json',
+        },
+      }),
+    }],
+  })
+
+  assert.equal(score.fingerprintChanged, true)
+  assert.equal(score.milestoneChanged, true)
+  assert.match(score.fingerprint || '', /skill_video_expert_pipeline:score_batches/)
+  assert.match(score.fingerprint || '', /\/tmp\/vea\/out\/run_state\.json/)
+})
 test('waste scorer flags repeated tools, unchanged observations, and recoverable errors', () => {
   const waste = scoreSkillWaste({
     recentToolCalls: [

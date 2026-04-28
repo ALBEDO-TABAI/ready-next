@@ -759,9 +759,20 @@ export class TurnEngine {
           )
         }
       }
+      const inspectLatestSkillTaskForHost = (params: {
+        sessionId?: string | null
+        scopeId?: string | null
+        skillId?: string | null
+      }): SkillTaskSupervisorSnapshot => {
+        if (host.skillTaskSupervisor?.inspectLatestSkillTask) {
+          return host.skillTaskSupervisor.inspectLatestSkillTask(params)
+        }
+        return inspectLatestSkillTask(params)
+      }
+
       if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
         const continuitySkillRun = getLatestSkillRun(request.sessionId)
-        const supervisorSnapshot = (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
+        const supervisorSnapshot = inspectLatestSkillTaskForHost({
           sessionId: request.sessionId,
           scopeId: request.sessionId,
         })
@@ -1484,10 +1495,10 @@ export class TurnEngine {
         shouldUseLongSkillResumeBudget
         || hasLongTypedSkillAction(preferredSkillToolNames)
         || Boolean(skillBudgetLeaseState)
-      const sampleSkillLeaseSnapshot = (): SkillTaskSupervisorSnapshot | null => {
-        if (!shouldUseSkillBudgetLease && !skillBudgetLeaseState) return null
+      const sampleSkillLeaseSnapshot = (force = false): SkillTaskSupervisorSnapshot | null => {
+        if (!force && !shouldUseSkillBudgetLease && !skillBudgetLeaseState) return null
         try {
-          return (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
+          return inspectLatestSkillTaskForHost({
             sessionId: request.sessionId,
             scopeId: request.sessionId,
             skillId: referenceSkillForMetrics?.id || null,
@@ -2284,16 +2295,12 @@ export class TurnEngine {
             : limitResult.domainState
           appendSessionMessages(session, limitResult.sessionMessages)
         }
-        const skillTaskSnapshot = (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
-          sessionId: request.sessionId,
-          scopeId: request.sessionId,
-          skillId: referenceSkillForMetrics?.id || null,
-        })
+        const skillTaskSnapshot = sampleSkillLeaseSnapshot(true)
         const skillTaskLifecycle = buildSkillTaskLifecycleSignal({
           snapshot: skillTaskSnapshot,
           reason: leaseLifecycleReason || 'budget_exhausted',
         })
-        if (skillTaskLifecycle) {
+        if (skillTaskLifecycle && skillTaskSnapshot) {
           state.interactionState = skillTaskLifecycle.interactionState
           state.syncBudgetWarning()
           const lifecycleSummary =
@@ -2357,6 +2364,30 @@ export class TurnEngine {
             success: true,
             status: skillTaskLifecycle.phase === 'done' ? 'done' : 'checkpoint',
             skillTaskLifecycle,
+          })
+        }
+        if (
+          shouldUseSkillBudgetLease
+          || shouldUseLongSkillResumeBudget
+          || Boolean(referenceSkillForMetrics)
+          || (preferredSkillToolNames?.length || 0) > 0
+        ) {
+          state.interactionState = 'suspended'
+          state.syncBudgetWarning()
+          emitStructuredTaskPayload({
+            module: 'skill',
+            phase: 'checkpoint',
+            taskTitle: referenceSkillForMetrics?.name
+              ? `技能执行 · ${referenceSkillForMetrics.name}`
+              : '技能任务',
+            taskSummary: '本轮预算已用完，技能任务状态需要重新检查',
+            waitingFor: 'background',
+            resumableActions: ['retry', 'cancel'],
+            blockedReason: '本轮预算已用完，技能任务状态检查失败或暂时不可用',
+          })
+          return finish({
+            success: true,
+            status: 'checkpoint',
           })
         }
         transcript.emitOutput(

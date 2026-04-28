@@ -363,6 +363,134 @@ test('SkillTaskSupervisor preserves resume payload for blocked run_state', () =>
   }
 })
 
+test('SkillTaskSupervisor prefers active run with durable progress evidence over first SQLite row', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-durable',
+      status: 'running',
+      current_stage: 'score_batches',
+      completed_scenes: 12,
+      updated_at: '2026-04-28T01:59:00.000Z',
+    })
+    const shallowRun = makeRun({
+      id: 'str-shallow',
+      status: 'running',
+      detachedTaskId: null,
+      outputDir: null,
+      runStatePath: null,
+      updatedAt: '2026-04-28T01:59:30.000Z',
+    })
+    const durableRun = makeRun({
+      id: 'str-durable',
+      status: 'running',
+      detachedTaskId: 'dst-durable',
+      outputDir: root,
+      runStatePath,
+      updatedAt: '2026-04-28T01:58:00.000Z',
+    })
+
+    const snapshot = makeSupervisor({
+      listActiveTaskRuns: () => [shallowRun, durableRun],
+    }).inspectLatestSkillTask({ sessionId: 'scope-supervisor' })
+
+    assert.equal(snapshot.taskRunId, 'str-durable')
+    assert.equal(snapshot.detachedTaskId, 'dst-durable')
+    assert.equal(snapshot.runStatePath, runStatePath)
+    assert.equal(snapshot.progress.currentStage, 'score_batches')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SkillTaskSupervisor marks SQLite done vs detached failed as ambiguous', () => {
+  const doneRun = makeRun({
+    id: 'str-done-conflict',
+    status: 'done',
+    detachedTaskId: 'dst-conflict',
+    finishedAt: '2026-04-28T01:45:00.000Z',
+  })
+  const failedDetached = makeDetached({
+    id: 'dst-conflict',
+    status: 'failed',
+    error: 'provider rejected request',
+    finishedAt: '2026-04-28T01:46:00.000Z',
+  })
+
+  const snapshot = makeSupervisor({}).inspectSkillTask({
+    taskRun: doneRun,
+    detachedTask: failedDetached,
+    taskRunId: doneRun.id,
+    detachedTaskId: failedDetached.id,
+  })
+
+  assert.equal(snapshot.ambiguous, true)
+  assert.equal(snapshot.closeAllowed, false)
+  assert.ok(snapshot.sourceObservations.some((item) => item.status === 'ambiguous_terminal_conflict'))
+})
+
+test('SkillTaskSupervisor marks SQLite done vs run_state failed as ambiguous', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-runstate-failed',
+      status: 'failed',
+      last_error: 'render failed',
+    })
+    const doneRun = makeRun({
+      id: 'str-done-runstate-failed',
+      status: 'done',
+      detachedTaskId: 'dst-runstate-failed',
+      outputDir: root,
+      runStatePath,
+      finishedAt: '2026-04-28T01:45:00.000Z',
+    })
+
+    const snapshot = makeSupervisor({}).inspectSkillTask({
+      taskRun: doneRun,
+      taskRunId: doneRun.id,
+      expectedTaskId: 'dst-runstate-failed',
+    })
+
+    assert.equal(snapshot.ambiguous, true)
+    assert.equal(snapshot.closeAllowed, false)
+    assert.deepEqual(snapshot.blockers, ['render failed'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SkillTaskSupervisor marks detached done vs run_state blocked as ambiguous', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-blocked-conflict',
+      status: 'blocked',
+      last_error: 'waiting for handoff',
+    })
+    const doneDetached = makeDetached({
+      id: 'dst-blocked-conflict',
+      status: 'done',
+      outputDir: root,
+      runStatePath,
+      finishedAt: '2026-04-28T01:45:00.000Z',
+    })
+
+    const snapshot = makeSupervisor({}).inspectSkillTask({
+      detachedTask: doneDetached,
+      detachedTaskId: doneDetached.id,
+      expectedTaskId: 'dst-blocked-conflict',
+    })
+
+    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.ambiguous, true)
+    assert.equal(snapshot.closeAllowed, false)
+    assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('SkillTaskSupervisor keeps failed detached output paths', () => {
   const failed = makeDetached({
     id: 'dst-failed',
