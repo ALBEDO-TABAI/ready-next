@@ -26,7 +26,7 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
   }),
   skill_run_shell: z.object({
     command: TRIMMED_STRING.describe(
-      '要在技能沙箱内执行的 shell 命令。cwd 为技能 managedPath，env 含 CLAUDE_SKILL_DIR 和 CLAUDE_SKILL_OUTPUT_DIR。支持 cd、$VAR、&&、管道、重定向、bash/sh 包裹的 POSIX 单引号写法，以及 python/node/grep/find/awk/sed/yt-dlp/scenedetect 这类脚本探针里的单引号片段；受白名单限制，只允许 python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / which / mkdir / pwd / echo / awk / sed / yt-dlp / ffmpeg / ffprobe / scenedetect，禁止 rm / cp / mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。',
+      '要在技能沙箱内执行的 shell 命令。cwd 为技能 managedPath，env 含 CLAUDE_SKILL_DIR 和 CLAUDE_SKILL_OUTPUT_DIR。支持 cd、$VAR、&&、管道、重定向、bash/sh 包裹的 POSIX 单引号写法，以及 python/node/grep/find/awk/sed 这类脚本探针里的单引号片段；受白名单限制，只允许 python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / which / mkdir / pwd / echo / awk / sed，禁止 rm / cp / mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。',
     ),
     timeoutMs: z
       .number()
@@ -60,6 +60,47 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .max(1_048_576)
       .optional()
       .describe('最多读取字节数，默认 32768（32K），最大 1048576（1M）'),
+  }),
+  skill_start_detached: z.object({
+    action: TRIMMED_STRING.describe('要后台启动的当前 skill typed action 名称。'),
+    params: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe('传给 typed action 的参数。'),
+  }),
+  skill_inspect_detached: z.object({
+    taskId: TRIMMED_STRING.describe('skill_start_detached 返回的后台任务 id。'),
+  }),
+  skill_cancel_detached: z.object({
+    taskId: TRIMMED_STRING.describe('skill_start_detached 返回的后台任务 id。'),
+  }),
+  // Phase 5.1 — generic run_state inspector. The audit found that long
+  // multi-step skills (VEA pipeline et al.) write a `run_state.json` in
+  // their output dir to track which step is in flight, what file they're
+  // waiting on, and the last error. Without a primitive, the model could
+  // only read the file via skill_read_artifact and parse JSON blindly,
+  // which routinely went wrong. This primitive parses the canonical
+  // shape, extracts well-known keys, and returns a bounded raw slice.
+  skill_inspect_run_state: z.object({
+    outputDir: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe('要检查 run_state.json 所在目录。绝对或相对都可；与 taskId 二选一。'),
+    taskId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe('detached task id；从该任务的 outputDir 解析 run_state.json，与 outputDir 二选一。'),
+    maxRawBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(65_536)
+      .optional()
+      .describe('原始 JSON 截断上限，默认 16384 (16K)，避免污染 LLM 上下文。'),
   }),
 } as const
 

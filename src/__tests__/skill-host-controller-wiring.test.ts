@@ -64,8 +64,8 @@ function makeStubController(options: StubControllerOptions = {}): {
     calls.push({ method, args, at: Date.now() })
   }
   const controller: SkillHostController = {
-    async prepareSpawnContext(skillId, _skillName, _assetRoot, _requirements, jobId): Promise<SpawnContextHandle> {
-      record('prepareSpawnContext', [skillId, jobId])
+    async prepareSpawnContext(skillId, _skillName, _assetRoot, _requirements, jobId, outputDir): Promise<SpawnContextHandle> {
+      record('prepareSpawnContext', [skillId, jobId, outputDir])
       if (options.prepareSpawnContextDelay) {
         await new Promise((res) => setTimeout(res, options.prepareSpawnContextDelay))
       }
@@ -233,6 +233,33 @@ test('runSkill SKIPS prepare/restore when manifest does NOT declare host_require
     assert.equal(methods.includes('restoreSpawnContext'), false, 'restoreSpawnContext should NOT be called without host_requirements')
     // detectStatus is still called (used to backfill SkillRunResult.status).
     assert.equal(methods.includes('detectStatus'), true)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('runSkill passes a stable outputDir into host spawn context when host_requirements is declared', async () => {
+  const fx = makeCustomSkillFixture({ withHostRequirements: true })
+  try {
+    const { controller, calls } = makeStubController()
+    const manager = new SkillsRuntimeManager({
+      runtimeRoot: fx.runtimeRoot,
+      embeddedSkillsRoot: fx.embeddedSkillsRoot,
+      startBackgroundTasks: false,
+      hostController: controller,
+    })
+
+    const result = await manager.runSkill({
+      skillId: fx.skillId,
+      action: 'read_skill',
+      params: {},
+    })
+
+    assert.equal(result.success, true)
+    const prepare = calls.find((call) => call.method === 'prepareSpawnContext')
+    assert.ok(prepare, 'prepareSpawnContext should be called')
+    assert.equal(typeof prepare.args[2], 'string')
+    assert.match(String(prepare.args[2]), new RegExp(`/outputs/${fx.skillId}/[0-9a-f-]{36}$`))
   } finally {
     fx.cleanup()
   }

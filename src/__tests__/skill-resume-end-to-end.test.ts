@@ -1,5 +1,8 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   rememberLastReferenceSkill,
@@ -7,13 +10,31 @@ import {
   restoreLastReferenceSkill,
   getLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
+  _peekLastReferenceSkillForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
 import {
   collectRecentAssistantSkillToolUses,
   buildSkillDetectionInputs,
   isRetryOnlyTurn,
 } from '../main/modules/agent-control/skill-detection-inputs'
+import { recoverLatestSkillRunFromTaskProjections } from '../main/modules/agent-control/skill-run-recovery'
+import {
+  __reloadSessionContinuityFromDiskForTests,
+  __resetSessionContinuityForTests,
+  __setSessionContinuityStoragePathForTests,
+  getLatestSkillRun,
+  rememberSkillRun,
+} from '../main/modules/agent-control/session-continuity'
+import {
+  clearSkillTaskProjection,
+  recordSkillTaskEvent,
+  readSkillTaskProjection,
+} from '../main/modules/agent-control/skill-task-tracker'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
+
+const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
+const DIRECT_CHAT_PATH = new URL('../main/modules/claude-bridge/direct-chat.ts', import.meta.url)
 
 // skill-resume F1 — narrative integration test that walks the full chain a
 // resume bug walked in production:
@@ -51,10 +72,13 @@ describe('skill-resume end-to-end (F1)', () => {
     // (resume) replay from "DB"
     const restored = restoreLastReferenceSkill(sessionId, persisted)
     assert.equal(restored, true)
+    const peek = _peekLastReferenceSkillForTests(sessionId)
+    assert.ok(peek)
+    assert.equal(peek!.at, persisted!.at, 'restore preserved original `at` before active reads bump TTL')
     const post = getLastReferenceSkill(sessionId)
     assert.ok(post)
     assert.equal(post!.id, 'video-expert-analyzer')
-    assert.equal(post!.at, persisted!.at, 'preserved original `at` so TTL math survives restart')
+    assert.ok(post!.at >= persisted!.at, 'active read keeps the restored hint fresh')
   })
 
   it('lookback link: bare "继续" probes prior assistant tool_use for skill_*', () => {
@@ -86,6 +110,209 @@ describe('skill-resume end-to-end (F1)', () => {
       inputs.includes('skill_video_expert_pipeline'),
       'lookback fed the prior skill name into detection batch',
     )
+  })
+
+  it('lookback link: config repair turns probe prior assistant tool_use for skill_*', () => {
+    const userInput = '模型换成 mimo-v2.5 再试一次'
+    assert.equal(isRetryOnlyTurn(userInput), false, 'not a bare retry-only turn')
+
+    const previousAssistantSkillToolUses = ['skill_video_expert_pipeline']
+    const inputs = buildSkillDetectionInputs({
+      contextualUserInput: userInput,
+      primaryInstruction: userInput,
+      pureUserText: userInput,
+      previousPureUserInputs: ['帮我分析视频'],
+      previousAssistantSkillToolUses,
+    })
+
+    assert.ok(
+      inputs.includes('skill_video_expert_pipeline'),
+      'config repair turn fed the prior skill name into detection batch',
+    )
+  })
+
+  it('history link: retry can recover a persisted latest skill run when hint and messages are gone', () => {
+    const storagePath = join(tmpdir(), `ready-session-continuity-${Date.now()}-${Math.random()}.json`)
+    __setSessionContinuityStoragePathForTests(storagePath)
+    __resetSessionContinuityForTests()
+    try {
+      rememberSkillRun('conv-vea', {
+        toolName: 'skill_video_expert_pipeline',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        success: false,
+        summary: 'Skill install failed for video-expert-analyzer',
+      })
+      __reloadSessionContinuityFromDiskForTests()
+      const latest = getLatestSkillRun('conv-vea')
+      assert.equal(latest?.skillId, 'video-expert-analyzer')
+      assert.equal(latest?.success, false)
+
+      const turnEngineSource = readFileSync(TURN_ENGINE_PATH, 'utf8')
+      assert.match(turnEngineSource, /getLatestSkillRun\(request\.sessionId\)/)
+      assert.match(turnEngineSource, /resolveRecentSkillTaskRun/)
+      assert.match(turnEngineSource, /reference_skill_rearmed_from_skill_history/)
+
+      const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
+      assert.match(directChatSource, /resolveRecentSkillTaskRun/)
+      assert.match(directChatSource, /resolveRecentSkillRunFromTaskRuns/)
+      assert.match(directChatSource, /getLatestRecoverableSkillTaskRun/)
+    } finally {
+      __resetSessionContinuityForTests()
+      __setSessionContinuityStoragePathForTests(null)
+      rmSync(storagePath, { force: true })
+    }
+  })
+
+  it('task projection link: retry can recover the last skill when the continuity file is empty', () => {
+    const projections: TaskProjectionRecord[] = [
+      {
+        taskId: 'task-system',
+        scopeId: 'conv-vea',
+        runId: 'run-system',
+        taskType: 'short_task',
+        module: 'system',
+        taskTitle: '正在理解需求',
+        taskSummary: '正在整理任务边界、上下文与可用能力',
+        status: 'done',
+        interactionState: 'running',
+        steps: [],
+        currentStepId: null,
+        budget: null,
+        budgetUsagePercent: 0,
+        budgetWarningLevel: 'none',
+        recoveryHistory: [],
+        degradationReason: null,
+        blockedReason: null,
+        resumableActions: [],
+        continuationRef: null,
+        recentArtifacts: [],
+        createdAt: '2026-04-27T06:57:11.000Z',
+        updatedAt: '2026-04-27T06:57:14.000Z',
+      },
+      {
+        taskId: 'task-skill',
+        scopeId: 'conv-vea',
+        runId: 'run-skill',
+        taskType: 'short_task',
+        module: 'skill',
+        taskTitle: '技能执行 · Video Expert Analyzer (VNext)',
+        taskSummary: '执行技能脚本',
+        status: 'done',
+        interactionState: 'running',
+        steps: [],
+        currentStepId: null,
+        budget: null,
+        budgetUsagePercent: 0,
+        budgetWarningLevel: 'none',
+        recoveryHistory: [],
+        degradationReason: null,
+        blockedReason: null,
+        resumableActions: [],
+        continuationRef: null,
+        recentArtifacts: [],
+        createdAt: '2026-04-26T16:11:08.000Z',
+        updatedAt: '2026-04-26T16:13:01.000Z',
+      },
+    ]
+
+    const recovered = recoverLatestSkillRunFromTaskProjections({
+      projections,
+      skills: [
+        {
+          id: 'video-expert-analyzer',
+          name: 'Video Expert Analyzer',
+          description: '视频分析',
+          version: '1',
+          installed: true,
+          installStatePath: '',
+          source: 'embedded',
+          manifestValid: true,
+          defaultAction: 'read_skill',
+          executionMode: 'advisory',
+          actions: [
+            { name: 'read_skill', description: 'read docs', runtime: 'reference', entry: 'SKILL.md', visibility: 'internal', params: [] },
+            { name: 'video_expert_pipeline', description: 'run pipeline', runtime: 'python', entry: 'scripts/ready_compat.py', visibility: 'internal', params: [] },
+          ],
+        },
+      ],
+      resolveSkillToolByAction: (skillId, actionName) => ({
+        name: `${skillId}:${actionName}`,
+      }),
+    })
+
+    assert.equal(recovered?.skillId, 'video-expert-analyzer')
+    assert.equal(recovered?.action, 'read_skill')
+    assert.match(recovered?.summary || '', /Video Expert Analyzer/)
+  })
+
+  it('task projection link: failed/blocked skill projections beat newer done projections', () => {
+    const baseProjection = {
+      scopeId: 'conv-vea',
+      runId: 'run',
+      taskType: 'short_task' as const,
+      module: 'skill',
+      interactionState: 'running' as const,
+      steps: [],
+      currentStepId: null,
+      budget: null,
+      budgetUsagePercent: 0,
+      budgetWarningLevel: 'none' as const,
+      recoveryHistory: [],
+      degradationReason: null,
+      resumableActions: [],
+      continuationRef: null,
+      recentArtifacts: [],
+      createdAt: '2026-04-27T06:57:11.000Z',
+    }
+    const projections: TaskProjectionRecord[] = [
+      {
+        ...baseProjection,
+        taskId: 'task-done',
+        taskTitle: '技能执行 · Done Skill',
+        taskSummary: 'done summary',
+        status: 'done',
+        blockedReason: null,
+        updatedAt: '2026-04-27T08:00:00.000Z',
+      },
+      {
+        ...baseProjection,
+        taskId: 'task-failed',
+        taskTitle: '技能执行 · Video Expert Analyzer',
+        taskSummary: '上次目标：分析视频并输出分镜',
+        status: 'failed',
+        blockedReason: 'API key invalid',
+        recentArtifacts: [{ path: '/tmp/vea-output', label: 'output dir', kind: 'directory' }],
+        updatedAt: '2026-04-27T07:00:00.000Z',
+      },
+    ]
+
+    const recovered = recoverLatestSkillRunFromTaskProjections({
+      projections,
+      skills: [
+        {
+          id: 'video-expert-analyzer',
+          name: 'Video Expert Analyzer',
+          description: '视频分析',
+          version: '1',
+          installed: true,
+          installStatePath: '',
+          source: 'embedded',
+          manifestValid: true,
+          defaultAction: 'read_skill',
+          executionMode: 'advisory',
+          actions: [
+            { name: 'read_skill', description: 'read docs', runtime: 'reference', entry: 'SKILL.md', visibility: 'internal', params: [] },
+            { name: 'video_expert_pipeline', description: 'run pipeline', runtime: 'python', entry: 'scripts/ready_compat.py', visibility: 'internal', params: [] },
+          ],
+        },
+      ],
+    })
+
+    assert.equal(recovered?.skillId, 'video-expert-analyzer')
+    assert.equal(recovered?.success, false)
+    assert.match(recovered?.summary || '', /API key invalid/)
+    assert.match(recovered?.summary || '', /\/tmp\/vea-output/)
   })
 
   it('exposure link: when hint armed, expose_when_hint_armed action becomes visible', () => {
@@ -177,5 +404,34 @@ describe('skill-resume end-to-end (F1)', () => {
       'lookback correctly attributes to the actual prior skill, not a hardcoded one')
     assert.ok(!inputs.includes('skill_video_expert_pipeline'),
       'no leakage from other tests/sessions')
+  })
+
+  it('regression: memory capture event does not overwrite the latest skill summary', () => {
+    clearSkillTaskProjection('conv-memory-capture')
+
+    const firstStep = recordSkillTaskEvent({
+      sessionId: 'conv-memory-capture',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      toolName: 'skill_video_expert_pipeline',
+      status: 'running',
+      message: 'VEA 正在评分第 3 批镜头',
+    })
+    recordSkillTaskEvent({
+      sessionId: 'conv-memory-capture',
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      toolName: 'memory_capture',
+      status: 'done',
+      message: '已保存阶段性记忆',
+    })
+
+    const projection = readSkillTaskProjection({
+      sessionId: 'conv-memory-capture',
+      skillId: 'video-expert-analyzer',
+    })
+
+    assert.equal(projection?.taskSummary, 'VEA 正在评分第 3 批镜头')
+    assert.equal(projection?.currentStepId, firstStep.stepId)
   })
 })

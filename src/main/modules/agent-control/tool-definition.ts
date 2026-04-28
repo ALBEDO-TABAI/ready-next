@@ -53,5 +53,7 @@ export interface ToolDefinition {
   projectionHint: ToolProjectionHint | null
   description: string
   schema: ToolDefinitionSchema | null
+  executionTimeoutMs?: number
+  requiresExplicitAllowlist?: boolean
   resultShape: ToolResultShape
 }

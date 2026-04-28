@@ -237,10 +237,12 @@ interface ScopeRunTaskStepData {
 
 interface ScopeRunTaskContinuationData {
   taskId?: string | null
-  executionId: string
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
+  todoId?: string | null
+  todoTitle?: string | null
 }
 
 interface ContinuationIntentData {
@@ -249,6 +251,8 @@ interface ContinuationIntentData {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  todoId?: string
+  todoTitle?: string
 }
 
 interface ScopeRunMemoryCaptureItemData {
@@ -483,6 +487,32 @@ interface SessionRecallCapsuleData {
   updatedAt: string
 }
 
+interface ReferenceSkillHintData {
+  id: string
+  name: string
+  at: number
+  expiresAt: number
+}
+
+interface DetachedSkillTaskData {
+  id: string
+  scopeId?: string | null
+  sessionId?: string | null
+  agent?: string | null
+  skillId: string
+  action: string
+  params: Record<string, unknown>
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+  outputDir?: string | null
+  runStatePath?: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+  error?: string | null
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string | null
+}
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -613,6 +643,28 @@ interface ElectronAgentAPI {
   listAttachedSessionRecallContexts: (
     scopeId: string
   ) => Promise<IPCResponse<SessionRecallCapsuleData[]>>
+  getReferenceSkillHint: (
+    scopeId: string
+  ) => Promise<IPCResponse<ReferenceSkillHintData | null>>
+  startDetachedSkillAction: (payload: {
+    scopeId?: string
+    sessionId?: string
+    agent?: string
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }) => Promise<IPCResponse<DetachedSkillTaskData>>
+  inspectDetachedSkillTask: (
+    taskId: string,
+    scopeId: string
+  ) => Promise<IPCResponse<DetachedSkillTaskData>>
+  listDetachedSkillTasks: (
+    payload?: { scopeId?: string }
+  ) => Promise<IPCResponse<DetachedSkillTaskData[]>>
+  cancelDetachedSkillTask: (
+    taskId: string,
+    scopeId: string
+  ) => Promise<IPCResponse<DetachedSkillTaskData>>
   attachSessionRecallContext: (
     currentScopeId: string,
     conversationId: string
@@ -769,6 +821,9 @@ interface ElectronAgentAPI {
   }) => Promise<IPCResponse<{ acknowledged: boolean }>>
   onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
   onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
+  // Phase 5.3 — push-based reference-skill hint state changes. Renderer uses
+  // this to refresh the "上下文已启用" badge immediately on arm/clear/sweep.
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => () => void
 }
 
 // =============================================================================
@@ -2250,5 +2305,7 @@ export type {
   MemoryLifecycleStatus,
   MemoryMaintenanceResult,
   TaskProjectionRecordData,
-  RecoveryRecordData
+  RecoveryRecordData,
+  ReferenceSkillHintData,
+  DetachedSkillTaskData
 }

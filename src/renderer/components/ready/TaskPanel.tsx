@@ -334,6 +334,10 @@ export default function TaskPanel() {
       : Math.max(0, Math.min(100, Math.round(activeProjection?.budgetUsagePercent)))
   const safeProjectionBudgetPercent = projectionBudgetPercent ?? 0
   const projectionStepBudget = activeProjection?.budget?.stepBudget || null
+  const isAwaitingSupplement =
+    activeProjection?.interactionState === 'awaiting_clarification'
+    || activeRun?.waitingFor === 'input'
+    || activeRun?.waitingFor === 'clarification'
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -352,6 +356,8 @@ export default function TaskPanel() {
           executionId: activeProjection.continuationRef?.executionId || undefined,
           stepId: activeProjection.continuationRef?.stepId || undefined,
           blockedReason: activeProjection.blockedReason || undefined,
+          todoId: activeProjection.continuationRef?.todoId || undefined,
+          todoTitle: activeProjection.continuationRef?.todoTitle || undefined,
         }
         : undefined,
     })
@@ -388,6 +394,8 @@ export default function TaskPanel() {
           stepId: activeProjection.continuationRef?.stepId || undefined,
           blockedReason: activeProjection.blockedReason || undefined,
           responseText: trimmed,
+          todoId: activeProjection.continuationRef?.todoId || undefined,
+          todoTitle: activeProjection.continuationRef?.todoTitle || undefined,
         }
         : undefined,
     })
@@ -403,6 +411,8 @@ export default function TaskPanel() {
           executionId: activeProjection.continuationRef?.executionId || undefined,
           stepId: activeProjection.continuationRef?.stepId || undefined,
           blockedReason: activeProjection.blockedReason || undefined,
+          todoId: activeProjection.continuationRef?.todoId || undefined,
+          todoTitle: activeProjection.continuationRef?.todoTitle || undefined,
         }
         : null,
     )
@@ -650,7 +660,7 @@ export default function TaskPanel() {
                     暂停任务
                   </button>
                 )}
-                {(activeProjection?.interactionState === 'awaiting_clarification'
+                {(isAwaitingSupplement
                   || activeProjection?.interactionState === 'awaiting_confirmation'
                   || activeProjection?.interactionState === 'human_takeover') && (
                   <button

@@ -81,6 +81,7 @@ function normalizeWaitingFor(value: unknown): RunProjectionPatch['waitingFor'] {
   return value === 'input'
     || value === 'confirmation'
     || value === 'agent_result'
+    || value === 'clarification'
     || value === 'background'
     || value === 'none'
     ? value

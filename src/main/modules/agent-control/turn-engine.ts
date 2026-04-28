@@ -28,7 +28,77 @@ export function computeBudgetWarningThreshold(maxIterations: number): number {
   return Math.max(1, Math.floor(Math.max(0, maxIterations) * 0.7))
 }
 
+export function shouldInjectBudgetWarning(params: {
+  warned: boolean
+  iteration: number
+  warningThreshold: number
+  lastLongTypedSkillActionIteration?: number | null
+}): boolean {
+  if (params.warned) return false
+  if (params.iteration < params.warningThreshold) return false
+  if (
+    typeof params.lastLongTypedSkillActionIteration === 'number'
+    && params.iteration - params.lastLongTypedSkillActionIteration <= 1
+  ) {
+    return false
+  }
+  return true
+}
+
+// Phase 3.2 + post-screenshot hotfix — TOOL_CALL_TEXT_PATTERN, sanitizeAssistantText,
+// pushAssistantTextSafely all live in `tool-call-text-guard.ts` so
+// `turn-transcript.ts` (the actual user-visible emit point) can import them
+// without creating a turn-engine ↔ turn-transcript circular dep. Re-exporting
+// the public surface here so the existing test imports from turn-engine
+// keep working.
+export {
+  TOOL_CALL_TEXT_PATTERN,
+  sanitizeAssistantText,
+  pushAssistantTextSafely,
+} from './tool-call-text-guard'
+export type {
+  SanitizeAssistantTextOptions,
+  SanitizeAssistantTextOptions as PushAssistantTextSafelyOptions,
+} from './tool-call-text-guard'
+import {
+  pushAssistantTextSafely,
+  sanitizeAssistantText,
+} from './tool-call-text-guard'
+
+/**
+ * Phase 3.3 — budget-warning copy that doesn't sabotage long skill flows.
+ *
+ * The previous 70%/90% nudges literally told the model to "总结当前进度并
+ * 询问用户是否继续" — a reverse instruction for staged pipelines like VEA
+ * which need to keep running without asking. Audit Phase 3 §D3/D4.
+ *
+ * `isLongSkillContext` is the gate: when the run is on the long-skill
+ * budget OR a typed skill action is in the preferred-tools list, we send
+ * a "keep going, prefer typed actions, only ask on real blockers" message
+ * instead of the convergence/summarize nudge. Returns plain string so the
+ * caller can wrap it in any role (currently `user` per the existing IPC
+ * shape).
+ */
+export function buildBudgetWarningMessage(params: {
+  iterations: number
+  effectiveMaxIterations: number
+  level: 'converge' | 'warning'
+  isLongSkillContext: boolean
+}): string {
+  if (params.isLongSkillContext) {
+    if (params.level === 'converge') {
+      return `系统提醒：长任务接近预算上限（${params.iterations}/${params.effectiveMaxIterations}）。继续用 typed skill action 推进剩余步骤；只有遇到真实 blocker（如等待用户确认）才用 skill_ask_user。不要在这一步停下来总结。`
+    }
+    return `系统提醒：长任务进度 ${params.iterations}/${params.effectiveMaxIterations}。继续推进当前 skill 流程，优先 typed skill action 而不是 skill_run_shell；如果 run_state 表明在等某个文件，先用 skill_read_artifact 看清楚再推进，不需要在这一步问用户。`
+  }
+  if (params.level === 'converge') {
+    return '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。'
+  }
+  return `系统提醒：已用 ${params.iterations}/${params.effectiveMaxIterations} 次工具调用。请总结当前进度并询问用户是否继续，或在确认下一步方向后再继续调用工具。`
+}
+
 import { buildContinuationStateFromProjection } from './continuation-state'
+import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
@@ -36,9 +106,12 @@ import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import {
   buildSkillDetectionInputs,
   collectRecentAssistantSkillToolUses,
+  isConfigRepairTurn,
   isRetryOnlyTurn,
 } from './skill-detection-inputs'
+import { getLatestSkillRun } from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
+import { defaultToolRegistry } from './tool-registry'
 import {
   selectDomainAdapter,
   type DomainAdapter,
@@ -46,13 +119,16 @@ import {
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import {
+  applyLongSkillTaskBudgetSeed,
   applyRunBudgetHint,
   consumeIterationBudget,
   consumeParallelGroupBudget,
   consumeToolCallBudget,
+  createContinuationRunBudgetSeed,
   createRunBudgetSeed,
   createStepBudgetState,
   getRemainingToolCallBudget,
+  grantBudgetSafetyFloor,
   refundIterationBudget,
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
@@ -67,6 +143,7 @@ import { buildToolDispatchDecision } from './execution-tool-policy'
 import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
+  parseTextToolBridgeResponse,
   shouldEnforceBrowserToolRetry,
 } from '../claude-bridge/tool-bridge'
 import { compressHistoryForPrompt } from './context-compression'
@@ -87,6 +164,8 @@ import {
 } from './tool-result-types'
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
+import { buildLongSkillRunningProjection } from './skill-running-projection'
+import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import type {
   RunBudgetHint,
   StepBudgetState,
@@ -104,11 +183,30 @@ import type {
 } from './run-contracts'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
+const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000
+const LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS = 30 * 1000
+
+function isLongTypedSkillActionName(toolName: string): boolean {
+  if (!toolName.startsWith('skill_')) return false
+  const definition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
+  return definition?.domain === 'skill'
+    && typeof definition.executionTimeoutMs === 'number'
+    && definition.executionTimeoutMs >= LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS
+}
+
+function hasLongTypedSkillAction(toolNames: string[] | null | undefined): boolean {
+  return Boolean(toolNames?.some((toolName) => isLongTypedSkillActionName(toolName)))
+}
+
+const LONG_SKILL_POST_ACTION_MIN_ITERATIONS = 6
+const LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS = 6
+
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
-  findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId: string }>
+  findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId?: string; id?: string; name?: string }>
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
+  getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
   // skill-resume G2/G3 — reverse-resolve `skill_*` tool names from prior
   // assistant tool_use blocks back to a reference-like skill and arm the
@@ -232,6 +330,38 @@ function appendSessionMessages<TSession extends TurnEngineSession>(
 ): void {
   if (!messages || messages.length === 0) return
   session.messages.push(...messages)
+}
+
+type RecentSkillRunForResume = NonNullable<ReturnType<typeof getLatestSkillRun>>
+
+function chooseRecentSkillRunForResume(
+  runs: Array<RecentSkillRunForResume | null | undefined>,
+): RecentSkillRunForResume | null {
+  const candidates = runs.filter((item): item is RecentSkillRunForResume => Boolean(item?.skillId))
+  if (candidates.length === 0) return null
+  const failedOrBlocked = candidates
+    .filter((item) => !item.success)
+    .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
+  if (failedOrBlocked.length > 0) return failedOrBlocked[0]
+  return candidates
+    .filter((item) => item.success)
+    .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))[0] || null
+}
+
+function buildSkillResumeContextPrompt(params: {
+  skillName: string
+  skillId: string
+  action?: string | null
+  summary?: string | null
+  userText: string
+}): string {
+  return [
+    `系统补充：这是一次 skill 恢复请求。优先恢复 skill "${params.skillName}" (${params.skillId})。`,
+    params.action ? `上一轮技能动作：${params.action}` : '',
+    params.summary ? `上次摘要/目标、输出目录或 artifact、失败原因：${params.summary}` : '',
+    `用户本轮补充内容：${params.userText || '继续当前任务。'}`,
+    '请沿用上次目标继续，不要把这轮补充当成新的普通问答。',
+  ].filter(Boolean).join('\n')
 }
 
 function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
@@ -409,7 +539,7 @@ function assertNoToolResolutionViolation(params: {
 export class TurnEngine {
   async execute<TSession extends TurnEngineSession>(request: TurnEngineRequest<TSession>) {
     const host = request.host
-    const transcript = new TurnTranscript(request.emitters)
+    const transcript = new TurnTranscript(request.emitters, { sessionId: request.sessionId })
     const state = new TurnState({
       taskId: request.taskId,
       taskBudgetRuntime: request.taskBudgetRuntime,
@@ -442,6 +572,9 @@ export class TurnEngine {
       registerRunCleanup: (cleanup) => {
         host.registerRunCleanup?.(cleanup)
       },
+      agentContext: buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
+        baseUrl: host.providerContext.baseUrl,
+      }),
     })
 
     const finish = (params: {
@@ -488,6 +621,11 @@ export class TurnEngine {
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       const pureUserInput = requestEnvelope.pureUserText
+      const currentTurnResumeText =
+        executionIntentContext.requestEnvelope.primaryInstruction
+        || executionIntentContext.requestEnvelope.pureUserText
+        || userText
+      const providedContinuationState = request.continuationState || null
       if (contextualUserInput !== pureUserInput) {
         host.log(`tool policy context reused previous user input: ${contextualUserInput.slice(0, 120)}`)
       }
@@ -527,12 +665,20 @@ export class TurnEngine {
         requestEnvelope.pureUserText,
         contextualUserInput,
       ].some((text) => isRetryOnlyTurn(String(text || '')))
+      const isConfigRepairTurnDetected = [
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        contextualUserInput,
+      ].some((text) => isConfigRepairTurn(String(text || '')) || matchesConfigRepairIntent(String(text || '')))
+      const isSkillResumeTurnDetected = isRetryOnlyTurnDetected || isConfigRepairTurnDetected
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
       let hasExplicitSkill = Boolean(firstSkillMatch)
       const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
       let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
+      let referenceSkillForMetrics: { id?: string; name?: string } | null = null
+      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | null = null
       // skill-resume G2/G3 — when the user fired a bare retry intent and the
       // substring-based skill match failed but the assistant recently used a
       // skill_* tool_use, reverse-resolve the tool name back to its skill and
@@ -540,18 +686,78 @@ export class TurnEngine {
       // the rest of the turn (preferredSkillToolNames, maybeInjectExplicitSkillContext)
       // flows naturally as if the user had named the skill.
       let lookbackRearmedSkill: { skillId?: string; skillName?: string } | null = null
-      if (!hasExplicitSkill && isRetryOnlyTurnDetected && previousAssistantSkillToolUses.length > 0) {
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && previousAssistantSkillToolUses.length > 0) {
         const rearmed = skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
           previousAssistantSkillToolUses,
           request.sessionId,
         )
         if (rearmed?.armed && rearmed.skillName) {
           lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
+          referenceSkillForMetrics = { id: rearmed.skillId, name: rearmed.skillName }
+          referenceSkillHintVia = 'lookback'
           skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
           hasExplicitSkill = true
           host.log(
             `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
           )
+        }
+      }
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
+        const armedHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
+        if (armedHint) {
+          lookbackRearmedSkill = { skillId: armedHint.id, skillName: armedHint.name }
+          referenceSkillForMetrics = { id: armedHint.id, name: armedHint.name }
+          referenceSkillHintVia = 'current'
+          skillContextInjectionText = `用户希望继续使用 skill "${armedHint.name}"`
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${armedHint.id} skillName=${armedHint.name}`,
+          )
+        }
+      }
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
+        const continuitySkillRun = getLatestSkillRun(request.sessionId)
+        const projectionSkillRun = host.resolveRecentSkillRun?.(request.sessionId) || null
+        const taskRunSkillRun = (host as unknown as {
+          resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
+        }).resolveRecentSkillTaskRun?.(request.sessionId) || null
+        const latestSkillRun = chooseRecentSkillRunForResume([
+          continuitySkillRun,
+          taskRunSkillRun,
+          projectionSkillRun,
+        ])
+        const latestSkillRunSource = latestSkillRun === continuitySkillRun
+          ? 'session_continuity'
+          : latestSkillRun === taskRunSkillRun
+            ? 'skill_task_run'
+            : latestSkillRun === projectionSkillRun
+              ? 'task_projection'
+              : 'none'
+        if (latestSkillRun?.skillId) {
+          const recoveredSkill = skillContextOrchestrator
+            .findExplicitlyRequestedSkills(`skill ${latestSkillRun.skillId}`)
+            .find((skill) => skill.id === latestSkillRun.skillId)
+          const skillName = recoveredSkill?.name || latestSkillRun.skillId
+          lookbackRearmedSkill = { skillId: latestSkillRun.skillId, skillName }
+          referenceSkillForMetrics = { id: latestSkillRun.skillId, name: skillName }
+          referenceSkillHintVia = 'history'
+          skillContextInjectionText = buildSkillResumeContextPrompt({
+            skillName,
+            skillId: latestSkillRun.skillId,
+            action: latestSkillRun.action,
+            summary: latestSkillRun.summary,
+            userText: currentTurnResumeText || contextualUserInput,
+          })
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_skill_history source=${latestSkillRunSource} skillId=${latestSkillRun.skillId} skillName=${skillName}`,
+          )
+        } else if (isConfigRepairTurnDetected) {
+          const clarification = '我看到了你更新配置，但这里没有可恢复的 skill 任务。请告诉我要继续哪一个技能任务。'
+          host.log('[skill_detection] No recent skill task is available to resume after config repair turn')
+          transcript.emitOutput(clarification, 'text')
+          pushAssistantTextSafely(session, clarification, { sessionId: request.sessionId })
+          return finish({ success: true, status: 'done' })
         }
       }
       const referenceSkillHintArmed = hasExplicitSkill
@@ -560,12 +766,44 @@ export class TurnEngine {
           request.sessionId,
         )) || Boolean(lookbackRearmedSkill)
         : false
+      if (referenceSkillHintArmed && !referenceSkillForMetrics) {
+        const currentHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
+        referenceSkillForMetrics = currentHint
+          ? { id: currentHint.id, name: currentHint.name }
+          : firstSkillMatch?.skills[0]
+            ? { id: firstSkillMatch.skills[0].skillId, name: firstSkillMatch.skills[0].skillId }
+            : null
+        referenceSkillHintVia = 'explicit'
+      }
       const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
           skillContextInjectionText,
           request.sessionId,
         )
         : null
+      const isLongSkillResumeTurn =
+        isRetryOnlyTurnDetected
+        && referenceSkillHintArmed
+        && hasLongTypedSkillAction(preferredSkillToolNames)
+      if (referenceSkillHintArmed) {
+        logAgentMetric('skill_reference_hint_armed', {
+          via: referenceSkillHintVia || 'explicit',
+          sessionId: request.sessionId,
+          skillId: referenceSkillForMetrics?.id || null,
+          skillName: referenceSkillForMetrics?.name || null,
+          retryOnly: isRetryOnlyTurnDetected,
+        })
+      }
+      if (preferredSkillToolNames?.length) {
+        logAgentMetric('preferred_skill_tools', {
+          sessionId: request.sessionId,
+          count: preferredSkillToolNames.length,
+          tools: preferredSkillToolNames,
+          referenceSkillHintArmed,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          longSkillResume: isLongSkillResumeTurn,
+        })
+      }
       host.log(
         `[skill_detection] primaryMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.primaryInstruction)?.skills.length
@@ -642,32 +880,38 @@ export class TurnEngine {
       }
 
       const continuationHintText =
-        executionIntentContext.requestEnvelope.primaryInstruction
-        || executionIntentContext.requestEnvelope.pureUserText
-        || userText
+        currentTurnResumeText
       const continuationLookupText =
         requestEnvelope.rawUserText
         || requestEnvelope.pureUserText
         || userText
-      const providedContinuationState = request.continuationState || null
-      const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
+      const effectiveProvidedContinuationState = hasExplicitSkill ? null : providedContinuationState
+      const explicitTaskId = effectiveProvidedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
       const shouldSuppressImplicitContinuation = hasExplicitSkill
-        && !providedContinuationState
+        && !effectiveProvidedContinuationState
         && !explicitTaskId
       const shouldResolveContinuation =
-        Boolean(providedContinuationState)
+        Boolean(effectiveProvidedContinuationState)
         || Boolean(explicitTaskId)
-        || (!shouldSuppressImplicitContinuation && /(继续|接着|恢复|上次|重试)/.test(continuationHintText))
+        // Phase 2.4 — use the unified resume lexicon's `anywhere` mode so
+        // phrasings like "你需要从头跑一轮" / "重新跑一次" / "再跑一遍" are
+        // recognized. Audit Phase 2 §B1/B2 — the previous inline regex
+        // dropped these phrases on the floor, falling through to plain-
+        // answer where the model could leak `<tool_call>` text into chat.
+        || (!shouldSuppressImplicitContinuation && (
+          matchesResumeIntent(continuationHintText, 'anywhere')
+          || isConfigRepairTurnDetected
+        ))
       if (shouldSuppressImplicitContinuation) {
         host.log('[skill_detection] suppressed implicit continuation because an explicit skill request was resolved')
       }
-      const continuationProjection = providedContinuationState
+      const continuationProjection = effectiveProvidedContinuationState
         ? null
         : host.resolveContinuationProjection(request.sessionId, continuationLookupText, {
           explicitTaskId,
           allowImplicitContinuation: shouldResolveContinuation,
         })
-      const continuationState = providedContinuationState
+      const continuationState = effectiveProvidedContinuationState
         || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
       const continuationTaskId = continuationState?.taskId || continuationProjection?.taskId || null
       const initialTaskTypeResolution = resolveTaskType({
@@ -761,12 +1005,33 @@ export class TurnEngine {
         allowedToolNames: reconciledRunCapabilities.allowedToolNames,
       })
 
-      const taskTypeResolution = resolveTaskType({
+      const resolvedTaskTypeForEffectiveRun = resolveTaskType({
         intent: executionIntentContext.intentClassification as IntentClassification,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
         currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
       })
+      // Phase 4.1 — long-skill resume budget no longer requires `!continuationTaskId`.
+      // Audit Phase 4 §C1: an explicit continuation that's still on a typed
+      // long-skill action (e.g. resuming VEA pipeline at step 3 of 7) was
+      // previously denied the 80-iter ceiling because the gate was AND'd with
+      // "no continuationTaskId". Now: any turn where (a) it's a retry-only
+      // intent OR (b) we have an explicit continuation pointing at a typed
+      // long-skill action gets the upgrade. preferredSkillToolNames only
+      // populates when the skill is in the active set, so this can't false-
+      // positive on continuations to non-skill tasks.
+      const shouldUseLongSkillResumeBudget =
+        isLongSkillResumeTurn
+        || (Boolean(continuationTaskId) && hasLongTypedSkillAction(preferredSkillToolNames))
+      const taskTypeResolution = shouldUseLongSkillResumeBudget && resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
+        ? {
+          ...resolvedTaskTypeForEffectiveRun,
+          taskType: 'multi_step_task' as const,
+          executionChain: 'domain_executor' as const,
+          requiresPlanner: false,
+          preferredExecutor: 'skill' as const,
+        }
+        : resolvedTaskTypeForEffectiveRun
       const taskExecutionRoute = resolveTaskExecutionRoute({
         taskId: request.taskId,
         resolution: taskTypeResolution,
@@ -831,7 +1096,63 @@ export class TurnEngine {
           : null
       }
       state.adoptResolvedTaskTypeBudget(taskExecutionRoute.taskType)
-      const alignedRunBudget = state.effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
+      // Phase 4.2 — continuation inherits the budget seed from the original
+      // task type instead of collapsing to the 24-iter `continuation` preset.
+      // Audit Phase 4 §C4: a multi_step or media task resumed across processes
+      // / after a Ready restart would otherwise hit the 70% warning at iter
+      // 16, well before the original task's natural ceiling.
+      //
+      // RE-AUDIT FIX 4.2 — applies to BOTH fresh and restored continuations
+      // (original Phase 4.2 only covered fresh; restored runtimes that lost
+      // the long-skill budget cross-process were stuck at the saved value).
+      //
+      // SCREENSHOT-BUG follow-up — gate the override on the ORIGINAL task
+      // type being long (multi_step / media). Don't override for short
+      // task types because the saved budget there was likely a deliberate
+      // small value (e.g. a turn-engine-route test saving 12 iter for a
+      // short_task continuation that should remain 12, not get bumped to
+      // the standard 24 just because that's the continuation preset).
+      // Audit Phase 4 §C4 was specifically about long-task throttling,
+      // not about uniformly forcing every continuation to the standard
+      // preset.
+      if (
+        taskExecutionRoute.chain === 'continuation'
+        && (
+          continuationProjection?.taskType === 'multi_step_task'
+          || continuationProjection?.taskType === 'media_task'
+        )
+      ) {
+        const inheritedSeed = createContinuationRunBudgetSeed(continuationProjection.taskType)
+        const previousMaxIterations = state.effectiveRunBudget?.maxIterations ?? null
+        if (inheritedSeed.maxIterations > (previousMaxIterations ?? 0)) {
+          state.effectiveRunBudget = { ...inheritedSeed }
+          if (state.taskBudgetRuntime) {
+            state.taskBudgetRuntime = {
+              ...state.taskBudgetRuntime,
+              budget: { ...inheritedSeed },
+            }
+          }
+          logAgentMetric('continuation_budget_inherited', {
+            sessionId: request.sessionId,
+            originalTaskType: continuationProjection.taskType,
+            previousMaxIterations,
+            inheritedMaxIterations: inheritedSeed.maxIterations,
+            hadRestoredRuntime: Boolean(taskExecutionRoute.continuation?.budgetRuntime),
+          })
+        }
+      }
+      let alignedRunBudget = state.effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
+      if (shouldUseLongSkillResumeBudget) {
+        alignedRunBudget = applyLongSkillTaskBudgetSeed(alignedRunBudget)
+        logAgentMetric('long_skill_task_budget_applied', {
+          sessionId: request.sessionId,
+          taskType: taskExecutionRoute.taskType,
+          maxIterations: alignedRunBudget.maxIterations,
+          maxToolCalls: alignedRunBudget.maxToolCalls,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          preferredSkillTools: preferredSkillToolNames || [],
+        })
+      }
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
@@ -965,7 +1286,7 @@ export class TurnEngine {
         if (hostShortcutResult.outputText) {
           transcript.emitOutput(hostShortcutResult.outputText.slice(0, 300), 'tool_result')
           transcript.emitOutput(hostShortcutResult.outputText, 'text')
-          session.messages.push({ role: 'assistant', content: hostShortcutResult.outputText })
+          pushAssistantTextSafely(session, hostShortcutResult.outputText, { sessionId: request.sessionId })
         }
         return finish({ success: true, status: 'done' })
       }
@@ -996,7 +1317,7 @@ export class TurnEngine {
         }
         if (domainDispatchResult.finalText) {
           transcript.emitOutput(domainDispatchResult.finalText, 'text')
-          session.messages.push({ role: 'assistant', content: domainDispatchResult.finalText })
+          pushAssistantTextSafely(session, domainDispatchResult.finalText, { sessionId: request.sessionId })
         }
         if (domainDispatchResult.finish) {
           return finish({
@@ -1032,7 +1353,7 @@ export class TurnEngine {
             advancePlannerStep(simpleResponse.text)
           }
           transcript.emitOutput(simpleResponse.text, 'text')
-          session.messages.push({ role: 'assistant', content: simpleResponse.text })
+          pushAssistantTextSafely(session, simpleResponse.text, { sessionId: request.sessionId })
         }
         return finish({ success: true, status: 'done' })
       }
@@ -1058,7 +1379,7 @@ export class TurnEngine {
         ? { ...state.taskBudgetRuntime.stepBudget }
         : null
       state.budgetWarningLevel = state.taskBudgetRuntime.warningLevel
-      const effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
+      let effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
         ? state.effectiveRunBudget.maxIterations
         : host.maxToolIterations
       let iterations = 0
@@ -1067,6 +1388,8 @@ export class TurnEngine {
       let budgetLimitedBeforeCompletion = false
       let convergencePromptInjected = false
       let preferTextToolBridgeOnce = false
+      let lastLongTypedSkillActionIteration: number | null = null
+      const longTypedSkillActionStartTimes = new Map<string, number>()
       // skill-resume C1: ring buffer of recent tool calls for repetition detection.
       // When the same tool is called with the same args ≥3 times in the last 5
       // iterations, we inject an ask-user nudge to break the loop.
@@ -1076,7 +1399,7 @@ export class TurnEngine {
       // skill-resume C3: prepend a system warning when 70% of the iteration
       // budget is consumed, reminding the LLM to summarize and consult the user.
       let warned70Pct = false
-      const warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
+      let warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
       const toolGuidance = buildToolGuidance(toolPolicy as any)
       const toolLoopSession = toolGuidance
         ? {
@@ -1084,6 +1407,46 @@ export class TurnEngine {
           systemPrompt: `${session.systemPrompt}\n\n${toolGuidance}`,
         }
         : session
+      const grantLongSkillBudgetHeadroom = (params: {
+        phase: 'pre_action' | 'post_action'
+        minimumRemainingToolCalls?: number
+      }): void => {
+        if (!state.effectiveRunBudget) return
+        const safetyFloor = grantBudgetSafetyFloor({
+          budget: state.effectiveRunBudget,
+          usage: state.runBudgetState,
+          stepBudget: state.stepBudgetState,
+          minimumRemainingIterations: LONG_SKILL_POST_ACTION_MIN_ITERATIONS,
+          minimumRemainingToolCalls: params.minimumRemainingToolCalls || LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS,
+          minimumRemainingStepIterations: LONG_SKILL_POST_ACTION_MIN_ITERATIONS,
+        })
+        state.effectiveRunBudget = safetyFloor.budget
+        state.stepBudgetState = safetyFloor.stepBudget
+        effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
+          ? state.effectiveRunBudget.maxIterations
+          : host.maxToolIterations
+        warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
+        if (
+          safetyFloor.grantedIterationSafetyFloor
+          || safetyFloor.grantedToolCallSafetyFloor
+          || safetyFloor.grantedStepBudgetSafetyFloor
+        ) {
+          state.syncBudgetWarning()
+          logAgentMetric('long_skill_budget_headroom_granted', {
+            sessionId: request.sessionId,
+            phase: params.phase,
+            iteration: iterations,
+            grantedIterationSafetyFloor: safetyFloor.grantedIterationSafetyFloor,
+            grantedToolCallSafetyFloor: safetyFloor.grantedToolCallSafetyFloor,
+            grantedStepBudgetSafetyFloor: safetyFloor.grantedStepBudgetSafetyFloor,
+            maxIterations: state.effectiveRunBudget.maxIterations,
+            maxToolCalls: state.effectiveRunBudget.maxToolCalls,
+            stepRemainingIterations: state.stepBudgetState?.remainingIterations ?? null,
+            referenceSkillId: referenceSkillForMetrics?.id || null,
+            referenceSkillName: referenceSkillForMetrics?.name || null,
+          })
+        }
+      }
 
       while (iterations < effectiveMaxToolIterations) {
         request.ensureNotAborted()
@@ -1103,9 +1466,17 @@ export class TurnEngine {
           break
         }
         if (state.budgetWarningLevel === 'converge' && !convergencePromptInjected) {
+          // Phase 3.3 — skill-aware nudge. For long skill flows, "summarize
+          // and ask user" is a reverse instruction; we send "keep going,
+          // prefer typed actions" instead. Audit Phase 3 §D4.
           session.messages.push({
             role: 'user',
-            content: '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。',
+            content: buildBudgetWarningMessage({
+              iterations,
+              effectiveMaxIterations: effectiveMaxToolIterations,
+              level: 'converge',
+              isLongSkillContext: shouldUseLongSkillResumeBudget || (preferredSkillToolNames?.length || 0) > 0,
+            }),
           })
           convergencePromptInjected = true
         }
@@ -1120,11 +1491,33 @@ export class TurnEngine {
         state.syncBudgetWarning()
 
         // skill-resume C3: 70% iteration warning — fire ONCE per run.
-        if (!warned70Pct && iterations >= warningThreshold) {
+        if (shouldInjectBudgetWarning({
+          warned: warned70Pct,
+          iteration: iterations,
+          warningThreshold,
+          lastLongTypedSkillActionIteration,
+        })) {
           warned70Pct = true
+          logAgentMetric('turn_budget_warning', {
+            sessionId: request.sessionId,
+            taskType: state.resolvedTaskType || null,
+            iteration: iterations,
+            maxIterations: effectiveMaxToolIterations,
+            warningThreshold,
+            referenceSkillId: referenceSkillForMetrics?.id || null,
+            referenceSkillName: referenceSkillForMetrics?.name || null,
+            preferredSkillTools: preferredSkillToolNames || [],
+            longSkillResume: shouldUseLongSkillResumeBudget,
+          })
+          // Phase 3.3 — skill-aware 70% nudge. Audit Phase 3 §D3.
           session.messages.push({
             role: 'user',
-            content: `系统提醒：已用 ${iterations}/${effectiveMaxToolIterations} 次工具调用。请总结当前进度并询问用户是否继续，或在确认下一步方向后再继续调用工具。`,
+            content: buildBudgetWarningMessage({
+              iterations,
+              effectiveMaxIterations: effectiveMaxToolIterations,
+              level: 'warning',
+              isLongSkillContext: shouldUseLongSkillResumeBudget || (preferredSkillToolNames?.length || 0) > 0,
+            }),
           })
         }
         const scope = request.sessionId ? host.runtime?.getConversationScope?.(request.sessionId) : undefined
@@ -1190,7 +1583,7 @@ export class TurnEngine {
             textToolBridgeNudges += 1
             const assistantHistoryText = response.rawText || response.text
             if (assistantHistoryText) {
-              session.messages.push({ role: 'assistant', content: assistantHistoryText })
+              pushAssistantTextSafely(session, assistantHistoryText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             }
             preferTextToolBridgeOnce = true
             session.messages.push({
@@ -1203,7 +1596,7 @@ export class TurnEngine {
             continue
           }
           if (response.toolTransport === 'text' && response.rawText) {
-            session.messages.push({ role: 'assistant', content: response.rawText })
+            pushAssistantTextSafely(session, response.rawText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             if (looksLikeMissingNativeToolsReply(response.text || response.rawText) && textToolBridgeNudges < 2) {
               textToolBridgeNudges += 1
               preferTextToolBridgeOnce = true
@@ -1245,7 +1638,7 @@ export class TurnEngine {
             }
             if (domainApplyResult.nextUserMessage) {
               if (domainApplyResult.preserveAssistantText && response.text && response.toolTransport !== 'text') {
-                session.messages.push({ role: 'assistant', content: response.text })
+                pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               }
               session.messages.push({
                 role: 'user',
@@ -1255,7 +1648,7 @@ export class TurnEngine {
             }
             if (domainApplyResult.finalText) {
               transcript.emitOutput(domainApplyResult.finalText, 'text')
-              session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+              pushAssistantTextSafely(session, domainApplyResult.finalText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               advancePlannerStep(domainApplyResult.finalText)
               finishedBeforeLimit = true
               break
@@ -1277,13 +1670,13 @@ export class TurnEngine {
               }
             }
             if (genericInteractionDetected) {
-              session.messages.push({ role: 'assistant', content: response.text })
+              pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               finishedBeforeLimit = true
               break
             }
           }
           if (response.text && response.toolTransport !== 'text' && !shouldHideBrowserProcessText) {
-            session.messages.push({ role: 'assistant', content: response.text })
+            pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
           }
           finishedBeforeLimit = true
           break
@@ -1309,7 +1702,15 @@ export class TurnEngine {
         }
         const toolCallsForIteration = designToolFilter.toolCalls
           .map((toolCall) => designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
-        const remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
+        const iterationHasLongTypedSkillAction = toolCallsForIteration.some((toolCall) => isLongTypedSkillActionName(toolCall.name))
+        let remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
+        if (iterationHasLongTypedSkillAction && remainingToolCallBudget < toolCallsForIteration.length) {
+          grantLongSkillBudgetHeadroom({
+            phase: 'pre_action',
+            minimumRemainingToolCalls: toolCallsForIteration.length + LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS,
+          })
+          remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
+        }
         if (remainingToolCallBudget < toolCallsForIteration.length) {
           budgetLimitedBeforeCompletion = true
           break
@@ -1331,31 +1732,86 @@ export class TurnEngine {
           result: ToolExecutionOutput
         }> = []
 
-        const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
-          toolCalls: toolCallsForIteration,
-          context: toolContext,
-          budget: state.effectiveRunBudget || undefined,
-          budgetState: state.runBudgetState,
-          signal: request.abortSignal,
-          hooks: {
-            onToolStart: ({ toolCall }) => {
-              transcript.emitToolUse(toolCall.name, toolCall.input)
-            },
-            onToolRecovered: ({ toolCall, recoveryHistory }) => {
-              const lastRecovery = recoveryHistory[recoveryHistory.length - 1]
-              if (!lastRecovery) return
-              host.log(`tool recover: ${toolCall.name}, kind=${lastRecovery.kind}, recovered=${lastRecovery.recovered}`)
-            },
-            onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
-              host.log(`tool batch interrupted: started=${startedToolCallIds.join('|') || 'none'}, skipped=${skippedToolCalls.map((toolCall) => toolCall.name).join('|') || 'none'}`)
-            },
-          },
-          onGroupStart: (group) => {
-            if (group.mode === 'parallel') {
-              Object.assign(state.runBudgetState, consumeParallelGroupBudget(state.runBudgetState))
-            }
-          },
-        }))
+        const longTypedSkillActionHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
+        const emitLongTypedSkillRunningProjection = (toolCall: TurnToolCall, startedAt: number): void => {
+          transcript.emitStructuredPayload(buildLongSkillRunningProjection({
+            sessionId: request.sessionId,
+            toolName: toolCall.name,
+            toolInput: toolCall.input,
+            startedAt,
+            now: Date.now(),
+          }))
+        }
+        const clearLongTypedSkillHeartbeat = (toolCallId: string): void => {
+          const timer = longTypedSkillActionHeartbeatTimers.get(toolCallId)
+          if (timer) clearInterval(timer)
+          longTypedSkillActionHeartbeatTimers.delete(toolCallId)
+        }
+        const clearAllLongTypedSkillHeartbeats = (): void => {
+          for (const timer of longTypedSkillActionHeartbeatTimers.values()) {
+            clearInterval(timer)
+          }
+          longTypedSkillActionHeartbeatTimers.clear()
+        }
+
+        const executeBatch = async () => {
+          try {
+            return normalizeToolBatchResult(await host.executeToolBatch({
+              toolCalls: toolCallsForIteration,
+              context: toolContext,
+              budget: state.effectiveRunBudget || undefined,
+              budgetState: state.runBudgetState,
+              signal: request.abortSignal,
+              hooks: {
+                onToolStart: ({ toolCall }) => {
+                  transcript.emitToolUse(toolCall.name, toolCall.input)
+                  if (isLongTypedSkillActionName(toolCall.name)) {
+                    const startedAt = Date.now()
+                    longTypedSkillActionStartTimes.set(toolCall.id, startedAt)
+                    emitLongTypedSkillRunningProjection(toolCall, startedAt)
+                    longTypedSkillActionHeartbeatTimers.set(
+                      toolCall.id,
+                      setInterval(() => {
+                        emitLongTypedSkillRunningProjection(toolCall, startedAt)
+                      }, LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS),
+                    )
+                  }
+                },
+                onToolResult: ({ toolCall }) => {
+                  if (!isLongTypedSkillActionName(toolCall.name)) return
+                  clearLongTypedSkillHeartbeat(toolCall.id)
+                  const startedAt = longTypedSkillActionStartTimes.get(toolCall.id)
+                  if (typeof startedAt !== 'number') return
+                  longTypedSkillActionStartTimes.delete(toolCall.id)
+                  logAgentMetric('skill_typed_action_duration_ms', {
+                    sessionId: request.sessionId,
+                    toolName: toolCall.name,
+                    iteration: iterations,
+                    durationMs: Math.max(0, Date.now() - startedAt),
+                    referenceSkillId: referenceSkillForMetrics?.id || null,
+                    referenceSkillName: referenceSkillForMetrics?.name || null,
+                  })
+                },
+                onToolRecovered: ({ toolCall, recoveryHistory }) => {
+                  const lastRecovery = recoveryHistory[recoveryHistory.length - 1]
+                  if (!lastRecovery) return
+                  host.log(`tool recover: ${toolCall.name}, kind=${lastRecovery.kind}, recovered=${lastRecovery.recovered}`)
+                },
+                onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
+                  clearAllLongTypedSkillHeartbeats()
+                  host.log(`tool batch interrupted: started=${startedToolCallIds.join('|') || 'none'}, skipped=${skippedToolCalls.map((toolCall) => toolCall.name).join('|') || 'none'}`)
+                },
+              },
+              onGroupStart: (group) => {
+                if (group.mode === 'parallel') {
+                  Object.assign(state.runBudgetState, consumeParallelGroupBudget(state.runBudgetState))
+                }
+              },
+            }))
+          } finally {
+            clearAllLongTypedSkillHeartbeats()
+          }
+        }
 
         const consumeExecutedToolBatch = (executedToolBatch: Awaited<ReturnType<typeof executeBatch>>, params: {
           onResult: (payload: {
@@ -1365,6 +1821,12 @@ export class TurnEngine {
         }) => {
           state.appendRecoveryHistory(executedToolBatch.recoveryHistory)
           Object.assign(state.runBudgetState, consumeToolCallBudget(state.runBudgetState, executedToolBatch.results.length))
+          const batchHasLongTypedSkillAction = executedToolBatch.results.some((executedTool) =>
+            isLongTypedSkillActionName(executedTool.name),
+          )
+          if (batchHasLongTypedSkillAction && !executedToolBatch.budgetLimited) {
+            grantLongSkillBudgetHeadroom({ phase: 'post_action' })
+          }
           if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(state.effectiveRunBudget || alignedRunBudget, state.runBudgetState) <= 0) {
             budgetLimitedBeforeCompletion = true
           }
@@ -1374,6 +1836,9 @@ export class TurnEngine {
             const resultText = result.text
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
+            if (isLongTypedSkillActionName(toolName)) {
+              lastLongTypedSkillActionIteration = iterations
+            }
             executedToolsThisIteration.push({
               id: executedTool.id,
               name: executedTool.name,
@@ -1430,7 +1895,18 @@ export class TurnEngine {
             if (!shouldHideBrowserProcessText) {
               transcript.emitOutput(response.text, 'text')
             }
-            assistantContent.push({ type: 'text', text: response.text })
+            // Phase 3.2 — Anthropic protocol path uses a multimodal content
+            // array, so we can't reuse pushAssistantTextSafely directly.
+            // Sanitize the text block here and only emit it when non-empty
+            // so a fully-leaked turn doesn't pollute the assistant message.
+            const cleanedText = sanitizeAssistantText(response.text, {
+              sessionId: request.sessionId,
+              iteration: iterations,
+              toolTransport: response.toolTransport,
+            })
+            if (cleanedText) {
+              assistantContent.push({ type: 'text', text: cleanedText })
+            }
           }
           for (const toolCall of toolCallsForIteration) {
             assistantContent.push({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: toolCall.input })
@@ -1494,7 +1970,7 @@ export class TurnEngine {
         } else if (response.toolTransport === 'text') {
           const historyText = response.rawText || response.text
           if (historyText) {
-            session.messages.push({ role: 'assistant', content: historyText })
+            pushAssistantTextSafely(session, historyText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
           }
           if (response.text) {
             if (!shouldHideBrowserProcessText) {
@@ -1563,7 +2039,7 @@ export class TurnEngine {
             }
           }
           if (syncInteractionStateFromAssistantText(response.text)) {
-            session.messages.push({ role: 'assistant', content: response.text })
+            pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             finishedBeforeLimit = true
             break
           }
@@ -1616,7 +2092,7 @@ export class TurnEngine {
           }
           if (domainApplyResult.finalText) {
             transcript.emitOutput(domainApplyResult.finalText, 'text')
-            session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+            pushAssistantTextSafely(session, domainApplyResult.finalText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             advancePlannerStep(domainApplyResult.finalText)
             finishedBeforeLimit = true
             break
@@ -1633,7 +2109,7 @@ export class TurnEngine {
               phase: 'done',
             }))
             transcript.emitOutput(completionText, 'text')
-            session.messages.push({ role: 'assistant', content: completionText })
+            pushAssistantTextSafely(session, completionText, { sessionId: request.sessionId, iteration: iterations })
             advancePlannerStep(completionText)
           }
           finishedBeforeLimit = true
@@ -1650,6 +2126,17 @@ export class TurnEngine {
       }
 
       if (!finishedBeforeLimit && (iterations >= effectiveMaxToolIterations || budgetLimitedBeforeCompletion)) {
+        logAgentMetric('turn_budget_exhausted', {
+          sessionId: request.sessionId,
+          taskType: state.resolvedTaskType || null,
+          iterations,
+          maxIterations: effectiveMaxToolIterations,
+          budgetLimitedBeforeCompletion,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          referenceSkillName: referenceSkillForMetrics?.name || null,
+          preferredSkillTools: preferredSkillToolNames || [],
+          longSkillResume: shouldUseLongSkillResumeBudget,
+        })
         if (selectedDomainAdapter) {
           const limitResult = await selectedDomainAdapter.applyResult({
                 route: taskExecutionRoute,

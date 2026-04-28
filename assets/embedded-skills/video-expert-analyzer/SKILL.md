@@ -16,16 +16,17 @@ when-to-use: |
 
 下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**typed action 已经把它们包好了，30 分钟超时 + `run_state.json` 状态追踪都已接好**。LLM 看到工具名时按下表对应：
 
-- **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ typed action**
+- **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ 必须优先 typed action**
   - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，30 min 超时
   - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，30 min 超时
 - **快速探针（cat 文件 / ls 目录 / 看 run_state.json / wc 输出）→ `skill_run_shell`**
-  - 默认 60 秒，硬上限 10 分钟，超时即 SIGTERM 整个进程组
+  - 只用于轻量诊断；它不是长链路的等价 fallback。默认 60 秒，硬上限 10 分钟，超时即 SIGTERM 整个进程组
 - **读 artifact** → `skill_read_artifact`；**写临时报告/scratchpad** → `skill_write_artifact`
 
 反模式（真踩过的坑，不要再重复）：
 - ❌ `skill_run_shell({"command": "python3 scripts/pipeline_enhanced.py <url>"})` — 必超时
 - ❌ `skill_run_shell({"command": "cd <dir> && python3 scripts/orchestrate_vnext.py ..."})` — 同上
+- ❌ typed action 失败后立刻改用 shell 重跑长链路 — 会丢失结构化状态与 30 分钟动作契约
 - ✅ `skill_video_expert_pipeline({"url": "<url>", "outputDir": "<dir>"})`
 - ✅ 想看进度：`skill_read_artifact({"relativePath": "<videoSlug>/run_state.json"})`
 

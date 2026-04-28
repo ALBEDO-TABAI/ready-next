@@ -48,6 +48,35 @@ export const REFERENCE_SKILL_HINT_TTL_MS = 30 * 60 * 1000 // 30 min
 
 const lastReferenceSkillBySession = new Map<string, ReferenceSkillHint>()
 
+/**
+ * Phase 5.3 — module-level change emitter so the renderer's `referenceSkillHint`
+ * badge stays in sync with the in-memory map. Production wires this in
+ * `setupAgentIPC` to push `agent:referenceSkillHintChanged`. Tests leave it
+ * unset (default no-op). Audit Phase 5 §E3 — UI used to lag the backend by
+ * one scope-run event; the badge could show "armed" after the hint had
+ * already been swept, or vice versa.
+ *
+ * The emitter is intentionally fire-and-forget: errors in the IPC pipe
+ * must never propagate back into the hint map mutation path.
+ */
+type HintChangeKind = 'armed' | 'cleared'
+export type ReferenceHintChangeEmitter = (sessionId: string, change: HintChangeKind) => void
+let hintChangeEmitter: ReferenceHintChangeEmitter | null = null
+
+export function setReferenceHintChangeEmitter(fn: ReferenceHintChangeEmitter | null): void {
+  hintChangeEmitter = fn
+}
+
+function emitHintChange(sessionId: string, change: HintChangeKind): void {
+  if (!hintChangeEmitter) return
+  try {
+    hintChangeEmitter(sessionId, change)
+  } catch (error) {
+    // Swallow — emitter is observability, not correctness.
+    console.warn('[skill-reference-hints] hint change emitter threw:', error)
+  }
+}
+
 function now(): number {
   return Date.now()
 }
@@ -69,6 +98,8 @@ export function rememberLastReferenceSkill(
     name: name || id,
     at: now(),
   })
+  // Phase 5.3 — notify renderer the badge state may have changed.
+  emitHintChange(sessionId, 'armed')
 }
 
 export function getLastReferenceSkill(
@@ -94,9 +125,25 @@ export function getLastReferenceSkill(
   return hint
 }
 
+export function peekLastReferenceSkill(
+  sessionId: string | undefined,
+): ReferenceSkillHint | null {
+  if (!sessionId) return null
+  const hint = lastReferenceSkillBySession.get(sessionId)
+  if (!hint) return null
+  if (isExpired(hint, now())) {
+    lastReferenceSkillBySession.delete(sessionId)
+    return null
+  }
+  return { ...hint }
+}
+
 export function clearLastReferenceSkill(sessionId: string | undefined): void {
   if (!sessionId) return
-  lastReferenceSkillBySession.delete(sessionId)
+  const existed = lastReferenceSkillBySession.delete(sessionId)
+  if (existed) {
+    emitHintChange(sessionId, 'cleared')
+  }
 }
 
 /**
@@ -111,6 +158,9 @@ export function sweepExpiredReferenceSkillHints(): number {
     if (isExpired(hint, at)) {
       lastReferenceSkillBySession.delete(sessionId)
       removed += 1
+      // Phase 5.3 — notify renderer so the badge stops claiming "armed"
+      // the moment the sweep removes a stale hint.
+      emitHintChange(sessionId, 'cleared')
     }
   }
   // Phase 4: emit a dedicated metric — this sweep used to piggyback on
@@ -131,6 +181,11 @@ export function sweepExpiredReferenceSkillHints(): number {
  * `ConversationScope` retire hooks. Idempotent.
  */
 export function clearAllReferenceSkillHints(): void {
+  // Phase 5.3 — emit per session BEFORE clearing so observers can react
+  // (e.g. renderer badges) without re-reading an empty map.
+  for (const sessionId of lastReferenceSkillBySession.keys()) {
+    emitHintChange(sessionId, 'cleared')
+  }
   lastReferenceSkillBySession.clear()
 }
 
@@ -177,12 +232,20 @@ export function restoreLastReferenceSkill(
     name: name || id,
     at,
   })
+  // Phase 5.3 — restore is functionally an arming, notify renderer.
+  emitHintChange(sessionId, 'armed')
   return true
 }
 
 // Exposed for tests only — do not call from production code paths.
 export function _resetLastReferenceSkillHintsForTests(): void {
   lastReferenceSkillBySession.clear()
+  // RE-AUDIT bonus — also reset the change emitter so Phase 5.3 tests can't
+  // leak a `setReferenceHintChangeEmitter(...)` callback into adjacent test
+  // files when `tsx --test file1 file2` runs in a shared process. Without
+  // this, a Phase 5 test that forgets to clear emitter would silently
+  // intercept hint mutations from unrelated tests downstream.
+  hintChangeEmitter = null
 }
 
 /**

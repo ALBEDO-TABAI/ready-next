@@ -73,6 +73,31 @@ export const TOOL_ERROR_METRICS = {
    * `{ scopeId, skillId, skillName }`。无匹配 / 不是 reference-like → 不 emit。
    */
   skillReferenceHintRecoveredFromCapsule: 'skill_reference_hint_recovered_from_capsule',
+  /**
+   * Phase 1.4 — `parseScopeMeta` 发现 conversation_scope.meta_json 不是合法 JSON
+   * 时打这条。以前默默吞成 `{}`，会让 `lastReferenceSkill` 之类的字段无声丢失。
+   * emit 附 `{ scopeId, sample }`（sample 截前 80 字符防爆）。
+   */
+  metaParseCorrupted: 'meta_parse_corrupted',
+  /**
+   * Phase 3.2 — turn-engine 在把模型 assistant 文本写入 session.messages
+   * 之前，检测到残留的 tool_call 标记（`<tool_call>` / `<function=` /
+   * `<parameter=` / `:::tool_call`）。命中后 helper 会用 parseTextToolBridge
+   * 重解析、剥离标记、emit 该 metric，避免污染 chat panel + chat_messages 表。
+   * 出现该 metric 即说明上游 tool-bridge 解析没拦住或 native transport 漏出了
+   * 模型自造的工具调用文本。emit 附 `{ sessionId, iteration, transport,
+   * extractedToolCalls, originalLen, cleanedLen }`。审计 Phase 3 §D2。
+   */
+  toolCallTextIntercepted: 'tool_call_text_intercepted',
+  /**
+   * Screenshot-bug ROOT FIX — openai-execution-client 在 native 路径检测到
+   * 模型 text 含 `<tool_call>` XML 但 provider 返回 toolCalls=[] 的协议
+   * mismatch（mimo / qwen 等 OpenAI 兼容方常见），用 parseTextToolBridgeResponse
+   * 解析 XML 把 calls 挂回 toolCalls 让 dispatch 链照常推进。出现该 metric
+   * 即说明本会话的 model+provider 组合在 tool-calling 协议上有偏差。emit 附
+   * `{ originalCallsCount, recoveredCallsCount, recoveredToolNames, route }`。
+   */
+  xmlToolCallsRecoveredFromNative: 'xml_tool_calls_recovered_from_native',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

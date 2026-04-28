@@ -21,3 +21,9 @@ test('task panel exposes continue and retry actions from task projections', () =
   assert.doesNotMatch(source, /Task ID:/)
   assert.doesNotMatch(source, /Execution ID:/)
 })
+
+test('task panel lets projection clear stale active run blockers', () => {
+  const source = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
+
+  assert.doesNotMatch(source, /activeRun\?\.blockedReason \|\| activeProjection\?\.blockedReason/)
+})

@@ -130,6 +130,7 @@ export interface ContinuationBudgetRestoreDiagnostics {
   restoredUsage: boolean
   grantedIterationSafetyFloor: boolean
   grantedToolCallSafetyFloor: boolean
+  grantedStepBudgetSafetyFloor: boolean
 }
 
 export interface RecoveryRecord {
@@ -538,6 +539,14 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
     explicitTaskId?: string | null
     allowImplicitContinuation?: boolean
   }) => TaskProjectionRecord | null
+  resolveRecentSkillRun?: (sessionId: string | undefined) => {
+    toolName: string
+    skillId: string
+    action: string
+    success: boolean
+    summary: string
+    updatedAt: number
+  } | null
   getIncomingAttachmentHints: (content: RunMessage) => { count: number; latestName?: string }
   collectRecentPureUserInputs: (messages: TurnEngineSessionMessage[], limit?: number) => string[]
   sessionHasMediaInputs: (messages: TurnEngineSessionMessage[]) => boolean

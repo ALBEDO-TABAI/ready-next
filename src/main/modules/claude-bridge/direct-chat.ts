@@ -127,6 +127,8 @@ import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
 import type { RequestEnvelope } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
+import { recoverLatestSkillRunFromTaskProjections } from '../agent-control/skill-run-recovery'
+import { getLatestRecoverableSkillTaskRun } from '../agent-control/skill-task-tracker'
 import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
@@ -1006,6 +1008,10 @@ export class DirectChatEngine extends EventEmitter {
           allowImplicitContinuation?: boolean
         },
       ) => this.resolveContinuationProjection(sessionId, userText, options),
+      resolveRecentSkillRun: (sessionId: string | undefined) =>
+        this.resolveRecentSkillRunFromTaskProjections(sessionId),
+      resolveRecentSkillTaskRun: (sessionId: string | undefined) =>
+        this.resolveRecentSkillRunFromTaskRuns(sessionId),
       getIncomingAttachmentHints: (turnContent: RunMessage) => this.getIncomingAttachmentHints(turnContent),
       collectRecentPureUserInputs: (messages: ChatMessage[], limit?: number) => this.collectRecentPureUserInputs(messages, limit),
       sessionHasMediaInputs: (messages: ChatMessage[]) => this.sessionHasMediaInputs(messages),
@@ -1268,6 +1274,46 @@ export class DirectChatEngine extends EventEmitter {
       explicitTaskId: options?.explicitTaskId ?? this.extractTaskIdFromText(userText),
       allowImplicitContinuation: options?.allowImplicitContinuation,
     })
+  }
+
+  private resolveRecentSkillRunFromTaskProjections(sessionId: string | undefined): SkillRunRecord | null {
+    const runtime = this.runtime
+    if (!runtime || !sessionId) return null
+    return recoverLatestSkillRunFromTaskProjections({
+      projections: runtime.listTaskProjections(sessionId),
+      skills: getSkillsRuntimeManager().listSkills(),
+      resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
+    })
+  }
+
+  private resolveRecentSkillRunFromTaskRuns(sessionId: string | undefined): SkillRunRecord | null {
+    if (!sessionId) return null
+    const record = getLatestRecoverableSkillTaskRun(sessionId)
+    if (!record?.skillId) return null
+    const action = record.action || record.toolName || ''
+    const toolName = record.toolName
+      || (action ? findSkillToolBySkillAction(record.skillId, action)?.name || '' : '')
+    const resourceSummary = record.resourceRefs && record.resourceRefs.length > 0
+      ? JSON.stringify(record.resourceRefs).slice(0, 240)
+      : ''
+    const summary = [
+      `技能：${record.skillName || record.skillId}`,
+      record.goalText ? `上次目标：${record.goalText}` : '',
+      record.outputDir ? `输出目录：${record.outputDir}` : '',
+      record.runStatePath ? `run_state：${record.runStatePath}` : '',
+      record.sceneScoresPath ? `scene_scores：${record.sceneScoresPath}` : '',
+      record.failureDetail ? `失败原因：${record.failureDetail}` : '',
+      resourceSummary ? `资源：${resourceSummary}` : '',
+    ].filter((item) => item.trim().length > 0).join('；')
+
+    return {
+      toolName,
+      skillId: record.skillId,
+      action,
+      success: record.status === 'done',
+      summary,
+      updatedAt: toContinuationUpdatedAt(record.updatedAt),
+    }
   }
 
   private resolveContinuationState(

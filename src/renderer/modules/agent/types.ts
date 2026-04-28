@@ -189,6 +189,8 @@ export interface ScopeRunTaskContinuation {
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
+  todoId?: string | null
+  todoTitle?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {

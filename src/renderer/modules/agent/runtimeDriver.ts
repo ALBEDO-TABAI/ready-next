@@ -1,4 +1,4 @@
-import { deriveScopeRunStatePatch, getActiveScopeRunState, isActiveScopePhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
+import { deriveScopeRunStatePatch, getActiveScopeRunState, isStreamingScopeRunState, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
@@ -83,7 +83,7 @@ export function syncActiveScopeRunAliases(
 ): Pick<{ isStreaming: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'toolTrace' | 'toolTraceStatus'> {
   const activeRunState = getActiveScopeRunState(state.scopeRunStates, state.currentScopeId)
   return {
-    isStreaming: isActiveScopePhase(activeRunState?.phase),
+    isStreaming: isStreamingScopeRunState(activeRunState),
     toolTrace: activeRunState?.toolTrace || [],
     toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
   }
@@ -930,7 +930,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
         const currentState = store.getState()
         if (currentState.currentScopeId === event.scopeId) {
-          if (event.type === 'started') {
+          const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
+          if (event.type === 'started' && !detachedJobEvent) {
             store.setState({ streamingRequestId: event.runId || currentState.streamingRequestId })
           }
           if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {

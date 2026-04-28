@@ -48,12 +48,16 @@ test('parseCommand tokenizes whitespace and preserves double-quoted segments', (
   assert.equal(parseCommand('   '), null)
 })
 
-test('SHELL_ALLOWLIST exposes the Phase 1 base whitelist', () => {
-  for (const expected of ['python', 'python3', 'node', 'bash', 'sh', 'cat', 'echo', 'pwd', 'which', 'yt-dlp', 'ffmpeg', 'ffprobe', 'scenedetect']) {
+test('SHELL_ALLOWLIST exposes the Phase 1 base whitelist without VEA-only binaries', () => {
+  for (const expected of ['python', 'python3', 'node', 'bash', 'sh', 'cat', 'echo', 'pwd', 'which']) {
     assert.ok(SHELL_ALLOWLIST.has(expected), `expected ${expected} in allowlist`)
   }
   // Commands known NOT to be in the Phase 1 list
   assert.equal(SHELL_ALLOWLIST.has('vim'), false)
+  assert.equal(SHELL_ALLOWLIST.has('yt-dlp'), false)
+  assert.equal(SHELL_ALLOWLIST.has('ffmpeg'), false)
+  assert.equal(SHELL_ALLOWLIST.has('ffprobe'), false)
+  assert.equal(SHELL_ALLOWLIST.has('scenedetect'), false)
   assert.equal(SHELL_ALLOWLIST.has('rm'), false)
   assert.equal(SHELL_ALLOWLIST.has('cp'), false)
   assert.equal(SHELL_ALLOWLIST.has('mv'), false)

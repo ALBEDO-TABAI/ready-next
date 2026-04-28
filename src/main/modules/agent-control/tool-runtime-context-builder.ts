@@ -4,6 +4,7 @@ import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
 import type { ToolContext } from '../tools/tool-executor'
 import type { ToolRuntimeContext } from './tool-runtime'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export function buildToolRuntimeContext(params: {
   browserController: BrowserController | null
@@ -15,8 +16,12 @@ export function buildToolRuntimeContext(params: {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal: AbortSignal
   sessionId?: string
+  scopeId?: string
+  runId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+  agentContext?: AgentSpawnContext | null
 }): ToolRuntimeContext {
+  const scopeId = params.scopeId || params.scope?.id || params.sessionId
   return {
     browserController: params.browserController,
     sidecarManager: params.sidecarManager,
@@ -27,7 +32,10 @@ export function buildToolRuntimeContext(params: {
     requestModuleToolAction: params.requestModuleToolAction,
     abortSignal: params.abortSignal,
     sessionId: params.sessionId,
+    scopeId,
+    runId: params.runId,
     registerRunCleanup: params.registerRunCleanup,
+    agentContext: params.agentContext ?? null,
   }
 }
 
@@ -42,6 +50,9 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     requestModuleToolAction: context.requestModuleToolAction,
     abortSignal: context.abortSignal,
     sessionId: context.sessionId,
+    scopeId: context.scopeId || context.scope?.id || context.sessionId,
+    runId: context.runId,
     registerRunCleanup: context.registerRunCleanup,
+    agentContext: context.agentContext ?? null,
   }
 }

@@ -123,6 +123,7 @@ test('continuation state survives an in-memory reset by reloading from disk', ()
       restoredUsage: true,
       grantedIterationSafetyFloor: false,
       grantedToolCallSafetyFloor: false,
+      grantedStepBudgetSafetyFloor: false,
     },
   })
 

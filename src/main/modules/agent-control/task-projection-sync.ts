@@ -50,25 +50,55 @@ function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState
   if (summary.interactionState) return summary.interactionState
   if (summary.phase === 'takeover') return 'human_takeover'
   if (summary.waitingFor === 'confirmation') return 'awaiting_confirmation'
-  if (summary.waitingFor === 'input') return 'awaiting_clarification'
+  if (summary.waitingFor === 'input' || summary.waitingFor === 'clarification') return 'awaiting_clarification'
   if (summary.phase === 'resuming') return 'resuming'
   return 'running'
 }
 
 function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status'] {
+  const interactionState = resolveInteractionState(summary)
+  const waitingForBlocker = Boolean(summary.waitingFor && summary.waitingFor !== 'none')
   if (summary.phase === 'queued') return 'queued'
-  if (summary.phase === 'done') return 'done'
-  if (summary.phase === 'error') return 'failed'
-  if (summary.phase === 'cancelled') return 'cancelled'
   if (
-    summary.phase === 'takeover'
-    || summary.blockedReason
-    || resolveInteractionState(summary) !== 'running'
-    || (summary.waitingFor && summary.waitingFor !== 'none')
+    waitingForBlocker
+    || summary.phase === 'takeover'
+    || interactionState === 'awaiting_clarification'
+    || interactionState === 'awaiting_confirmation'
+    || interactionState === 'human_takeover'
+    || interactionState === 'suspended'
   ) {
     return 'blocked'
   }
+  if (summary.phase === 'error') return 'failed'
+  if (summary.phase === 'cancelled') return 'cancelled'
+  if (summary.blockedReason) return 'blocked'
+  if (summary.phase === 'done') return 'done'
+  if (interactionState !== 'running') return 'blocked'
   return 'running'
+}
+
+function resolveResumableActions(
+  summary: ScopeRunSummary,
+  status: TaskProjectionRecord['status'],
+  previous?: TaskProjectionRecord | null,
+): ScopeRunSummary['resumableActions'] {
+  if (summary.resumableActions && summary.resumableActions.length > 0) return summary.resumableActions
+  if (status === 'failed') return ['retry']
+  if (status === 'blocked') {
+    if (previous?.resumableActions && previous.resumableActions.length > 0) return previous.resumableActions
+    if (summary.taskContinuation || previous?.continuationRef) return ['continue', 'cancel']
+  }
+  return []
+}
+
+function resolveContinuationRef(
+  summary: ScopeRunSummary,
+  status: TaskProjectionRecord['status'],
+  previous?: TaskProjectionRecord | null,
+): ScopeRunSummary['taskContinuation'] {
+  if (summary.taskContinuation) return summary.taskContinuation
+  if (status === 'blocked' || status === 'failed') return previous?.continuationRef || null
+  return null
 }
 
 function mapSteps(summary: ScopeRunSummary, previous?: TaskProjectionRecord | null): TaskStep[] {
@@ -280,6 +310,7 @@ export function buildTaskProjectionRecord(
       truthPatch?.waitingFor === 'input'
       || truthPatch?.waitingFor === 'confirmation'
       || truthPatch?.waitingFor === 'agent_result'
+      || truthPatch?.waitingFor === 'clarification'
       || truthPatch?.waitingFor === 'background'
       || truthPatch?.waitingFor === 'none'
     )
@@ -301,6 +332,12 @@ export function buildTaskProjectionRecord(
       : summary.recentArtifacts,
   }
 
+  const status = resolveStatus(effectiveSummary)
+  const blockedReason =
+    effectiveSummary.blockedReason
+    || (status === 'blocked' ? previous?.blockedReason : null)
+    || null
+
   return {
     taskId,
     scopeId: effectiveSummary.scopeId,
@@ -315,7 +352,7 @@ export function buildTaskProjectionRecord(
       || 'system',
     taskTitle: effectiveSummary.taskTitle ?? previous?.taskTitle ?? null,
     taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
-    status: resolveStatus(effectiveSummary),
+    status,
     interactionState: resolveInteractionState(effectiveSummary),
     steps: mapSteps(effectiveSummary, previous),
     currentStepId: effectiveSummary.currentStepId || null,
@@ -324,9 +361,9 @@ export function buildTaskProjectionRecord(
     budgetWarningLevel: effectiveSummary.budgetWarningLevel ?? effectiveSummary.executionDiagnostics?.budgetWarningLevel ?? null,
     recoveryHistory: mapRecoveryHistory(effectiveSummary),
     degradationReason: effectiveSummary.degradationReason ?? effectiveSummary.executionDiagnostics?.degradationReason ?? null,
-    blockedReason: effectiveSummary.blockedReason || null,
-    resumableActions: effectiveSummary.resumableActions || [],
-    continuationRef: effectiveSummary.taskContinuation || null,
+    blockedReason,
+    resumableActions: resolveResumableActions(effectiveSummary, status, previous),
+    continuationRef: resolveContinuationRef(effectiveSummary, status, previous),
     recentArtifacts: effectiveSummary.recentArtifacts || previous?.recentArtifacts || [],
     createdAt: previous?.createdAt || payload.timestamp,
     updatedAt: effectiveSummary.updatedAt,

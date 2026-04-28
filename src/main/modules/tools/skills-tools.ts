@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
@@ -7,10 +9,13 @@ import {
   type ToolExecutionOutput,
 } from '../agent-control/tool-result-types'
 import {
+  getLatestActiveSkillTaskRun,
+  hasActiveSkillTaskRun,
   readSkillTaskProjection,
   recordSkillTaskEvent,
   type SkillTaskEventStatus,
 } from '../agent-control/skill-task-tracker'
+import { getDetachedSkillTaskTracker } from '../agent-control/detached-skill-task-tracker'
 import type {
   SkillActionDefinition,
   SkillInputValue,
@@ -21,6 +26,7 @@ import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
   executeAskUser,
+  executeInspectRunState,
   executeReadArtifact,
   executeRunShell,
   executeWriteArtifact,
@@ -35,8 +41,15 @@ import {
   type ToolParam,
 } from './skill-tool-types'
 import { paramListToZodObject } from './paramList-to-zod'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
+
+interface SkillToolRuntimeContext {
+  scopeId?: string
+  runId?: string
+  agent?: string | null
+}
 
 const STATIC_TOOL_NAMES: Record<string, string> = {
   'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
@@ -69,6 +82,16 @@ function buildSkillToolDescription(skill: SkillState, action: SkillActionDefinit
     return `读取并应用技能 ${skill.name} 的方法说明，再继续完成当前任务。${skill.description}`
   }
   return `${skill.name} · ${skill.description} · ${action.description}`
+}
+
+export function resolveSkillActionTimeoutMs(skill: Pick<SkillState, 'hostRequirements'>, action: Pick<SkillActionDefinition, 'timeoutMs'>): number | undefined {
+  if (typeof action.timeoutMs === 'number' && Number.isFinite(action.timeoutMs) && action.timeoutMs > 0) {
+    return action.timeoutMs
+  }
+  const declared = skill.hostRequirements?.default_action_timeout_ms
+  return typeof declared === 'number' && Number.isFinite(declared) && declared > 0
+    ? declared
+    : undefined
 }
 
 /**
@@ -107,14 +130,17 @@ export function shouldExposeSkillAction(args: {
  * matches the armed hint, action name appears in the manifest's whitelist).
  * Any other internal action stays hidden.
  */
-function getSkillActionToolDefs(opts?: { referenceHintSkillId?: string | null }): SkillToolDef[] {
+function getSkillActionToolDefs(opts?: {
+  referenceHintSkillId?: string | null
+  includeInternal?: boolean
+}): SkillToolDef[] {
   const manager = getSkillsRuntimeManager()
   const hintSkillId = opts?.referenceHintSkillId ?? null
   return manager.listSkills().flatMap((skill) => {
     const exposeWhenArmed = skill.hostRequirements?.expose_when_hint_armed ?? []
     return skill.actions
       .filter((action) => shouldExposeSkillAction({
-        actionVisibility: action.visibility ?? 'public',
+        actionVisibility: opts?.includeInternal ? 'public' : (action.visibility ?? 'public'),
         actionName: action.name,
         skillId: skill.id,
         referenceHintSkillId: hintSkillId,
@@ -126,7 +152,8 @@ function getSkillActionToolDefs(opts?: { referenceHintSkillId?: string | null })
         kind: 'skill_action' as const,
         skillId: skill.id,
         action: action.name,
-        timeoutMs: action.timeoutMs,
+        visibility: action.visibility ?? 'public',
+        timeoutMs: resolveSkillActionTimeoutMs(skill, action),
         params: action.params,
       }))
   })
@@ -150,7 +177,7 @@ function computeSkillActionSignature(defs: SkillToolDef[]): string {
 
 export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> {
   try {
-    const defs = getSkillActionToolDefs()
+    const defs = getSkillActionToolDefs({ includeInternal: true })
     const sig = computeSkillActionSignature(defs)
     if (sig !== skillActionSchemaSignature) {
       const next: Record<string, ZodObject<ZodRawShape>> = {}
@@ -178,11 +205,14 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
  * Phase 4: skill_executions state machine retired. The 6 execution-control
  * tools (skill_get_state / skill_submit_* / skill_restart_from_step /
  * skill_cancel_execution) no longer exist. The LLM-facing tool list is now
- * just skill_action tools + the 4 skill primitives (gated by reference-skill
+ * just skill_action tools + skill primitives (gated by reference-skill
  * hint presence).
  */
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
+  // B-plan: only running/blocked skill_task_runs count as active. Terminal
+  // projection state must not keep primitives exposed forever.
+  const hasActiveSkillTaskProjection = (sid: string) => hasActiveSkillTaskRun(sid)
 
   const primitiveTools = filterSkillPrimitivesBySession(
     PRIMITIVE_TOOL_DEFS,
@@ -190,11 +220,16 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
     // Phase 4: hasActiveExecution is permanently false — no execution state.
     () => false,
     hasReferenceHint,
+    hasActiveSkillTaskProjection,
   )
   // B2: pass referenceHintSkillId through so internal actions whitelisted
   // via host_requirements.expose_when_hint_armed surface for the LLM.
   const referenceHintSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
   return [...getSkillActionToolDefs({ referenceHintSkillId }), ...primitiveTools]
+}
+
+export function getSkillToolDefsForRegistry(sessionId?: string): SkillToolDef[] {
+  return getSkillToolDefs(sessionId)
 }
 
 /**
@@ -269,6 +304,8 @@ function resolvePrimitiveSkillId(sessionId?: string): string | null {
   if (!sessionId) return null
   const hint = getLastReferenceSkill(sessionId)
   if (hint && hint.id) return hint.id
+  const activeRun = getLatestActiveSkillTaskRun(sessionId)
+  if (activeRun?.skillId) return activeRun.skillId
   return null
 }
 
@@ -280,6 +317,201 @@ function findSkillName(manager: ReturnType<typeof getSkillsRuntimeManager>, skil
 function artifactLabel(path?: string | null): string | null {
   if (!path) return null
   return path.split(/[\\/]/).pop() || path
+}
+
+function goalTextFromParams(toolName: string, action: string | undefined, params?: Record<string, unknown> | null): string | null {
+  if (!params) return null
+  for (const key of ['goal', 'goalText', 'prompt', 'instruction', 'task', 'query']) {
+    const value = asString(params[key])
+    if (value) return value
+  }
+  const source = asString(params.url) || asString(params.source) || asString(params.sceneScoresPath)
+  if (source) return `${action || toolName}: ${source}`
+  const command = asString(params.command)
+  if (command) return `${toolName}: ${command}`
+  return null
+}
+
+function resourceRefsFromParams(params?: Record<string, unknown> | null): unknown[] {
+  if (!params) return []
+  const refs: unknown[] = []
+  const pushString = (type: string, key: string): void => {
+    const value = asString(params[key])
+    if (value) refs.push({ type, key, value })
+  }
+  pushString('url', 'url')
+  pushString('source', 'source')
+  pushString('file', 'sceneScoresPath')
+  pushString('directory', 'outputDir')
+  pushString('command', 'command')
+  if (Array.isArray(params.resources)) {
+    refs.push(...params.resources)
+  }
+  return refs
+}
+
+function normalizeRunStateStatus(value: unknown): 'blocked' | 'error' | null {
+  const status = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['blocked', 'pending_review', 'awaiting_input'].includes(status)) return 'blocked'
+  if (['failed', 'failure', 'error'].includes(status)) return 'error'
+  return null
+}
+
+function findStatusInObject(value: unknown, depth = 0): 'blocked' | 'error' | null {
+  if (depth > 4 || !value || typeof value !== 'object') return null
+  const rec = value as Record<string, unknown>
+  const direct = normalizeRunStateStatus(rec.status)
+  if (direct) return direct
+  for (const key of ['run_state', 'runState', 'projection', 'data', 'summary']) {
+    const nested = findStatusInObject(rec[key], depth + 1)
+    if (nested) return nested
+  }
+  return null
+}
+
+function parseJsonCandidates(text: string): unknown[] {
+  const values: unknown[] = []
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  for (const line of lines) {
+    if (!line.startsWith('{') || !line.endsWith('}')) continue
+    try {
+      values.push(JSON.parse(line) as unknown)
+    } catch {
+      // ignore non-json log lines
+    }
+  }
+  const trimmed = text.trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      values.push(JSON.parse(trimmed) as unknown)
+    } catch {
+      // ignore
+    }
+  }
+  return values
+}
+
+function stringFromRecord(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object') return null
+  const rec = value as Record<string, unknown>
+  const raw = rec[key]
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+}
+
+function collectRunStatePaths(data: Record<string, unknown>, text: string): string[] {
+  const values: unknown[] = [data, ...parseJsonCandidates(text)]
+  const paths: string[] = []
+  for (const value of values) {
+    const direct = stringFromRecord(value, 'runStatePath') || stringFromRecord(value, 'run_state_path')
+    if (direct) paths.push(direct)
+    const outputDir = stringFromRecord(value, 'outputDir') || stringFromRecord(value, 'output_dir')
+    if (outputDir) paths.push(`${outputDir.replace(/\/+$/, '')}/run_state.json`)
+    if (value && typeof value === 'object') {
+      const rec = value as Record<string, unknown>
+      const runState = rec.run_state || rec.runState
+      const nestedPath = stringFromRecord(runState, 'path') || stringFromRecord(runState, 'runStatePath')
+      if (nestedPath) paths.push(nestedPath)
+    }
+  }
+  return Array.from(new Set(paths))
+}
+
+function readRunStateStatus(path: string): 'blocked' | 'error' | null {
+  try {
+    if (!existsSync(path)) return null
+    const raw = readFileSync(path, 'utf-8')
+    return findStatusInObject(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function hasFailureSignalInText(text: string): boolean {
+  const normalized = String(text || '')
+  if (!normalized.trim()) return false
+  return [
+    /\bHTTP\s*(?:status\s*)?(?:401|403)\b/i,
+    /\b(?:401|403)\b[^\n]*(?:unauthorized|forbidden|provider|api|key)/i,
+    /\b(?:unauthorized|forbidden)\b/i,
+    /\binvalid\s+(?:api\s*)?key\b/i,
+    /\bapi\s*key\s*(?:invalid|missing|unauthorized)\b/i,
+    /\bprovider[_\s-]*(?:missing|error|unauthorized|invalid)\b/i,
+    /\bquota(?:\s+exceeded)?\b/i,
+    /\btraceback\s*\(most recent call last\)/i,
+    /\b(?:exception|fatal)\b/i,
+    /(?:^|\n)\s*(?:error|failed|failure):/i,
+  ].some((pattern) => pattern.test(normalized))
+}
+
+export function inferSkillRunStatusFromOutput(output: ToolExecutionOutput): SkillTaskEventStatus {
+  const data = output.data && typeof output.data === 'object' ? output.data as Record<string, unknown> : {}
+  const fromData = findStatusInObject(data)
+  if (fromData) return fromData
+  const combinedText = [
+    typeof data.stdout === 'string' ? data.stdout : '',
+    typeof data.stderr === 'string' ? data.stderr : '',
+    output.text,
+  ].join('\n')
+  for (const parsed of parseJsonCandidates(combinedText)) {
+    const fromJson = findStatusInObject(parsed)
+    if (fromJson) return fromJson
+  }
+  for (const path of collectRunStatePaths(data, combinedText)) {
+    const fromFile = readRunStateStatus(path)
+    if (fromFile) return fromFile
+  }
+  const exitCode = typeof data.exitCode === 'number' ? data.exitCode : 0
+  if (exitCode === 0 && hasFailureSignalInText(combinedText)) return 'error'
+  return exitCode === 0 ? 'done' : 'error'
+}
+
+function outputPathsFromToolOutput(output?: ToolExecutionOutput): {
+  outputDir?: string | null
+  runStatePath?: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+} {
+  const data = output?.data && typeof output.data === 'object' ? output.data as Record<string, unknown> : {}
+  const runStatePath = stringFromRecord(data, 'runStatePath') || stringFromRecord(data, 'run_state_path')
+  const outputDir = stringFromRecord(data, 'outputDir') || stringFromRecord(data, 'output_dir') || (runStatePath ? dirname(runStatePath) : null)
+  return {
+    outputDir,
+    runStatePath,
+    sceneScoresPath: stringFromRecord(data, 'sceneScoresPath') || stringFromRecord(data, 'scene_scores_path'),
+    deliveryReportPath: stringFromRecord(data, 'deliveryReportPath') || stringFromRecord(data, 'delivery_report_path'),
+  }
+}
+
+function buildSkillRunArtifacts(result: {
+  outputDir?: string
+  outputs?: Record<string, string>
+}, toolName: string): Array<{ path: string; label: string; kind?: string; meta?: Record<string, unknown> }> {
+  const labels: Record<string, string> = {
+    outputDir: '技能输出目录',
+    runStatePath: 'run_state.json',
+    sceneScoresPath: 'scene_scores.json',
+    deliveryReportPath: '交付报告',
+  }
+  const outputs = result.outputs || {}
+  const entries = Object.entries(outputs)
+    .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+  if (result.outputDir && !entries.some(([key, value]) => key === 'outputDir' || value === result.outputDir)) {
+    entries.unshift(['outputDir', result.outputDir])
+  }
+  return entries.map(([key, value]) => ({
+    path: value,
+    label: labels[key] || artifactLabel(value) || key,
+    kind: key === 'outputDir' ? 'directory' : 'artifact',
+    meta: {
+      outputKey: key,
+      toolName,
+    },
+  }))
+}
+
+function detachedTaskBelongsToSession(record: { scopeId?: string | null; sessionId?: string | null }, sessionId?: string): boolean {
+  if (!sessionId) return false
+  return record.scopeId === sessionId || record.sessionId === sessionId
 }
 
 function attachSkillProjection(output: string | ToolExecutionOutput, params: {
@@ -298,14 +530,19 @@ function attachSkillProjection(output: string | ToolExecutionOutput, params: {
 }
 
 function recordPrimitiveOutcome(params: {
+  scopeId?: string
   sessionId?: string
+  runId?: string | null
+  agent?: string | null
   skillId?: string | null
   skillName?: string
   toolName: string
+  stepId?: string
   status: SkillTaskEventStatus
   message?: string
   output?: ToolExecutionOutput
-}): void {
+  params?: Record<string, unknown> | null
+}): { stepId: string } {
   const data = params.output?.data || {}
   const artifactPath = typeof data.absolutePath === 'string'
     ? data.absolutePath
@@ -314,16 +551,36 @@ function recordPrimitiveOutcome(params: {
       : typeof data.stderrArtifactPath === 'string'
         ? data.stderrArtifactPath
         : null
-  recordSkillTaskEvent({
+  const recorded = recordSkillTaskEvent({
+    scopeId: params.scopeId,
     sessionId: params.sessionId,
+    runId: params.runId,
+    agent: params.agent,
     skillId: params.skillId || undefined,
     skillName: params.skillName,
     toolName: params.toolName,
+    action: params.toolName,
+    runKind: 'primitive',
+    stepId: params.stepId,
     status: params.status,
     message: params.message,
+    params: params.params || null,
+    goalText: goalTextFromParams(params.toolName, params.toolName, params.params),
+    resourceRefs: resourceRefsFromParams(params.params),
     artifactPath,
     artifactLabel: artifactLabel(artifactPath),
+    ...outputPathsFromToolOutput(params.output),
   })
+  if (params.skillId && params.status !== 'running') {
+    rememberSkillRun(params.sessionId, {
+      toolName: params.toolName,
+      skillId: params.skillId,
+      action: params.toolName,
+      success: params.status === 'done',
+      summary: (params.message || params.output?.text || params.toolName).slice(0, 240),
+    })
+  }
+  return recorded
 }
 
 export function getSkillAnthropicTools(sessionId?: string): Array<Record<string, unknown>> {
@@ -337,11 +594,18 @@ export function getSkillOpenAITools(sessionId?: string): Array<Record<string, un
 // Handler lookup always sees the full skill tool set (action + primitives).
 // Gating is a LISTING concern, not an execution concern.
 export function findSkillToolByName(toolName: string): SkillToolDef | null {
-  return getSkillToolDefs().find((item) => item.name === toolName) || null
+  return findSkillToolByNameForExecution(toolName)
+}
+
+export function findSkillToolByNameForExecution(toolName: string): SkillToolDef | null {
+  const actionTool = getSkillActionToolDefs({ includeInternal: true })
+    .find((item) => item.name === toolName)
+  if (actionTool) return actionTool
+  return PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName) || null
 }
 
 export function findSkillToolBySkillAction(skillId: string, actionName?: string): SkillToolDef | null {
-  const defs = getSkillActionToolDefs().filter((item) => item.skillId === skillId)
+  const defs = getSkillActionToolDefs({ includeInternal: true }).filter((item) => item.skillId === skillId)
   if (!actionName) return defs[0] || null
   return defs.find((item) => item.action === actionName) || defs[0] || null
 }
@@ -356,6 +620,8 @@ export async function executeSkillTool(
   // orphaned workflow — is gone along with the state machine).
   _registerRunCleanup?: (cleanup: () => void | Promise<void>) => void,
   abortSignal?: AbortSignal,
+  agentContext?: AgentSpawnContext | null,
+  runtimeContext?: SkillToolRuntimeContext,
 ): Promise<string | ToolExecutionOutput> {
   const tool = findSkillToolByName(toolName)
   if (!tool) {
@@ -368,8 +634,11 @@ export async function executeSkillTool(
     const skillId = resolvePrimitiveSkillId(sessionId)
     const skillName = findSkillName(manager, skillId)
     if (tool.name === 'skill_ask_user') {
-      recordPrimitiveOutcome({
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
         sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
         skillId,
         skillName,
         toolName,
@@ -393,10 +662,14 @@ export async function executeSkillTool(
           },
         )
         recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
           sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
           skillId,
           skillName,
           toolName,
+          stepId: started.stepId,
           status: 'done',
           message: '用户已回复',
           output,
@@ -404,15 +677,61 @@ export async function executeSkillTool(
         return attachSkillProjection(output, { sessionId, skillId: skillId || undefined })
       } catch (error) {
         recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
           sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
           skillId,
           skillName,
           toolName,
+          stepId: started.stepId,
           status: 'error',
           message: error instanceof Error ? error.message : String(error),
         })
         throw error
       }
+    }
+    if (tool.name === 'skill_inspect_detached') {
+      const tracker = getDetachedSkillTaskTracker()
+      const taskId = asString(args.taskId)
+      const record = tracker?.inspect(taskId) || null
+      if (!record) {
+        return createToolExecutionOutput(`Detached skill task not found: ${taskId}`, {
+          shape: 'json',
+          data: { errorKind: 'detached_task_not_found', taskId },
+        })
+      }
+      if (!detachedTaskBelongsToSession(record, sessionId)) {
+        return createToolExecutionOutput(`Detached skill task is not available in this session: ${taskId}`, {
+          shape: 'json',
+          data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
+        })
+      }
+      return createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
+        shape: 'json',
+        data: { task: record },
+      })
+    }
+    if (tool.name === 'skill_cancel_detached') {
+      const tracker = getDetachedSkillTaskTracker()
+      const taskId = asString(args.taskId)
+      const record = tracker?.cancel(taskId) || null
+      if (!record) {
+        return createToolExecutionOutput(`Detached skill task not found: ${taskId}`, {
+          shape: 'json',
+          data: { errorKind: 'detached_task_not_found', taskId },
+        })
+      }
+      if (!detachedTaskBelongsToSession(record, sessionId)) {
+        return createToolExecutionOutput(`Detached skill task is not available in this session: ${taskId}`, {
+          shape: 'json',
+          data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
+        })
+      }
+      return createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
+        shape: 'json',
+        data: { task: record },
+      })
     }
     if (!skillId) {
       return createToolExecutionOutput(
@@ -427,12 +746,137 @@ export async function executeSkillTool(
         },
       )
     }
+    if (tool.name === 'skill_start_detached') {
+      const tracker = getDetachedSkillTaskTracker()
+      if (!tracker) {
+        return createToolExecutionOutput('Detached skill task runtime is not ready.', {
+          shape: 'json',
+          data: { errorKind: 'detached_task_runtime_unavailable' },
+        })
+      }
+      const requestedAction = asString(args.action)
+      let action = requestedAction
+      const params = args.params && typeof args.params === 'object' && !Array.isArray(args.params)
+        ? { ...(args.params as Record<string, unknown>) }
+        : {}
+      let actionTool: SkillToolDef | null = null
+      if (requestedAction.startsWith('skill_')) {
+        const resolvedTool = findSkillToolByNameForExecution(requestedAction)
+        if (resolvedTool?.kind === 'skill_action' && resolvedTool.skillId === skillId && resolvedTool.action) {
+          actionTool = resolvedTool
+          action = resolvedTool.action
+        }
+      } else {
+        actionTool = findSkillToolBySkillAction(skillId, action)
+      }
+      const skillDef = manager.listSkills().find((skill) => skill.id === skillId)
+      const referenceHintSkillId = sessionId ? getLastReferenceSkill(sessionId)?.id ?? null : null
+      // Phase 4.4 — split the old `detached_task_action_not_allowed` blob into
+      // four specific errorKinds so the model can self-diagnose:
+      //   - skill_not_loaded     (skill manifest never loaded — try later or check install)
+      //   - skill_action_unknown (skill loaded but no action by that name)
+      //   - hint_required        (action is internal-only and the session has no
+      //                           reference hint armed for this skill)
+      //   - visibility_internal  (action visibility=internal AND not in
+      //                           expose_when_hint_armed allowlist)
+      // Audit Phase 4 §C3 — prior taxonomy collapsed all four causes into
+      // one opaque "action not allowed" message, leaving the model unable to
+      // tell "skill not installed yet, retry in a sec" from "this action is
+      // permanently internal".
+      let detachedReject: { errorKind: string; reason: string } | null = null
+      if (!action || actionTool?.kind !== 'skill_action' || actionTool.skillId !== skillId || actionTool.action !== action) {
+        detachedReject = {
+          errorKind: 'detached_task_skill_action_unknown',
+          reason: `No typed action "${requestedAction}" exposed for skill ${skillId}.`,
+        }
+      } else if (!skillDef) {
+        detachedReject = {
+          errorKind: 'detached_task_skill_not_loaded',
+          reason: `Skill ${skillId} is not in the loaded manifest list. It may still be installing or the manifest failed to load.`,
+        }
+      } else if (
+        !shouldExposeSkillAction({
+          actionVisibility: actionTool.visibility || 'public',
+          actionName: action,
+          skillId,
+          referenceHintSkillId,
+          exposeWhenHintArmed: skillDef.hostRequirements?.expose_when_hint_armed ?? [],
+        })
+      ) {
+        const isInternal = (actionTool.visibility || 'public') === 'internal'
+        const armedForThisSkill = referenceHintSkillId === skillId
+        if (isInternal && !armedForThisSkill && (skillDef.hostRequirements?.expose_when_hint_armed ?? []).includes(action)) {
+          detachedReject = {
+            errorKind: 'detached_task_hint_required',
+            reason: `Action "${action}" requires a reference-skill hint for ${skillId} to be armed. The skill's SKILL.md was not inlined this session — re-trigger the skill (e.g. mention it by name) to arm the hint.`,
+          }
+        } else {
+          detachedReject = {
+            errorKind: 'detached_task_visibility_internal',
+            reason: `Action "${action}" is marked visibility=internal and is not in expose_when_hint_armed. Use a public action of skill ${skillId} instead.`,
+          }
+        }
+      }
+      if (detachedReject) {
+        return createToolExecutionOutput(`Cannot start detached skill action: ${detachedReject.reason}`, {
+          shape: 'json',
+          data: {
+            errorKind: detachedReject.errorKind,
+            skillId,
+            action: requestedAction,
+            referenceHintSkillId,
+          },
+        })
+      }
+      try {
+        const record = tracker.start({
+          scopeId: sessionId || null,
+          sessionId: sessionId || null,
+          skillId,
+          action,
+          params,
+        })
+        recordSkillTaskEvent({
+          sessionId,
+          skillId,
+          skillName,
+          toolName,
+          status: 'running',
+          message: `后台技能任务已启动：${record.id}`,
+        })
+        return createToolExecutionOutput(`Detached skill task started: ${record.id}`, {
+          shape: 'json',
+          data: { task: record },
+          projectionPatch: buildSkillProjectionPatch({ sessionId, skillId }),
+        })
+      } catch (error) {
+        return createToolExecutionOutput('Detached skill task failed to start.', {
+          shape: 'json',
+          data: {
+            errorKind: 'detached_task_start_failed',
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        })
+      }
+    }
     if (tool.name === 'skill_run_shell') {
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+        message: asString(args.command) || '执行技能脚本',
+        params: args,
+      })
       try {
         // B-arch-4 — when the active reference-skill declares
         // host_requirements.shell_allowlist_extensions, fold them into the
-        // base SHELL_ALLOWLIST so skill-specific commands (e.g. ffmpeg for
-        // video skills, when added) are accepted only while that hint is
+        // base SHELL_ALLOWLIST so skill-specific diagnostic commands are
+        // accepted only while that hint is
         // armed. Other sessions / non-skill tool calls keep the base list.
         const referenceSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
         const skillDef = manager.listSkills().find((skill) => skill.id === skillId)
@@ -457,21 +901,49 @@ export async function executeSkillTool(
             effectiveAllowlist,
           },
         )
-        recordPrimitiveOutcome({ sessionId, skillId, skillName, toolName, status: 'done', output })
-        return attachSkillProjection(output, { sessionId, skillId })
-      } catch (error) {
+        const status = inferSkillRunStatusFromOutput(output)
         recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
           sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
           skillId,
           skillName,
           toolName,
+          stepId: started.stepId,
+          status,
+          output,
+          params: args,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
           status: 'error',
           message: error instanceof Error ? error.message : String(error),
+          params: args,
         })
         throw error
       }
     }
     if (tool.name === 'skill_write_artifact') {
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+      })
       try {
         const output = await executeWriteArtifact(
           {
@@ -481,14 +953,29 @@ export async function executeSkillTool(
           },
           { skillId },
         )
-        recordPrimitiveOutcome({ sessionId, skillId, skillName, toolName, status: 'done', output })
-        return attachSkillProjection(output, { sessionId, skillId })
-      } catch (error) {
         recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
           sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
           skillId,
           skillName,
           toolName,
+          stepId: started.stepId,
+          status: 'done',
+          output,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
           status: 'error',
           message: error instanceof Error ? error.message : String(error),
         })
@@ -496,6 +983,16 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_read_artifact') {
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+      })
       try {
         const output = await executeReadArtifact(
           {
@@ -504,14 +1001,76 @@ export async function executeSkillTool(
           },
           { skillId },
         )
-        recordPrimitiveOutcome({ sessionId, skillId, skillName, toolName, status: 'done', output })
-        return attachSkillProjection(output, { sessionId, skillId })
-      } catch (error) {
         recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
           sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
           skillId,
           skillName,
           toolName,
+          stepId: started.stepId,
+          status: 'done',
+          output,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+    }
+    if (tool.name === 'skill_inspect_run_state') {
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+      })
+      try {
+        const output = await executeInspectRunState({
+          outputDir: typeof args.outputDir === 'string' ? args.outputDir : undefined,
+          taskId: typeof args.taskId === 'string' ? args.taskId : undefined,
+          maxRawBytes: typeof args.maxRawBytes === 'number' ? args.maxRawBytes : undefined,
+        })
+        const status = inferSkillRunStatusFromOutput(output)
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status,
+          output,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
           status: 'error',
           message: error instanceof Error ? error.message : String(error),
         })
@@ -524,20 +1083,43 @@ export async function executeSkillTool(
   // Phase 4: execution_control (skill_get_state / skill_submit_* /
   // skill_restart_from_step / skill_cancel_execution) branch retired.
 
+  const started = recordSkillTaskEvent({
+    scopeId: runtimeContext?.scopeId,
+    sessionId,
+    runId: runtimeContext?.runId,
+    agent: runtimeContext?.agent,
+    skillId: tool.skillId || undefined,
+    skillName: findSkillName(manager, tool.skillId),
+    toolName,
+    action: tool.action || '',
+    runKind: 'typed_action',
+    status: 'running',
+    params: args,
+    goalText: goalTextFromParams(toolName, tool.action || '', args),
+    resourceRefs: resourceRefsFromParams(args),
+  })
   const result = await manager.runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
     params: args,
     timeoutMs: tool.timeoutMs,
+    signal: abortSignal,
     triggerType: 'tool',
     sessionId,
+    agentContext,
   })
   const formatted = formatRunResult(result)
   recordSkillTaskEvent({
+    scopeId: runtimeContext?.scopeId,
     sessionId,
+    runId: runtimeContext?.runId,
+    agent: runtimeContext?.agent,
     skillId: tool.skillId || undefined,
     skillName: findSkillName(manager, tool.skillId),
     toolName,
+    action: tool.action || '',
+    runKind: 'typed_action',
+    stepId: started.stepId,
     // B-arch-4 — when SkillRunResult.status is populated by
     // SkillHostController.detectStatus, propagate it (so 'blocked' surfaces in
     // the task projection). Falls back to the legacy success-mapping when the
@@ -546,6 +1128,17 @@ export async function executeSkillTool(
     message: result.success ? undefined : result.error || result.stderr || '技能执行失败',
     artifactPath: result.outputDir || undefined,
     artifactLabel: result.outputDir ? '技能输出目录' : undefined,
+    artifacts: buildSkillRunArtifacts(result, toolName),
+    params: args,
+    outputDir: result.outputDir || result.outputs?.outputDir || null,
+    runStatePath: result.outputs?.runStatePath || null,
+    sceneScoresPath: result.outputs?.sceneScoresPath || null,
+    deliveryReportPath: result.outputs?.deliveryReportPath || null,
+    failureKind: result.success ? null : 'skill_action_failed',
+    failureDetail: result.success ? null : result.error || result.stderr || null,
+    goalText: goalTextFromParams(toolName, tool.action || '', args),
+    resourceRefs: resourceRefsFromParams(args),
+    jobId: result.jobId || null,
   })
   rememberSkillRun(sessionId, {
     toolName,

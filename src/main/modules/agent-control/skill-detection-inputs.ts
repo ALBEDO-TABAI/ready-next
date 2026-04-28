@@ -1,3 +1,5 @@
+import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon'
+
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -10,23 +12,42 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
   return result
 }
 
+/**
+ * Phase 2.2 — fresh-request markers reject liberal matches that look like
+ * NEW asks even though they start with a continuation root. Without this,
+ * "继续帮我搜索一下" or "继续，我想换个方向" would auto-attach recall and arm
+ * the previous skill's hint, polluting the next turn. Hoisted to a constant
+ * so it's grep-able when adding new markers.
+ */
+const FRESH_REQUEST_MARKERS = /[?？!!@()<>《》【】\[\]]|帮(我|忙)|请(帮|你|给)|我想|我要|可以吗|能不能|怎么|为什么|什么|哪个|多少|搜索|查询|查一下|搜一下|换个|换成|换一/
+
 export function isRetryOnlyTurn(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
-  if (normalized.length > 32) return false
-  // Strict short forms (historical contract — kept verbatim)
-  const strictTail = /^(再?重试(一次|一下)?|再试(一次|一下)?|再来(一次|一下)?|重新(试|来|开始)|继续(一下|处理|执行|刚才|上次|当前|这个|任务)?|接着(来|做|处理|执行)?|恢复(上次|刚才|当前)?|try again|retry|continue|resume)$/i
-  if (strictTail.test(normalized)) return true
-  // skill-resume G1 — liberal extension for natural Chinese continuation
+  // Phase 2.2 — hard cap raised 32→48 so natural Chinese phrasings like
+  // "从头重新跑一次看看刚才的任务" still get a chance at the liberal path.
+  // Anything above 48 chars almost certainly carries new instructions and
+  // should be treated as a fresh task.
+  if (normalized.length > 48) return false
+  // Strict short forms — bare resume commands ("继续", "重新跑一次",
+  // "从头跑一轮"). The lexicon is the single source for what counts.
+  if (matchesResumeIntent(normalized, 'strict')) return true
+  // Phase 2.2 — liberal extension for natural Chinese continuation
   // phrasings that the strict regex misses, e.g.
   //   "继续之前任务", "继续上次的视频分析", "接着上次做",
-  //   "继续未完成的任务", "继续完成视频分析"
-  // Constraints to avoid false positives: short text (≤24 chars), starts with
-  // a continuation root, contains no question/fresh-request markers.
-  if (normalized.length > 24) return false
-  if (!/^(继续|接着|恢复|再来|重做|继续完成|接着做|接着完成)/.test(normalized)) return false
-  if (/[?？!!@()<>《》【】\[\]]|帮(我|忙)|请(帮|你|给)|我想|我要|可以吗|能不能|怎么|为什么|什么|哪个|多少|搜索|查询|查一下|搜一下|换个|换成|换一/.test(normalized)) return false
+  //   "继续未完成的任务", "继续完成视频分析",
+  //   "重新跑一次刚才的", "从头重新跑一次".
+  // Constraints to avoid false positives: short text (≤32 chars, was 24),
+  // starts with a continuation root, contains no question/fresh-request
+  // markers.
+  if (normalized.length > 32) return false
+  if (!matchesResumeIntent(normalized, 'liberal')) return false
+  if (FRESH_REQUEST_MARKERS.test(normalized)) return false
   return true
+}
+
+export function isConfigRepairTurn(text: string): boolean {
+  return matchesConfigRepairIntent(text)
 }
 
 export function buildSkillDetectionInputs(params: {
@@ -48,11 +69,31 @@ export function buildSkillDetectionInputs(params: {
     params.primaryInstruction,
     params.pureUserText,
   ])
-  const shouldReuseRecentGoals = currentInputs.some(isRetryOnlyTurn)
+  // Phase 2.3 — detect retry-only on the SHORT primary+pure pair, not on
+  // contextualUserInput. contextualUserInput often inherits a previous turn's
+  // widget-attachment text (`### Widget 更新上下文`, `--- 文档内容开始 ---`
+  // blobs), which is dozens of KB and would never match isRetryOnlyTurn even
+  // when the user's actual ask ("继续") clearly does. Audit Phase 2 §B3.
+  //
+  // Fallback: if a caller doesn't pass primary/pure (some test fixtures and
+  // legacy code paths), fall back to currentInputs so detection still runs.
+  // The widget-pollution risk only exists when contextualUserInput is large
+  // AND a separate primary/pure conveys the real ask; in the fallback path
+  // contextualUserInput IS the only signal, so we keep it.
+  const retryProbes = uniqueNonEmpty([params.primaryInstruction, params.pureUserText])
+  const probesForRetryCheck = retryProbes.length > 0 ? retryProbes : currentInputs
+  const shouldReuseRecentGoals = probesForRetryCheck.some((text) =>
+    isRetryOnlyTurn(text) || isConfigRepairTurn(text),
+  )
   if (!shouldReuseRecentGoals) return currentInputs
 
+  // Phase 2.3 — when retry confirmed via primary/pure: drop contextualUserInput
+  // from the appended inputs (widget pollution). When confirmed via the
+  // currentInputs fallback (no primary/pure): keep currentInputs as-is so we
+  // don't silently lose the user's command.
+  const baseInputs = retryProbes.length > 0 ? retryProbes : currentInputs
   return uniqueNonEmpty([
-    ...currentInputs,
+    ...baseInputs,
     ...(params.previousPureUserInputs || []).slice(0, 6),
     ...(params.previousAssistantSkillToolUses || []).slice(0, 5),
   ])

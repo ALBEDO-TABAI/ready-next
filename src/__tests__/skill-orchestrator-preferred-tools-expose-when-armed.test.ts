@@ -20,6 +20,7 @@ import {
 const VEA_SKILL = {
   id: 'video-expert-analyzer',
   name: 'Video Expert Analyzer (VNext)',
+  description: '长视频深度分析与场景评分',
   executionMode: 'advisory' as const,
   hostRequirements: {
     expose_when_hint_armed: ['video_expert_pipeline', 'video_expert_ai_analyze'],
@@ -28,6 +29,17 @@ const VEA_SKILL = {
     { name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] },
     { name: 'video_expert_pipeline', visibility: 'internal', runtime: 'subprocess', params: [] },
     { name: 'video_expert_ai_analyze', visibility: 'internal', runtime: 'subprocess', params: [] },
+  ],
+}
+
+const VIDEO_COPY_SKILL = {
+  id: 'video-copy-analyzer',
+  name: 'Video Copy Analyzer',
+  description: '视频分析与文案拆解',
+  executionMode: 'advisory' as const,
+  actions: [
+    { name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] },
+    { name: 'video_copy_analyze', visibility: 'public', runtime: 'subprocess', params: [] },
   ],
 }
 
@@ -43,9 +55,103 @@ function makeOrchestrator() {
   })
 }
 
+function makeOrchestratorWithStaticVeaToolNames() {
+  return new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [VEA_SKILL] as never,
+    resolveSkillToolByAction: (_skillId, actionName) => ({
+      name: actionName === 'video_expert_pipeline'
+        ? 'skill_video_expert_pipeline'
+        : actionName === 'video_expert_ai_analyze'
+          ? 'skill_video_expert_ai_analyze'
+          : `skill_${actionName}`,
+      action: actionName,
+      params: [],
+    }),
+  })
+}
+
+function makeOrchestratorWithCompetingVideoSkill() {
+  return new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [VEA_SKILL, VIDEO_COPY_SKILL] as never,
+    resolveSkillToolByAction: (_skillId, actionName) => ({
+      name: actionName === 'video_expert_pipeline'
+        ? 'skill_video_expert_pipeline'
+        : actionName === 'video_expert_ai_analyze'
+          ? 'skill_video_expert_ai_analyze'
+          : actionName === 'video_copy_analyze'
+            ? 'skill_video_copy_analyze'
+            : `skill_${actionName}`,
+      action: actionName,
+      params: [],
+    }),
+  })
+}
+
 describe('skill-resume G6 — buildPreferredSkillToolNames honors expose_when_hint_armed', () => {
   beforeEach(() => {
     _resetLastReferenceSkillHintsForTests()
+  })
+
+  it('includes VEA typed actions for retry-only text when the restored hint is armed', () => {
+    const sessionId = 'session-restored-vea'
+    rememberLastReferenceSkill(sessionId, { id: 'video-expert-analyzer', name: VEA_SKILL.name })
+
+    const orchestrator = makeOrchestratorWithStaticVeaToolNames()
+    const tools = orchestrator.buildPreferredSkillToolNames('继续', sessionId)
+
+    assert.ok(tools.includes('skill_video_expert_pipeline'))
+    assert.ok(tools.includes('skill_video_expert_ai_analyze'))
+  })
+
+  it('does not include VEA typed actions for retry-only text when another hint is armed', () => {
+    const sessionId = 'session-restored-rss'
+    rememberLastReferenceSkill(sessionId, { id: 'lets-go-rss', name: 'lets-go-rss' })
+
+    const orchestrator = makeOrchestratorWithStaticVeaToolNames()
+    const tools = orchestrator.buildPreferredSkillToolNames('继续', sessionId)
+
+    assert.equal(tools.includes('skill_video_expert_pipeline'), false)
+    assert.equal(tools.includes('skill_video_expert_ai_analyze'), false)
+  })
+
+  it('does not let an armed hint prefer VEA typed actions for a fresh unrelated task', () => {
+    const sessionId = 'session-restored-vea-fresh-task'
+    rememberLastReferenceSkill(sessionId, { id: 'video-expert-analyzer', name: VEA_SKILL.name })
+
+    const orchestrator = makeOrchestratorWithStaticVeaToolNames()
+    const tools = orchestrator.buildPreferredSkillToolNames('帮我写一段新的产品文案', sessionId)
+
+    assert.equal(tools.includes('skill_video_expert_pipeline'), false)
+    assert.equal(tools.includes('skill_video_expert_ai_analyze'), false)
+  })
+
+  it('replaces an unrelated hint when a fresh concrete video task matches VEA', () => {
+    const sessionId = 'session-restored-rss-then-vea-task'
+    rememberLastReferenceSkill(sessionId, { id: 'lets-go-rss', name: 'lets-go-rss' })
+
+    const orchestrator = makeOrchestratorWithStaticVeaToolNames()
+    const taskText = '分析这个视频 https://www.youtube.com/watch?v=4qkyxm4jppc，输出到 /Users/me/测试'
+
+    assert.equal(orchestrator.rememberExplicitReferenceSkillHint(taskText, sessionId), true)
+    const tools = orchestrator.buildPreferredSkillToolNames(taskText, sessionId)
+
+    assert.ok(tools.includes('skill_video_expert_pipeline'))
+    assert.ok(tools.includes('skill_video_expert_ai_analyze'))
+  })
+
+  it('does not let fuzzy description matches overwrite an explicitly named VEA task', () => {
+    const sessionId = 'session-explicit-vea-with-competing-video-skill'
+    const orchestrator = makeOrchestratorWithCompetingVideoSkill()
+    const taskText = '用 @[Video Expert Analyzer (VNext)]分析@[Inside Notion SF Office - YouTube]，输出到@[测试]'
+
+    assert.equal(orchestrator.rememberExplicitReferenceSkillHint(taskText, sessionId), true)
+    const tools = orchestrator.buildPreferredSkillToolNames(taskText, sessionId)
+
+    assert.ok(tools.includes('skill_video_expert_pipeline'))
+    assert.ok(tools.includes('skill_video_expert_ai_analyze'))
+    assert.equal(tools.includes('skill_video_copy_analyze'), false)
   })
 
   it('includes whitelisted internal actions when hint is armed for that skill', () => {

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import {
   createEmptyScopeRunState,
   getActiveScopeRunState,
-  isActiveScopePhase,
+  isStreamingScopeRunState,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
 import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
@@ -45,6 +45,8 @@ export interface PendingContinuationIntent {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  todoId?: string
+  todoTitle?: string
 }
 
 interface AgentState {
@@ -581,7 +583,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         currentAgent: currentScope?.agent || get().currentAgent,
         toolTrace: activeRunState?.toolTrace || [],
         toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
-        isStreaming: isActiveScopePhase(activeRunState?.phase),
+        isStreaming: isStreamingScopeRunState(activeRunState),
         streamingRequestId: activeRunState?.requestId || null,
         pendingContinuationIntent: null,
       })
@@ -634,7 +636,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         currentScope: scope,
         conversationId: scopeId,
         currentAgent: scope?.agent || get().currentAgent,
-        isStreaming: isActiveScopePhase(activeRunState?.phase),
+        isStreaming: isStreamingScopeRunState(activeRunState),
         streamingMessageId: null,
         streamingRequestId: activeRunState?.requestId || null,
         toolTrace: activeRunState?.toolTrace || [],

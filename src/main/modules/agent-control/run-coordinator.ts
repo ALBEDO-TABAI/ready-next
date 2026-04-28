@@ -159,6 +159,7 @@ export class RunCoordinator {
       projectionPatch?.waitingFor === 'input'
       || projectionPatch?.waitingFor === 'confirmation'
       || projectionPatch?.waitingFor === 'agent_result'
+      || projectionPatch?.waitingFor === 'clarification'
       || projectionPatch?.waitingFor === 'background'
       || projectionPatch?.waitingFor === 'none'
         ? projectionPatch.waitingFor
@@ -232,7 +233,6 @@ export class RunCoordinator {
           runId: request.requestId,
           taskId,
           phase: 'done',
-          taskSummary: `已记录 ${memoryCapture.items.length} 条常驻偏好/上下文`,
           memoryCapture,
           timestamp: new Date().toISOString(),
         })

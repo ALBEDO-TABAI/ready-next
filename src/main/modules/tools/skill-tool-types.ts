@@ -6,7 +6,7 @@
  * + the Anthropic/OpenAI renderers are still needed by:
  *
  *   - `skills-tools.ts`              (builds skill_action defs)
- *   - `skill-primitives/tool-defs.ts` (4 primitive defs)
+ *   - `skill-primitives/tool-defs.ts` (primitive defs)
  *
  * The renderers are pure — no electron / runtime-manager imports — so this
  * file stays safe to pull in from isolated unit tests.
@@ -27,6 +27,7 @@ export interface SkillToolDef {
   kind: SkillToolKind
   skillId?: string
   action?: string
+  visibility?: string
   timeoutMs?: number
   params: ToolParam[]
 }

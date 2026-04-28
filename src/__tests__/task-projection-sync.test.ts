@@ -288,3 +288,179 @@ test('syncTaskProjection keeps older blocked continuation snapshots when a newer
 
   assert.equal(getContinuationState('scope-1')?.taskId, 'task-1')
 })
+
+test('syncTaskProjection keeps clarification blockers blocked even when phase is done', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const summary: ScopeRunSummary = {
+    ...createSummary(),
+    phase: 'done',
+    waitingFor: 'clarification',
+    interactionState: 'awaiting_clarification',
+    blockedReason: '需要补充目标视频风格',
+    resumableActions: ['continue', 'cancel'],
+    taskContinuation: {
+      taskId: 'task-1',
+      stepId: 'collect_input',
+      blockerType: 'primitive_ask_user',
+      todoId: 'todo-1',
+      todoTitle: '补充视频风格',
+    },
+    updatedAt: '2026-04-26T11:00:00.000Z',
+  }
+
+  const result = await syncTaskProjection(store, summary, {
+    ...createPayload(),
+    phase: 'done',
+    timestamp: '2026-04-26T11:00:00.000Z',
+  })
+
+  assert.equal(result?.status, 'blocked')
+  assert.equal(result?.interactionState, 'awaiting_clarification')
+  assert.equal(result?.blockedReason, '需要补充目标视频风格')
+  assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
+  assert.deepEqual(result?.continuationRef, {
+    taskId: 'task-1',
+    stepId: 'collect_input',
+    blockerType: 'primitive_ask_user',
+    todoId: 'todo-1',
+    todoTitle: '补充视频风格',
+  })
+  assert.equal(getContinuationState('scope-1')?.taskId, 'task-1')
+})
+
+test('syncTaskProjection does not materialize blocked background work with only none action', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    waitingFor: 'background',
+    interactionState: 'suspended',
+    blockedReason: '预算耗尽但后台仍在跑',
+    resumableActions: ['none'],
+    taskContinuation: {
+      taskId: 'task-1',
+      stepId: 'skill_video_expert_pipeline#1',
+      blockerType: 'budget_exhausted',
+    },
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    timestamp: '2026-04-28T01:00:00.000Z',
+  })
+
+  assert.equal(result?.status, 'blocked')
+  assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
+})
+
+test('syncTaskProjection preserves continuation data and retry action for failed projections', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const existing = {
+    taskId: 'task-1',
+    scopeId: 'scope-1',
+    runId: 'run-1',
+    taskType: 'short_task',
+    module: 'skill',
+    taskTitle: '视频任务',
+    taskSummary: '等待补充',
+    status: 'blocked',
+    interactionState: 'awaiting_clarification',
+    steps: [],
+    currentStepId: 'collect_input',
+    budget: null,
+    blockedReason: '需要补充目标视频风格',
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: {
+      taskId: 'task-1',
+      stepId: 'collect_input',
+      blockerType: 'primitive_ask_user',
+      todoId: 'todo-1',
+      todoTitle: '补充视频风格',
+    },
+    recentArtifacts: [],
+    createdAt: '2026-04-26T10:00:00.000Z',
+    updatedAt: '2026-04-26T10:00:00.000Z',
+  } satisfies TaskProjectionRecord
+  records.set('task-1', existing)
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'error',
+    interactionState: 'running',
+    blockedReason: null,
+    resumableActions: [],
+    taskContinuation: null,
+    taskSummary: '执行失败',
+    updatedAt: '2026-04-26T10:05:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'error',
+    timestamp: '2026-04-26T10:05:00.000Z',
+  })
+
+  assert.equal(result?.status, 'failed')
+  assert.deepEqual(result?.resumableActions, ['retry'])
+  assert.deepEqual(result?.continuationRef, existing.continuationRef)
+})

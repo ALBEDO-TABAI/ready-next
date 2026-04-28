@@ -47,3 +47,36 @@ test('skill adapter surfaces no-tool dispatch failures as a task projection patc
   assert.equal(patch?.blockedReason, '未解析到可用的 skill_* 工具')
   assert.deepEqual(patch?.resumableActions, ['retry', 'cancel'])
 })
+
+test('skill adapter keeps clarification waiting patches blocked', () => {
+  const adapter = new SkillDomainAdapter()
+  const state = {
+    latestProjectionPatch: {
+      taskSummary: '等待补充视频风格',
+      waitingFor: 'clarification',
+      blockedReason: '需要补充视频风格',
+      resumableActions: ['continue', 'cancel'],
+    },
+    dispatchedAt: '2026-04-26T10:00:00.000Z',
+  }
+
+  const result = adapter.applyResult({
+    route: createRoute(),
+    request: {} as never,
+    host: {} as never,
+    session: { messages: [] } as never,
+    userText: 'continue',
+    pureUserInput: 'continue',
+    requestEnvelope: {} as never,
+    executionIntentContext: {} as never,
+    toolPolicy: {} as never,
+    allowedToolNames: ['skill_get_state'],
+    domainState: state,
+    phase: 'no_tool_call',
+  } as never) as Awaited<ReturnType<typeof adapter.applyResult>>
+
+  assert.equal(result.projection?.phase, 'blocked')
+  assert.equal(result.projection?.waitingFor, 'clarification')
+  assert.equal(result.projection?.blockedReason, '需要补充视频风格')
+  assert.deepEqual(result.projection?.resumableActions, ['continue', 'cancel'])
+})

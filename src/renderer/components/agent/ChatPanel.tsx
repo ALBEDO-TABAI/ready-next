@@ -49,8 +49,9 @@ import {
   type TaskCardRunLike,
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
+import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
-import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
+import type { RecoveryRecordData, ReferenceSkillHintData, TaskProjectionRecordData } from '../../types/electron'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -486,6 +487,8 @@ function TaskCard({
   onRetry,
   onSuspendRun,
   onResumeRun,
+  onCancelDetachedTask,
+  onContinueDetachedTask,
 }: {
   run: TaskCardRun
   taskKey: string
@@ -505,6 +508,8 @@ function TaskCard({
   onRetry?: (scopeId: string) => void
   onSuspendRun?: (scopeId: string) => void
   onResumeRun?: (scopeId: string) => void
+  onCancelDetachedTask?: (scopeId: string, taskId?: string | null) => void
+  onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
@@ -514,9 +519,10 @@ function TaskCard({
   const planStepsToRender = showAllPlanSteps ? steps : steps.slice(0, PLAN_STEP_COLLAPSE_THRESHOLD)
   const hiddenPlanStepCount = Math.max(0, steps.length - planStepsToRender.length)
   const recentArtifacts = run.recentArtifacts || []
+  const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
-  const collapsedSummary = vm.summary
+  const summaryPreview = formatSingleLinePreview(vm.summary)
   const metaBadges = [
     run.taskType ? taskTypeBadgeLabel(run.taskType) : null,
     run.interactionState && run.interactionState !== 'running'
@@ -613,7 +619,7 @@ function TaskCard({
             {primaryTitle}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
-            {expanded ? vm.summary : collapsedSummary}
+            {summaryPreview}
           </div>
           {metaBadges.length > 0 && (
             <div className="flex flex-wrap gap-1.5" style={{ marginTop: 6 }}>
@@ -847,13 +853,31 @@ function TaskCard({
       {expanded &&
         (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
           <div className="flex flex-wrap gap-1.5">
-            {(run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
+            {!isDetachedTask && (run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
               <button
                 type="button"
                 onClick={() => onSuspendRun?.(run.scopeId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
                 暂停任务
+              </button>
+            )}
+            {isDetachedTask && (run.resumableActions || []).includes('cancel') && (
+              <button
+                type="button"
+                onClick={() => onCancelDetachedTask?.(run.scopeId, run.taskId || null)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                取消后台任务
+              </button>
+            )}
+            {isDetachedTask && (run.resumableActions || []).includes('continue') && (
+              <button
+                type="button"
+                onClick={() => onContinueDetachedTask?.(run.scopeId, run.taskId || null)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                继续后台任务
               </button>
             )}
             {run.interactionState === 'suspended' && (
@@ -865,7 +889,7 @@ function TaskCard({
                 继续运行
               </button>
             )}
-            {run.waitingFor === 'input' && (
+            {(run.waitingFor === 'input' || run.waitingFor === 'clarification') && (
               <button
                 type="button"
                 onClick={() => onContinueInput?.(run.scopeId)}
@@ -937,8 +961,8 @@ function ToolTraceCard({
   onToggleExpanded?: () => void
 }) {
   if (events.length === 0) return null
-  const visibleEvents = expanded ? events : events.slice(-1)
   const latestEvent = events[events.length - 1]
+  const latestPreview = formatToolTracePreview(latestEvent?.text)
   return (
     <div
       style={{
@@ -991,7 +1015,7 @@ function ToolTraceCard({
                 flex: 1
               }}
             >
-              {latestEvent.text}
+              {latestPreview}
             </div>
           ) : null}
         </div>
@@ -1005,25 +1029,27 @@ function ToolTraceCard({
           }}
         />
       </button>
-      <div className="flex flex-col" style={{ gap: 4 }}>
-        {visibleEvents.map((event) => (
-          <div
-            key={event.id}
-            className="flex items-start gap-2"
-            style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
-          >
-            <span
-              style={{
-                color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
-                marginTop: 1
-              }}
+      {expanded ? (
+        <div className="flex flex-col" style={{ gap: 4 }}>
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="flex items-start gap-2"
+              style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
             >
-              {event.kind === 'call' ? '•' : '✓'}
-            </span>
-            <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
-          </div>
-        ))}
-      </div>
+              <span
+                style={{
+                  color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
+                  marginTop: 1
+                }}
+              >
+                {event.kind === 'call' ? '•' : '✓'}
+              </span>
+              <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1683,6 +1709,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
     SessionRecallCapsule[]
   >([])
+  const [referenceSkillHint, setReferenceSkillHint] = useState<ReferenceSkillHintData | null>(null)
   const [sessionRecallSearching, setSessionRecallSearching] = useState(false)
   const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1768,6 +1795,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     () => attachedSessionRecallCapsules.map((capsule) => capsule.conversationId),
     [attachedSessionRecallCapsules]
   )
+  const currentScopeRunUpdatedAt = currentScopeId
+    ? scopeRunStates[currentScopeId]?.updatedAt || null
+    : null
 
   const refreshPersistedScopeRuns = useCallback(async () => {
     if (!window.electronAPI?.agent?.listScopeRuns) return
@@ -1826,6 +1856,21 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       return
     }
     setAttachedSessionRecallCapsules(result.data as SessionRecallCapsule[])
+  }, [])
+
+  const refreshReferenceSkillHint = useCallback(async (scopeId?: string | null) => {
+    if (!scopeId || !window.electronAPI?.agent?.getReferenceSkillHint) {
+      setReferenceSkillHint(null)
+      return
+    }
+    const result = await window.electronAPI.agent
+      .getReferenceSkillHint(scopeId)
+      .catch(() => null)
+    if (!result?.success || !result.data) {
+      setReferenceSkillHint(null)
+      return
+    }
+    setReferenceSkillHint(result.data as ReferenceSkillHintData)
   }, [])
 
   const runSessionRecallSearch = useCallback(
@@ -2270,6 +2315,28 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   }, [currentScopeId, refreshAttachedSessionRecall])
 
   useEffect(() => {
+    setReferenceSkillHint(null)
+  }, [currentScopeId])
+
+  useEffect(() => {
+    void refreshReferenceSkillHint(currentScopeId)
+  }, [currentScopeId, currentScopeRunUpdatedAt, isStreaming, refreshReferenceSkillHint])
+
+  // Phase 5.3 — subscribe to push-based hint changes from main so the badge
+  // updates the instant the orchestrator arms/clears/sweeps a hint, instead
+  // of lagging behind scope-run-event ticks. Audit Phase 5 §E3.
+  useEffect(() => {
+    if (!window.electronAPI?.agent?.onReferenceSkillHintChanged) return
+    const unsubscribe = window.electronAPI.agent.onReferenceSkillHintChanged((data) => {
+      // Only refresh when the event targets the currently displayed scope —
+      // hint changes for other scopes shouldn't ping this view.
+      if (!currentScopeId || data.scopeId !== currentScopeId) return
+      void refreshReferenceSkillHint(currentScopeId)
+    })
+    return unsubscribe
+  }, [currentScopeId, refreshReferenceSkillHint])
+
+  useEffect(() => {
     void refreshPersistedScopeRuns()
   }, [refreshPersistedScopeRuns, currentScopeId, scopes.length])
 
@@ -2382,6 +2449,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         stepId: run?.taskContinuation?.stepId || undefined,
         blockedReason: run?.blockedReason || undefined,
         responseText: responseText || undefined,
+        todoId: run?.taskContinuation?.todoId || undefined,
+        todoTitle: run?.taskContinuation?.todoTitle || undefined,
       }
     },
     [],
@@ -2452,6 +2521,28 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       taskId: run?.taskId || undefined,
     })
   }, [mergedTaskRuns])
+
+  const handleCancelDetachedTask = useCallback(async (_scopeId: string, taskId?: string | null) => {
+    const detachedTaskId = typeof taskId === 'string' && taskId.startsWith('detached:')
+      ? taskId.slice('detached:'.length)
+      : ''
+    if (!detachedTaskId || !window.electronAPI?.agent?.cancelDetachedSkillTask) return
+    await window.electronAPI.agent.cancelDetachedSkillTask(detachedTaskId, _scopeId).catch(() => null)
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [refreshPersistedScopeRuns, refreshPersistedTaskProjections])
+
+  const handleContinueDetachedTask = useCallback((scopeId: string, taskId?: string | null) => {
+    const detachedTaskId = typeof taskId === 'string' && taskId.startsWith('detached:')
+      ? taskId.slice('detached:'.length)
+      : ''
+    if (!detachedTaskId) return
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    setInputValue(`继续后台任务 ${detachedTaskId}`, { preserveContinuationIntent: true })
+    focusInputWithResize()
+  }, [currentScopeId, focusInputWithResize, loadConversation, setInputValue])
 
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =
@@ -2585,11 +2676,15 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           onRetry={handleRetryTask}
           onSuspendRun={handleSuspendTask}
           onResumeRun={handleResumeTask}
+          onCancelDetachedTask={handleCancelDetachedTask}
+          onContinueDetachedTask={handleContinueDetachedTask}
         />
       )
     },
     [
       handleContinueTaskInput,
+      handleCancelDetachedTask,
+      handleContinueDetachedTask,
       handleDismissMemoryCapture,
       handleOpenTaskArtifact,
       handleRetryTask,
@@ -3105,9 +3200,68 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           boxShadow: 'none'
         }}
       >
+        {referenceSkillHint && (
+          <div
+            className="glass-surface-card"
+            data-reference-skill-hint="true"
+            style={{
+              borderRadius: 8,
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--surface-panel-bg) 44%, transparent)',
+              padding: '8px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <Puzzle
+                style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
+                strokeWidth={2}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--text-light)',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  技能上下文
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: 'var(--text-body)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {referenceSkillHint.name || referenceSkillHint.id}
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                flexShrink: 0,
+                fontSize: 11,
+                color: 'var(--text-muted)'
+              }}
+            >
+              上下文已启用
+            </div>
+          </div>
+        )}
+
         {attachedSessionRecallCapsules.length > 0 && (
           <div
             className="glass-surface-card"
+            data-session-recall-attachments="true"
             style={{
               borderRadius: 12,
               border: '1px solid var(--border-default)',

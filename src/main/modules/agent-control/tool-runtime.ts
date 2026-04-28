@@ -8,7 +8,8 @@ import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
-import { defaultToolGateway } from './tool-gateway'
+import { defaultToolRegistry } from './tool-registry'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
@@ -42,7 +43,10 @@ export interface ToolRuntimeContext {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
   sessionId?: string
+  scopeId?: string
+  runId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+  agentContext?: AgentSpawnContext | null
 }
 
 export interface ToolRuntimeExecutionResult {
@@ -245,7 +249,7 @@ export class ToolRuntime {
 
     startedToolCallIds.push(toolCall.id)
     params.hooks?.onToolStart?.({ toolCall })
-    const toolDefinition = defaultToolGateway.getToolDefinition(toolCall.name)
+    const toolDefinition = defaultToolRegistry.getToolDefinitionForExecution(toolCall.name)
     const timeoutMs = this.resolveTimeoutMs(toolDefinition, toolCall)
     const pendingRecoveries: Array<{ result: KnownExecutionErrorResult; attempt: number }> = []
     let attempt = 0
@@ -352,7 +356,7 @@ export class ToolRuntime {
     // Check registration first (when required) so the model gets an "unknown
     // tool" signal for fabricated names, not an "allowed list" signal that
     // would invite retry. Matches tool-executor.ts for a unified contract.
-    if (options?.requireRegisteredTool && !defaultToolGateway.getToolDefinition(toolName)) {
+    if (options?.requireRegisteredTool && !defaultToolRegistry.getToolDefinitionForExecution(toolName)) {
       return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
         shape: 'json',
         data: {
@@ -364,6 +368,16 @@ export class ToolRuntime {
     }
 
     const allowedToolNames = normalizeAllowedToolSet(options?.context?.allowedToolNames)
+    if (defaultToolRegistry.getToolDefinitionForExecution(toolName)?.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
+      return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
+        shape: 'json',
+        data: {
+          errorKind: 'host_unavailable',
+          reason: 'tool_restricted_this_turn',
+          toolName,
+        },
+      })
+    }
     if (allowedToolNames && !allowedToolNames.has(toolName)) {
       return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
         shape: 'json',
@@ -524,6 +538,9 @@ export class ToolRuntime {
   ): number {
     if (this.deps.resolveTimeoutMs) {
       return Math.max(1, this.deps.resolveTimeoutMs(definition, toolCall))
+    }
+    if (definition?.executionTimeoutMs) {
+      return Math.max(1, definition.executionTimeoutMs)
     }
     return resolveToolExecutionTimeoutMsForProfile(definition?.timeoutProfile || 'default')
   }

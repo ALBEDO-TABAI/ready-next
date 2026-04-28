@@ -4,6 +4,7 @@ import assert from 'node:assert'
 import {
   deriveScopeRunStatePatch,
   isActiveScopePhase,
+  isStreamingScopeRunState,
   mergeArtifacts,
   phaseToToolTraceStatus
 } from '../renderer/modules/agent/scopeRunState'
@@ -105,6 +106,31 @@ describe('scope run state helpers', () => {
     assert.strictEqual(isActiveScopePhase('done'), false)
     assert.strictEqual(phaseToToolTraceStatus('checkpoint'), 'running')
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
+  })
+
+  it('does not treat detached skill jobs as chat streaming', () => {
+    assert.strictEqual(isStreamingScopeRunState({
+      scopeId: 'scope-1',
+      agent: 'assistant',
+      requestId: 'dst-1',
+      taskId: 'detached:dst-1',
+      phase: 'tool_running',
+      module: 'skill',
+      executionKind: 'job',
+      toolTrace: [],
+      startedAt: '2026-04-26T00:00:00.000Z',
+      updatedAt: '2026-04-26T00:00:00.000Z',
+    }), false)
+    assert.strictEqual(isStreamingScopeRunState({
+      scopeId: 'scope-1',
+      agent: 'assistant',
+      requestId: 'run-1',
+      phase: 'tool_running',
+      module: 'skill',
+      toolTrace: [],
+      startedAt: '2026-04-26T00:00:00.000Z',
+      updatedAt: '2026-04-26T00:00:00.000Z',
+    }), true)
   })
 
   it('reads document pipeline diagnostics from structured scope run events', () => {
@@ -389,6 +415,62 @@ describe('scope run state helpers', () => {
       patch.steps?.map((item) => item.status),
       ['done']
     )
+  })
+
+  it('keeps clarification blockers when a final event arrives as done', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'done',
+        timestamp: '2026-04-26T10:00:00.000Z',
+        taskSummary: '等待补充参数',
+        waitingFor: 'clarification',
+        blockedReason: '需要选择输出格式',
+        resumableActions: ['continue', 'cancel'],
+        steps: [
+          {
+            id: 'collect_input',
+            title: '收集参数',
+            status: 'blocked',
+            updatedAt: '2026-04-26T09:59:00.000Z',
+          },
+        ],
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.phase, 'done')
+    assert.strictEqual(patch.waitingFor, 'clarification')
+    assert.strictEqual(patch.blockedReason, '需要选择输出格式')
+    assert.deepStrictEqual(patch.resumableActions, ['continue', 'cancel'])
+    assert.deepStrictEqual(patch.steps?.map((item) => item.status), ['blocked'])
+  })
+
+  it('clears a previous blocker when structured event explicitly sends blockedReason null', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        timestamp: '2026-04-28T01:00:00.000Z',
+        waitingFor: 'none',
+        blockedReason: null,
+        resumableActions: ['cancel'],
+      },
+      {
+        scopeId: 'scope-clear-blocker',
+        agent: 'butler',
+        requestId: 'run-clear-blocker',
+        phase: 'checkpoint',
+        toolTrace: [],
+        startedAt: '2026-04-28T00:59:00.000Z',
+        updatedAt: '2026-04-28T00:59:00.000Z',
+        blockedReason: '旧阻塞原因',
+        waitingFor: 'clarification',
+        resumableActions: ['continue', 'cancel'],
+      } as any,
+    )
+
+    assert.strictEqual(patch.blockedReason, null)
+    assert.strictEqual(patch.waitingFor, 'none')
+    assert.deepStrictEqual(patch.resumableActions, ['cancel'])
   })
 
   it('preserves execution diagnostics without overriding structured task summary', () => {

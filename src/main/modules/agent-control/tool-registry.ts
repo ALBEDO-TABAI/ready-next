@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync } from 'fs'
+import { join } from 'path'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import type {
@@ -36,10 +38,19 @@ import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-t
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
-import { STATIC_SKILL_TOOL_NAMES_BOOT_SAFE } from '../tools/skills-tools-static'
+import {
+  STATIC_SKILL_ACTIONS_BY_TOOL_NAME,
+  STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
+} from '../tools/skills-tools-static'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
-import { getSkillAnthropicTools, getSkillOpenAITools } from '../tools/skills-tools'
+import {
+  findSkillToolByNameForExecution,
+  getSkillAnthropicTools,
+  getSkillOpenAITools,
+  getSkillToolDefsForRegistry,
+} from '../tools/skills-tools'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
+import { getLastReferenceSkill } from './skill-reference-hints'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite
@@ -76,6 +87,7 @@ export interface ToolRegistryOptions {
 export interface ToolRegistryReader {
   hasDynamicSource(groupId: CapabilityGroupId): boolean
   getToolDefinition(toolName: string): ToolDefinition | null
+  getToolDefinitionForExecution(toolName: string): ToolDefinition | null
   listToolDefinitions(): ToolDefinition[]
   getToolDefinitionsForGroup(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[]
   getToolSchemasForGroup(
@@ -160,6 +172,16 @@ const MEMORY_TOOL_NAMES = [
 const SESSION_RECALL_TOOL_NAMES = ['session_search']
 const SYSTEM_TOOL_NAMES = ['system_run_embedded_python', 'system_run_openclaw']
 
+interface StaticSkillActionMeta {
+  skillId: string
+  actionName: string
+  visibility: string
+  timeoutMs?: number
+  exposeWhenHintArmed: string[]
+}
+
+let staticSkillActionMetaCache: Map<string, StaticSkillActionMeta> | null = null
+
 const BROWSER_JOB_TOOL_NAMES = new Set([
   'browser_start_task',
   'browser_get_task',
@@ -197,13 +219,6 @@ function getAnthropicToolName(tool: Record<string, unknown>): string | null {
   return typeof tool.name === 'string' ? tool.name : null
 }
 
-function collectToolNames(tools: Array<Record<string, unknown>>, format: ToolSchemaFormat): string[] {
-  const names = tools
-    .map((tool) => format === 'anthropic' ? getAnthropicToolName(tool) : getOpenAIToolName(tool))
-    .filter((name): name is string => Boolean(name))
-  return Array.from(new Set(names))
-}
-
 function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat): Record<string, unknown> {
   if (format === 'anthropic') {
     return {
@@ -231,7 +246,76 @@ function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat):
   }
 }
 
-function resolveStaticSkillToolNames(): string[] {
+function parsePositiveTimeout(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+function readStaticSkillActionMeta(): Map<string, StaticSkillActionMeta> {
+  if (staticSkillActionMetaCache) return staticSkillActionMetaCache
+  const meta = new Map<string, StaticSkillActionMeta>()
+  const root = join(process.cwd(), 'assets', 'embedded-skills')
+  if (!existsSync(root)) {
+    staticSkillActionMetaCache = meta
+    return meta
+  }
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const manifestPath = join(root, entry.name, 'ready-skill.json')
+    if (!existsSync(manifestPath)) continue
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+        id?: unknown
+        actions?: unknown
+        host_requirements?: {
+          default_action_timeout_ms?: unknown
+          expose_when_hint_armed?: unknown
+        }
+      }
+      const skillId = typeof manifest.id === 'string' ? manifest.id : entry.name
+      const actions = Array.isArray(manifest.actions) ? manifest.actions : []
+      const exposeWhenHintArmed = Array.isArray(manifest.host_requirements?.expose_when_hint_armed)
+        ? manifest.host_requirements!.expose_when_hint_armed.filter((item): item is string => typeof item === 'string')
+        : []
+      for (const rawAction of actions) {
+        if (!rawAction || typeof rawAction !== 'object') continue
+        const action = rawAction as { name?: unknown; visibility?: unknown; timeoutMs?: unknown; timeout_ms?: unknown }
+        if (typeof action.name !== 'string') continue
+        const byStaticAlias = Object.entries(STATIC_SKILL_ACTIONS_BY_TOOL_NAME)
+          .filter(([, ref]) => ref.skillId === skillId && ref.actionName === action.name)
+          .map(([toolName]) => toolName)
+        for (const toolName of byStaticAlias) {
+          meta.set(toolName, {
+            skillId,
+            actionName: action.name,
+            visibility: typeof action.visibility === 'string' ? action.visibility : 'public',
+            timeoutMs: parsePositiveTimeout(action.timeoutMs)
+              || parsePositiveTimeout(action.timeout_ms)
+              || parsePositiveTimeout(manifest.host_requirements?.default_action_timeout_ms),
+            exposeWhenHintArmed,
+          })
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+  staticSkillActionMetaCache = meta
+  return meta
+}
+
+function getStaticSkillActionMeta(toolName: string): StaticSkillActionMeta | null {
+  return readStaticSkillActionMeta().get(toolName) || null
+}
+
+function isStaticSkillToolVisible(toolName: string, sessionId?: string): boolean {
+  const meta = getStaticSkillActionMeta(toolName)
+  if (!meta || meta.visibility !== 'internal') return true
+  if (!sessionId) return false
+  const hint = getLastReferenceSkill(sessionId)
+  return hint?.id === meta.skillId && meta.exposeWhenHintArmed.includes(meta.actionName)
+}
+
+function resolveStaticSkillToolNames(sessionId?: string): string[] {
   // Patch A2: the static fallback runs while the runtime-manager is still
   // booting. Advertising the gated submit/restart/cancel tools during that
   // window is exactly the vector that inspired Phase 0 — the model sees them,
@@ -239,6 +323,7 @@ function resolveStaticSkillToolNames(): string[] {
   // `STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` strips those 5; they re-appear
   // dynamically via the session-aware provider once an execution lands.
   return Array.from(new Set(STATIC_SKILL_TOOL_NAMES_BOOT_SAFE))
+    .filter((toolName) => isStaticSkillToolVisible(toolName, sessionId))
 }
 
 function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
@@ -289,6 +374,8 @@ function buildToolDefinition(
     projectionHint: resolveToolProjectionHint(toolName, domain, kind),
     description: metadata?.description || toolName,
     schema: metadata?.schema || null,
+    executionTimeoutMs: metadata?.executionTimeoutMs,
+    requiresExplicitAllowlist: metadata?.requiresExplicitAllowlist,
     resultShape: resolveToolResultShape(toolName, domain),
   }
 }
@@ -325,6 +412,8 @@ function getErrorMessage(error: unknown): string {
 interface ToolDefinitionMetadata {
   description: string
   schema: ToolDefinitionSchema | null
+  executionTimeoutMs?: number
+  requiresExplicitAllowlist?: boolean
 }
 
 function toToolDefinitionSchema(schema: unknown): ToolDefinitionSchema | null {
@@ -389,6 +478,42 @@ function mergeToolMetadata(
   return merged
 }
 
+function buildStaticSkillMetadata(toolNames: readonly string[]): Map<string, ToolDefinitionMetadata> {
+  const metadata = new Map<string, ToolDefinitionMetadata>()
+  for (const toolName of toolNames) {
+    const skillMeta = getStaticSkillActionMeta(toolName)
+    metadata.set(toolName, {
+      description: `${toolName} fallback schema`,
+      schema: null,
+      executionTimeoutMs: skillMeta?.timeoutMs,
+      requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
+    })
+  }
+  return metadata
+}
+
+function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinition | null {
+  try {
+    const def = findSkillToolByNameForExecution(toolName)
+    if (!def) return null
+    return buildToolDefinition('skills', def.name, {
+      description: def.description,
+      schema: null,
+      executionTimeoutMs: def.timeoutMs,
+      requiresExplicitAllowlist: def.visibility === 'internal',
+    })
+  } catch {
+    if (!STATIC_SKILL_TOOL_NAMES_BOOT_SAFE.includes(toolName)) return null
+    const skillMeta = getStaticSkillActionMeta(toolName)
+    return buildToolDefinition('skills', toolName, {
+      description: `${toolName} fallback schema`,
+      schema: null,
+      executionTimeoutMs: skillMeta?.timeoutMs,
+      requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
+    })
+  }
+}
+
 function resolveSupportsTextBridge(_toolName: string, domain: ToolDomain): boolean {
   return domain !== 'browser'
 }
@@ -423,7 +548,7 @@ function resolveToolResultShape(toolName: string, domain: ToolDomain): ToolDefin
 }
 
 function resolveSkillToolSchemas(format: ToolSchemaFormat, sessionId?: string): ToolSchemaResolution {
-  const staticToolNames = resolveStaticSkillToolNames()
+  const staticToolNames = resolveStaticSkillToolNames(sessionId)
   const staticTools = staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format))
   try {
     return {
@@ -441,15 +566,24 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat, sessionId?: string): 
 }
 
 function resolveSkillToolDefinitions(sessionId?: string): ToolDefinitionResolution {
-  const staticToolNames = resolveStaticSkillToolNames()
+  const staticToolNames = resolveStaticSkillToolNames(sessionId)
   try {
-    const skillNames = collectToolNames(getSkillOpenAITools(sessionId), 'openai')
+    const defs = getSkillToolDefsForRegistry(sessionId)
+    const metadata = new Map<string, ToolDefinitionMetadata>()
+    for (const def of defs) {
+      metadata.set(def.name, {
+        description: def.description,
+        schema: null,
+        executionTimeoutMs: def.timeoutMs,
+        requiresExplicitAllowlist: def.visibility === 'internal',
+      })
+    }
     return {
-      definitions: buildToolDefinitions('skills', skillNames),
+      definitions: buildToolDefinitions('skills', defs.map((def) => def.name), metadata),
     }
   } catch (error) {
     return {
-      definitions: buildToolDefinitions('skills', staticToolNames),
+      definitions: buildToolDefinitions('skills', staticToolNames, buildStaticSkillMetadata(staticToolNames)),
       error: getErrorMessage(error),
       usedStaticFallback: true,
     }
@@ -558,6 +692,11 @@ export class ToolRegistry implements ToolRegistryReader {
 
   getToolDefinition(toolName: string): ToolDefinition | null {
     return this.listToolDefinitions().find((tool) => tool.name === toolName) || null
+  }
+
+  getToolDefinitionForExecution(toolName: string): ToolDefinition | null {
+    return this.getToolDefinition(toolName)
+      || (toolName.startsWith('skill_') ? resolveSkillToolDefinitionForExecution(toolName) : null)
   }
 
   getToolDefinitionsResolutionForGroup(
@@ -678,6 +817,8 @@ export class ToolRegistry implements ToolRegistryReader {
               ? definition.description
               : fallback.description,
           schema: definition.schema || fallback.schema,
+          executionTimeoutMs: definition.executionTimeoutMs ?? fallback.executionTimeoutMs,
+          requiresExplicitAllowlist: definition.requiresExplicitAllowlist ?? fallback.requiresExplicitAllowlist,
           resultShape: definition.resultShape || fallback.resultShape,
         }
       }),

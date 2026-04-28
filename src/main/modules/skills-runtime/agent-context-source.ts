@@ -66,6 +66,27 @@ function deriveApiKind(provider: string): AgentSpawnContext['api_kind'] {
   return PROVIDER_API_KIND[provider] ?? 'openai-completions'
 }
 
+export function buildAgentSpawnContextFromAIConfig(
+  config: AIModelConfig,
+  options: { baseUrl?: string } = {},
+): AgentSpawnContext | null {
+  const provider = String(config.provider || '').trim()
+  const modelId = String(config.model || '').trim()
+  const baseUrl = String(options.baseUrl ?? config.baseUrl ?? '').trim()
+  const apiKey = String(config.apiKey || '')
+
+  if (!provider || !modelId) return null
+
+  return {
+    provider,
+    model_id: modelId,
+    base_url: baseUrl,
+    api_key: apiKey,
+    api_kind: deriveApiKind(provider),
+    fallback_chain: [],
+  }
+}
+
 /**
  * Returns the agent context that should be injected into skill spawns.
  * Returns `null` (with a logged warning) if no agent is currently configured
@@ -93,23 +114,12 @@ export async function getCurrentAgentContext(
     return null
   }
 
-  const provider = String(config.provider || '').trim()
-  const modelId = String(config.model || '').trim()
-  const baseUrl = String(config.baseUrl || '').trim()
-  const apiKey = String(config.apiKey || '')
-
-  if (!provider || !modelId) {
+  const context = buildAgentSpawnContextFromAIConfig(config)
+  if (!context) {
     warn('AI config is missing provider or model — skill spawn will run without agent context')
     return null
   }
 
   // Fresh object literal; readonly array literal; no refs to `config`.
-  return {
-    provider,
-    model_id: modelId,
-    base_url: baseUrl,
-    api_key: apiKey,
-    api_kind: deriveApiKind(provider),
-    fallback_chain: [],
-  }
+  return context
 }

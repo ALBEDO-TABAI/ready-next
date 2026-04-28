@@ -3,6 +3,10 @@ import test from 'node:test'
 
 import { collectAllowedToolNames } from '../main/modules/agent-control/execution-tool-config'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import {
+  rememberLastReferenceSkill,
+  _resetLastReferenceSkillHintsForTests,
+} from '../main/modules/agent-control/skill-reference-hints'
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
   const gateway = new ToolGateway()
@@ -18,7 +22,13 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   const browserContentTools = gateway.collectToolNamesForGroups(['browser_content_tasks'])
   const systemTools = gateway.collectToolNamesForGroups(['system_host'])
   const skillTools = gateway.collectToolNamesForGroups(['skills'])
+  const sessionId = 'tool-gateway-vea'
   const skillsGroup = gateway.getCapabilityGroup('skills')
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill(sessionId, { id: 'video-expert-analyzer', name: 'VEA' })
+  const hintedSkillSchemaNames = gateway.getOpenAIToolsForGroups(['skills'], sessionId)
+    .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
+    .filter(Boolean)
   const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai')
   const browserNavigate = gateway.getToolDefinition('browser_navigate')
   const documentSave = gateway.getToolDefinition('document_save_tab')
@@ -38,8 +48,10 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
 
   assert.ok(systemTools.includes('system_run_embedded_python'))
   assert.ok(systemTools.includes('system_run_openclaw'))
-  assert.ok(skillTools.includes('skill_get_state'))
-  assert.ok(skillTools.includes('skill_video_expert_pipeline'))
+  assert.ok(skillTools.includes('skill_rss_add'))
+  assert.ok(!skillTools.includes('skill_get_state'))
+  assert.ok(!skillTools.includes('skill_video_expert_pipeline'))
+  assert.ok(hintedSkillSchemaNames.includes('skill_video_expert_pipeline'))
   assert.equal(skillsGroup?.hasDynamicSource, true)
   assert.ok(systemOpenAISchemas.some((tool) => (tool.function as { name?: string } | undefined)?.name === 'system_run_openclaw'))
   assert.equal(browserNavigate?.domain, 'browser')
@@ -72,14 +84,7 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.deepEqual(documentRemoveWidget?.projectionHint, { mutating: true, emitsProjectionPatch: true })
   assert.equal(documentListWidgets?.resultShape, 'text')
   assert.equal(documentListWidgets?.projectionHint, null)
-  assert.equal(skillPipeline?.domain, 'skill')
-  assert.equal(skillPipeline?.interruptBehavior, 'host_managed')
-  assert.equal(skillPipeline?.timeoutProfile, 'skill')
-  assert.equal(skillPipeline?.supportsTextBridge, true)
-  assert.deepEqual(skillPipeline?.projectionHint, { emitsProjectionPatch: true })
-  assert.equal(skillPipeline?.resultShape, 'projection_patch')
-  assert.match(skillPipeline?.description || '', /workflow|启动|fallback schema/)
-  assert.equal(skillPipeline?.schema?.type, 'object')
+  assert.equal(skillPipeline, null)
   assert.ok(gateway.listToolDefinitions().some((tool) => tool.name === 'session_search' && tool.domain === 'session'))
 })
 

@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync 
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, resolve as resolvePath, sep } from 'node:path'
 
-import type { SkillHostRequirements } from '../../../shared/skill-host-contract'
+import type { AgentSpawnContext, SkillHostRequirements } from '../../../shared/skill-host-contract'
 import { getCurrentAgentContext } from './agent-context-source'
 import {
   TemplateError,
@@ -168,6 +168,7 @@ export class SkillHostController {
     requirements: SkillHostRequirements | null,
     jobId: string,
     outputDir?: string,
+    agentContext?: AgentSpawnContext | null,
   ): Promise<SpawnContextHandle> {
     const concurrencyMode = requirements?.concurrency?.model ?? 'serialized'
     const releaseLock = concurrencyMode === 'serialized'
@@ -183,7 +184,7 @@ export class SkillHostController {
 
     try {
       // Read agent context (must succeed — skills cannot spawn without it).
-      const agent = await this.readAgentContext()
+      const agent = agentContext ?? await this.readAgentContext()
       if (!agent) {
         throw new SkillHostContextError(
           `cannot prepare spawn context for skill '${skillId}': no active AI config`,
@@ -461,7 +462,10 @@ export class SkillHostController {
         value = (parsed as Record<string, unknown>)[fieldName]
       }
       if (value === undefined || value === null) {
-        return { status: 'done' }
+        const detail = `sentinel_field_missing: ${fieldName || '<root>'}`
+        return processResult.exitCode === 0
+          ? { status: 'done', detail }
+          : { status: 'error', detail: `${detail}; exit_code=${processResult.exitCode}` }
       }
       const valueStr = String(value)
       if (blockedValues.includes(valueStr)) {

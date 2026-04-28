@@ -12,6 +12,7 @@ import type {
 import type { ContinuationState } from './continuation-state'
 
 const DEFAULT_MAX_PARALLEL_TOOL_GROUPS = 5
+const LONG_SKILL_TASK_MIN_ITERATIONS = 80
 const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterations' | 'maxToolCalls'>> = {
   direct_answer: {
     maxIterations: 8,
@@ -47,6 +48,43 @@ export function createRunBudgetSeed(taskType: TaskType = 'short_task'): RunBudge
     maxToolCalls: preset.maxToolCalls,
     maxParallelToolGroups: DEFAULT_MAX_PARALLEL_TOOL_GROUPS,
     reservedToolCalls: 0,
+  }
+}
+
+/**
+ * Phase 4.2 — fresh continuation budget that inherits from the original task
+ * type instead of always collapsing to the 24-iter `continuation` preset.
+ *
+ * Background: the audit found that resuming a multi_step_task or media_task
+ * (e.g. mid-pipeline VEA, mid-batch RSS update) was throttled to 24 iter
+ * regardless of the original task's ceiling. With the typical 70%-warning at
+ * iter 16, multi-stage skills got an "ask user if continue" reverse nudge
+ * before they could finish. Audit Phase 4 §C4.
+ *
+ * Inheritance rule: only LARGER presets bubble up so we don't accidentally
+ * grant a tiny direct_answer continuation 60 iters. Long types
+ * (multi_step_task, media_task) inherit; everything else falls back to the
+ * 'continuation' preset (24/24).
+ *
+ * `restoreContinuationTaskBudgetRuntime` already inherits via saved
+ * budgetRuntime when available — this helper covers the FRESH continuation
+ * case where no prior runtime was persisted (e.g. cross-process resume
+ * after Ready restart that lost the runtime budget but kept the projection).
+ */
+export function createContinuationRunBudgetSeed(
+  inheritedFromTaskType: TaskType | null | undefined,
+): RunBudgetSeed {
+  if (inheritedFromTaskType === 'multi_step_task' || inheritedFromTaskType === 'media_task') {
+    return createRunBudgetSeed(inheritedFromTaskType)
+  }
+  return createRunBudgetSeed('continuation')
+}
+
+export function applyLongSkillTaskBudgetSeed(seed: RunBudgetSeed): RunBudgetSeed {
+  return {
+    ...seed,
+    maxIterations: Math.max(seed.maxIterations, LONG_SKILL_TASK_MIN_ITERATIONS),
+    maxToolCalls: Math.max(seed.maxToolCalls, LONG_SKILL_TASK_MIN_ITERATIONS),
   }
 }
 
@@ -102,6 +140,74 @@ export function createTaskBudgetRuntime(taskType: TaskType, options?: {
   return {
     ...runtime,
     warningLevel: getBudgetWarningLevel(getBudgetUsagePercent(runtime)),
+  }
+}
+
+export function grantBudgetSafetyFloor(params: {
+  budget: RunBudgetSeed
+  usage: RunBudgetUsage
+  stepBudget?: StepBudgetState | null
+  minimumRemainingIterations?: number
+  minimumRemainingToolCalls?: number
+  minimumRemainingStepIterations?: number
+}): {
+  budget: RunBudgetSeed
+  stepBudget: StepBudgetState | null
+  grantedIterationSafetyFloor: boolean
+  grantedToolCallSafetyFloor: boolean
+  grantedStepBudgetSafetyFloor: boolean
+} {
+  const budget: RunBudgetSeed = {
+    ...params.budget,
+    reservedToolCalls: Math.max(0, Math.round(params.budget.reservedToolCalls || 0)),
+  }
+  const usage: RunBudgetUsage = {
+    iterationsUsed: Math.max(0, Math.round(params.usage.iterationsUsed || 0)),
+    toolCallsUsed: Math.max(0, Math.round(params.usage.toolCallsUsed || 0)),
+    parallelToolGroupsUsed: Math.max(0, Math.round(params.usage.parallelToolGroupsUsed || 0)),
+  }
+  const minimumRemainingIterations = Math.max(1, Math.round(params.minimumRemainingIterations || 4))
+  const minimumRemainingToolCalls = Math.max(1, Math.round(params.minimumRemainingToolCalls || 2))
+  const minimumRemainingStepIterations = Math.max(
+    1,
+    Math.round(params.minimumRemainingStepIterations || minimumRemainingIterations),
+  )
+  let grantedIterationSafetyFloor = false
+  let grantedToolCallSafetyFloor = false
+  let grantedStepBudgetSafetyFloor = false
+
+  if (budget.maxIterations - usage.iterationsUsed < minimumRemainingIterations) {
+    budget.maxIterations = usage.iterationsUsed + minimumRemainingIterations
+    grantedIterationSafetyFloor = true
+  }
+  if (budget.maxToolCalls - budget.reservedToolCalls! - usage.toolCallsUsed < minimumRemainingToolCalls) {
+    budget.maxToolCalls = usage.toolCallsUsed + budget.reservedToolCalls! + minimumRemainingToolCalls
+    grantedToolCallSafetyFloor = true
+  }
+
+  let stepBudget = params.stepBudget
+    ? {
+      stepId: params.stepBudget.stepId || null,
+      maxIterations: Math.max(1, Math.round(params.stepBudget.maxIterations)),
+      remainingIterations: Math.max(0, Math.round(params.stepBudget.remainingIterations)),
+    }
+    : null
+  if (stepBudget && stepBudget.remainingIterations < minimumRemainingStepIterations) {
+    const usedStepIterations = Math.max(0, stepBudget.maxIterations - stepBudget.remainingIterations)
+    stepBudget = {
+      ...stepBudget,
+      maxIterations: Math.max(stepBudget.maxIterations, usedStepIterations + minimumRemainingStepIterations),
+      remainingIterations: minimumRemainingStepIterations,
+    }
+    grantedStepBudgetSafetyFloor = true
+  }
+
+  return {
+    budget,
+    stepBudget,
+    grantedIterationSafetyFloor,
+    grantedToolCallSafetyFloor,
+    grantedStepBudgetSafetyFloor,
   }
 }
 
@@ -226,6 +332,7 @@ export function restoreContinuationTaskBudgetRuntime(params: {
     restoredUsage: false,
     grantedIterationSafetyFloor: false,
     grantedToolCallSafetyFloor: false,
+    grantedStepBudgetSafetyFloor: false,
   }
   const continuationState = params.continuationState || null
   const budget = continuationState?.budget || params.budget
@@ -272,36 +379,40 @@ export function restoreContinuationTaskBudgetRuntime(params: {
     }
   const minimumRemainingIterations = Math.max(1, Math.round(params.minimumRemainingIterations || 4))
   const minimumRemainingToolCalls = Math.max(1, Math.round(params.minimumRemainingToolCalls || 2))
+  const restoredStepBudget = runtimeBudget?.stepBudget
+    ? {
+      stepId: runtimeBudget.stepBudget.stepId || null,
+      maxIterations: Math.max(1, Math.round(runtimeBudget.stepBudget.maxIterations)),
+      remainingIterations: Math.max(0, Math.round(runtimeBudget.stepBudget.remainingIterations)),
+    }
+    : budget?.stepBudget
+    ? {
+      stepId: budget.stepBudget.stepId || null,
+      maxIterations: Math.max(1, Math.round(budget.stepBudget.maxIterations)),
+      remainingIterations: Math.max(0, Math.round(budget.stepBudget.remainingIterations ?? budget.stepBudget.maxIterations)),
+    }
+    : null
 
   diagnostics.inheritedBudget = true
   diagnostics.restoredUsage = usage.iterationsUsed > 0 || usage.toolCallsUsed > 0 || usage.parallelToolGroupsUsed > 0
 
-  if (seed.maxIterations - usage.iterationsUsed < minimumRemainingIterations) {
-    seed.maxIterations = usage.iterationsUsed + minimumRemainingIterations
-    diagnostics.grantedIterationSafetyFloor = true
-  }
-  if (seed.maxToolCalls - seed.reservedToolCalls! - usage.toolCallsUsed < minimumRemainingToolCalls) {
-    seed.maxToolCalls = usage.toolCallsUsed + seed.reservedToolCalls! + minimumRemainingToolCalls
-    diagnostics.grantedToolCallSafetyFloor = true
-  }
+  const safetyFloor = grantBudgetSafetyFloor({
+    budget: seed,
+    usage,
+    stepBudget: restoredStepBudget,
+    minimumRemainingIterations,
+    minimumRemainingToolCalls,
+    minimumRemainingStepIterations: minimumRemainingIterations,
+  })
+  diagnostics.grantedIterationSafetyFloor = safetyFloor.grantedIterationSafetyFloor
+  diagnostics.grantedToolCallSafetyFloor = safetyFloor.grantedToolCallSafetyFloor
+  diagnostics.grantedStepBudgetSafetyFloor = safetyFloor.grantedStepBudgetSafetyFloor
 
   return {
     runtime: createTaskBudgetRuntime(params.taskType, {
-      budget: seed,
+      budget: safetyFloor.budget,
       usage,
-      stepBudget: runtimeBudget?.stepBudget
-        ? {
-          stepId: runtimeBudget.stepBudget.stepId || null,
-          maxIterations: Math.max(1, Math.round(runtimeBudget.stepBudget.maxIterations)),
-          remainingIterations: Math.max(0, Math.round(runtimeBudget.stepBudget.remainingIterations)),
-        }
-        : budget?.stepBudget
-        ? {
-          stepId: budget.stepBudget.stepId || null,
-          maxIterations: Math.max(1, Math.round(budget.stepBudget.maxIterations)),
-          remainingIterations: Math.max(0, Math.round(budget.stepBudget.remainingIterations ?? budget.stepBudget.maxIterations)),
-        }
-        : null,
+      stepBudget: safetyFloor.stepBudget,
       frozen: Boolean(runtimeBudget?.frozen ?? budget?.frozen),
       bootstrapBudget: Boolean(runtimeBudget?.bootstrapBudget ?? budget?.bootstrapBudget),
     }),

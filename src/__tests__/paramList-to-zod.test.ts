@@ -12,7 +12,7 @@ import test from 'node:test'
 import { paramListToZodObject } from '../main/modules/tools/paramList-to-zod'
 import { zodObjectToParamList } from '../main/modules/tools/zod-param-derivation'
 // Phase 4: SKILL_CONTROL_SCHEMAS retired; use SKILL_PRIMITIVE_SCHEMAS as the
-// round-trip fixture set since the 4 primitives are our new canonical
+// round-trip fixture set since primitives are our canonical
 // describe()-annotated Zod objects.
 import { SKILL_PRIMITIVE_SCHEMAS } from '../main/modules/tools/skill-primitives/primitive-schemas'
 import type { SkillParamDefinition } from '../shared/skill-execution-types'

@@ -52,6 +52,19 @@ export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): b
   )
 }
 
+export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
+  if (!run) return false
+  if (
+    run.module === 'skill' &&
+    run.executionKind === 'job' &&
+    typeof run.taskId === 'string' &&
+    run.taskId.startsWith('detached:')
+  ) {
+    return false
+  }
+  return isActiveScopePhase(run.phase)
+}
+
 export function phaseToToolTraceStatus(
   phase: ScopeRunState['phase'] | undefined
 ): 'idle' | 'running' | 'done' | 'error' | 'cancelled' {
@@ -280,6 +293,7 @@ function normalizeWaitingFor(value: unknown): ScopeRunWaitingFor {
     normalized === 'input' ||
     normalized === 'confirmation' ||
     normalized === 'agent_result' ||
+    normalized === 'clarification' ||
     normalized === 'background'
   ) {
     return normalized
@@ -385,12 +399,16 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   const taskId = typeof record.taskId === 'string' ? record.taskId : null
   const stepId = typeof record.stepId === 'string' ? record.stepId : null
   const blockerType = typeof record.blockerType === 'string' ? record.blockerType : null
-  if (!executionId && !taskId && !stepId && !blockerType) return null
+  const todoId = typeof record.todoId === 'string' ? record.todoId : null
+  const todoTitle = typeof record.todoTitle === 'string' ? record.todoTitle : null
+  if (!executionId && !taskId && !stepId && !blockerType && !todoId) return null
   return {
     executionId,
     taskId,
     stepId,
     blockerType,
+    todoId,
+    todoTitle,
   }
 }
 
@@ -420,6 +438,19 @@ function finalizeTaskState(
   const steps = patch.steps || previous?.steps || []
   if (steps.length === 0) return
   if (phase === 'done') {
+    const hasBlocker = Boolean((patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason)
+    if (hasBlocker) {
+      patch.steps = steps.map((step) => ({
+        ...step,
+        updatedAt: step.updatedAt || timestamp
+      }))
+      patch.resumableActions =
+        patch.resumableActions && patch.resumableActions.length > 0
+          ? patch.resumableActions
+          : previous?.resumableActions || []
+      patch.taskSummary = patch.taskSummary || previous?.taskSummary || patch.blockedReason || '等待补充后继续'
+      return
+    }
     patch.steps = steps.map((step) => ({
       ...step,
       status: step.status === 'error' ? step.status : 'done',
@@ -682,7 +713,10 @@ export function deriveScopeRunStatePatch(
     patch.blockedReason = null
     patch.checkpointExpiresAt = null
   } else if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
-    patch.blockedReason = null
+    const hasDoneBlocker = event.phase === 'done' && Boolean(
+      (patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason
+    )
+    if (!hasDoneBlocker) patch.blockedReason = null
     patch.checkpointExpiresAt = null
   }
 

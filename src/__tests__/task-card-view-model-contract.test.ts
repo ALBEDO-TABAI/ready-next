@@ -95,3 +95,40 @@ test('task card view model prefers projection status and steps when available', 
   assert.equal(vm.currentStep?.status, 'blocked')
   assert.equal(vm.sections.plan.summary, '当前：章节改写')
 })
+
+test('task card view model surfaces skill output artifacts', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-skill-vea',
+    phase: 'done',
+    status: 'done',
+    title: '视频分析',
+    taskTitle: '技能执行 · Video Expert Analyzer',
+    taskSummary: '视频分析已完成',
+    waitingFor: 'none',
+    resumableActions: ['open_artifact'],
+    recentArtifacts: [
+      {
+        id: 'artifact-1',
+        module: 'skill',
+        kind: 'artifact',
+        label: 'run_state.json',
+        path: '/tmp/video/out/run_state.json',
+        createdAt: '2026-04-17T10:00:00.000Z',
+        meta: { outputKey: 'runStatePath' },
+      },
+      {
+        id: 'artifact-2',
+        module: 'skill',
+        kind: 'artifact',
+        label: 'scene_scores.json',
+        path: '/tmp/video/out/scene_scores.json',
+        createdAt: '2026-04-17T10:00:00.000Z',
+        meta: { outputKey: 'sceneScoresPath' },
+      },
+    ],
+    updatedAt: '2026-04-17T10:00:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.sections.artifacts.count, 2)
+  assert.equal(vm.sections.artifacts.summary, 'run_state.json')
+})

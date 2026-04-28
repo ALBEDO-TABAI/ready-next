@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { join, delimiter } from 'path'
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
@@ -43,17 +43,26 @@ import { SkillLoader } from './skill-loader'
 // skill_executions state machine. The imports (and the files) are removed in
 // PR1-E.
 import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
+import { logAgentMetric } from '../agent-control/metrics'
 import {
   getSkillHostController,
   type SkillHostController,
   type SpawnContextHandle,
 } from './skill-host-controller'
 import { spawnWithTreeKill, type SpawnWithTreeKillError } from '../process-cleanup/spawn-with-tree-kill'
+import {
+  buildReadyPythonCandidates,
+  isSupportedReadyPythonVersion,
+  parsePythonVersionText,
+  type PythonVersionInfo,
+} from './python-runtime-version'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 const execFileAsync = promisify(execFile)
 
 const INSTALL_STATE_FILENAME = '.ready-install-state.json'
 const EMBEDDED_SYNC_STATE_FILENAME = '.ready-embedded-sync-state.json'
+const PYTHON_RUNTIME_STATE_FILENAME = '.ready-python-runtime-state.json'
 const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
 /**
  * C6 — per-stream in-memory cap before output spills to a `.logs/` artifact
@@ -68,6 +77,26 @@ const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
 const DIRECT_ACTION_INMEMORY_CAP = 1 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000
 const SCHEDULER_INTERVAL_MS = 60_000
+type SkillRunStatus = NonNullable<SkillRunResult['status']>
+
+function normalizeSkillRunStatus(value: unknown, ok?: boolean): SkillRunStatus | undefined {
+  const status = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['blocked', 'pending_review', 'awaiting_input'].includes(status)) return 'blocked'
+  if (['failed', 'failure', 'error'].includes(status)) return 'error'
+  if (['completed', 'success', 'done'].includes(status)) return 'done'
+  if (ok === false) return 'error'
+  if (ok === true) return 'done'
+  return undefined
+}
+
+function mergeSkillRunStatus(
+  current: SkillRunStatus | undefined,
+  detected: SkillRunStatus,
+): SkillRunStatus {
+  if (current === 'blocked' || current === 'error') return current
+  if (detected === 'blocked' || detected === 'error') return detected
+  return current || detected
+}
 
 /**
  * B-arch-4 — explicit allowlist of embedded skill ids that have been retired
@@ -85,6 +114,28 @@ const RETIRED_EMBEDDED_SKILL_IDS: ReadonlySet<string> = new Set(['video-expert-a
 
 type SkillTriggerType = 'manual' | 'tool' | 'schedule'
 export type SkillId = string
+
+function hashDirectoryContents(root: string): string {
+  const hash = createHash('sha256')
+  const visit = (dir: string, relativePrefix = ''): void => {
+    for (const entry of readdirSync(dir).sort()) {
+      const absolute = join(dir, entry)
+      const relative = relativePrefix ? `${relativePrefix}/${entry}` : entry
+      const stat = statSync(absolute)
+      if (stat.isDirectory()) {
+        hash.update(`dir:${relative}\n`)
+        visit(absolute, relative)
+        continue
+      }
+      if (!stat.isFile()) continue
+      hash.update(`file:${relative}:${stat.size}\n`)
+      hash.update(readFileSync(absolute))
+      hash.update('\n')
+    }
+  }
+  visit(root)
+  return hash.digest('hex')
+}
 
 export interface SkillState {
   id: SkillId
@@ -120,6 +171,14 @@ interface SkillInstallState {
   version: string
   requirementsDigest: string
   installedAt: string
+  venvId?: string
+}
+
+interface PythonRuntimeState {
+  venvId: string
+  pythonPath: string
+  pythonVersion: string
+  updatedAt: string
 }
 
 export interface SkillsRuntimeManagerOptions {
@@ -154,9 +213,11 @@ export interface SkillRunResult {
   success: boolean
   skillId: SkillId
   action: string
+  jobId?: string
   stdout: string
   stderr: string
   outputDir?: string
+  outputs?: Record<string, string>
   command: string[]
   error?: string
   // Phase 4: 'workflow' mode retired along with the skill_executions state
@@ -191,11 +252,13 @@ export interface SkillRunRequest {
   action: string
   params?: Record<string, unknown>
   timeoutMs?: number
+  signal?: AbortSignal
   triggerType?: SkillTriggerType
   scheduleId?: string
   env?: Record<string, string>
   sessionId?: string
   executionMode?: 'auto' | 'workflow' | 'direct'
+  agentContext?: AgentSpawnContext | null
 }
 
 interface SkillJobRow {
@@ -622,8 +685,9 @@ export class SkillsRuntimeManager {
       scheduleId: request.scheduleId || null,
     })
     const finish = (result: SkillRunResult): SkillRunResult => {
-      this.recordJobFinish(jobId, result)
-      return result
+      const withJobId = { ...result, jobId }
+      this.recordJobFinish(jobId, withJobId)
+      return withJobId
     }
 
     try {
@@ -662,6 +726,16 @@ export class SkillsRuntimeManager {
       )
 
       let spawnHandle: SpawnContextHandle | null = null
+      const rawOutputDir = request.params?.outputDir
+      const requestedOutputDir = typeof rawOutputDir === 'string' && rawOutputDir.trim()
+        ? rawOutputDir.trim()
+        : null
+      const preparedOutputDir = hostRequirements
+        ? this.resolveOutputDir(requestedOutputDir, resolved.definition.id, jobId)
+        : undefined
+      const actionParams = preparedOutputDir && action.inputMode === 'json' && !requestedOutputDir
+        ? { ...(request.params || {}), outputDir: preparedOutputDir }
+        : (request.params || {})
       if (hostRequirements) {
         spawnHandle = await controller.prepareSpawnContext(
           resolved.definition.id,
@@ -669,7 +743,8 @@ export class SkillsRuntimeManager {
           skillAssetRoot,
           hostRequirements,
           jobId,
-          undefined, // outputDir is not yet wired per-action; controller falls back to exit_code
+          preparedOutputDir,
+          request.agentContext ?? null,
         )
       }
 
@@ -681,11 +756,13 @@ export class SkillsRuntimeManager {
         const result = await this.runDefinitionActionDirect(
           resolved.definition,
           action,
-          request.params || {},
+          actionParams,
           effectiveTimeout,
           mergedEnv,
           resolved.installResult.venvPython,
           hostRequirements,
+          request.signal,
+          preparedOutputDir,
         )
         return finish(result)
       } finally {
@@ -757,6 +834,9 @@ export class SkillsRuntimeManager {
     this.ensureRuntimeDirs()
     const installResult = await this.ensureSkillInstalled(skillId)
     if (!installResult.success || !installResult.skillPath) {
+      if (installResult.error && !installResult.error.startsWith(`Unknown skill: ${skillId}`)) {
+        throw new Error(`Skill install failed for ${skillId}: ${installResult.error}`)
+      }
       return null
     }
     const definition = this.getSkillLoader().loadSkill(skillId, installResult.skillPath)
@@ -774,6 +854,8 @@ export class SkillsRuntimeManager {
     envOverrides?: Record<string, string>,
     venvPython?: string,
     hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements | null,
+    signal?: AbortSignal,
+    preparedOutputDir?: string,
   ): Promise<SkillRunResult> {
     const skillPath = definition.source === 'embedded'
       ? this.getSkillRuntimePath(definition.id)
@@ -819,11 +901,11 @@ export class SkillsRuntimeManager {
         if (!venvPython) {
           return this.invalidParams(definition.id, action.name, 'Python skill runtime is unavailable')
         }
-        result = await this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides)
+        result = await this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides, signal)
       } else if (action.runtime === 'node') {
-        result = await this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides)
+        result = await this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides, signal)
       } else {
-        result = await this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides)
+        result = await this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides, signal)
       }
     }
 
@@ -842,9 +924,9 @@ export class SkillsRuntimeManager {
       const status = await controller.detectStatus(
         hostRequirements ?? null,
         { exitCode: inferredExitCode, stdout: result.stdout || '', stderr: result.stderr || '' },
-        result.outputDir,
+        result.outputDir || preparedOutputDir,
       )
-      result.status = status.status
+      result.status = mergeSkillRunStatus(result.status, status.status)
     } catch (error) {
       // detectStatus must never break the skill run — fall back to legacy
       // success-mapping. Telemetry surfaces via the warn log.
@@ -855,7 +937,10 @@ export class SkillsRuntimeManager {
         ':',
         error instanceof Error ? error.message : String(error),
       )
-      result.status = result.success ? 'done' : 'error'
+      result.status = result.status || (result.success ? 'done' : 'error')
+    }
+    if (!result.outputDir && preparedOutputDir) {
+      result.outputDir = preparedOutputDir
     }
     return result
   }
@@ -868,6 +953,7 @@ export class SkillsRuntimeManager {
     commandArgs: string[],
     timeoutMs: number,
     envOverrides?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<SkillRunResult> {
     const executed = await this.executeProcessWithStructuredResult({
       skillId,
@@ -878,6 +964,7 @@ export class SkillsRuntimeManager {
       commandArgs,
       timeoutMs,
       envOverrides,
+      signal,
       preferStructuredResult: true,
     })
     return this.toDirectRunResult(skillId, action.name, executed)
@@ -902,6 +989,7 @@ export class SkillsRuntimeManager {
     commandArgs: string[]
     timeoutMs: number
     envOverrides?: Record<string, string>
+    signal?: AbortSignal
     preferStructuredResult: boolean
   }): Promise<{
     success: boolean
@@ -1028,6 +1116,7 @@ export class SkillsRuntimeManager {
         cwd: params.cwd,
         env,
         timeoutMs: params.timeoutMs,
+        signal: params.signal,
         maxBuffer: MAX_COMMAND_BUFFER,
         inMemoryStdoutCap: DIRECT_ACTION_INMEMORY_CAP,
         inMemoryStderrCap: DIRECT_ACTION_INMEMORY_CAP,
@@ -1097,6 +1186,10 @@ export class SkillsRuntimeManager {
   ): SkillRunResult {
     const structured = executed.structuredResult
     const outputs = structured?.outputs || {}
+    const stringOutputs = Object.fromEntries(
+      Object.entries(outputs)
+        .filter(([, value]) => typeof value === 'string' && value.length > 0)
+    ) as Record<string, string>
     const extraStdout = [
       typeof outputs.outputDir === 'string' ? `Output directory: ${outputs.outputDir}` : '',
       ...Object.entries(outputs)
@@ -1111,8 +1204,10 @@ export class SkillsRuntimeManager {
       stdout: [executed.stdout, extraStdout].filter(Boolean).join('\n').trim(),
       stderr: executed.stderr,
       outputDir: executed.outputDir,
+      outputs: Object.keys(stringOutputs).length > 0 ? stringOutputs : undefined,
       command: executed.command,
       error: structured?.ok ? undefined : (structured?.error?.message || executed.error),
+      status: normalizeSkillRunStatus(structured?.status, structured?.ok),
       mode: 'direct',
       stdoutArtifactPath: executed.stdoutArtifactPath,
       stderrArtifactPath: executed.stderrArtifactPath,
@@ -1374,12 +1469,18 @@ export class SkillsRuntimeManager {
       const statePath = getInstallStatePath(skillPath)
       const requirementsPath = join(skillPath, manifest.requirementsFile)
       const digest = requirementsDigest(requirementsPath)
+      const venvPython = await this.ensurePythonVenv()
+      const venvState = this.readPythonRuntimeState()
 
       if (!force && existsSync(statePath)) {
         try {
           const state = JSON.parse(readFileSync(statePath, 'utf-8')) as SkillInstallState
-          if (state.version === manifest.version && state.requirementsDigest === digest) {
-            const venvPython = await this.ensurePythonVenv()
+          if (
+            state.version === manifest.version
+            && state.requirementsDigest === digest
+            && state.venvId
+            && state.venvId === venvState?.venvId
+          ) {
             return { success: true, skillId: manifest.id, skillPath, venvPython }
           }
         } catch {
@@ -1388,7 +1489,6 @@ export class SkillsRuntimeManager {
       }
 
       try {
-        const venvPython = await this.ensurePythonVenv()
         await this.ensureRuntimeToolchain()
         if (existsSync(requirementsPath)) {
           await this.installRequirements(venvPython, requirementsPath)
@@ -1397,6 +1497,7 @@ export class SkillsRuntimeManager {
           version: manifest.version,
           requirementsDigest: digest,
           installedAt: new Date().toISOString(),
+          venvId: venvState?.venvId,
         }
         writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8')
         return { success: true, skillId: manifest.id, skillPath, venvPython }
@@ -1419,12 +1520,17 @@ export class SkillsRuntimeManager {
     const requiresPython = customSkill.runtime === 'python' || customSkill.actions.some((action) => action.runtime === 'python')
     const requirementsPath = customSkill.requirementsFile ? join(customSkill.managedPath, customSkill.requirementsFile) : ''
     const digest = customSkill.requirementsFile ? requirementsDigest(requirementsPath) : 'none'
+    const venvPython = requiresPython ? await this.ensurePythonVenv() : undefined
+    const venvState = requiresPython ? this.readPythonRuntimeState() : null
 
     if (!force && existsSync(statePath)) {
       try {
         const state = JSON.parse(readFileSync(statePath, 'utf-8')) as SkillInstallState
-        if (state.version === customSkill.version && state.requirementsDigest === digest) {
-          const venvPython = requiresPython ? await this.ensurePythonVenv() : undefined
+        if (
+          state.version === customSkill.version
+          && state.requirementsDigest === digest
+          && (!requiresPython || (state.venvId && state.venvId === venvState?.venvId))
+        ) {
           return { success: true, skillId: customSkill.id, skillPath: customSkill.managedPath, venvPython }
         }
       } catch {
@@ -1433,9 +1539,10 @@ export class SkillsRuntimeManager {
     }
 
     try {
-      let venvPython: string | undefined
       if (requiresPython) {
-        venvPython = await this.ensurePythonVenv()
+        if (!venvPython) {
+          throw new Error('Python skill runtime is unavailable')
+        }
         await this.ensureRuntimeToolchain()
         if (customSkill.requirementsFile && existsSync(requirementsPath)) {
           await this.installRequirements(venvPython, requirementsPath)
@@ -1445,6 +1552,7 @@ export class SkillsRuntimeManager {
         version: customSkill.version,
         requirementsDigest: digest,
         installedAt: new Date().toISOString(),
+        venvId: venvState?.venvId,
       }
       writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8')
       return { success: true, skillId: customSkill.id, skillPath: customSkill.managedPath, venvPython }
@@ -1491,15 +1599,17 @@ export class SkillsRuntimeManager {
     }
     const destination = this.getSkillRuntimePath(manifest.id)
     const syncStatePath = join(destination, EMBEDDED_SYNC_STATE_FILENAME)
+    const sourceHash = hashDirectoryContents(source)
     const currentSyncState = (() => {
       try {
-        return JSON.parse(readFileSync(syncStatePath, 'utf-8')) as { version?: string }
+        return JSON.parse(readFileSync(syncStatePath, 'utf-8')) as { version?: string; sourceHash?: string }
       } catch {
         return null
       }
     })()
     if (
       currentSyncState?.version === manifest.version
+      && currentSyncState?.sourceHash === sourceHash
       && existsSync(join(destination, 'SKILL.md'))
       && existsSync(join(destination, 'ready-skill.json'))
     ) {
@@ -1512,6 +1622,7 @@ export class SkillsRuntimeManager {
       syncStatePath,
       JSON.stringify({
         version: manifest.version,
+        sourceHash,
         sourcePath: source,
         syncedAt: new Date().toISOString(),
       }, null, 2),
@@ -1526,7 +1637,23 @@ export class SkillsRuntimeManager {
 
   private async ensurePythonVenv(): Promise<string> {
     const pythonPath = this.getVenvPythonPath()
-    if (existsSync(pythonPath)) return pythonPath
+    let previousVersionText: string | null = null
+    if (existsSync(pythonPath)) {
+      const version = await this.getPythonVersion(pythonPath)
+      if (isSupportedReadyPythonVersion(version)) {
+        if (!this.readPythonRuntimeState()?.venvId) {
+          await this.writePythonRuntimeState(pythonPath)
+        }
+        return pythonPath
+      }
+      // Phase 1.3 — capture the bad version BEFORE rmSync so the metric +
+      // log can show what we replaced. Old behavior was a silent rm + rebuild.
+      previousVersionText = await this.getPythonVersionText(pythonPath)
+      console.warn(
+        `[SkillsRuntimeManager] Python venv version unsupported (${previousVersionText || 'unknown'}); rebuilding to a Ready-supported version.`,
+      )
+      rmSync(this.venvRoot, { recursive: true, force: true })
+    }
 
     const basePython = await this.findPythonExecutable()
     await execFileAsync(basePython, ['-m', 'venv', this.venvRoot], {
@@ -1541,7 +1668,63 @@ export class SkillsRuntimeManager {
       maxBuffer: MAX_COMMAND_BUFFER,
       env: this.getBaseEnv(),
     })
+    const state = await this.writePythonRuntimeState(venvPython, basePython)
+    if (previousVersionText) {
+      // Phase 1.3 — only emit on real rebuild (existing-but-bad → fresh).
+      logAgentMetric('python_runtime_rebuilt', {
+        previousVersion: previousVersionText,
+        newVersion: state.pythonVersion,
+        venvId: state.venvId,
+      })
+    }
     return venvPython
+  }
+
+  /**
+   * Phase 1.3 — public wrapper used by app startup to proactively detect a
+   * stale (e.g. 3.14) venv and rebuild it BEFORE the first skill_run_shell
+   * call hits a confused interpreter. Returns a small status snapshot so the
+   * caller can log "Python ready: 3.12.x" once during boot.
+   *
+   * Background: `ensurePythonVenv` previously only ran on first install/run,
+   * so a host that had Python 3.14 from a prior install never saw a rebuild
+   * until a Python skill was triggered, and even then the rmSync was silent.
+   * Calling this from `setupAgentIPC` after `runtime.start()` makes the
+   * version invariant a startup contract instead of a lazy invariant.
+   *
+   * Best-effort: any failure is swallowed and reported via the returned
+   * `error` field so it cannot block boot.
+   */
+  async ensurePythonRuntimeReady(): Promise<{
+    ready: boolean
+    pythonPath?: string
+    version?: string
+    error?: string
+  }> {
+    try {
+      const pythonPath = await this.ensurePythonVenv()
+      const state = this.readPythonRuntimeState()
+      const version = state?.pythonVersion || (await this.getPythonVersionText(pythonPath)) || 'unknown'
+      console.log(`[SkillsRuntimeManager] Python runtime ready: ${version} at ${pythonPath}`)
+      // Phase 5.2 — observability counterpart to `python_runtime_rebuilt`.
+      // Always emit so we can count total boots and detect "ensurePythonVenv
+      // succeeded but no rebuilt event" (i.e. healthy boot). Pair with the
+      // rebuilt metric to compute rebuild rate.
+      logAgentMetric('python_runtime_ready', {
+        version,
+        pythonPath,
+        venvId: state?.venvId ?? null,
+        configuredAt: state?.updatedAt ?? null,
+      })
+      return { ready: true, pythonPath, version }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[SkillsRuntimeManager] Python runtime not ready: ${message}`)
+      logAgentMetric('python_runtime_not_ready', {
+        error: message,
+      })
+      return { ready: false, error: message }
+    }
   }
 
   private getVenvPythonPath(): string {
@@ -1553,16 +1736,52 @@ export class SkillsRuntimeManager {
 
   private async findPythonExecutable(): Promise<string> {
     const configured = getDatabase().getSetting('skills_python_path')
-    const candidates = [configured, process.env.PYTHON3, 'python3', 'python'].filter((item): item is string => Boolean(item))
+    const candidates = buildReadyPythonCandidates(configured, process.env)
     for (const candidate of candidates) {
       try {
-        await execFileAsync(candidate, ['--version'], { timeout: 10_000, maxBuffer: 1_000_000 })
+        const version = await this.getPythonVersion(candidate)
+        if (!isSupportedReadyPythonVersion(version)) continue
         return candidate
       } catch {
         // Continue trying candidates.
       }
     }
-    throw new Error('Python runtime not found. Please install Python 3.9+ or set setting key `skills_python_path`.')
+    throw new Error('Python runtime not found. Please install Python 3.9-3.12 or set setting key `skills_python_path`.')
+  }
+
+  private readPythonRuntimeState(): PythonRuntimeState | null {
+    try {
+      const statePath = join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME)
+      return JSON.parse(readFileSync(statePath, 'utf-8')) as PythonRuntimeState
+    } catch {
+      return null
+    }
+  }
+
+  private async writePythonRuntimeState(venvPython: string, basePython = venvPython): Promise<PythonRuntimeState> {
+    const version = await this.getPythonVersionText(venvPython)
+    const state: PythonRuntimeState = {
+      venvId: randomUUID(),
+      pythonPath: basePython,
+      pythonVersion: version || 'unknown',
+      updatedAt: new Date().toISOString(),
+    }
+    writeFileSync(join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME), JSON.stringify(state, null, 2), 'utf-8')
+    return state
+  }
+
+  private async getPythonVersion(pythonBin: string): Promise<PythonVersionInfo | null> {
+    const versionText = await this.getPythonVersionText(pythonBin)
+    return parsePythonVersionText(versionText || '')
+  }
+
+  private async getPythonVersionText(pythonBin: string): Promise<string | null> {
+    try {
+      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 10_000, maxBuffer: 1_000_000 })
+      return `${stdout} ${stderr}`.trim()
+    } catch {
+      return null
+    }
   }
 
   private async installRequirements(venvPython: string, requirementsPath: string): Promise<void> {
@@ -1609,8 +1828,8 @@ export class SkillsRuntimeManager {
     }
   }
 
-  private resolveOutputDir(candidate: string | null, skillId: SkillId): string {
-    const outputDir = candidate || join(this.outputsRoot, skillId)
+  private resolveOutputDir(candidate: string | null, skillId: SkillId, jobId?: string): string {
+    const outputDir = candidate || join(this.outputsRoot, skillId, jobId || randomUUID())
     mkdirSync(outputDir, { recursive: true })
     return outputDir
   }

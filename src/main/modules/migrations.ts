@@ -1429,6 +1429,61 @@ const migrations: Migration[] = [
         '(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)'
       )
     }
+  },
+
+  // ------------------------------------------------------------------ 031
+  // Lightweight skill task archive. This intentionally does not restore the
+  // retired skill_executions state machine; it only stores enough durable task
+  // memory for resume/retry/restart and UI projection recovery.
+  {
+    name: '031_create_skill_task_runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_task_runs (
+          id TEXT PRIMARY KEY,
+          scope_id TEXT,
+          session_id TEXT,
+          agent TEXT,
+          run_id TEXT,
+          skill_id TEXT NOT NULL,
+          skill_name TEXT,
+          action TEXT NOT NULL,
+          tool_name TEXT,
+          run_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          interaction_state TEXT NOT NULL,
+          goal_text TEXT,
+          resource_refs_json TEXT,
+          params_json TEXT,
+          steps_json TEXT NOT NULL DEFAULT '[]',
+          current_step_id TEXT,
+          artifacts_json TEXT NOT NULL DEFAULT '[]',
+          output_dir TEXT,
+          run_state_path TEXT,
+          scene_scores_path TEXT,
+          delivery_report_path TEXT,
+          failure_kind TEXT,
+          failure_detail TEXT,
+          job_id TEXT,
+          detached_task_id TEXT,
+          resume_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_scope_updated
+          ON skill_task_runs(scope_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_session_status_updated
+          ON skill_task_runs(session_id, status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_skill_updated
+          ON skill_task_runs(skill_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_job_id
+          ON skill_task_runs(job_id);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_detached_task_id
+          ON skill_task_runs(detached_task_id);
+      `)
+    }
   }
 ]
 

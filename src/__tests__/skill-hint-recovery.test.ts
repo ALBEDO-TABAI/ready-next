@@ -39,6 +39,25 @@ describe('skill-resume G4 — findSkillHintInCapsuleTexts', () => {
     assert.equal(recovered, null)
   })
 
+  it('recovers when capsule text mentions only the natural skill id', () => {
+    const recovered = findSkillHintInCapsuleTexts(
+      ['上次任务使用 video-expert-analyzer 跑到素材筛选阶段'],
+      {
+        resolveToolByName: () => null,
+        listSkills: () => [{
+          id: 'video-expert-analyzer',
+          name: 'Video Expert Analyzer (VNext)',
+          executionMode: 'advisory',
+          actions: [{ runtime: 'reference' }],
+        }],
+      },
+    )
+    assert.deepEqual(recovered, {
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer (VNext)',
+    })
+  })
+
   it('returns null when the matched tool name does not resolve to a skill', () => {
     const recovered = findSkillHintInCapsuleTexts(
       ['agent 调用了 skill_unknown_action 后失败'],

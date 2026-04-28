@@ -227,10 +227,12 @@ export interface ScopeRunTaskStep {
 
 export interface ScopeRunTaskContinuation {
   taskId?: string | null
-  executionId: string
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
+  todoId?: string | null
+  todoTitle?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -292,6 +294,7 @@ export interface ScopeRunExecutionDiagnostics {
     restoredUsage: boolean
     grantedIterationSafetyFloor: boolean
     grantedToolCallSafetyFloor: boolean
+    grantedStepBudgetSafetyFloor: boolean
   } | null
   degradationReason?: string | null
   pipeline?: {

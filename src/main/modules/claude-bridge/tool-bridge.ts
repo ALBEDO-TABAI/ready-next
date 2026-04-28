@@ -12,6 +12,31 @@ export interface ParsedTextToolBridgeResponse {
 
 const TOOL_CALL_BLOCK_REGEX = /:::tool_call\s*\n\s*({[\s\S]*?})\s*\n\s*:::/g
 
+/**
+ * Phase 3.1 — XML-style tool_call blocks the audit found leaking into chat.
+ *
+ * Several upstream models (mostly OpenAI-compatible Qwen / Mimo deployments)
+ * sometimes emit tool calls in this shape instead of native function calls
+ * or the canonical `:::tool_call` block:
+ *
+ *   <tool_call>
+ *   <function=skill_run_shell>
+ *   <parameter=command>ls -la /tmp/project</parameter>
+ *   </function>
+ *   </tool_call>
+ *
+ * Before this regex landed, the parser silently passed those through as
+ * visibleText, the markers ended up in the chat panel + chat_messages DB,
+ * and the tool dispatch never saw the call. Audit Phase 3 §D1.
+ *
+ * The regex is non-greedy and `g` so multiple blocks in a row are extracted
+ * in order. Inner `<function=NAME>` and repeated `<parameter=KEY>VAL</parameter>`
+ * are pulled by helper regexes inside the parser body.
+ */
+const XML_TOOL_CALL_REGEX = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g
+const XML_FUNCTION_REGEX = /<function=([^>\s]+)\s*>([\s\S]*?)<\/function>/
+const XML_PARAMETER_REGEX = /<parameter=([^>\s]+)\s*>([\s\S]*?)<\/parameter>/g
+
 function normalizeSchemaType(value: unknown): string {
   if (Array.isArray(value)) {
     return value.filter((item) => typeof item === 'string').join(' | ') || 'unknown'
@@ -98,6 +123,34 @@ export function buildTextToolBridgePrompt(
   ].join('\n')
 }
 
+/**
+ * Phase 3.1 — extract tool calls from an XML-style block. The block content
+ * (between `<tool_call>` and `</tool_call>`) must contain exactly one
+ * `<function=NAME>...</function>` and zero or more
+ * `<parameter=KEY>VAL</parameter>`. Returns null when the block is malformed
+ * (no function, empty name) so the caller knows to leave the original text
+ * intact.
+ *
+ * Whitespace inside parameter values is preserved verbatim — script bodies
+ * like `command` for skill_run_shell often contain leading spaces.
+ */
+function extractXmlToolCall(blockBody: string): TextToolBridgeCall | null {
+  const fn = blockBody.match(XML_FUNCTION_REGEX)
+  if (!fn) return null
+  const name = String(fn[1] || '').trim()
+  if (!name) return null
+  const fnBody = String(fn[2] || '')
+  const args: Record<string, unknown> = {}
+  XML_PARAMETER_REGEX.lastIndex = 0
+  let paramMatch: RegExpExecArray | null
+  while ((paramMatch = XML_PARAMETER_REGEX.exec(fnBody)) !== null) {
+    const key = String(paramMatch[1] || '').trim()
+    if (!key) continue
+    args[key] = String(paramMatch[2] ?? '')
+  }
+  return { name, args }
+}
+
 export function parseTextToolBridgeResponse(text: string): ParsedTextToolBridgeResponse {
   if (!text) {
     return { visibleText: '', toolCalls: [] }
@@ -105,6 +158,7 @@ export function parseTextToolBridgeResponse(text: string): ParsedTextToolBridgeR
 
   const toolCalls: TextToolBridgeCall[] = []
   const visibleText = text
+    // Canonical `:::tool_call\n{...JSON...}\n:::` block.
     .replace(TOOL_CALL_BLOCK_REGEX, (_match, jsonBlock) => {
       try {
         const parsed = JSON.parse(String(jsonBlock)) as Record<string, unknown>
@@ -117,6 +171,17 @@ export function parseTextToolBridgeResponse(text: string): ParsedTextToolBridgeR
         }
       } catch {
         // Ignore invalid JSON blocks.
+      }
+      return ''
+    })
+    // Phase 3.1 — XML-style `<tool_call><function=...>...</function></tool_call>`
+    // emitted by some OpenAI-compatible providers. Extract calls in document
+    // order so cross-block dependencies (e.g. write then read) preserve
+    // intent. Audit Phase 3 §D1.
+    .replace(XML_TOOL_CALL_REGEX, (_match, blockBody) => {
+      const call = extractXmlToolCall(String(blockBody))
+      if (call) {
+        toolCalls.push(call)
       }
       return ''
     })

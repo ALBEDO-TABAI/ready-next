@@ -21,6 +21,13 @@ const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
 
+export const STATIC_SKILL_ACTIONS_BY_TOOL_NAME: Record<string, { skillId: string; actionName: string }> = Object.fromEntries(
+  Object.entries(STATIC_SKILL_TOOL_NAMES_BY_ACTION).map(([key, toolName]) => {
+    const [skillId, actionName] = key.split(':')
+    return [toolName, { skillId, actionName }]
+  }),
+)
+
 // B Phase 1 — skill primitives names. Session-gated at runtime via
 // `filterSkillPrimitivesBySession` (only exposed when a reference-skill hint
 // is armed). Names included here so static-fallback tool enumeration still
@@ -30,10 +37,15 @@ const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  // Phase 5.1 — generic run_state inspector for long multi-step skills.
+  'skill_inspect_run_state',
 ]
 
 /**
- * Full static tool list — skill_action + 4 primitives. Boot-path callers
+ * Full static tool list — skill_action + primitives. Boot-path callers
  * (ToolRegistry static fallback) use this unchanged; session-aware filtering
  * runs at dispatch time through filterSkillPrimitivesBySession.
  */

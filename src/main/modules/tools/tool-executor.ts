@@ -6,10 +6,11 @@
 import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime'
-import { defaultToolGateway } from '../agent-control/tool-gateway'
+import { defaultToolRegistry } from '../agent-control/tool-registry'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
@@ -50,7 +51,10 @@ export interface ToolContext {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
   sessionId?: string
+  scopeId?: string
+  runId?: string
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
+  agentContext?: AgentSpawnContext | null
 }
 
 export async function executeToolCall(
@@ -61,7 +65,7 @@ export async function executeToolCall(
   // Check registration BEFORE admission so the model can distinguish
   // "fabricated tool name" from "real tool but not allowed this turn" —
   // see tool-not-allowed-message.ts for the rationale.
-  const definition = defaultToolGateway.getToolDefinition(toolName)
+  const definition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
   if (!definition) {
     return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
       shape: 'json',
@@ -74,6 +78,16 @@ export async function executeToolCall(
   }
 
   const allowedToolNames = normalizeAllowedToolSet(context.allowedToolNames)
+  if (definition.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
+    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
+      shape: 'json',
+      data: {
+        errorKind: 'host_unavailable',
+        reason: 'tool_restricted_this_turn',
+        toolName,
+      },
+    })
+  }
   if (allowedToolNames && !allowedToolNames.has(toolName)) {
     return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
       shape: 'json',
@@ -143,7 +157,10 @@ export async function executeToolCall(
           return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
 
         case 'skill':
-          return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal)
+          return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
+            scopeId: context.scopeId || context.scope?.id || context.sessionId,
+            runId: context.runId,
+          })
 
         case 'system':
           return executeSystemTool(toolName, args)

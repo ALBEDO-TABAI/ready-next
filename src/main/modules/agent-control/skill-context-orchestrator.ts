@@ -5,6 +5,7 @@ import type { SkillState } from '../skills-runtime/runtime-manager'
 import type { ToolExecutionOutput } from './tool-result-types'
 import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from './metrics'
+import { isRetryOnlyTurn } from './skill-detection-inputs'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
@@ -26,6 +27,16 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  // RE-AUDIT FIX 5.1 followup — keep this list in lock-step with
+  // PRIMITIVE_TOOL_DEFS (`tool-defs.ts`). Original Phase 5.1 added the
+  // new primitive to PRIMITIVE_TOOL_DEFS + STATIC_SKILL_TOOL_NAMES but
+  // forgot this hardcoded duplicate in the orchestrator. Result: the
+  // tool was dispatchable but never appeared in `preferredSkillToolNames`,
+  // so reference-skill turns didn't surface it as a recommended next step.
+  'skill_inspect_run_state',
 ]
 
 interface SkillToolRef {
@@ -64,15 +75,44 @@ export class SkillContextOrchestrator {
     if (!primary) return []
     const normalizedPrimary = this.normalizeLooseToken(primary)
     if (!normalizedPrimary) return []
+    const aliasTokens = this.extractAliasTokens(primary)
     const skills = this.deps.listSkills()
-    return skills.filter((skill, index) => {
+    const exactMatches: Array<{ skill: SkillState; position: number; index: number }> = []
+    const aliasMatches: Array<{ skill: SkillState; position: number; index: number }> = []
+    const descriptionMatches: Array<{ skill: SkillState; position: number; index: number }> = []
+
+    skills.forEach((skill, index) => {
       const candidates = [skill.id, skill.name]
         .map((item) => this.normalizeLooseToken(item))
         .filter((item) => item.length >= 6)
-      const matched = candidates.some((candidate) => normalizedPrimary.includes(candidate))
-      if (!matched) return false
-      return skills.findIndex((entry) => entry.id === skill.id) === index
-    }).slice(0, 2)
+      const positions = candidates
+        .map((candidate) => normalizedPrimary.indexOf(candidate))
+        .filter((position) => position >= 0)
+      if (positions.length > 0) {
+        exactMatches.push({ skill, position: Math.min(...positions), index })
+        return
+      }
+      const aliasPosition = aliasTokens.findIndex((alias) => this.skillMatchesAlias(skill, alias))
+      if (aliasPosition >= 0) {
+        aliasMatches.push({ skill, position: aliasPosition, index })
+        return
+      }
+      if (this.skillMatchesDescriptionIntent(skill, primary)) {
+        descriptionMatches.push({ skill, position: Number.MAX_SAFE_INTEGER, index })
+      }
+    })
+
+    const strongestMatches = exactMatches.length > 0
+      ? exactMatches
+      : aliasMatches.length > 0
+        ? aliasMatches
+        : descriptionMatches
+
+    return strongestMatches
+      .sort((left, right) => left.position - right.position || left.index - right.index)
+      .filter((match, index, all) => all.findIndex((entry) => entry.skill.id === match.skill.id) === index)
+      .map((match) => match.skill)
+      .slice(0, 2)
   }
 
   listRegisteredSkillTokens(): string[] {
@@ -119,8 +159,15 @@ export class SkillContextOrchestrator {
     // G3 synthesized a context text on retry intent.
     const armedHint = sessionId ? getLastReferenceSkill(sessionId) : null
 
-    const explicitSkills = this.findExplicitlyRequestedSkills(userText)
-    for (const skill of explicitSkills) {
+    const skillCandidates = this.findExplicitlyRequestedSkills(userText)
+    if (armedHint && skillCandidates.length === 0 && isRetryOnlyTurn(userText)) {
+      const armedSkill = this.deps.listSkills().find((skill) => skill.id === armedHint.id)
+      if (armedSkill && !skillCandidates.some((skill) => skill.id === armedSkill.id)) {
+        skillCandidates.push(armedSkill)
+      }
+    }
+
+    for (const skill of skillCandidates) {
       const exposeWhenArmed = skill.hostRequirements?.expose_when_hint_armed ?? []
       for (const action of skill.actions) {
         const isPublic = action.visibility !== 'internal'
@@ -140,15 +187,18 @@ export class SkillContextOrchestrator {
     return Array.from(toolNames)
   }
 
+  getCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string } | null {
+    const hint = getLastReferenceSkill(sessionId)
+    return hint ? { id: hint.id, name: hint.name } : null
+  }
+
   rememberExplicitReferenceSkillHint(userText: string, sessionId?: string): boolean {
     if (!sessionId) return false
-    let remembered = false
-    for (const skill of this.findExplicitlyRequestedSkills(userText)) {
-      if (!this.isReferenceLikeSkill(skill)) continue
-      rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
-      remembered = true
-    }
-    return remembered
+    const skill = this.findExplicitlyRequestedSkills(userText)
+      .find((candidate) => this.isReferenceLikeSkill(candidate))
+    if (!skill) return false
+    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+    return true
   }
 
   /**
@@ -318,7 +368,7 @@ export class SkillContextOrchestrator {
   }
 
   private composeReferenceSystemInjection(skill: SkillState, docText: string): string {
-    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact。`
+    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact；如需启动耗时较长的技能 action，用 skill_start_detached。`
     const goal = skill.description ? `技能目标：${skill.description}` : ''
     return [header, goal, '技能说明正文：', docText].filter(Boolean).join('\n')
   }
@@ -343,5 +393,60 @@ export class SkillContextOrchestrator {
       .toLowerCase()
       .replace(/[^a-z0-9一-龥]+/g, '')
       .trim()
+  }
+
+  private extractAliasTokens(value: string): string[] {
+    const tokens = String(value || '').match(/[A-Z][A-Z0-9]{1,9}/g) || []
+    return Array.from(new Set(tokens.map((token) => token.toLowerCase())))
+  }
+
+  private skillMatchesAlias(skill: SkillState, alias: string): boolean {
+    const candidates = this.skillAliasCandidates(skill)
+    return candidates.some((candidate) => {
+      if (candidate === alias) return true
+      return alias.length >= 3 && candidate.length > alias.length && candidate.startsWith(alias)
+    })
+  }
+
+  private skillAliasCandidates(skill: SkillState): string[] {
+    const words = `${skill.name} ${skill.id}`
+      .replace(/\([^)]*\)/g, ' ')
+      .split(/[^A-Za-z0-9]+/)
+      .map((word) => word.trim())
+      .filter((word) => word.length > 0)
+    const aliases = new Set<string>()
+    const acronym = words.map((word) => word[0]).join('').toLowerCase()
+    if (acronym.length >= 2) aliases.add(acronym)
+    for (const word of words) {
+      if (/^[A-Z0-9]{2,10}$/.test(word)) aliases.add(word.toLowerCase())
+    }
+    return Array.from(aliases)
+  }
+
+  private skillMatchesDescriptionIntent(skill: SkillState, text: string): boolean {
+    const taskTerms = new Set(this.extractIntentTerms(text))
+    if (taskTerms.size < 2) return false
+    const skillTerms = new Set(this.extractIntentTerms(`${skill.name} ${skill.description}`))
+    let matches = 0
+    for (const term of taskTerms) {
+      if (!skillTerms.has(term)) continue
+      matches += 1
+      if (matches >= 2) return true
+    }
+    return false
+  }
+
+  private extractIntentTerms(value: string): string[] {
+    const terms = new Set<string>()
+    const raw = String(value || '').toLowerCase()
+    for (const word of raw.match(/[a-z0-9]{3,}/g) || []) {
+      terms.add(word)
+    }
+    for (const chunk of raw.match(/[\u4e00-\u9fa5]{2,}/g) || []) {
+      for (let index = 0; index < chunk.length - 1; index += 1) {
+        terms.add(chunk.slice(index, index + 2))
+      }
+    }
+    return Array.from(terms)
   }
 }

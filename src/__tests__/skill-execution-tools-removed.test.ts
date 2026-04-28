@@ -59,13 +59,13 @@ test('filterSkillPrimitivesBySession never leaks retired names back (even if def
   // Even when fully exposed (sessionId undefined), the filter passes through
   // whatever the caller hands in — the protection is that the callers
   // (skills-tools.ts getSkillToolDefs) always pass PRIMITIVE_TOOL_DEFS, which
-  // contains only the 4 primitives. Lock that contract with a source-level
+  // contains only current primitives. Lock that contract with a source-level
   // check rather than relying on the filter to sanitize.
   const pass = filterSkillPrimitivesBySession(spoofed, undefined, () => false, () => false)
   assert.deepEqual(pass.map((t) => t.name), spoofed.map((t) => t.name))
 })
 
-test('source — PRIMITIVE_TOOL_DEFS contains exactly the 4 primitive names (no retired tool smuggled in)', () => {
+test('source — PRIMITIVE_TOOL_DEFS contains current primitive names (no retired tool smuggled in)', () => {
   const source = readFileSync(
     resolve(process.cwd(), 'src/main/modules/tools/skill-primitives/tool-defs.ts'),
     'utf-8',
@@ -77,12 +77,17 @@ test('source — PRIMITIVE_TOOL_DEFS contains exactly the 4 primitive names (no 
       `PRIMITIVE_TOOL_DEFS must not declare ${name}`,
     )
   }
-  // Positive baseline — the 4 primitives are declared.
+  // Positive baseline — current primitives are declared.
   for (const name of [
     'skill_ask_user',
     'skill_run_shell',
     'skill_write_artifact',
     'skill_read_artifact',
+    'skill_start_detached',
+    'skill_inspect_detached',
+    'skill_cancel_detached',
+    // Phase 5.1 — generic run_state inspector for long multi-step skills.
+    'skill_inspect_run_state',
   ]) {
     assert.match(
       source,

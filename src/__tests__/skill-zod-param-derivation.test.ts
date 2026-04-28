@@ -5,7 +5,7 @@
  * SKILL_CONTROL_SCHEMAS and EXECUTION_TOOL_DEFS. The generic fail-loud case
  * (a .describe()-less field must throw) is retained because
  * `paramListToZodObject` / `zodObjectToParamList` round-trip is still used
- * for the 4 skill primitives + dynamic skill-action schemas.
+ * for skill primitives + dynamic skill-action schemas.
  */
 
 import assert from 'node:assert/strict'

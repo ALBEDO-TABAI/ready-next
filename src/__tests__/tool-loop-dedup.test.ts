@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
-import { countToolRepetitions, computeBudgetWarningThreshold } from '../main/modules/agent-control/turn-engine'
+import {
+  countToolRepetitions,
+  computeBudgetWarningThreshold,
+  shouldInjectBudgetWarning,
+} from '../main/modules/agent-control/turn-engine'
 
 // skill-resume plan C1 + C3 — pure helpers extracted from the tool loop:
 //
@@ -84,5 +90,38 @@ describe('computeBudgetWarningThreshold (C3 70% warning)', () => {
   it('zero/negative budget → 1 (defensive floor)', () => {
     assert.equal(computeBudgetWarningThreshold(0), 1)
     assert.equal(computeBudgetWarningThreshold(-5), 1)
+  })
+})
+
+describe('shouldInjectBudgetWarning', () => {
+  it('suppresses the 70% warning for the first model request after a long typed skill action returns', () => {
+    assert.equal(shouldInjectBudgetWarning({
+      warned: false,
+      iteration: 29,
+      warningThreshold: 28,
+      lastLongTypedSkillActionIteration: 28,
+    }), false)
+  })
+
+  it('allows the 70% warning after the post-action grace request has passed', () => {
+    assert.equal(shouldInjectBudgetWarning({
+      warned: false,
+      iteration: 30,
+      warningThreshold: 28,
+      lastLongTypedSkillActionIteration: 28,
+    }), true)
+  })
+})
+
+describe('long skill action detection', () => {
+  it('is based on tool timeout metadata instead of a specific skill/action name', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
+    const start = source.indexOf('function isLongTypedSkillActionName')
+    const end = source.indexOf('function hasLongTypedSkillAction', start)
+    const helperSource = source.slice(start, end)
+
+    assert.match(helperSource, /executionTimeoutMs/)
+    assert.doesNotMatch(helperSource, /video_expert/)
+    assert.doesNotMatch(helperSource, /video-expert-analyzer/)
   })
 })

@@ -14,7 +14,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getCurrentAgentContext } from '../main/modules/skills-runtime/agent-context-source'
+import {
+  buildAgentSpawnContextFromAIConfig,
+  getCurrentAgentContext,
+} from '../main/modules/skills-runtime/agent-context-source'
 import type { AIModelConfig } from '../shared/ai-providers'
 
 function makeConfig(overrides: Partial<AIModelConfig> = {}): AIModelConfig {
@@ -36,6 +39,23 @@ test('returns context derived from the active AI config', async () => {
   assert.equal(ctx!.base_url, 'https://api.moonshot.cn/v1')
   assert.equal(ctx!.api_key, 'sk-test-secret-do-not-leak')
   assert.deepEqual(ctx!.fallback_chain, [])
+})
+
+test('buildAgentSpawnContextFromAIConfig can use the run-time normalized base URL', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(
+    makeConfig({
+      provider: 'openai',
+      baseUrl: 'https://stale.example.com/v1',
+      model: 'gpt-5.4',
+    }),
+    { baseUrl: 'https://current.example.com/v1' },
+  )
+
+  assert.ok(ctx)
+  assert.equal(ctx!.provider, 'openai')
+  assert.equal(ctx!.model_id, 'gpt-5.4')
+  assert.equal(ctx!.base_url, 'https://current.example.com/v1')
+  assert.equal(ctx!.api_kind, 'openai-responses')
 })
 
 test('returns null with a warning when no AI config is configured', async () => {

@@ -43,10 +43,6 @@ export const SHELL_ALLOWLIST: ReadonlySet<string> = new Set([
   'echo',
   'awk',
   'sed',
-  'yt-dlp',
-  'ffmpeg',
-  'ffprobe',
-  'scenedetect',
 ])
 
 const SINGLE_QUOTE_SHELL_COMPAT_BINS: ReadonlySet<string> = new Set([
@@ -57,8 +53,6 @@ const SINGLE_QUOTE_SHELL_COMPAT_BINS: ReadonlySet<string> = new Set([
   'find',
   'awk',
   'sed',
-  'yt-dlp',
-  'scenedetect',
 ])
 
 export interface RunShellArgs {

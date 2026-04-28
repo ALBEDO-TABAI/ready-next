@@ -42,6 +42,13 @@ function isReferenceLikeSkill(skill: SkillLikeForRecovery): boolean {
     && skill.actions.some((action) => action?.runtime === 'reference')
 }
 
+function normalizeLooseToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, '')
+    .trim()
+}
+
 /**
  * Scan one or more capsule text fields for a canonical `skill_*` tool name
  * that resolves to a reference-like skill. Returns the first match (newest
@@ -68,6 +75,20 @@ export function findSkillHintInCapsuleTexts(
       if (!skill) continue
       if (!isReferenceLikeSkill(skill)) continue
       return { skillId: skill.id, skillName: skill.name }
+    }
+  }
+  const referenceSkills = skills.filter(isReferenceLikeSkill)
+  for (const text of texts) {
+    if (typeof text !== 'string' || !text.trim()) continue
+    const normalizedText = normalizeLooseToken(text)
+    if (!normalizedText) continue
+    for (const skill of referenceSkills) {
+      const candidates = [skill.id, skill.name]
+        .map(normalizeLooseToken)
+        .filter((candidate) => candidate.length >= 6)
+      if (candidates.some((candidate) => normalizedText.includes(candidate))) {
+        return { skillId: skill.id, skillName: skill.name }
+      }
     }
   }
   return null

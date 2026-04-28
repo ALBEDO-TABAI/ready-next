@@ -8,6 +8,8 @@ type ContinuationIntentPayload = {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  todoId?: string
+  todoTitle?: string
 }
 
 // Agent API
@@ -56,6 +58,22 @@ const agentAPI = {
     ipcRenderer.invoke('agent:getSessionRecallCapsule', { conversationId }),
   listAttachedSessionRecallContexts: (scopeId: string) =>
     ipcRenderer.invoke('agent:listAttachedSessionRecallContexts', { scopeId }),
+  getReferenceSkillHint: (scopeId: string) =>
+    ipcRenderer.invoke('agent:getReferenceSkillHint', { scopeId }),
+  startDetachedSkillAction: (payload: {
+    scopeId?: string
+    sessionId?: string
+    agent?: string
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }) => ipcRenderer.invoke('agent:startDetachedSkillAction', payload),
+  inspectDetachedSkillTask: (taskId: string, scopeId: string) =>
+    ipcRenderer.invoke('agent:inspectDetachedSkillTask', { taskId, scopeId }),
+  listDetachedSkillTasks: (payload?: { scopeId?: string }) =>
+    ipcRenderer.invoke('agent:listDetachedSkillTasks', payload || {}),
+  cancelDetachedSkillTask: (taskId: string, scopeId: string) =>
+    ipcRenderer.invoke('agent:cancelDetachedSkillTask', { taskId, scopeId }),
   attachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
     ipcRenderer.invoke('agent:attachSessionRecallContext', { currentScopeId, conversationId }),
   detachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
@@ -176,7 +194,15 @@ const agentAPI = {
     const handler = (_: unknown, data: unknown) => callback(data)
     ipcRenderer.on('agent:scopeRunEvent', handler)
     return () => { ipcRenderer.removeListener('agent:scopeRunEvent', handler) }
-  }
+  },
+  // Phase 5.3 — subscribe to reference-skill hint state changes pushed by
+  // main. Renderer uses this to refresh the "上下文已启用" badge immediately
+  // instead of relying on next scope-run tick.
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; change: 'armed' | 'cleared' })
+    ipcRenderer.on('agent:referenceSkillHintChanged', handler)
+    return () => { ipcRenderer.removeListener('agent:referenceSkillHintChanged', handler) }
+  },
 }
 
 // Memory API

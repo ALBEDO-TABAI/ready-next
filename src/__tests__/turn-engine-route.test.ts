@@ -2,9 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+import {
+  rememberLastReferenceSkill,
+  _resetLastReferenceSkillHintsForTests,
+} from '../main/modules/agent-control/skill-reference-hints'
+import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type { RunBudgetSeed, RunBudgetUsage, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
+import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 
 function createSession(userText: string): TurnEngineSession {
   return {
@@ -36,8 +43,12 @@ function createEvents() {
   return {
     events,
     emitters: {
-      emitOutput: (chunk: string, type: string) => {
-        events.push({ kind: 'output', type, chunk })
+      emitOutput: (
+        chunk: string,
+        type: string,
+        options?: { projectionPatch?: Record<string, unknown> | null },
+      ) => {
+        events.push({ kind: 'output', type, chunk, projectionPatch: options?.projectionPatch || null } as TurnTranscriptEvent)
       },
       emitStatus: (status: string) => {
         events.push({ kind: 'status', status })
@@ -50,6 +61,38 @@ function createEvents() {
         events.push({ kind: 'tool_action', tool, args })
       },
     },
+  }
+}
+
+function installLongSkillToolDefinitionForTest(toolName = 'skill_video_expert_pipeline'): () => void {
+  const registry = defaultToolRegistry as unknown as {
+    getToolDefinitionForExecution: (name: string) => ToolDefinition | null
+  }
+  const original = registry.getToolDefinitionForExecution.bind(defaultToolRegistry)
+  registry.getToolDefinitionForExecution = (name: string): ToolDefinition | null => {
+    const base = original(name)
+    if (name !== toolName) return base
+    return {
+      ...(base || {
+        name,
+        groupId: 'skills',
+        domain: 'skill',
+        kind: 'interactive',
+        concurrency: 'serialized',
+        interruptBehavior: 'host_managed',
+        timeoutProfile: 'skill',
+        supportsTextBridge: true,
+        projectionHint: { emitsProjectionPatch: true },
+        description: name,
+        schema: null,
+        resultShape: 'projection_patch',
+      }),
+      executionTimeoutMs: 30 * 60 * 1000,
+      requiresExplicitAllowlist: true,
+    }
+  }
+  return () => {
+    registry.getToolDefinitionForExecution = original
   }
 }
 
@@ -944,4 +987,482 @@ test('TurnEngine records tool snapshots and clears browser text-bridge nudges af
   )
   assert.equal(toolSnapshots.some((snapshot) => snapshot.stage === 'provider_response'), true)
   assert.equal(Array.isArray(result.executionDiagnostics?.toolResolution?.usedStaticFallbackGroups), true)
+})
+
+test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs with 80 iteration budget', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  const logs: string[] = []
+  let toolLoopRequests = 0
+  let capturedAllowedToolNames: string[] = []
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  try {
+    const { request } = createRequest({
+      userText: '继续',
+      host: {
+        log: (message: string) => { logs.push(message) },
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'VEA'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          toolLoopRequests += 1
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '恢复完成',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(toolLoopRequests, 1)
+    assert.equal(result.taskType, 'multi_step_task')
+    assert.equal(result.executionDiagnostics?.budget?.maxIterations, 80)
+    assert.equal(result.executionDiagnostics?.budget?.maxToolCalls, 80)
+    assert.ok(
+      capturedAllowedToolNames.includes('skill_video_expert_pipeline'),
+      `expected VEA pipeline in allowed tools, got: ${capturedAllowedToolNames.join(',')}`,
+    )
+    assert.ok(metrics.some((event) => event.metric === 'preferred_skill_tools' && event.count === 2))
+    assert.ok(metrics.some((event) => event.metric === 'skill_reference_hint_armed' && event.via === 'current'))
+    assert.ok(logs.some((line) => line.includes('[skill_detection]')))
+  } finally {
+    restoreLongToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine emits a typed skill action duration metric from tool hooks', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let loopPass = 0
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  try {
+    const { request } = createRequest({
+      userText: '继续',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        requestToolLoopResponse: async () => {
+          loopPass += 1
+          if (loopPass === 1) {
+            return {
+              text: '继续执行 VEA',
+              toolCalls: [{ id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }],
+              stopReason: 'tool_calls',
+            }
+          }
+          return {
+            text: '已完成恢复总结',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+        executeToolBatch: async (params: { hooks?: { onToolStart?: Function; onToolResult?: Function } }) => {
+          const toolCall = { id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }
+          params.hooks?.onToolStart?.({ toolCall })
+          params.hooks?.onToolResult?.({
+            toolCall,
+            result: {
+              text: JSON.stringify({
+                status: 'done',
+                outputs: {
+                  outputDir: '/tmp/vea-output',
+                  runStatePath: '/tmp/vea-output/run_state.json',
+                  sceneScoresPath: '/tmp/vea-output/scene_scores.json',
+                },
+              }),
+            },
+          })
+          return {
+            results: [{
+              id: 'tool-1',
+              name: 'skill_video_expert_pipeline',
+              input: {},
+              result: {
+                text: JSON.stringify({
+                  status: 'done',
+                  outputs: {
+                    outputDir: '/tmp/vea-output',
+                    runStatePath: '/tmp/vea-output/run_state.json',
+                    sceneScoresPath: '/tmp/vea-output/scene_scores.json',
+                  },
+                }),
+              },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.match(result.finalText, /已完成恢复总结/)
+    assert.ok(metrics.some((event) =>
+      event.metric === 'skill_typed_action_duration_ms'
+      && event.toolName === 'skill_video_expert_pipeline'
+      && typeof event.durationMs === 'number'
+    ))
+  } finally {
+    restoreLongToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine emits a generic running projection as soon as a long skill action starts', async () => {
+  const engine = new TurnEngine()
+  let loopPass = 0
+
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  try {
+    const { request, events } = createRequest({
+      userText: '继续',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        requestToolLoopResponse: async () => {
+          loopPass += 1
+          if (loopPass === 1) {
+            return {
+              text: '开始执行',
+              toolCalls: [{ id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }],
+              stopReason: 'tool_calls',
+            }
+          }
+          return { text: '完成', toolCalls: [], stopReason: 'stop' }
+        },
+        executeToolBatch: async (params: { hooks?: { onToolStart?: Function; onToolResult?: Function } }) => {
+          const toolCall = { id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }
+          params.hooks?.onToolStart?.({ toolCall })
+          params.hooks?.onToolResult?.({ toolCall, result: { text: 'done' } })
+          return {
+            results: [{
+              id: 'tool-1',
+              name: 'skill_video_expert_pipeline',
+              input: {},
+              result: { text: 'done' },
+            }],
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    await engine.execute(request)
+
+    const runningProjection = events
+      .map((event) => (event as TurnTranscriptEvent & { projectionPatch?: Record<string, unknown> | null }).projectionPatch)
+      .find((projection) => projection?.module === 'skill' && projection.taskSummary === '正在执行技能工具，已运行 0 秒')
+
+    assert.equal(runningProjection?.currentStepId, 'skill_video_expert_pipeline')
+    assert.equal((runningProjection?.steps as Array<{ status?: string }> | undefined)?.[0]?.status, 'running')
+  } finally {
+    restoreLongToolDefinition()
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine gives long typed skill results enough follow-up budget to summarize', async () => {
+  const engine = new TurnEngine()
+  let loopPass = 0
+
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  try {
+    const { request } = createRequest({
+      userText: '继续',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        requestToolLoopResponse: async () => {
+          loopPass += 1
+          if (loopPass === 1) {
+            return {
+              text: '继续执行 VEA',
+              toolCalls: [
+                { id: 'tool-vea', name: 'skill_video_expert_pipeline', input: {} },
+                { id: 'tool-memory', name: 'memory_create', input: { text: 'VEA 已完成' } },
+              ],
+              stopReason: 'tool_calls',
+            }
+          }
+          return {
+            text: 'VEA 已完成，输出目录 /tmp/vea-output。',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+        executeToolBatch: async () => ({
+          results: [
+            {
+              id: 'tool-vea',
+              name: 'skill_video_expert_pipeline',
+              input: {},
+              result: {
+                text: JSON.stringify({
+                  status: 'done',
+                  outputs: {
+                    outputDir: '/tmp/vea-output',
+                    runStatePath: '/tmp/vea-output/run_state.json',
+                    sceneScoresPath: '/tmp/vea-output/scene_scores.json',
+                  },
+                }),
+              },
+            },
+            {
+              id: 'tool-memory',
+              name: 'memory_create',
+              input: { text: 'VEA 已完成' },
+              result: { text: 'memory saved' },
+            },
+          ],
+          budgetLimited: false,
+          recoveryHistory: [],
+        }),
+      },
+    })
+
+    request.continuationState = {
+      taskId: 'task-vea',
+      scopeId: 'scope-test',
+      runId: 'run-vea',
+      module: 'skill',
+      taskType: 'multi_step_task',
+      interactionState: 'resuming',
+      steps: [{ id: 'score', title: '继续评分', description: '继续评分', status: 'running' }],
+      currentStepId: 'score',
+      resumableActions: ['continue', 'cancel'],
+      budgetRuntime: {
+        taskType: 'continuation',
+        budget: {
+          maxIterations: 3,
+          maxToolCalls: 3,
+          maxParallelToolGroups: 5,
+          reservedToolCalls: 0,
+        },
+        usage: {
+          iterationsUsed: 1,
+          toolCallsUsed: 1,
+          parallelToolGroupsUsed: 0,
+        },
+        stepBudget: {
+          stepId: 'score',
+          maxIterations: 3,
+          remainingIterations: 2,
+        },
+        warningLevel: 'warning',
+        frozen: false,
+        bootstrapBudget: false,
+      },
+    }
+
+    const result = await engine.execute(request)
+
+    assert.equal(loopPass, 2)
+    assert.match(result.finalText, /VEA 已完成/)
+    assert.doesNotMatch(result.finalText, /预算上限/)
+  } finally {
+    restoreLongToolDefinition()
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine emits budget warning and exhaustion metrics with skill context fields', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+  try {
+    const { request } = createRequest({
+      userText: '继续',
+      intentClassification: createIntent({
+        primaryDomain: 'skill',
+        mentionedDomains: ['skill'],
+        objectSignals: ['skill-object'],
+        actionSignals: ['skill-action'],
+        confidence: 'high',
+      }),
+      budget: {
+        maxIterations: 1,
+        maxToolCalls: 1,
+        maxParallelToolGroups: 1,
+        reservedToolCalls: 0,
+      },
+      budgetState: {
+        iterationsUsed: 0,
+        toolCallsUsed: 0,
+        parallelToolGroupsUsed: 0,
+      },
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_run_shell'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        requestToolLoopResponse: async () => ({
+          text: '继续执行',
+          toolCalls: [{ id: 'tool-1', name: 'skill_run_shell', input: {} }],
+          stopReason: 'tool_calls',
+        }),
+        executeToolBatch: async () => ({
+          results: [{
+            id: 'tool-1',
+            name: 'skill_run_shell',
+            input: {},
+            result: { text: 'done' },
+          }],
+          budgetLimited: false,
+          recoveryHistory: [],
+        }),
+      },
+    })
+
+    await engine.execute(request)
+
+    const warning = metrics.find((event) => event.metric === 'turn_budget_warning')
+    const exhausted = metrics.find((event) => event.metric === 'turn_budget_exhausted')
+    assert.equal(warning?.referenceSkillId, 'video-expert-analyzer')
+    assert.equal(exhausted?.referenceSkillId, 'video-expert-analyzer')
+    assert.equal(exhausted?.budgetLimitedBeforeCompletion, true)
+  } finally {
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
 })

@@ -1,6 +1,6 @@
 /**
  * B plan Phase 4 — gating coverage shifted from the 6 execution-control
- * tools (retired along with the skill_executions state machine) to the 4
+ * tools (retired along with the skill_executions state machine) to current
  * skill primitives. Primitives are only exposed to the LLM when the session
  * has a reference-skill hint armed by the orchestrator.
  *
@@ -21,6 +21,9 @@ const ALL_PRIMITIVE_TOOLS = [
   { name: 'skill_run_shell' },
   { name: 'skill_write_artifact' },
   { name: 'skill_read_artifact' },
+  { name: 'skill_start_detached' },
+  { name: 'skill_inspect_detached' },
+  { name: 'skill_cancel_detached' },
 ]
 
 const neverActive = () => false
@@ -35,7 +38,7 @@ test('without sessionId the full primitive list stays (legacy boot/static fallba
     neverActive,
     neverHint,
   )
-  assert.equal(filtered.length, 4)
+  assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
   assert.deepEqual(
     filtered.map((def) => def.name).sort(),
     ALL_PRIMITIVE_TOOLS.map((def) => def.name).sort(),
@@ -52,24 +55,35 @@ test('with sessionId but no execution and no reference hint, primitives are filt
   assert.deepEqual(filtered, [])
 })
 
-test('reference-skill hint alone is enough to expose the 4 primitives', () => {
+test('ordinary chat session does not expose primitives after a completed skill projection', () => {
+  const filtered = filterSkillPrimitivesBySession(
+    ALL_PRIMITIVE_TOOLS,
+    'session-after-skill-done',
+    neverActive,
+    neverHint,
+    () => false,
+  )
+  assert.deepEqual(filtered, [])
+})
+
+test('reference-skill hint alone is enough to expose primitives', () => {
   const filtered = filterSkillPrimitivesBySession(
     ALL_PRIMITIVE_TOOLS,
     'session-with-hint',
     neverActive,
     alwaysHint,
   )
-  assert.equal(filtered.length, 4)
+  assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
 })
 
-test('active execution alone is enough to expose the 4 primitives', () => {
+test('active execution alone is enough to expose primitives', () => {
   const filtered = filterSkillPrimitivesBySession(
     ALL_PRIMITIVE_TOOLS,
     'session-with-exec',
     alwaysActive,
     neverHint,
   )
-  assert.equal(filtered.length, 4)
+  assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
 })
 
 test('shouldExposeSkillPrimitive short-circuits on sessionId=undefined', () => {
@@ -106,7 +120,7 @@ test('concurrent sessions get independent gate outcomes (one with hint, one with
     hintResolver,
   )
 
-  assert.equal(listA.length, 4, 'session-A sees the full primitive list because a hint is armed')
+  assert.equal(listA.length, ALL_PRIMITIVE_TOOLS.length, 'session-A sees the full primitive list because a hint is armed')
   assert.deepEqual(listB, [], 'session-B without a hint sees nothing')
 })
 
@@ -116,5 +130,5 @@ test('gate returns a fresh array each call; no cached reference', () => {
   assert.deepEqual(first.map((d) => d.name), second.map((d) => d.name))
   assert.notEqual(first, second)
   // Input array is untouched.
-  assert.equal(ALL_PRIMITIVE_TOOLS.length, 4)
+  assert.equal(ALL_PRIMITIVE_TOOLS.length, 7)
 })

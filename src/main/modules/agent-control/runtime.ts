@@ -28,6 +28,8 @@ import {
   restoreLastReferenceSkill,
   rememberLastReferenceSkill,
   getLastReferenceSkill,
+  peekLastReferenceSkill,
+  REFERENCE_SKILL_HINT_TTL_MS,
   type PersistedReferenceSkillHint,
 } from './skill-reference-hints'
 import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
@@ -41,6 +43,7 @@ import { normalizeContinuationIntent, type ContinuationIntent } from './continua
 import { forgetSession } from './session-continuity'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -55,6 +58,11 @@ import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../repositories/task-projection-repository'
+import {
+  DetachedSkillTaskTracker,
+  registerDetachedSkillTaskTracker,
+  type DetachedSkillTaskRecord,
+} from './detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -162,6 +170,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private readonly detachedSkillTasks: DetachedSkillTaskTracker
   private readonly pendingInboundChannels = new Map<
     string,
     {
@@ -212,6 +221,12 @@ export class AgentControlRuntime extends EventEmitter {
       },
       toChannelKey: (scope) => this.toChannelKey(scope)
     })
+    this.detachedSkillTasks = new DetachedSkillTaskTracker({
+      storagePath: join(app.getPath('userData'), 'skill-runtime', 'detached-tasks.json'),
+      runSkill: (request) => getSkillsRuntimeManager().runSkill(request),
+      onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
+    })
+    registerDetachedSkillTaskTracker(this.detachedSkillTasks)
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
@@ -236,6 +251,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
+    this.publishRestoredDetachedSkillTasks()
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
@@ -450,6 +466,91 @@ export class AgentControlRuntime extends EventEmitter {
 
   listAttachedSessionRecallContexts(scopeId: string): SessionRecallCapsule[] {
     return this.sessionRecallService.listAttachedSessionRecallContexts(scopeId)
+  }
+
+  getReferenceSkillHint(scopeId: string): { id: string; name: string; at: number; expiresAt: number } | null {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return null
+    const live = peekLastReferenceSkill(normalizedScopeId)
+    if (live) {
+      return {
+        id: live.id,
+        name: live.name,
+        at: live.at,
+        expiresAt: live.at + REFERENCE_SKILL_HINT_TTL_MS,
+      }
+    }
+
+    const scope = this.getConversationScope(normalizedScopeId)
+    const meta = this.parseScopeMeta(scope)
+    const persisted = meta['lastReferenceSkill']
+    if (!persisted || typeof persisted !== 'object') return null
+    const hint = persisted as PersistedReferenceSkillHint
+    if (typeof hint.id !== 'string' || typeof hint.name !== 'string' || typeof hint.at !== 'number') return null
+    if (!restoreLastReferenceSkill(normalizedScopeId, hint)) return null
+    const restored = peekLastReferenceSkill(normalizedScopeId)
+    if (!restored) return null
+    return {
+      id: restored.id,
+      name: restored.name,
+      at: restored.at,
+      expiresAt: restored.at + REFERENCE_SKILL_HINT_TTL_MS,
+    }
+  }
+
+  /**
+   * Phase 1.1 — Public hook the renderer's `chat:saveMessage` IPC calls after
+   * persisting a message, so a hint armed during the assistant's turn survives
+   * a Ready restart for LOCAL conversations too.
+   *
+   * Background: assistant messages saved via `chat:saveMessage` IPC go through
+   * `ChatRepository.saveMessage` (a thin wrapper over `db.addChatMessage`),
+   * which bypasses `runtime.createConversationMessage` — the only path that
+   * previously snapshot the in-memory hint into `meta_json.lastReferenceSkill`.
+   * Result before this hook: local sessions never persisted hints, so a Ready
+   * restart always re-armed `referenceSkillHintArmed=false` and the model lost
+   * VEA / other typed actions mid-flow.
+   *
+   * No-op for non-assistant roles. Safe to call after every message; the
+   * underlying `persistReferenceHintToScope` is idempotent (skips DB write
+   * when the persisted snapshot equals the in-memory one).
+   */
+  persistReferenceHintAfterAssistantMessage(scopeId: string, role: string): void {
+    if (role !== 'assistant') return
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return
+    this.persistReferenceHintToScope(normalizedScopeId)
+  }
+
+  startDetachedSkillAction(payload: {
+    scopeId?: string | null
+    sessionId?: string | null
+    agent?: string | null
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }): DetachedSkillTaskRecord {
+    return this.detachedSkillTasks.start(payload)
+  }
+
+  inspectDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
+    const task = this.detachedSkillTasks.inspect(taskId)
+    if (!task) return null
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
+    return task
+  }
+
+  listDetachedSkillTasks(payload?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
+    return this.detachedSkillTasks.list(payload)
+  }
+
+  cancelDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
+    const normalizedScopeId = String(scopeId || '').trim()
+    const task = this.detachedSkillTasks.inspect(taskId)
+    if (!task) return null
+    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
+    return this.detachedSkillTasks.cancel(taskId)
   }
 
   attachSessionRecallContext(
@@ -1412,6 +1513,13 @@ export class AgentControlRuntime extends EventEmitter {
       }
     })
     const scope = this.mapConversationRow(row)
+    // Phase 1.2 — recover any persisted lastReferenceSkill into the in-memory
+    // map before the inbound message hits the orchestrator. Without this, a
+    // Ready restart loses the hint until the user manually re-arms it; the
+    // first remote IM turn after restart goes out with `referenceSkillHintArmed=false`
+    // and the model loses access to typed skill actions. Idempotent: replay
+    // checks TTL and same-value short-circuits.
+    this.restoreReferenceHintFromScope(scope, scope.id)
     this.emitConversationEvent({
       type: existing ? 'scope_updated' : 'scope_created',
       scope
@@ -1464,7 +1572,25 @@ export class AgentControlRuntime extends EventEmitter {
       try {
         const parsed = JSON.parse(raw) as unknown
         if (parsed && typeof parsed === 'object') return { ...(parsed as Record<string, unknown>) }
-      } catch { /* fallthrough */ }
+        // Phase 1.4 — JSON parsed but produced something that's not a record
+        // (string/array/number/null). Surface this so silent meta loss has a
+        // signal in the metrics log.
+        logAgentMetric(TOOL_ERROR_METRICS.metaParseCorrupted, {
+          scopeId: scope?.id || null,
+          reason: 'not_object',
+          sample: raw.slice(0, 80),
+        })
+      } catch (error) {
+        // Phase 1.4 — JSON.parse threw. Previously the catch swallowed the
+        // error and returned {}, so corruption silently nuked any
+        // `lastReferenceSkill` field at the next read. Emit a metric instead.
+        logAgentMetric(TOOL_ERROR_METRICS.metaParseCorrupted, {
+          scopeId: scope?.id || null,
+          reason: 'parse_error',
+          message: error instanceof Error ? error.message : String(error),
+          sample: raw.slice(0, 80),
+        })
+      }
     }
     return {}
   }
@@ -1589,6 +1715,105 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  private publishRestoredDetachedSkillTasks(): void {
+    for (const record of this.detachedSkillTasks.list()) {
+      if (record.status === 'blocked' || record.status === 'running') {
+        this.publishDetachedSkillTaskUpdate(record)
+      }
+    }
+  }
+
+  private buildDetachedSkillArtifacts(record: DetachedSkillTaskRecord): NonNullable<ScopeRunEventPayload['artifactRefs']> {
+    const nowIso = record.updatedAt
+    const entries: Array<{ key: string; path?: string | null; label: string; kind: string }> = [
+      { key: 'outputDir', path: record.outputDir, label: '技能输出目录', kind: 'directory' },
+      { key: 'runStatePath', path: record.runStatePath, label: 'run_state.json', kind: 'artifact' },
+      { key: 'sceneScoresPath', path: record.sceneScoresPath, label: 'scene_scores.json', kind: 'artifact' },
+      { key: 'deliveryReportPath', path: record.deliveryReportPath, label: '交付报告', kind: 'artifact' },
+    ]
+    const seen = new Set<string>()
+    return entries
+      .filter((entry) => {
+        const path = String(entry.path || '').trim()
+        if (!path || seen.has(path)) return false
+        seen.add(path)
+        return true
+      })
+      .map((entry) => ({
+        id: `${record.id}:${entry.key}`,
+        module: 'skill',
+        kind: entry.kind,
+        label: entry.label,
+        path: entry.path || null,
+        createdAt: nowIso,
+        meta: {
+          detachedTaskId: record.id,
+          skillId: record.skillId,
+          action: record.action,
+          outputKey: entry.key,
+        },
+      }))
+  }
+
+  private publishDetachedSkillTaskUpdate(record: DetachedSkillTaskRecord): void {
+    const scopeId = record.scopeId || record.sessionId
+    if (!scopeId) return
+    const phase: ScopeRunEventPayload['phase'] =
+      record.status === 'running' ? 'tool_running'
+        : record.status === 'done' ? 'done'
+          : record.status === 'cancelled' ? 'cancelled'
+            : record.status === 'blocked' ? 'checkpoint'
+              : 'error'
+    const stepStatus =
+      record.status === 'running' ? 'running'
+        : record.status === 'done' ? 'done'
+          : record.status === 'blocked' ? 'blocked'
+            : 'error'
+    const artifacts = this.buildDetachedSkillArtifacts(record)
+    const taskId = `detached:${record.id}`
+    const summary =
+      record.status === 'running' ? '后台技能任务正在执行'
+        : record.status === 'done' ? '后台技能任务已完成'
+          : record.status === 'blocked' ? (record.error || '后台技能任务需要继续')
+            : record.status === 'cancelled' ? '后台技能任务已取消'
+              : (record.error || '后台技能任务失败')
+    this.publishScopeRunEvent({
+      type: record.status === 'running' ? 'started' : record.status === 'blocked' ? 'updated' : 'finished',
+      scopeId,
+      agent: record.agent || 'assistant',
+      runId: record.id,
+      taskId,
+      taskProjectionId: taskId,
+      phase,
+      module: 'skill',
+      executionKind: 'job',
+      jobId: record.id,
+      taskTitle: `后台技能任务 · ${record.skillId}`,
+      taskSummary: summary,
+      steps: [{
+        id: record.action,
+        title: record.action,
+        status: stepStatus,
+        detail: record.error || record.outputDir || null,
+        updatedAt: record.updatedAt,
+      }],
+      currentStepId: record.action,
+      waitingFor: record.status === 'running' || record.status === 'blocked' ? 'background' : 'none',
+      resumableActions: record.status === 'running'
+        ? ['cancel']
+        : record.status === 'blocked'
+          ? ['continue', 'cancel']
+          : artifacts.length > 0
+            ? ['open_artifact']
+            : ['none'],
+      recentArtifacts: artifacts,
+      artifactRefs: artifacts,
+      blockedReason: record.status === 'blocked' ? record.error || '后台任务需要继续' : null,
+      error: record.status === 'failed' ? record.error || '后台技能任务失败' : undefined,
+      timestamp: record.updatedAt,
+    })
+  }
+
   private emitConversationEvent(payload: ConversationEventPayload): void {
     this.emit('conversationEvent', payload)
   }
@@ -1672,7 +1897,7 @@ export class AgentControlRuntime extends EventEmitter {
     const continuationRef = params.projection?.continuationRef || params.scopeRunSummary?.taskContinuation || null
     return normalizeContinuationIntent({
       taskId,
-      executionId: incoming?.executionId || continuationRef?.executionId,
+      executionId: incoming?.executionId || continuationRef?.executionId || undefined,
       stepId:
         incoming?.stepId
         || continuationRef?.stepId
@@ -1685,6 +1910,8 @@ export class AgentControlRuntime extends EventEmitter {
         || params.scopeRunSummary?.blockedReason
         || undefined,
       responseText: params.responseText || incoming?.responseText,
+      todoId: incoming?.todoId || continuationRef?.todoId || undefined,
+      todoTitle: incoming?.todoTitle || continuationRef?.todoTitle || undefined,
     })
   }
 

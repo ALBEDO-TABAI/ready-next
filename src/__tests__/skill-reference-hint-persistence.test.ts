@@ -114,10 +114,14 @@ describe('skill-resume A1 persistence helpers', () => {
       // Replay from persisted snapshot.
       const ok = restoreLastReferenceSkill('sess-7', snap)
       assert.equal(ok, true)
-      const restored = getLastReferenceSkill('sess-7')
-      assert.ok(restored)
-      assert.equal(restored!.id, snap!.id)
-      assert.equal(restored!.at, snap!.at)
+      const restoredBeforeRead = _peekLastReferenceSkillForTests('sess-7')
+      assert.ok(restoredBeforeRead)
+      assert.equal(restoredBeforeRead!.id, snap!.id)
+      assert.equal(restoredBeforeRead!.at, snap!.at)
+      const restoredAfterRead = getLastReferenceSkill('sess-7')
+      assert.ok(restoredAfterRead)
+      assert.equal(restoredAfterRead!.id, snap!.id)
+      assert.ok(restoredAfterRead!.at >= snap!.at)
     })
 
     it('different sessionIds are isolated (no cross-contamination)', () => {

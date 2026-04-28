@@ -3,11 +3,11 @@
  *
  * The registry is the single source of truth for dispatch-time Zod validation.
  * Phase 4: the 6 skill execution-control schemas were retired along with the
- * skill_executions state machine. The 4 skill primitives are now the canonical
+ * skill_executions state machine. Skill primitives are now the canonical
  * skill-domain entries in the registry.
  *
  * These tests lock:
- *  1. Baseline — the 4 primitive tool names are present with ZodObject values.
+ *  1. Baseline — primitive tool names are present with ZodObject values.
  *  2. Accessor shape — `getToolInputSchemas()` returns a plain record, not a
  *     frozen / proxy / live reference, so per-call merging (PR 12) is safe.
  *  3. No accidental name shadowing — the registry never has two entries for

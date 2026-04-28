@@ -50,6 +50,7 @@ function makeAgent(overrides: Partial<AgentSpawnContext> = {}): AgentSpawnContex
     model_id: 'kimi-k2',
     base_url: 'https://api.example.com/v1',
     api_key: 'sk-test-DO-NOT-LEAK',
+    api_kind: 'anthropic-messages',
     fallback_chain: [],
     ...overrides,
   }
@@ -234,6 +235,52 @@ test('prepareSpawnContext throws when no agent context is available', async () =
     () => controller.prepareSpawnContext('s', 'S', '/x', requirements, 'job'),
     SkillHostContextError,
   )
+})
+
+test('prepareSpawnContext uses an explicit agent context over the default reader', async () => {
+  const root = makeWorkRoot()
+  try {
+    const cfgPath = `${root}/c.json`
+    const requirements: SkillHostRequirements = {
+      manifest_version: 1,
+      spawn_context: {
+        config_file: {
+          path: cfgPath,
+          format: 'json',
+          fields: {
+            '/auto_scoring/preferred_model': '${agent.provider}/${agent.model_id}',
+            '/auto_scoring/api': '${agent.api_kind}',
+          },
+          preserve_existing: true,
+        },
+      },
+    }
+    const controller = makeController({
+      agent: makeAgent({
+        provider: 'old-provider',
+        model_id: 'old-model',
+        api_kind: 'openai-completions',
+      }),
+    })
+    const handle = await controller.prepareSpawnContext(
+      's-current', 'S Current', '/x', requirements, 'job-current', undefined,
+      makeAgent({
+        provider: 'current-provider',
+        model_id: 'current-model',
+        api_kind: 'openai-responses',
+      }),
+    )
+    try {
+      const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>
+      const auto = cfg['auto_scoring'] as Record<string, unknown>
+      assert.equal(auto['preferred_model'], 'current-provider/current-model')
+      assert.equal(auto['api'], 'openai-responses')
+    } finally {
+      await controller.restoreSpawnContext(handle)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('lock is RELEASED if prepareSpawnContext throws (downstream failure)', async () => {
@@ -465,6 +512,12 @@ test('detectStatus sentinel_file: reads JSON file and maps fields', async () => 
     writeFileSync(sentinel, JSON.stringify({ phase: 'done' }))
     const done = await c.detectStatus(requirements, { exitCode: 0, stdout: '', stderr: '' }, root)
     assert.equal(done.status, 'done')
+
+    // Sentinel exists but the declared field is missing: never treat that as done.
+    writeFileSync(sentinel, JSON.stringify({ message: 'failed but no phase' }))
+    const missingField = await c.detectStatus(requirements, { exitCode: 1, stdout: '', stderr: '' }, root)
+    assert.equal(missingField.status, 'error')
+    assert.match(missingField.detail ?? '', /sentinel_field_missing: phase/)
 
     // Malformed JSON → error.
     writeFileSync(sentinel, 'not-valid-json {')

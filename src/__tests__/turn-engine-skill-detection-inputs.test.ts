@@ -85,5 +85,32 @@ test('turn-engine suppresses implicit continuation lookup when a retry resolves 
 
   assert.match(turnEngine, /shouldSuppressImplicitContinuation/)
   assert.match(turnEngine, /hasExplicitSkill/)
-  assert.match(turnEngine, /!\s*shouldSuppressImplicitContinuation[\s\S]*?\(继续\|接着\|恢复\|上次\|重试\)/)
+  // Phase 2.4 — turn-engine's implicit continuation gate must go through the
+  // unified resume lexicon (`matchesResumeIntent` w/ 'anywhere' mode), not an
+  // inline regex. The lexicon covers natural phrasings like "你需要从头跑一轮"
+  // / "重新跑一次" that the original 5-token regex silently dropped. Pinning
+  // the lexicon call here so a future refactor that re-inlines the regex
+  // gets caught.
+  assert.match(
+    turnEngine,
+    /!\s*shouldSuppressImplicitContinuation\s*&&\s*\([\s\S]*?matchesResumeIntent\(\s*continuationHintText\s*,\s*'anywhere'\s*\)/,
+  )
+  assert.match(turnEngine, /from '\.\/resume-lexicon'/, 'turn-engine imports the lexicon module')
+})
+
+test('turn-engine treats config repair turns as skill resume candidates', () => {
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+
+  assert.match(turnEngine, /matchesConfigRepairIntent/)
+  assert.match(turnEngine, /isConfigRepairTurnDetected/)
+  assert.match(turnEngine, /isSkillResumeTurnDetected/)
+  assert.match(turnEngine, /No recent skill task is available to resume/)
+})
+
+test('turn-engine synthesizes skill context from an armed reference hint on retry-only turns', () => {
+  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+
+  assert.match(turnEngine, /getCurrentReferenceSkillHint\?\.\(request\.sessionId\)/)
+  assert.match(turnEngine, /用户希望继续使用 skill "\$\{[^}]+\.name\}"/)
+  assert.match(turnEngine, /reference_skill_rearmed_from_current_hint/)
 })
