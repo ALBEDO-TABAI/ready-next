@@ -290,6 +290,7 @@ export interface ScopeRunExecutionDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  budgetLease?: import('./run-contracts').ExecutionRunDiagnostics['budgetLease']
   recoveryHistory?: Array<{
     kind: string
     source: string

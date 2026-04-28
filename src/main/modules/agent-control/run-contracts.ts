@@ -124,6 +124,35 @@ export interface TaskBudgetRuntime {
   warningLevel: BudgetWarningLevel
   frozen: boolean
   bootstrapBudget: boolean
+  lease?: SkillBudgetLeaseState | null
+}
+
+export type SkillBudgetLeaseDecision =
+  | 'active'
+  | 'renew'
+  | 'pause'
+  | 'handoff_background'
+  | 'close'
+
+export interface SkillBudgetLeaseState {
+  leaseId: string
+  createdAt: string
+  leaseSizeIterations: number
+  maxRenewals: number
+  hardCapIterations: number
+  renewalsUsed: number
+  currentLeaseEndIteration: number
+  hardCapIteration: number
+  lastFingerprint: string | null
+  renewedFingerprints: string[]
+  leasesWithoutFingerprintChange: number
+  repeatedUnchangedObservations: number
+  repeatedRecoverableErrors: number
+  pidOnlyRenewalsUsed: number
+  decision: SkillBudgetLeaseDecision
+  reason: string | null
+  progressScore: number
+  wasteScore: number
 }
 
 export interface ContinuationBudgetRestoreDiagnostics {
@@ -307,6 +336,16 @@ export interface ExecutionRunDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: BudgetWarningLevel | null
+  budgetLease?: {
+    leaseId: string
+    decision: SkillBudgetLeaseDecision
+    reason: string | null
+    renewalsUsed: number
+    progressScore: number
+    wasteScore: number
+    lastFingerprint: string | null
+    currentLeaseEndIteration: number
+  } | null
   fallback?: {
     happened: boolean
     kind: string

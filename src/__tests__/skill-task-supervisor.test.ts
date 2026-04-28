@@ -257,6 +257,76 @@ test('SkillTaskSupervisor selects older matching run_state by task identity', ()
   }
 })
 
+test('SkillTaskSupervisor skips mismatched root run_state when matching child exists', () => {
+  const root = tempRoot()
+  try {
+    writeRunState(root, {
+      task_id: 'other',
+      status: 'completed',
+      current_stage: 'completed',
+    }, '2026-04-28T01:59:00.000Z')
+    const target = writeRunState(join(root, 'target'), {
+      task_id: 'target',
+      status: 'running',
+      current_stage: 'score_batches',
+    }, '2026-04-28T01:55:00.000Z')
+
+    const snapshot = makeSupervisor({}).inspectSkillTask({
+      outputDir: root,
+      expectedTaskId: 'target',
+      skillId: 'video-expert-analyzer',
+    })
+
+    assert.equal(snapshot.runStatePath, target)
+    assert.equal(snapshot.progress.currentStage, 'score_batches')
+    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.closeAllowed, false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SkillTaskSupervisor blocks close when SQLite is done but stale run_state is resumable', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-stale',
+      status: 'running',
+      current_stage: 'score_batches',
+      updated_at: '2026-04-28T01:40:00.000Z',
+    }, '2026-04-28T01:40:00.000Z')
+    utimesSync(root, new Date('2026-04-28T01:40:00.000Z'), new Date('2026-04-28T01:40:00.000Z'))
+    const doneRun = makeRun({
+      id: 'str-done-stale',
+      status: 'done',
+      detachedTaskId: 'dst-stale',
+      outputDir: root,
+      runStatePath,
+      resumePayload: {
+        detachedTaskId: 'dst-stale',
+        runStatePath,
+        outputDir: root,
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+      },
+      finishedAt: '2026-04-28T01:45:00.000Z',
+    })
+
+    const snapshot = makeSupervisor({}).inspectSkillTask({
+      taskRun: doneRun,
+      taskRunId: doneRun.id,
+      expectedTaskId: 'dst-stale',
+    })
+
+    assert.equal(snapshot.status, 'done')
+    assert.equal(snapshot.stale, true)
+    assert.equal(snapshot.closeAllowed, false)
+    assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('SkillTaskSupervisor preserves resume payload for blocked run_state', () => {
   const root = tempRoot()
   try {

@@ -240,6 +240,7 @@ test('RunCoordinator does not mark an exhausted background skill task as done', 
 
 test('RunCoordinator prioritizes lifecycle signal over a success result', async () => {
   const events: ScopeRunEventPayload[] = []
+  const outcomes: Array<{ success: boolean; finalText: string }> = []
   const coordinator = new RunCoordinator({
     promptAssembly: {
       buildForScopedRun: async () => ({
@@ -250,7 +251,9 @@ test('RunCoordinator prioritizes lifecycle signal over a success result', async 
         contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
       }),
       applyToMessage: (message) => message,
-      recordRunOutcome: () => {},
+      recordRunOutcome: (payload) => {
+        outcomes.push({ success: payload.success, finalText: payload.finalText })
+      },
     },
     executeAndCollect: async () => ({
       success: true,
@@ -292,6 +295,7 @@ test('RunCoordinator prioritizes lifecycle signal over a success result', async 
   assert.equal(finalEvent?.waitingFor, 'background')
   assert.deepEqual(finalEvent?.resumableActions, ['continue', 'retry', 'cancel'])
   assert.equal(finalEvent?.taskContinuation?.taskRunId, 'str-budget')
+  assert.equal(outcomes[0]?.success, false)
 })
 
 test('RunCoordinator memory reflection does not convert a paused background skill task to done', async () => {

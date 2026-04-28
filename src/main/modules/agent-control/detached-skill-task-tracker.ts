@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto'
 import { dirname } from 'path'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import type { SkillRunRequest, SkillRunResult } from '../skills-runtime/runtime-manager'
 import { upsertDetachedSkillTaskRun } from './skill-task-tracker'
+import { selectRunStateCandidate } from './run-state-selection'
 
 export type DetachedSkillTaskStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
 
@@ -92,58 +93,13 @@ function pathFromParam(params: Record<string, unknown>, key: string): string | n
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
-interface NamedFileCandidate {
-  path: string
-  mtimeMs: number
-  taskId: string | null
-}
-
-function collectFilesNamed(root: string, fileName: string): NamedFileCandidate[] {
-  const candidates: NamedFileCandidate[] = []
-  if (!existsSync(root)) return candidates
-  const stat = statSync(root)
-  const addCandidate = (path: string): void => {
-    const fileStat = statSync(path)
-    const payload = readJsonFile(path)
-    const item = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
-    candidates.push({
-      path,
-      mtimeMs: fileStat.mtimeMs,
-      taskId: stringField(item.task_id) || stringField(item.taskId),
-    })
-  }
-  if (stat.isFile()) {
-    if (root.endsWith(fileName)) addCandidate(root)
-    return candidates
-  }
-  if (!stat.isDirectory()) return candidates
-  const visit = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = `${dir}/${entry.name}`
-      if (entry.isDirectory()) {
-        visit(path)
-        continue
-      }
-      if (!entry.isFile() || entry.name !== fileName) continue
-      addCandidate(path)
-    }
-  }
-  visit(root)
-  return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)
-}
-
 function selectRunStatePath(root: string, expectedTaskId: string | null): string | null {
-  const candidates = collectFilesNamed(root, 'run_state.json')
-  if (candidates.length === 0) return null
-  const direct = `${root}/run_state.json`
-  const directCandidate = candidates.find((candidate) => candidate.path === direct)
-  if (directCandidate) return directCandidate.path
-  if (expectedTaskId) {
-    const match = candidates.find((candidate) => candidate.taskId === expectedTaskId)
-    if (match) return match.path
-  }
-  if (candidates.length === 1) return candidates[0].path
-  return null
+  return selectRunStateCandidate({
+    rootDir: root,
+    expectedTaskId,
+    fileName: 'run_state.json',
+    searchDepth: 1,
+  }).path
 }
 
 function inferOutputPathsFromParams(params: Record<string, unknown>, fallbackTaskId?: string | null): Pick<

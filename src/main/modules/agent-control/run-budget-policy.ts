@@ -116,6 +116,7 @@ export function createTaskBudgetRuntime(taskType: TaskType, options?: {
   stepBudget?: StepBudgetState | null
   frozen?: boolean
   bootstrapBudget?: boolean
+  lease?: TaskBudgetRuntime['lease']
 }): TaskBudgetRuntime {
   const budget = {
     ...(options?.budget || createRunBudgetSeed(taskType)),
@@ -136,6 +137,7 @@ export function createTaskBudgetRuntime(taskType: TaskType, options?: {
     warningLevel: 'none',
     frozen: Boolean(options?.frozen),
     bootstrapBudget: Boolean(options?.bootstrapBudget),
+    lease: options?.lease || null,
   }
   return {
     ...runtime,
@@ -314,6 +316,7 @@ export function rebindTaskBudgetRuntime(
       : runtime.stepBudget,
     frozen: typeof options?.frozen === 'boolean' ? options.frozen : runtime.frozen,
     bootstrapBudget: Boolean(options?.bootstrapBudget),
+    lease: runtime.lease || null,
   })
 }
 
@@ -415,6 +418,7 @@ export function restoreContinuationTaskBudgetRuntime(params: {
       stepBudget: safetyFloor.stepBudget,
       frozen: Boolean(runtimeBudget?.frozen ?? budget?.frozen),
       bootstrapBudget: Boolean(runtimeBudget?.bootstrapBudget ?? budget?.bootstrapBudget),
+      lease: runtimeBudget?.lease || null,
     }),
     diagnostics,
   }

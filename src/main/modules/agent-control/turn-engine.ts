@@ -131,9 +131,8 @@ import {
   createContinuationRunBudgetSeed,
   createRunBudgetSeed,
   createStepBudgetState,
+  createTaskBudgetRuntime,
   getRemainingToolCallBudget,
-  grantBudgetSafetyFloor,
-  refundIterationBudget,
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskType } from './task-type-resolver'
@@ -160,7 +159,6 @@ import {
 import { detectGenericInteractionState } from './interaction-state-detector'
 import { inspectDocumentToolCall } from '../claude-bridge/document-tool-flow'
 import { deriveAgentErrorContract } from '../claude-bridge/error-contract'
-import { getToolResourceTag } from './tool-parallelism-policy'
 import {
   normalizeToolExecutionOutput,
   serializeToolExecutionOutput,
@@ -173,9 +171,16 @@ import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
 import { inspectLatestSkillTask } from './skill-task-supervisor'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
+import {
+  createSkillBudgetLeaseState,
+  evaluateSkillBudgetLease,
+} from './skill-budget-lease-controller'
+import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
+import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import type {
   RunBudgetHint,
+  SkillBudgetLeaseState,
   SkillTaskLifecycleSignal,
   StepBudgetState,
   ToolSnapshot,
@@ -206,9 +211,6 @@ function isLongTypedSkillActionName(toolName: string): boolean {
 function hasLongTypedSkillAction(toolNames: string[] | null | undefined): boolean {
   return Boolean(toolNames?.some((toolName) => isLongTypedSkillActionName(toolName)))
 }
-
-const LONG_SKILL_POST_ACTION_MIN_ITERATIONS = 6
-const LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS = 6
 
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
@@ -621,7 +623,7 @@ export class TurnEngine {
       success: boolean
       error?: string
       cancelled?: boolean
-      status?: 'done' | 'error' | 'cancelled'
+      status?: 'done' | 'error' | 'cancelled' | 'checkpoint'
       doneEventType?: 'done' | 'error'
       skillTaskLifecycle?: SkillTaskLifecycleSignal | null
     }) => {
@@ -1461,52 +1463,109 @@ export class TurnEngine {
           systemPrompt: `${session.systemPrompt}\n\n${toolGuidance}`,
         }
         : session
-      const grantLongSkillBudgetHeadroom = (params: {
-        phase: 'pre_action' | 'post_action'
-        minimumRemainingToolCalls?: number
-      }): void => {
-        if (!state.effectiveRunBudget) return
-        const safetyFloor = grantBudgetSafetyFloor({
-          budget: state.effectiveRunBudget,
-          usage: state.runBudgetState,
-          stepBudget: state.stepBudgetState,
-          minimumRemainingIterations: LONG_SKILL_POST_ACTION_MIN_ITERATIONS,
-          minimumRemainingToolCalls: params.minimumRemainingToolCalls || LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS,
-          minimumRemainingStepIterations: LONG_SKILL_POST_ACTION_MIN_ITERATIONS,
-        })
-        state.effectiveRunBudget = safetyFloor.budget
-        state.stepBudgetState = safetyFloor.stepBudget
-        effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
-          ? state.effectiveRunBudget.maxIterations
-          : host.maxToolIterations
-        warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
-        if (
-          safetyFloor.grantedIterationSafetyFloor
-          || safetyFloor.grantedToolCallSafetyFloor
-          || safetyFloor.grantedStepBudgetSafetyFloor
-        ) {
-          state.syncBudgetWarning()
-          logAgentMetric('long_skill_budget_headroom_granted', {
+      let skillBudgetLeaseState: SkillBudgetLeaseState | null = state.taskBudgetRuntime?.lease || null
+      let previousLeaseSnapshot: SkillTaskSupervisorSnapshot | null = null
+      let lastLeaseSnapshot: SkillTaskSupervisorSnapshot | null = null
+      let lastLeaseProgress: SkillProgressScore = {
+        score: 0,
+        reasons: [],
+        fingerprint: skillBudgetLeaseState?.lastFingerprint || null,
+        fingerprintChanged: false,
+        milestoneChanged: false,
+      }
+      let lastLeaseWaste: SkillWasteScore = {
+        score: 0,
+        reasons: [],
+        repeatedUnchangedObservation: false,
+        repeatedRecoverableError: false,
+      }
+      let leaseLifecycleReason: 'budget_exhausted' | 'background_running' | null = null
+      const shouldUseSkillBudgetLease =
+        shouldUseLongSkillResumeBudget
+        || hasLongTypedSkillAction(preferredSkillToolNames)
+        || Boolean(skillBudgetLeaseState)
+      const sampleSkillLeaseSnapshot = (): SkillTaskSupervisorSnapshot | null => {
+        if (!shouldUseSkillBudgetLease) return null
+        try {
+          return (host.skillTaskSupervisor?.inspectLatestSkillTask || inspectLatestSkillTask)({
             sessionId: request.sessionId,
-            phase: params.phase,
-            iteration: iterations,
-            grantedIterationSafetyFloor: safetyFloor.grantedIterationSafetyFloor,
-            grantedToolCallSafetyFloor: safetyFloor.grantedToolCallSafetyFloor,
-            grantedStepBudgetSafetyFloor: safetyFloor.grantedStepBudgetSafetyFloor,
-            maxIterations: state.effectiveRunBudget.maxIterations,
-            maxToolCalls: state.effectiveRunBudget.maxToolCalls,
-            stepRemainingIterations: state.stepBudgetState?.remainingIterations ?? null,
-            referenceSkillId: referenceSkillForMetrics?.id || null,
-            referenceSkillName: referenceSkillForMetrics?.name || null,
+            scopeId: request.sessionId,
+            skillId: referenceSkillForMetrics?.id || null,
           })
+        } catch {
+          return null
         }
       }
+      const publishSkillBudgetLease = (): void => {
+        if (!skillBudgetLeaseState) return
+        if (!state.effectiveRunBudget) state.effectiveRunBudget = createRunBudgetSeed('multi_step_task')
+        state.effectiveRunBudget = {
+          ...state.effectiveRunBudget,
+          maxIterations: Math.max(state.effectiveRunBudget.maxIterations, skillBudgetLeaseState.hardCapIteration),
+          maxToolCalls: Math.max(state.effectiveRunBudget.maxToolCalls, skillBudgetLeaseState.hardCapIteration),
+        }
+        effectiveMaxToolIterations = Math.max(effectiveMaxToolIterations, skillBudgetLeaseState.hardCapIteration)
+        warningThreshold = computeBudgetWarningThreshold(skillBudgetLeaseState.currentLeaseEndIteration)
+        state.taskBudgetRuntime = {
+          ...(state.syncTaskBudgetRuntime() || createTaskBudgetRuntime('multi_step_task', {
+            budget: state.effectiveRunBudget,
+            usage: state.runBudgetState,
+            stepBudget: state.stepBudgetState,
+          })),
+          lease: skillBudgetLeaseState,
+        }
+        state.syncBudgetWarning()
+      }
+      if (shouldUseSkillBudgetLease && !skillBudgetLeaseState) {
+        skillBudgetLeaseState = createSkillBudgetLeaseState({ iteration: iterations })
+        logAgentMetric('skill_budget_lease_created', {
+          sessionId: request.sessionId,
+          leaseId: skillBudgetLeaseState.leaseId,
+          leaseEndIteration: skillBudgetLeaseState.currentLeaseEndIteration,
+          hardCapIteration: skillBudgetLeaseState.hardCapIteration,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+        })
+      }
+      publishSkillBudgetLease()
 
       while (iterations < effectiveMaxToolIterations) {
         request.ensureNotAborted()
         if (state.syncTaskBudgetRuntime()?.frozen) {
           state.interactionState = 'suspended'
           break
+        }
+        if (skillBudgetLeaseState && iterations >= skillBudgetLeaseState.currentLeaseEndIteration) {
+          const evaluation = evaluateSkillBudgetLease({
+            state: skillBudgetLeaseState,
+            iteration: iterations,
+            progress: lastLeaseProgress,
+            waste: lastLeaseWaste,
+            snapshot: lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
+          })
+          skillBudgetLeaseState = evaluation.state
+          publishSkillBudgetLease()
+          logAgentMetric('skill_budget_lease_decision', {
+            sessionId: request.sessionId,
+            leaseId: skillBudgetLeaseState.leaseId,
+            decision: evaluation.decision,
+            reason: evaluation.reason,
+            iteration: iterations,
+            renewalsUsed: skillBudgetLeaseState.renewalsUsed,
+            progressScore: skillBudgetLeaseState.progressScore,
+            wasteScore: skillBudgetLeaseState.wasteScore,
+          })
+          if (evaluation.decision === 'renew' || evaluation.decision === 'active') {
+            // Keep moving under the refreshed lease gate.
+          } else if (evaluation.decision === 'close') {
+            finishedBeforeLimit = true
+            break
+          } else {
+            leaseLifecycleReason = evaluation.decision === 'handoff_background'
+              ? 'background_running'
+              : 'budget_exhausted'
+            budgetLimitedBeforeCompletion = true
+            break
+          }
         }
         if (taskExecutionRoute.chain === 'planner' && (state.stepBudgetState?.remainingIterations || 0) <= 0) {
           const advanced = advancePlannerStep('当前步骤预算已耗尽，已切换到下一步继续推进。')
@@ -1756,15 +1815,7 @@ export class TurnEngine {
         }
         const toolCallsForIteration = designToolFilter.toolCalls
           .map((toolCall) => designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
-        const iterationHasLongTypedSkillAction = toolCallsForIteration.some((toolCall) => isLongTypedSkillActionName(toolCall.name))
-        let remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
-        if (iterationHasLongTypedSkillAction && remainingToolCallBudget < toolCallsForIteration.length) {
-          grantLongSkillBudgetHeadroom({
-            phase: 'pre_action',
-            minimumRemainingToolCalls: toolCallsForIteration.length + LONG_SKILL_POST_ACTION_MIN_TOOL_CALLS,
-          })
-          remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
-        }
+        const remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
         if (remainingToolCallBudget < toolCallsForIteration.length) {
           budgetLimitedBeforeCompletion = true
           break
@@ -1878,9 +1929,6 @@ export class TurnEngine {
           const batchHasLongTypedSkillAction = executedToolBatch.results.some((executedTool) =>
             isLongTypedSkillActionName(executedTool.name),
           )
-          if (batchHasLongTypedSkillAction && !executedToolBatch.budgetLimited) {
-            grantLongSkillBudgetHeadroom({ phase: 'post_action' })
-          }
           if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(state.effectiveRunBudget || alignedRunBudget, state.runBudgetState) <= 0) {
             budgetLimitedBeforeCompletion = true
           }
@@ -1940,6 +1988,39 @@ export class TurnEngine {
               executedTool,
               serializedResult,
             })
+          }
+          if (skillBudgetLeaseState && (batchHasLongTypedSkillAction || shouldUseSkillBudgetLease)) {
+            const currentSnapshot = sampleSkillLeaseSnapshot()
+            const currentFingerprint = currentSnapshot?.progressFingerprint || skillBudgetLeaseState.lastFingerprint
+            lastLeaseProgress = scoreSkillProgress({
+              previousFingerprint: skillBudgetLeaseState.lastFingerprint,
+              previousSnapshot: previousLeaseSnapshot,
+              currentSnapshot,
+              executedTools: executedToolBatch.results.map((executedTool) => ({
+                name: executedTool.name,
+                result: executedTool.result as ToolExecutionOutput,
+              })),
+            })
+            lastLeaseWaste = scoreSkillWaste({
+              toolCalls: toolCallsForIteration,
+              recentToolCalls,
+              executedTools: executedToolBatch.results.map((executedTool) => ({
+                name: executedTool.name,
+                input: executedTool.input,
+                result: executedTool.result as ToolExecutionOutput,
+              })),
+              recoveryHistory: executedToolBatch.recoveryHistory,
+              previousFingerprint: skillBudgetLeaseState.lastFingerprint,
+              currentFingerprint,
+            })
+            previousLeaseSnapshot = currentSnapshot || previousLeaseSnapshot
+            lastLeaseSnapshot = currentSnapshot || lastLeaseSnapshot
+            skillBudgetLeaseState.progressScore = lastLeaseProgress.score
+            skillBudgetLeaseState.wasteScore = lastLeaseWaste.score
+            if (lastLeaseProgress.fingerprint) {
+              skillBudgetLeaseState.lastFingerprint = lastLeaseProgress.fingerprint
+            }
+            publishSkillBudgetLease()
           }
         }
 
@@ -2001,25 +2082,6 @@ export class TurnEngine {
               toolResults.push({ type: 'tool_result', tool_use_id: executedTool.id, content: serializedResult })
             },
           })
-          if (toolCallsForIteration.length > 0 && toolCallsForIteration.every((toolCall) => getToolResourceTag(toolCall.name).accessMode === 'read')) {
-            if (state.stepBudgetState) {
-              state.stepBudgetState = refundIterationBudget({
-                taskType: state.resolvedTaskType || 'short_task',
-                budget: state.effectiveRunBudget,
-                usage: state.runBudgetState,
-                stepBudget: {
-                  stepId: state.stepBudgetState.stepId || null,
-                  maxIterations: Number(state.stepBudgetState.maxIterations || 0),
-                  remainingIterations: Number(state.stepBudgetState.remainingIterations || 0),
-                },
-                warningLevel: state.budgetWarningLevel,
-                frozen: false,
-                bootstrapBudget: false,
-              }).stepBudget
-            }
-            state.runBudgetState.iterationsUsed = Math.max(0, state.runBudgetState.iterationsUsed - 1)
-            state.syncBudgetWarning()
-          }
           session.messages.push({ role: 'user', content: toolResults })
         } else if (response.toolTransport === 'text') {
           const historyText = response.rawText || response.text
@@ -2220,7 +2282,7 @@ export class TurnEngine {
         })
         const skillTaskLifecycle = buildSkillTaskLifecycleSignal({
           snapshot: skillTaskSnapshot,
-          reason: 'budget_exhausted',
+          reason: leaseLifecycleReason || 'budget_exhausted',
         })
         if (skillTaskLifecycle) {
           state.interactionState = skillTaskLifecycle.interactionState
@@ -2282,7 +2344,11 @@ export class TurnEngine {
               resumePayload: skillTaskLifecycle.taskContinuation ? { ...skillTaskLifecycle.taskContinuation } : undefined,
             })
           }
-          return finish({ success: true, status: 'done', skillTaskLifecycle })
+          return finish({
+            success: true,
+            status: skillTaskLifecycle.phase === 'done' ? 'done' : 'checkpoint',
+            skillTaskLifecycle,
+          })
         }
         transcript.emitOutput(
           budgetLimitedBeforeCompletion

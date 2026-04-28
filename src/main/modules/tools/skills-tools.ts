@@ -495,6 +495,29 @@ function outputPathsFromToolOutput(output?: ToolExecutionOutput): {
   }
 }
 
+const MONITOR_ONLY_PRIMITIVE_TOOLS = new Set([
+  'skill_run_shell',
+  'skill_read_artifact',
+  'skill_inspect_run_state',
+  'skill_inspect_detached',
+])
+
+export function shouldRememberPrimitiveOutcomeForContinuity(params: {
+  toolName: string
+  status: SkillTaskEventStatus
+  hasDurableHandle: boolean
+}): boolean {
+  if (params.status === 'running') return false
+  if (
+    params.status === 'done'
+    && MONITOR_ONLY_PRIMITIVE_TOOLS.has(params.toolName)
+    && !params.hasDurableHandle
+  ) {
+    return false
+  }
+  return true
+}
+
 function buildContinuityResumePayload(params: {
   taskId?: string | null
   stepId?: string | null
@@ -583,6 +606,7 @@ function recordPrimitiveOutcome(params: {
 }): { stepId: string } {
   const data = params.output?.data || {}
   const paths = outputPathsFromToolOutput(params.output)
+  const hasDurableHandle = Boolean(paths.outputDir || paths.runStatePath || paths.sceneScoresPath || paths.deliveryReportPath)
   const artifactPath = typeof data.absolutePath === 'string'
     ? data.absolutePath
     : typeof data.stdoutArtifactPath === 'string'
@@ -610,7 +634,11 @@ function recordPrimitiveOutcome(params: {
     artifactLabel: artifactLabel(artifactPath),
     ...paths,
   })
-  if (params.skillId && params.status !== 'running') {
+  if (params.skillId && shouldRememberPrimitiveOutcomeForContinuity({
+    toolName: params.toolName,
+    status: params.status,
+    hasDurableHandle,
+  })) {
     rememberSkillRun(params.sessionId, {
       toolName: params.toolName,
       skillId: params.skillId,

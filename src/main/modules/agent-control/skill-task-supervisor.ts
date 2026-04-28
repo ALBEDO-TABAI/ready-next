@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -12,6 +12,7 @@ import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
 } from '../repositories/skill-task-run-repository'
+import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from './run-state-selection'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1
@@ -111,18 +112,6 @@ export interface SkillTaskSupervisorDependencies {
   pidExists?: (pid: number) => boolean
 }
 
-interface RunStateCandidate {
-  path: string
-  mtimeMs: number
-  taskId: string | null
-}
-
-interface RunStateSelection {
-  path: string | null
-  ambiguous: boolean
-  candidates: RunStateCandidate[]
-}
-
 interface RunStateInfo {
   path: string
   mtimeMs: number
@@ -185,65 +174,18 @@ function statFile(path: string): { isFile: boolean; isDirectory: boolean; mtimeM
   }
 }
 
-function collectRunStateCandidates(rootDir: string): RunStateCandidate[] {
-  const candidates: RunStateCandidate[] = []
-  const add = (path: string): void => {
-    const stat = statFile(path)
-    if (!stat?.isFile) return
-    const rec = readJson(path) || {}
-    candidates.push({
-      path,
-      mtimeMs: stat.mtimeMs,
-      taskId: nonEmpty(rec.task_id) || nonEmpty(rec.taskId),
-    })
-  }
-  const direct = join(rootDir, RUN_STATE_FILENAME)
-  const directStat = statFile(direct)
-  if (directStat?.isFile) {
-    add(direct)
-    return candidates
-  }
-  const rootStat = statFile(rootDir)
-  if (!rootStat?.isDirectory) return candidates
-  const visit = (dir: string, depth: number): void => {
-    if (depth > RUN_STATE_SEARCH_DEPTH) return
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(dir, { withFileTypes: true }) as unknown as Dirent[]
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const path = join(dir, String(entry.name))
-      if (entry.isFile() && entry.name === RUN_STATE_FILENAME) add(path)
-      if (entry.isDirectory() && depth < RUN_STATE_SEARCH_DEPTH) visit(path, depth + 1)
-    }
-  }
-  visit(rootDir, 0)
-  return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-}
-
 function selectRunStateFile(params: {
   outputDir?: string | null
   explicitPath?: string | null
   expectedTaskId?: string | null
 }): RunStateSelection {
-  if (params.explicitPath && existsSync(params.explicitPath) && statFile(params.explicitPath)?.isFile) {
-    return { path: params.explicitPath, ambiguous: false, candidates: [] }
-  }
-  if (!params.outputDir) return { path: null, ambiguous: false, candidates: [] }
-  const candidates = collectRunStateCandidates(params.outputDir)
-  if (candidates.length === 0) return { path: null, ambiguous: false, candidates }
-  const direct = join(params.outputDir, RUN_STATE_FILENAME)
-  const directCandidate = candidates.find((candidate) => candidate.path === direct)
-  if (directCandidate) return { path: directCandidate.path, ambiguous: false, candidates }
-  const expectedTaskId = nonEmpty(params.expectedTaskId)
-  if (expectedTaskId) {
-    const match = candidates.find((candidate) => candidate.taskId === expectedTaskId)
-    if (match) return { path: match.path, ambiguous: false, candidates }
-  }
-  if (candidates.length === 1) return { path: candidates[0].path, ambiguous: false, candidates }
-  return { path: null, ambiguous: true, candidates }
+  return selectRunStateCandidate({
+    rootDir: params.outputDir,
+    explicitRunStatePath: params.explicitPath,
+    expectedTaskId: params.expectedTaskId,
+    fileName: RUN_STATE_FILENAME,
+    searchDepth: RUN_STATE_SEARCH_DEPTH,
+  })
 }
 
 function readRunStateInfo(path: string): RunStateInfo | null {
@@ -445,8 +387,6 @@ export class SkillTaskSupervisor {
                 : taskRunStatus || detachedStatus || runStateStatus || 'unknown'
 
     if (status === 'blocked' && (pidLive || outputFresh)) status = 'background_running'
-    const ambiguous = selection.ambiguous || Boolean(terminalSeen && hasLiveWork)
-    const closeAllowed = isTerminal(status) && !hasLiveWork && !ambiguous
     const progress: SkillTaskSupervisorProgress = {
       currentStage: runState?.currentStage || null,
       totalScenes: runState?.totalScenes ?? null,
@@ -466,6 +406,23 @@ export class SkillTaskSupervisor {
           action: detached.action,
         }
         : null)
+    const runStateNonTerminal = Boolean(runStateStatus && !isTerminal(runStateStatus))
+    const hasDurableResumeHandle = Boolean(
+      resolvedRunStatePath
+        || resolvedOutputDir
+        || resumePayload
+        || taskRun?.resumePayload
+        || detached?.id
+        || taskRun?.detachedTaskId,
+    )
+    const terminalOnlyByStore = Boolean(
+      isTerminal(status)
+        && (taskRunStatus || detachedStatus)
+        && runStateNonTerminal
+        && hasDurableResumeHandle,
+    )
+    const ambiguous = selection.ambiguous || Boolean(terminalSeen && hasLiveWork) || terminalOnlyByStore
+    const closeAllowed = isTerminal(status) && !hasLiveWork && !ambiguous
 
     const projection = this.readProjection({ sessionId: params.sessionId || detached?.sessionId || taskRun?.sessionId || undefined, skillId: skillId || undefined })
     if (projection) observations.push({ source: 'projection', message: 'projection used as fallback context only' })

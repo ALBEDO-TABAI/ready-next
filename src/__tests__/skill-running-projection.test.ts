@@ -144,6 +144,38 @@ test('long skill running projection selects matching run_state when task identit
   }
 })
 
+test('long skill running projection skips mismatched root run_state when task identity is present', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))
+  try {
+    const targetDir = join(root, 'target-task')
+    mkdirSync(targetDir, { recursive: true })
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      task_id: 'other',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf8')
+    writeFileSync(join(targetDir, 'run_state.json'), JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf8')
+
+    const projection = buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: root, taskId: 'target' },
+      startedAt: 0,
+      now: 65_000,
+    })
+
+    assert.match(String(projection.taskSummary), /score_batches/)
+    assert.doesNotMatch(String(projection.taskSummary), /completed/)
+    assert.doesNotMatch(String(projection.taskSummary), /多个 run_state/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('long skill running projection still shows a live confirmation before artifacts exist', () => {
   const projection = buildLongSkillRunningProjection({
     sessionId: 's1',

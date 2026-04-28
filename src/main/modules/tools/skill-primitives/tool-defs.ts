@@ -69,7 +69,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_inspect_run_state',
     description:
-      '检查 skill 输出目录里的 run_state.json，返回结构化的 currentStep / completedSteps / waitingFor / lastError + 截断后的 raw JSON。续做长流程任务（VEA pipeline 等）时优先调用，不要靠 skill_read_artifact 自己 parse。outputDir 与 taskId 二选一：传 taskId 自动解析后台任务的 outputDir。',
+      '检查 skill 输出目录里的 run_state.json，返回结构化的 currentStage / totalScenes / completedScenes / coverageRatio / activeOutputDir / taskId / expectedTaskId / waitingFor / lastError + 截断后的 raw JSON。续做长流程任务（VEA pipeline 等）时优先调用，不要靠 skill_read_artifact 自己 parse。outputDir 与 taskId 二选一：传 taskId 自动解析后台任务的 outputDir；同一目录有多个 run_state 时传 expectedTaskId 防止误选。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_inspect_run_state),
   },

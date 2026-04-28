@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { selectRunStateCandidate } from './run-state-selection'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const SEARCH_DEPTH_LIMIT = 1
@@ -17,18 +18,6 @@ interface RunStateSummary {
   lastError: string | null
   status: string | null
   updatedAt: string | null
-}
-
-interface RunStateCandidate {
-  path: string
-  mtimeMs: number
-  taskId: string | null
-}
-
-interface RunStateSelection {
-  path: string | null
-  ambiguous: boolean
-  candidates: RunStateCandidate[]
 }
 
 interface ArtifactRef {
@@ -104,65 +93,6 @@ function safeStat(path: string) {
   } catch {
     return null
   }
-}
-
-function collectRunStateCandidates(rootDir: string): RunStateCandidate[] {
-  const candidates: RunStateCandidate[] = []
-  const addCandidate = (path: string): void => {
-    const stat = safeStat(path)
-    if (!stat?.isFile()) return
-    let taskId: string | null = null
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
-      const rec = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-      taskId = asNonEmptyString(rec.task_id) || asNonEmptyString(rec.taskId)
-    } catch {
-      taskId = null
-    }
-    candidates.push({ path, mtimeMs: stat.mtimeMs, taskId })
-  }
-  const direct = join(rootDir, RUN_STATE_FILENAME)
-  const directStat = safeStat(direct)
-  if (directStat?.isFile()) {
-    addCandidate(direct)
-    return candidates
-  }
-  const rootStat = safeStat(rootDir)
-  if (!rootStat?.isDirectory()) return candidates
-
-  const visit = (dir: string, depth: number): void => {
-    if (depth > SEARCH_DEPTH_LIMIT) return
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(dir, { withFileTypes: true }) as unknown as Dirent[]
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const full = join(dir, String(entry.name))
-      if (entry.isFile() && entry.name === RUN_STATE_FILENAME) {
-        addCandidate(full)
-      } else if (entry.isDirectory() && depth < SEARCH_DEPTH_LIMIT) {
-        visit(full, depth + 1)
-      }
-    }
-  }
-  visit(rootDir, 0)
-  return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)
-}
-
-function selectRunStateFile(rootDir: string, expectedTaskId: string | null): RunStateSelection {
-  const candidates = collectRunStateCandidates(rootDir)
-  if (candidates.length === 0) return { path: null, ambiguous: false, candidates }
-  const direct = join(rootDir, RUN_STATE_FILENAME)
-  const directCandidate = candidates.find((candidate) => candidate.path === direct)
-  if (directCandidate) return { path: directCandidate.path, ambiguous: false, candidates }
-  if (expectedTaskId) {
-    const match = candidates.find((candidate) => candidate.taskId === expectedTaskId)
-    if (match) return { path: match.path, ambiguous: false, candidates }
-  }
-  if (candidates.length === 1) return { path: candidates[0].path, ambiguous: false, candidates }
-  return { path: null, ambiguous: true, candidates }
 }
 
 function readRunState(path: string | null): RunStateSummary | null {
@@ -297,7 +227,12 @@ export function buildLongSkillRunningProjection(params: {
   const updatedAt = new Date(params.now).toISOString()
   const probeDirs = collectProbeDirs(params.toolInput)
   const expectedTaskId = collectExpectedTaskId(params.toolInput)
-  const selections = probeDirs.map((dir) => selectRunStateFile(dir, expectedTaskId))
+  const selections = probeDirs.map((dir) => selectRunStateCandidate({
+    rootDir: dir,
+    expectedTaskId,
+    fileName: RUN_STATE_FILENAME,
+    searchDepth: SEARCH_DEPTH_LIMIT,
+  }))
   const ambiguousSelection = selections.find((selection) => selection.ambiguous)
   const runStatePath = selections.map((selection) => selection.path).find(Boolean) || null
   const runState = readRunState(runStatePath)
@@ -326,7 +261,7 @@ export function buildLongSkillRunningProjection(params: {
     runState?.waitingFor ? `等待：${runState.waitingFor}` : null,
     artifacts.length > 0 ? `已发现 ${artifacts.length} 个中间文件` : null,
   ].filter(Boolean)
-  const detail = `正在执行技能工具，已运行 ${elapsed}${confirmations.length > 0 ? `；${confirmations.join('；')}` : ''}`
+  const detail = `正在执行技能工具，已运行 ${elapsed}，工具仍在运行${confirmations.length > 0 ? `；${confirmations.join('；')}` : ''}`
   const stepDetail = runState?.lastError
     ? `${detail}；最近错误：${runState.lastError}`
     : detail

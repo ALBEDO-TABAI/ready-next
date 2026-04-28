@@ -140,13 +140,6 @@ export class RunCoordinator {
         ...(result.budgetState || budgetState),
       }
 
-    this.deps.promptAssembly.recordRunOutcome({
-      scope: request.scope,
-      finalText: result.finalText,
-      usedTools: result.usedTools,
-      success: result.success,
-    })
-
     const projectionPatch = result.projectionTruth?.projectionPatch
     const projectionTaskTitle =
       typeof projectionPatch?.taskTitle === 'string' ? projectionPatch.taskTitle : undefined
@@ -202,6 +195,13 @@ export class RunCoordinator {
         ? hasRecoverableWait ? 'checkpoint' : 'done'
         : 'error'
 
+    this.deps.promptAssembly.recordRunOutcome({
+      scope: request.scope,
+      finalText: result.finalText,
+      usedTools: result.usedTools,
+      success: result.success && finalPhase === 'done',
+    })
+
     this.deps.emitScopeRunEvent({
       type: 'updated',
       scopeId: request.scope.id,
@@ -231,6 +231,7 @@ export class RunCoordinator {
           ?? (resolvedTaskBudgetRuntime ? getBudgetUsagePercent(resolvedTaskBudgetRuntime) : null),
         stepBudget: result.executionDiagnostics?.stepBudget ?? null,
         fallback: buildExecutionFallbackState(result.executionDiagnostics?.fallback || null),
+        budgetLease: result.executionDiagnostics?.budgetLease ?? null,
         toolSnapshots: result.executionDiagnostics?.toolSnapshots ?? null,
         toolResolution: result.executionDiagnostics?.toolResolution ?? null,
         recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,

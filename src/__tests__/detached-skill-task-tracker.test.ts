@@ -282,6 +282,49 @@ test('DetachedSkillTaskTracker restart recovery uses task identity instead of ne
   }
 })
 
+test('DetachedSkillTaskTracker restart recovery skips mismatched root run_state', () => {
+  const path = storagePath()
+  const root = mkdtempSync(join(tmpdir(), 'ready-detached-skill-out-'))
+  try {
+    const targetDir = join(root, 'task-a')
+    mkdirSync(targetDir, { recursive: true })
+    const rootRunState = join(root, 'run_state.json')
+    const targetRunState = join(targetDir, 'run_state.json')
+    writeFileSync(rootRunState, JSON.stringify({
+      task_id: 'task-b',
+      current_stage: 'completed',
+    }), 'utf-8')
+    writeFileSync(targetRunState, JSON.stringify({
+      task_id: 'task-a',
+      current_stage: 'score_batches',
+    }), 'utf-8')
+    writeFileSync(path, JSON.stringify({
+      tasks: [{
+        id: 'dst-root-mismatch',
+        scopeId: 'scope-long',
+        sessionId: 'scope-long',
+        skillId: 'long-report-skill',
+        action: 'run_report',
+        params: { outputDir: root, taskId: 'task-a' },
+        status: 'running',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        updatedAt: '2026-04-28T00:00:00.000Z',
+      }],
+    }), 'utf-8')
+
+    const tracker = new DetachedSkillTaskTracker({
+      storagePath: path,
+      runSkill: async (request) => successfulLongSkillResult(request),
+    })
+
+    const restored = tracker.inspect('dst-root-mismatch')
+    assert.equal(restored?.outputDir, targetDir)
+    assert.equal(restored?.runStatePath, targetRunState)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('DetachedSkillTaskTracker restart recovery falls back to detached id as run_state identity', () => {
   const path = storagePath()
   const root = mkdtempSync(join(tmpdir(), 'ready-detached-skill-out-'))

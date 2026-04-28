@@ -141,15 +141,20 @@ def _resolve_active_candidate(candidate: Path) -> Path:
 
 
 def _find_video_output_dir(output_root: Path, started_at: float, expected_task_id: str = "") -> Optional[Path]:
-    if _is_video_output_dir(output_root):
-        task_id = _state_task_id(output_root)
-        if expected_task_id and task_id and task_id != expected_task_id:
-            return None
-        return _resolve_active_candidate(output_root)
     if not output_root.exists():
         return None
 
     candidates: list[tuple[float, Path, str]] = []
+    seen: set[str] = set()
+    if _is_video_output_dir(output_root):
+        candidate = _resolve_active_candidate(output_root)
+        seen.add(str(candidate))
+        newest_mtime = max(
+            (candidate / "scene_scores.json").stat().st_mtime,
+            (candidate / "run_state.json").stat().st_mtime,
+            (candidate / "delivery_report.json").stat().st_mtime,
+        )
+        candidates.append((newest_mtime, candidate, _state_task_id(candidate)))
     for scores_path in output_root.rglob("scene_scores.json"):
         candidate = scores_path.parent
         if not _is_video_output_dir(candidate):
@@ -162,6 +167,10 @@ def _find_video_output_dir(output_root: Path, started_at: float, expected_task_i
         if newest_mtime + 1 < started_at:
             continue
         candidate = _resolve_active_candidate(candidate)
+        candidate_key = str(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
         candidates.append((newest_mtime, candidate, _state_task_id(candidate)))
     if not candidates:
         return None
@@ -170,8 +179,12 @@ def _find_video_output_dir(output_root: Path, started_at: float, expected_task_i
         if matches:
             matches.sort(key=lambda item: item[0], reverse=True)
             return matches[0][1]
+        unidentified = [item for item in candidates if not item[2]]
+        if len(candidates) == 1 and len(unidentified) == 1:
+            return candidates[0][1]
+        return None
     candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
+    return candidates[0][1] if len(candidates) == 1 else None
 
 
 def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, started_at: float) -> Optional[Path]:
@@ -179,16 +192,23 @@ def _resolve_output_dir(action: str, payload: dict, stdout: str, stderr: str, st
         scores = (payload.get("sceneScoresPath") or payload.get("source") or "").strip()
         return Path(scores).expanduser().resolve().parent if scores else None
 
+    expected_task_id = os.environ.get("READY_SKILL_TASK_ID", "").strip()
     detected = _candidate_from_output(f"{stdout}\n{stderr}")
     if detected and _is_video_output_dir(detected.expanduser().resolve()):
-        return detected.expanduser().resolve()
+        detected_root = detected.expanduser().resolve()
+        if expected_task_id:
+            found = _find_video_output_dir(detected_root, started_at, expected_task_id)
+            if found:
+                return found
+        else:
+            return detected_root
 
     output_root = payload.get("outputDir")
     if output_root:
         found = _find_video_output_dir(
             Path(str(output_root)).expanduser().resolve(),
             started_at,
-            os.environ.get("READY_SKILL_TASK_ID", "").strip(),
+            expected_task_id,
         )
         if found:
             return found

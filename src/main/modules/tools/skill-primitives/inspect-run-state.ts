@@ -23,8 +23,7 @@
  * and bounds its output. Treat output as untrusted skill data.
  */
 
-import type { Dirent } from 'node:fs'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
@@ -32,6 +31,7 @@ import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
 import { getDetachedSkillTaskTracker } from '../../agent-control/detached-skill-task-tracker'
+import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/run-state-selection'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_MAX_RAW_BYTES = 16_384
@@ -63,14 +63,6 @@ interface RunStateSummary {
   status: unknown
   updatedAt: unknown
   knownKeysFound: string[]
-}
-
-interface RunStateCandidate {
-  path: string
-  mtimeMs: number
-  taskId: string | null
-  status: string | null
-  currentStage: string | null
 }
 
 /**
@@ -133,107 +125,18 @@ function extractKnownKeys(parsed: unknown): RunStateSummary {
   }
 }
 
-/**
- * Locate run_state.json candidates. Try the directory root first (the
- * canonical place); if not present, walk one level deep so per-job sub-folders
- * (common in VEA batch runs) still resolve. Selection is handled separately so
- * identity-aware callers never silently pick a stale newest mtime.
- */
-function collectRunStateCandidates(rootDir: string): RunStateCandidate[] {
-  const candidates: RunStateCandidate[] = []
-  const addCandidate = (path: string): void => {
-    try {
-      const stat = statSync(path)
-      if (!stat.isFile()) return
-      let parsed: unknown = null
-      try {
-        parsed = JSON.parse(readFileSync(path, 'utf-8'))
-      } catch {
-        parsed = null
-      }
-      const rec = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-      candidates.push({
-        path,
-        mtimeMs: stat.mtimeMs,
-        taskId: typeof rec.task_id === 'string'
-          ? rec.task_id
-          : typeof rec.taskId === 'string'
-            ? rec.taskId
-            : null,
-        status: typeof rec.status === 'string' ? rec.status : null,
-        currentStage: typeof rec.current_stage === 'string'
-          ? rec.current_stage
-          : typeof rec.currentStage === 'string'
-            ? rec.currentStage
-            : null,
-      })
-    } catch {
-      // ignore stat/read errors
-    }
-  }
-  const direct = join(rootDir, RUN_STATE_FILENAME)
-  if (existsSync(direct) && statSync(direct).isFile()) {
-    addCandidate(direct)
-    return candidates
-  }
-  if (!existsSync(rootDir) || !statSync(rootDir).isDirectory()) {
-    return candidates
-  }
-  const visit = (dir: string, depth: number): void => {
-    if (depth > SUBDIR_DEPTH_LIMIT) return
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(dir, { withFileTypes: true }) as unknown as Dirent[]
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const name = String(entry.name)
-      const full = join(dir, name)
-      if (entry.isFile() && name === RUN_STATE_FILENAME) {
-        addCandidate(full)
-      } else if (entry.isDirectory() && depth < SUBDIR_DEPTH_LIMIT) {
-        visit(full, depth + 1)
-      }
-    }
-  }
-  visit(rootDir, 0)
-  return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)
-}
-
 function selectRunStateFile(params: {
   outputDir: string
   explicitRunStatePath?: string | null
   expectedTaskId?: string | null
 }): { path: string | null; ambiguous: boolean; candidates: RunStateCandidate[] } {
-  if (params.explicitRunStatePath && existsSync(params.explicitRunStatePath) && statSync(params.explicitRunStatePath).isFile()) {
-    return { path: params.explicitRunStatePath, ambiguous: false, candidates: [] }
-  }
-
-  const candidates = collectRunStateCandidates(params.outputDir)
-  if (candidates.length === 0) {
-    return { path: null, ambiguous: false, candidates }
-  }
-
-  const direct = join(params.outputDir, RUN_STATE_FILENAME)
-  const directCandidate = candidates.find((candidate) => candidate.path === direct)
-  if (directCandidate) {
-    return { path: directCandidate.path, ambiguous: false, candidates }
-  }
-
-  const expectedTaskId = String(params.expectedTaskId || '').trim()
-  if (expectedTaskId) {
-    const matches = candidates.filter((candidate) => candidate.taskId === expectedTaskId)
-    if (matches.length > 0) {
-      return { path: matches[0].path, ambiguous: false, candidates }
-    }
-  }
-
-  if (candidates.length === 1) {
-    return { path: candidates[0].path, ambiguous: false, candidates }
-  }
-
-  return { path: null, ambiguous: true, candidates }
+  return selectRunStateCandidate({
+    rootDir: params.outputDir,
+    explicitRunStatePath: params.explicitRunStatePath,
+    expectedTaskId: params.expectedTaskId,
+    fileName: RUN_STATE_FILENAME,
+    searchDepth: SUBDIR_DEPTH_LIMIT,
+  })
 }
 
 export async function executeInspectRunState(

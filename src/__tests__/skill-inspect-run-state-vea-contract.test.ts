@@ -79,6 +79,39 @@ test('skill_inspect_run_state uses expectedTaskId instead of newest mtime when i
   }
 })
 
+test('skill_inspect_run_state skips mismatched root run_state when matching child exists', async () => {
+  const root = makeTempDir()
+  try {
+    const targetDir = join(root, 'task-target')
+    mkdirSync(targetDir)
+    const rootRunState = join(root, 'run_state.json')
+    const targetRunState = join(targetDir, 'run_state.json')
+    writeFileSync(rootRunState, JSON.stringify({
+      task_id: 'other',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf-8')
+    writeFileSync(targetRunState, JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf-8')
+    utimesSync(rootRunState, new Date('2026-04-28T01:05:00Z'), new Date('2026-04-28T01:05:00Z'))
+    utimesSync(targetRunState, new Date('2026-04-28T01:00:00Z'), new Date('2026-04-28T01:00:00Z'))
+
+    const data = outputData(await executeInspectRunState({
+      outputDir: root,
+      expectedTaskId: 'target',
+    } as any))
+
+    assert.equal(data.runStatePath, targetRunState)
+    assert.equal(data.summary.taskId, 'target')
+    assert.equal(data.summary.currentStage, 'score_batches')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('skill_inspect_run_state uses detached task id as default expectedTaskId', async () => {
   const root = makeTempDir()
   try {

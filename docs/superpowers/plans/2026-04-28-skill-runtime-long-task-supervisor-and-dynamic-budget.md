@@ -84,6 +84,42 @@ Phase 3 must be surgical. It should prevent false completion and preserve recove
 - Session continuity can persist and restore skill task status, run kind, and detached/task ids without losing compatibility with older `success` records.
 - Detached task cards and parent turn cards are linked well enough that one cannot show done while the other is still running.
 
+## 2.3 Phase 0-4 Audit Addendum
+
+This addendum is a hard acceptance layer for the Phase 4 implementation pass. It backfills the gaps found while reviewing Phase 0-3 and prevents Phase 4 from being accepted on stub-only evidence.
+
+**Native DB gate:**
+
+- Before accepting any DB-backed supervisor, session-continuity, or `skill_task_runs` behavior, run `npm run rebuild:native`.
+- If test output still contains `Database initialization failed` or a better-sqlite3 ABI mismatch, the DB-backed persistence path is not proven even when targeted tests pass.
+- In that case, mark SQLite-backed acceptance as unproven and rerun with a real working SQLite harness before claiming completion.
+
+**Phase 0 extra red/regression coverage:**
+
+- Add at least one real mainline test from `RunCoordinator.runScoped` through a real `TurnEngine`, real tool batch, supervisor inspection, scope event emission, and projection sync.
+- Add the tool-budget-limited branch where `executeToolBatch.budgetLimited === true`.
+- Do not count tests that only prebuild `projectionPatch` or inject `skillTaskLifecycle` as proof of the real path.
+
+**Phase 1/2 run_state selection rule:**
+
+- Use one JS helper for `run_state.json` candidate selection instead of copying selection logic.
+- When `expectedTaskId` is present, a root-level `run_state.json` must also match `task_id` / `taskId`; otherwise skip it and continue searching child output directories.
+- When there is no identity and multiple candidates exist, return an explicit ambiguous result instead of picking by newest mtime.
+- Apply the rule to `skill_inspect_run_state`, `SkillTaskSupervisor`, `detached-skill-task-tracker`, `skill-running-projection`, and the Python `ready_compat.py` path.
+- Update the `skill_inspect_run_state` tool description to expose `currentStage`, `totalScenes`, `completedScenes`, `coverageRatio`, `activeOutputDir`, `taskId`, and `expectedTaskId`.
+
+**Phase 2 closeAllowed hardening:**
+
+- `closeAllowed` must stay false when any non-terminal `run_state`, durable resume handle, active detached task, or active task run still indicates recoverable work.
+- SQLite or detached terminal status alone cannot close the parent if a stale running `run_state` plus resume handle still exists.
+- Add a regression fixture for "SQLite done + stale running run_state + durable resume handle".
+
+**Phase 3 lifecycle honesty:**
+
+- Checkpoint/background handoff must not be recorded as ordinary `status: done`.
+- `RunCoordinator.recordRunOutcome`, memory reflection, and prompt assembly must all preserve "paused/background/resumable" as the final lifecycle.
+- Monitor-only primitive success without an active parent or durable supervisor handle is only an observation. It must not write a successful recent skill run.
+
 ## Phase 0: Baseline And Red Tests
 
 **Purpose:** Lock the real failure modes into tests before touching behavior. This prevents "fix one symptom, create another" churn.
@@ -545,12 +581,35 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 
 ## Phase 4: Dynamic Budget Lease
 
-**Purpose:** Replace fixed long-task ceilings with progress-aware renewal.
+**Purpose:** Replace fixed long-task ceilings with a lease loop that renews only on real progress, pauses wasteful loops, and hands off live background work instead of pretending it is done.
 
 **New Modules:**
 
 - `src/main/modules/agent-control/progress-scorer.ts`
 - `src/main/modules/agent-control/waste-scorer.ts`
+- `src/main/modules/agent-control/skill-budget-lease-controller.ts`
+- `src/main/modules/agent-control/run-state-selection.ts`
+
+**Module Boundaries:**
+
+- `run-state-selection.ts` is the only JS-side helper for selecting `run_state.json` candidates by task identity.
+- `progress-scorer.ts` only decides whether new evidence represents real progress. It must not read files or mutate budget state.
+- `waste-scorer.ts` only decides whether repeated behavior is wasting budget. It must not read files or mutate budget state.
+- `skill-budget-lease-controller.ts` is the only module that decides `renew`, `pause`, `handoff_background`, `close`, or `active`.
+
+**Runtime Contract Changes:**
+
+- Add `SkillBudgetLeaseState` to `run-contracts.ts` and attach it to `TaskBudgetRuntime.lease`.
+- Add `budgetLease` to `ExecutionRunDiagnostics`.
+- Diagnostics must include at least:
+  - `leaseId`
+  - `decision`
+  - `reason`
+  - `renewalsUsed`
+  - `progressScore`
+  - `wasteScore`
+  - `lastFingerprint`
+  - `currentLeaseEndIteration`
 
 **Progress Signals:**
 
@@ -560,7 +619,8 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 - New artifacts appear in output directory.
 - `run_state.updated_at` advances.
 - Typed action returns new structured result.
-- Detached pid is alive.
+- Typed action returns a new milestone or durable output handle.
+- Progress fingerprint changes.
 
 **Waste Signals:**
 
@@ -573,19 +633,58 @@ Phase 3 passes only if budget exhaustion with live work produces checkpoint/back
 
 **Budget Lease Model:**
 
-- Start long skill tasks with a smaller initial lease, such as 20 or 40 iterations.
-- Near lease end, ask supervisor and scorers for the current score.
-- If progress is strong, renew by a bounded chunk.
-- If progress is weak but background work is alive, hand off to background supervisor.
-- If waste is high, pause and ask for user/strategy intervention.
-- Never renew indefinitely without positive progress.
+- Initial lease: 20 iterations.
+- Renewal chunk: 20 iterations.
+- Maximum renewals: 10.
+- Hard cap: 220 total iterations.
+- The hard cap is only a ceiling. It is not the starting budget.
+- Keep the existing 80-iteration compatibility seed if needed, but gate foreground continuation through the lease state.
+
+**Renewal Conditions:**
+
+- `progress.score >= 2`.
+- `waste.score <= 1`.
+- Progress fingerprint changed, or a typed action returned a new milestone.
+- The same fingerprint has not already been renewed.
+- The lease has not exceeded `maxRenewals` or the 220-iteration hard cap.
+
+**Pause Conditions:**
+
+- Two consecutive lease windows have no fingerprint change.
+- Repeated unchanged `run_state` or unchanged artifact reads reach 3 observations.
+- Repeated input validation, parse, allowlist, auth, quota, or rate-limit style errors reach 3 observations.
+- Supervisor result is ambiguous or stale and there is no live pid or fresh output activity.
+
+**Background Handoff Conditions:**
+
+- `hasLiveWork === true` but foreground progress is weak.
+- A pid is alive or output activity is fresh.
+- At least one resume handle exists: `resumePayload`, `runStatePath`, `outputDir`, or `detachedTaskId`.
+- A pid-only signal may receive at most one short renewal. After that, the controller must see stage, scene, artifact, or `updatedAt` movement, or hand off to background.
+
+**TurnEngine Integration Points:**
+
+- After tool-loop initialization, create a lease state for long skills or recoverable supervisor snapshots.
+- Before each budget check, if the lease has two or fewer iterations left or has reached the lease end, sample the supervisor and ask the lease controller for a decision.
+- On `renew`, extend only the lease end, not the global hard cap.
+- On `pause` or `handoff_background`, route through the Phase 3 lifecycle path so the parent task remains resumable.
+- After each tool batch, feed executed tools, tool results, recovery history, and supervisor snapshot into the progress and waste scorers.
+
+**Temporary Logic To Remove:**
+
+- Long typed-action success must not automatically call `grantBudgetSafetyFloor`.
+- Pure read-only tool batches must not unconditionally refund an iteration.
+- Continuing foreground work is a progress/waste lease decision, not a special case per tool type.
 
 **Verification:**
 
-- Simulated 200-step task with periodic progress does not stop early.
-- Simulated stalled loop pauses within a bounded number of iterations.
-- Read-only calls against unchanged content do not refund budget.
-- Repeated invalid tool calls reduce renewal eligibility.
+- Unit test `progress-scorer` for stage, scene, coverage, artifact, `updatedAt`, and fingerprint changes.
+- Unit test `waste-scorer` for repeated tools, repeated reads, unchanged `run_state`, and repeated validation/allowlist/auth/quota errors.
+- Unit test `skill-budget-lease-controller` for renew, pause, handoff, and close decisions.
+- Integration test a 200-step progressing fixture through bounded renewals until done.
+- Integration test a stalled unchanged `run_state` loop until it reaches `budget_paused`.
+- Integration test weak live background work: one short renewal at most, then `handoff_background` unless progress changes.
+- Verify `budgetRuntime.lease` appears in diagnostics and can be restored with the runtime state.
 
 ## Phase 5: UI And Continuation Semantics
 
