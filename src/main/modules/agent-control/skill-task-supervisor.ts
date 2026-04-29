@@ -13,6 +13,7 @@ import {
   type SkillTaskRunRecord,
 } from '../repositories/skill-task-run-repository'
 import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from './run-state-selection'
+import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1
@@ -24,6 +25,7 @@ export type SkillTaskSupervisorStatus =
   | 'running'
   | 'background_running'
   | 'budget_paused'
+  | 'recoverable_paused'
   | 'blocked'
   | 'failed'
   | 'done'
@@ -45,6 +47,7 @@ export interface SkillTaskSupervisorSourceObservation {
     | 'run_state'
     | 'pid'
     | 'output_activity'
+    | 'artifact_progress'
     | 'projection'
     | 'supervisor'
   status?: string | null
@@ -253,7 +256,8 @@ function statusFromTaskRun(status?: string | null): SkillTaskSupervisorStatus | 
 
 function statusFromRunState(status?: string | null): SkillTaskSupervisorStatus | null {
   if (!status) return null
-  if (['running', 'waiting_for_batches', 'ready_to_finalize', 'paused'].includes(status)) return 'background_running'
+  if (['running', 'waiting_for_batches', 'ready_to_finalize'].includes(status)) return 'background_running'
+  if (status === 'paused') return 'recoverable_paused'
   if (['blocked', 'pending_review', 'awaiting_input'].includes(status)) return 'blocked'
   if (['failed', 'failure', 'error'].includes(status)) return 'failed'
   if (['completed', 'success', 'done'].includes(status)) return 'done'
@@ -279,7 +283,7 @@ function scoreLatestSnapshot(snapshot: SkillTaskSupervisorSnapshot): number {
   let score = 0
   if (snapshot.hasLiveWork) score += 100
   if (snapshot.status === 'background_running' || snapshot.status === 'running') score += 60
-  if (snapshot.status === 'blocked' || snapshot.status === 'budget_paused') score += 50
+  if (snapshot.status === 'blocked' || snapshot.status === 'budget_paused' || snapshot.status === 'recoverable_paused') score += 50
   if (snapshotHasDurableHandle(snapshot)) score += 30
   if (snapshot.hasRecentProgress) score += 20
   if (!snapshot.stale) score += 5
@@ -392,6 +396,24 @@ export class SkillTaskSupervisor {
     if (outputActivityMs !== null) {
       observations.push({ source: 'output_activity', live: outputFresh, stale: observedAtMs - outputActivityMs > STALE_MS })
     }
+    const resolvedRunStatePath = runState?.path || selection.path || explicitRunStatePath || null
+    const resolvedOutputDir = runState?.activeOutputDir || outputDir || (resolvedRunStatePath ? dirname(resolvedRunStatePath) : null)
+    const artifactProgress = inspectSkillProgressArtifacts({
+      outputDir: resolvedOutputDir,
+      sceneScoresPath: detached?.sceneScoresPath || taskRun?.sceneScoresPath || (resolvedOutputDir ? join(resolvedOutputDir, 'scene_scores.json') : null),
+    })
+    if (artifactProgress.hasEvidence) {
+      observations.push({
+        source: 'artifact_progress',
+        status: `${artifactProgress.completedScenes ?? 'unknown'}/${artifactProgress.totalScenes ?? 'unknown'}`,
+        path: artifactProgress.sceneScoresPath || artifactProgress.hostBatchesIndexPath,
+        live: false,
+        stale: artifactProgress.hostBatches
+          ? (artifactProgress.hostBatches.statusCounts.pending || 0) > 0
+            || (artifactProgress.hostBatches.statusCounts.in_progress || 0) > 0
+          : undefined,
+      })
+    }
 
     const detachedStatus = statusFromDetached(detached?.status)
     const taskRunStatus = statusFromTaskRun(taskRun?.status)
@@ -405,6 +427,14 @@ export class SkillTaskSupervisor {
     const liveByTaskRun = taskRun?.status === 'running'
     const blockedByTaskRun = taskRun?.status === 'blocked'
     const liveByRunState = runStateStatus === 'background_running' && heartbeatFresh
+    const recoverableByRunState = Boolean(
+      runStateStatus === 'background_running'
+        && !heartbeatFresh
+        && !pidLive
+        && !liveByTaskRun
+        && !liveByDetached
+        && (resolvedRunStatePath || resolvedOutputDir),
+    )
     const hasLiveWork = Boolean(liveByDetached || liveByTaskRun || liveByRunState || pidLive)
     const hasRecentProgress = Boolean(heartbeatFresh || outputFresh)
     let status: SkillTaskSupervisorStatus =
@@ -413,18 +443,16 @@ export class SkillTaskSupervisor {
           : liveByRunState ? 'background_running'
             : pidLive && runStateStatus === 'background_running' ? 'background_running'
               : blockedByTaskRun || runStateStatus === 'blocked' || detachedStatus === 'blocked' ? 'blocked'
-                : taskRunStatus || detachedStatus || runStateStatus || 'unknown'
+                : taskRunStatus || detachedStatus || (recoverableByRunState ? 'recoverable_paused' : runStateStatus) || 'unknown'
 
     if (status === 'blocked' && (pidLive || outputFresh)) status = 'background_running'
     const progress: SkillTaskSupervisorProgress = {
       currentStage: runState?.currentStage || null,
-      totalScenes: runState?.totalScenes ?? null,
-      completedScenes: runState?.completedScenes ?? null,
-      coverageRatio: runState?.coverageRatio ?? null,
+      totalScenes: artifactProgress.totalScenes ?? runState?.totalScenes ?? null,
+      completedScenes: artifactProgress.completedScenes ?? runState?.completedScenes ?? null,
+      coverageRatio: artifactProgress.coverageRatio ?? runState?.coverageRatio ?? null,
       updatedAt: runState?.updatedAt || null,
     }
-    const resolvedRunStatePath = runState?.path || selection.path || explicitRunStatePath || null
-    const resolvedOutputDir = runState?.activeOutputDir || outputDir || (resolvedRunStatePath ? dirname(resolvedRunStatePath) : null)
     const resumePayload = taskRun?.resumePayload
       || (detached
         ? {

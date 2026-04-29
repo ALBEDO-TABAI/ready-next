@@ -31,6 +31,7 @@ import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
 import { getDetachedSkillTaskTracker } from '../../agent-control/detached-skill-task-tracker'
+import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skill-progress-artifacts'
 import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/run-state-selection'
 
 const RUN_STATE_FILENAME = 'run_state.json'
@@ -137,6 +138,22 @@ function selectRunStateFile(params: {
     fileName: RUN_STATE_FILENAME,
     searchDepth: SUBDIR_DEPTH_LIMIT,
   })
+}
+
+function normalizeStatus(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : null
+}
+
+function deriveReconciledLiveness(summary: RunStateSummary, artifactProgress: SkillProgressArtifacts): string {
+  const status = normalizeStatus(summary.status)
+  if (['completed', 'success', 'done'].includes(status || '')) return 'done'
+  if (['failed', 'failure', 'error'].includes(status || '')) return 'failed'
+  if (['blocked', 'pending_review', 'awaiting_input'].includes(status || '')) return 'blocked'
+  if (['running', 'waiting_for_batches', 'ready_to_finalize', 'paused'].includes(status || '')) {
+    if (artifactProgress.hasEvidence) return 'recoverable_paused'
+    return 'unknown'
+  }
+  return 'unknown'
 }
 
 export async function executeInspectRunState(
@@ -297,6 +314,8 @@ export async function executeInspectRunState(
   }
 
   const summary = extractKnownKeys(parsed)
+  const artifactProgress = inspectSkillProgressArtifacts({ outputDir })
+  const reconciledLiveness = deriveReconciledLiveness(summary, artifactProgress)
   const cap = Math.min(
     typeof args.maxRawBytes === 'number' && args.maxRawBytes > 0
       ? args.maxRawBytes
@@ -328,6 +347,8 @@ export async function executeInspectRunState(
         runStatePath,
         candidates: selection.candidates,
         summary,
+        artifactProgress,
+        reconciledLiveness,
         parseError,
         raw: rawSlice,
         rawBytes: raw.length,

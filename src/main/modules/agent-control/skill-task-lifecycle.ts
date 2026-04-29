@@ -169,6 +169,16 @@ export function buildSkillTaskLifecycleSignal(params: {
     })
   }
 
+  if (snapshot.status === 'recoverable_paused') {
+    return buildCheckpointSignal({
+      snapshot,
+      reason: 'recoverable_paused',
+      state: 'budget_paused',
+      actions: ['continue', 'retry', 'cancel'],
+      blockedReason: buildBlockedReason(snapshot, '技能任务未在后台运行，可继续执行'),
+    })
+  }
+
   if (snapshot.hasLiveWork || snapshot.hasRecentProgress || snapshot.status === 'background_running' || snapshot.status === 'running') {
     return buildCheckpointSignal({
       snapshot,

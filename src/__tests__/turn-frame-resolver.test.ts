@@ -175,3 +175,20 @@ test('resolveTurnFrame preserves explicit task artifact identity over supervisor
   assert.equal(frame.skill?.taskRunId, 'str-explicit')
   assert.equal(frame.skill?.detachedTaskId, 'dst-explicit')
 })
+
+test('resolveTurnFrame maps recoverable paused supervisor status into recoverable liveness', () => {
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-test',
+    requestId: 'req-recoverable',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot('video-expert-analyzer', {
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+
+  assert.equal(frame.skill?.skillId, 'video-expert-analyzer')
+  assert.equal(frame.liveness, 'recoverable_paused')
+  assert.equal(frame.mode, 'skill_resume')
+})

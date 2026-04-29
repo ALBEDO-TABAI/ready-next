@@ -456,6 +456,7 @@ export type SkillTaskLifecycleReason =
   | 'background_running'
   | 'background_handoff'
   | 'budget_exhausted'
+  | 'recoverable_paused'
   | 'blocked'
   | 'completed'
   | 'failed'

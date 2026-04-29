@@ -44,6 +44,58 @@ test('skill_inspect_run_state extracts VEA stage and scene progress fields', asy
   }
 })
 
+test('skill_inspect_run_state returns artifact progress and reconciled paused liveness for stale VEA output', async () => {
+  const dir = makeTempDir()
+  try {
+    writeFileSync(join(dir, 'run_state.json'), JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'score_batches',
+      total_scenes: 97,
+      completed_scenes: 97,
+      coverage_ratio: 1,
+      updated_at: '2026-04-28T01:00:00Z',
+    }), 'utf-8')
+    writeFileSync(join(dir, 'scene_scores.json'), JSON.stringify({
+      total_scenes: 97,
+      scenes: Array.from({ length: 97 }, (_, index) => ({
+        scene_number: index + 1,
+        scores: {},
+        weighted_score: 0,
+        type_classification: '',
+        description: '',
+        selection_reasoning: '',
+        edit_suggestion: '',
+        storyboard: {},
+      })),
+    }), 'utf-8')
+    const hostDir = join(dir, 'host_batches')
+    mkdirSync(hostDir)
+    writeFileSync(join(hostDir, 'index.json'), JSON.stringify({
+      total_scenes: 97,
+      total_batches: 17,
+      completed_scenes: 0,
+      coverage_ratio: 0,
+      batches: Array.from({ length: 17 }, (_, index) => ({
+        batch_id: `batch-${String(index + 1).padStart(3, '0')}`,
+        scene_numbers: [index + 1],
+        output: `batch-${String(index + 1).padStart(3, '0')}-output.json`,
+        status: 'pending',
+      })),
+    }), 'utf-8')
+
+    const data = outputData(await executeInspectRunState({ outputDir: dir }))
+
+    assert.equal(data.summary.completedScenes, 97)
+    assert.equal(data.artifactProgress.totalScenes, 97)
+    assert.equal(data.artifactProgress.completedScenes, 0)
+    assert.equal(data.artifactProgress.coverageRatio, 0)
+    assert.equal(data.reconciledLiveness, 'recoverable_paused')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('skill_inspect_run_state uses expectedTaskId instead of newest mtime when identity is known', async () => {
   const root = makeTempDir()
   try {

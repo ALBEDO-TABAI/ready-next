@@ -28,6 +28,17 @@ function writeRunState(dir: string, payload: Record<string, unknown>, mtime = '2
   return path
 }
 
+function writeJsonFile(path: string, payload: Record<string, unknown>, mtime = '2026-04-28T01:40:00.000Z'): void {
+  writeFileSync(path, JSON.stringify(payload), 'utf8')
+  const date = new Date(mtime)
+  utimesSync(path, date, date)
+}
+
+function markTreeMtime(root: string, mtime = '2026-04-28T01:40:00.000Z'): void {
+  const date = new Date(mtime)
+  utimesSync(root, date, date)
+}
+
 function makeDetached(overrides: Partial<DetachedSkillTaskRecord>): DetachedSkillTaskRecord {
   return {
     id: overrides.id || 'dst-1',
@@ -251,7 +262,7 @@ test('SkillTaskSupervisor selects older matching run_state by task identity', ()
 
     assert.equal(snapshot.runStatePath, target)
     assert.equal(snapshot.progress.currentStage, 'score_batches')
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'recoverable_paused')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -279,7 +290,7 @@ test('SkillTaskSupervisor skips mismatched root run_state when matching child ex
 
     assert.equal(snapshot.runStatePath, target)
     assert.equal(snapshot.progress.currentStage, 'score_batches')
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'recoverable_paused')
     assert.equal(snapshot.closeAllowed, false)
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -322,6 +333,69 @@ test('SkillTaskSupervisor blocks close when SQLite is done but stale run_state i
     assert.equal(snapshot.stale, true)
     assert.equal(snapshot.closeAllowed, false)
     assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SkillTaskSupervisor treats stale running run_state with pending VEA batches as recoverable paused', () => {
+  const root = tempRoot()
+  try {
+    const staleTime = '2026-04-28T01:40:00.000Z'
+    const runStatePath = writeRunState(root, {
+      task_id: 'dst-stale-vea',
+      status: 'running',
+      current_stage: 'score_batches',
+      total_scenes: 97,
+      completed_scenes: 97,
+      coverage_ratio: 1,
+      updated_at: staleTime,
+    }, staleTime)
+    writeJsonFile(join(root, 'scene_scores.json'), {
+      total_scenes: 97,
+      scenes: Array.from({ length: 97 }, (_, index) => ({
+        scene_number: index + 1,
+        scores: {},
+        weighted_score: 0,
+        type_classification: '',
+        description: '',
+        selection_reasoning: '',
+        edit_suggestion: '',
+        storyboard: {},
+      })),
+    }, staleTime)
+    const hostDir = join(root, 'host_batches')
+    mkdirSync(hostDir)
+    writeJsonFile(join(hostDir, 'index.json'), {
+      total_scenes: 97,
+      total_batches: 17,
+      completed_scenes: 0,
+      coverage_ratio: 0,
+      batches: Array.from({ length: 17 }, (_, index) => ({
+        batch_id: `batch-${String(index + 1).padStart(3, '0')}`,
+        scene_numbers: [index + 1],
+        output: `batch-${String(index + 1).padStart(3, '0')}-output.json`,
+        status: 'pending',
+      })),
+    }, staleTime)
+    markTreeMtime(hostDir, staleTime)
+    markTreeMtime(root, staleTime)
+
+    const snapshot = makeSupervisor({
+      pidExists: () => false,
+    }).inspectSkillTask({
+      outputDir: root,
+      runStatePath,
+      expectedTaskId: 'dst-stale-vea',
+      skillId: 'video-expert-analyzer',
+    })
+
+    assert.equal(snapshot.status, 'recoverable_paused')
+    assert.equal(snapshot.hasLiveWork, false)
+    assert.equal(snapshot.progress.completedScenes, 0)
+    assert.equal(snapshot.progress.totalScenes, 97)
+    assert.equal(snapshot.progress.coverageRatio, 0)
+    assert.ok(snapshot.sourceObservations.some((item) => item.source === 'artifact_progress'))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

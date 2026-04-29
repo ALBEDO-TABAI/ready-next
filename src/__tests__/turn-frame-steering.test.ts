@@ -114,3 +114,19 @@ test('buildTurnFrameSteering can recover the default VEA pipeline tool from a re
   assert.equal(steering.preferredToolNames[0], 'skill_video_expert_pipeline')
   assert.match(steering.systemReminder || '', /typed skill action/)
 })
+
+test('resolveTurnFrame keeps typed resume steering for recoverable paused VEA output', () => {
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-vea',
+    requestId: 'req-paused',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+
+  assert.equal(frame.liveness, 'recoverable_paused')
+  assert.equal(frame.steering.preferredToolNames[0], 'skill_video_expert_pipeline')
+})

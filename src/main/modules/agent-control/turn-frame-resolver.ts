@@ -101,12 +101,13 @@ function inferLiveness(context: ActiveSkillContext | null, snapshot?: SkillTaskS
     if (snapshot.status === 'failed') return 'failed'
     if (snapshot.hasLiveWork) return 'running_process'
     if (snapshot.hasRecentProgress) return 'recent_progress'
+    if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
     if (snapshot.status === 'blocked') return 'blocked'
   }
   if (context.status === 'done') return 'done'
   if (context.status === 'failed') return 'failed'
   if (context.status === 'background_running' || context.status === 'running') return 'running_process'
-  if (context.status === 'budget_paused') return 'recoverable_paused'
+  if (context.status === 'budget_paused' || context.status === 'recoverable_paused') return 'recoverable_paused'
   if (context.status === 'blocked') return 'blocked'
   return 'unknown'
 }
@@ -117,6 +118,7 @@ function livenessFromSupervisorSnapshot(snapshot?: SkillTaskSupervisorSnapshot |
   if (snapshot.status === 'failed') return 'failed'
   if (snapshot.hasLiveWork) return 'running_process'
   if (snapshot.hasRecentProgress) return 'recent_progress'
+  if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
   if (snapshot.status === 'blocked') return 'blocked'
   return null
 }

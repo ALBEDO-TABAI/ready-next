@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { selectRunStateCandidate } from './run-state-selection'
+import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const SEARCH_DEPTH_LIMIT = 1
@@ -236,10 +237,16 @@ export function buildLongSkillRunningProjection(params: {
   const ambiguousSelection = selections.find((selection) => selection.ambiguous)
   const runStatePath = selections.map((selection) => selection.path).find(Boolean) || null
   const runState = readRunState(runStatePath)
-  const progressText = runState?.totalScenes && runState?.completedScenes
-    ? `${runState.completedScenes}/${runState.totalScenes}`
-    : runState?.coverageRatio
-      ? `${Math.round(Number(runState.coverageRatio) * 100)}%`
+  const artifactProgress = inspectSkillProgressArtifacts({
+    outputDir: runStatePath ? dirname(runStatePath) : probeDirs[0],
+  })
+  const totalScenes = artifactProgress.totalScenes ?? (runState?.totalScenes ? Number(runState.totalScenes) : null)
+  const completedScenes = artifactProgress.completedScenes ?? (runState?.completedScenes ? Number(runState.completedScenes) : null)
+  const coverageRatio = artifactProgress.coverageRatio ?? (runState?.coverageRatio ? Number(runState.coverageRatio) : null)
+  const progressText = totalScenes !== null && completedScenes !== null
+    ? `${completedScenes}/${totalScenes}`
+    : coverageRatio !== null
+      ? `${Math.round(coverageRatio * 100)}%`
       : null
   const stageText = runState?.currentStage || runState?.currentStep || null
   const artifacts = collectArtifacts({
