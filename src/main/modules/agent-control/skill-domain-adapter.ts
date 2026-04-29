@@ -46,14 +46,29 @@ const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使�
 export function buildSkillDomainInstruction(
   inputAllowed: ReadonlyArray<string> | null | undefined,
   outputAllowed: ReadonlyArray<string> | null | undefined,
+  frameSteering?: {
+    preferredToolNames?: string[] | null
+    systemReminder?: string | null
+  } | null,
 ): string {
-  if (!inputAllowed || inputAllowed.length === 0) return INSTRUCTION
+  const sections = [INSTRUCTION]
+  const preferredTypedAction = (frameSteering?.preferredToolNames || [])
+    .find((name) => name.startsWith('skill_') && name !== 'skill_run_shell')
+  if (frameSteering?.systemReminder || preferredTypedAction) {
+    sections.push([
+      frameSteering?.systemReminder || `系统补充：当前 TurnFrame 已确认应优先调用 typed skill action ${preferredTypedAction}。`,
+      preferredTypedAction ? `优先工具：${preferredTypedAction}` : '',
+      'skill_run_shell 只用于必要诊断，不要用 shell 反复读取同一份状态来替代 typed skill action。',
+    ].filter(Boolean).join('\n'))
+  }
+  if (!inputAllowed || inputAllowed.length === 0) return sections.join('\n\n')
   const kept = new Set(outputAllowed || [])
   const dropped = inputAllowed.filter((name) => !kept.has(name))
-  if (dropped.length === 0) return INSTRUCTION
+  if (dropped.length === 0) return sections.join('\n\n')
   const sample = dropped.slice(0, 5).join('、')
   const more = dropped.length > 5 ? `（共 ${dropped.length} 个）` : ''
-  return `${INSTRUCTION}\n\n⚠️ 本回合限定 skill domain，已暂停 ${dropped.length} 个工具${more}：${sample}。如确实需要 file_search/document_* 等通用工具，请用普通指令（不带"继续/重试"等关键词）让系统切回通用域。`
+  sections.push(`⚠️ 本回合限定 skill domain，已暂停 ${dropped.length} 个工具${more}：${sample}。如确实需要 file_search/document_* 等通用工具，请用普通指令（不带"继续/重试"等关键词）让系统切回通用域。`)
+  return sections.join('\n\n')
 }
 
 interface SkillAdapterState {
@@ -137,7 +152,7 @@ export class SkillDomainAdapter implements DomainAdapter {
     }
     // skill-resume D2: dynamic instruction tells LLM which tools were dropped
     // this turn, so it doesn't blindly retry them and waste iterations.
-    const instruction = buildSkillDomainInstruction(params.allowedToolNames, narrowed)
+    const instruction = buildSkillDomainInstruction(params.allowedToolNames, narrowed, params.turnFrameSteering)
     return {
       allowedToolNames: narrowed,
       sessionMessages: params.hasTools ? [{ role: 'user', content: instruction }] : [],

@@ -10,7 +10,7 @@
 // skill_submit_* / skill_restart_from_step / skill_cancel_execution) were
 // removed from the registry along with the skill_executions state machine.
 
-const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
+export const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
   'video-expert-analyzer:video_expert_ai_analyze': 'skill_video_expert_ai_analyze',
   'video-copy-analyzer:video_copy_analyze': 'skill_video_copy_analyze',
@@ -19,6 +19,10 @@ const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_status': 'skill_rss_status',
   'lets-go-rss:rss_list': 'skill_rss_list',
   'lets-go-rss:rss_stats': 'skill_rss_stats',
+}
+
+export function getStaticSkillToolNameForAction(skillId: string, actionName: string): string | null {
+  return STATIC_SKILL_TOOL_NAMES_BY_ACTION[`${skillId}:${actionName}`] || null
 }
 
 export const STATIC_SKILL_ACTIONS_BY_TOOL_NAME: Record<string, { skillId: string; actionName: string }> = Object.fromEntries(

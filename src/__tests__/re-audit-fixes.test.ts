@@ -9,6 +9,7 @@ import {
   clearSkillTaskProjection,
 } from '../main/modules/agent-control/skill-task-tracker'
 import {
+  choosePrimitiveSkillId,
   shouldExposeSkillPrimitive,
 } from '../main/modules/tools/skill-tool-session-gate'
 
@@ -136,6 +137,27 @@ test('FIX 4.3 wiring — skills-tools dispatch wraps readSkillTaskProjection in 
     dispatchBlock![0],
     /readSkillTaskProjection\(\{\s*sessionId:\s*sid\s*\}\)\s*!==\s*null/,
     'old permissive form must be gone from dispatch',
+  )
+})
+
+test('Stage 3 — primitive skill id can come from the TurnFrame before hint or task-run fallbacks', () => {
+  assert.equal(
+    choosePrimitiveSkillId({
+      frameSkillId: 'video-expert-analyzer',
+      activeContextSkillId: null,
+      referenceHintSkillId: 'lets-go-rss',
+      latestTaskRunSkillId: 'novel-writer-system',
+    }),
+    'video-expert-analyzer',
+  )
+  assert.equal(
+    choosePrimitiveSkillId({
+      frameSkillId: null,
+      activeContextSkillId: 'video-expert-analyzer',
+      referenceHintSkillId: 'lets-go-rss',
+      latestTaskRunSkillId: null,
+    }),
+    'video-expert-analyzer',
   )
 })
 

@@ -1176,7 +1176,19 @@ test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs wi
       capturedAllowedToolNames.includes('skill_video_expert_pipeline'),
       `expected VEA pipeline in allowed tools, got: ${capturedAllowedToolNames.join(',')}`,
     )
-    assert.ok(metrics.some((event) => event.metric === 'preferred_skill_tools' && event.count === 2))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'preferred_skill_tools'
+      && event.count >= 2
+      && Array.isArray(event.tools)
+      && event.tools.includes('skill_video_expert_pipeline'),
+    ))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_tool_policy'
+      && Array.isArray(event.preferredToolNames)
+      && event.preferredToolNames.includes('skill_video_expert_pipeline')
+      && Array.isArray(event.allowedToolNames)
+      && event.allowedToolNames.includes('skill_video_expert_pipeline'),
+    ))
     assert.ok(metrics.some((event) => event.metric === 'skill_reference_hint_armed' && event.via === 'current'))
     assert.ok(logs.some((line) => line.includes('[skill_detection]')))
   } finally {

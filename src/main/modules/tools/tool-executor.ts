@@ -57,6 +57,7 @@ export interface ToolContext {
   parentTaskId?: string
   parentStepId?: string
   taskProjectionId?: string
+  frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
 }
@@ -164,6 +165,7 @@ export async function executeToolCall(
           return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
+            frameSkillId: context.frameSkillId ?? null,
           })
 
         case 'system':

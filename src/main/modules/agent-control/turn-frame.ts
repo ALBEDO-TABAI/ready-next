@@ -30,6 +30,13 @@ export type TurnFrameLiveness =
   | 'failed'
   | 'unknown'
 
+export type TurnFrameMode =
+  | 'general'
+  | 'skill_resume'
+  | 'skill_start'
+  | 'skill_repair'
+  | 'skill_inspect'
+
 export interface TurnFrameSkillSlice {
   skillId: string
   skillName: string | null
@@ -53,6 +60,7 @@ export interface TurnFrame {
     sessionId: string | null
     requestId: string | null
   }
+  mode: TurnFrameMode
   userIntent: TurnUserIntent
   skill: TurnFrameSkillSlice | null
   liveness: TurnFrameLiveness
@@ -82,11 +90,13 @@ export function summarizeTurnFrame(frame: TurnFrame | null): Record<string, unkn
   return {
     sessionId: frame.ids.sessionId,
     requestId: frame.ids.requestId,
+    mode: frame.mode,
     skillId: frame.skill?.skillId || null,
     source: frame.skill?.source || null,
     hasRunState: Boolean(frame.skill?.runStatePath),
     hasOutputDir: Boolean(frame.skill?.outputDir),
     liveness: frame.liveness,
+    preferredToolNames: frame.steering.preferredToolNames,
     terminalReason: frame.terminalReason,
   }
 }

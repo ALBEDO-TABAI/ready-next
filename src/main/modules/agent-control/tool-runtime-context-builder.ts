@@ -22,6 +22,7 @@ export function buildToolRuntimeContext(params: {
   parentTaskId?: string
   parentStepId?: string
   taskProjectionId?: string
+  frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
 }): ToolRuntimeContext {
@@ -42,6 +43,7 @@ export function buildToolRuntimeContext(params: {
     parentTaskId: params.parentTaskId,
     parentStepId: params.parentStepId,
     taskProjectionId: params.taskProjectionId,
+    frameSkillId: params.frameSkillId ?? null,
     registerRunCleanup: params.registerRunCleanup,
     agentContext: params.agentContext ?? null,
   }
@@ -64,6 +66,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     parentTaskId: context.parentTaskId,
     parentStepId: context.parentStepId,
     taskProjectionId: context.taskProjectionId,
+    frameSkillId: context.frameSkillId ?? null,
     registerRunCleanup: context.registerRunCleanup,
     agentContext: context.agentContext ?? null,
   }

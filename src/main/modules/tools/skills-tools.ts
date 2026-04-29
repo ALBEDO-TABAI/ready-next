@@ -11,6 +11,7 @@ import {
 } from '../agent-control/tool-result-types'
 import {
   getLatestActiveSkillTaskRun,
+  isSkillTaskProjectionLive,
   readSkillTaskProjection,
   recordSkillTaskEvent,
   type SkillTaskEventStatus,
@@ -22,7 +23,7 @@ import type {
 } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
-import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
+import { choosePrimitiveSkillId, filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
   executeAskUser,
@@ -53,6 +54,7 @@ interface SkillToolRuntimeContext {
   parentTaskId?: string
   parentStepId?: string
   taskProjectionId?: string
+  frameSkillId?: string | null
   agent?: string | null
 }
 
@@ -216,13 +218,13 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
  * tools (skill_get_state / skill_submit_* / skill_restart_from_step /
  * skill_cancel_execution) no longer exist. The LLM-facing tool list is now
  * just skill_action tools + skill primitives (gated by reference-skill
- * hint presence).
+ * hint presence or live task projection).
  */
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
   const activeSkillContext = sessionId ? resolveActiveSkillContext({ sessionId }) : null
-  const hasActiveSkillContext = (sid: string) =>
-    Boolean(activeSkillContext && sid === sessionId)
+  const hasActiveSkillTaskProjection = (sid: string) =>
+    isSkillTaskProjectionLive(readSkillTaskProjection({ sessionId: sid }))
 
   const primitiveTools = filterSkillPrimitivesBySession(
     PRIMITIVE_TOOL_DEFS,
@@ -230,7 +232,7 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
     // Phase 4: hasActiveExecution is permanently false — no execution state.
     () => false,
     hasReferenceHint,
-    hasActiveSkillContext,
+    hasActiveSkillTaskProjection,
   )
   // B2: pass referenceHintSkillId through so internal actions whitelisted
   // via host_requirements.expose_when_hint_armed surface for the LLM.
@@ -313,15 +315,17 @@ function asString(value: unknown): string {
  * orchestrator. Returns null when no hint is armed — handlers refuse with a
  * structured `primitive_no_skill_context` errorKind.
  */
-function resolvePrimitiveSkillId(sessionId?: string): string | null {
-  if (!sessionId) return null
-  const activeContext = resolveActiveSkillContext({ sessionId })
-  if (activeContext?.skillId) return activeContext.skillId
-  const hint = getLastReferenceSkill(sessionId)
-  if (hint && hint.id) return hint.id
-  const activeRun = getLatestActiveSkillTaskRun(sessionId)
-  if (activeRun?.skillId) return activeRun.skillId
-  return null
+function resolvePrimitiveSkillId(sessionId?: string, runtimeContext?: SkillToolRuntimeContext): string | null {
+  if (!sessionId && !runtimeContext?.frameSkillId) return null
+  const activeContext = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+  const hint = sessionId ? getLastReferenceSkill(sessionId) : null
+  const activeRun = sessionId ? getLatestActiveSkillTaskRun(sessionId) : null
+  return choosePrimitiveSkillId({
+    frameSkillId: runtimeContext?.frameSkillId,
+    activeContextSkillId: activeContext?.skillId ?? null,
+    referenceHintSkillId: hint?.id ?? null,
+    latestTaskRunSkillId: activeRun?.skillId ?? null,
+  })
 }
 
 function findSkillName(manager: ReturnType<typeof getSkillsRuntimeManager>, skillId?: string | null): string | undefined {
@@ -751,7 +755,7 @@ export async function executeSkillTool(
   }
 
   if (tool.kind === 'primitive') {
-    const skillId = resolvePrimitiveSkillId(sessionId)
+    const skillId = resolvePrimitiveSkillId(sessionId, runtimeContext)
     const skillName = findSkillNameSafely(skillId)
     if (tool.name === 'skill_ask_user') {
       const started = recordPrimitiveOutcome({

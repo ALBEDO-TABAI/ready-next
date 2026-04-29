@@ -21,6 +21,22 @@ describe('buildSkillDomainInstruction (D2 dynamic addendum)', () => {
     assert.equal(buildSkillDomainInstruction(tools, tools), BASE_INSTRUCTION)
   })
 
+  it('appends TurnFrame steering reminder when a typed skill action is preferred', () => {
+    const result = buildSkillDomainInstruction(
+      ['skill_video_expert_pipeline', 'skill_run_shell', 'memory_search'],
+      ['skill_video_expert_pipeline', 'skill_run_shell', 'memory_search'],
+      {
+        preferredToolNames: ['skill_video_expert_pipeline', 'skill_run_shell'],
+        systemReminder: '系统补充：当前 TurnFrame 已确认应优先调用 typed skill action skill_video_expert_pipeline。',
+      },
+    )
+
+    assert.ok(result.startsWith(BASE_INSTRUCTION), 'keeps base instruction')
+    assert.ok(result.includes('skill_video_expert_pipeline'), 'names preferred typed action')
+    assert.ok(result.includes('typed skill action'), 'keeps steering language')
+    assert.ok(result.includes('skill_run_shell 只用于必要诊断'), 'discourages shell inspection loops')
+  })
+
   it('appends addendum listing dropped tool names when narrowing dropped some', () => {
     const input = ['skill_run_shell', 'file_search', 'file_locate', 'document_open_tab']
     const output = ['skill_run_shell']

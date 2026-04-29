@@ -125,6 +125,21 @@ test('waste scorer flags repeated tools, unchanged observations, and recoverable
   assert.ok(waste.reasons.includes('unchanged_run_state_or_artifact'))
 })
 
+test('waste scorer penalizes repeated shell inspection when a typed resume action is preferred', () => {
+  const waste = scoreSkillWaste({
+    preferredTypedSkillToolName: 'skill_video_expert_pipeline',
+    recentToolCalls: [
+      { name: 'skill_run_shell', argsHash: 'cat-run-state' },
+    ],
+    toolCalls: [
+      { name: 'skill_run_shell', input: { command: 'cat /tmp/vea/run_state.json' } },
+    ],
+  })
+
+  assert.ok(waste.score >= 2)
+  assert.ok(waste.reasons.includes('shell_loop_while_typed_action_preferred'))
+})
+
 test('waste scorer only treats the third same recoverable error as repeated', () => {
   const first = scoreSkillWaste({
     executedTools: [{

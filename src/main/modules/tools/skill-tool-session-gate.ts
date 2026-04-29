@@ -50,6 +50,19 @@ export function shouldExposeSkillPrimitive(
   return false
 }
 
+export function choosePrimitiveSkillId(params: {
+  frameSkillId?: string | null
+  activeContextSkillId?: string | null
+  referenceHintSkillId?: string | null
+  latestTaskRunSkillId?: string | null
+}): string | null {
+  return params.frameSkillId
+    || params.activeContextSkillId
+    || params.referenceHintSkillId
+    || params.latestTaskRunSkillId
+    || null
+}
+
 export function filterSkillPrimitivesBySession<T extends { name: string }>(
   defs: readonly T[],
   sessionId: string | undefined,

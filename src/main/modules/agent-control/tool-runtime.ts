@@ -49,6 +49,7 @@ export interface ToolRuntimeContext {
   parentTaskId?: string
   parentStepId?: string
   taskProjectionId?: string
+  frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
 }

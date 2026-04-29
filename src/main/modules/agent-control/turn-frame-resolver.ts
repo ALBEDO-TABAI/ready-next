@@ -7,7 +7,8 @@ import {
   resolveActiveSkillContextFromInputs,
   type ActiveSkillContext,
 } from './active-skill-context'
-import type { TurnFrame, TurnFrameLiveness, TurnUserIntent } from './turn-frame'
+import { applySteeringToTurnFrame } from './turn-frame-steering'
+import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from './turn-frame'
 
 export interface ResolveTurnFrameInputs {
   sessionId?: string | null
@@ -131,16 +132,25 @@ function progressFromSnapshot(snapshot?: SkillTaskSupervisorSnapshot | null): Tu
   }
 }
 
+function inferMode(context: ActiveSkillContext | null, userIntent: TurnUserIntent): TurnFrameMode {
+  if (!context) return 'general'
+  if (userIntent === 'repair_config') return 'skill_repair'
+  if (userIntent === 'inspect') return 'skill_inspect'
+  if (userIntent === 'continue') return 'skill_resume'
+  if (userIntent === 'start' || context.source === 'explicit') return 'skill_start'
+  return 'general'
+}
+
 export function applySupervisorRuntimeToTurnFrame(
   frame: TurnFrame,
   snapshot?: SkillTaskSupervisorSnapshot | null,
 ): TurnFrame {
   if (!snapshot || !frame.skill || snapshot.skillId !== frame.skill.skillId) return frame
-  return {
+  return applySteeringToTurnFrame({
     ...frame,
     liveness: livenessFromSupervisorSnapshot(snapshot) || frame.liveness,
     progress: progressFromSnapshot(snapshot),
-  }
+  })
 }
 
 export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
@@ -151,12 +161,14 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
       ? inputs.supervisorSnapshot
       : null
 
-  return {
+  const userIntent = inputs.userIntent || 'unknown'
+  const frame: TurnFrame = {
     ids: {
       sessionId: inputs.sessionId || null,
       requestId: inputs.requestId || null,
     },
-    userIntent: inputs.userIntent || 'unknown',
+    mode: inferMode(context, userIntent),
+    userIntent,
     skill: context
       ? {
         skillId: context.skillId,
@@ -191,4 +203,5 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
     },
     terminalReason: null,
   }
+  return applySteeringToTurnFrame(frame)
 }

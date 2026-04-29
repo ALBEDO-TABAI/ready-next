@@ -1,4 +1,5 @@
 import type { RequestEnvelope } from './request-envelope'
+import type { TurnFrame } from './turn-frame'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
 import { logAgentMetric } from './metrics'
@@ -102,6 +103,7 @@ export interface DomainAdapterPrepareParams<TSession extends TurnEngineSession =
    * Computed by skill-detection-inputs.isRetryOnlyTurn.
    */
   isRetryOnlyTurn?: boolean
+  turnFrameSteering?: TurnFrame['steering'] | null
 }
 
 export interface DomainAdapterPrepareResult {

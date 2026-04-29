@@ -22,6 +22,7 @@ export interface SkillWasteScorerInput {
   recoveryHistory?: RecoveryRecord[]
   currentFingerprint?: string | null
   previousFingerprint?: string | null
+  preferredTypedSkillToolName?: string | null
 }
 
 function hashInput(input: unknown): string {
@@ -76,6 +77,14 @@ export function scoreSkillWaste(input: SkillWasteScorerInput): SkillWasteScore {
       score += 2
       reasons.push('repeated_tool_call')
     }
+  }
+  if (
+    input.preferredTypedSkillToolName
+    && last?.name === 'skill_run_shell'
+    && recent.filter((item) => item.name === 'skill_run_shell').length >= 2
+  ) {
+    score += 2
+    reasons.push('shell_loop_while_typed_action_preferred')
   }
 
   const repeatedObservation = Boolean(

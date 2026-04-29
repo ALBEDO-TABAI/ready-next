@@ -651,6 +651,7 @@ export class TurnEngine {
       parentTaskId: request.taskId,
       parentStepId: request.parentStepId,
       taskProjectionId: request.taskId,
+      frameSkillId: turnFrame?.skill?.skillId || null,
       registerRunCleanup: (cleanup) => {
         host.registerRunCleanup?.(cleanup)
       },
@@ -956,25 +957,17 @@ export class TurnEngine {
             : null
         referenceSkillHintVia = 'explicit'
       }
-      const preferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
+      const legacyPreferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
           skillContextInjectionText,
           request.sessionId,
         )
         : null
-      const isLongSkillResumeTurn =
+      let preferredSkillToolNames = legacyPreferredSkillToolNames
+      let isLongSkillResumeTurn =
         isRetryOnlyTurnDetected
         && referenceSkillHintArmed
         && hasLongTypedSkillAction(preferredSkillToolNames)
-      if (referenceSkillHintArmed) {
-        logAgentMetric('skill_reference_hint_armed', {
-          via: referenceSkillHintVia || 'explicit',
-          sessionId: request.sessionId,
-          skillId: referenceSkillForMetrics?.id || null,
-          skillName: referenceSkillForMetrics?.name || null,
-          retryOnly: isRetryOnlyTurnDetected,
-        })
-      }
       let activeSkillContextForTurn: ActiveSkillContext | null = null
       let currentReferenceHintForContext: { id: string; name: string; at?: number } | null = null
       try {
@@ -1015,6 +1008,22 @@ export class TurnEngine {
           id: turnFrame.skill.skillId,
           name: turnFrame.skill.skillName || turnFrame.skill.skillId,
         }
+      }
+      if (turnFrame.steering.preferredToolNames.length > 0) {
+        preferredSkillToolNames = turnFrame.steering.preferredToolNames
+      }
+      isLongSkillResumeTurn = (
+        turnFrame.mode === 'skill_resume'
+        && hasLongTypedSkillAction(preferredSkillToolNames)
+      ) || isLongSkillResumeTurn
+      if (referenceSkillHintArmed) {
+        logAgentMetric('skill_reference_hint_armed', {
+          via: referenceSkillHintVia || 'explicit',
+          sessionId: request.sessionId,
+          skillId: referenceSkillForMetrics?.id || null,
+          skillName: referenceSkillForMetrics?.name || null,
+          retryOnly: isRetryOnlyTurnDetected,
+        })
       }
       host.log(`[active_skill_context] ${JSON.stringify(summarizeActiveSkillContext(activeSkillContextForTurn))}`)
       host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
@@ -1193,6 +1202,7 @@ export class TurnEngine {
           hasTools,
           toolPolicy,
           allowedToolNames: preparedRunCapabilities.allowedToolNames,
+          turnFrameSteering: turnFrame?.steering || null,
         })
         : null
       browserDecision = {
@@ -1315,6 +1325,7 @@ export class TurnEngine {
               toolPolicy,
               allowedToolNames: reconciledRunCapabilities.allowedToolNames,
               isRetryOnlyTurn: isRetryOnlyTurnDetected,
+              turnFrameSteering: turnFrame?.steering || null,
             })
             : null
       const shouldHideBrowserProcessText =
@@ -1402,6 +1413,15 @@ export class TurnEngine {
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      logAgentMetric('turn_frame_tool_policy', {
+        sessionId: request.sessionId,
+        mode: turnFrame?.mode || null,
+        skillId: turnFrame?.skill?.skillId || referenceSkillForMetrics?.id || null,
+        liveness: turnFrame?.liveness || null,
+        preferredToolNames: preferredSkillToolNames || [],
+        allowedToolNames: routedAllowedToolNames,
+        terminalReason: turnFrame?.terminalReason || null,
+      })
       appendSessionMessages(session, selectedDomainPrepareResult?.sessionMessages)
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
         state.interactionState = 'resuming'
@@ -2344,6 +2364,7 @@ export class TurnEngine {
               recoveryHistory: executedToolBatch.recoveryHistory,
               previousFingerprint: skillBudgetLeaseState.lastFingerprint,
               currentFingerprint,
+              preferredTypedSkillToolName: preferredSkillToolNames?.find((name) => isLongTypedSkillActionName(name)) || null,
             })
             previousLeaseSnapshot = currentSnapshot || previousLeaseSnapshot
             lastLeaseSnapshot = currentSnapshot || lastLeaseSnapshot
