@@ -1,3 +1,5 @@
+import type { TurnTerminalReason } from './turn-frame'
+
 export type ChannelAdapterType =
   | 'local-debug'
   | 'generic-webhook'
@@ -357,6 +359,7 @@ export interface ScopeRunSummary {
   taskProjectionId?: string | null
   blockedReason?: string | null
   error?: string | null
+  terminalReason?: TurnTerminalReason | null
   updatedAt: string
 }
 
@@ -379,6 +382,7 @@ export interface ScopeRunEventPayload {
     | 'done'
     | 'error'
     | 'cancelled'
+  terminalReason?: TurnTerminalReason | null
   latestText?: string
   module?:
     | 'browser'

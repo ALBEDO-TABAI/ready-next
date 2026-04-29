@@ -339,6 +339,7 @@ test('RunCoordinator maps terminalReason checkpoint_budget to checkpoint outcome
   const finalEvent = events[events.length - 1]
   assert.equal(result.success, true)
   assert.equal(finalEvent?.phase, 'checkpoint')
+  assert.equal(finalEvent?.terminalReason, 'checkpoint_budget')
   assert.equal(outcomes[0]?.success, false)
   assert.equal(outcomes[0]?.lifecyclePhase, 'checkpoint')
 })

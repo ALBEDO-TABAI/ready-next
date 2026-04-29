@@ -281,6 +281,18 @@ export interface ScopeRunStepMetrics {
   lastToolAt: string | null
 }
 
+export type ScopeRunTerminalReason =
+  | 'done'
+  | 'checkpoint_budget'
+  | 'checkpoint_background'
+  | 'checkpoint_user_input'
+  | 'blocked_config'
+  | 'blocked_tool_error'
+  | 'failed_skill'
+  | 'cancelled_user'
+  | 'cancelled_runtime'
+  | 'infra_error'
+
 /**
  * Phase 3 — soft-failure capsule payload carried on ScopeRunState.softError.
  *
@@ -312,6 +324,7 @@ export interface ScopeRunState {
     | 'done'
     | 'error'
     | 'cancelled'
+  terminalReason?: ScopeRunTerminalReason | null
   toolTrace: ToolTraceEvent[]
   startedAt: string | null
   updatedAt: string | null

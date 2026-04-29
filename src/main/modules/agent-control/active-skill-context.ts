@@ -321,25 +321,26 @@ export function resolveActiveSkillContextFromInputs(
   const supervisor = contextFromSupervisor(inputs.supervisorSnapshot)
   if (supervisor) return supervisor
 
-  const remembered = rememberedContext(sessionId)
-  if (remembered) return remembered
-
   const projection = newestContext((inputs.projections || []).map(contextFromProjection))
   if (projection) return projection
 
   const taskRun = newestContext((inputs.taskRuns || []).map(contextFromTaskRun))
   if (taskRun) return taskRun
 
+  const remembered = rememberedContext(sessionId)
+  if (remembered) return remembered
+
   return contextFromReferenceHint(inputs.referenceHint ?? null)
 }
 
 export function resolveActiveSkillContext(inputs: ResolveActiveSkillContextInputs = {}): ActiveSkillContext | null {
   const sessionId = sessionKey(inputs.sessionId)
-  const explicitOrSupervisor = resolveActiveSkillContextFromInputs({
+  const explicitOrProvidedContext = resolveActiveSkillContextFromInputs({
     ...inputs,
+    sessionId: null,
     referenceHint: null,
   })
-  if (explicitOrSupervisor) return explicitOrSupervisor
+  if (explicitOrProvidedContext) return explicitOrProvidedContext
 
   const inspectedSupervisor = inputs.inspectSupervisor === false || !sessionId
     ? null
@@ -357,6 +358,9 @@ export function resolveActiveSkillContext(inputs: ResolveActiveSkillContextInput
     ...readTaskRunContexts(sessionId),
   ])
   if (taskRun) return taskRun
+
+  const remembered = rememberedContext(sessionId)
+  if (remembered) return remembered
 
   return contextFromReferenceHint(inputs.referenceHint ?? (sessionId ? getLastReferenceSkill(sessionId) : null))
 }

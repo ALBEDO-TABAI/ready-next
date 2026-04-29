@@ -108,7 +108,7 @@ import {
   summarizeActiveSkillContext,
   type ActiveSkillContext,
 } from './active-skill-context'
-import { resolveTurnFrame } from './turn-frame-resolver'
+import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
 import { summarizeTurnFrame, type TurnFrame, type TurnTerminalReason } from './turn-frame'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import {
@@ -1759,16 +1759,9 @@ export class TurnEngine {
               }
             }
             host.log(`[active_skill_context] ${JSON.stringify(summarizeActiveSkillContext(observedActiveSkillContext))}`)
-            turnFrame = resolveTurnFrame({
-              sessionId: request.sessionId,
-              requestId: request.runId,
-              userIntent: turnFrame?.userIntent || 'unknown',
-              supervisorSnapshot: observedLeaseSnapshot,
-              activeContext: observedActiveSkillContext,
-              referenceHint: currentReferenceHintForContext
-                ? { ...currentReferenceHintForContext, at: Date.now() }
-                : null,
-            })
+            if (turnFrame) {
+              turnFrame = applySupervisorRuntimeToTurnFrame(turnFrame, observedLeaseSnapshot)
+            }
             host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
             logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
           }

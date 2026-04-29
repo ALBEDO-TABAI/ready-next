@@ -151,3 +151,27 @@ test('resolveTurnFrame uses reference hint only when no recoverable task identit
   assert.equal(frame.skill?.source, 'reference_hint')
   assert.equal(frame.skill?.runStatePath, null)
 })
+
+test('resolveTurnFrame preserves explicit task artifact identity over supervisor context', () => {
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-test',
+    requestId: 'req-4',
+    userIntent: 'continue',
+    explicitSkillId: 'video-expert-analyzer',
+    explicitSkillName: 'Video Expert Analyzer',
+    explicitOutputDir: '/tmp/explicit-vea',
+    explicitRunStatePath: '/tmp/explicit-vea/run_state.json',
+    explicitTaskRunId: 'str-explicit',
+    explicitDetachedTaskId: 'dst-explicit',
+    supervisorSnapshot: snapshot('lets-go-rss'),
+    projections: [projection('novel-writer-system')],
+    referenceHint: { id: 'novel-writer-system', name: 'novel_writer_system' },
+  } as any)
+
+  assert.equal(frame.skill?.skillId, 'video-expert-analyzer')
+  assert.equal(frame.skill?.source, 'explicit')
+  assert.equal(frame.skill?.outputDir, '/tmp/explicit-vea')
+  assert.equal(frame.skill?.runStatePath, '/tmp/explicit-vea/run_state.json')
+  assert.equal(frame.skill?.taskRunId, 'str-explicit')
+  assert.equal(frame.skill?.detachedTaskId, 'dst-explicit')
+})

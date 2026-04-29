@@ -10,6 +10,7 @@ import type {
   ScopeRunResumableAction,
   ScopeRunState,
   ScopeRunTaskContinuation,
+  ScopeRunTerminalReason,
   ScopeRunTaskStep,
   ScopeRunTaskStepStatus,
   ScopeRunWaitingFor,
@@ -54,6 +55,7 @@ export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): b
 
 export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
   if (!run) return false
+  if (run.terminalReason) return false
   if (
     run.module === 'skill' &&
     run.executionKind === 'job' &&
@@ -63,6 +65,25 @@ export function isStreamingScopeRunState(run: ScopeRunState | null | undefined):
     return false
   }
   return isActiveScopePhase(run.phase)
+}
+
+function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null {
+  const normalized = String(value || '').trim()
+  if (
+    normalized === 'done' ||
+    normalized === 'checkpoint_budget' ||
+    normalized === 'checkpoint_background' ||
+    normalized === 'checkpoint_user_input' ||
+    normalized === 'blocked_config' ||
+    normalized === 'blocked_tool_error' ||
+    normalized === 'failed_skill' ||
+    normalized === 'cancelled_user' ||
+    normalized === 'cancelled_runtime' ||
+    normalized === 'infra_error'
+  ) {
+    return normalized
+  }
+  return null
 }
 
 export function phaseToToolTraceStatus(
@@ -515,6 +536,7 @@ export function createEmptyScopeRunState(params: {
     agent: params.agent,
     requestId: params.requestId || null,
     phase: params.phase || 'idle',
+    terminalReason: null,
     toolTrace: [],
     startedAt: null,
     updatedAt: null,
@@ -592,6 +614,7 @@ export function deriveScopeRunStatePatch(
     errorKind?: string
     recoverable?: boolean
     toolName?: string
+    terminalReason?: ScopeRunTerminalReason | string | null
     blockedReason?: string | null
     timestamp: string
   },
@@ -635,8 +658,12 @@ export function deriveScopeRunStatePatch(
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
+  const terminalReason = 'terminalReason' in event
+    ? normalizeTerminalReason(event.terminalReason)
+    : null
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
+    terminalReason: terminalReason || (isActiveScopePhase(event.phase) ? null : previous?.terminalReason || null),
     latestText: event.latestText ?? previous?.latestText ?? null,
     module: eventModule || previous?.module || null,
     intent: typeof event.intent === 'string' ? event.intent : previous?.intent || null,
@@ -750,6 +777,9 @@ export function deriveScopeRunStatePatch(
       (patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason
     )
     if (!hasDoneBlocker) patch.blockedReason = null
+    patch.checkpointExpiresAt = null
+  }
+  if (patch.terminalReason) {
     patch.checkpointExpiresAt = null
   }
 

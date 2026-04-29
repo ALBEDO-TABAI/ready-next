@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  clearActiveSkillContext,
+  rememberActiveSkillContext,
   resolveActiveSkillContextFromInputs,
   type ActiveSkillContext,
 } from '../main/modules/agent-control/active-skill-context'
@@ -124,4 +126,37 @@ test('active skill context prefers recoverable supervisor snapshot over stale re
   assert.equal(context.taskRunId, 'str-vea')
   assert.equal(context.detachedTaskId, 'dst-vea')
   assert.equal(context.runStatePath, '/tmp/video-output/run_state.json')
+})
+
+test('active skill context treats remembered context as fallback behind recoverable projection', () => {
+  clearActiveSkillContext('conv-vea')
+  rememberActiveSkillContext('conv-vea', {
+    skillId: 'novel-writer-system',
+    skillName: 'novel-writer-system',
+    taskRunId: null,
+    detachedTaskId: null,
+    runStatePath: null,
+    outputDir: null,
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    action: null,
+    source: 'reference_hint',
+    confidence: 20,
+    status: null,
+    staleBlockerReason: null,
+    observedAt: new Date().toISOString(),
+  })
+
+  try {
+    const context = resolveActiveSkillContextFromInputs({
+      sessionId: 'conv-vea',
+      projections: [projection({})],
+      referenceHint: { id: 'novel-writer-system', name: 'novel_writer_system' },
+    })
+
+    assert.equal(context?.source, 'projection')
+    assert.equal(context?.skillId, 'video-expert-analyzer')
+  } finally {
+    clearActiveSkillContext('conv-vea')
+  }
 })

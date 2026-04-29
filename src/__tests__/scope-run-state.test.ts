@@ -133,6 +133,39 @@ describe('scope run state helpers', () => {
     }), true)
   })
 
+  it('does not treat terminal checkpoints as chat streaming', () => {
+    const run = {
+      scopeId: 'scope-1',
+      agent: 'assistant',
+      requestId: 'req-checkpoint',
+      phase: 'checkpoint',
+      terminalReason: 'checkpoint_budget',
+      module: 'skill',
+      waitingFor: 'background',
+      toolTrace: [],
+      startedAt: '2026-04-29T00:00:00.000Z',
+      updatedAt: '2026-04-29T00:00:01.000Z',
+    }
+    assert.strictEqual(isStreamingScopeRunState(run as any), false)
+  })
+
+  it('preserves terminal reason from structured scope events', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'checkpoint',
+        module: 'skill',
+        terminalReason: 'checkpoint_budget',
+        waitingFor: 'background',
+        timestamp: '2026-04-29T00:00:00.000Z',
+      } as any,
+      null,
+    )
+
+    assert.strictEqual((patch as any).terminalReason, 'checkpoint_budget')
+    assert.strictEqual(patch.phase, 'checkpoint')
+    assert.strictEqual(patch.waitingFor, 'background')
+  })
+
   it('reads document pipeline diagnostics from structured scope run events', () => {
     const patch = deriveScopeRunStatePatch(
       {

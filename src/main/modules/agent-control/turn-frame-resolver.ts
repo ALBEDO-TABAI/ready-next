@@ -15,6 +15,13 @@ export interface ResolveTurnFrameInputs {
   userIntent?: TurnUserIntent
   explicitSkillId?: string | null
   explicitSkillName?: string | null
+  explicitTaskRunId?: string | null
+  explicitDetachedTaskId?: string | null
+  explicitAction?: string | null
+  explicitOutputDir?: string | null
+  explicitRunStatePath?: string | null
+  explicitSceneScoresPath?: string | null
+  explicitDeliveryReportPath?: string | null
   supervisorSnapshot?: SkillTaskSupervisorSnapshot | null
   projections?: TaskProjectionRecord[]
   taskRuns?: SkillTaskRunRecord[]
@@ -29,12 +36,34 @@ function contextWithoutRemembered(inputs: Parameters<typeof resolveActiveSkillCo
   })
 }
 
+function nonEmpty(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function contextFromExplicitInputs(inputs: ResolveTurnFrameInputs): ActiveSkillContext | null {
+  const skillId = nonEmpty(inputs.explicitSkillId)
+  if (!skillId) return null
+  return {
+    skillId,
+    skillName: nonEmpty(inputs.explicitSkillName) || skillId,
+    taskRunId: nonEmpty(inputs.explicitTaskRunId),
+    detachedTaskId: nonEmpty(inputs.explicitDetachedTaskId),
+    runStatePath: nonEmpty(inputs.explicitRunStatePath),
+    outputDir: nonEmpty(inputs.explicitOutputDir),
+    sceneScoresPath: nonEmpty(inputs.explicitSceneScoresPath),
+    deliveryReportPath: nonEmpty(inputs.explicitDeliveryReportPath),
+    action: nonEmpty(inputs.explicitAction),
+    source: 'explicit',
+    confidence: 100,
+    status: null,
+    staleBlockerReason: null,
+    observedAt: new Date().toISOString(),
+  }
+}
+
 function chooseContext(inputs: ResolveTurnFrameInputs): ActiveSkillContext | null {
   if (inputs.explicitSkillId) {
-    return contextWithoutRemembered({
-      explicitSkillId: inputs.explicitSkillId,
-      explicitSkillName: inputs.explicitSkillName || inputs.explicitSkillId,
-    })
+    return contextFromExplicitInputs(inputs)
   }
 
   const supervisor = contextWithoutRemembered({
@@ -81,6 +110,16 @@ function inferLiveness(context: ActiveSkillContext | null, snapshot?: SkillTaskS
   return 'unknown'
 }
 
+function livenessFromSupervisorSnapshot(snapshot?: SkillTaskSupervisorSnapshot | null): TurnFrameLiveness | null {
+  if (!snapshot) return null
+  if (snapshot.status === 'done') return 'done'
+  if (snapshot.status === 'failed') return 'failed'
+  if (snapshot.hasLiveWork) return 'running_process'
+  if (snapshot.hasRecentProgress) return 'recent_progress'
+  if (snapshot.status === 'blocked') return 'blocked'
+  return null
+}
+
 function progressFromSnapshot(snapshot?: SkillTaskSupervisorSnapshot | null): TurnFrame['progress'] {
   const progress = snapshot?.progress || null
   return {
@@ -89,6 +128,18 @@ function progressFromSnapshot(snapshot?: SkillTaskSupervisorSnapshot | null): Tu
     completedUnits: typeof progress?.completedScenes === 'number' ? progress.completedScenes : null,
     coverageRatio: typeof progress?.coverageRatio === 'number' ? progress.coverageRatio : null,
     fingerprint: snapshot?.progressFingerprint || null,
+  }
+}
+
+export function applySupervisorRuntimeToTurnFrame(
+  frame: TurnFrame,
+  snapshot?: SkillTaskSupervisorSnapshot | null,
+): TurnFrame {
+  if (!snapshot || !frame.skill || snapshot.skillId !== frame.skill.skillId) return frame
+  return {
+    ...frame,
+    liveness: livenessFromSupervisorSnapshot(snapshot) || frame.liveness,
+    progress: progressFromSnapshot(snapshot),
   }
 }
 

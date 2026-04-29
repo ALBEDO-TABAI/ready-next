@@ -44,6 +44,7 @@ function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null,
       updatedAt: runState.updatedAt || new Date().toISOString(),
       responseMessageId: runState.responseMessageId || null,
       phase: runState.phase,
+      terminalReason: runState.terminalReason || null,
       toolTrace: (runState.toolTrace || []).map((event) => ({
         id: event.id,
         kind: event.kind,
@@ -885,6 +886,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             requestId: event.runId || previous?.requestId || null,
             taskId: event.taskId || previous?.taskId || patch.taskContinuation?.taskId || null,
             phase: patch.phase || event.phase,
+            terminalReason: patch.terminalReason ?? null,
             toolTrace: nextTrace,
             startedAt: previous?.startedAt || event.timestamp,
             updatedAt: event.timestamp,
@@ -934,11 +936,22 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           if (event.type === 'started' && !detachedJobEvent) {
             store.setState({ streamingRequestId: event.runId || currentState.streamingRequestId })
           }
-          if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
+          const terminalRunEvent = Boolean(
+            event.terminalReason ||
+            event.phase === 'done' ||
+            event.phase === 'error' ||
+            event.phase === 'cancelled',
+          )
+          if (terminalRunEvent) {
             store.setState({ streamingRequestId: null })
           }
         }
-        if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
+        if (
+          event.terminalReason ||
+          event.phase === 'done' ||
+          event.phase === 'error' ||
+          event.phase === 'cancelled'
+        ) {
           void persistAssistantMessageForRun(event.scopeId, store.getState().scopeRunStates[event.scopeId] || null)
         }
       })
