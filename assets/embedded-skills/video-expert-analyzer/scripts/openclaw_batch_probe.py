@@ -50,7 +50,6 @@ DEFAULT_MODELS_JSON = _default_models_json()
 DEFAULT_OPENCLAW_ROOT = _default_openclaw_root()
 DEFAULT_PREFERRED_MODEL = "kcode/K2.6-code-preview"
 DEFAULT_FALLBACK_MODELS = (
-    "zai/GLM-5V-Turbo",
     "novacode-openai/gpt-5.4",
 )
 DEFAULT_COUNTS = (1, 5, 10)
@@ -136,10 +135,15 @@ def build_attempt_order(
     attempts: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
-    for model_ref in (preferred_model, *fallback_models):
+    for index, model_ref in enumerate((preferred_model, *fallback_models)):
         if not model_ref or model_ref in seen:
             continue
-        provider_name, provider_config, model_config = resolve_model_entry(providers, model_ref)
+        try:
+            provider_name, provider_config, model_config = resolve_model_entry(providers, model_ref)
+        except ValueError:
+            if index == 0:
+                raise
+            continue
         attempts.append(
             {
                 "model_ref": model_ref,

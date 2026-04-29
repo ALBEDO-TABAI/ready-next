@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session-continuity'
+import { resolveActiveSkillContext } from '../agent-control/active-skill-context'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
@@ -10,7 +11,6 @@ import {
 } from '../agent-control/tool-result-types'
 import {
   getLatestActiveSkillTaskRun,
-  hasActiveSkillTaskRun,
   readSkillTaskProjection,
   recordSkillTaskEvent,
   type SkillTaskEventStatus,
@@ -27,6 +27,7 @@ import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
   executeAskUser,
   executeInspectRunState,
+  executePatchConfig,
   executeReadArtifact,
   executeRunShell,
   executeWriteArtifact,
@@ -112,11 +113,13 @@ export function shouldExposeSkillAction(args: {
   actionName: string
   skillId: string
   referenceHintSkillId: string | null
+  activeSkillId?: string | null
   exposeWhenHintArmed: string[]
 }): boolean {
   if (args.actionVisibility !== 'internal') return true
-  if (args.referenceHintSkillId === null) return false
-  if (args.referenceHintSkillId !== args.skillId) return false
+  const contextSkillId = args.referenceHintSkillId || args.activeSkillId || null
+  if (contextSkillId === null) return false
+  if (contextSkillId !== args.skillId) return false
   return args.exposeWhenHintArmed.includes(args.actionName)
 }
 
@@ -136,10 +139,12 @@ export function shouldExposeSkillAction(args: {
  */
 function getSkillActionToolDefs(opts?: {
   referenceHintSkillId?: string | null
+  activeSkillId?: string | null
   includeInternal?: boolean
 }): SkillToolDef[] {
   const manager = getSkillsRuntimeManager()
   const hintSkillId = opts?.referenceHintSkillId ?? null
+  const activeSkillId = opts?.activeSkillId ?? null
   return manager.listSkills().flatMap((skill) => {
     const exposeWhenArmed = skill.hostRequirements?.expose_when_hint_armed ?? []
     return skill.actions
@@ -148,6 +153,7 @@ function getSkillActionToolDefs(opts?: {
         actionName: action.name,
         skillId: skill.id,
         referenceHintSkillId: hintSkillId,
+        activeSkillId,
         exposeWhenHintArmed: exposeWhenArmed,
       }))
       .map((action) => ({
@@ -214,9 +220,9 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
  */
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null
-  // B-plan: only running/blocked skill_task_runs count as active. Terminal
-  // projection state must not keep primitives exposed forever.
-  const hasActiveSkillTaskProjection = (sid: string) => hasActiveSkillTaskRun(sid)
+  const activeSkillContext = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+  const hasActiveSkillContext = (sid: string) =>
+    Boolean(activeSkillContext && sid === sessionId)
 
   const primitiveTools = filterSkillPrimitivesBySession(
     PRIMITIVE_TOOL_DEFS,
@@ -224,12 +230,15 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
     // Phase 4: hasActiveExecution is permanently false — no execution state.
     () => false,
     hasReferenceHint,
-    hasActiveSkillTaskProjection,
+    hasActiveSkillContext,
   )
   // B2: pass referenceHintSkillId through so internal actions whitelisted
   // via host_requirements.expose_when_hint_armed surface for the LLM.
   const referenceHintSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
-  return [...getSkillActionToolDefs({ referenceHintSkillId }), ...primitiveTools]
+  return [...getSkillActionToolDefs({
+    referenceHintSkillId,
+    activeSkillId: activeSkillContext?.skillId ?? null,
+  }), ...primitiveTools]
 }
 
 export function getSkillToolDefsForRegistry(sessionId?: string): SkillToolDef[] {
@@ -306,6 +315,8 @@ function asString(value: unknown): string {
  */
 function resolvePrimitiveSkillId(sessionId?: string): string | null {
   if (!sessionId) return null
+  const activeContext = resolveActiveSkillContext({ sessionId })
+  if (activeContext?.skillId) return activeContext.skillId
   const hint = getLastReferenceSkill(sessionId)
   if (hint && hint.id) return hint.id
   const activeRun = getLatestActiveSkillTaskRun(sessionId)
@@ -673,18 +684,29 @@ export function getSkillOpenAITools(sessionId?: string): Array<Record<string, un
 // Handler lookup always sees the full skill tool set (action + primitives).
 // Gating is a LISTING concern, not an execution concern.
 export function findSkillToolByName(toolName: string): SkillToolDef | null {
-  return findSkillToolByNameForExecution(toolName)
+  return PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName)
+    || findSkillToolByNameForExecution(toolName)
 }
 
 export function findSkillToolByNameForExecution(toolName: string): SkillToolDef | null {
-  const actionTool = getSkillActionToolDefs({ includeInternal: true })
-    .find((item) => item.name === toolName)
+  let actionTool: SkillToolDef | null = null
+  try {
+    actionTool = getSkillActionToolDefs({ includeInternal: true })
+      .find((item) => item.name === toolName) || null
+  } catch {
+    actionTool = null
+  }
   if (actionTool) return actionTool
   return PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName) || null
 }
 
 export function findSkillToolBySkillAction(skillId: string, actionName?: string): SkillToolDef | null {
-  const defs = getSkillActionToolDefs({ includeInternal: true }).filter((item) => item.skillId === skillId)
+  let defs: SkillToolDef[] = []
+  try {
+    defs = getSkillActionToolDefs({ includeInternal: true }).filter((item) => item.skillId === skillId)
+  } catch {
+    defs = []
+  }
   if (!actionName) return defs[0] || null
   return defs.find((item) => item.action === actionName) || defs[0] || null
 }
@@ -707,11 +729,30 @@ export async function executeSkillTool(
     return `Unknown skill tool: ${toolName}`
   }
 
-  const manager = getSkillsRuntimeManager()
+  let manager: ReturnType<typeof getSkillsRuntimeManager> | null = null
+  const getManager = (): ReturnType<typeof getSkillsRuntimeManager> => {
+    if (!manager) manager = getSkillsRuntimeManager()
+    return manager
+  }
+  const listSkillsSafely = (): SkillState[] => {
+    try {
+      return getManager().listSkills()
+    } catch {
+      return []
+    }
+  }
+  const findSkillNameSafely = (skillIdForLookup?: string | null): string | undefined => {
+    if (!skillIdForLookup) return undefined
+    try {
+      return findSkillName(getManager(), skillIdForLookup)
+    } catch {
+      return skillIdForLookup
+    }
+  }
 
   if (tool.kind === 'primitive') {
     const skillId = resolvePrimitiveSkillId(sessionId)
-    const skillName = findSkillName(manager, skillId)
+    const skillName = findSkillNameSafely(skillId)
     if (tool.name === 'skill_ask_user') {
       const started = recordPrimitiveOutcome({
         scopeId: runtimeContext?.scopeId,
@@ -825,6 +866,83 @@ export async function executeSkillTool(
         },
       )
     }
+    if (tool.name === 'skill_patch_config') {
+      const maskedParams = {
+        target: asString(args.target),
+        operations: Array.isArray(args.operations)
+          ? args.operations.map((operation) => {
+            const rec = operation && typeof operation === 'object' ? operation as Record<string, unknown> : {}
+            return {
+              op: rec.op,
+              path: rec.path,
+              value: rec.op === 'set' ? '[masked]' : undefined,
+            }
+          })
+          : [],
+      }
+      const started = recordPrimitiveOutcome({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+        message: `修复技能配置：${maskedParams.target}`,
+        params: maskedParams,
+      })
+      try {
+        const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
+        const activeSkillContext = resolveActiveSkillContext({ sessionId })
+        const output = await executePatchConfig({
+          target: maskedParams.target,
+          operations: Array.isArray(args.operations)
+            ? args.operations as Array<{ op: 'set' | 'delete'; path: string; value?: unknown }>
+            : [],
+        }, {
+          skillId,
+          hostRequirements: skillDef?.hostRequirements ?? null,
+          activeContext: activeSkillContext
+            ? {
+              runStatePath: activeSkillContext.runStatePath,
+              outputDir: activeSkillContext.outputDir,
+            }
+            : null,
+        })
+        const validationOk = Boolean((output.data?.validation as { ok?: unknown } | undefined)?.ok)
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status: validationOk ? 'done' : 'blocked',
+          message: validationOk ? '配置已修复并校验通过' : '配置已写入但校验未通过',
+          output,
+          params: maskedParams,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitiveOutcome({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status: 'error',
+          message: error instanceof Error ? error.message : String(error),
+          params: maskedParams,
+        })
+        throw error
+      }
+    }
     if (tool.name === 'skill_start_detached') {
       const tracker = getDetachedSkillTaskTracker()
       if (!tracker) {
@@ -848,8 +966,9 @@ export async function executeSkillTool(
       } else {
         actionTool = findSkillToolBySkillAction(skillId, action)
       }
-      const skillDef = manager.listSkills().find((skill) => skill.id === skillId)
+      const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
       const referenceHintSkillId = sessionId ? getLastReferenceSkill(sessionId)?.id ?? null : null
+      const activeSkillId = resolveActiveSkillContext({ sessionId })?.skillId ?? null
       // Phase 4.4 — split the old `detached_task_action_not_allowed` blob into
       // four specific errorKinds so the model can self-diagnose:
       //   - skill_not_loaded     (skill manifest never loaded — try later or check install)
@@ -879,6 +998,7 @@ export async function executeSkillTool(
           actionName: action,
           skillId,
           referenceHintSkillId,
+          activeSkillId,
           exposeWhenHintArmed: skillDef.hostRequirements?.expose_when_hint_armed ?? [],
         })
       ) {
@@ -962,11 +1082,12 @@ export async function executeSkillTool(
         // accepted only while that hint is
         // armed. Other sessions / non-skill tool calls keep the base list.
         const referenceSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
-        const skillDef = manager.listSkills().find((skill) => skill.id === skillId)
+        const activeSkillId = resolveActiveSkillContext({ sessionId })?.skillId ?? null
+        const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
         const hostRequirements = skillDef?.hostRequirements ?? null
         const effectiveAllowlist = getSkillHostController().getEffectiveShellAllowlist(
           sessionId,
-          referenceSkillId,
+          referenceSkillId || activeSkillId,
           SHELL_ALLOWLIST,
           hostRequirements,
         )
@@ -979,8 +1100,8 @@ export async function executeSkillTool(
           {
             skillId,
             signal: abortSignal,
-            runtimeBinDir: manager.getRuntimeBinDir(),
-            venvBinDir: manager.getSharedVenvBinDir(),
+            runtimeBinDir: getManager().getRuntimeBinDir(),
+            venvBinDir: getManager().getSharedVenvBinDir(),
             effectiveAllowlist,
           },
         )
@@ -1173,7 +1294,7 @@ export async function executeSkillTool(
     runId: runtimeContext?.runId,
     agent: runtimeContext?.agent,
     skillId: tool.skillId || undefined,
-    skillName: findSkillName(manager, tool.skillId),
+    skillName: findSkillName(getManager(), tool.skillId),
     toolName,
     action: tool.action || '',
     runKind: 'typed_action',
@@ -1182,7 +1303,7 @@ export async function executeSkillTool(
     goalText: goalTextFromParams(toolName, tool.action || '', args),
     resourceRefs: resourceRefsFromParams(args),
   })
-  const result = await manager.runSkill({
+  const result = await getManager().runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
     params: args,
@@ -1207,7 +1328,7 @@ export async function executeSkillTool(
     runId: runtimeContext?.runId,
     agent: runtimeContext?.agent,
     skillId: tool.skillId || undefined,
-    skillName: findSkillName(manager, tool.skillId),
+    skillName: findSkillName(getManager(), tool.skillId),
     toolName,
     action: tool.action || '',
     runKind: 'typed_action',

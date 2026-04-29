@@ -42,6 +42,8 @@ import {
   STATIC_SKILL_ACTIONS_BY_TOOL_NAME,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
 } from '../tools/skills-tools-static'
+import { PRIMITIVE_TOOL_NAME_SET } from '../tools/skill-primitives/tool-defs'
+import { shouldExposeSkillPrimitive } from '../tools/skill-tool-session-gate'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import {
   findSkillToolByNameForExecution,
@@ -51,6 +53,7 @@ import {
 } from '../tools/skills-tools'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
 import { getLastReferenceSkill } from './skill-reference-hints'
+import { resolveActiveSkillContext } from './active-skill-context'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite
@@ -308,11 +311,21 @@ function getStaticSkillActionMeta(toolName: string): StaticSkillActionMeta | nul
 }
 
 function isStaticSkillToolVisible(toolName: string, sessionId?: string): boolean {
+  const activeSkillContext = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+  if (PRIMITIVE_TOOL_NAME_SET.has(toolName)) {
+    return shouldExposeSkillPrimitive(
+      sessionId,
+      () => false,
+      (sid) => getLastReferenceSkill(sid) !== null,
+      (sid) => Boolean(activeSkillContext && sid === sessionId),
+    )
+  }
   const meta = getStaticSkillActionMeta(toolName)
   if (!meta || meta.visibility !== 'internal') return true
   if (!sessionId) return false
   const hint = getLastReferenceSkill(sessionId)
-  return hint?.id === meta.skillId && meta.exposeWhenHintArmed.includes(meta.actionName)
+  const contextSkillId = hint?.id || activeSkillContext?.skillId || null
+  return contextSkillId === meta.skillId && meta.exposeWhenHintArmed.includes(meta.actionName)
 }
 
 function resolveStaticSkillToolNames(sessionId?: string): string[] {

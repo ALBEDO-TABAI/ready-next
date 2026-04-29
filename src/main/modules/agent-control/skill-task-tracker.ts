@@ -152,6 +152,8 @@ function titleForTool(toolName: string): string {
       return '写入技能产物'
     case 'skill_read_artifact':
       return '读取技能产物'
+    case 'skill_patch_config':
+      return '修复技能配置'
     default:
       return toolName.startsWith('skill_') ? '执行技能工具' : toolName
   }

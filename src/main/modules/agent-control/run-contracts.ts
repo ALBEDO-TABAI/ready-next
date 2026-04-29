@@ -15,6 +15,7 @@ import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import type { TurnTerminalReason } from './turn-frame'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 
@@ -423,6 +424,7 @@ export interface ExecutionHostResult {
   executionDiagnostics?: ExecutionRunDiagnostics | null
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
+  terminalReason?: TurnTerminalReason | null
 }
 
 export interface ExecutionTurnResult {
@@ -439,6 +441,7 @@ export interface ExecutionTurnResult {
   executionDiagnostics?: ExecutionRunDiagnostics | null
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
+  terminalReason?: TurnTerminalReason | null
 }
 
 export type SkillTaskLifecycleState =

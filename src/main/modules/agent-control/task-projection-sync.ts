@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type {
   ProjectionTruthSnapshot,
   TaskInteractionState,
@@ -33,8 +34,107 @@ function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | nu
   return patch
 }
 
-function resolveTaskId(summary: ScopeRunSummary, payload: ScopeRunEventPayload): string | null {
-  return summary.taskId || payload.taskId || summary.taskProjectionId || payload.taskProjectionId || payload.runId || null
+function stringFromRecord(record: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = record?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function truthContinuation(truthPatch: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  return recordFromUnknown(truthPatch?.taskContinuation)
+}
+
+function truthArtifacts(truthPatch: Record<string, unknown> | null | undefined): ScopeRunSummary['recentArtifacts'] | null {
+  return Array.isArray(truthPatch?.recentArtifacts)
+    ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
+    : null
+}
+
+function firstArtifactMetaString(artifacts: ScopeRunSummary['recentArtifacts'] | undefined, key: string): string | null {
+  for (const artifact of artifacts || []) {
+    const value = stringFromRecord(artifact.meta, key)
+    if (value) return value
+  }
+  return null
+}
+
+function artifactPathByOutputKey(
+  artifacts: ScopeRunSummary['recentArtifacts'] | undefined,
+  outputKey: string,
+): string | null {
+  for (const artifact of artifacts || []) {
+    if (stringFromRecord(artifact.meta, 'outputKey') === outputKey && artifact.path) return artifact.path
+  }
+  return null
+}
+
+function artifactPathEnding(
+  artifacts: ScopeRunSummary['recentArtifacts'] | undefined,
+  filename: string,
+): string | null {
+  for (const artifact of artifacts || []) {
+    const path = typeof artifact.path === 'string' ? artifact.path.trim() : ''
+    if (path && path.split(/[\\/]/).pop() === filename) return path
+  }
+  return null
+}
+
+function stableProjectionHash(parts: string[]): string {
+  return createHash('sha1').update(parts.join('\0')).digest('hex').slice(0, 16)
+}
+
+function resolveStableSkillProjectionTaskId(
+  summary: ScopeRunSummary,
+  payload: ScopeRunEventPayload,
+  truthPatch?: Record<string, unknown> | null,
+): string | null {
+  if (summary.taskType !== 'short_task' || payload.module !== 'system') return null
+  const continuation = truthContinuation(truthPatch)
+  const artifacts = truthArtifacts(truthPatch) || summary.recentArtifacts
+  const skillId =
+    stringFromRecord(continuation, 'skillId')
+    || summary.taskContinuation?.skillId
+    || firstArtifactMetaString(artifacts, 'skillId')
+  if (!skillId) return null
+  const detachedTaskId =
+    stringFromRecord(continuation, 'detachedTaskId')
+    || summary.taskContinuation?.detachedTaskId
+    || firstArtifactMetaString(artifacts, 'detachedTaskId')
+  if (detachedTaskId) return `skill:detached:${detachedTaskId}`
+  const runStatePath =
+    stringFromRecord(continuation, 'runStatePath')
+    || summary.taskContinuation?.runStatePath
+    || artifactPathByOutputKey(artifacts, 'runStatePath')
+    || artifactPathEnding(artifacts, 'run_state.json')
+  if (runStatePath) return `skill:run_state:${stableProjectionHash([skillId, runStatePath])}`
+  const outputDir =
+    stringFromRecord(continuation, 'outputDir')
+    || summary.taskContinuation?.outputDir
+    || artifactPathByOutputKey(artifacts, 'outputDir')
+  const action =
+    stringFromRecord(continuation, 'action')
+    || summary.taskContinuation?.action
+    || firstArtifactMetaString(artifacts, 'action')
+    || summary.currentStepId
+  if (outputDir && action) return `skill:output:${stableProjectionHash([skillId, action, outputDir])}`
+  return null
+}
+
+function resolveTaskId(
+  summary: ScopeRunSummary,
+  payload: ScopeRunEventPayload,
+  truthPatch?: Record<string, unknown> | null,
+): string | null {
+  return resolveStableSkillProjectionTaskId(summary, payload, truthPatch)
+    || summary.taskId
+    || payload.taskId
+    || summary.taskProjectionId
+    || payload.taskProjectionId
+    || payload.runId
+    || null
 }
 
 function isTaskProjectionUniqueRace(error: unknown): boolean {
@@ -53,6 +153,20 @@ function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState
   if (summary.waitingFor === 'input' || summary.waitingFor === 'clarification') return 'awaiting_clarification'
   if (summary.phase === 'resuming') return 'resuming'
   return 'running'
+}
+
+function resolveRecordInteractionState(
+  summary: ScopeRunSummary,
+  status: TaskProjectionRecord['status'],
+): TaskInteractionState {
+  const interactionState = resolveInteractionState(summary)
+  if (
+    interactionState === 'running'
+    && (status === 'done' || status === 'failed' || status === 'cancelled')
+  ) {
+    return 'suspended'
+  }
+  return interactionState
 }
 
 function resolveWaitingFor(
@@ -311,9 +425,9 @@ export function buildTaskProjectionRecord(
   previous?: TaskProjectionRecord | null,
   projectionTruth?: ProjectionTruthSnapshot | null,
 ): TaskProjectionRecord | null {
-  const taskId = resolveTaskId(summary, payload)
-  if (!taskId) return null
   const truthPatch = readProjectionTruthPatch(projectionTruth)
+  const taskId = resolveTaskId(summary, payload, truthPatch)
+  if (!taskId) return null
   const effectiveSummary: ScopeRunSummary = {
     ...summary,
     taskType: (
@@ -387,7 +501,7 @@ export function buildTaskProjectionRecord(
     taskTitle: effectiveSummary.taskTitle ?? previous?.taskTitle ?? null,
     taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
     status,
-    interactionState: resolveInteractionState(effectiveSummary),
+    interactionState: resolveRecordInteractionState(effectiveSummary, status),
     waitingFor: resolveWaitingFor(effectiveSummary, previous),
     steps: mapSteps(effectiveSummary, previous),
     currentStepId: effectiveSummary.currentStepId || null,
@@ -411,7 +525,8 @@ export async function syncTaskProjection(
   payload: ScopeRunEventPayload,
   projectionTruth?: ProjectionTruthSnapshot | null,
 ): Promise<TaskProjectionRecord | null> {
-  const taskId = resolveTaskId(summary, payload)
+  const truthPatch = readProjectionTruthPatch(projectionTruth)
+  const taskId = resolveTaskId(summary, payload, truthPatch)
   if (!taskId) return null
   const previous = await store.get(taskId)
   let next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)

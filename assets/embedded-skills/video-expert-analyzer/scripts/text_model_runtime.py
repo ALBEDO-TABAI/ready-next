@@ -134,10 +134,15 @@ def build_attempt_order(runtime_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     preferred_model = str(runtime_config.get("preferred_model", "") or "")
     fallback_models = tuple(runtime_config.get("fallback_models", ()) or ())
 
-    for model_ref in (preferred_model, *fallback_models):
+    for index, model_ref in enumerate((preferred_model, *fallback_models)):
         if not model_ref or model_ref in seen:
             continue
-        provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
+        try:
+            provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
+        except ValueError:
+            if index == 0:
+                raise
+            continue
         attempts.append(
             {
                 "model_ref": model_ref,

@@ -61,6 +61,18 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .optional()
       .describe('最多读取字节数，默认 32768（32K），最大 1048576（1M）'),
   }),
+  skill_patch_config: z.object({
+    target: TRIMMED_STRING.describe('manifest host_requirements.config_repair.files 中声明的 id、basename 或完整路径。'),
+    operations: z
+      .array(z.object({
+        op: z.enum(['set', 'delete']).describe('set 写入 JSON pointer；delete 删除 JSON pointer。'),
+        path: TRIMMED_STRING.describe('JSON pointer，例如 /auto_scoring/fallback_models。'),
+        value: z.unknown().optional().describe('set 操作的新值；delete 操作忽略。'),
+      }))
+      .min(1)
+      .max(50)
+      .describe('要原子应用到目标 JSON 文件的一组补丁操作。'),
+  }),
   skill_start_detached: z.object({
     action: TRIMMED_STRING.describe('要后台启动的当前 skill typed action 名称。'),
     params: z

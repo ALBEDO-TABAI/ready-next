@@ -19,6 +19,15 @@ import {
 } from './run-budget-policy'
 import { buildExecutionFallbackState } from '../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
+import type { TurnTerminalReason } from './turn-frame'
+
+function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
+  if (!reason) return null
+  if (reason === 'done') return 'done'
+  if (reason === 'cancelled_runtime' || reason === 'cancelled_user') return 'cancelled'
+  if (reason === 'failed_skill' || reason === 'infra_error') return 'error'
+  return 'checkpoint'
+}
 
 export class RunCoordinator {
   constructor(private readonly deps: {
@@ -198,10 +207,13 @@ export class RunCoordinator {
       || finalBlockedReason
       || (finalInteractionState && finalInteractionState !== 'running'),
     )
+    const terminalPhase = phaseFromTerminalReason(result.terminalReason)
     const finalPhase: ScopeRunEventPayload['phase'] = result.cancelled
       ? 'cancelled'
       : lifecycleSignal
         ? lifecycleSignal.phase
+        : terminalPhase
+          ? terminalPhase
         : result.success
         ? hasRecoverableWait ? 'checkpoint' : 'done'
         : 'error'

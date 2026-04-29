@@ -298,6 +298,51 @@ test('RunCoordinator prioritizes lifecycle signal over a success result', async 
   assert.equal(outcomes[0]?.success, false)
 })
 
+test('RunCoordinator maps terminalReason checkpoint_budget to checkpoint outcome', async () => {
+  const events: ScopeRunEventPayload[] = []
+  const outcomes: Array<{ success: boolean; lifecyclePhase?: ScopeRunEventPayload['phase'] }> = []
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: (payload) => {
+        outcomes.push({ success: payload.success, lifecyclePhase: payload.lifecyclePhase })
+      },
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: 'checkpoint text',
+      cancelled: false,
+      usedTools: ['skill_run_shell'],
+      taskType: 'multi_step_task',
+      interactionState: 'suspended',
+      terminalReason: 'checkpoint_budget',
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async () => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: '继续视频分析',
+    requestId: 'req-terminal-reason',
+  })
+
+  const finalEvent = events[events.length - 1]
+  assert.equal(result.success, true)
+  assert.equal(finalEvent?.phase, 'checkpoint')
+  assert.equal(outcomes[0]?.success, false)
+  assert.equal(outcomes[0]?.lifecyclePhase, 'checkpoint')
+})
+
 test('RunCoordinator memory reflection does not convert a paused background skill task to done', async () => {
   const events: ScopeRunEventPayload[] = []
   let memoryCaptured: (() => void) | null = null

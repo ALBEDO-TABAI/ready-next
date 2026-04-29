@@ -9,18 +9,25 @@
  */
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { afterEach, test } from 'node:test'
 
 import {
   filterSkillPrimitivesBySession,
   shouldExposeSkillPrimitive,
 } from '../main/modules/tools/skill-tool-session-gate'
+import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
+import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
+import {
+  clearActiveSkillContext,
+  rememberActiveSkillContext,
+} from '../main/modules/agent-control/active-skill-context'
 
 const ALL_PRIMITIVE_TOOLS = [
   { name: 'skill_ask_user' },
   { name: 'skill_run_shell' },
   { name: 'skill_write_artifact' },
   { name: 'skill_read_artifact' },
+  { name: 'skill_patch_config' },
   { name: 'skill_start_detached' },
   { name: 'skill_inspect_detached' },
   { name: 'skill_cancel_detached' },
@@ -30,6 +37,10 @@ const neverActive = () => false
 const alwaysActive = () => true
 const neverHint = () => false
 const alwaysHint = () => true
+
+afterEach(() => {
+  clearActiveSkillContext()
+})
 
 test('without sessionId the full primitive list stays (legacy boot/static fallback path)', () => {
   const filtered = filterSkillPrimitivesBySession(
@@ -124,11 +135,61 @@ test('concurrent sessions get independent gate outcomes (one with hint, one with
   assert.deepEqual(listB, [], 'session-B without a hint sees nothing')
 })
 
+test('active skill task projection alone is enough to expose primitives', () => {
+  const filtered = filterSkillPrimitivesBySession(
+    ALL_PRIMITIVE_TOOLS,
+    'session-with-active-skill-task',
+    neverActive,
+    neverHint,
+    () => true,
+  )
+
+  assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
+})
+
+test('active skill context can expose internal typed actions without a reference hint', () => {
+  assert.equal(shouldExposeSkillAction({
+    actionVisibility: 'internal',
+    actionName: 'video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    referenceHintSkillId: null,
+    activeSkillId: 'video-expert-analyzer',
+    exposeWhenHintArmed: ['video_expert_pipeline'],
+  }), true)
+})
+
+test('registry exposes primitives and VEA typed actions from active context alone', () => {
+  rememberActiveSkillContext('session-with-vea-context', {
+    skillId: 'video-expert-analyzer',
+    skillName: 'Video Expert Analyzer',
+    taskRunId: 'tr-vea',
+    detachedTaskId: 'dst-vea',
+    runStatePath: '/tmp/vea/run_state.json',
+    outputDir: '/tmp/vea',
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    action: 'video_expert_pipeline',
+    source: 'projection',
+    confidence: 84,
+    status: 'blocked',
+    staleBlockerReason: '旧 blocker',
+    observedAt: new Date().toISOString(),
+  })
+
+  const names = new ToolRegistry()
+    .getToolDefinitionsForGroup('skills', 'session-with-vea-context')
+    .map((tool) => tool.name)
+
+  assert.ok(names.includes('skill_run_shell'))
+  assert.ok(names.includes('skill_patch_config'))
+  assert.ok(names.includes('skill_video_expert_pipeline'))
+})
+
 test('gate returns a fresh array each call; no cached reference', () => {
   const first = filterSkillPrimitivesBySession(ALL_PRIMITIVE_TOOLS, undefined, neverActive, neverHint)
   const second = filterSkillPrimitivesBySession(ALL_PRIMITIVE_TOOLS, undefined, neverActive, neverHint)
   assert.deepEqual(first.map((d) => d.name), second.map((d) => d.name))
   assert.notEqual(first, second)
   // Input array is untouched.
-  assert.equal(ALL_PRIMITIVE_TOOLS.length, 7)
+  assert.equal(ALL_PRIMITIVE_TOOLS.length, 8)
 })

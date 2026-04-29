@@ -84,7 +84,6 @@ DEFAULT_AUTO_SCORING = {
     "models_json_path": "",
     "preferred_model": "kcode/K2.6-code-preview",
     "fallback_models": [
-        "zai/GLM-5V-Turbo",
         "novacode-openai/gpt-5.4",
     ],
     "max_workers": 4,

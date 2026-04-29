@@ -67,6 +67,20 @@
     },
     "shell_allowlist_extensions": ["wc"],
     "default_action_timeout_ms": 1800000,
+    "config_repair": {
+      "files": [
+        {
+          "id": "config",
+          "path": "~/.config/video-expert-analyzer-vnext/config.json",
+          "format": "json"
+        },
+        {
+          "id": "models",
+          "path": "~/.config/video-expert-analyzer-vnext/models.multi.json",
+          "format": "json"
+        }
+      ]
+    },
     "status_detection": {
       "method": "sentinel_file",
       "file_path": "${output_dir}/run_state.json",

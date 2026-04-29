@@ -62,6 +62,20 @@ export const ConcurrencySchema = z
   })
   .strict()
 
+export const RepairableConfigFileSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9_-]*$/),
+    path: z.string().min(1),
+    format: z.literal('json'),
+  })
+  .strict()
+
+export const ConfigRepairSchema = z
+  .object({
+    files: z.array(RepairableConfigFileSchema).min(1),
+  })
+  .strict()
+
 export const SkillHostRequirementsSchema = z
   .object({
     manifest_version: z.literal(1).default(1),
@@ -78,6 +92,7 @@ export const SkillHostRequirementsSchema = z
     status_detection: StatusDetectionSchema.optional(),
     lifecycle: LifecycleSchema.optional(),
     concurrency: ConcurrencySchema.optional(),
+    config_repair: ConfigRepairSchema.optional(),
     /**
      * Action names from this skill's manifest that should be exposed to the LLM
      * even if their visibility is 'internal', BUT only when the reference-skill
@@ -100,6 +115,8 @@ export type SpawnContext = z.infer<typeof SpawnContextSchema>
 export type StatusDetection = z.infer<typeof StatusDetectionSchema>
 export type Lifecycle = z.infer<typeof LifecycleSchema>
 export type Concurrency = z.infer<typeof ConcurrencySchema>
+export type RepairableConfigFile = z.infer<typeof RepairableConfigFileSchema>
+export type ConfigRepair = z.infer<typeof ConfigRepairSchema>
 
 // AgentSpawnContext — what Ready provides to the templater at spawn time.
 // Filled by getCurrentAgentContext() (defined in B-arch-5).

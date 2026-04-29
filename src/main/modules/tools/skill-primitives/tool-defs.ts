@@ -46,6 +46,13 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_read_artifact),
   },
   {
+    name: 'skill_patch_config',
+    description:
+      '受控修改当前 skill manifest 明确声明可修复的 JSON 配置文件。只能传 host_requirements.config_repair.files 中的 target id/basename/完整路径，支持 JSON pointer set/delete，工具会原子写入、回读校验并 mask key/token/secret。用于用户明确授权“改 key / 改模型 / 清 fallback 后继续”时；禁止用它尝试任意本地路径。',
+    kind: 'primitive',
+    params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_patch_config),
+  },
+  {
     name: 'skill_start_detached',
     description:
       '后台启动当前 reference skill 的 typed action，立即返回 taskId；适合耗时较长、无需当前 LLM turn 一直等待的技能任务。后续用 skill_inspect_detached 查看状态。',

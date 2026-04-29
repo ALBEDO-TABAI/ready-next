@@ -212,6 +212,132 @@ test('syncTaskProjection falls back to update when create loses a concurrent ins
   assert.equal(records.get('task-1')?.taskSummary, '并发后更新成功')
 })
 
+test('syncTaskProjection collapses duplicate skill projections by detached task id', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+  const baseSkillSummary: ScopeRunSummary = {
+    ...createSummary(),
+    taskType: 'short_task',
+    phase: 'takeover',
+    interactionState: 'suspended',
+    waitingFor: 'background',
+    blockedReason: '后台任务待续跑',
+    taskContinuation: {
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      detachedTaskId: 'dst-vea-1',
+      runStatePath: '/tmp/vea/run_state.json',
+      outputDir: '/tmp/vea',
+    },
+    recentArtifacts: [
+      {
+        id: 'run-state',
+        module: 'skill',
+        kind: 'json',
+        label: 'run_state.json',
+        path: '/tmp/vea/run_state.json',
+        createdAt: '2026-04-28T01:00:00.000Z',
+        meta: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          detachedTaskId: 'dst-vea-1',
+          outputKey: 'runStatePath',
+        },
+      },
+    ],
+  }
+
+  const first = await syncTaskProjection(store, {
+    ...baseSkillSummary,
+    taskId: 'system-short-a',
+    taskSummary: '第一次投影',
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }, {
+    ...createPayload(),
+    taskId: 'system-short-a',
+    runId: 'run-a',
+    module: 'system',
+    timestamp: '2026-04-28T01:00:00.000Z',
+  })
+  const second = await syncTaskProjection(store, {
+    ...baseSkillSummary,
+    taskId: 'system-short-b',
+    taskSummary: '第二次投影',
+    updatedAt: '2026-04-28T01:05:00.000Z',
+  }, {
+    ...createPayload(),
+    taskId: 'system-short-b',
+    runId: 'run-b',
+    module: 'system',
+    timestamp: '2026-04-28T01:05:00.000Z',
+  })
+
+  assert.equal(first?.taskId, 'skill:detached:dst-vea-1')
+  assert.equal(second?.taskId, 'skill:detached:dst-vea-1')
+  assert.equal(records.size, 1)
+  assert.equal(records.get('skill:detached:dst-vea-1')?.taskSummary, '第二次投影')
+})
+
+test('syncTaskProjection does not keep terminal projections in running interaction state', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    interactionState: 'running',
+    waitingFor: 'none',
+    blockedReason: null,
+    taskSummary: '已完成',
+    updatedAt: '2026-04-28T01:10:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    timestamp: '2026-04-28T01:10:00.000Z',
+  })
+
+  assert.equal(result?.status, 'done')
+  assert.equal(result?.interactionState, 'suspended')
+})
+
 test('syncTaskProjection keeps older blocked continuation snapshots when a newer task finishes', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const store: TaskProjectionStore = {

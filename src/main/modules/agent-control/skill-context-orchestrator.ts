@@ -27,6 +27,7 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',
+  'skill_patch_config',
   'skill_start_detached',
   'skill_inspect_detached',
   'skill_cancel_detached',

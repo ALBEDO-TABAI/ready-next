@@ -507,6 +507,77 @@ test('TurnEngine keeps browser process narration out of final text when the brow
   )
 })
 
+test('TurnEngine recovers leaked text tool calls in the generic tool loop before treating the turn as no-tool', async () => {
+  const engine = new TurnEngine()
+  let loopPasses = 0
+  let executedToolNames: string[] = []
+  let capturedAllowedToolNames: string[] = []
+  const { request } = createRequest({
+    userText: '查一下文件',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+        capturedAllowedToolNames = params.allowedToolNames || []
+        loopPasses += 1
+        if (loopPasses === 1) {
+          return {
+            text: '<tool_call><function=file_search><parameter=query>配置</parameter></function></tool_call>',
+            toolCalls: [],
+            stopReason: 'stop',
+            toolTransport: 'native',
+          }
+        }
+        return {
+          text: '完成',
+          toolCalls: [],
+          stopReason: 'stop',
+          toolTransport: 'native',
+        }
+      },
+      executeToolBatch: async ({ toolCalls }: { toolCalls: Array<{ name: string }> }) => {
+        executedToolNames = toolCalls.map((call) => call.name)
+        return {
+          results: toolCalls.map((call) => ({
+            id: 'call-recovered',
+            name: call.name,
+            input: {},
+            result: { text: 'page text' },
+          })),
+          budgetLimited: false,
+          recoveryHistory: [],
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.deepEqual(executedToolNames, ['file_search'], `allowed tools: ${capturedAllowedToolNames.join(',')}`)
+  assert.equal(result.finalText, '完成')
+})
+
 test('TurnEngine lets a domain adapter block once and then finish a document tool loop', async () => {
   const engine = new TurnEngine()
   let toolLoopRequests = 0
@@ -1098,8 +1169,8 @@ test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs wi
 
     assert.equal(toolLoopRequests, 1)
     assert.equal(result.taskType, 'multi_step_task')
-    assert.equal(result.executionDiagnostics?.budget?.maxIterations, 220)
-    assert.equal(result.executionDiagnostics?.budget?.maxToolCalls, 220)
+    assert.equal(result.executionDiagnostics?.budget?.maxIterations, 20)
+    assert.equal(result.executionDiagnostics?.budget?.maxToolCalls, 20)
     assert.equal(result.executionDiagnostics?.budgetLease?.currentLeaseEndIteration, 20)
     assert.ok(
       capturedAllowedToolNames.includes('skill_video_expert_pipeline'),
@@ -1809,6 +1880,7 @@ test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhau
   assert.equal(result.success, true)
   assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
   assert.equal(result.skillTaskLifecycle?.phase, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
   assert.equal(result.interactionState, 'suspended')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
   assert.equal((result.projectionTruth?.projectionPatch?.taskContinuation as Record<string, unknown>)?.taskRunId, 'str-budget')
@@ -1964,6 +2036,117 @@ test('TurnEngine creates a skill lease from a recoverable supervisor snapshot ev
     ))
   } finally {
     __setMetricSinkForTests(null)
+  }
+})
+
+test('TurnEngine binds config repair turns to the blocked supervisor skill before a stale current hint', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  const preferredInputs: string[] = []
+  const logs: string[] = []
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', {
+    id: 'novel-writer-system',
+    name: 'novel_writer_system',
+  })
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const veaSkill = {
+      id: 'video-expert-analyzer',
+      name: 'video-expert-analyzer',
+      executionMode: 'advisory',
+      actions: [],
+      hostRequirements: {},
+    } as any
+    const { request } = createRequest({
+      userText: 'key 改成新的了，清掉 zai 的 5v turbo 后继续',
+      intentClassification: createIntent({
+        primaryDomain: 'generic',
+        confidence: 'low',
+      }),
+      host: {
+        log: (message: string) => logs.push(message),
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            skillId: 'video-expert-analyzer',
+            action: 'video_expert_pipeline',
+            status: 'blocked',
+            hasLiveWork: false,
+            hasRecentProgress: true,
+            closeAllowed: false,
+            detachedTaskId: 'dst-vea-config',
+            taskRunId: 'str-vea-config',
+            failureKind: 'tool_error',
+            progress: {
+              currentStage: 'score_batches',
+              completedScenes: 54,
+              totalScenes: 97,
+            },
+          } as any),
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: (text: string) =>
+            text.includes('video-expert-analyzer') ? [veaSkill] : [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'novel-writer-system', name: 'novel_writer_system' }),
+          rememberExplicitReferenceSkillHint: (text: string) => {
+            if (!text.includes('video-expert-analyzer')) return false
+            rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'video-expert-analyzer' })
+            return true
+          },
+          buildPreferredSkillToolNames: (text: string) => {
+            preferredInputs.push(text)
+            return text.includes('video-expert-analyzer')
+              ? ['skill_video_expert_pipeline', 'skill_run_shell']
+              : ['skill_run_shell']
+          },
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'novel-writer-system'],
+        },
+        requestToolLoopResponse: async () => ({
+          text: '检查配置',
+          toolCalls: [],
+          stopReason: 'stop',
+        }),
+      },
+    })
+
+    await engine.execute(request)
+
+    assert.ok(
+      preferredInputs.some((text) => text.includes('video-expert-analyzer')),
+      'config repair should synthesize VEA resume context instead of stale hint context',
+    )
+    assert.ok(metrics.some((event) =>
+      event.metric === 'skill_reference_hint_armed'
+      && event.skillId === 'video-expert-analyzer'
+      && event.via === 'history'
+    ))
+    assert.equal(
+      logs.some((line) => line.includes('suppressed implicit continuation')),
+      false,
+      'recovered config repair should not suppress implicit continuation because of stale hint',
+    )
+  } finally {
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
   }
 })
 
@@ -2185,6 +2368,7 @@ test('TurnEngine evaluates skill budget leases two iterations before lease end',
     assert.equal(executedBatches, 18)
     assert.equal(result.skillTaskLifecycle?.state, 'budget_paused')
     assert.equal(result.skillTaskLifecycle?.phase, 'checkpoint')
+    assert.equal(result.terminalReason, 'checkpoint_background')
   } finally {
     restoreLongToolDefinition()
   }
@@ -2469,6 +2653,7 @@ test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor thr
 
   assert.equal(result.success, true)
   assert.equal(result.skillTaskLifecycle, null)
+  assert.equal(result.terminalReason, 'checkpoint_budget')
   assert.equal(result.interactionState, 'suspended')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
   assert.equal(result.projectionTruth?.projectionPatch?.blockedReason, '本轮预算已用完，技能任务状态检查失败或暂时不可用')

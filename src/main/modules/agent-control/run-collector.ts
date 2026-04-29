@@ -66,6 +66,7 @@ export interface SendAndCollectResult {
     degradationReason?: string | null
   } | null
   projectionTruth?: import('./run-contracts').ProjectionTruthSnapshot | null
+  terminalReason?: import('./turn-frame').TurnTerminalReason | null
 }
 
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {
@@ -132,7 +133,7 @@ export function createScopedRunCollector(match: ScopedRunMatch) {
         })
         return
       }
-      if (payload.status === 'done') {
+      if (payload.status === 'done' || payload.status === 'checkpoint') {
         finish({
           success: !runtimeError,
           finalText: finalChunks.join(''),
