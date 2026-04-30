@@ -15,7 +15,8 @@ export const CANONICAL_SKILL_CHILD_TERMINAL_REASONS = [
   'nested_child_run_not_supported',
   'cancelled_user',
   'failed_skill',
-  'infra_error',
+  'resume_launch_failed',
+  'persistence_failed',
   'child_process_crashed',
   'host_unavailable',
   'tool_not_registered',
@@ -32,23 +33,52 @@ const INFRA_ERROR_KIND_TO_TERMINAL_REASON: Partial<Record<string, SkillChildRunT
   host_unavailable: 'host_unavailable',
   tool_not_registered: 'tool_not_registered',
   input_validation: 'input_validation',
+  no_record: 'resume_launch_failed',
+  no_payload: 'resume_launch_failed',
+  repository_create_failed: 'persistence_failed',
+  repository_update_failed: 'persistence_failed',
+  repository_lookup_failed: 'persistence_failed',
+  persistence_failed: 'persistence_failed',
 }
 
 export function isSkillChildRunTerminalReason(value: unknown): value is SkillChildRunTerminalReason {
   return typeof value === 'string' && TERMINAL_REASON_SET.has(value)
 }
 
-export function coerceSkillChildTerminalReason(
-  close: Pick<SkillChildCloseEvent, 'terminalReason' | 'error'>,
+type StoredCloseLike = {
+  terminalReason?: unknown
+  error?: {
+    kind?: unknown
+  } | null
+}
+
+export function decodeStoredSkillChildTerminalReason(
+  close: StoredCloseLike,
 ): SkillChildRunTerminalReason {
   if (close.terminalReason === 'infra_error') {
-    const mapped = close.error?.kind
-      ? INFRA_ERROR_KIND_TO_TERMINAL_REASON[close.error.kind]
+    const errorKind = typeof close.error?.kind === 'string' ? close.error.kind : null
+    const mapped = errorKind
+      ? INFRA_ERROR_KIND_TO_TERMINAL_REASON[errorKind]
       : undefined
     if (mapped) return mapped
+    return 'child_process_crashed'
   }
 
-  return close.terminalReason
+  if (isSkillChildRunTerminalReason(close.terminalReason)) return close.terminalReason
+  return 'child_process_crashed'
+}
+
+export function decodeStoredSkillChildCloseEvent(close: SkillChildCloseEvent): SkillChildCloseEvent
+export function decodeStoredSkillChildCloseEvent(
+  close: Omit<SkillChildCloseEvent, 'terminalReason'> & { terminalReason: unknown },
+): SkillChildCloseEvent
+export function decodeStoredSkillChildCloseEvent(
+  close: Omit<SkillChildCloseEvent, 'terminalReason'> & { terminalReason: unknown },
+): SkillChildCloseEvent {
+  return {
+    ...close,
+    terminalReason: decodeStoredSkillChildTerminalReason(close),
+  }
 }
 
 export function classifySkillChildRunStatus(status: SkillChildRunStatus): SkillChildRunStatusClass {

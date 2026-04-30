@@ -19,7 +19,7 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
  * the previous skill's hint, polluting the next turn. Hoisted to a constant
  * so it's grep-able when adding new markers.
  */
-const FRESH_REQUEST_MARKERS = /[?？!!@()<>《》【】\[\]]|帮(我|忙)|请(帮|你|给)|我想|我要|可以吗|能不能|怎么|为什么|什么|哪个|多少|搜索|查询|查一下|搜一下|换个|换成|换一/
+const FRESH_REQUEST_MARKERS = /[?？!!@()<>《》【】[\]]|帮(我|忙)|请(帮|你|给)|我想|我要|可以吗|能不能|怎么|为什么|什么|哪个|多少|搜索|查询|查一下|搜一下|换个|换成|换一/
 
 export function isRetryOnlyTurn(text: string): boolean {
   const normalized = String(text || '').trim()

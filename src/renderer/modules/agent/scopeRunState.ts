@@ -77,6 +77,8 @@ function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null 
     normalized === 'blocked_config' ||
     normalized === 'blocked_tool_error' ||
     normalized === 'failed_skill' ||
+    normalized === 'resume_launch_failed' ||
+    normalized === 'persistence_failed' ||
     normalized === 'cancelled_user' ||
     normalized === 'cancelled_runtime' ||
     normalized === 'infra_error'

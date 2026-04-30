@@ -126,9 +126,10 @@ function describeWidgetSkip(existing: string, incoming: string): {
 
 function logWidgetSkip(scope: string, tabTitle: string, info: ReturnType<typeof describeWidgetSkip>): void {
   try {
-    // eslint-disable-next-line no-console
     console.info(`[widget-skip:${scope}]`, { tab: tabTitle, reason: info.reason, ...info.detail })
-  } catch {}
+  } catch {
+    // Best-effort diagnostics must never block widget updates.
+  }
 }
 
 function extractDeclaredWidgetAspect(widgetCode: string): { width: number; height: number } | null {

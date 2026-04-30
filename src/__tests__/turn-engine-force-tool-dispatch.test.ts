@@ -668,7 +668,7 @@ test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no
  *   - cancellation       (terminalReason='cancelled_runtime', cancelled=true)
  *   - tool error result  (when the host returns an error result instead of
  *                         throwing — covered by other tests)
- *   - failure            (terminalReason='infra_error', success=false)
+ *   - failure            (terminalReason='persistence_failed', success=false)
  *   - checkpoint         (mid-iteration checkpoint with explicit reason)
  * What we are guarding against here is the parent loop double-dispatching, or
  * the parent emitting a `turn_frame_summary` for a turn whose synthesized
@@ -794,7 +794,7 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
         'checkpoint_budget',
         'checkpoint_background',
         'checkpoint_user_input',
-        'infra_error',
+        'persistence_failed',
       ].includes(summary.terminalReason as string),
       `orphan-result regression: terminalReason must be a structured close, got ${summary.terminalReason}`,
     )

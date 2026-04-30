@@ -25,7 +25,7 @@ function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined):
   if (!reason) return null
   if (reason === 'done') return 'done'
   if (reason === 'cancelled_runtime' || reason === 'cancelled_user') return 'cancelled'
-  if (reason === 'failed_skill' || reason === 'infra_error') return 'error'
+  if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'error'
   return 'checkpoint'
 }
 

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
@@ -9,6 +8,7 @@ import {
 import {
   isChildInternalStrictAdmissionEnabled,
 } from '../main/modules/agent-control/tool-definition'
+import { executeToolCall } from '../main/modules/tools/tool-executor'
 import type {
   SkillRunRequest,
   SkillRunResult,
@@ -40,30 +40,6 @@ function makeRuntimeManager(onRun?: (request: SkillRunRequest) => void): SkillsR
       return makeSkillResult(request)
     },
   } as unknown as SkillsRuntimeManager
-}
-
-function stripTsComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
-}
-
-function gatewayFunctionSource(): string {
-  const source = readFileSync(
-    new URL('../main/modules/agent-control/tool-registry.ts', import.meta.url),
-    'utf-8',
-  )
-  const start = source.indexOf('export async function executeSkillActionViaToolGateway')
-  const end = source.indexOf('\nfunction makeChildGatewayError', start)
-  assert.ok(start >= 0 && end > start, 'expected executeSkillActionViaToolGateway source')
-  return stripTsComments(source.slice(start, end))
-}
-
-function toolExecutorSource(): string {
-  return stripTsComments(readFileSync(
-    new URL('../main/modules/tools/tool-executor.ts', import.meta.url),
-    'utf-8',
-  ))
 }
 
 test('child internal action without ToolDefinition returns tool_not_registered', async () => {
@@ -108,11 +84,6 @@ test('child internal action with invalid args returns input_validation', async (
 })
 
 test('child internal action dispatches through executeToolCall', async () => {
-  const source = gatewayFunctionSource()
-  assert.match(source, /executeToolCall\(/)
-  assert.doesNotMatch(source, /runSkillFromChildRunner/)
-  assert.doesNotMatch(source, /\.runSkill\(/)
-
   let request: SkillRunRequest | null = null
   const result = await executeSkillActionViaToolGateway({
     skillId: 'video-expert-analyzer',
@@ -148,12 +119,14 @@ test('strict internal admission flag defaults enabled', () => {
   }), true)
 })
 
-test('executeToolCall rejects internal tools unless child internal context is allowed', () => {
-  const source = toolExecutorSource()
+test('executeToolCall rejects internal tools unless child internal context is allowed', async () => {
+  const result = await executeToolCall('skill_video_expert_pipeline', { url: 'https://example.test/video' }, {
+    allowedToolNames: new Set(['skill_video_expert_pipeline']),
+    invoker: 'model',
+  })
 
-  assert.match(source, /context\.allowInternal/)
-  assert.match(source, /context\.invoker\s*===\s*'child_runner'/)
-  assert.match(source, /internal_tool_not_allowed/)
+  assert.equal(result.data?.errorKind, 'host_unavailable')
+  assert.equal(result.data?.reason, 'internal_tool_not_allowed')
 })
 
 test('public model surface does not expose internal VEA actions without hint', () => {

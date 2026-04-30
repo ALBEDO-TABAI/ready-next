@@ -87,7 +87,7 @@ test('skills-tools formatRunResult has a dedicated reference-mode branch', () =>
   // "Command:" / "STDOUT:" prefixes may still exist (used by real subprocess
   // skills), but the reference branch must render its payload before those
   // prefixes are applied.
-  const refBranch = source.match(/if \(result\.mode === 'reference'\) \{[\s\S]*?\n  \}/)?.[0]
+  const refBranch = source.match(/if \(result\.mode === 'reference'\) \{[\s\S]*?\n {2}\}/)?.[0]
   assert.ok(refBranch, 'reference branch body must be parseable')
   assert.doesNotMatch(refBranch!, /Command:/, 'reference branch must not emit "Command:" prefix')
   assert.doesNotMatch(refBranch!, /STDOUT:/, 'reference branch must not emit "STDOUT:" prefix')
@@ -97,10 +97,6 @@ test('formatRunResult reference branch exercises cleanly at runtime', async () =
   // Behavioral check: the pure formatter runs without needing electron/DB.
   // Import the module dynamically so the top-level electron chain (via
   // session-continuity / tool-result-types) is triggered only in this test.
-  const mod = (await import('../main/modules/tools/skills-tools')) as unknown as {
-    // formatRunResult is not exported — only exercise via executeSkillTool is
-    // possible, which requires the runtime manager. Skip live invocation and
-    // stay at the source-pin level. The source-pin above is the contract.
-  }
+  const mod = await import('../main/modules/tools/skills-tools')
   assert.ok(mod, 'skills-tools module must load')
 })

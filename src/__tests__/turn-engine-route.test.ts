@@ -2900,8 +2900,8 @@ test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor thr
 })
 
 // =====================================================================
-// Team 2 — A2 / D3: resume outcome failure paths must surface `failed`
-// terminalReason and "恢复失败" copy instead of silently lying as "已继续".
+// Team 2 — A2 / D3: resume outcome failure paths must surface
+// `resume_launch_failed` terminalReason and "恢复失败" copy instead of silently lying as "已继续".
 // `makeFailedClose` / `makeKilledClose` build close events `makeChildCloseEvent`
 // can't (it hardcodes error=null for non-blocked statuses).
 // =====================================================================
@@ -2911,7 +2911,7 @@ function makeFailedClose(errorKind: string, errorMessage: string): SkillChildClo
     childRunId: 'vchild001',
     skillId: 'video-expert-analyzer',
     status: 'failed',
-    terminalReason: 'infra_error',
+    terminalReason: 'resume_launch_failed',
     outputDir: '',
     runStatePath: '',
     sceneScoresPath: null,
@@ -2982,7 +2982,7 @@ test('resume failure with no_record surfaces failed terminalReason and failure m
   const result = await engine.execute(request)
 
   assert.equal(cancelCalls, 0, 'resume failure path must not call cancel')
-  assert.equal(result.terminalReason, 'failed_skill')
+  assert.equal(result.terminalReason, 'resume_launch_failed')
   assert.equal(result.status, 'error')
   assert.match(result.finalText, /恢复.*失败/)
   assert.ok(!/已继续/.test(result.finalText), 'must not claim "已继续" on a failed resume')
@@ -3012,7 +3012,7 @@ test('resume failure with no_payload surfaces failed terminalReason', async () =
 
   const result = await engine.execute(request)
 
-  assert.equal(result.terminalReason, 'failed_skill')
+  assert.equal(result.terminalReason, 'resume_launch_failed')
   assert.notEqual(result.terminalReason, 'done')
   assert.match(result.finalText, /恢复.*失败/)
 })

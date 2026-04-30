@@ -34,7 +34,7 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     ]
     for (const type of types) {
       // 允许两种写法：`type: 'xxx'` 直接字面量，或 `? 'xxx' :` 三元选取
-      const re = new RegExp(`['\"]${type}['\"]`)
+      const re = new RegExp(`['"]${type}['"]`)
       assert.match(driverSource, re, `缺少 runtimeDriver 事件打点：${type}`)
     }
   })

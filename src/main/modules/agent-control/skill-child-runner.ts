@@ -17,7 +17,7 @@
  *      iteration counter.
  *   6. Launch-stuck guard — if `started` is written but the first
  *      `action_started` doesn't appear within the guard window the
- *      runner emits `infra_error / launch_stuck`.
+ *      runner emits `child_process_crashed / launch_stuck`.
  *
  * Side effects (DB writes, JSONL append) are isolated behind the injected
  * `SkillTaskRunRepository` and `SkillsRuntimeManager` — tests pass stubs.
@@ -60,7 +60,7 @@ import type {
 } from './skill-child-run-types'
 import {
   classifySkillChildRunStatus,
-  coerceSkillChildTerminalReason,
+  decodeStoredSkillChildCloseEvent,
   isSkillChildRunResumable,
 } from './skill-child-state-machine'
 
@@ -186,13 +186,13 @@ class SkillChildRunner {
   async startSkillChildRun(params: StartSkillChildRunParams): Promise<StartSkillChildRunResult> {
     const driver = getSkillChildDriver(params.skillId)
     if (!driver) {
-      // No driver registered — refuse with infra_error so the parent can
+      // No driver registered — refuse with tool_not_registered so the parent can
       // pick a different route. Keeping this as a failed close (not a
       // throw) means the caller observes the same channel as a normal
       // refusal.
       return makePausedOnLaunchResult({
         skillId: params.skillId,
-        terminalReason: 'infra_error',
+        terminalReason: 'tool_not_registered',
         status: 'failed',
         errorKind: 'no_driver_registered',
         message: `No skill child driver registered for ${params.skillId}`,
@@ -296,7 +296,7 @@ class SkillChildRunner {
     } catch (error) {
       return makePausedOnLaunchResult({
         skillId: params.skillId,
-        terminalReason: 'infra_error',
+        terminalReason: 'persistence_failed',
         status: 'failed',
         errorKind: 'repository_create_failed',
         message: errorMessage(error),
@@ -329,7 +329,7 @@ class SkillChildRunner {
     if (!record) {
       return makePausedOnLaunchResult({
         skillId: 'unknown',
-        terminalReason: 'infra_error',
+        terminalReason: 'resume_launch_failed',
         status: 'failed',
         errorKind: 'no_record',
         message: `No child-run record for id ${childRunId}`,
@@ -340,7 +340,7 @@ class SkillChildRunner {
     if (!payload) {
       return makePausedOnLaunchResult({
         skillId: record.skillId,
-        terminalReason: 'infra_error',
+        terminalReason: 'resume_launch_failed',
         status: 'failed',
         errorKind: 'no_payload',
         message: 'Child-run record is missing payload',
@@ -360,11 +360,12 @@ class SkillChildRunner {
           closeEvent: null,
         }
       }
+      const storedClose = payload.closeEvent ? decodeStoredSkillChildCloseEvent(payload.closeEvent) : null
       return makeResumeRefusalResult({
         childRunId,
         skillId: payload.skillId,
         status: payload.status,
-        terminalReason: payload.closeEvent?.terminalReason ?? defaultTerminalReasonForStatus(payload.status),
+        terminalReason: storedClose?.terminalReason ?? defaultTerminalReasonForStatus(payload.status),
         outputDir: payload.outputDir,
         runStatePath: payload.runStatePath,
         eventLogPath: payload.eventLogPath,
@@ -397,7 +398,7 @@ class SkillChildRunner {
     } catch (error) {
       return makePausedOnLaunchResult({
         skillId: payload.skillId,
-        terminalReason: 'infra_error',
+        terminalReason: 'persistence_failed',
         status: 'failed',
         errorKind: 'repository_update_failed',
         message: errorMessage(error),
@@ -439,8 +440,9 @@ class SkillChildRunner {
           || payload.status === 'failed'
           || payload.status === 'killed'
         )) {
-        this.recentCloses.set(childRunId, payload.closeEvent)
-        return payload.closeEvent
+        const decodedClose = decodeStoredSkillChildCloseEvent(payload.closeEvent)
+        this.recentCloses.set(childRunId, decodedClose)
+        return decodedClose
       }
 
       const synth = makeCloseEvent({
@@ -485,9 +487,10 @@ class SkillChildRunner {
     const payload = (record.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
     if (!payload) return null
     if (payload.closeEvent) {
+      const decodedClose = decodeStoredSkillChildCloseEvent(payload.closeEvent)
       // Prime the in-memory ring so subsequent reads stay cheap.
-      this.recentCloses.set(childRunId, payload.closeEvent)
-      return payload.closeEvent
+      this.recentCloses.set(childRunId, decodedClose)
+      return decodedClose
     }
     return null
   }
@@ -565,7 +568,9 @@ class SkillChildRunner {
     // (`findLatestChildRunByKey` filters by ACTIVE statuses today, so this
     // branch is defensive against the filter being relaxed later.)
     const persistedStatus = existingPayload?.status
-    const persistedClose = existingPayload?.closeEvent ?? null
+    const persistedClose = existingPayload?.closeEvent
+      ? decodeStoredSkillChildCloseEvent(existingPayload.closeEvent)
+      : null
     if (persistedStatus
         && (persistedStatus === 'completed'
             || persistedStatus === 'failed'
@@ -729,7 +734,7 @@ class SkillChildRunner {
         childRunId,
         skillId: params.params.skillId,
         status: 'failed',
-        terminalReason: 'infra_error',
+        terminalReason: 'tool_not_registered',
         outputDir,
         runStatePath,
         errorKind: 'no_driver_registered',
@@ -779,7 +784,7 @@ class SkillChildRunner {
         childRunId,
         skillId: params.params.skillId,
         status: 'failed',
-        terminalReason: 'infra_error',
+        terminalReason: 'child_process_crashed',
         outputDir,
         runStatePath,
         errorKind: 'runner_uncaught',
@@ -817,7 +822,7 @@ class SkillChildRunner {
         childRunId: active.childRunId,
         skillId: active.skillId,
         status: 'failed',
-        terminalReason: 'infra_error',
+        terminalReason: 'child_process_crashed',
         outputDir: active.outputDir,
         runStatePath: active.runStatePath,
         errorKind: 'driver_init_failed',
@@ -883,7 +888,7 @@ class SkillChildRunner {
             childRunId: active.childRunId,
             skillId: active.skillId,
             status: 'failed',
-            terminalReason: 'infra_error',
+            terminalReason: 'child_process_crashed',
             outputDir: active.outputDir,
             runStatePath: active.runStatePath,
             errorKind: 'driver_plan_failed',
@@ -980,15 +985,12 @@ class SkillChildRunner {
             : gatewayKind === 'tool_not_registered' ? 'tool_not_registered'
             : gatewayKind === 'tool_failed' ? 'child_process_crashed'
             : gatewayKind
-          const terminalReason = coerceSkillChildTerminalReason({
-            terminalReason: gatewayKind === 'aborted' ? 'cancelled_user' : 'infra_error',
-            error: {
-              kind: errorKind,
-              message: typeof gateway.data?.message === 'string'
-                ? (gateway.data.message as string)
-                : gateway.text || `gateway ${gatewayKind}`,
-            },
-          })
+          const terminalReason: SkillChildRunTerminalReason =
+            gatewayKind === 'aborted' ? 'cancelled_user'
+            : errorKind === 'input_validation' ? 'input_validation'
+            : errorKind === 'host_unavailable' ? 'host_unavailable'
+            : errorKind === 'tool_not_registered' ? 'tool_not_registered'
+            : 'child_process_crashed'
           const status: SkillChildRunStatus =
             gatewayKind === 'aborted' ? 'killed' : 'failed'
           const close = makeCloseEvent({
@@ -1045,7 +1047,7 @@ class SkillChildRunner {
             childRunId: active.childRunId,
             skillId: active.skillId,
             status: 'failed',
-            terminalReason: 'infra_error',
+            terminalReason: 'child_process_crashed',
             outputDir: active.outputDir,
             runStatePath: active.runStatePath,
             errorKind: 'driver_observe_failed',

@@ -4,7 +4,8 @@ import test from 'node:test'
 import {
   CANONICAL_SKILL_CHILD_TERMINAL_REASONS,
   classifySkillChildRunStatus,
-  coerceSkillChildTerminalReason,
+  decodeStoredSkillChildCloseEvent,
+  decodeStoredSkillChildTerminalReason,
   isSkillChildRunResumable,
   isSkillChildRunTerminalReason,
 } from '../main/modules/agent-control/skill-child-state-machine'
@@ -20,7 +21,7 @@ function makeCloseEvent(overrides?: Partial<SkillChildCloseEvent>): SkillChildCl
     childRunId: 'scr-test-1',
     skillId: 'video-expert-analyzer',
     status: 'failed',
-    terminalReason: 'infra_error',
+    terminalReason: 'child_process_crashed',
     outputDir: null,
     runStatePath: null,
     sceneScoresPath: null,
@@ -54,7 +55,8 @@ test('state machine accepts canonical terminal reasons and rejects ad-hoc reason
     'nested_child_run_not_supported',
     'cancelled_user',
     'failed_skill',
-    'infra_error',
+    'resume_launch_failed',
+    'persistence_failed',
     'child_process_crashed',
     'host_unavailable',
     'tool_not_registered',
@@ -75,48 +77,88 @@ test('state machine accepts canonical terminal reasons and rejects ad-hoc reason
   }
 })
 
-test('legacy infra_error crash payload coerces to child_process_crashed', () => {
-  const close = makeCloseEvent({
+test('legacy infra_error crash payload decodes to child_process_crashed', () => {
+  const close = {
+    ...makeCloseEvent(),
+    terminalReason: 'infra_error',
     error: {
       kind: 'child_process_crashed',
       message: 'child process exited unexpectedly',
     },
-  })
+  }
 
-  assert.equal(coerceSkillChildTerminalReason(close), 'child_process_crashed')
+  assert.equal(decodeStoredSkillChildTerminalReason(close), 'child_process_crashed')
 })
 
-test('legacy infra_error host payload coerces to host_unavailable', () => {
-  const close = makeCloseEvent({
+test('legacy infra_error host payload decodes to host_unavailable', () => {
+  const close = {
+    ...makeCloseEvent(),
+    terminalReason: 'infra_error',
     error: {
       kind: 'host_unavailable',
       message: 'tool host is unavailable',
     },
-  })
+  }
 
-  assert.equal(coerceSkillChildTerminalReason(close), 'host_unavailable')
+  assert.equal(decodeStoredSkillChildTerminalReason(close), 'host_unavailable')
 })
 
-test('legacy infra_error tool admission payload coerces to tool_not_registered', () => {
-  const close = makeCloseEvent({
+test('legacy infra_error tool admission payload decodes to tool_not_registered', () => {
+  const close = {
+    ...makeCloseEvent(),
+    terminalReason: 'infra_error',
     error: {
       kind: 'tool_not_registered',
       message: 'requested tool is not registered',
     },
-  })
+  }
 
-  assert.equal(coerceSkillChildTerminalReason(close), 'tool_not_registered')
+  assert.equal(decodeStoredSkillChildTerminalReason(close), 'tool_not_registered')
 })
 
-test('legacy infra_error input validation payload coerces to input_validation', () => {
-  const close = makeCloseEvent({
+test('legacy infra_error input validation payload decodes to input_validation', () => {
+  const close = {
+    ...makeCloseEvent(),
+    terminalReason: 'infra_error',
     error: {
       kind: 'input_validation',
       message: 'input failed validation',
     },
-  })
+  }
 
-  assert.equal(coerceSkillChildTerminalReason(close), 'input_validation')
+  assert.equal(decodeStoredSkillChildTerminalReason(close), 'input_validation')
+})
+
+test('legacy infra_error resume and persistence payloads decode to new terminal reasons', () => {
+  assert.equal(
+    decodeStoredSkillChildTerminalReason({
+      ...makeCloseEvent(),
+      terminalReason: 'infra_error',
+      error: { kind: 'no_payload', message: 'missing payload' },
+    }),
+    'resume_launch_failed',
+  )
+  assert.equal(
+    decodeStoredSkillChildTerminalReason({
+      ...makeCloseEvent(),
+      terminalReason: 'infra_error',
+      error: { kind: 'repository_create_failed', message: 'db write failed' },
+    }),
+    'persistence_failed',
+  )
+})
+
+test('stored close event decoder preserves the close shape while normalizing terminalReason', () => {
+  const legacyClose = {
+    ...makeCloseEvent(),
+    terminalReason: 'infra_error',
+    error: { kind: 'repository_update_failed', message: 'db write failed' },
+  }
+
+  const decoded = decodeStoredSkillChildCloseEvent(legacyClose)
+
+  assert.equal(decoded.terminalReason, 'persistence_failed')
+  assert.equal(decoded.childRunId, legacyClose.childRunId)
 })
 
 test('observer timeout is a wait result and not a terminal reason', () => {
@@ -129,6 +171,7 @@ test('observer timeout is a wait result and not a terminal reason', () => {
   assert.equal(waitResult.kind, 'observer_timeout')
   assert.equal(isSkillChildRunTerminalReason('observer_timeout'), false)
   assert.equal(isSkillChildRunTerminalReason('await_timeout'), false)
+  assert.equal(isSkillChildRunTerminalReason('infra_error'), false)
 })
 
 test('blocked child is not directly resumable', () => {

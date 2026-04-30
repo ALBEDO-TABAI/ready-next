@@ -121,7 +121,7 @@ test('Phase 1.4 — meta_parse_corrupted is registered in TOOL_ERROR_METRICS', (
 
 test('Phase 1.3 — ensurePythonVenv emits python_runtime_rebuilt only when an unsupported venv was replaced', () => {
   const source = readSource(RUNTIME_MANAGER_PATH)
-  const blockMatch = source.match(/private async ensurePythonVenv[\s\S]*?\n  \}\n/)
+  const blockMatch = source.match(/private async ensurePythonVenv[\s\S]*?\n {2}\}\n/)
   assert.ok(blockMatch, 'ensurePythonVenv block exists')
   const block = blockMatch![0]
 
@@ -156,7 +156,7 @@ test('Phase 1.3 — ensurePythonRuntimeReady is the public startup hook with str
     'public method exists with structured result type',
   )
   // Must not throw — boot must not block.
-  const blockMatch = source.match(/async ensurePythonRuntimeReady[\s\S]*?\n  \}\n/)
+  const blockMatch = source.match(/async ensurePythonRuntimeReady[\s\S]*?\n {2}\}\n/)
   assert.ok(blockMatch)
   assert.match(
     blockMatch![0],

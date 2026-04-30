@@ -12,9 +12,10 @@ export type TurnTerminalReason =
   | 'blocked_config'
   | 'blocked_tool_error'
   | 'failed_skill'
+  | 'resume_launch_failed'
+  | 'persistence_failed'
   | 'cancelled_user'
   | 'cancelled_runtime'
-  | 'infra_error'
 
 export type TurnUserIntent =
   | 'start'

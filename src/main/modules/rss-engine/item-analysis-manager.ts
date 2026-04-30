@@ -155,7 +155,7 @@ function toProgress(job: RSSAnalysisJob): RSSItemAnalysisProgress {
 /**
  * Phase 7 — VEA long actions are routed through `startSkillChildRunAndWait`.
  * `queued_global_concurrency` is the only terminal-on-launch reason that
- * deserves a retry; everything else (failed_skill / infra_error /
+ * deserves a retry; everything else (failed_skill / child_process_crashed /
  * cancelled_user / blocked_*) is propagated to the caller. Bounded retry
  * keeps RSS visual flow alive when the user has 3 other VEA child runs in
  * flight.

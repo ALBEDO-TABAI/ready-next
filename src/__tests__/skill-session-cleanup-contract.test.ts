@@ -9,7 +9,7 @@ function readWorkspaceFile(path: string): string {
 
 test('agent session teardown clears reference skill hints and pending ask_user records', () => {
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
-  const killHandler = ipcHandler.match(/ipcMain\.handle\('agent:kill'[\s\S]*?\n  \}\)/)?.[0] || ''
+  const killHandler = ipcHandler.match(/ipcMain\.handle\('agent:kill'[\s\S]*?\n {2}\}\)/)?.[0] || ''
 
   assert.match(ipcHandler, /cleanupSkillSessionState/)
   assert.match(ipcHandler, /clearLastReferenceSkill/)

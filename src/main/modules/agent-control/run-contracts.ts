@@ -24,6 +24,7 @@ import type {
   SkillChildRunParentNextHint,
   SkillChildRunStatus,
 } from './skill-child-run-types'
+import { decodeStoredSkillChildCloseEvent } from './skill-child-state-machine'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
@@ -1443,7 +1444,7 @@ export function loadSkillRunContract(
     }
     const candidateClose = payload.closeEvent
     if (candidateClose && typeof candidateClose === 'object' && !Array.isArray(candidateClose)) {
-      childCloseEvent = candidateClose as unknown as SkillChildCloseEvent
+      childCloseEvent = decodeStoredSkillChildCloseEvent(candidateClose as unknown as SkillChildCloseEvent)
     } else {
       childCloseEvent = null
     }

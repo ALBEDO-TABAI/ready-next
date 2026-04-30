@@ -6,7 +6,7 @@
  *   - launch-stuck: child writes `started` but no `action_started`
  *     within the guard window → `terminalReason='launch_stuck'`.
  *   - skill-declared failure (`success: false`) vs infra throw
- *     (process crash) split between `failed_skill` and `infra_error`.
+ *     (process crash) split between `failed_skill` and `child_process_crashed`.
  */
 
 import assert from 'node:assert/strict'
@@ -146,9 +146,9 @@ function registerLooping(skillId: string): void {
     canStart: () => true,
     canResume: () => true,
     createInitialState: async (params) => ({ skillId, requestedInput: params.requestedInput }),
-    planNextAction: async (): Promise<SkillChildDriverAction | SkillChildCloseEvent> => ({
-      action: 'do_thing',
-      input: {},
+    planNextAction: async (state): Promise<SkillChildDriverAction | SkillChildCloseEvent> => ({
+      action: 'video_expert_pipeline',
+      input: state.requestedInput as Record<string, unknown>,
     }),
     observeAfterAction: async (state) => state,
   }
@@ -247,7 +247,7 @@ test('Phase 5: launch-stuck — started but no action_started within guard windo
   resolveDriver()
 })
 
-test('Phase 5: skill_failure (success:false) vs infra_error (throw) split correctly', async () => {
+test('Phase 5: skill_failure (success:false) vs process crash throw split correctly', async () => {
   // Skill-declared failure
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
@@ -271,12 +271,12 @@ test('Phase 5: skill_failure (success:false) vs infra_error (throw) split correc
     repository: makeFakeRepository(),
     launchStuckGuardMs: 5_000,
   })
-  registerLooping('test-skill-split')
+  registerLooping('video-expert-analyzer')
   const a = await startSkillChildRun({
     scopeId: 'scope-1',
     sessionId: 'session-1',
-    skillId: 'test-skill-split',
-    action: 'do_thing',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
     requestedInput: { url: 'https://example.com/a' },
   })
   const closeA = await pollUntil(() => getSkillChildRunCloseEvent(a.childRunId))
@@ -299,16 +299,16 @@ test('Phase 5: skill_failure (success:false) vs infra_error (throw) split correc
     repository: makeFakeRepository(),
     launchStuckGuardMs: 5_000,
   })
-  registerLooping('test-skill-split')
+  registerLooping('video-expert-analyzer')
   const b = await startSkillChildRun({
     scopeId: 'scope-2',
     sessionId: 'session-2',
-    skillId: 'test-skill-split',
-    action: 'do_thing',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
     requestedInput: { url: 'https://example.com/b' },
   })
   const closeB = await pollUntil(() => getSkillChildRunCloseEvent(b.childRunId))
-  assert.equal(closeB.terminalReason, 'infra_error')
+  assert.equal(closeB.terminalReason, 'child_process_crashed')
 })
 
 // =====================================================================

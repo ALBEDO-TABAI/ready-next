@@ -289,8 +289,12 @@ export type ScopeRunTerminalReason =
   | 'blocked_config'
   | 'blocked_tool_error'
   | 'failed_skill'
+  | 'resume_launch_failed'
+  | 'persistence_failed'
   | 'cancelled_user'
   | 'cancelled_runtime'
+  // Legacy persisted events are normalized on read, but renderer keeps
+  // this for older scope-run payloads still in memory.
   | 'infra_error'
 
 /**

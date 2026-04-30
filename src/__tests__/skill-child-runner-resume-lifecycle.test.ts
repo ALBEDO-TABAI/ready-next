@@ -539,7 +539,7 @@ test('two finalize attempts in the same lifecycle do not double-resolve', async 
 
   // Second finalize: pass a DIFFERENT close. If the guard works, none of
   // the visible state should mutate.
-  const closeB = makeTerminalClose('test-skill-double-finalize', 'failed', 'infra_error')
+  const closeB = makeTerminalClose('test-skill-double-finalize', 'failed', 'child_process_crashed')
   closeB.childRunId = first.childRunId
   runner.finalizeRun(activeRef, closeB)
 

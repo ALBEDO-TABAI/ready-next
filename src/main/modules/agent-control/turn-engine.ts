@@ -363,12 +363,12 @@ export type ChildCommandKind = 'cancel' | 'resume'
 /**
  * `terminalReason` is constrained to `TurnTerminalReason` so callers can
  * pass it straight to `finish({ terminalReason })` without coercion. Resume
- * failure maps to `'failed_skill'` (not the bare `'failed'` literal in the
+ * failure maps to `'resume_launch_failed'` (not the bare `'failed'` literal in the
  * source plan, which isn't a valid `TurnTerminalReason` member).
  */
 export interface ChildCommandOutcome {
   message: string
-  terminalReason: 'done' | 'cancelled_user' | 'failed_skill'
+  terminalReason: 'done' | 'cancelled_user' | 'resume_launch_failed'
   status: 'done' | 'cancelled' | 'error'
 }
 
@@ -407,7 +407,7 @@ export function renderChildCommandOutcome(args: {
       const detail = close.error?.message || close.terminalReason
       return {
         message: `恢复 child run ${childRunId} 失败：${detail}`,
-        terminalReason: 'failed_skill',
+        terminalReason: 'resume_launch_failed',
         status: 'error',
       }
     }
@@ -424,7 +424,7 @@ export function renderChildCommandOutcome(args: {
       // claiming success.
       return {
         message: `恢复 child run ${childRunId} 时回到暂停状态：${close.terminalReason}`,
-        terminalReason: 'failed_skill',
+        terminalReason: 'resume_launch_failed',
         status: 'error',
       }
   }
@@ -959,7 +959,7 @@ export class TurnEngine {
             ? 'checkpoint_budget'
             : status === 'cancelled'
               ? 'cancelled_runtime'
-              : 'infra_error')
+              : 'persistence_failed')
       if (turnFrame) {
         turnFrame.terminalReason = terminalReason
       }
@@ -2416,7 +2416,10 @@ export class TurnEngine {
           const childStatus = childContinuation.closeEvent.status
           const turnTerminalReason: TurnTerminalReason =
             childStatus === 'completed' ? 'done'
-            : childStatus === 'failed' ? 'failed_skill'
+            : childStatus === 'failed'
+              ? childContinuation.closeEvent.terminalReason === 'failed_skill'
+                ? 'failed_skill'
+                : 'persistence_failed'
             : childStatus === 'killed' ? 'cancelled_user'
             : 'done'
           if (turnFrame) {

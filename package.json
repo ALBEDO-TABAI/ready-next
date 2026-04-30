@@ -26,8 +26,11 @@
     "test:watch": "npx tsx@^4.19.2 --test --watch src/__tests__/*.test.ts",
     "test:skill": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/skill-*.test.ts src/__tests__/contract-*.test.ts src/__tests__/agent-context-*.test.ts src/__tests__/embedded-skill-*.test.ts src/__tests__/db-worker*.test.ts src/__tests__/spawn-*.test.ts src/__tests__/before-quit*.test.ts src/__tests__/boot-reaper*.test.ts",
     "test:perf": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/db-*.test.ts src/__tests__/database-*.test.ts src/__tests__/file-filter-*.test.ts src/__tests__/file-watcher*.test.ts src/__tests__/indexer-*.test.ts src/__tests__/use-force-layout-*.test.ts src/__tests__/workspace-validation*.test.ts src/__tests__/browser-cleanup*.test.ts src/__tests__/before-quit*.test.ts src/__tests__/boot-reaper*.test.ts src/__tests__/skill-action-output-overflow*.test.ts src/__tests__/skill-direct-action-tree-kill*.test.ts",
+    "test:a0:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
+    "test:a0:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-state-machine.test.ts src/__tests__/skill-child-runtime-decisions.test.ts src/__tests__/skill-child-runner.test.ts src/__tests__/skill-child-runner-resume-lifecycle.test.ts src/__tests__/skill-child-run-end-to-end.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/turn-engine-force-tool-dispatch.test.ts src/__tests__/skill-task-run-repository.test.ts src/__tests__/tool-internal-admission.test.ts",
     "generate:document-widget-openui": "npx tsx@^4.19.2 ./scripts/generate-document-widget-openui-artifacts.ts",
     "verify": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
+    "verify:a0": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-plan-pairing.cjs --all && node scripts/check-commit-message.cjs --message \"feat(agent): implement A0 strategic foundation\" && npm run test:a0:gates && npm run test:a0:focus",
     "verify:cloud": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
     "postinstall": "electron-builder install-app-deps"
   },
