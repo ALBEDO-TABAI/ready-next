@@ -236,10 +236,11 @@ import type {
   SkillsRuntimeManager,
   SkillRunRequest,
 } from '../main/modules/skills-runtime/runtime-manager'
-import type {
-  SkillTaskRunRepository,
-  SkillTaskRunRecord,
-} from '../main/modules/repositories/skill-task-run-repository'
+import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
+// `SkillTaskRunRepository` is already imported as a value (the class
+// constructor) on line 25; ESLint flags a redeclare if we re-import it
+// here as a type, so we reuse the value-imported binding for both
+// purposes.
 
 // ----------- Test fixtures -----------
 

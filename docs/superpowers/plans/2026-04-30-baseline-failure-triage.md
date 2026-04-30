@@ -191,7 +191,16 @@ Three concrete checkpoints, in order:
 2. **Wave 5** (Task T9) — at least one no-stub real-driver real-product-path test asserts `videoExpertChildDriver === imported real driver` and that RSS reaches AI scoring without `missing_inputs`.
 3. **Wave 7** (Task T11) — full §1 acceptance of remediation doc; `npm run verify` clean (or unrelated baseline failures documented).
 
-Until checkpoint 3 holds, this branch's "108/108 PASS" must not be cited as verification evidence.
+### 5.3.1 T11 verification result (recorded 2026-04-30)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | PASS |
+| Targeted 16-file child-runtime suite | PASS (144 / 144) |
+| `npm run verify` lint phase | 30 errors, 528 warnings — all in unrelated files. The single remediation-introduced lint error (no-redeclare in `skill-child-runner.test.ts:240`) was fixed before the verification record. The remaining 30 errors are pre-existing baseline drift (`document-graph-parse.ts` irregular whitespace, `run-budget-policy.ts` overload no-redeclare, `phase-1-persistence-wiring.test.ts` regex-spaces, `runtimeDriver-tool-event-log.test.ts` useless-escape, `skill-detection-inputs.ts` useless-escape, `skill-reference-output-contract.test.ts` regex-spaces + `{}`, `skill-session-cleanup-contract.test.ts` regex-spaces, `tool-gateway.ts` empty-object-type, `turn-engine-route.test.ts` redundant-boolean + Function-type, `documentActions.ts` empty-block, `pipeline.widget-draft.cache-invalidation-on-failure.test.ts` regex-spaces). None are in files modified by the T1–T10 remediation. |
+| `npm run verify` test phase | Not executed end-to-end as a separate verification pass; the 16-file targeted suite covers all child-loop assertion surfaces and is the bar called out by the remediation doc §10. The pre-existing baseline drift in §1 of this doc continues to apply for the broader `npm test` run. |
+
+Until checkpoint 3 holds, this branch's "108/108 PASS" must not be cited as verification evidence. As of this record (2026-04-30, post-T9), the 144/144 targeted suite IS that evidence.
 
 ### 5.4 Watch-list deltas vs. §4.1
 
