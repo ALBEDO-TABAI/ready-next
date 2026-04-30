@@ -1,12 +1,38 @@
 # Skill Child-Loop Boundary
 
-> Status: implemented boundary as of 2026-04-30. Last updated 2026-04-30.
+> Status: implemented boundary as of 2026-04-30 (remediation series).
+> Last updated 2026-04-30.
 >
-> The Phase 1–7 child-loop migration landed on this branch. VEA long
-> actions (`video_expert_pipeline`, `video_expert_ai_analyze`) now run
-> through a dedicated child runner with its own identity, transcript,
-> abort controller, and structured close event. The parent turn loop
-> never synthesises an internal VEA action.
+> The Phase 1–7 child-loop *shape* landed at commit `452f01a`
+> (`feat(skill): introduce child-owned long-skill runtime architecture`).
+> A subsequent independent code review found that the *ownership
+> migration* was incomplete: parent steering still surfaced typed VEA
+> actions, the child runner false-claimed live work for inactive DB
+> rows, terminal close events were memory-only, and the gateway-style
+> tool admission did not yet apply to internal child dispatches. The
+> remediation series (commits `c58e314` → `4b7e359`, T1–T9 of
+> `~/.claude/plans/bubbly-floating-mccarthy.md`) closed those gaps.
+> What this document describes is now the actual runtime behavior, not
+> a future-state target.
+
+## 0. Authoritative boundary statement (post-remediation)
+
+When `frame.skill?.runContract?.childRunId` is set:
+
+- Parent code MAY resume / wait / cancel / status the child via the
+  child runner's public APIs.
+- Parent code MUST NOT choose the next internal VEA action. The child
+  driver picks the action; the runner dispatches it through the
+  unified tool gateway.
+- Parent prompts (`buildTurnFrameSteering`) MUST NOT surface typed
+  `skill_video_expert_*` actions. A child-aware system reminder names
+  the live `childRunId` so the model knows why the typed action is
+  absent.
+- `task_projection` is a read model. It never invents child liveness.
+- `<outputDir>/run_state.json` is VEA's recovery truth. The parent
+  reads handles, never the file content.
+- The child's append-only JSONL log is audit, not parent decision
+  input. The parent never parses it to choose VEA's next action.
 
 ## 1. Why this document exists
 
@@ -204,6 +230,48 @@ It MUST NOT be reported as `failed` (source plan §3 rule 7).
   the contract carries a `childRunId`. Single gate for force-tool fencing.
 - `isChildOwnedSkill(skillId)` — owned by `skill-child-drivers.ts`,
   reflects whether a driver has been registered.
+
+## 5.4 Remediation closures (T1–T9, commits c58e314 → 4b7e359)
+
+The shape from `452f01a` plus the remediation series jointly satisfy
+each rule in §0 above. Concrete code locations:
+
+| Rule | Code that enforces it | Test that locks it |
+| --- | --- | --- |
+| Parent never picks next VEA action | `turn-frame-steering.ts:isChildOwnedFrame` — `shouldPreferTypedAction` early-returns false; `selectSteeringMode` early-returns `ask_model`; `buildTurnFrameSteering` short-circuits with primitives-only `preferredToolNames` and a child-aware reminder. | `turn-frame-steering.test.ts` T5 cases. |
+| Parent actively routes continuation | `turn-engine.ts:computeChildContinuationDecision` — wired at iteration top to surface child closes / parent-side checkpoint / wait posture before any model invocation or force-tool decision. | `skill-child-run-end-to-end.test.ts` T5 cases (Cases G–L). |
+| Single-flight reuse only when runner is alive | `skill-child-runner.ts:reconcileExistingChildRun` — gates `'reused'` on `this.active.get(existingId)`; inactive `running` rows are pinned to `recoverable_paused / process_restarted`. | `skill-child-single-flight.test.ts` T4 Cases A & B. |
+| getCloseEvent reads durable terminal closes | `skill-child-runner.ts:getCloseEvent` — falls back to `repository.get(id).resumePayload.childRun.closeEvent` after `recentCloses` misses. Skips fallback while a live runner exists for the id. | `skill-child-runner.test.ts` T4 Case C. |
+| Cancel uses real metadata | `skill-child-runner.ts:cancelSkillChildRun` — looks up the row first; preserves real `skillId / outputDir / runStatePath`; observer/launch timeouts produce `failed/launch_stuck`, never `killed/cancelled_user`. | `skill-child-runner.test.ts` T4 Cases D & E. |
+| Child internal admission is unified | `tool-registry.ts:executeSkillActionViaToolGateway` — same Zod resolver as public typed dispatch, structured errors mapped to runner close event vocabulary. Recursion guards live where they can fire (`startSkillChildRun:inDriverDepth`, `dispatchChildLoopSkillAction`), not in the gateway. | `tool-input-schemas-registry.test.ts` T6 cases + `tool-gateway-registry.test.ts` parity. |
+| Live frame seeded into ToolRuntimeContext | `tool-runtime-context-builder.ts:buildActiveFrameContextFromTurnFrame` + `turn-engine.ts` per-turn `activeFrame` seed. Earlier same-batch `contextModifier` patches union onto the seed. | `skill-tools-frame-patch-delta.test.ts` T7 cases. |
+| Exact-first contract identity | `run-contracts.ts:loadSkillRunContract` — strict order: childRunId → runStatePath → outputDir → singleFlightKey → latest-by-skill fallback. `skillId` filter applied at every step. | `skill-child-run-end-to-end.test.ts` T8 cases + `task-projection-sync.test.ts`. |
+| Direct sceneScoresPath cold-start | `video-expert-child-driver.ts:planNextAction` — prefers explicit `state.requestedInput.sceneScoresPath`; derives outputDir from `dirname(sceneScoresPath)` when absent. | `video-expert-child-driver.test.ts` T3 cases + `rss-visual-skill-child-run.test.ts` T9 real-driver test. |
+| No false-green stub tests | `rss-visual-skill-child-run.test.ts` T9 block + identity guard `assert.strictEqual(videoExpertChildDriver, productionExport)` in both T3 and T9 real-driver tests so a stub swap-in fails before any plan runs. | T9 itself. |
+
+## 5.5 Verification (recorded 2026-04-30 after T9 landed)
+
+```bash
+npm run typecheck                                    # PASS
+npx tsx@^4.19.2 --test --test-concurrency=1 \
+  src/__tests__/skill-child-run-id.test.ts \
+  src/__tests__/skill-child-run-log.test.ts \
+  src/__tests__/video-expert-child-driver.test.ts \
+  src/__tests__/skill-child-runner.test.ts \
+  src/__tests__/skill-child-single-flight.test.ts \
+  src/__tests__/skill-child-runtime-decisions.test.ts \
+  src/__tests__/skill-child-run-end-to-end.test.ts \
+  src/__tests__/skill-child-run-migration.test.ts \
+  src/__tests__/tool-gateway-registry.test.ts \
+  src/__tests__/tool-input-schemas-registry.test.ts \
+  src/__tests__/skill-tools-frame-patch-delta.test.ts \
+  src/__tests__/skill-read-artifact-frame-roots.test.ts \
+  src/__tests__/rss-visual-skill-child-run.test.ts \
+  src/__tests__/task-projection-sync.test.ts \
+  src/__tests__/task-projection-supersede.test.ts \
+  src/__tests__/skill-runtime-user-acceptance.test.ts
+                                                     # PASS (144 / 144)
+```
 
 ## 5.3 Status normalization (Phase 7)
 

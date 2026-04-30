@@ -1,5 +1,24 @@
 # Skill Runtime Child-Loop Architecture Implementation Plan
 
+> **Status (2026-04-30):** Phases 1–7 of this plan landed at commit
+> `452f01a`, but landed the *shape* not the full *ownership* migration.
+> The remediation series at
+> `docs/superpowers/plans/2026-04-30-skill-runtime-child-loop-remediation.md`
+> (commits `c58e314` → `4b7e359`, T1–T9 of meta-plan
+> `~/.claude/plans/bubbly-floating-mccarthy.md`) closed the residual
+> gaps: parent steering no longer surfaces typed VEA actions when
+> `childRunId` is set; the runner's single-flight reuse is gated on
+> in-memory liveness; terminal close events are durable; child internal
+> dispatches share the public Zod admission contract; live tool context
+> is seeded from the active frame; contract lookup is exact-first; the
+> RSS visual chain is proven against the real `videoExpertChildDriver`,
+> not a stub.
+>
+> Treat this document as the architectural reference for *what was
+> built*. For *what was missing and how it was repaired*, see the
+> remediation doc and `docs/architecture/skill-child-loop-boundary.md`
+> §0 (authoritative boundary statement) and §5.4 (closure table).
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace parent-turn forced skill resumption with child-owned long-skill runs that have their own identity, state, transcript/log, cancellation, budget, and close event.
