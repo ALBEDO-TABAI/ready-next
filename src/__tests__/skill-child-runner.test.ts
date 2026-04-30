@@ -895,3 +895,160 @@ test('T2 guard — every typed close event status is in the public child-status 
     }
   }
 })
+
+// =====================================================================
+// T4 — Durable close persistence + inactive cancel + observer-timeout
+// regression guards.
+//
+// These cases lock down the contract that close events survive across
+// the in-memory `recentCloses` cache being cleared (process restart
+// proxy) and that `cancelSkillChildRun` on a persisted-but-inactive row
+// uses the row's real metadata instead of synthesizing `'unknown'`.
+// =====================================================================
+
+test('T4 Case C: getCloseEvent reads durable close after recentCloses is cleared', async () => {
+  const { repo } = setupRunner()
+  registerStubDriver('test-skill-durable-close', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-durable-close', 'completed', 'completed'),
+    ],
+  })
+  const result = await startSkillChildRun({
+    scopeId: 'scope-durable',
+    sessionId: 'session-durable',
+    skillId: 'test-skill-durable-close',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/durable' },
+  })
+  // Wait for the run to terminate.
+  await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+
+  // Tear down the runner singleton (proxy for "process restarted") but
+  // keep the repository state so the durable close persists in the row.
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  configureSkillChildRunner({
+    runtimeManager: makeFakeRuntime().manager,
+    repository: repo.repo,
+    launchStuckGuardMs: 100,
+  })
+
+  // After fresh runner config, recentCloses is empty. The repo still has
+  // the close event. getSkillChildRunCloseEvent must reconstruct it from
+  // the durable record.
+  const durable = getSkillChildRunCloseEvent(result.childRunId)
+  assert.ok(durable, 'durable close must survive recentCloses eviction')
+  assert.equal(durable!.childRunId, result.childRunId)
+  assert.equal(durable!.skillId, 'test-skill-durable-close')
+  assert.equal(durable!.status, 'completed')
+  assert.equal(durable!.terminalReason, 'completed')
+})
+
+test('T4 Case D: cancel on persisted-but-inactive row uses the row real skillId / outputDir / runStatePath', async () => {
+  const { repo } = setupRunner()
+  registerStubDriver('test-skill-cancel-real', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-cancel-real', 'completed', 'completed'),
+    ],
+  })
+  // Drive the run far enough to mint a real row with real outputDir /
+  // runStatePath, then let it complete naturally.
+  const result = await startSkillChildRun({
+    scopeId: 'scope-cancel-real',
+    sessionId: 'session-cancel-real',
+    skillId: 'test-skill-cancel-real',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/cancel-real' },
+  })
+  await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+
+  // Capture row metadata while the row is still in the repo.
+  const row = repo.state.rows.get(result.childRunId)
+  assert.ok(row, 'row must be persisted')
+  const realOutputDir = row!.outputDir
+  const realRunStatePath = row!.runStatePath
+  assert.ok(realOutputDir, 'real outputDir must be persisted')
+  assert.ok(realRunStatePath, 'real runStatePath must be persisted')
+
+  // Tear down the runner singleton; the row stays in the repo. Now the
+  // active map is empty so `cancelSkillChildRun` falls through to the
+  // synthesizing branch.
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  configureSkillChildRunner({
+    runtimeManager: makeFakeRuntime().manager,
+    repository: repo.repo,
+    launchStuckGuardMs: 100,
+  })
+
+  // The row already has a durable close from completion; that close MUST
+  // be returned (not a synthesized killed). But to test the synthesize
+  // branch with REAL metadata, force the row back to a non-terminal state
+  // first so cancel must mint a fresh close.
+  repo.repo.updateChildRun(result.childRunId, { status: 'recoverable_paused', closeEvent: null })
+
+  const close = await cancelSkillChildRun(result.childRunId, 'user_pressed_cancel')
+  // (1) Real skillId, NOT 'unknown'.
+  assert.equal(close.skillId, 'test-skill-cancel-real',
+    'cancel close must use the row real skillId')
+  assert.notEqual(close.skillId, 'unknown')
+  // (2) Real outputDir / runStatePath, NOT null.
+  assert.equal(close.outputDir, realOutputDir,
+    'cancel close must use the row real outputDir')
+  assert.equal(close.runStatePath, realRunStatePath,
+    'cancel close must use the row real runStatePath')
+  // (3) Status remains killed/cancelled_user (cancel is an explicit user
+  // intent — Case E covers the observer-timeout distinction).
+  assert.equal(close.status, 'killed')
+  assert.equal(close.terminalReason, 'cancelled_user')
+})
+
+test('T4 Case E: observer / launch timeout MUST NOT mark the child as killed / cancelled_user', async () => {
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  configureSkillChildRunner({
+    runtimeManager: makeFakeRuntime().manager,
+    repository: makeFakeRepository().repo,
+    launchStuckGuardMs: 30,
+  })
+  // Driver hangs in planNextAction so the runner never reaches
+  // `action_started` — the launch-stuck guard fires. This is the
+  // canonical "observer / awaiter timeout" code path inside the runner.
+  let resolveDriver!: () => void
+  const stall = new Promise<void>((r) => { resolveDriver = r })
+  registerSkillChildDriver({
+    skillId: 'test-skill-observer-timeout',
+    canStart: () => true,
+    canResume: () => true,
+    createInitialState: async (params) => ({
+      skillId: 'test-skill-observer-timeout',
+      requestedInput: params.requestedInput,
+    }),
+    planNextAction: async () => {
+      await stall
+      return makeTerminalClose('test-skill-observer-timeout', 'completed', 'completed')
+    },
+    observeAfterAction: async (state) => state,
+  })
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-observer',
+    sessionId: 'session-observer',
+    skillId: 'test-skill-observer-timeout',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/observer-timeout' },
+  })
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId), 1_500)
+
+  // Observer / awaiter timeout MUST NOT collapse into a user cancel.
+  assert.notEqual(close.status, 'killed',
+    'observer-timeout must not be reported as killed')
+  assert.notEqual(close.terminalReason, 'cancelled_user',
+    'observer-timeout must not be reported as cancelled_user')
+  // The real terminal reason is launch_stuck (status='failed').
+  assert.equal(close.status, 'failed')
+  assert.equal(close.terminalReason, 'launch_stuck')
+
+  resolveDriver()
+})

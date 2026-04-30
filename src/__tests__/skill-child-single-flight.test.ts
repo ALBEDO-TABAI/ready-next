@@ -250,3 +250,106 @@ test('Phase 5: single-flight — different scope/session = different child run',
   assert.notEqual(third.status, 'reused')
   assert.notEqual(third.childRunId, first.childRunId)
 })
+
+// =====================================================================
+// T4 — Single-flight liveness (B Phase) regression guards.
+//
+// `startSkillChildRun` must never claim live work for a DB row whose row
+// status says `running` when no in-memory runner is actually alive.
+// =====================================================================
+
+test('T4 Case A: row running + no in-memory active runner does NOT return reused', async () => {
+  // Build a repo whose pre-existing row claims `running` for the canonical
+  // single-flight key the runner will compute. The runner must consult the
+  // active map; since no runner is alive (fresh setup), the result must NOT
+  // be `reused`. The expected outcome is either a durable resume or a
+  // `recoverable_paused` reconciliation marker.
+  const { repo } = setup()
+  registerStallingDriver('video-expert-analyzer')
+
+  // Pre-seed the repository as if the previous process had left a `running`
+  // row behind. Use the same digest computation as the runner so the
+  // single-flight key matches.
+  const url = 'https://example.com/restart-recovered'
+  const requestedInput = { url }
+  // The runner will compute the digest from {url}-only (no outputDir hint).
+  // Just create with a synthetic key — but to align, we let the runner
+  // compute its own and instead seed via createChildRun with a key derived
+  // identically. Since the runner builds the key as
+  // `${scope}|${session}|${skillId}|${digest}`, we seed via a known scope.
+  // To avoid replicating digest logic, use the runner once to mint a row,
+  // then teardown the runner state and create a new one — the row remains
+  // in the repo.
+  const seeded = await startSkillChildRun({
+    scopeId: 'scope-stale',
+    sessionId: 'session-stale',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput,
+  })
+  assert.equal(seeded.status, 'running')
+  // Tiny yield so the runner registers as active before we tear it down.
+  await new Promise((r) => setTimeout(r, 5))
+
+  // Tear down the runner singleton WITHOUT clearing the repository. The row
+  // remains with status `running`; the in-memory `active` map is now empty.
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  configureSkillChildRunner({
+    runtimeManager: makeFakeRuntime(),
+    repository: repo.repo,
+    launchStuckGuardMs: 60_000,
+  })
+  registerStallingDriver('video-expert-analyzer')
+
+  const second = await startSkillChildRun({
+    scopeId: 'scope-stale',
+    sessionId: 'session-stale',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput,
+  })
+
+  // (1) MUST NOT claim live work via 'reused' when nothing is live.
+  assert.notEqual(second.status, 'reused',
+    'startSkillChildRun must not return reused when active map is empty')
+  // (2) Either resumed (status 'running') or pinned to recoverable_paused
+  // with terminalReason='process_restarted'. Both are valid; the
+  // anti-pattern is silently claiming `reused`.
+  assert.ok(
+    second.status === 'running'
+      || second.status === 'recoverable_paused',
+    `unexpected status=${second.status} for stale-row recovery`,
+  )
+  if (second.status === 'recoverable_paused') {
+    assert.ok(second.closeEvent, 'recoverable_paused result must carry a close event')
+    assert.equal(second.closeEvent!.terminalReason, 'process_restarted')
+  }
+})
+
+test('T4 Case B: row running + active runner present DOES return reused', async () => {
+  // Same scope/session/url with a still-alive runner — the existing
+  // single-flight collapse behavior is preserved.
+  setup()
+  registerStallingDriver('video-expert-analyzer')
+
+  const first = await startSkillChildRun({
+    scopeId: 'scope-live',
+    sessionId: 'session-live',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/live' },
+  })
+  assert.equal(first.status, 'running')
+  await new Promise((r) => setTimeout(r, 5))
+
+  const second = await startSkillChildRun({
+    scopeId: 'scope-live',
+    sessionId: 'session-live',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/live' },
+  })
+  assert.equal(second.status, 'reused')
+  assert.equal(second.childRunId, first.childRunId)
+})

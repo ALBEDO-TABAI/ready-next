@@ -250,6 +250,220 @@ test('Phase 7: two skills sharing one outputDir do not supersede each other', ()
   assert.equal(otherContract!.childRunId, undefined)
 })
 
+// =====================================================================
+// T4 — Legacy row reconciliation (Case F)
+//
+// A legacy row that pre-existed from before this branch (status `running`
+// in the DB but no in-memory runner alive, and no `closeEvent` persisted)
+// must reconcile cleanly when the new runner observes it via
+// `startSkillChildRun`. The acceptance: it must NOT be silently claimed
+// as live (`status: 'reused'`); it must either resume durably or mark
+// the row as `recoverable_paused` with `terminalReason='process_restarted'`.
+// =====================================================================
+
+import {
+  configureSkillChildRunner as configureRunnerForCaseF,
+  startSkillChildRun as startSkillChildRunForCaseF,
+  __resetSkillChildRunnerForTests as resetRunnerForCaseF,
+} from '../main/modules/agent-control/skill-child-runner'
+import {
+  registerSkillChildDriver as registerDriverForCaseF,
+  __resetSkillChildDriversForTests as resetDriversForCaseF,
+  type SkillChildDriver as SkillChildDriverForCaseF,
+} from '../main/modules/agent-control/skill-child-drivers'
+import type {
+  SkillChildCloseEvent as SkillChildCloseEventForCaseF,
+  SkillChildDriverAction as SkillChildDriverActionForCaseF,
+} from '../main/modules/agent-control/skill-child-run-types'
+import type {
+  SkillRunResult as SkillRunResultForCaseF,
+  SkillsRuntimeManager as SkillsRuntimeManagerForCaseF,
+  SkillRunRequest as SkillRunRequestForCaseF,
+} from '../main/modules/skills-runtime/runtime-manager'
+
+interface CaseFRepoState { rows: Map<string, SkillTaskRunRecord> }
+
+function makeCaseFRepository(): { repo: SkillTaskRunRepository; state: CaseFRepoState } {
+  const state: CaseFRepoState = { rows: new Map() }
+  const repo = {
+    createChildRun: (input: Parameters<SkillTaskRunRepository['createChildRun']>[0]) => {
+      const now = new Date().toISOString()
+      const record: SkillTaskRunRecord = {
+        id: input.childRunId,
+        scopeId: input.scopeId ?? null,
+        sessionId: input.sessionId ?? null,
+        agent: null,
+        runId: null,
+        skillId: input.skillId,
+        skillName: input.skillName ?? null,
+        action: input.action,
+        toolName: null,
+        runKind: 'child_run',
+        status: 'running',
+        interactionState: 'running',
+        goalText: null,
+        resourceRefs: [],
+        params: input.requestedInput,
+        steps: [],
+        currentStepId: null,
+        artifacts: [],
+        outputDir: input.outputDir,
+        runStatePath: input.runStatePath,
+        sceneScoresPath: null,
+        deliveryReportPath: null,
+        failureKind: null,
+        failureDetail: null,
+        jobId: null,
+        detachedTaskId: null,
+        resumePayload: {
+          childRun: {
+            version: 1,
+            childRunId: input.childRunId,
+            kind: 'vea',
+            parentScopeId: input.scopeId,
+            parentSessionId: input.sessionId,
+            skillId: input.skillId,
+            skillName: input.skillName,
+            requestedAction: input.action,
+            requestedInput: input.requestedInput,
+            singleFlightKey: input.singleFlightKey,
+            parentNextHint: input.parentNextHint,
+            outputDir: input.outputDir,
+            runStatePath: input.runStatePath,
+            eventLogPath: input.eventLogPath,
+            status: input.status ?? 'running',
+            closeEvent: null,
+            legacy: { taskRunId: null, detachedTaskId: null, projectionTaskId: null },
+          },
+        },
+        createdAt: now,
+        startedAt: null,
+        updatedAt: now,
+        finishedAt: null,
+      }
+      state.rows.set(input.childRunId, record)
+      return record
+    },
+    updateChildRun: (childRunId: string, patch: Record<string, unknown>) => {
+      const existing = state.rows.get(childRunId)
+      if (!existing) return
+      const payload = (existing.resumePayload as { childRun: Record<string, unknown> }).childRun
+      const merged = { ...payload, ...patch }
+      existing.resumePayload = { childRun: merged }
+      if (typeof patch.status === 'string') existing.status = patch.status as SkillTaskRunRecord['status']
+      existing.updatedAt = new Date().toISOString()
+    },
+    findLatestChildRunByKey: (key: string): SkillTaskRunRecord | null => {
+      const ACTIVE = new Set(['queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked'])
+      for (const row of state.rows.values()) {
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (child.singleFlightKey === key && ACTIVE.has(child.status as string)) return row
+      }
+      return null
+    },
+    findLatestChildRunBySkill: () => null,
+    get: (id: string) => state.rows.get(id) ?? null,
+  } as unknown as SkillTaskRunRepository
+  return { repo, state }
+}
+
+function makeCaseFRuntime(): SkillsRuntimeManagerForCaseF {
+  let resolveStall!: () => void
+  const stall = new Promise<void>((r) => { resolveStall = r })
+  ;(globalThis as Record<string, unknown>).__casef_resolve = resolveStall
+  return {
+    getRuntimeInfo: () => ({
+      runtimeRoot: '/tmp/casef', skillsRoot: '/tmp/casef/s',
+      customSkillsRoot: '/tmp/casef/c', outputsRoot: '/tmp/casef/o',
+      venvRoot: '/tmp/casef/v',
+    }),
+    runSkill: async (_request: SkillRunRequestForCaseF): Promise<SkillRunResultForCaseF> => {
+      await stall
+      return { success: true, skillId: '', action: '', stdout: '', stderr: '', command: [] }
+    },
+  } as unknown as SkillsRuntimeManagerForCaseF
+}
+
+function registerCaseFDriver(skillId: string): void {
+  const driver: SkillChildDriverForCaseF = {
+    skillId,
+    canStart: () => true,
+    canResume: () => true,
+    createInitialState: async (params) => ({ skillId, requestedInput: params.requestedInput }),
+    planNextAction: async (): Promise<SkillChildDriverActionForCaseF | SkillChildCloseEventForCaseF> => ({
+      action: 'do_thing',
+      input: {},
+    }),
+    observeAfterAction: async (state) => state,
+  }
+  registerDriverForCaseF(driver)
+}
+
+test('T4 Case F: legacy row pre-existing as running with missing close payload reconciles cleanly', async () => {
+  const { repo } = makeCaseFRepository()
+  resetRunnerForCaseF()
+  resetDriversForCaseF()
+  configureRunnerForCaseF({
+    runtimeManager: makeCaseFRuntime(),
+    repository: repo,
+    launchStuckGuardMs: 60_000,
+  })
+  registerCaseFDriver('video-expert-analyzer')
+
+  // Phase A — first runner mints a row with status `running`.
+  const seeded = await startSkillChildRunForCaseF({
+    scopeId: 'scope-legacy-recovery',
+    sessionId: 'session-legacy-recovery',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/legacy-recovery' },
+  })
+  assert.equal(seeded.status, 'running')
+  await new Promise((r) => setTimeout(r, 5))
+
+  // Phase B — simulate process restart by tearing the runner down WITHOUT
+  // touching the repository, then reconfigure with the same repo. The row
+  // remains with status `running` but no in-memory runner is alive and
+  // no closeEvent has been persisted.
+  resetRunnerForCaseF()
+  resetDriversForCaseF()
+  configureRunnerForCaseF({
+    runtimeManager: makeCaseFRuntime(),
+    repository: repo,
+    launchStuckGuardMs: 60_000,
+  })
+  registerCaseFDriver('video-expert-analyzer')
+
+  // Confirm the legacy row is still in the repo with status 'running' AND
+  // no closeEvent — this is the legacy shape the spec calls out.
+  const seededRow = repo.get(seeded.childRunId)
+  assert.ok(seededRow, 'legacy row must still be in the repository')
+  assert.equal(seededRow!.status, 'running')
+
+  // Phase C — startSkillChildRun for the SAME single-flight target. The
+  // contract: never silently claim it as live (`reused`); reconcile by
+  // either durable resume or marking process_restarted.
+  const recovered = await startSkillChildRunForCaseF({
+    scopeId: 'scope-legacy-recovery',
+    sessionId: 'session-legacy-recovery',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/legacy-recovery' },
+  })
+  assert.notEqual(recovered.status, 'reused',
+    'legacy reconciliation must never claim a stale row as live (reused)')
+  assert.ok(
+    recovered.status === 'running'
+      || recovered.status === 'recoverable_paused',
+    `unexpected reconcile status=${recovered.status}`,
+  )
+  if (recovered.status === 'recoverable_paused') {
+    assert.ok(recovered.closeEvent, 'recoverable_paused result must carry a close event')
+    assert.equal(recovered.closeEvent!.terminalReason, 'process_restarted')
+  }
+})
+
 test('Phase 7: legacy row with no skillId remains adoptable (loader keeps legacyAdoptableHandles)', () => {
   // Source plan §8 Scenario H part 2 — legacy short-task row with no
   // `skillId` recording must still be adoptable. The contract surfaces

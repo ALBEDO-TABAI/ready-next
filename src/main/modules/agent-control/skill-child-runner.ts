@@ -218,17 +218,14 @@ class SkillChildRunner {
     try {
       const existing = this.config.repository.findLatestChildRunByKey(singleFlightKey)
       if (existing) {
-        return {
-          childRunId: existing.id,
-          status: 'reused',
-          outputDir: existing.outputDir ?? '',
-          runStatePath: existing.runStatePath ?? '',
-          eventLogPath: deriveEventLogPathFromRecord(existing),
-          parentNextHint: existing.resumePayload && (existing.resumePayload as Record<string, unknown>).childRun
-            ? ((existing.resumePayload as { childRun: SkillChildRunPayload }).childRun.parentNextHint)
-            : (params.parentNextHint ?? 'wait_for_close_event'),
-          closeEvent: null,
-        }
+        const existingPayload = (existing.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+        const recoveredOrReused = await this.reconcileExistingChildRun({
+          existing,
+          existingPayload: existingPayload ?? null,
+          params,
+        })
+        if (recoveredOrReused) return recoveredOrReused
+        // Fall through — record was unrecoverable; mint a new child run.
       }
     } catch (error) {
       // Repo unavailable — fall through and try to start, the create()
@@ -386,14 +383,30 @@ class SkillChildRunner {
       // Already terminal — return the cached close if we have one.
       const cached = this.recentCloses.get(childRunId)
       if (cached) return cached
-      // Otherwise synthesize a killed close.
+
+      // Try the durable record before falling back to a synthesized close.
+      // When the row exists, the cancel close event MUST use the row's real
+      // skillId, outputDir, runStatePath — synthesizing `'unknown'` for a
+      // persisted row is a class-of-bug we explicitly guard against.
+      const record = this.tryGetRecord(childRunId)
+      const payload = (record?.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+      // If the record already has a stored terminal close, return it.
+      if (payload?.closeEvent && (
+          payload.status === 'completed'
+          || payload.status === 'failed'
+          || payload.status === 'killed'
+        )) {
+        this.recentCloses.set(childRunId, payload.closeEvent)
+        return payload.closeEvent
+      }
+
       const synth = makeCloseEvent({
         childRunId,
-        skillId: 'unknown',
+        skillId: payload?.skillId ?? record?.skillId ?? 'unknown',
         status: 'killed',
         terminalReason: 'cancelled_user',
-        outputDir: null,
-        runStatePath: null,
+        outputDir: payload?.outputDir ?? record?.outputDir ?? null,
+        runStatePath: payload?.runStatePath ?? record?.runStatePath ?? null,
         errorKind: 'cancelled_user',
         message: reason || 'cancelled before launch',
       })
@@ -405,6 +418,7 @@ class SkillChildRunner {
       } catch {
         // already gone — ignore.
       }
+      this.recentCloses.set(childRunId, synth)
       return synth
     }
     active.controller.abort(new Error(reason || 'cancelled_user'))
@@ -412,7 +426,206 @@ class SkillChildRunner {
   }
 
   getCloseEvent(childRunId: string): SkillChildCloseEvent | null {
-    return this.recentCloses.get(childRunId) ?? null
+    // A run is currently in flight for this childRunId — any cached or
+    // persisted close belongs to an earlier round and is therefore stale.
+    // Return `null` so callers continue polling until the live run reaches
+    // its real terminal state (which finalizeRun then exposes here).
+    if (this.active.has(childRunId)) return null
+    const cached = this.recentCloses.get(childRunId)
+    if (cached) return cached
+    // Durable fallback — read the persisted close from the repository
+    // when the in-memory ring has evicted it (or the runner singleton
+    // was reconfigured mid-process). The close event is written under
+    // `resumePayload.childRun.closeEvent` by `finalizeRun`.
+    const record = this.tryGetRecord(childRunId)
+    if (!record) return null
+    const payload = (record.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+    if (!payload) return null
+    if (payload.closeEvent) {
+      // Prime the in-memory ring so subsequent reads stay cheap.
+      this.recentCloses.set(childRunId, payload.closeEvent)
+      return payload.closeEvent
+    }
+    return null
+  }
+
+  private tryGetRecord(childRunId: string): ReturnType<SkillTaskRunRepository['get']> | null {
+    try {
+      return this.config.repository.get(childRunId)
+    } catch (error) {
+      logAgentMetric('skill_child_runner_lookup_error', {
+        childRunId,
+        error: errorMessage(error),
+      })
+      return null
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Internal: existing-row reconciliation
+  // ------------------------------------------------------------------
+
+  /**
+   * Decide what to do when `findLatestChildRunByKey` returned an existing row.
+   *
+   * Returns a `StartSkillChildRunResult` when the existing row is either
+   * genuinely live (`reused`), terminal-with-stored-close (terminal summary),
+   * durably resumed (`running`), or marked `recoverable_paused/process_restarted`.
+   *
+   * Returns `null` when the row is unrecoverable in a way that should fall
+   * through to a fresh child run.
+   *
+   * The DB-row-says-running-but-no-active-runner branch is the false-live
+   * path this method exists to kill: if `recentCloses` evicts and the
+   * runner singleton has no record of the row, we MUST not claim it as
+   * `reused`.
+   */
+  private async reconcileExistingChildRun(opts: {
+    existing: ReturnType<SkillTaskRunRepository['get']> & object
+    existingPayload: SkillChildRunPayload | null
+    params: StartSkillChildRunParams
+  }): Promise<StartSkillChildRunResult | null> {
+    const { existing, existingPayload, params } = opts
+
+    // (1) Active in-memory runner present — genuine live work.
+    const liveRunner = this.active.get(existing.id)
+    if (liveRunner) {
+      return {
+        childRunId: existing.id,
+        status: 'reused',
+        outputDir: existing.outputDir ?? '',
+        runStatePath: existing.runStatePath ?? '',
+        eventLogPath: deriveEventLogPathFromRecord(existing),
+        parentNextHint: existingPayload?.parentNextHint
+          ?? params.parentNextHint ?? 'wait_for_close_event',
+        closeEvent: null,
+      }
+    }
+
+    // (2) Row is terminal with a stored close event — surface terminal summary.
+    // (`findLatestChildRunByKey` filters by ACTIVE statuses today, so this
+    // branch is defensive against the filter being relaxed later.)
+    const persistedStatus = existingPayload?.status
+    const persistedClose = existingPayload?.closeEvent ?? null
+    if (persistedStatus
+        && (persistedStatus === 'completed'
+            || persistedStatus === 'failed'
+            || persistedStatus === 'killed')
+        && persistedClose) {
+      return {
+        childRunId: existing.id,
+        status: persistedStatus,
+        outputDir: existing.outputDir ?? '',
+        runStatePath: existing.runStatePath ?? '',
+        eventLogPath: deriveEventLogPathFromRecord(existing),
+        parentNextHint: existingPayload!.parentNextHint
+          ?? params.parentNextHint ?? 'wait_for_close_event',
+        closeEvent: persistedClose,
+      }
+    }
+
+    // (3) Row is active per the DB but no in-memory runner exists. This is
+    // the "process restarted / runner crashed mid-flight" case. Try a
+    // durable resume if the payload carries enough handles; otherwise
+    // mark the row `recoverable_paused/process_restarted`.
+    const driver = getSkillChildDriver(existing.skillId)
+    const canResume = !!driver
+      && !!existingPayload
+      && typeof existingPayload.outputDir === 'string'
+      && existingPayload.outputDir.length > 0
+      && typeof existingPayload.runStatePath === 'string'
+      && existingPayload.runStatePath.length > 0
+      && typeof existingPayload.eventLogPath === 'string'
+      && existingPayload.eventLogPath.length > 0
+
+    if (canResume) {
+      const payload = existingPayload!
+      const launchParams: SkillChildLaunchParams = {
+        skillId: payload.skillId,
+        action: payload.requestedAction,
+        scopeId: payload.parentScopeId ?? params.scopeId,
+        sessionId: payload.parentSessionId ?? params.sessionId,
+        requestedInput: payload.requestedInput,
+        parentNextHint: payload.parentNextHint,
+        outputDir: payload.outputDir,
+      }
+      const resumeStartParams: StartSkillChildRunParams = {
+        scopeId: payload.parentScopeId ?? params.scopeId,
+        sessionId: payload.parentSessionId ?? params.sessionId,
+        skillId: payload.skillId,
+        action: payload.requestedAction,
+        requestedInput: payload.requestedInput,
+        parentNextHint: payload.parentNextHint,
+      }
+      try {
+        this.config.repository.updateChildRun(existing.id, { status: 'running' })
+      } catch (error) {
+        logAgentMetric('skill_child_runner_resume_update_failed', {
+          childRunId: existing.id,
+          error: errorMessage(error),
+        })
+        // Fall through to recoverable_paused below.
+        return this.markRowProcessRestarted(existing.id, payload)
+      }
+      return this.beginRunLoop({
+        childRunId: existing.id,
+        params: resumeStartParams,
+        launchParams,
+        outputDir: payload.outputDir,
+        runStatePath: payload.runStatePath,
+        eventLogPath: payload.eventLogPath,
+        resume: true,
+      })
+    }
+
+    // No driver / insufficient handles — pin to recoverable_paused with
+    // terminalReason='process_restarted'.
+    return this.markRowProcessRestarted(existing.id, existingPayload)
+  }
+
+  /**
+   * Mark a stale row as `recoverable_paused/process_restarted` and return
+   * a non-reused result that surfaces the recoverable state to the caller.
+   */
+  private markRowProcessRestarted(
+    childRunId: string,
+    existingPayload: SkillChildRunPayload | null,
+  ): StartSkillChildRunResult {
+    const close = makeCloseEvent({
+      childRunId,
+      skillId: existingPayload?.skillId ?? 'unknown',
+      status: 'recoverable_paused',
+      terminalReason: 'process_restarted',
+      outputDir: existingPayload?.outputDir ?? null,
+      runStatePath: existingPayload?.runStatePath ?? null,
+      errorKind: 'process_restarted',
+      message: 'In-memory runner missing for an active row; reconciled as recoverable_paused.',
+    })
+    try {
+      this.config.repository.updateChildRun(childRunId, {
+        status: 'recoverable_paused',
+        closeEvent: close,
+      })
+    } catch (error) {
+      logAgentMetric('skill_child_runner_reconcile_persist_failed', {
+        childRunId,
+        error: errorMessage(error),
+      })
+    }
+    this.recentCloses.set(childRunId, close)
+    if (this.recentCloses.size > 64) {
+      const firstKey = this.recentCloses.keys().next().value
+      if (firstKey) this.recentCloses.delete(firstKey)
+    }
+    return {
+      childRunId,
+      status: 'recoverable_paused',
+      outputDir: existingPayload?.outputDir ?? '',
+      runStatePath: existingPayload?.runStatePath ?? '',
+      eventLogPath: existingPayload?.eventLogPath ?? '',
+      parentNextHint: existingPayload?.parentNextHint ?? 'wait_for_close_event',
+      closeEvent: close,
+    }
   }
 
   // ------------------------------------------------------------------

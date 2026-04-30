@@ -30,6 +30,11 @@ export type SkillChildRunStatus =
 /**
  * Terminal reason union per source plan §5.4. Order intentionally mirrors
  * the spec so reviewers can diff against the plan without translation.
+ *
+ * `process_restarted` is set when `startSkillChildRun` finds an existing
+ * active row whose in-memory runner is gone (process restart / runner
+ * crash). Reconciliation pins the row to `recoverable_paused` so the
+ * caller never sees a false-live `reused` claim.
  */
 export type SkillChildRunTerminalReason =
   | 'completed'
@@ -43,6 +48,7 @@ export type SkillChildRunTerminalReason =
   | 'cancelled_user'
   | 'failed_skill'
   | 'infra_error'
+  | 'process_restarted'
 
 export type SkillChildRunParentNextHint =
   | 'wait_for_close_event'
