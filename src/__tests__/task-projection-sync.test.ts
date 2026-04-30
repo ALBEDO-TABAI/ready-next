@@ -961,3 +961,90 @@ test('Stage F1: syncTaskProjection prefers frame snapshot runContract truth for 
   assert.equal(result?.taskId, 'skill:detached:dst-from-contract')
   assert.equal(records.has('skill:detached:dst-from-contract'), true)
 })
+
+test('Phase 7: syncTaskProjection reads child-run identity off contract for projection truth', async () => {
+  // Source plan §Phase 7 — the projection primary key MUST be
+  // `skill-child:<childRunId>` when the contract carries one, so the
+  // projection truth comes from the close event / contract summary
+  // instead of artifact path heuristics.
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const childRunId = 'va1b2c3d4'
+  const summary: ScopeRunSummary = {
+    ...createSummary(),
+    taskType: 'short_task',
+    taskId: 'system-child',
+    taskContinuation: null,
+    recentArtifacts: [],
+    updatedAt: '2026-04-30T05:00:00.000Z',
+  }
+  const payload: ScopeRunEventPayload = {
+    ...createPayload(),
+    taskId: 'system-child',
+    runId: 'run-child',
+    module: 'system',
+    timestamp: '2026-04-30T05:00:00.000Z',
+  }
+
+  const result = await syncTaskProjection(store, summary, payload, {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'VEA',
+        source: 'tool',
+        detachedTaskId: null,
+        runStatePath: '/tmp/c/run_state.json',
+        outputDir: '/tmp/c',
+        action: 'video_expert_pipeline',
+        staleBlockerReason: null,
+        runContract: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          toolName: null,
+          actionInput: null,
+          originalInput: null,
+          sourceUrl: null,
+          taskRunId: null,
+          // Even with detachedTaskId set, child-run id wins.
+          detachedTaskId: 'dst-irrelevant',
+          jobId: null,
+          outputDir: '/tmp/c',
+          runStatePath: '/tmp/c/run_state.json',
+          artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+          status: 'running',
+          liveness: 'running_process',
+          progress: { stage: 'init', totalUnits: null, completedUnits: null, coverageRatio: null },
+          blocker: { reason: null, stale: false },
+          projectionIdentity: { stableKey: 'skill:detached:dst-irrelevant' },
+          childRunId,
+        },
+      },
+    },
+  })
+
+  // childRunId wins over BOTH detachedTaskId and projectionIdentity.stableKey.
+  assert.equal(result?.taskId, `skill-child:${childRunId}`)
+  assert.equal(records.has(`skill-child:${childRunId}`), true)
+})

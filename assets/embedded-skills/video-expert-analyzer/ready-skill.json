@@ -91,5 +91,9 @@
       "on_uninstall_remove": ["~/.config/video-expert-analyzer-vnext"]
     },
     "expose_when_hint_armed": ["video_expert_pipeline", "video_expert_ai_analyze"]
+  },
+  "child_loop": {
+    "version": 1,
+    "actions": ["video_expert_pipeline", "video_expert_ai_analyze"]
   }
 }

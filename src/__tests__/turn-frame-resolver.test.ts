@@ -50,6 +50,7 @@ function snapshot(skillId: string, overrides: Partial<SkillTaskSupervisorSnapsho
     sessionId: 'scope-test',
     action: 'video_expert_pipeline',
     status: 'blocked',
+    liveness: null,
     hasLiveWork: false,
     hasRecentProgress: true,
     closeAllowed: false,

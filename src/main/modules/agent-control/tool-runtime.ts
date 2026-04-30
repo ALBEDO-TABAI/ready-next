@@ -10,7 +10,7 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage } from './run-contracts'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
   canUseParallelToolGroup,
@@ -33,6 +33,33 @@ import {
   normalizeAllowedToolSet,
 } from '../tools/tool-not-allowed-message'
 
+/**
+ * Phase 3 (skill-child-loop) — live, same-turn slice of the active TurnFrame
+ * exposed to dependent later tools in the same batch. Where the durable
+ * `framePatch` flows through the end-of-turn persistence path, this slot is
+ * mutated by `applyContextModifier` immediately after each tool result is
+ * normalized so the next dependent tool in the same iteration sees the fresh
+ * artifact roots / handles without having to rebuild a TurnFrame.
+ *
+ * Shape is intentionally minimal in Phase 3 — only the three signals the
+ * upcoming child runner needs:
+ *   - `activeArtifactRoots`: read-only paths that `skill_read_artifact`
+ *     should treat as additional allowed roots for the rest of the turn.
+ *   - `runContract`: the latest `SkillRunContract` snapshot (or null) so
+ *     consumers can check status / liveness without re-entering the loader.
+ *   - `discoveredHandles`: opaque per-tool handle records (taskRunId,
+ *     detachedTaskId, jobId, runStatePath, …) that later tools can read
+ *     without the LLM having to repeat the discovery call.
+ *
+ * Always populated (never undefined). Empty defaults stand in when the
+ * builder has no frame snapshot — see `tool-runtime-context-builder.ts`.
+ */
+export interface ToolRuntimeActiveFrameContext {
+  activeArtifactRoots: string[]
+  runContract: SkillRunContract | null
+  discoveredHandles: Record<string, unknown>[]
+}
+
 export interface ToolRuntimeContext {
   browserController?: BrowserController | null
   sidecarManager?: SidecarManager | null
@@ -52,6 +79,76 @@ export interface ToolRuntimeContext {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  /**
+   * Phase 3 — same-turn live frame slot (see `ToolRuntimeActiveFrameContext`).
+   * Mutated by `applyContextModifier` between tool calls within the same
+   * batch. The end-of-turn persistence path (frame patch) is unchanged.
+   */
+  activeFrame: ToolRuntimeActiveFrameContext
+}
+
+/**
+ * Build the empty default `ToolRuntimeActiveFrameContext`. Used by the
+ * context builder cold path and by `applyContextModifier` when the caller
+ * passes a context lacking the slot (e.g. legacy tests).
+ */
+export function createEmptyActiveFrameContext(): ToolRuntimeActiveFrameContext {
+  return {
+    activeArtifactRoots: [],
+    runContract: null,
+    discoveredHandles: [],
+  }
+}
+
+/**
+ * Phase 3 — apply a tool result's `contextModifier.activeFrame` to the
+ * runtime context's `activeFrame` slot, BEFORE the next dependent tool runs.
+ *
+ * Semantics:
+ *   - `activeArtifactRoots`: union with existing list (deduplicated, order
+ *     preserved by first appearance). New roots appended last.
+ *   - `runContract`: last-write-wins; null leaves the existing contract.
+ *   - `discoveredHandles`: appended.
+ *
+ * The mutation is in-place so downstream tools that read `context.activeFrame`
+ * see the update without having to rebuild the runtime context.
+ */
+export function applyContextModifier(
+  context: ToolRuntimeContext | null | undefined,
+  output: ToolExecutionOutput | null | undefined,
+): void {
+  if (!context || !output) return
+  const modifier = output.contextModifier
+  if (!modifier || !modifier.activeFrame) return
+
+  if (!context.activeFrame) {
+    context.activeFrame = createEmptyActiveFrameContext()
+  }
+
+  const patch = modifier.activeFrame
+
+  if (Array.isArray(patch.activeArtifactRoots) && patch.activeArtifactRoots.length > 0) {
+    const seen = new Set<string>(context.activeFrame.activeArtifactRoots)
+    for (const root of patch.activeArtifactRoots) {
+      if (typeof root !== 'string') continue
+      const trimmed = root.trim()
+      if (!trimmed || seen.has(trimmed)) continue
+      seen.add(trimmed)
+      context.activeFrame.activeArtifactRoots.push(trimmed)
+    }
+  }
+
+  if (patch.runContract !== undefined && patch.runContract !== null) {
+    context.activeFrame.runContract = patch.runContract
+  }
+
+  if (Array.isArray(patch.discoveredHandles) && patch.discoveredHandles.length > 0) {
+    for (const handle of patch.discoveredHandles) {
+      if (handle && typeof handle === 'object' && !Array.isArray(handle)) {
+        context.activeFrame.discoveredHandles.push(handle as Record<string, unknown>)
+      }
+    }
+  }
 }
 
 export interface ToolRuntimeExecutionResult {
@@ -181,6 +278,12 @@ export class ToolRuntime {
             throw firstRejected.reason
           }
           for (const item of settled as Array<PromiseFulfilledResult<ToolRuntimeExecutionResult & { recoveryHistory: RecoveryRecord[] }>>) {
+            // Phase 3 (skill-child-loop) — apply any same-turn `contextModifier`
+            // BEFORE recording the result, so a later parallel-group tool in
+            // this batch sees fresh `activeFrame` state. Context-mutating
+            // tools are serialized by `tool-parallelism-policy`, so within a
+            // single parallel chunk the order is benign.
+            applyContextModifier(params.context, item.value.result)
             results.push(item.value)
             recoveryHistory.push(...item.value.recoveryHistory)
             if (item.value.recoveryHistory.length > 0) {
@@ -212,6 +315,11 @@ export class ToolRuntime {
           await this.drainRegisteredCleanups(batchCleanups)
           throw error
         }
+        // Phase 3 (skill-child-loop) — same-turn `contextModifier` is
+        // applied to the runtime context BEFORE the next dependent tool runs
+        // so the next iteration's tool sees the fresh `activeFrame` state
+        // (e.g. VEA's outputDir as an additional read-only artifact root).
+        applyContextModifier(params.context, executedTool.result)
         results.push(executedTool)
         recoveryHistory.push(...executedTool.recoveryHistory)
         if (executedTool.recoveryHistory.length > 0) {
@@ -423,6 +531,10 @@ export class ToolRuntime {
     return {
       ...(context || {}),
       abortSignal,
+      // Phase 3 — `activeFrame` is non-optional on `ToolRuntimeContext`; the
+      // attempt context inherits the live slot if present and falls back to
+      // an empty default for legacy callers that didn't seed one.
+      activeFrame: context?.activeFrame ?? createEmptyActiveFrameContext(),
       registerRunCleanup: (cleanup) => {
         const trackedCleanup = this.trackCleanup(cleanup)
         trackedCleanups.push(trackedCleanup)

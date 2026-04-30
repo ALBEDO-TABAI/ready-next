@@ -35,6 +35,12 @@ import {
 import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
 import { findSkillToolByName } from '../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
+import { configureSkillChildRunner } from './skill-child-runner'
+// Importing the VEA driver triggers its module-load-time
+// `registerSkillChildDriver(...)` side-effect. The runner relies on the
+// registry being primed before any `startSkillChildRun` call.
+import './video-expert-child-driver'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
@@ -227,6 +233,27 @@ export class AgentControlRuntime extends EventEmitter {
       onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
     })
     registerDetachedSkillTaskTracker(this.detachedSkillTasks)
+
+    // Phase 5 — wire the skill child runner. The runner stays as a
+    // module-level singleton so `skills-tools.ts` (Team 6) can call
+    // `startSkillChildRun(...)` without crossing class boundaries. We
+    // configure it once at runtime construction so the SQLite-backed
+    // repository is ready and `getSkillsRuntimeManager()` is safe to
+    // call.
+    try {
+      configureSkillChildRunner({
+        runtimeManager: getSkillsRuntimeManager(),
+        repository: new SkillTaskRunRepository(this.db),
+      })
+    } catch (error) {
+      // Boot-time wiring failure is best-effort logged; the parent loop
+      // continues to function via legacy paths if the child runner
+      // can't be configured (e.g. DB unavailable in a test harness).
+      console.warn(
+        '[AgentControlRuntime] configureSkillChildRunner failed:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {

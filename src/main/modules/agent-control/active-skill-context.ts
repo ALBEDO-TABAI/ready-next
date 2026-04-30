@@ -159,7 +159,8 @@ function contextFromProjection(projection: TaskProjectionRecord): ActiveSkillCon
 
 function contextFromSupervisor(snapshot: SkillTaskSupervisorSnapshot | null | undefined): ActiveSkillContext | null {
   if (!snapshot?.skillId) return null
-  if (snapshot.closeAllowed && snapshot.status === 'done') return null
+  // Phase 7 — supervisor public status uses `completed` instead of `done`.
+  if (snapshot.closeAllowed && snapshot.status === 'completed') return null
   const hasHandle = Boolean(
     snapshot.hasLiveWork
       || snapshot.hasRecentProgress

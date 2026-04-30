@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 
 import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
-import { getToolInputSchemas } from '../tools/schemas'
+import { resolveToolInputSchemaForExecution } from './tool-registry'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
 
@@ -13,9 +13,13 @@ export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_ask_user',
 ] as const
 
-const DEFAULT_RESUME_ACTION_BY_SKILL_ID: Record<string, string> = {
-  'video-expert-analyzer': 'video_expert_pipeline',
-}
+// Phase 6 — VEA's `video_expert_pipeline` was the legacy parent-force
+// fallback action for `mode='skill_resume'` frames missing an explicit
+// action. The child-loop runner now owns VEA execution, so the parent
+// must never synthesize this typed action with `{}`. Other skills that
+// still rely on the legacy parent-force route may register here; VEA
+// MUST NOT.
+const DEFAULT_RESUME_ACTION_BY_SKILL_ID: Record<string, string> = {}
 
 /**
  * Stage 7 — extra signals the caller may pass when re-evaluating steering
@@ -146,14 +150,16 @@ export function deriveForcedActionInput(params: {
  *
  * NOTE: We deliberately do not import `validateToolInput` here to avoid
  * circular module deps; the contract is identical because both code paths
- * resolve the same `getToolInputSchemas()` registry.
+ * resolve the same schema via `resolveToolInputSchemaForExecution()` —
+ * Phase 2 (B plan child-loop) collapsed dispatch / preflight / steering
+ * onto that single resolver so the dynamic skill-action cache is no longer
+ * invisible to the steering validator.
  */
 export function validateForcedActionInput(
   toolName: string,
   input: Record<string, unknown>,
 ): { ok: true; data: Record<string, unknown> } | { ok: false; missingInputs: string[] } {
-  const schemas = getToolInputSchemas()
-  const schema = schemas[toolName]
+  const schema = resolveToolInputSchemaForExecution(toolName)
   if (!schema) {
     // Same passthrough behaviour as the validator: tools without a registered
     // schema cannot have missing inputs from our perspective.

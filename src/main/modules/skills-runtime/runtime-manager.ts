@@ -675,6 +675,19 @@ export class SkillsRuntimeManager {
     return installTask
   }
 
+  /**
+   * Phase 5 — child-runner internal entry. The skill child runner calls
+   * this so its inner action dispatch can never accidentally trip a
+   * recursive child-loop wrap (Team 5). For now it's a thin alias of
+   * `runSkill`; the wrap routing for "should this be wrapped in a child
+   * run?" lives upstream in `skills-tools.ts` (Team 6) anyway, so this
+   * method just provides a stable surface the runner can rely on as
+   * upstream wrap routing evolves.
+   */
+  async runSkillFromChildRunner(request: SkillRunRequest): Promise<SkillRunResult> {
+    return this.runSkill(request)
+  }
+
   async runSkill(request: SkillRunRequest): Promise<SkillRunResult> {
     const triggerType = request.triggerType || 'manual'
     const jobId = this.recordJobStart({
@@ -1970,4 +1983,116 @@ export function getSkillsRuntimeManager(): SkillsRuntimeManager {
     runtimeManager = new SkillsRuntimeManager()
   }
   return runtimeManager
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase 7 — `startSkillChildRunAndWait` compatibility helper.
+//
+// Product callers (e.g. `item-analysis-manager.ts`) historically awaited
+// `runSkill` for VEA long actions. After Phase 6/7 those actions are
+// child-loop owned; the runtime helper below preserves the await-style
+// contract: launch a child run, block until its close event, and return
+// the structured close + childRunId. RSS visual analysis keeps its
+// existing flow — internally the long work is now child-owned.
+//
+// The helper is a thin wrapper around `startSkillChildRun` /
+// `getSkillChildRunCloseEvent` from `agent-control/skill-child-runner.ts`.
+// We import lazily inside the function body to avoid a hard cycle between
+// runtime-manager and the child-runner module (the runner's
+// SkillChildRunnerConfig already depends on this file).
+// ────────────────────────────────────────────────────────────────────────
+
+import type { SkillChildCloseEvent, SkillChildRunStatus } from '../agent-control/skill-child-run-types'
+
+export interface StartSkillChildRunAndWaitParams {
+  skillId: string
+  action: string
+  params: Record<string, unknown>
+  scopeId?: string | null
+  sessionId?: string | null
+  /** Hard upper bound on wait time. When elapsed the helper cancels the
+   *  child run via `cancelSkillChildRun(id, 'await_timeout')` and returns
+   *  the resulting close event. Set null/undefined for no timeout. */
+  timeoutMs?: number
+  triggerType?: 'tool' | 'product' | 'agent'
+}
+
+export interface StartSkillChildRunAndWaitResult {
+  childRunId: string
+  /** Final status from the close event. `running` is never returned — the
+   *  helper always waits for the child run to terminate (or be cancelled
+   *  on timeout). */
+  status: Exclude<SkillChildRunStatus, 'queued' | 'running'>
+  closeEvent: SkillChildCloseEvent
+  /** True only when `closeEvent.status === 'completed'`. Provided as a
+   *  convenience so existing product code doesn't have to re-derive it. */
+  success: boolean
+}
+
+/**
+ * Phase 7 — launch a skill child run and await its close event.
+ *
+ * Single-flight semantics are honored: when the underlying runner returns
+ * `'reused'` the helper waits on the existing child's close event. A
+ * `'recoverable_paused'` / `'failed'` / `'killed'` / `'completed'` close
+ * that arrives synchronously on launch is also forwarded immediately.
+ */
+export async function startSkillChildRunAndWait(
+  params: StartSkillChildRunAndWaitParams,
+): Promise<StartSkillChildRunAndWaitResult> {
+  // Lazy require to break the runtime-manager ⇄ skill-child-runner cycle.
+  const childRunner = await import('../agent-control/skill-child-runner')
+
+  const launch = await childRunner.startSkillChildRun({
+    scopeId: params.scopeId ?? null,
+    sessionId: params.sessionId ?? null,
+    skillId: params.skillId,
+    action: params.action,
+    requestedInput: params.params,
+    parentNextHint: 'wait_for_close_event',
+    triggerType: params.triggerType ?? 'product',
+  })
+
+  // Synchronous launch refusal (no driver, nested-child, queued, infra
+  // error). Forward the close event verbatim — caller decides retry.
+  if (launch.closeEvent) {
+    return {
+      childRunId: launch.childRunId,
+      status: launch.closeEvent.status,
+      closeEvent: launch.closeEvent,
+      success: launch.closeEvent.status === 'completed',
+    }
+  }
+
+  // Wait for the runner's recorded close event. The runner stores the
+  // close in `recentCloses` once the loop drains; we poll because the
+  // public surface (`getSkillChildRunCloseEvent`) is the only stable
+  // way to read it across the runner instance + reused-key paths.
+  const start = Date.now()
+  const pollIntervalMs = 100
+  const timeoutMs = typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs) && params.timeoutMs > 0
+    ? params.timeoutMs
+    : null
+
+  while (true) {
+    const close = childRunner.getSkillChildRunCloseEvent(launch.childRunId)
+    if (close) {
+      return {
+        childRunId: launch.childRunId,
+        status: close.status,
+        closeEvent: close,
+        success: close.status === 'completed',
+      }
+    }
+    if (timeoutMs !== null && Date.now() - start >= timeoutMs) {
+      const cancelled = await childRunner.cancelSkillChildRun(launch.childRunId, 'await_timeout')
+      return {
+        childRunId: launch.childRunId,
+        status: cancelled.status,
+        closeEvent: cancelled,
+        success: false,
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
 }

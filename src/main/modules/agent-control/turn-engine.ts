@@ -150,8 +150,7 @@ import {
   type SkillRunRecord,
 } from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
-import { defaultToolRegistry } from './tool-registry'
-import { getToolInputSchemas } from '../tools/schemas'
+import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tool-registry'
 import {
   selectDomainAdapter,
   type DomainAdapter,
@@ -214,6 +213,7 @@ import {
 import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
+import { shouldParentForceLongSkillTool } from './run-contracts'
 import type {
   RunBudgetHint,
   SkillBudgetLeaseState,
@@ -398,7 +398,7 @@ function skillRunFromSupervisorSnapshot(
     toolName: snapshot.action || SUPERVISOR_SNAPSHOT_TOOL_NAME,
     skillId: snapshot.skillId,
     action: snapshot.action || '',
-    success: snapshot.closeAllowed && snapshot.status === 'done',
+    success: snapshot.closeAllowed && snapshot.status === 'completed',
     status: snapshot.status,
     runKind: snapshot.detachedTaskId ? 'detached' : 'typed_action',
     taskRunId: snapshot.taskRunId || undefined,
@@ -1868,7 +1868,7 @@ export class TurnEngine {
       }
       const hasRecoverableSkillLeaseSnapshot = (snapshot: SkillTaskSupervisorSnapshot | null): boolean => {
         if (!snapshot) return false
-        if (snapshot.closeAllowed && snapshot.status === 'done') return false
+        if (snapshot.closeAllowed && snapshot.status === 'completed') return false
         return Boolean(
           snapshot.hasLiveWork
             || snapshot.hasRecentProgress
@@ -2125,8 +2125,18 @@ export class TurnEngine {
         // `{}`: missing required fields surface in `action.missingInputs[]`
         // and route to a checkpoint instead.
         const steeringAction = turnFrame?.steering?.action || null
+        // Phase 6 — child-loop short-circuit. When the durable
+        // `runContract.childRunId` is set, the child runner now owns the
+        // long-skill execution. The parent MUST NOT synthesize a typed
+        // `tool_use` for it (e.g. `skill_video_expert_pipeline` with `{}`),
+        // and the cross-turn `forceLoopGuard` is fenced for the same reason.
+        // The single source of truth for "is this skill child-owned?" is
+        // `shouldParentForceLongSkillTool(contract)` — keeps the engine
+        // free of skill-id string matching.
+        const childOwnedSkill = !shouldParentForceLongSkillTool(turnFrame?.skill?.runContract || null)
         const forceToolName = (
-          turnFrame
+          !childOwnedSkill
+            && turnFrame
             && turnFrame.steering?.mode === 'force_tool'
             && !forceToolDispatchedThisTurn
             && typeof turnFrame.steering.requiredToolName === 'string'
@@ -2138,7 +2148,13 @@ export class TurnEngine {
         // recorded the same `(toolName, inputDigest)` from a prior turn AND
         // we are about to dispatch the same `(toolName, inputDigest)` again,
         // checkpoint instead of forcing to break the loop deterministically.
-        const priorGuard = turnFrame?.skill?.runContract?.forceLoopGuard || null
+        // Phase 6 — `forceLoopGuard` is migration-only; child-owned skills
+        // bypass it because the child runner has its own per-run budget +
+        // launch-stuck guard, and a child's parentNextHint='wait_for_close_event'
+        // is not a "force same tool again" signal.
+        const priorGuard = childOwnedSkill
+          ? null
+          : (turnFrame?.skill?.runContract?.forceLoopGuard || null)
         const wouldRepeat = Boolean(
           forceToolName
             && steeringAction
@@ -2161,7 +2177,7 @@ export class TurnEngine {
           if (!definition) {
             preflightFailureReason = 'tool_not_registered'
           } else {
-            const schema = getToolInputSchemas()[forceToolName]
+            const schema = resolveToolInputSchemaForExecution(forceToolName)
             if (schema) {
               const parsed = schema.safeParse(steeringAction.input || {})
               if (!parsed.success) {
@@ -3072,7 +3088,7 @@ export class TurnEngine {
         const budgetTerminalReason: TurnTerminalReason =
           skillTaskSnapshot && (
             skillTaskSnapshot.hasLiveWork
-            || skillTaskSnapshot.status === 'background_running'
+            || skillTaskSnapshot.liveness === 'background'
             || skillTaskSnapshot.status === 'running'
           )
             ? 'checkpoint_background'

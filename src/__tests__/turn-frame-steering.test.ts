@@ -101,7 +101,12 @@ test('resolveTurnFrame uses projection-only VEA action for typed resume steering
   assert.equal(frame.steering.preferredToolNames[0], 'skill_video_expert_pipeline')
 })
 
-test('buildTurnFrameSteering can recover the default VEA pipeline tool from a retry-only hint frame', () => {
+test('Phase 6: retry-only VEA hint frame no longer parent-forces the default pipeline action', () => {
+  // Phase 6 retired the `DEFAULT_RESUME_ACTION_BY_SKILL_ID` fallback for
+  // VEA — the child runner now owns "what action runs next" for VEA, so
+  // a retry-only hint frame (no supervisor snapshot, no explicit action)
+  // must NOT synthesize `skill_video_expert_pipeline` as the resume target
+  // and must NOT enter `force_tool` mode. Steering falls back to ask_model.
   const frame = resolveTurnFrame({
     sessionId: 'scope-vea',
     requestId: 'req-hint',
@@ -111,8 +116,8 @@ test('buildTurnFrameSteering can recover the default VEA pipeline tool from a re
   const steering = buildTurnFrameSteering(frame)
 
   assert.equal(frame.mode, 'skill_resume')
-  assert.equal(steering.preferredToolNames[0], 'skill_video_expert_pipeline')
-  assert.match(steering.systemReminder || '', /typed skill action/)
+  assert.equal(steering.mode, 'ask_model')
+  assert.equal(steering.requiredToolName, null)
 })
 
 test('resolveTurnFrame keeps typed resume steering for recoverable paused VEA output', () => {
@@ -131,11 +136,21 @@ test('resolveTurnFrame keeps typed resume steering for recoverable paused VEA ou
   assert.equal(frame.steering.preferredToolNames[0], 'skill_video_expert_pipeline')
 })
 
-test('resolveTurnFrame produces force_tool steering for recoverable paused VEA frame', () => {
-  // Stage 7 — typed-action force path. Recoverable paused supervisor frames
-  // with a resolvable typed skill action should mark steering as `force_tool`
-  // so the turn engine can synthesize the tool batch instead of asking the
-  // model for another diagnostic loop.
+test('Phase 6: recoverable paused VEA frame no longer parent-forces; the child runner owns the resume', () => {
+  // Phase 6 — VEA force retirement. Previously this test asserted
+  // `mode === 'force_tool'` on a recoverable_paused VEA supervisor frame.
+  // The plan explicitly retires that path: the child-loop runner now owns
+  // VEA execution, the engine's force-tool dispatch path is fenced by
+  // `shouldParentForceLongSkillTool(contract)` (returns false when
+  // `contract.childRunId` is set), and `loadSkillRunContract` populates
+  // `childRunId` once the child runner has launched a run.
+  //
+  // The steering layer still surfaces `skill_video_expert_pipeline` in
+  // `preferredToolNames` so the model can voluntarily pick the typed
+  // action — but the engine no longer synthesizes the `tool_use` itself.
+  // We accept any non-`force_tool` mode here; today's resolver picks
+  // `checkpoint` (the live-work signal is gone, so there's nothing to
+  // "force" in any case).
   const frame = resolveTurnFrame({
     sessionId: 'scope-vea',
     requestId: 'req-force',
@@ -147,8 +162,15 @@ test('resolveTurnFrame produces force_tool steering for recoverable paused VEA f
     }),
   })
 
-  assert.equal(frame.steering.mode, 'force_tool')
-  assert.equal(frame.steering.requiredToolName, 'skill_video_expert_pipeline')
+  assert.notEqual(
+    frame.steering.mode,
+    'force_tool',
+    'Phase 6: VEA must not be parent-forced — child-loop runner owns the resume',
+  )
+  assert.ok(
+    frame.steering.preferredToolNames.includes('skill_video_expert_pipeline'),
+    'Phase 6: typed action stays in preferredToolNames as a model nudge, never a synthesized force',
+  )
 })
 
 test('buildTurnFrameSteering: budget-exhausted running_process produces checkpoint mode', () => {

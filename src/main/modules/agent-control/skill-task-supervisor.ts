@@ -21,7 +21,39 @@ const HEARTBEAT_FRESH_MS = 120_000
 const OUTPUT_ACTIVITY_FRESH_MS = 180_000
 const STALE_MS = 600_000
 
+/**
+ * Phase 7 — public, normalized status vocabulary across child / contract /
+ * projection / supervisor. Source plan §3 rule 7: cancellation is NEVER
+ * collapsed into `failed`. `background_running` is removed from the public
+ * surface — when the supervisor sees background work it returns
+ * `status: 'running'` and sets `liveness: 'background'`. Old internal
+ * helpers (`statusFromTaskRun` / `statusFromDetached` / `statusFromRunState`)
+ * still produce `done` / `cancelled` / `background_running` so the
+ * reconciliation logic against raw upstream signals does not change; the
+ * normalization happens once at the end of `inspectSkillTask`.
+ */
 export type SkillTaskSupervisorStatus =
+  | 'running'
+  | 'budget_paused'
+  | 'recoverable_paused'
+  | 'blocked'
+  | 'failed'
+  | 'killed'
+  | 'completed'
+  | 'unknown'
+
+export type SkillTaskSupervisorLiveness =
+  | 'foreground'
+  | 'background'
+  | null
+
+/**
+ * Phase 7 — internal vocabulary used by the per-source mappers. Exists so
+ * the reconciliation logic (`statusFromTaskRun`, score lookups, etc.) keeps
+ * its 1:1 mapping to upstream signals while the public output is the
+ * narrow normalized union above.
+ */
+type SkillTaskSupervisorInternalStatus =
   | 'running'
   | 'background_running'
   | 'budget_paused'
@@ -31,6 +63,44 @@ export type SkillTaskSupervisorStatus =
   | 'done'
   | 'cancelled'
   | 'unknown'
+
+/**
+ * Phase 7 — normalize an arbitrary status-like string from any of the
+ * four sources (child runner, run-contract, projection, supervisor) into
+ * the public vocabulary. Cancellation MUST map to `killed`, never to
+ * `failed`. `background_running` → `running` (callers should also surface
+ * `liveness='background'` separately).
+ */
+export function normalizeSkillStatus(value: unknown): SkillTaskSupervisorStatus {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  switch (raw) {
+    case 'running':
+    case 'background_running':
+      return 'running'
+    case 'budget_paused':
+      return 'budget_paused'
+    case 'recoverable_paused':
+    case 'paused':
+      return 'recoverable_paused'
+    case 'blocked':
+      return 'blocked'
+    case 'failed':
+    case 'failure':
+    case 'error':
+      return 'failed'
+    case 'killed':
+    case 'cancelled':
+    case 'cancelled_user':
+    case 'canceled':
+      return 'killed'
+    case 'completed':
+    case 'done':
+    case 'success':
+      return 'completed'
+    default:
+      return 'unknown'
+  }
+}
 
 export interface SkillTaskSupervisorProgress {
   currentStage?: string | null
@@ -65,6 +135,13 @@ export interface SkillTaskSupervisorSnapshot {
   sessionId: string | null
   action: string | null
   status: SkillTaskSupervisorStatus
+  /**
+   * Phase 7 — `'background'` when the live work is owned by a detached or
+   * background process (replaces the old `status: 'background_running'`
+   * channel). `'foreground'` for ordinary live work, `null` for terminal /
+   * paused / unknown states.
+   */
+  liveness: SkillTaskSupervisorLiveness
   hasLiveWork: boolean
   hasRecentProgress: boolean
   closeAllowed: boolean
@@ -236,7 +313,7 @@ function latestOutputMtime(root: string | null): number | null {
   return latest
 }
 
-function statusFromDetached(status?: string | null): SkillTaskSupervisorStatus | null {
+function statusFromDetached(status?: string | null): SkillTaskSupervisorInternalStatus | null {
   if (status === 'running') return 'background_running'
   if (status === 'blocked') return 'blocked'
   if (status === 'failed') return 'failed'
@@ -245,7 +322,7 @@ function statusFromDetached(status?: string | null): SkillTaskSupervisorStatus |
   return null
 }
 
-function statusFromTaskRun(status?: string | null): SkillTaskSupervisorStatus | null {
+function statusFromTaskRun(status?: string | null): SkillTaskSupervisorInternalStatus | null {
   if (status === 'queued' || status === 'running') return 'running'
   if (status === 'blocked') return 'blocked'
   if (status === 'failed') return 'failed'
@@ -254,7 +331,7 @@ function statusFromTaskRun(status?: string | null): SkillTaskSupervisorStatus | 
   return null
 }
 
-function statusFromRunState(status?: string | null): SkillTaskSupervisorStatus | null {
+function statusFromRunState(status?: string | null): SkillTaskSupervisorInternalStatus | null {
   if (!status) return null
   if (['running', 'waiting_for_batches', 'ready_to_finalize'].includes(status)) return 'background_running'
   if (status === 'paused') return 'recoverable_paused'
@@ -265,8 +342,12 @@ function statusFromRunState(status?: string | null): SkillTaskSupervisorStatus |
   return null
 }
 
-function isTerminal(status: SkillTaskSupervisorStatus): boolean {
+function isTerminalInternal(status: SkillTaskSupervisorInternalStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'cancelled'
+}
+
+function isTerminalPublic(status: SkillTaskSupervisorStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'killed'
 }
 
 function snapshotHasDurableHandle(snapshot: SkillTaskSupervisorSnapshot): boolean {
@@ -282,7 +363,9 @@ function snapshotHasDurableHandle(snapshot: SkillTaskSupervisorSnapshot): boolea
 function scoreLatestSnapshot(snapshot: SkillTaskSupervisorSnapshot): number {
   let score = 0
   if (snapshot.hasLiveWork) score += 100
-  if (snapshot.status === 'background_running' || snapshot.status === 'running') score += 60
+  // Phase 7 — public status no longer carries `background_running`; the
+  // `liveness` hint distinguishes background from foreground running work.
+  if (snapshot.status === 'running') score += 60
   if (snapshot.status === 'blocked' || snapshot.status === 'budget_paused' || snapshot.status === 'recoverable_paused') score += 50
   if (snapshotHasDurableHandle(snapshot)) score += 30
   if (snapshot.hasRecentProgress) score += 20
@@ -428,11 +511,11 @@ export class SkillTaskSupervisor {
     // `progressFingerprint` / durable handles, nothing more.
     // See docs/architecture/skill-child-loop-boundary.md §5.3.
     const runStateStatus = statusFromRunState(runState?.status)
-    const normalizedStatuses = [detachedStatus, taskRunStatus, runStateStatus].filter(Boolean) as SkillTaskSupervisorStatus[]
-    const terminalStatuses = normalizedStatuses.filter((status) => isTerminal(status))
+    const normalizedStatuses = [detachedStatus, taskRunStatus, runStateStatus].filter(Boolean) as SkillTaskSupervisorInternalStatus[]
+    const terminalStatuses = normalizedStatuses.filter((status) => isTerminalInternal(status))
     const terminalSeen = terminalStatuses.length > 0
     const terminalConflict = new Set(terminalStatuses).size > 1
-    const terminalLifecycleConflict = terminalSeen && normalizedStatuses.some((candidateStatus) => !isTerminal(candidateStatus))
+    const terminalLifecycleConflict = terminalSeen && normalizedStatuses.some((candidateStatus) => !isTerminalInternal(candidateStatus))
     const liveByDetached = detached?.status === 'running'
     const liveByTaskRun = taskRun?.status === 'running'
     const blockedByTaskRun = taskRun?.status === 'blocked'
@@ -447,7 +530,11 @@ export class SkillTaskSupervisor {
     )
     const hasLiveWork = Boolean(liveByDetached || liveByTaskRun || liveByRunState || pidLive)
     const hasRecentProgress = Boolean(heartbeatFresh || outputFresh)
-    let status: SkillTaskSupervisorStatus =
+    // Phase 7 — internal reconciliation still uses the old vocabulary
+    // (`background_running`, `done`, `cancelled`) so the per-source mappers
+    // line up 1:1 with raw upstream signals. The public `status` is
+    // normalized in a single step below.
+    let internalStatus: SkillTaskSupervisorInternalStatus =
       liveByDetached ? 'background_running'
         : liveByTaskRun ? 'running'
           : liveByRunState ? 'background_running'
@@ -455,7 +542,7 @@ export class SkillTaskSupervisor {
               : blockedByTaskRun || runStateStatus === 'blocked' || detachedStatus === 'blocked' ? 'blocked'
                 : taskRunStatus || detachedStatus || (recoverableByRunState ? 'recoverable_paused' : runStateStatus) || 'unknown'
 
-    if (status === 'blocked' && (pidLive || outputFresh)) status = 'background_running'
+    if (internalStatus === 'blocked' && (pidLive || outputFresh)) internalStatus = 'background_running'
     const progress: SkillTaskSupervisorProgress = {
       currentStage: runState?.currentStage || null,
       totalScenes: artifactProgress.totalScenes ?? runState?.totalScenes ?? null,
@@ -473,7 +560,7 @@ export class SkillTaskSupervisor {
           action: detached.action,
         }
         : null)
-    const runStateNonTerminal = Boolean(runStateStatus && !isTerminal(runStateStatus))
+    const runStateNonTerminal = Boolean(runStateStatus && !isTerminalInternal(runStateStatus))
     const hasDurableResumeHandle = Boolean(
       resolvedRunStatePath
         || resolvedOutputDir
@@ -483,7 +570,7 @@ export class SkillTaskSupervisor {
         || taskRun?.detachedTaskId,
     )
     const terminalOnlyByStore = Boolean(
-      isTerminal(status)
+      isTerminalInternal(internalStatus)
         && (taskRunStatus || detachedStatus)
         && runStateNonTerminal
         && hasDurableResumeHandle,
@@ -500,10 +587,21 @@ export class SkillTaskSupervisor {
       || Boolean(terminalLifecycleConflict && hasDurableResumeHandle)
       || Boolean(terminalSeen && hasLiveWork)
       || terminalOnlyByStore
-    const closeAllowed = isTerminal(status) && !hasLiveWork && !ambiguous
+    const closeAllowed = isTerminalInternal(internalStatus) && !hasLiveWork && !ambiguous
 
     const projection = this.readProjection({ sessionId: params.sessionId || detached?.sessionId || taskRun?.sessionId || undefined, skillId: skillId || undefined })
     if (projection) observations.push({ source: 'projection', message: 'projection used as fallback context only' })
+
+    // Phase 7 — collapse to the public, normalized vocabulary in one place.
+    // `cancelled` MUST become `killed` here (not `failed`); `done` →
+    // `completed`; `background_running` → `running` with
+    // `liveness: 'background'`. Source plan §3 rule 7.
+    const status: SkillTaskSupervisorStatus = normalizeSkillStatus(internalStatus)
+    const liveness: SkillTaskSupervisorLiveness = (() => {
+      if (internalStatus === 'background_running') return 'background'
+      if (status === 'running') return 'foreground'
+      return null
+    })()
 
     return {
       taskRunId: taskRun?.id || null,
@@ -513,6 +611,7 @@ export class SkillTaskSupervisor {
       sessionId: params.sessionId || detached?.sessionId || taskRun?.sessionId || null,
       action: params.action || detached?.action || taskRun?.action || null,
       status,
+      liveness,
       hasLiveWork,
       hasRecentProgress,
       closeAllowed,
@@ -572,6 +671,7 @@ export class SkillTaskSupervisor {
       sessionId: null,
       action: null,
       status: 'unknown',
+      liveness: null,
       hasLiveWork: false,
       hasRecentProgress: false,
       closeAllowed: false,

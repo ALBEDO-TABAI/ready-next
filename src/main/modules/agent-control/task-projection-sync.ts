@@ -107,6 +107,18 @@ function resolveStableSkillProjectionTaskId(
   if (summary.taskType !== 'short_task' || payload.module !== 'system') return null
   const continuation = truthContinuation(truthPatch)
   const artifacts = truthArtifacts(truthPatch) || summary.recentArtifacts
+  // Phase 7 — child-run identity wins over every other key. When the
+  // contract carries a `childRunId`, the projection primary key MUST be
+  // `skill-child:<childRunId>` so two skills sharing one outputDir do not
+  // alias. Look in contract first, then in continuation/artifact meta as
+  // a fallback for callers that haven't migrated yet.
+  const childRunId =
+    (contract && typeof (contract as { childRunId?: unknown }).childRunId === 'string'
+      ? ((contract as { childRunId?: string }).childRunId || '').trim() || null
+      : null)
+    || stringFromRecord(continuation, 'childRunId')
+    || firstArtifactMetaString(artifacts, 'childRunId')
+  if (childRunId) return `skill-child:${childRunId}`
   // Stage F1 — contract truth wins over summary/artifact heuristics for
   // stable identity. Fall back to existing sources when the producer chain
   // did not emit a contract this turn.
@@ -150,6 +162,14 @@ function resolveTaskId(
   truthPatch?: Record<string, unknown> | null,
   contract?: ReturnType<typeof readFrameContract>,
 ): string | null {
+  // Phase 7 — child-run identity wins over every other key, including the
+  // contract's stableKey. This prevents `outputDir`-keyed identities from
+  // aliasing across two child runs that happen to share an output path.
+  const childRunIdFromContract =
+    contract && typeof (contract as { childRunId?: unknown }).childRunId === 'string'
+      ? ((contract as { childRunId?: string }).childRunId || '').trim() || null
+      : null
+  if (childRunIdFromContract) return `skill-child:${childRunIdFromContract}`
   // Stage F1 — when the contract carries a stable projection key (e.g.
   // VEA's typed action wrapper computed it from skillId+detachedTaskId),
   // prefer it directly over recomputing the same key from heuristics.

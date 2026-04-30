@@ -363,3 +363,167 @@ test('Stage F4: cross-skill non-supersede — overlapping output paths but diffe
   assert.equal(after?.status, 'running')
   assert.equal(after?.continuationRef?.blockerType, undefined)
 })
+
+test('Phase 7: child-run identity primary key prevents cross-skill outputDir merge', async () => {
+  // Source plan §8 Scenario H — two different skills share one outputDir.
+  // Phase 7 makes the projection primary key `skill-child:<childRunId>`
+  // when the contract carries one. Two child runs that happen to share
+  // outputDir get DIFFERENT projection task IDs, so the second commit
+  // cannot supersede or merge with the first.
+  const { store, records } = createInMemoryStore()
+
+  // First commit: VEA child run. Synthesize a frameSnapshot with a
+  // childRunId on the contract (Phase 7 wiring).
+  const veaChildRunId = 'va1b2c3d4'
+  const veaSummary = buildSkillSummary()
+  const veaPayload = buildSkillPayload()
+  const veaProjectionTruth = {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'VEA',
+        source: 'tool',
+        detachedTaskId: null,
+        runStatePath: '/tmp/shared-output/run_state.json',
+        outputDir: '/tmp/shared-output',
+        action: 'video_expert_pipeline',
+        staleBlockerReason: null,
+        runContract: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          toolName: null,
+          actionInput: null,
+          originalInput: null,
+          sourceUrl: null,
+          taskRunId: null,
+          detachedTaskId: null,
+          jobId: null,
+          outputDir: '/tmp/shared-output',
+          runStatePath: '/tmp/shared-output/run_state.json',
+          artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+          status: 'running' as const,
+          liveness: 'running_process' as const,
+          progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null },
+          blocker: { reason: null, stale: false },
+          projectionIdentity: { stableKey: null },
+          childRunId: veaChildRunId,
+        },
+      },
+    },
+  }
+  const veaResult = await syncTaskProjection(store, veaSummary, veaPayload, veaProjectionTruth)
+  assert.equal(veaResult?.taskId, `skill-child:${veaChildRunId}`,
+    'Phase 7 — VEA commit must use skill-child:<childRunId> as primary key')
+
+  // Second commit: a different skill that adopted the SAME outputDir.
+  // Different childRunId → different projection identity → no merge.
+  const otherChildRunId = 'sxyz98765'
+  const otherSummary = {
+    ...buildSkillSummary(),
+    taskContinuation: {
+      skillId: 'skill-other',
+      action: 'something_else',
+      detachedTaskId: 'dst-other',
+      runStatePath: '/tmp/shared-output/run_state.json',
+      outputDir: '/tmp/shared-output',
+    },
+  }
+  const otherProjectionTruth = {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'skill-other',
+        skillName: 'Other Skill',
+        source: 'tool',
+        detachedTaskId: null,
+        runStatePath: '/tmp/shared-output/run_state.json',
+        outputDir: '/tmp/shared-output',
+        action: 'something_else',
+        staleBlockerReason: null,
+        runContract: {
+          skillId: 'skill-other',
+          action: 'something_else',
+          toolName: null,
+          actionInput: null,
+          originalInput: null,
+          sourceUrl: null,
+          taskRunId: null,
+          detachedTaskId: null,
+          jobId: null,
+          outputDir: '/tmp/shared-output',
+          runStatePath: '/tmp/shared-output/run_state.json',
+          artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+          status: 'running' as const,
+          liveness: 'running_process' as const,
+          progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null },
+          blocker: { reason: null, stale: false },
+          projectionIdentity: { stableKey: null },
+          childRunId: otherChildRunId,
+        },
+      },
+    },
+  }
+  const otherResult = await syncTaskProjection(store, otherSummary, buildSkillPayload(), otherProjectionTruth)
+  assert.equal(otherResult?.taskId, `skill-child:${otherChildRunId}`,
+    'Phase 7 — second skill on same outputDir must NOT alias to the VEA row')
+
+  // Both rows coexist; the VEA row was not superseded.
+  const veaRow = records.get(`skill-child:${veaChildRunId}`)
+  const otherRow = records.get(`skill-child:${otherChildRunId}`)
+  assert.ok(veaRow, 'VEA child-run row must persist')
+  assert.ok(otherRow, 'second skill child-run row must persist independently')
+  assert.notEqual(veaRow?.taskId, otherRow?.taskId, 'two child runs must have distinct projection ids')
+})
+
+test('Phase 7: legacy row with no skillId remains adoptable by a same-skill child run', async () => {
+  // Source plan §8 Scenario H part 2 — a legacy short-task row with NO
+  // recorded skillId on its artifacts (pre-skill-keyed scheme) must still
+  // be adoptable / superseded by a freshly-committed skill row.
+  const legacy = buildLegacyRecord({
+    recentArtifacts: [
+      {
+        id: 'run-state',
+        module: 'skill',
+        kind: 'json',
+        label: 'run_state.json',
+        path: '/tmp/4qkyxm4jppc/run_state.json',
+        createdAt: '2026-04-29T04:50:00.000Z',
+        // No `meta.skillId` — pre-Phase-3 row.
+        meta: {
+          outputDir: '/tmp/4qkyxm4jppc',
+        },
+      },
+    ],
+  })
+  const { store, records } = createInMemoryStore([legacy])
+
+  // The in-memory test store mirrors the repository's filter: skill-aware
+  // filtering, but legacy rows without recordedSkillId remain matchable.
+  const originalFindByArtifactSiblings = store.findByArtifactSiblings!.bind(store)
+  store.findByArtifactSiblings = (args) => {
+    const candidates = originalFindByArtifactSiblings(args) as TaskProjectionRecord[]
+    if (!args.skillId) return candidates
+    return candidates.filter((record: TaskProjectionRecord) => {
+      let recordedSkillId: string | null = null
+      for (const artifact of record.recentArtifacts || []) {
+        const meta = artifact?.meta as Record<string, unknown> | undefined
+        const sid = typeof meta?.skillId === 'string' ? meta.skillId.trim() : ''
+        if (sid) { recordedSkillId = sid; break }
+      }
+      return !recordedSkillId || recordedSkillId === args.skillId
+    })
+  }
+
+  const result = await syncTaskProjection(store, buildSkillSummary(), buildSkillPayload())
+  // The fresh commit picks the detachedTaskId-keyed projection identity
+  // (Phase 7 child-run identity isn't on this commit's contract).
+  assert.equal(result?.taskId, 'skill:detached:dst-x')
+
+  // The legacy row was superseded — adoption succeeded.
+  const after = records.get(legacy.taskId)
+  assert.equal(after?.status, 'cancelled')
+  assert.equal(after?.continuationRef?.blockerType, 'superseded')
+})

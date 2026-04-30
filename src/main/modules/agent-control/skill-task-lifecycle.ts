@@ -108,7 +108,7 @@ export function buildSkillTaskLifecycleSignal(params: {
   if (!params.snapshot || !isRelevantSkillTaskSnapshot(params.snapshot)) return null
   const snapshot = params.snapshot
 
-  if (snapshot.closeAllowed && snapshot.status === 'done') {
+  if (snapshot.closeAllowed && snapshot.status === 'completed') {
     return {
       state: 'done',
       reason: 'completed',
@@ -121,7 +121,7 @@ export function buildSkillTaskLifecycleSignal(params: {
     }
   }
 
-  if (snapshot.closeAllowed && snapshot.status === 'cancelled') {
+  if (snapshot.closeAllowed && snapshot.status === 'killed') {
     const taskContinuation = buildTaskContinuation(snapshot, 'cancelled')
     return {
       state: 'cancelled',
@@ -179,7 +179,7 @@ export function buildSkillTaskLifecycleSignal(params: {
     })
   }
 
-  if (snapshot.hasLiveWork || snapshot.hasRecentProgress || snapshot.status === 'background_running' || snapshot.status === 'running') {
+  if (snapshot.hasLiveWork || snapshot.hasRecentProgress || snapshot.status === 'running') {
     return buildCheckpointSignal({
       snapshot,
       reason: 'background_running',

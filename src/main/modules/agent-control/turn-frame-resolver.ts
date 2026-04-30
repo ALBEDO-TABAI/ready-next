@@ -97,14 +97,18 @@ function chooseContext(inputs: ResolveTurnFrameInputs): ActiveSkillContext | nul
 function inferLiveness(context: ActiveSkillContext | null, snapshot?: SkillTaskSupervisorSnapshot | null): TurnFrameLiveness {
   if (!context) return 'unknown'
   if (snapshot && context.source === 'supervisor') {
-    if (snapshot.status === 'done') return 'done'
+    if (snapshot.status === 'completed') return 'done'
     if (snapshot.status === 'failed') return 'failed'
     if (snapshot.hasLiveWork) return 'running_process'
     if (snapshot.hasRecentProgress) return 'recent_progress'
     if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
     if (snapshot.status === 'blocked') return 'blocked'
   }
-  if (context.status === 'done') return 'done'
+  // ActiveSkillContext.status carries the projection / task-run status
+  // strings, which still use legacy `done` / `background_running` /
+  // `running`. Phase 7 normalized supervisor output (`completed`,
+  // `running` + `liveness='background'`) is also tolerated.
+  if (context.status === 'done' || context.status === 'completed') return 'done'
   if (context.status === 'failed') return 'failed'
   if (context.status === 'background_running' || context.status === 'running') return 'running_process'
   if (context.status === 'budget_paused' || context.status === 'recoverable_paused') return 'recoverable_paused'
@@ -114,7 +118,7 @@ function inferLiveness(context: ActiveSkillContext | null, snapshot?: SkillTaskS
 
 function livenessFromSupervisorSnapshot(snapshot?: SkillTaskSupervisorSnapshot | null): TurnFrameLiveness | null {
   if (!snapshot) return null
-  if (snapshot.status === 'done') return 'done'
+  if (snapshot.status === 'completed') return 'done'
   if (snapshot.status === 'failed') return 'failed'
   if (snapshot.hasLiveWork) return 'running_process'
   if (snapshot.hasRecentProgress) return 'recent_progress'

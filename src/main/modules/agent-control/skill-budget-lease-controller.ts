@@ -101,9 +101,9 @@ export function evaluateSkillBudgetLease(params: {
     return { state, decision, reason }
   }
 
-  if (snapshot?.closeAllowed && snapshot.status === 'done') return finish('close', 'supervisor_close_allowed')
+  if (snapshot?.closeAllowed && snapshot.status === 'completed') return finish('close', 'supervisor_close_allowed')
   if (snapshot?.closeAllowed && snapshot.status === 'failed') return finish('pause', 'supervisor_failed')
-  if (snapshot?.closeAllowed && snapshot.status === 'cancelled') return finish('pause', 'supervisor_cancelled')
+  if (snapshot?.closeAllowed && snapshot.status === 'killed') return finish('pause', 'supervisor_cancelled')
   if (state.repeatedToolCallStreak >= 3) return finish('pause', 'tool_repetition')
   if (state.repeatedUnchangedObservations >= 3) return finish('pause', 'unchanged_observation_repeated')
   if (state.repeatedRecoverableErrors >= 3) return finish('pause', 'recoverable_error_repeated')

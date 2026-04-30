@@ -108,6 +108,7 @@ function setupSchema(db: SqliteDatabase): void {
       task_summary TEXT,
       status TEXT NOT NULL,
       interaction_state TEXT NOT NULL,
+      waiting_for TEXT,
       steps_json TEXT NOT NULL,
       current_step_id TEXT,
       budget_json TEXT,
@@ -502,7 +503,8 @@ test('Phase 6 accepts a healthy long skill task only after delivery_report and s
     })
 
     const completed = supervisor.inspectLatestSkillTask({ sessionId: SESSION_ID, skillId: SKILL_ID })
-    assert.equal(completed.status, 'done')
+    // Phase 7 — supervisor public surface uses `completed` (not `done`).
+    assert.equal(completed.status, 'completed')
     assert.equal(completed.closeAllowed, true)
     assertAcceptanceEvidence(fixture, { expectDone: true })
   } finally {

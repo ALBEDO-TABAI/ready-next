@@ -238,3 +238,102 @@ test('Delta D6: source-level proof — start_detached success path emits framePa
     'D6 regression: start_detached must include detachedTaskId in the supervisor snapshot',
   )
 })
+
+/**
+ * Phase 3 (skill-child-loop, Team 3) — same-turn live frame visibility.
+ *
+ * Verifies the runtime-level contract: when tool A in a batch emits a
+ * `contextModifier.activeFrame.activeArtifactRoots`, calling
+ * `applyContextModifier(context, output)` immediately mutates
+ * `context.activeFrame.activeArtifactRoots` so a later tool B in the same
+ * batch reads the fresh roots without rebuilding a TurnFrame.
+ */
+test('Phase 3: applyContextModifier mutates activeFrame.activeArtifactRoots in place (same-turn live update)', async () => {
+  const {
+    applyContextModifier,
+    createEmptyActiveFrameContext,
+  } = await import('../main/modules/agent-control/tool-runtime')
+  const { createToolExecutionOutput } = await import('../main/modules/agent-control/tool-result-types')
+
+  // Initial runtime context with empty active-frame slot — analogous to
+  // the cold path the runtime context builder produces when no frame
+  // snapshot was passed.
+  const context = {
+    activeFrame: createEmptyActiveFrameContext(),
+  } as any
+
+  // Tool A — VEA typed-action result emits a contextModifier carrying its
+  // freshly-produced output directory.
+  const toolAResult = createToolExecutionOutput('VEA pipeline kicked off', {
+    contextModifier: {
+      activeFrame: {
+        activeArtifactRoots: ['/tmp/vea-phase3-live/output'],
+      },
+    },
+  })
+
+  applyContextModifier(context, toolAResult)
+
+  // Tool B (a hypothetical follow-up `skill_read_artifact`) reads the
+  // same context object — it must observe the new root WITHOUT having
+  // rebuilt a TurnFrame.
+  assert.deepEqual(
+    context.activeFrame.activeArtifactRoots,
+    ['/tmp/vea-phase3-live/output'],
+    'tool B must see tool A\'s artifact root via the same-turn live activeFrame slot',
+  )
+
+  // A second emission unions (de-duplicates by first appearance) — the
+  // existing root is preserved, the new one is appended.
+  const toolA2Result = createToolExecutionOutput('VEA analyze step closed', {
+    contextModifier: {
+      activeFrame: {
+        activeArtifactRoots: [
+          '/tmp/vea-phase3-live/output', // duplicate — must be ignored
+          '/tmp/vea-phase3-live/aux',     // new — appended
+        ],
+      },
+    },
+  })
+  applyContextModifier(context, toolA2Result)
+  assert.deepEqual(
+    context.activeFrame.activeArtifactRoots,
+    ['/tmp/vea-phase3-live/output', '/tmp/vea-phase3-live/aux'],
+    'duplicate roots must be ignored; new roots appended in order',
+  )
+
+  // Tools that emit no contextModifier are no-ops on the live frame.
+  const noopResult = createToolExecutionOutput('plain text result')
+  applyContextModifier(context, noopResult)
+  assert.deepEqual(
+    context.activeFrame.activeArtifactRoots,
+    ['/tmp/vea-phase3-live/output', '/tmp/vea-phase3-live/aux'],
+    'tools without contextModifier must not mutate the live frame',
+  )
+})
+
+test('Phase 3: source-level proof — VEA typed-action wrapper emits contextModifier when outputDir is present', () => {
+  const source = readFileSync(
+    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
+    'utf-8',
+  )
+  // The typed-action branch must scope contextModifier emission to the
+  // VEA pipeline + analyze tool names AND only when outputDir is set.
+  assert.match(
+    source,
+    /VEA_CONTEXT_MUTATING_TOOL_NAMES = new Set\(\[[\s\S]+?'skill_video_expert_pipeline',[\s\S]+?'skill_video_expert_ai_analyze',[\s\S]+?\]\)/,
+    'Phase 3 regression: typed-action wrapper must declare a VEA tool-name set for contextModifier emission.',
+  )
+  assert.match(
+    source,
+    /contextModifier = \(outputDir && VEA_CONTEXT_MUTATING_TOOL_NAMES\.has\(toolName\)\)[\s\S]+?activeArtifactRoots: \[outputDir\]/,
+    'Phase 3 regression: typed-action wrapper must emit contextModifier.activeFrame.activeArtifactRoots=[outputDir] for VEA tools.',
+  )
+  // The framePatch path MUST coexist — context modifier is additive, not
+  // a replacement for the durable end-of-turn frame patch.
+  assert.match(
+    source,
+    /createToolExecutionOutput\(formatted, \{[\s\S]+?framePatch,[\s\S]+?contextModifier,[\s\S]+?\}\)/,
+    'Phase 3 regression: typed-action wrapper must keep framePatch alongside contextModifier.',
+  )
+})

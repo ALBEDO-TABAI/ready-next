@@ -6,11 +6,15 @@
 import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import type { AgentControlRuntime } from '../agent-control/runtime'
-import { defaultToolRegistry } from '../agent-control/tool-registry'
+import {
+  defaultToolRegistry,
+  resolveToolInputSchemaForExecution,
+} from '../agent-control/tool-registry'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
@@ -22,7 +26,7 @@ import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeFileManagementTool } from './file-management-tools'
 import { executeRSSTool } from './rss-tools'
-import { executeSkillTool, getSkillActionSchemas } from './skills-tools'
+import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
@@ -33,7 +37,6 @@ import {
   errorMessageOf,
   isTerminalInfrastructureError,
 } from './tool-errors'
-import { getToolInputSchemas } from './schemas'
 import { validateToolInput } from './tool-input-validator'
 import {
   buildToolNotAllowedMessage,
@@ -60,6 +63,13 @@ export interface ToolContext {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  /**
+   * Phase 3 (skill-child-loop) — same-turn live active-frame slot. Forwarded
+   * by `toToolExecutorContext` so domain dispatchers (notably
+   * `skills-tools.ts` for `skill_read_artifact`) can prefer fresh artifact
+   * roots / handles emitted by an earlier tool in the same batch.
+   */
+  activeFrame?: ToolRuntimeActiveFrameContext | null
 }
 
 export async function executeToolCall(
@@ -110,19 +120,20 @@ export async function executeToolCall(
     throw error
   }
 
-  // Phase 2.5: Zod input validation runs for every tool. The registry is the
-  // union of every per-domain static map plus the dynamic skill-action cache
-  // (PR 12 — user manifests derive to Zod schemas via paramListToZodObject,
-  // cached in skills-tools.ts and refreshed when the skill set changes).
-  // Tools with no registered schema pass through unchanged because
-  // validateToolInput treats a missing entry as { ok: true }.
+  // Phase 2 (B plan child-loop): single-source schema admission. The
+  // resolver in `tool-registry.ts` consults the static registry first
+  // (which already includes static-manifest-derived skill action schemas)
+  // and falls back to the dynamic `getSkillActionSchemas()` cache for
+  // user-installed manifests. The split-schema hazard — where a forced
+  // dispatch could pass through `turn-frame-steering` because the dynamic
+  // cache was invisible there but be rejected later in the executor — is
+  // collapsed into one ordering. Tools with no registered schema pass
+  // through unchanged because `validateToolInput` treats a missing entry
+  // as `{ ok: true }`.
   {
-    // Dynamic cache first, static second: static schemas (including the 6
-    // skill control tools) always win over dynamic ones. This is a belt
-    // against a hypothetical user manifest that accidentally names an
-    // action the same as a reserved control-tool name.
-    const mergedSchemas = { ...getSkillActionSchemas(), ...getToolInputSchemas() }
-    const outcome = validateToolInput(toolName, args, mergedSchemas)
+    const resolvedSchema = resolveToolInputSchemaForExecution(toolName)
+    const schemas = resolvedSchema ? { [toolName]: resolvedSchema } : {}
+    const outcome = validateToolInput(toolName, args, schemas)
     if (!outcome.ok) {
       logAgentMetric(TOOL_ERROR_METRICS.inputValidation, {
         toolName,
@@ -166,6 +177,10 @@ export async function executeToolCall(
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
             frameSkillId: context.frameSkillId ?? null,
+            // Phase 3 — forward the live active-frame slot so the skill
+            // dispatcher (`skill_read_artifact`) can prefer fresh artifact
+            // roots emitted by earlier tools in the same batch.
+            activeFrame: context.activeFrame ?? null,
           })
 
         case 'system':

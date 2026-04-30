@@ -19,6 +19,12 @@ import type { ToolRuntimeContext } from './tool-runtime'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { ReferenceSkillHint } from './skill-reference-hints'
 import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from './turn-frame'
+import type {
+  SkillChildCloseEvent,
+  SkillChildRunParentNextHint,
+  SkillChildRunStatus,
+} from './skill-child-run-types'
+import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 
@@ -574,6 +580,12 @@ export interface ProjectionTruthSnapshot {
         projectionIdentity: {
           stableKey: string | null
         } | null
+        /**
+         * Phase 7 — child-run handle. When non-empty the projection
+         * primary key MUST be `skill-child:<childRunId>` so two skills
+         * sharing one outputDir do not alias.
+         */
+        childRunId?: string | null
       } | null
     } | null
     /** Per-turn terminal reason captured at frame closure. */
@@ -919,10 +931,12 @@ export interface SkillRunContract {
     | 'unknown'
     | 'running'
     | 'recoverable_paused'
+    | 'budget_paused'
     | 'blocked'
     | 'ready_to_resume'
     | 'completed'
     | 'failed'
+    | 'killed'
   liveness: TurnFrame['liveness']
   progress: TurnFrame['progress']
   blocker: {
@@ -939,6 +953,11 @@ export interface SkillRunContract {
    * can still run. Owned by the contract — not a `turn-engine.ts` local —
    * so a new turn cannot rebuild the frame and force the same tool forever.
    */
+  // migration-only. Phase 6: retired for skills with `childRunId` —
+  // `shouldParentForceLongSkillTool(contract)` returns false in that case,
+  // and the engine's force-tool dispatch + this guard's read+write are
+  // both fenced by that helper. Other (non-VEA) migration paths still rely
+  // on this field until they move to the child-loop architecture.
   forceLoopGuard: {
     lastForceToolName: string | null
     lastForceInputDigest: string | null
@@ -946,6 +965,60 @@ export interface SkillRunContract {
     consecutiveForceCount: number
   }
   updatedAt: string
+  /**
+   * Phase 4 — child-run handle. When `childRunId` is present, the parent
+   * MUST NOT derive the next internal action from `actionInput` — that's
+   * the child driver's job. `actionInput` / `originalInput` and the legacy
+   * handles below remain populated as SUMMARY ONLY.
+   */
+  childRunId?: string
+  childStatus?: SkillChildRunStatus
+  parentNextHint?: SkillChildRunParentNextHint
+  childCloseEvent?: SkillChildCloseEvent | null
+  /**
+   * Phase 4 — surface raw legacy handles when no child-run row exists yet.
+   * Phase 5's adoption path uses these to mint a child run that resumes the
+   * legacy state. When BOTH `outputDir` and `runStatePath` are missing, the
+   * loader sets `blockerReason` instead and refuses to mark the row done.
+   */
+  legacyAdoptableHandles?: {
+    taskRunId?: string
+    outputDir?: string
+    runStatePath?: string
+  }
+  /**
+   * Phase 4 — explicit blocker reason when a legacy row has no usable
+   * handles. The loader NEVER silently completes such rows; the contract
+   * stays `recoverable_paused` and Phase 5 decides what to do next.
+   */
+  blockerReason?: string
+}
+
+/**
+ * Phase 6 — Parent-force gate for long skill tools.
+ *
+ * Returns `false` when the contract carries a `childRunId`: the child-loop
+ * runner now owns "what action runs next" for that skill, and the parent
+ * turn-engine MUST NOT synthesize a typed-action `tool_use` (e.g.
+ * `skill_video_expert_pipeline` with `{}`). The parent should either wait
+ * for the structured close event (when `parentNextHint='wait_for_close_event'`)
+ * or, on explicit user continuation, call `resumeSkillChildRun(childRunId)`
+ * — never the legacy `force_tool` path.
+ *
+ * Returns `true` only when there is NO child-run handle on the contract;
+ * the migration-only `forceLoopGuard` path remains for non-child-owned
+ * skills until they're migrated.
+ *
+ * The function only inspects `contract.childRunId`. Other fields (status,
+ * parentNextHint, …) are advisory and consulted by the engine separately.
+ * Accepting `unknown` keeps the helper usable from tests that synthesize a
+ * minimal contract shape (the Phase 1 red test passes a plain object).
+ */
+export function shouldParentForceLongSkillTool(contract: unknown): boolean {
+  if (!contract || typeof contract !== 'object') return true
+  const candidate = (contract as { childRunId?: unknown }).childRunId
+  if (typeof candidate === 'string' && candidate.trim().length > 0) return false
+  return true
 }
 
 /**
@@ -1021,6 +1094,14 @@ export interface LoadSkillRunContractParams {
   actionInput?: Record<string, unknown> | null
   /** Job id (typed action wrapper sets this when known). */
   jobId?: string | null
+  /**
+   * Phase 4 — optional child-run lookup. When provided, the loader looks
+   * up the most recent active child-run row for the given skill (preferring
+   * the matching `runStatePath` when known) and surfaces the child handle
+   * + close event on the contract. When omitted, the contract falls back
+   * to legacy supervisor + projection sources.
+   */
+  skillTaskRunRepository?: SkillTaskRunRepository | null
 }
 
 function trimmed(value: unknown): string | null {
@@ -1061,21 +1142,23 @@ function dedupePaths(values: Array<string | null | undefined>): string[] {
 function statusFromSupervisorSnapshot(
   snapshot: SkillTaskSupervisorSnapshot,
 ): SkillRunContract['status'] {
+  // Phase 7 — supervisor now emits the public, normalized vocabulary.
+  // `killed` MUST NOT collapse to `failed` (source plan §3 rule 7).
   switch (snapshot.status) {
     case 'running':
-    case 'background_running':
       return 'running'
     case 'recoverable_paused':
-    case 'budget_paused':
       return 'recoverable_paused'
+    case 'budget_paused':
+      return 'budget_paused'
     case 'blocked':
       return 'blocked'
-    case 'done':
+    case 'completed':
       return 'completed'
     case 'failed':
       return 'failed'
-    case 'cancelled':
-      return 'failed'
+    case 'killed':
+      return 'killed'
     default:
       return 'unknown'
   }
@@ -1085,8 +1168,13 @@ function livenessFromSupervisorSnapshot(
   snapshot: SkillTaskSupervisorSnapshot | null | undefined,
 ): TurnFrame['liveness'] {
   if (!snapshot) return 'unknown'
-  if (snapshot.status === 'done') return 'done'
+  // Phase 7 — supervisor public status uses `completed` / `killed` /
+  // `failed`; map both terminal-but-not-failed exits (`completed`, `killed`)
+  // to non-failed liveness so the renderer doesn't paint a cancellation as
+  // a failure.
+  if (snapshot.status === 'completed') return 'done'
   if (snapshot.status === 'failed') return 'failed'
+  if (snapshot.status === 'killed') return 'done'
   if (snapshot.hasLiveWork) return 'running_process'
   if (snapshot.hasRecentProgress) return 'recent_progress'
   if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
@@ -1310,6 +1398,99 @@ export function loadSkillRunContract(
       ? trimmed(readStringField(resumePayloadOriginalInput, 'url'))
       : null)
 
+  // Phase 4 — child-run lookup. When a child-run row exists for this
+  // skill (active status), we surface the handle + close event so the
+  // parent stops deriving the next internal action from `actionInput`.
+  // When `childRunId` is present, `actionInput` / `originalInput` are
+  // SUMMARY ONLY: parent code MUST NOT use them to pick the next VEA
+  // step — that's the child driver's job.
+  let childRunId: string | undefined
+  let childStatus: SkillChildRunStatus | undefined
+  let childParentNextHint: SkillChildRunParentNextHint | undefined
+  let childCloseEvent: SkillChildCloseEvent | null | undefined
+
+  // Helper that hoists a `childRun` payload (the same shape the repository
+  // writes via `setResumePayload`) onto the loader's local child-handle
+  // slots. Both the repository row's `resumePayload.childRun` and the
+  // supervisor snapshot's `resumePayload.childRun` use the same shape, so
+  // we can drain either source through this single block.
+  const readChildPayload = (payload: Record<string, unknown> | null): void => {
+    if (!payload) return
+    const candidateId = trimmed(payload.childRunId as unknown)
+    if (!candidateId) return
+    childRunId = candidateId
+    const candidateStatus = trimmed(payload.status as unknown)
+    if (candidateStatus) childStatus = candidateStatus as SkillChildRunStatus
+    const candidateHint = trimmed(payload.parentNextHint as unknown)
+    if (candidateHint === 'wait_for_close_event' || candidateHint === 'continue_other_work') {
+      childParentNextHint = candidateHint
+    }
+    const candidateClose = payload.closeEvent
+    if (candidateClose && typeof candidateClose === 'object' && !Array.isArray(candidateClose)) {
+      childCloseEvent = candidateClose as unknown as SkillChildCloseEvent
+    } else {
+      childCloseEvent = null
+    }
+  }
+
+  if (params.skillTaskRunRepository && skillId) {
+    try {
+      const childRow = params.skillTaskRunRepository.findLatestChildRunBySkill({
+        sessionId: params.sessionId ?? null,
+        scopeId: params.scopeId ?? null,
+        skillId,
+      })
+      const childPayload = childRow
+        ? readObjectField(childRow.resumePayload, 'childRun')
+        : null
+      readChildPayload(childPayload)
+    } catch {
+      // Repository lookup is best-effort; missing DB / malformed rows fall
+      // through to the legacy contract path.
+    }
+  }
+  // Phase 6 — fallback: when no repository was provided (or it returned
+  // nothing), read the same `childRun` payload off the supervisor
+  // snapshot. The child runner persists the handle into the snapshot's
+  // `resumePayload.childRun` block, so the contract reflects child
+  // ownership even on call sites that don't carry a repository
+  // reference (the turn-frame resolver, for example).
+  if (!childRunId && snapshot?.resumePayload) {
+    const supervisorChildPayload = readObjectField(snapshot.resumePayload, 'childRun')
+    readChildPayload(supervisorChildPayload)
+  }
+
+  // Phase 4 — legacy adoption surface. When no child run exists yet but
+  // the legacy row has at least one usable handle, surface the handles so
+  // Phase 5 can detect "I should mint a child run that adopts this state".
+  // When NEITHER handle is present, never silently complete the row: pin
+  // the status to `recoverable_paused` (or whatever terminal status the
+  // supervisor already chose) and set `blockerReason: 'no_usable_handles'`.
+  let legacyAdoptableHandles: SkillRunContract['legacyAdoptableHandles']
+  let blockerReasonOverride: string | undefined
+  if (!childRunId) {
+    if (outputDir || runStatePath) {
+      const handles: NonNullable<SkillRunContract['legacyAdoptableHandles']> = {}
+      if (taskRunId) handles.taskRunId = taskRunId
+      if (outputDir) handles.outputDir = outputDir
+      if (runStatePath) handles.runStatePath = runStatePath
+      if (Object.keys(handles).length > 0) {
+        legacyAdoptableHandles = handles
+      }
+    } else if ((taskRunId || detachedTaskId) && status !== 'failed' && status !== 'completed') {
+      // Active legacy row with NO usable handles → cannot resume work, but
+      // we must NEVER silently mark it `completed`. Pin to recoverable_paused
+      // and surface a structured blocker.
+      blockerReasonOverride = 'no_usable_handles'
+    }
+  }
+
+  // Apply blocker override to status (never weaken a terminal status).
+  let finalStatus: SkillRunContract['status'] = status
+  if (blockerReasonOverride && finalStatus !== 'failed' && finalStatus !== 'completed') {
+    finalStatus = 'recoverable_paused'
+  }
+
   return {
     skillId: skillId || (skillName ?? '') || '',
     skillName,
@@ -1328,7 +1509,7 @@ export function loadSkillRunContract(
       sceneScoresPath,
       deliveryReportPath,
     },
-    status,
+    status: finalStatus,
     liveness: livenessFromSupervisorSnapshot(snapshot),
     progress: (() => {
       const fromSnapshot = progressFromSnapshot(snapshot)
@@ -1343,7 +1524,7 @@ export function loadSkillRunContract(
       }
     })(),
     blocker: {
-      reason: blockerReason,
+      reason: blockerReasonOverride ?? blockerReason,
       stale: Boolean(snapshot?.stale),
     },
     projectionIdentity: {
@@ -1357,6 +1538,12 @@ export function loadSkillRunContract(
       consecutiveForceCount: 0,
     },
     updatedAt: snapshot?.observedAt || new Date().toISOString(),
+    ...(childRunId !== undefined ? { childRunId } : {}),
+    ...(childStatus !== undefined ? { childStatus } : {}),
+    ...(childParentNextHint !== undefined ? { parentNextHint: childParentNextHint } : {}),
+    ...(childCloseEvent !== undefined ? { childCloseEvent } : {}),
+    ...(legacyAdoptableHandles ? { legacyAdoptableHandles } : {}),
+    ...(blockerReasonOverride ? { blockerReason: blockerReasonOverride } : {}),
   }
 }
 
@@ -1407,6 +1594,14 @@ export function buildContractFramePatch(
       },
       forceLoopGuard: { ...contract.forceLoopGuard },
       updatedAt: contract.updatedAt,
+      ...(contract.childRunId !== undefined ? { childRunId: contract.childRunId } : {}),
+      ...(contract.childStatus !== undefined ? { childStatus: contract.childStatus } : {}),
+      ...(contract.parentNextHint !== undefined ? { parentNextHint: contract.parentNextHint } : {}),
+      ...(contract.childCloseEvent !== undefined ? { childCloseEvent: contract.childCloseEvent } : {}),
+      ...(contract.legacyAdoptableHandles
+        ? { legacyAdoptableHandles: { ...contract.legacyAdoptableHandles } }
+        : {}),
+      ...(contract.blockerReason !== undefined ? { blockerReason: contract.blockerReason } : {}),
     }
     const handles: NonNullable<TurnFramePatch['discoveredHandles']> = {}
     if (contract.taskRunId) handles.taskRunId = contract.taskRunId

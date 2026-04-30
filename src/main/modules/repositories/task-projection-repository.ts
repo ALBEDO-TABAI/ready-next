@@ -250,25 +250,47 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if (!db) throw new Error('Database not available')
     const { scopeId, skillId, outputDir, runStatePath } = args
     if (!outputDir && !runStatePath) return []
-    const rows = db.prepare(
-      `SELECT * FROM task_projections
-       WHERE scope_id = ?
-         AND module = 'system'
-         AND task_type = 'short_task'
-         AND status NOT IN ('cancelled', 'done')`,
-    ).all<TaskProjectionRow>(scopeId)
-    const normalizedOutputDir = outputDir ? outputDir.replace(/[\\/]+$/, '') : null
     const normalizedSkillId = typeof skillId === 'string' && skillId.trim() ? skillId.trim() : null
+    // Phase 7 — apply `skillId` filter in SQL BEFORE path similarity, per
+    // source plan §7. A candidate row is rejected as soon as ANY of its
+    // recorded artifacts carries a `meta.skillId` that differs from
+    // `normalizedSkillId`. Legacy rows that never recorded a skillId have
+    // no such artifact — the inner NOT EXISTS evaluates true and they
+    // remain adoptable. Rows with `skill-child:` / `skill:` prefixes are
+    // also excluded here so we never re-adopt a child-run row by path
+    // similarity.
+    const rows = db.prepare(
+      `SELECT *
+       FROM task_projections tp
+       WHERE tp.scope_id = ?
+         AND tp.module = 'system'
+         AND tp.task_type = 'short_task'
+         AND tp.status NOT IN ('cancelled', 'done', 'killed', 'completed')
+         AND tp.task_id NOT LIKE 'skill:%'
+         AND tp.task_id NOT LIKE 'skill-child:%'
+         AND (
+           ? IS NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM json_each(COALESCE(tp.recent_artifacts_json, '[]')) artifact
+             WHERE TRIM(COALESCE(json_extract(artifact.value, '$.meta.skillId'), '')) <> ''
+               AND TRIM(json_extract(artifact.value, '$.meta.skillId')) <> ?
+           )
+         )`,
+    ).all<TaskProjectionRow>(scopeId, normalizedSkillId, normalizedSkillId ?? '')
+    const normalizedOutputDir = outputDir ? outputDir.replace(/[\\/]+$/, '') : null
     return rows
-      .filter((row) => !row.task_id.startsWith('skill:'))
       .map((row) => this.mapRow(row))
       .filter((record) => {
         const artifacts = record.recentArtifacts as Array<Record<string, unknown>> | undefined
+        // Path/runStatePath similarity matching applies on the already
+        // skill-filtered candidate set.
         if (!artifactsMatchSibling(artifacts, normalizedOutputDir, runStatePath)) return false
+        // Defense-in-depth: legacy DBs that pre-date `json_extract` quirks
+        // may still yield mixed-skill artifacts inside one row. Repeat the
+        // JS-side check so cross-skill rows can never sneak through.
         if (!normalizedSkillId) return true
         const siblingSkillId = artifactSiblingSkillId(artifacts)
-        // Reject rows that explicitly belong to a different skill. Legacy
-        // rows without a recorded skillId remain matchable.
         return !siblingSkillId || siblingSkillId === normalizedSkillId
       })
   }

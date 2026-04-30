@@ -32,6 +32,12 @@ export interface ReadArtifactHandlerDeps {
    * artifacts that live outside `<outputsRoot>/<skillId>/` without falling
    * back to `skill_run_shell cat`. The primary artifact root is always tried
    * first so existing relative-path semantics are preserved.
+   *
+   * Phase 3 (skill-child-loop) — the dispatcher in `skills-tools.ts` now
+   * sources this list from `ToolRuntimeContext.activeFrame.activeArtifactRoots`
+   * first (same-turn live signal), falling back to `resolveActiveSkillContext`.
+   * This parameter remains the legacy plumbing surface — keep it.
+   * TODO(skill-child-loop): drop fallback after child-run path is stable.
    */
   additionalAllowedReadRoots?: string[]
 }

@@ -237,7 +237,8 @@ function makeSkillSnapshot(overrides?: Partial<SkillTaskSupervisorSnapshot>): Sk
     scopeId: 'scope-test',
     sessionId: 'scope-test',
     action: 'video_expert_pipeline',
-    status: 'background_running',
+    status: 'running',
+    liveness: 'background',
     hasLiveWork: true,
     hasRecentProgress: true,
     closeAllowed: false,
@@ -1844,7 +1845,8 @@ test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhau
           scopeId: 'scope-test',
           sessionId: 'scope-test',
           action: 'video_expert_pipeline',
-          status: 'background_running',
+          status: 'running',
+          liveness: 'background',
           hasLiveWork: true,
           hasRecentProgress: true,
           closeAllowed: false,
@@ -2025,7 +2027,8 @@ test('TurnEngine creates a skill lease from a recoverable supervisor snapshot ev
         },
         skillTaskSupervisor: {
           inspectLatestSkillTask: () => makeSkillSnapshot({
-            status: 'background_running',
+            status: 'running',
+            liveness: 'background',
             hasLiveWork: true,
             closeAllowed: false,
             detachedTaskId: 'dst-observed',
@@ -2433,7 +2436,8 @@ test('TurnEngine renews a progressing long skill lease and closes only when supe
           inspectLatestSkillTask: () => {
             const closeAllowed = executedBatches >= 100
             return makeSkillSnapshot({
-              status: closeAllowed ? 'done' : 'background_running',
+              status: closeAllowed ? 'completed' : 'running',
+              liveness: closeAllowed ? null : 'background',
               hasLiveWork: !closeAllowed,
               closeAllowed,
               progress: {

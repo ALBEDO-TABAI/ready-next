@@ -8,7 +8,11 @@ import {
   type RSSAnalysisJobStatus,
 } from '../database'
 import { RSSRepository } from '../repositories/rss-repository'
-import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import {
+  getSkillsRuntimeManager,
+  startSkillChildRunAndWait,
+  type StartSkillChildRunAndWaitResult,
+} from '../skills-runtime/runtime-manager'
 import { extractWebContentToFile } from './content-extractor'
 import { rssSubagentRunner } from './subagent-runner'
 
@@ -148,6 +152,31 @@ function toProgress(job: RSSAnalysisJob): RSSItemAnalysisProgress {
   }
 }
 
+/**
+ * Phase 7 — VEA long actions are routed through `startSkillChildRunAndWait`.
+ * `queued_global_concurrency` is the only terminal-on-launch reason that
+ * deserves a retry; everything else (failed_skill / infra_error /
+ * cancelled_user / blocked_*) is propagated to the caller. Bounded retry
+ * keeps RSS visual flow alive when the user has 3 other VEA child runs in
+ * flight.
+ */
+const VEA_AWAIT_RETRY_LIMIT = 3
+const VEA_AWAIT_RETRY_DELAY_MS = 5000
+
+export interface RSSItemAnalysisManagerDeps {
+  /**
+   * Test seam — defaults to the production helper. Tests inject a stub so
+   * the manager can be exercised without booting the child-run runtime.
+   */
+  startSkillChildRunAndWait?: typeof startSkillChildRunAndWait
+  /**
+   * Test seam — override the bounded-retry sleep between
+   * `queued_global_concurrency` attempts so retry tests don't take 10+
+   * seconds. Defaults to the production constant.
+   */
+  veaAwaitRetryDelayMs?: number
+}
+
 export class RSSItemAnalysisManager {
   private readonly repository = new RSSRepository()
   private readonly queues: Record<RSSAnalysisAction, Array<{ jobId: string; run: () => Promise<void> }>> = {
@@ -159,6 +188,41 @@ export class RSSItemAnalysisManager {
     visual: false,
   }
   private initialized = false
+  private readonly veaChildAwait: typeof startSkillChildRunAndWait
+  private readonly veaAwaitRetryDelayMs: number
+
+  constructor(deps: RSSItemAnalysisManagerDeps = {}) {
+    this.veaChildAwait = deps.startSkillChildRunAndWait || startSkillChildRunAndWait
+    this.veaAwaitRetryDelayMs =
+      typeof deps.veaAwaitRetryDelayMs === 'number' && Number.isFinite(deps.veaAwaitRetryDelayMs) && deps.veaAwaitRetryDelayMs >= 0
+        ? deps.veaAwaitRetryDelayMs
+        : VEA_AWAIT_RETRY_DELAY_MS
+  }
+
+  /**
+   * Phase 7 — test seam. Production code never calls this; the
+   * `rss-visual-skill-child-run` test exercises it directly to verify
+   * VEA dispatch + bounded retry + close-event translation without
+   * booting the full job queue / SQLite repository. Keeping it on the
+   * class (rather than a top-level export) means private fields like
+   * `veaChildAwait` and `translateVeaCloseToError` stay encapsulated.
+   */
+  async __awaitVeaChildRunForTesting(args: {
+    skillId: 'video-expert-analyzer'
+    action: 'video_expert_pipeline' | 'video_expert_ai_analyze'
+    params: Record<string, unknown>
+    timeoutMs?: number
+  }): Promise<StartSkillChildRunAndWaitResult> {
+    return this.awaitVeaChildRun(args)
+  }
+
+  /** Phase 7 — test seam (paired with `__awaitVeaChildRunForTesting`). */
+  __translateVeaCloseToErrorForTesting(
+    result: StartSkillChildRunAndWaitResult,
+    fallbackMessage: string,
+  ): Error {
+    return this.translateVeaCloseToError(result, fallbackMessage)
+  }
 
   private ensureInitialized(): void {
     if (this.initialized) return
@@ -480,6 +544,74 @@ export class RSSItemAnalysisManager {
     })
   }
 
+  /**
+   * Phase 7 — wait on a VEA child run with bounded retry on global
+   * concurrency. Distinguishes failed / killed / blocked semantics so
+   * callers can map them to the manager's distinct outcomes.
+   */
+  private async awaitVeaChildRun(args: {
+    skillId: 'video-expert-analyzer'
+    action: 'video_expert_pipeline' | 'video_expert_ai_analyze'
+    params: Record<string, unknown>
+    timeoutMs?: number
+    sessionId?: string | null
+    scopeId?: string | null
+  }): Promise<StartSkillChildRunAndWaitResult> {
+    let attempt = 0
+    while (true) {
+      const result = await this.veaChildAwait({
+        skillId: args.skillId,
+        action: args.action,
+        params: args.params,
+        sessionId: args.sessionId ?? null,
+        scopeId: args.scopeId ?? null,
+        timeoutMs: args.timeoutMs,
+        triggerType: 'product',
+      })
+      // queued_global_concurrency is the one terminal-on-launch reason
+      // that deserves a retry — the next slot opens once another VEA
+      // child completes. Bounded so a fully saturated host doesn't hang
+      // the RSS queue.
+      if (
+        result.closeEvent.terminalReason === 'queued_global_concurrency'
+        && attempt < VEA_AWAIT_RETRY_LIMIT - 1
+      ) {
+        attempt += 1
+        await new Promise((resolve) => setTimeout(resolve, this.veaAwaitRetryDelayMs))
+        continue
+      }
+      return result
+    }
+  }
+
+  /**
+   * Phase 7 — translate a non-success VEA close event into a manager
+   * Error that preserves distinct failed / killed / blocked / paused
+   * semantics. Cancellation MUST NOT be reported as a generic failure.
+   */
+  private translateVeaCloseToError(
+    result: StartSkillChildRunAndWaitResult,
+    fallbackMessage: string,
+  ): Error {
+    const close = result.closeEvent
+    const baseMessage = close.error?.message || fallbackMessage
+    let qualifier = ''
+    let cause: 'killed' | 'blocked' | 'paused' | 'failed' = 'failed'
+    if (close.status === 'killed') {
+      qualifier = `（已取消：${close.terminalReason}）`
+      cause = 'killed'
+    } else if (close.status === 'blocked') {
+      qualifier = `（已阻塞：${close.terminalReason}）`
+      cause = 'blocked'
+    } else if (close.status === 'recoverable_paused' || close.status === 'budget_paused') {
+      qualifier = `（已暂停：${close.terminalReason}）`
+      cause = 'paused'
+    }
+    const error = new Error(`${baseMessage}${qualifier}`)
+    ;(error as Error & { veaCause?: string }).veaCause = cause
+    return error
+  }
+
   private async runVisualFlow(
     jobId: string,
     payload: StartRSSItemAnalysisPayload,
@@ -490,14 +622,15 @@ export class RSSItemAnalysisManager {
       throw new Error('视觉分析仅支持视频链接')
     }
 
-    const runtime = getSkillsRuntimeManager()
     this.updateJob(jobId, {
       status: 'running_script',
       progress: 20,
       message: '正在执行视觉脚本分析',
     })
 
-    const pipelineResult = await runtime.runSkill({
+    // Phase 7 — VEA long actions run as child runs. RSS visual flow keeps
+    // its await-style behavior; internally the long work is now child-owned.
+    const pipelineResult = await this.awaitVeaChildRun({
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
       params: {
@@ -505,15 +638,12 @@ export class RSSItemAnalysisManager {
         outputDir,
       },
       timeoutMs: 35 * 60 * 1000,
-      triggerType: 'tool',
     })
     if (!pipelineResult.success) {
-      throw new Error(pipelineResult.error || '视觉脚本分析失败')
+      throw this.translateVeaCloseToError(pipelineResult, '视觉脚本分析失败')
     }
 
-    const sceneScoresPath =
-      (await findFileByName(outputDir, 'scene_scores.json')) ||
-      this.tryParseSceneScoresPathFromStdout(pipelineResult.stdout)
+    const sceneScoresPath = await findFileByName(outputDir, 'scene_scores.json')
     if (!sceneScoresPath) {
       throw new Error('未找到 scene_scores.json，无法继续视觉评分')
     }
@@ -524,7 +654,7 @@ export class RSSItemAnalysisManager {
       message: '正在执行 AI 视觉评分',
     })
 
-    const aiResult = await runtime.runSkill({
+    const aiResult = await this.awaitVeaChildRun({
       skillId: 'video-expert-analyzer',
       action: 'video_expert_ai_analyze',
       params: {
@@ -532,11 +662,9 @@ export class RSSItemAnalysisManager {
         mode: 'api',
       },
       timeoutMs: 35 * 60 * 1000,
-      triggerType: 'tool',
-      env: rssSubagentRunner.getVisualAnalyzerEnv(),
     })
     if (!aiResult.success) {
-      throw new Error(aiResult.error || '视觉 AI 评分失败')
+      throw this.translateVeaCloseToError(aiResult, '视觉 AI 评分失败')
     }
 
     this.updateJob(jobId, {
@@ -550,7 +678,7 @@ export class RSSItemAnalysisManager {
       title: payload.title,
       link: payload.link,
       source: payload.source,
-      pipelineSummary: `${outputSummary}\n\n${aiResult.stdout}`.trim(),
+      pipelineSummary: outputSummary,
     })
 
     const reportPath = join(outputDir, '视觉分析总结.md')
@@ -595,13 +723,6 @@ export class RSSItemAnalysisManager {
       message: '视觉报告已生成',
       reportPath,
     })
-  }
-
-  private tryParseSceneScoresPathFromStdout(stdout: string): string | null {
-    const match = stdout.match(/([^\s\n\r]+scene_scores\.json)/)
-    if (!match?.[1]) return null
-    const candidate = match[1]
-    return candidate.trim()
   }
 
   private updateJob(

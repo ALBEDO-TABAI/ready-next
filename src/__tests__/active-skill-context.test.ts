@@ -77,6 +77,7 @@ function snapshot(overrides: Partial<SkillTaskSupervisorSnapshot>): SkillTaskSup
     sessionId: 'conv-vea',
     action: 'video_expert_pipeline',
     status: 'blocked',
+    liveness: null,
     hasLiveWork: false,
     hasRecentProgress: true,
     closeAllowed: false,

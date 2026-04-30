@@ -1,10 +1,35 @@
 import type { TurnFramePatch } from './turn-frame'
+import type { SkillRunContract } from './run-contracts'
 
 export type ToolResultShape = 'text' | 'json' | 'projection_patch'
 
 export type ToolInteractionHint =
   | 'awaiting_confirmation'
   | 'awaiting_clarification'
+
+/**
+ * Phase 3 (skill-child-loop) — same-turn live update emitted by a tool so
+ * dependent later tools in the SAME batch can read the fresh artifact roots
+ * / handles / contract without rebuilding a TurnFrame. Applied by
+ * `applyContextModifier` (in `tool-runtime.ts`) immediately after the tool
+ * result is normalized.
+ *
+ * Coexists with `framePatch`: the frame patch is the durable end-of-turn
+ * persistence path; `contextModifier` is the additive intra-turn signal.
+ * A tool may emit either, both, or neither.
+ */
+export interface ToolExecutionContextModifier {
+  activeFrame?: {
+    activeArtifactRoots?: string[]
+    runContract?: SkillRunContract | null
+    discoveredHandles?: Record<string, unknown>[]
+  }
+  /**
+   * Reserved for future intra-turn signals (e.g. live progress updates,
+   * supervisor liveness flips). Intentionally untyped here so Phase 3
+   * keeps the shape minimal — extension hooks land with their consumers.
+   */
+}
 
 export interface ToolExecutionOutput {
   text: string
@@ -20,6 +45,12 @@ export interface ToolExecutionOutput {
    * a batch and applies them deterministically.
    */
   framePatch: TurnFramePatch | null
+  /**
+   * Phase 3 (skill-child-loop) — same-turn live frame update for dependent
+   * later tools in the same batch. Optional; null/undefined for tools that
+   * don't mutate cross-tool context.
+   */
+  contextModifier?: ToolExecutionContextModifier | null
 }
 
 export type ToolExecutionResultLike = string | ToolExecutionOutput
@@ -32,6 +63,7 @@ export function createToolExecutionOutput(
     projectionPatch?: Record<string, unknown> | null
     interactionHint?: ToolInteractionHint | null
     framePatch?: TurnFramePatch | null
+    contextModifier?: ToolExecutionContextModifier | null
   },
 ): ToolExecutionOutput {
   const projectionPatch = options?.projectionPatch || null
@@ -46,6 +78,7 @@ export function createToolExecutionOutput(
     projectionPatch,
     interactionHint: options?.interactionHint || null,
     framePatch: options?.framePatch || null,
+    contextModifier: options?.contextModifier || null,
   }
 }
 
@@ -61,6 +94,7 @@ export function normalizeToolExecutionOutput(output: ToolExecutionResultLike): T
     projectionPatch: output.projectionPatch && typeof output.projectionPatch === 'object' ? output.projectionPatch : null,
     interactionHint: output.interactionHint || null,
     framePatch: output.framePatch && typeof output.framePatch === 'object' ? output.framePatch : null,
+    contextModifier: output.contextModifier && typeof output.contextModifier === 'object' ? output.contextModifier : null,
   }
 }
 

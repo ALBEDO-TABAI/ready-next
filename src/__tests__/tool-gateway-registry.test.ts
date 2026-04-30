@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { collectAllowedToolNames } from '../main/modules/agent-control/execution-tool-config'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
@@ -152,6 +153,38 @@ test('tool gateway reports grouped schema diagnostics and static fallback usage'
   assert.equal(resolution.groupResolutions[0]?.usedStaticFallback, true)
   assert.match(resolution.groupResolutions[0]?.schemaError || '', /runtime unavailable/)
   assert.match(gateway.getLastSchemaResolutionError('skills', 'openai') || '', /runtime unavailable/)
+})
+
+test('resolveToolInputSchemaForExecution resolves both static primitives and dynamic skill actions through one path', () => {
+  // Phase 2 (B child-loop): single execution-admission resolver. Used by
+  // tool-executor (dispatch validation), turn-engine (forced preflight),
+  // and turn-frame-steering (forced validation). All three must consult
+  // exactly the same schema for any given tool name — that's the contract
+  // collapsing the prior split between `getSkillActionSchemas()` and
+  // `getToolInputSchemas()`.
+  //
+  // Static primitive: declared via SKILL_PRIMITIVE_SCHEMAS and reaches the
+  // resolver via the static registry.
+  const writeArtifact = resolveToolInputSchemaForExecution('skill_write_artifact')
+  assert.ok(writeArtifact, 'resolver must surface skill_write_artifact')
+  // Empty input fails — `path` and `content` are required on the primitive.
+  const writeOutcome = (writeArtifact as { safeParse: (v: unknown) => { success: boolean } })
+    .safeParse({})
+  assert.equal(writeOutcome.success, false)
+
+  // Dynamic / static-manifest skill action: reaches the resolver either via
+  // the static-manifest-derived schemas folded into getToolInputSchemas(),
+  // or via the dynamic getSkillActionSchemas() cache when the runtime
+  // manager is up. Both sources land at the same resolver entry.
+  const veaPipeline = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
+  assert.ok(veaPipeline, 'resolver must surface skill_video_expert_pipeline')
+  const veaOutcome = (veaPipeline as { safeParse: (v: unknown) => { success: boolean } })
+    .safeParse({})
+  assert.equal(veaOutcome.success, false)
+
+  // Unknown tool: passthrough (null), so callers don't validate names that
+  // have no registered schema.
+  assert.equal(resolveToolInputSchemaForExecution('definitely_not_a_tool'), null)
 })
 
 test('collectAllowedToolNames keeps browser tools when browser groups are visible', () => {

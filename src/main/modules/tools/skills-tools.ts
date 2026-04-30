@@ -14,7 +14,15 @@ import {
   loadSkillRunContract,
   type SkillRunContract,
 } from '../agent-control/run-contracts'
-import type { SkillTaskSupervisorSnapshot } from '../agent-control/skill-task-supervisor'
+import {
+  isChildOwnedSkill,
+  resumeSkillChildRun,
+  startSkillChildRun,
+} from '../agent-control/skill-child-runner'
+import type {
+  SkillTaskSupervisorLiveness,
+  SkillTaskSupervisorSnapshot,
+} from '../agent-control/skill-task-supervisor'
 import type { TurnFramePatch } from '../agent-control/turn-frame'
 import {
   getLatestActiveSkillTaskRun,
@@ -63,6 +71,18 @@ interface SkillToolRuntimeContext {
   taskProjectionId?: string
   frameSkillId?: string | null
   agent?: string | null
+  /**
+   * Phase 3 (skill-child-loop) — same-turn live frame slot forwarded from
+   * the runtime. `skill_read_artifact` prefers `activeFrame.activeArtifactRoots`
+   * over the legacy `resolveActiveSkillContext` derivation when populated, so
+   * artifact roots emitted by an earlier tool in the same batch are
+   * immediately readable.
+   */
+  activeFrame?: {
+    activeArtifactRoots: string[]
+    runContract: unknown
+    discoveredHandles: Record<string, unknown>[]
+  } | null
 }
 
 const STATIC_TOOL_NAMES: Record<string, string> = {
@@ -74,6 +94,34 @@ const STATIC_TOOL_NAMES: Record<string, string> = {
   'lets-go-rss:rss_status': 'skill_rss_status',
   'lets-go-rss:rss_list': 'skill_rss_list',
   'lets-go-rss:rss_stats': 'skill_rss_stats',
+}
+
+/**
+ * Phase 6 — child-loop owned skill actions. A typed action listed here is
+ * routed to the SkillChildRunner instead of being awaited inline through
+ * `runSkill`. The parent tool batch returns immediately with a
+ * `child_launched` / `child_reused` / `child_paused` envelope; the actual
+ * run lives in the child runtime and surfaces a structured close event on
+ * its own channel.
+ *
+ * Keep keyed by `skillId` so adding a new child-loop skill is a one-line
+ * edit. Returns `true` only when both the skill is registered with a child
+ * driver AND the action name is on the per-skill allowlist.
+ */
+const CHILD_LOOP_SKILL_ACTIONS: Record<string, ReadonlySet<string>> = {
+  'video-expert-analyzer': new Set([
+    'video_expert_pipeline',
+    'video_expert_ai_analyze',
+  ]),
+}
+
+export function isChildLoopSkillAction(skillId: string, action: string): boolean {
+  if (typeof skillId !== 'string' || !skillId) return false
+  if (typeof action !== 'string' || !action) return false
+  if (!isChildOwnedSkill(skillId)) return false
+  const allow = CHILD_LOOP_SKILL_ACTIONS[skillId]
+  if (!allow) return false
+  return allow.has(action)
 }
 
 
@@ -534,6 +582,7 @@ function makeSupervisorSnapshotForContract(params: {
   sessionId?: string | null
   action?: string | null
   status: SkillTaskSupervisorSnapshot['status']
+  liveness?: SkillTaskSupervisorLiveness
   taskRunId?: string | null
   detachedTaskId?: string | null
   outputDir?: string | null
@@ -555,6 +604,7 @@ function makeSupervisorSnapshotForContract(params: {
     sessionId: params.sessionId ?? null,
     action: params.action ?? null,
     status: params.status,
+    liveness: params.liveness ?? null,
     hasLiveWork: Boolean(params.hasLiveWork),
     hasRecentProgress: Boolean(params.hasRecentProgress),
     closeAllowed: false,
@@ -602,14 +652,22 @@ function deriveSourceUrlFromActionInput(input?: Record<string, unknown> | null):
 function detachedStatusToSupervisorStatus(
   status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked',
 ): SkillTaskSupervisorSnapshot['status'] {
+  // Phase 7 — public vocabulary: cancelled→killed, done→completed,
+  // background_running→running (callers add `liveness: 'background'`).
   switch (status) {
-    case 'running': return 'background_running'
-    case 'done': return 'done'
+    case 'running': return 'running'
+    case 'done': return 'completed'
     case 'failed': return 'failed'
-    case 'cancelled': return 'cancelled'
+    case 'cancelled': return 'killed'
     case 'blocked': return 'blocked'
     default: return 'unknown'
   }
+}
+
+function detachedStatusToLiveness(
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked',
+): SkillTaskSupervisorLiveness {
+  return status === 'running' ? 'background' : null
 }
 
 /**
@@ -656,6 +714,9 @@ function attachContractFramePatch(
     projectionPatch: output.projectionPatch,
     interactionHint: output.interactionHint,
     framePatch: merged,
+    // Phase 3 — preserve any same-turn `contextModifier` the upstream
+    // handler attached so the runtime-level live-frame mutation still fires.
+    contextModifier: output.contextModifier ?? null,
   })
 }
 
@@ -786,6 +847,9 @@ function attachSkillProjection(output: string | ToolExecutionOutput, params: {
     // Stage 5 — preserve any structured frame patch the underlying handler
     // attached so the turn engine post-batch consumer still sees it.
     framePatch: normalized.framePatch,
+    // Phase 3 — preserve any same-turn `contextModifier` so the live
+    // active-frame slot is still mutated for the next dependent tool.
+    contextModifier: normalized.contextModifier ?? null,
   })
 }
 
@@ -1024,6 +1088,7 @@ export async function executeSkillTool(
         sessionId: record.sessionId || sessionId || null,
         action: record.action,
         status: detachedStatusToSupervisorStatus(record.status),
+        liveness: detachedStatusToLiveness(record.status),
         detachedTaskId: record.id,
         outputDir: record.outputDir,
         runStatePath: record.runStatePath,
@@ -1069,15 +1134,14 @@ export async function executeSkillTool(
       }
       // Stage D7 — emit terminal framePatch so the frame and projection
       // do NOT keep showing recoverable/running work after cancellation.
-      // The supervisor's `cancelled` status maps to the contract's
-      // `failed` bucket per loadSkillRunContract; liveness is forced to
-      // a non-running value via livenessHint.
+      // Phase 7: cancellation maps to public `killed` (NOT `failed`).
       const supervisorSnapshot = makeSupervisorSnapshotForContract({
         skillId: record.skillId,
         scopeId: record.scopeId || sessionId || null,
         sessionId: record.sessionId || sessionId || null,
         action: record.action,
         status: detachedStatusToSupervisorStatus(record.status),
+        liveness: detachedStatusToLiveness(record.status),
         detachedTaskId: record.id,
         outputDir: record.outputDir,
         runStatePath: record.runStatePath,
@@ -1317,7 +1381,8 @@ export async function executeSkillTool(
           scopeId: sessionId || null,
           sessionId: sessionId || null,
           action,
-          status: 'background_running',
+          status: 'running',
+          liveness: 'background',
           detachedTaskId: record.id,
           outputDir: record.outputDir,
           runStatePath: record.runStatePath,
@@ -1491,13 +1556,13 @@ export async function executeSkillTool(
         status: 'running',
       })
       try {
-        // Stage 5 — derive additional read-only roots from the active
-        // TurnFrame skill slice so the model can read live task artifacts
-        // (run_state.json / scene_scores.json / delivery report) without
-        // falling back to `skill_run_shell cat`. The same active-skill
-        // context that feeds the frame resolver is reused here so dispatch
-        // and frame stay aligned.
-        const activeContextForRoots = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+        // Phase 3 (skill-child-loop) — prefer the same-turn live
+        // `activeFrame.activeArtifactRoots` slot when populated so artifact
+        // roots emitted by an earlier tool in this batch (e.g. VEA's
+        // outputDir surfaced via `contextModifier`) are immediately readable
+        // without waiting for the next turn's frame rebuild. The legacy
+        // `resolveActiveSkillContext` path remains as fallback for cold
+        // sessions where the active-frame slot is empty.
         const additionalRootCandidates: string[] = []
         const seenRoots = new Set<string>()
         const pushRoot = (path: string | null | undefined) => {
@@ -1507,11 +1572,18 @@ export async function executeSkillTool(
           seenRoots.add(trimmed)
           additionalRootCandidates.push(trimmed)
         }
-        if (activeContextForRoots) {
-          pushRoot(activeContextForRoots.outputDir)
-          if (activeContextForRoots.runStatePath) pushRoot(dirname(activeContextForRoots.runStatePath))
-          if (activeContextForRoots.sceneScoresPath) pushRoot(dirname(activeContextForRoots.sceneScoresPath))
-          if (activeContextForRoots.deliveryReportPath) pushRoot(dirname(activeContextForRoots.deliveryReportPath))
+        const liveFrameRoots = runtimeContext?.activeFrame?.activeArtifactRoots
+        if (Array.isArray(liveFrameRoots) && liveFrameRoots.length > 0) {
+          for (const root of liveFrameRoots) pushRoot(root)
+        } else {
+          // TODO(skill-child-loop): drop fallback after child-run path is stable
+          const activeContextForRoots = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+          if (activeContextForRoots) {
+            pushRoot(activeContextForRoots.outputDir)
+            if (activeContextForRoots.runStatePath) pushRoot(dirname(activeContextForRoots.runStatePath))
+            if (activeContextForRoots.sceneScoresPath) pushRoot(dirname(activeContextForRoots.sceneScoresPath))
+            if (activeContextForRoots.deliveryReportPath) pushRoot(dirname(activeContextForRoots.deliveryReportPath))
+          }
         }
         const output = await executeReadArtifact(
           {
@@ -1626,6 +1698,29 @@ export async function executeSkillTool(
     goalText: goalTextFromParams(toolName, tool.action || '', args),
     resourceRefs: resourceRefsFromParams(args),
   })
+
+  // Phase 6 — child-loop routing. When the typed action belongs to a
+  // child-owned skill (currently: VEA `video_expert_pipeline` and
+  // `video_expert_ai_analyze`), skip the inline `runSkill` await: launch
+  // (or reuse) a child run and return immediately with a structured
+  // envelope the parent's tool batch can fold into the next iteration.
+  // The framePatch carries `runContract.childRunId` + `parentNextHint` so
+  // the next turn's `loadSkillRunContract` sees child ownership and
+  // `shouldParentForceLongSkillTool` blocks any synthesized parent-side
+  // force dispatch. See docs/architecture/skill-child-loop-boundary.md §5.2.
+  if (isChildLoopSkillAction(tool.skillId || '', tool.action || '')) {
+    return await dispatchChildLoopSkillAction({
+      toolName,
+      skillId: tool.skillId || '',
+      action: tool.action || '',
+      args,
+      sessionId,
+      scopeId: runtimeContext?.scopeId || sessionId || null,
+      stepId: started.stepId,
+      runtimeContext,
+    })
+  }
+
   // TODO(skill-child-loop): this awaited runSkill call blocks the parent's
   // tool batch on the entire long-skill run. When the child-loop runner
   // lands, this becomes a launch-and-acknowledge call; the structured close
@@ -1743,10 +1838,14 @@ export async function executeSkillTool(
   // action wrapper returns immediately on launch, and the close event
   // produces the framePatch. See docs/architecture/skill-child-loop-boundary.md §5.2.
   const supervisorStatusForContract: SkillTaskSupervisorSnapshot['status'] = (() => {
-    if (runStatus === 'done') return 'done'
+    if (runStatus === 'done') return 'completed'
     if (runStatus === 'error') return 'failed'
     if (runStatus === 'blocked') return 'blocked'
-    return 'background_running'
+    return 'running'
+  })()
+  const supervisorLivenessForContract: SkillTaskSupervisorLiveness = (() => {
+    if (runStatus === 'done' || runStatus === 'error' || runStatus === 'blocked') return null
+    return 'background'
   })()
   const livenessHintForContract: SkillRunContract['liveness'] = (() => {
     if (runStatus === 'done') return 'done'
@@ -1760,6 +1859,7 @@ export async function executeSkillTool(
     sessionId: sessionId || null,
     action: tool.action || null,
     status: supervisorStatusForContract,
+    liveness: supervisorLivenessForContract,
     taskRunId,
     detachedTaskId,
     outputDir,
@@ -1803,9 +1903,24 @@ export async function executeSkillTool(
     livenessHint: livenessHintForContract,
   })
 
+  // Phase 3 (skill-child-loop) — emit a same-turn `contextModifier` for the
+  // VEA typed-action wrappers so dependent later tools in this batch (e.g.
+  // a follow-up `skill_read_artifact run_state.json`) immediately see the
+  // freshly-produced output directory as an additional allowed read root.
+  // The framePatch above remains the durable end-of-turn signal; this
+  // contextModifier is strictly additive for live intra-turn visibility.
+  const VEA_CONTEXT_MUTATING_TOOL_NAMES = new Set([
+    'skill_video_expert_pipeline',
+    'skill_video_expert_ai_analyze',
+  ])
+  const contextModifier = (outputDir && VEA_CONTEXT_MUTATING_TOOL_NAMES.has(toolName))
+    ? { activeFrame: { activeArtifactRoots: [outputDir] } }
+    : null
+
   return createToolExecutionOutput(formatted, {
     projectionPatch,
     framePatch,
+    contextModifier,
   })
 }
 
@@ -1813,3 +1928,196 @@ export type { SkillToolDef, ToolParam, SkillActionDefinition }
 // Phase 4: SkillInputValue re-export preserved as a type-only passthrough for
 // callers that still import it from here (no runtime impact).
 export type { SkillInputValue }
+
+/**
+ * Phase 6 — dispatch a child-loop owned typed action through
+ * `startSkillChildRun`. Returns a `ToolExecutionOutput` with:
+ *   - text body  : a JSON envelope the model can read
+ *                  (`status: 'child_launched' | 'child_reused' | 'child_paused'`)
+ *   - framePatch : `runContract.{childRunId, parentNextHint}` + `livenessHint`
+ *                  + `activeArtifactRoots` so the next turn's contract loader
+ *                  sees child ownership.
+ *   - contextModifier: same artifact root + a (skeletal) `runContract` so
+ *                      same-batch dependent tools (e.g. `skill_read_artifact`)
+ *                      see the live outputDir without waiting for next turn.
+ *
+ * Does NOT await the child run. The runner emits a separate close event
+ * (and the next turn's `loadSkillRunContract` reads it).
+ */
+async function dispatchChildLoopSkillAction(params: {
+  toolName: string
+  skillId: string
+  action: string
+  args: Record<string, unknown>
+  sessionId?: string
+  scopeId: string | null
+  stepId: string
+  runtimeContext?: SkillToolRuntimeContext
+}): Promise<ToolExecutionOutput> {
+  const { toolName, skillId, action, args, sessionId, scopeId, stepId, runtimeContext } = params
+
+  let result: Awaited<ReturnType<typeof startSkillChildRun>>
+  try {
+    result = await startSkillChildRun({
+      scopeId,
+      sessionId: sessionId || null,
+      skillId,
+      action,
+      requestedInput: args,
+      parentNextHint: 'wait_for_close_event',
+      triggerType: 'tool',
+    })
+  } catch (error) {
+    // The runner is supposed to surface refusals as `recoverable_paused` /
+    // `failed` close events, not throws. Treat a throw as infra-level and
+    // record a failure event so the projection / metric pipeline notices.
+    const message = error instanceof Error ? error.message : String(error)
+    recordSkillTaskEvent({
+      scopeId: runtimeContext?.scopeId,
+      sessionId,
+      runId: runtimeContext?.runId,
+      agent: runtimeContext?.agent,
+      skillId,
+      skillName: undefined,
+      toolName,
+      action,
+      runKind: 'typed_action',
+      stepId,
+      status: 'error',
+      message: `child runner unavailable: ${message}`,
+      failureKind: 'child_runner_unavailable',
+      failureDetail: message,
+    })
+    return createToolExecutionOutput(`child runner unavailable: ${message}`, {
+      shape: 'json',
+      data: {
+        status: 'child_runner_unavailable',
+        skillId,
+        action,
+        error: message,
+      },
+    })
+  }
+
+  // Map runner status → tool envelope status.
+  const envelopeStatus: 'child_launched' | 'child_reused' | 'child_paused' | 'child_terminal' = (() => {
+    if (result.status === 'reused') return 'child_reused'
+    if (result.status === 'recoverable_paused' || result.status === 'queued' || result.status === 'blocked') {
+      return 'child_paused'
+    }
+    if (result.status === 'failed' || result.status === 'completed' || result.status === 'killed') {
+      return 'child_terminal'
+    }
+    return 'child_launched'
+  })()
+
+  // Record the launch as still-running for the legacy task-tracker so the
+  // projection layer surfaces the child as live work. Failures emitted on
+  // launch (no driver, repo create failure) record as `error`.
+  const trackerStatus: SkillTaskEventStatus = (() => {
+    if (envelopeStatus === 'child_terminal' && result.status === 'failed') return 'error'
+    if (envelopeStatus === 'child_paused') return 'blocked'
+    return 'running'
+  })()
+
+  recordSkillTaskEvent({
+    scopeId: runtimeContext?.scopeId,
+    sessionId,
+    runId: runtimeContext?.runId,
+    agent: runtimeContext?.agent,
+    skillId,
+    skillName: undefined,
+    toolName,
+    action,
+    runKind: 'typed_action',
+    stepId,
+    status: trackerStatus,
+    message: envelopeStatus === 'child_terminal'
+      ? (result.closeEvent?.error?.message || 'child run completed on launch')
+      : `child run ${envelopeStatus} (id=${result.childRunId})`,
+    artifactPath: result.outputDir || undefined,
+    artifactLabel: result.outputDir ? '技能输出目录' : undefined,
+    outputDir: result.outputDir || null,
+    runStatePath: result.runStatePath || null,
+    detachedTaskId: undefined,
+  })
+
+  // Build a minimal `SkillRunContract` carrying the child handle so the
+  // framePatch + contextModifier flow it forward without re-reading from
+  // the repository. We anchor the contract via `loadSkillRunContract` (so
+  // any of its other reconciliation paths still run when applicable),
+  // then override with the live child handle the runner just produced.
+  const livenessHintForContract: SkillRunContract['liveness'] = (() => {
+    if (envelopeStatus === 'child_terminal') {
+      if (result.status === 'failed' || result.status === 'killed') return 'failed'
+      if (result.status === 'completed') return 'done'
+      return 'unknown'
+    }
+    if (envelopeStatus === 'child_paused') return 'recoverable_paused'
+    return 'running_process'
+  })()
+
+  const contract = loadSkillRunContract({
+    scopeId,
+    sessionId: sessionId || null,
+    skillId,
+    outputDir: result.outputDir || null,
+    runStatePath: result.runStatePath || null,
+    supervisorSnapshot: null,
+    projectionSibling: null,
+    referenceHint: sessionId ? getLastReferenceSkill(sessionId) : null,
+    originalInput: args,
+    sourceUrl: deriveSourceUrlFromActionInput(args),
+    toolName,
+    actionInput: args,
+    jobId: null,
+  })
+  if (contract) {
+    contract.childRunId = result.childRunId
+    contract.parentNextHint = result.parentNextHint
+    if (result.closeEvent) {
+      contract.childCloseEvent = result.closeEvent
+    }
+    if (result.outputDir && !contract.artifactRoots.includes(result.outputDir)) {
+      contract.artifactRoots = [result.outputDir, ...contract.artifactRoots]
+    }
+  }
+
+  const framePatch = buildContractFramePatch({
+    contract,
+    activeArtifactRoots: result.outputDir ? [result.outputDir] : null,
+    livenessHint: livenessHintForContract,
+  })
+
+  const contextModifier = result.outputDir
+    ? {
+      activeFrame: {
+        activeArtifactRoots: [result.outputDir],
+        ...(contract ? { runContract: contract } : {}),
+      },
+    }
+    : null
+
+  const envelope: Record<string, unknown> = {
+    status: envelopeStatus,
+    childRunId: result.childRunId,
+    skillId,
+    action,
+    outputDir: result.outputDir,
+    runStatePath: result.runStatePath,
+    eventLogPath: result.eventLogPath,
+    parentNextHint: result.parentNextHint,
+  }
+  if (envelopeStatus === 'child_paused' || envelopeStatus === 'child_terminal') {
+    envelope.closeEvent = result.closeEvent
+  }
+
+  const text = JSON.stringify(envelope)
+
+  return createToolExecutionOutput(text, {
+    shape: 'json',
+    data: envelope,
+    framePatch,
+    contextModifier,
+  })
+}

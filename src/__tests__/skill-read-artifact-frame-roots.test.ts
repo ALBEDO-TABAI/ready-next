@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -129,6 +129,74 @@ test('skill_read_artifact resolves relative path against primary artifactRoot fi
     assert.match(String(data.content), /primary content/)
     assert.doesNotMatch(String(data.content), /OUTSIDE content/)
     assert.equal(data.absolutePath, join(env.artifactRoot, 'primary.txt'))
+  } finally {
+    env.cleanup()
+  }
+})
+
+/**
+ * Phase 3 (skill-child-loop, Team 3) — same-turn live frame visibility.
+ *
+ * When the dispatch in `skills-tools.ts` populates
+ * `additionalAllowedReadRoots` from `runtimeContext.activeFrame.activeArtifactRoots`
+ * (the new same-turn signal), `executeReadArtifact` must accept absolute
+ * paths under those roots without ever consulting the legacy
+ * `resolveActiveSkillContext` fallback. Verified at the primitive level by
+ * passing the live frame roots directly via `additionalAllowedReadRoots` —
+ * the dispatcher's job is to source them from the active-frame slot first;
+ * the primitive's job is to honor whatever the dispatcher passes.
+ */
+test('Phase 3: source-level proof — skill_read_artifact dispatch prefers activeFrame.activeArtifactRoots over the legacy fallback', () => {
+  const source = readFileSync(
+    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
+    'utf-8',
+  )
+  // Locate the skill_read_artifact branch.
+  const readArtifactRegion = source.split("if (tool.name === 'skill_read_artifact')")[1] || ''
+  const branchEnd = readArtifactRegion.indexOf("if (tool.name === 'skill_inspect_run_state')")
+  const branch = branchEnd > 0 ? readArtifactRegion.slice(0, branchEnd) : readArtifactRegion
+
+  // The dispatch must consult runtimeContext.activeFrame.activeArtifactRoots
+  // first.
+  assert.match(
+    branch,
+    /runtimeContext\?\.activeFrame\?\.activeArtifactRoots/,
+    'Phase 3 regression: skill_read_artifact dispatch must read runtimeContext.activeFrame.activeArtifactRoots',
+  )
+  // The fallback to resolveActiveSkillContext must remain (per spec) AND
+  // must carry the TODO marker so Phase 5/6 knows to drop it.
+  assert.match(
+    branch,
+    /TODO\(skill-child-loop\): drop fallback after child-run path is stable/,
+    'Phase 3 regression: legacy resolveActiveSkillContext fallback must carry TODO marker',
+  )
+})
+
+test('Phase 3: skill_read_artifact resolves through activeFrame.activeArtifactRoots without touching the fallback', async () => {
+  const env = setupEnv()
+  try {
+    // Simulate VEA having just produced run_state.json in an "outside" dir
+    // and surfacing it via contextModifier → activeFrame.activeArtifactRoots
+    // → additionalAllowedReadRoots in the same batch.
+    const runStateAbsPath = join(env.outsideRoot, 'run_state.json')
+    writeFileSync(runStateAbsPath, JSON.stringify({ status: 'running', stage: 'score_batches' }), 'utf-8')
+
+    const liveFrameRoots = [env.outsideRoot]
+
+    const output = await executeReadArtifact(
+      { relativePath: runStateAbsPath },
+      {
+        skillId: 'video-expert-analyzer',
+        lookupSkillRoots: lookupRoots('video-expert-analyzer', env.artifactRoot),
+        // Same-turn live signal — the dispatch sources this from
+        // runtimeContext.activeFrame.activeArtifactRoots; the primitive
+        // does not need to consult resolveActiveSkillContext.
+        additionalAllowedReadRoots: liveFrameRoots,
+      },
+    )
+    const data = (output as any).data as Record<string, unknown>
+    assert.equal(data.absolutePath, runStateAbsPath)
+    assert.match(String(data.content), /score_batches/)
   } finally {
     env.cleanup()
   }

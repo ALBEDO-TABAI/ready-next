@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
+import type { ZodObject, ZodRawShape } from 'zod'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import type {
@@ -47,10 +48,12 @@ import { shouldExposeSkillPrimitive } from '../tools/skill-tool-session-gate'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import {
   findSkillToolByNameForExecution,
+  getSkillActionSchemas,
   getSkillAnthropicTools,
   getSkillOpenAITools,
   getSkillToolDefsForRegistry,
 } from '../tools/skills-tools'
+import { getToolInputSchemas } from '../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
 import { getLastReferenceSkill } from './skill-reference-hints'
 import { resolveActiveSkillContext } from './active-skill-context'
@@ -863,4 +866,57 @@ export const defaultToolRegistry = new ToolRegistry()
  */
 export function getRegisteredToolNames(): Set<string> {
   return new Set(defaultToolRegistry.listToolDefinitions().map((tool) => tool.name))
+}
+
+/**
+ * Phase 2 (B plan child-loop) — single execution-admission schema resolver.
+ *
+ * Before this lived in three places: `tool-executor.ts` did an inline merge
+ * `{ ...getSkillActionSchemas(), ...getToolInputSchemas() }`, while the forced
+ * preflight in `turn-engine.ts` and the steering validator in
+ * `turn-frame-steering.ts` only consulted `getToolInputSchemas()`. The split
+ * meant a dynamic skill action schema would validate at dispatch but be
+ * invisible to the forced-tool preflight, so a forced dispatch could carry
+ * empty input through the steering validator and only be rejected once the
+ * executor merged the dynamic map back in.
+ *
+ * The resolver collapses those paths into one ordering:
+ *   1. Static registry (`getToolInputSchemas()`) wins. It already includes
+ *      static-manifest-derived skill action schemas via
+ *      `getStaticSkillActionSchemas()`, plus all per-domain primitives. This
+ *      mirrors the executor's old precedence (`...getToolInputSchemas()` came
+ *      LAST in the spread, overriding dynamic for any name collision).
+ *   2. Dynamic skill-action cache (`getSkillActionSchemas()`) is consulted
+ *      only for `skill_*` tool names that the static map does not already
+ *      cover. This is where user-installed manifests surface schemas that
+ *      the static manifest table cannot know about.
+ *   3. Returns `null` when neither map has the tool. Callers treat null as
+ *      "passthrough" — same contract as `validateToolInput` when its
+ *      registry has no entry for the tool.
+ *
+ * Child-loop runs share this resolver via the same call sites: the typed
+ * action wrapper preflights through `validateForcedActionInput` (which calls
+ * the resolver), and child internal tool calls dispatch through
+ * `executeToolCall` (which also calls the resolver). One source of truth →
+ * no split-schema hazard between the model-facing turn and the child loop.
+ */
+export function resolveToolInputSchemaForExecution(
+  toolName: string,
+): ZodObject<ZodRawShape> | null {
+  const staticSchemas = getToolInputSchemas()
+  const staticSchema = staticSchemas[toolName]
+  if (staticSchema) return staticSchema
+  if (toolName.startsWith('skill_')) {
+    try {
+      const dynamicSchemas = getSkillActionSchemas()
+      const dynamicSchema = dynamicSchemas[toolName]
+      if (dynamicSchema) return dynamicSchema
+    } catch {
+      // Same defensive posture as `getSkillActionSchemas` itself: when the
+      // runtime manager is unavailable (boot ordering, test contexts), we
+      // fall through to null rather than crashing the resolver. The static
+      // manifest fallback above already handles the boot-time path.
+    }
+  }
+  return null
 }

@@ -1,5 +1,18 @@
 # Skill Run Contract And Long Skill Ownership Implementation Plan
 
+> **VEA superseded by 2026-04-30 child-loop route.**
+>
+> This plan documents the historical parent-force migration. The
+> `video-expert-analyzer` long actions
+> (`video_expert_pipeline` / `video_expert_ai_analyze`) no longer flow
+> through the parent-force path described here — Stages A–E for VEA are
+> completed-via-supersede by the child-loop runner. New child-loop work
+> goes through `src/main/modules/agent-control/skill-child-runner.ts`
+> (Phase 7 boundary documentation:
+> `docs/architecture/skill-child-loop-boundary.md`). The `SkillRunContract`
+> shape itself is preserved as the parent-facing summary of a child run;
+> the migration-only `forceLoopGuard` field is fenced for non-child skills.
+>
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make recoverable long skills resume from an explicit, durable run contract instead of scattered hints, stale projections, or model-side file inspection.

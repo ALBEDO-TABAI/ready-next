@@ -20,7 +20,10 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import {
+  defaultToolRegistry,
+  resolveToolInputSchemaForExecution,
+} from '../main/modules/agent-control/tool-registry'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import { validateToolInput } from '../main/modules/tools/tool-input-validator'
@@ -324,7 +327,7 @@ function createRequest(params: {
   return { request, events: events.events }
 }
 
-test('TurnEngine force_tool dispatch synthesizes typed action and skips the model call', async () => {
+test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action and skips the model call', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   const logs: string[] = []
@@ -400,7 +403,7 @@ test('TurnEngine force_tool dispatch synthesizes typed action and skips the mode
   }
 })
 
-test('TurnEngine force_tool caps at one dispatch per turn (no chain-resume in same turn)', async () => {
+test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no chain-resume in same turn)', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   let executedBatches = 0
@@ -483,7 +486,7 @@ test('TurnEngine force_tool caps at one dispatch per turn (no chain-resume in sa
  * The child-loop runner inherits this invariant: one launch -> one close
  * event, no orphans. See docs/architecture/skill-child-loop-boundary.md §4.
  */
-test('TurnEngine force_tool aborted mid-dispatch closes the turn with one terminal event and no orphan tool_use', async () => {
+test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the turn with one terminal event and no orphan tool_use', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   let executedBatches = 0
@@ -673,6 +676,22 @@ test('A1+A2: skill_video_expert_pipeline empty input fails as input_validation w
   )
   assert.equal(definition?.domain, 'skill')
 
+  // Phase 2 (B child-loop) — the unified resolver returns the same schema
+  // the static-registry path would have returned. Forced-preflight in
+  // turn-engine.ts and forced-validation in turn-frame-steering.ts now both
+  // consume this single resolver, so an extension that fails here would
+  // equally regress those two call sites.
+  const resolvedSchema = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
+  assert.ok(
+    resolvedSchema,
+    'Phase 2: resolveToolInputSchemaForExecution must return a schema for skill_video_expert_pipeline',
+  )
+  assert.equal(
+    typeof (resolvedSchema as { safeParse?: unknown }).safeParse,
+    'function',
+    'resolved schema must expose Zod .safeParse',
+  )
+
   // Stage A2 / B5 — empty input fails Zod validation with deterministic
   // firstPath='url' from the static-manifest-derived schema.
   const outcome = validateToolInput('skill_video_expert_pipeline', {}, getToolInputSchemas())
@@ -699,6 +718,12 @@ test('A1+A2: skill_video_expert_ai_analyze empty input fails as input_validation
   )
   assert.equal(definition?.domain, 'skill')
 
+  const resolvedSchema = resolveToolInputSchemaForExecution('skill_video_expert_ai_analyze')
+  assert.ok(
+    resolvedSchema,
+    'Phase 2: resolveToolInputSchemaForExecution must return a schema for skill_video_expert_ai_analyze',
+  )
+
   const outcome = validateToolInput('skill_video_expert_ai_analyze', {}, getToolInputSchemas())
   assert.equal(outcome.ok, false, `expected validation failure, got: ${JSON.stringify(outcome)}`)
   if (outcome.ok) return
@@ -713,4 +738,177 @@ test('A1+A2: skill_video_expert_ai_analyze empty input fails as input_validation
     'sceneScoresPath',
     `Stage A2: expected firstPath="sceneScoresPath" for skill_video_expert_ai_analyze, got firstPath="${outcome.firstPath}"`,
   )
+})
+
+// ---------------------------------------------------------------------------
+// Phase 1 (Team 1) — appended red acceptance scaffolding.
+//
+// describe('child-owned VEA must not be parent-forced'): when the loaded
+// SkillRunContract for a turn already carries a `childRunId`, the
+// turn-engine force-dispatch path must NOT synthesize
+// `skill_video_expert_pipeline` with `{}`. The contract's
+// `parentNextHint='wait_for_close_event'` should drive a checkpoint
+// instead. Phase 6 turns this green; Phase 1 ships it RED.
+// ---------------------------------------------------------------------------
+
+import { describe } from 'node:test'
+
+describe('child-owned VEA must not be parent-forced', () => {
+  test('RED (pending Phase 6): turn-engine must not synthesize skill_video_expert_pipeline with {} when contract.childRunId is set', async () => {
+    // The Phase 6 wiring: `loadSkillRunContract` populates `childRunId`
+    // (and `parentNextHint`) on the contract once the child runner has
+    // launched a run. The turn-engine force-dispatch path must read those
+    // fields and short-circuit — emitting a checkpoint or wait, not a
+    // synthesized parent-side typed call.
+    //
+    // Today, no field on `SkillRunContract` carries `childRunId`. Phase 6
+    // adds `childRunId` and `parentNextHint` to the contract and exports
+    // `shouldParentForceLongSkillTool(contract)` from `run-contracts.ts`
+    // so the turn-engine can detect child ownership without string-
+    // matching skill ids.
+    const ContractModule = (await import(
+      '../main/modules/agent-control/run-contracts'
+    )) as {
+      shouldParentForceLongSkillTool?: (c: unknown) => boolean
+    }
+
+    const sampleContract: Record<string, unknown> = {
+      // Synthesized minimal contract shape — Phase 6's loader populates
+      // these fields. The test only inspects the shape, not the loader.
+      skillId: 'video-expert-analyzer',
+      childRunId: 'v00000001',
+      parentNextHint: 'wait_for_close_event',
+    }
+
+    // Probe for the Phase 6 helper. Until Phase 6 exports it, this
+    // assertion fails — that is the intended red state.
+    const helper = ContractModule.shouldParentForceLongSkillTool
+    assert.equal(
+      typeof helper,
+      'function',
+      'Phase 6 must export shouldParentForceLongSkillTool(contract) from run-contracts so the turn-engine can short-circuit child-owned skills',
+    )
+    assert.equal(
+      helper!(sampleContract),
+      false,
+      'a contract carrying childRunId must NOT trigger parent-side force dispatch of skill_video_expert_pipeline with {}',
+    )
+  })
+
+  test('Phase 6: turn-engine never dispatches force_tool for VEA when contract.childRunId is set', async () => {
+    // End-to-end assertion: with a recoverable_paused VEA supervisor + a
+    // simulated `runContract.childRunId` (i.e. the child runner has
+    // launched a run on a previous turn), the engine MUST NOT synthesize
+    // `skill_video_expert_pipeline` / `_ai_analyze`. We confirm this by
+    // running a turn and verifying:
+    //   - `executeToolBatch` is NOT called with either tool name.
+    //   - No `turn_force_tool_dispatched` metric fires for them.
+    //
+    // The simulation injects the child-run handle by overriding the
+    // skill task supervisor's snapshot to carry a `resumePayload.childRun`
+    // (which `loadSkillRunContract` reads via the
+    // `skillTaskRunRepository`-less fast path). To keep the test
+    // contained, we instead patch the contract directly on the resolved
+    // turn frame via the steering pipe — the engine's `forceToolName`
+    // line consumes `turnFrame.skill.runContract.childRunId` through the
+    // `shouldParentForceLongSkillTool` helper.
+    const engine = new TurnEngine()
+    const metrics: AgentMetricEvent[] = []
+    const dispatchedNames: string[] = []
+    let modelCalls = 0
+
+    __setMetricSinkForTests((event) => metrics.push(event))
+    _resetLastReferenceSkillHintsForTests()
+    rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
+    const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+
+    try {
+      // The supervisor snapshot is the only source `resolveTurnFrame`
+      // consults for a contract anchor in this harness. We attach a
+      // `resumePayload.childRun.childRunId` so the contract loader sees
+      // child ownership without needing the SkillTaskRunRepository (which
+      // doesn't run under tsx).
+      const childOwnedSnapshot: SkillTaskSupervisorSnapshot = {
+        ...makeRecoverableSnapshot(),
+        resumePayload: {
+          ...(makeRecoverableSnapshot().resumePayload || {}),
+          childRun: {
+            childRunId: 'v01234567',
+            parentNextHint: 'wait_for_close_event',
+            status: 'running',
+          },
+        },
+      }
+
+      const events = createEvents()
+      const request: TurnEngineRequest = {
+        runId: 'run-child-owned',
+        taskId: 'task-child-owned',
+        agentName: 'agent-test',
+        sessionId: 'scope-force',
+        session: createSession('继续视频分析'),
+        content: '继续视频分析',
+        requestEnvelope: buildRequestEnvelope({ userText: '继续视频分析' }),
+        intentClassification: createIntent(),
+        taskBudgetRuntime: null,
+        abortSignal: new AbortController().signal,
+        ensureNotAborted: () => {},
+        emitters: events.emitters,
+        host: createForceToolHost({
+          skillTaskSupervisor: {
+            inspectLatestSkillTask: () => childOwnedSnapshot,
+          },
+          requestToolLoopResponse: async () => {
+            modelCalls += 1
+            return {
+              text: 'no tool calls',
+              toolCalls: [],
+              stopReason: 'stop',
+            }
+          },
+          executeToolBatch: async (params: { toolCalls: Array<{ name: string }> }) => {
+            for (const tc of params.toolCalls) dispatchedNames.push(tc.name)
+            return {
+              results: params.toolCalls.map((toolCall) => ({
+                id: 'r-1',
+                name: toolCall.name,
+                input: {},
+                result: { text: 'ok' },
+              })),
+              budgetLimited: false,
+              recoveryHistory: [],
+            }
+          },
+        }),
+      }
+
+      await engine.execute(request)
+      void modelCalls
+
+      // Neither VEA typed action may be dispatched as `force_tool` when the
+      // contract carries a child-run handle.
+      assert.ok(
+        !dispatchedNames.includes('skill_video_expert_pipeline'),
+        `Phase 6: skill_video_expert_pipeline must NOT be force-dispatched when contract.childRunId is set, got: ${dispatchedNames.join(',')}`,
+      )
+      assert.ok(
+        !dispatchedNames.includes('skill_video_expert_ai_analyze'),
+        `Phase 6: skill_video_expert_ai_analyze must NOT be force-dispatched when contract.childRunId is set, got: ${dispatchedNames.join(',')}`,
+      )
+      const forceDispatched = metrics.filter((event) => event.metric === 'turn_force_tool_dispatched')
+      const veaForce = forceDispatched.filter(
+        (event) => event.toolName === 'skill_video_expert_pipeline'
+          || event.toolName === 'skill_video_expert_ai_analyze',
+      )
+      assert.equal(
+        veaForce.length,
+        0,
+        `Phase 6: no force-tool metric for VEA may fire when contract.childRunId is set, got ${veaForce.length}`,
+      )
+    } finally {
+      restoreLongToolDefinition()
+      __setMetricSinkForTests(null)
+      _resetLastReferenceSkillHintsForTests()
+    }
+  })
 })

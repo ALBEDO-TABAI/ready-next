@@ -16,6 +16,7 @@ function makeSnapshot(overrides: Partial<SkillTaskSupervisorSnapshot>): SkillTas
     sessionId: null,
     action: null,
     status: 'unknown',
+    liveness: null,
     hasLiveWork: false,
     hasRecentProgress: false,
     closeAllowed: false,
@@ -52,7 +53,8 @@ test('background running skill tasks map to checkpoint background with resume ha
       detachedTaskId: 'dst-1',
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
-      status: 'background_running',
+      status: 'running',
+      liveness: 'background',
       hasLiveWork: true,
       outputDir: '/tmp/ready/output',
       runStatePath: '/tmp/ready/output/run_state.json',
@@ -118,7 +120,7 @@ test('terminal close-allowed snapshots can close as done', () => {
     snapshot: makeSnapshot({
       taskRunId: 'str-done',
       skillId: 'video-expert-analyzer',
-      status: 'done',
+      status: 'completed',
       closeAllowed: true,
     }),
   })
@@ -157,7 +159,7 @@ test('failed and cancelled close-allowed snapshots keep recovery handles out of 
     snapshot: makeSnapshot({
       taskRunId: 'str-cancelled',
       skillId: 'video-expert-analyzer',
-      status: 'cancelled',
+      status: 'killed',
       closeAllowed: true,
       outputDir: '/tmp/cancelled',
     }),

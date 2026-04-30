@@ -47,12 +47,16 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SYSTEM_SCHEMAS,
   // Stage B5 — static manifest-derived skill-action schemas. Spread BEFORE
   // the per-domain entries so any name collision (in practice none — skill_*
-  // names are namespaced) is overridden by the curated static maps. The
-  // tool-executor already merges `{...getSkillActionSchemas(), ...getToolInputSchemas()}`
-  // with dynamic-first / static-second precedence, so when the runtime manager
-  // boots its dynamic schemas still win over this static fallback.
+  // names are namespaced) is overridden by the curated static maps.
+  //
+  // Phase 2 (B child-loop): admission no longer happens through this map
+  // alone. `resolveToolInputSchemaForExecution()` in tool-registry.ts
+  // consults this static map first, then falls back to the dynamic
+  // getSkillActionSchemas() cache for tools the static map does not cover.
+  // tool-executor / turn-engine / turn-frame-steering all consume that one
+  // resolver, so dispatch-time and forced-preflight admission see the same
+  // schemas. This accessor stays callable for tests and any legacy callers.
   ...getStaticSkillActionSchemas(),
-  // PR 12 folds in the dynamic skill-action schemas via getSkillActionSchemas().
 }
 
 export function getToolInputSchemas(): Record<string, ZodObject<ZodRawShape>> {

@@ -3,7 +3,11 @@ import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { ConversationScope } from './types'
 import type { ToolContext } from '../tools/tool-executor'
-import type { ToolRuntimeContext } from './tool-runtime'
+import {
+  createEmptyActiveFrameContext,
+  type ToolRuntimeActiveFrameContext,
+  type ToolRuntimeContext,
+} from './tool-runtime'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export function buildToolRuntimeContext(params: {
@@ -25,6 +29,14 @@ export function buildToolRuntimeContext(params: {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  /**
+   * Phase 3 — initial active-frame snapshot. When the caller has a
+   * TurnFrame snapshot to seed the slot from (active artifact roots,
+   * latest run contract, discovered handles), pass it here. When omitted
+   * (cold path / legacy callers), an empty default is used so the slot
+   * is never undefined.
+   */
+  activeFrame?: ToolRuntimeActiveFrameContext | null
 }): ToolRuntimeContext {
   const scopeId = params.scopeId || params.scope?.id || params.sessionId
   return {
@@ -46,6 +58,7 @@ export function buildToolRuntimeContext(params: {
     frameSkillId: params.frameSkillId ?? null,
     registerRunCleanup: params.registerRunCleanup,
     agentContext: params.agentContext ?? null,
+    activeFrame: params.activeFrame ?? createEmptyActiveFrameContext(),
   }
 }
 
@@ -69,5 +82,8 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     frameSkillId: context.frameSkillId ?? null,
     registerRunCleanup: context.registerRunCleanup,
     agentContext: context.agentContext ?? null,
+    // Phase 3 — forward the live active-frame slot so dispatched tools
+    // (skills-tools.ts read-artifact, etc.) can read fresh artifact roots.
+    activeFrame: context.activeFrame ?? createEmptyActiveFrameContext(),
   }
 }

@@ -23,7 +23,8 @@ function snapshot(overrides: Partial<SkillTaskSupervisorSnapshot>): SkillTaskSup
     scopeId: 'scope',
     sessionId: 'scope',
     action: 'video_expert_pipeline',
-    status: 'background_running',
+    status: 'running',
+    liveness: 'background',
     hasLiveWork: false,
     hasRecentProgress: false,
     closeAllowed: false,
@@ -278,7 +279,14 @@ test('lease controller does not close failed or cancelled terminal snapshots as 
     recoverableErrorCount: 0,
     repeatedRecoverableError: false,
   }
-  for (const status of ['failed', 'cancelled'] as const) {
+  // Phase 7 — supervisor public surface uses `failed` / `killed` (not
+  // `cancelled`). Lease controller maps `killed` to reason
+  // `supervisor_cancelled` for backwards-compat with the lease log.
+  const cases: Array<{ status: SkillTaskSupervisorSnapshot['status']; reason: string }> = [
+    { status: 'failed', reason: 'supervisor_failed' },
+    { status: 'killed', reason: 'supervisor_cancelled' },
+  ]
+  for (const { status, reason } of cases) {
     const evaluation = evaluateSkillBudgetLease({
       state: createSkillBudgetLeaseState({ iteration: 0 }),
       iteration: 1,
@@ -293,6 +301,6 @@ test('lease controller does not close failed or cancelled terminal snapshots as 
     })
 
     assert.equal(evaluation.decision, 'pause')
-    assert.equal(evaluation.reason, `supervisor_${status}`)
+    assert.equal(evaluation.reason, reason)
   }
 })

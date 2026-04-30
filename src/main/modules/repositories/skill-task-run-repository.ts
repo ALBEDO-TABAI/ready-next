@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
 
+import type {
+  SkillChildRunPayload,
+  SkillChildRunStatus,
+  SkillChildRunParentNextHint,
+} from '../agent-control/skill-child-run-types'
+
 export type SkillTaskRunStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
 export type SkillTaskRunInteractionState =
   | 'running'
@@ -126,6 +132,80 @@ function jsonOrNull(value: unknown): string | null {
 export function createSkillTaskRunId(): string {
   return `str-${randomUUID().replace(/-/g, '').slice(0, 8)}`
 }
+
+/**
+ * Phase 4 — child-run helpers (source plan §5.2).
+ *
+ * `skill_task_runs` is reused as the durable parent-visible child-run table.
+ * The full child payload lives in `resumePayload.childRun` (a versioned
+ * `SkillChildRunPayload`, version=1). The row's `id` column stores the
+ * child-run id directly (no `str-` prefix wrapper); legacy `str-…` rows
+ * coexist with new `[vsd]…` rows.
+ *
+ * Rationale for not adding a DB migration: `resumePayload_json` already
+ * accepts arbitrary JSON; SQLite supports `json_extract` for the queries we
+ * need. A dedicated column is only worth promoting after Phase 5/6 prove
+ * that JSON-field queries hurt perf or correctness.
+ */
+
+export interface CreateChildRunInput {
+  /** Pass an id minted via `createSkillChildRunId('vea' | 'skill' | 'detached')`. */
+  childRunId: string
+  scopeId: string | null
+  sessionId: string | null
+  skillId: string
+  skillName: string | null
+  action: string
+  requestedInput: Record<string, unknown>
+  singleFlightKey: string
+  parentNextHint: SkillChildRunParentNextHint
+  outputDir: string
+  runStatePath: string
+  eventLogPath: string
+  status?: SkillChildRunStatus
+}
+
+/**
+ * `SkillChildRunStatus` is wider than `SkillTaskRunStatus`. Child-run code
+ * always reads the canonical status from `resumePayload.childRun.status`;
+ * the row's `status` column is a coarse projection that lets the legacy
+ * "active" filter (`status IN ('queued','running','blocked')`) keep working
+ * without a migration.
+ */
+function mapChildStatusToRowStatus(status: SkillChildRunStatus): SkillTaskRunStatus {
+  switch (status) {
+    case 'queued':
+      return 'queued'
+    case 'running':
+      return 'running'
+    case 'recoverable_paused':
+    case 'budget_paused':
+    case 'blocked':
+      return 'blocked'
+    case 'completed':
+      return 'done'
+    case 'failed':
+      return 'failed'
+    case 'killed':
+      return 'cancelled'
+    default:
+      return 'blocked'
+  }
+}
+
+const CHILD_RUN_ACTIVE_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
+  'queued',
+  'running',
+  'recoverable_paused',
+  'budget_paused',
+  'blocked',
+]
+
+const CHILD_RUN_TERMINAL_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
+  'completed',
+  'failed',
+  'killed',
+]
 
 export class SkillTaskRunRepository {
   constructor(private readonly dbManager: SkillTaskRunDatabaseAccessor) {}
@@ -299,6 +379,172 @@ export class SkillTaskRunRepository {
     const row = db.prepare(
       'SELECT * FROM skill_task_runs WHERE detached_task_id = ? ORDER BY updated_at DESC LIMIT 1',
     ).get<SkillTaskRunRow>(detachedTaskId)
+    return row ? this.mapRow(row) : null
+  }
+
+  /**
+   * Phase 4 — insert a new child-run row whose `id` is the child-run id and
+   * whose `resumePayload.childRun` carries the versioned payload. The legacy
+   * status column is set to a coarse projection of the child status so the
+   * existing active-row filters keep working.
+   */
+  createChildRun(input: CreateChildRunInput): SkillTaskRunRecord {
+    const status: SkillChildRunStatus = input.status || 'queued'
+    const nowIso = new Date().toISOString()
+    const payload: SkillChildRunPayload = {
+      version: 1,
+      childRunId: input.childRunId,
+      // Phase 4 only mints VEA child runs in practice, but the payload's
+      // `kind` is best-effort derived from the id prefix to stay consistent
+      // with `getSkillChildRunKind` without forcing callers to repeat it.
+      kind: (input.childRunId.charAt(0) === 'v'
+        ? 'vea'
+        : input.childRunId.charAt(0) === 's'
+          ? 'skill'
+          : 'detached'),
+      parentScopeId: input.scopeId,
+      parentSessionId: input.sessionId,
+      skillId: input.skillId,
+      skillName: input.skillName,
+      requestedAction: input.action,
+      requestedInput: input.requestedInput,
+      singleFlightKey: input.singleFlightKey,
+      parentNextHint: input.parentNextHint,
+      outputDir: input.outputDir,
+      runStatePath: input.runStatePath,
+      eventLogPath: input.eventLogPath,
+      status,
+      closeEvent: null,
+      legacy: {
+        taskRunId: null,
+        detachedTaskId: null,
+        projectionTaskId: null,
+      },
+    }
+
+    const record: SkillTaskRunRecord = {
+      id: input.childRunId,
+      scopeId: input.scopeId,
+      sessionId: input.sessionId,
+      agent: null,
+      runId: null,
+      skillId: input.skillId,
+      skillName: input.skillName,
+      action: input.action,
+      toolName: null,
+      runKind: 'child_run',
+      status: mapChildStatusToRowStatus(status),
+      interactionState: 'running',
+      goalText: null,
+      resourceRefs: [],
+      params: input.requestedInput,
+      steps: [],
+      currentStepId: null,
+      artifacts: [],
+      outputDir: input.outputDir,
+      runStatePath: input.runStatePath,
+      sceneScoresPath: null,
+      deliveryReportPath: null,
+      failureKind: null,
+      failureDetail: null,
+      jobId: null,
+      detachedTaskId: null,
+      resumePayload: { childRun: payload as unknown as Record<string, unknown> },
+      createdAt: nowIso,
+      startedAt: null,
+      updatedAt: nowIso,
+      finishedAt: null,
+    }
+
+    this.create(record)
+    return record
+  }
+
+  /**
+   * Phase 4 — patch the child-run payload. Reads the row, merges the patch
+   * into `resumePayload.childRun`, mirrors `status` to the row column when
+   * provided, and writes back via the existing `update` path.
+   */
+  updateChildRun(childRunId: string, patch: Partial<SkillChildRunPayload>): void {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const existing = this.get(childRunId)
+    if (!existing) {
+      throw new Error(`updateChildRun: no row for child-run id ${childRunId}`)
+    }
+    const currentPayload = (existing.resumePayload || {}) as Record<string, unknown>
+    const currentChild = (currentPayload.childRun || {}) as Record<string, unknown>
+    const nextChild = { ...currentChild, ...patch } as unknown as SkillChildRunPayload
+    const nextResumePayload = { ...currentPayload, childRun: nextChild as unknown as Record<string, unknown> }
+    const nowIso = new Date().toISOString()
+
+    const updatePatch: Partial<SkillTaskRunRecord> = {
+      resumePayload: nextResumePayload,
+      updatedAt: nowIso,
+    }
+
+    if (patch.status !== undefined) {
+      updatePatch.status = mapChildStatusToRowStatus(patch.status)
+      if (CHILD_RUN_TERMINAL_STATUSES.includes(patch.status)) {
+        updatePatch.finishedAt = nowIso
+      }
+    }
+    if (patch.outputDir !== undefined) updatePatch.outputDir = patch.outputDir
+    if (patch.runStatePath !== undefined) updatePatch.runStatePath = patch.runStatePath
+
+    this.update(childRunId, updatePatch)
+  }
+
+  /**
+   * Phase 4 — find the most recently updated ACTIVE row whose
+   * `resumePayload.childRun.singleFlightKey` matches. Active = canonical
+   * child status in `(queued|running|recoverable_paused|budget_paused|blocked)`.
+   */
+  findLatestChildRunByKey(singleFlightKey: string): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE json_extract(resume_payload_json, '$.childRun.singleFlightKey') = ?
+        AND json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get<SkillTaskRunRow>(singleFlightKey, ...CHILD_RUN_ACTIVE_STATUSES)
+    return row ? this.mapRow(row) : null
+  }
+
+  /**
+   * Phase 4 — find the most recently updated ACTIVE child-run row for a
+   * given `skillId` (optionally narrowed by session/scope). Mirrors the
+   * status filter from `findLatestChildRunByKey`.
+   */
+  findLatestChildRunBySkill(opts: {
+    sessionId?: string | null
+    scopeId?: string | null
+    skillId: string
+  }): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const filters: string[] = ['skill_id = ?']
+    const values: unknown[] = [opts.skillId]
+    if (opts.sessionId) {
+      filters.push('session_id = ?')
+      values.push(opts.sessionId)
+    }
+    if (opts.scopeId) {
+      filters.push('scope_id = ?')
+      values.push(opts.scopeId)
+    }
+    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
+    const where = filters.join(' AND ')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE ${where}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
     return row ? this.mapRow(row) : null
   }
 

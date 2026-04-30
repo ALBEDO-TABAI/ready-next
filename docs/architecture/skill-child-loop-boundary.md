@@ -1,6 +1,12 @@
 # Skill Child-Loop Boundary
 
-> Status: design boundary marker. Not implemented. Last updated 2026-04-29.
+> Status: implemented boundary as of 2026-04-30. Last updated 2026-04-30.
+>
+> The Phase 1–7 child-loop migration landed on this branch. VEA long
+> actions (`video_expert_pipeline`, `video_expert_ai_analyze`) now run
+> through a dedicated child runner with its own identity, transcript,
+> abort controller, and structured close event. The parent turn loop
+> never synthesises an internal VEA action.
 
 ## 1. Why this document exists
 
@@ -119,12 +125,107 @@ interrupted mid-flight, exactly one terminal close event must surface. The
 same invariant will continue to hold for the child-loop runner: a cancelled
 child surfaces one close event, never an orphan tool_use.
 
-## 5. Where the parent currently fakes child work (TODO marker locations)
+## 5. Where the boundary lives in the source (Phase 1–7 landed)
 
-These are the boundaries marked with `// TODO(skill-child-loop):` comments in
-the source today. Each marker names the part of the parent's behaviour that
-will move into the child runner when the migration starts. The markers carry
-no logic change; they are anchors for the future split.
+The boundary is implemented across the following files. Each file owns one
+responsibility; the parent never reaches inside the child's loop.
+
+### Child-side files (created by Phase 1 / 5)
+
+- `src/main/modules/agent-control/skill-child-run-id.ts` — typed id helper
+  (`v[a-z0-9]{8}` for VEA, `s` for generic, `d` for detached-bridge).
+- `src/main/modules/agent-control/skill-child-run-types.ts` — payload,
+  event log entries, close event, driver interface.
+- `src/main/modules/agent-control/skill-child-run-log.ts` — append-only
+  JSONL helpers for `<outputDir>/.ready/child-runs/<childRunId>.jsonl`.
+- `src/main/modules/agent-control/skill-child-runner.ts` — lifecycle
+  orchestrator (start / resume / cancel / close). Owns
+  single-flight collapse, MAX_ACTIVE_VEA_CHILD_RUNS = 3, nested-child
+  guard, launch-stuck guard, and per-child internal budget.
+- `src/main/modules/agent-control/skill-child-drivers.ts` — driver
+  registry (`getSkillChildDriver(skillId)` / `isChildOwnedSkill`).
+- `src/main/modules/agent-control/video-expert-child-driver.ts` —
+  VEA-specific stage-to-action decisions. Owns the answer to
+  "should I run `video_expert_pipeline` or `video_expert_ai_analyze`?"
+  The parent never asks.
+
+### Parent-side adapters
+
+- `src/main/modules/tools/skills-tools.ts` —
+  `isChildLoopSkillAction(skillId, action)` table-driven gate; agent-driven
+  VEA tool calls dispatch via `dispatchChildLoopSkillAction(...)` instead
+  of awaiting `runSkill`. Returns the child-run envelope vocabulary
+  (`child_launched / child_reused / child_paused / child_terminal`).
+- `src/main/modules/agent-control/run-contracts.ts` — `SkillRunContract`
+  carries `childRunId` / `childStatus` / `parentNextHint` /
+  `childCloseEvent` / `legacyAdoptableHandles` / `blockerReason`.
+  `shouldParentForceLongSkillTool(contract)` is the single gate for
+  whether the parent's force-tool path is allowed.
+- `src/main/modules/skills-runtime/runtime-manager.ts` —
+  `startSkillChildRunAndWait(...)` is the await-style helper for product
+  callers (RSS visual flow). Internally launches a child run, polls for
+  the close event, and times out via `cancelSkillChildRun(id, 'await_timeout')`.
+- `src/main/modules/rss-engine/item-analysis-manager.ts` — RSS visual
+  flow uses the child-run helper for VEA actions (Phase 7 migration).
+  Bounded retry on `queued_global_concurrency`. Distinct
+  `failed / killed / blocked / paused` outcomes preserved.
+
+### Repository
+
+- `src/main/modules/repositories/skill-task-run-repository.ts` —
+  `createChildRun` / `updateChildRun` / `findLatestChildRunByKey` /
+  `findLatestChildRunBySkill`. Child-run payload stored in
+  `resumePayload.childRun`; no DB migration in this route.
+- `src/main/modules/repositories/task-projection-repository.ts` —
+  artifact sibling lookup (legacy fallback) tightened to apply `skillId`
+  filtering in SQL (`json_each` + `NOT EXISTS`) BEFORE path similarity.
+
+## 5.1 Tool envelope vocabulary
+
+Long skill tool calls return one of four stable status strings, all
+enumerated in `dispatchChildLoopSkillAction(...)`:
+
+| Envelope | Meaning |
+| --- | --- |
+| `child_launched` | A new child run was started; close event arrives via the runner. |
+| `child_reused`   | Single-flight collapsed onto an existing run. |
+| `child_paused`   | Recoverable pause / blocked / queued — close event present. |
+| `child_terminal` | Completed / failed / killed — close event present. |
+
+Cancellation maps to `child_terminal` with
+`closeEvent.status === 'killed'` and `terminalReason === 'cancelled_user'`.
+It MUST NOT be reported as `failed` (source plan §3 rule 7).
+
+## 5.2 Public predicates
+
+- `isChildLoopSkillAction(skillId, action)` — table-driven; current
+  allowlist is the VEA pipeline + ai_analyze pair.
+- `shouldParentForceLongSkillTool(contract)` — returns `false` whenever
+  the contract carries a `childRunId`. Single gate for force-tool fencing.
+- `isChildOwnedSkill(skillId)` — owned by `skill-child-drivers.ts`,
+  reflects whether a driver has been registered.
+
+## 5.3 Status normalization (Phase 7)
+
+The supervisor / contract / projection / child-runner layers all share
+one normalized public vocabulary:
+
+```text
+running | completed | failed | killed | recoverable_paused | budget_paused | blocked | unknown
+```
+
+`background_running` is removed from the public surface; the supervisor
+returns `status: 'running'` plus `liveness: 'background'` when the work
+is owned by a detached / pid-tracked process. Internal per-source
+mappers (`statusFromTaskRun`, `statusFromDetached`, `statusFromRunState`)
+keep the legacy raw vocabulary; normalization happens once at the end
+of `inspectSkillTask` via `normalizeSkillStatus(...)`.
+
+## 6. Historical TODO marker locations (anchor reference)
+
+Below are the boundaries that carried `// TODO(skill-child-loop):`
+comments before the migration. They remain in the source as comments but
+are no longer aspirational — Phase 1–7 implemented them.
 
 ### 5.1 `src/main/modules/agent-control/turn-engine.ts`
 

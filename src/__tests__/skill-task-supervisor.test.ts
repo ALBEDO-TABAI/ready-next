@@ -124,7 +124,7 @@ test('SkillTaskSupervisor keeps detached running work over a done SQLite row', (
       findTaskRunByDetachedTaskId: () => doneRun,
     }).inspectSkillTask({ detachedTaskId: 'dst-1' })
 
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'running'); assert.equal(snapshot.liveness, 'background')
     assert.equal(snapshot.hasLiveWork, true)
     assert.equal(snapshot.closeAllowed, false)
     assert.equal(snapshot.taskRunId, 'str-done')
@@ -155,7 +155,7 @@ test('SkillTaskSupervisor keeps detached running work over a done projection', (
       }),
     }).inspectSkillTask({ detachedTaskId: 'dst-2' })
 
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'running'); assert.equal(snapshot.liveness, 'background')
     assert.equal(snapshot.hasLiveWork, true)
     assert.equal(snapshot.closeAllowed, false)
   } finally {
@@ -213,7 +213,7 @@ test('SkillTaskSupervisor treats live pid with stale run_state as background run
       skillId: 'video-expert-analyzer',
     })
 
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'running'); assert.equal(snapshot.liveness, 'background')
     assert.equal(snapshot.hasLiveWork, true)
     assert.equal(snapshot.stale, true)
     assert.equal(snapshot.progress.currentStage, 'score_batches')
@@ -329,7 +329,7 @@ test('SkillTaskSupervisor blocks close when SQLite is done but stale run_state i
       expectedTaskId: 'dst-stale',
     })
 
-    assert.equal(snapshot.status, 'done')
+    assert.equal(snapshot.status, 'completed')
     assert.equal(snapshot.stale, true)
     assert.equal(snapshot.closeAllowed, false)
     assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
@@ -556,7 +556,7 @@ test('SkillTaskSupervisor marks detached done vs run_state blocked as ambiguous'
       expectedTaskId: 'dst-blocked-conflict',
     })
 
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'running'); assert.equal(snapshot.liveness, 'background')
     assert.equal(snapshot.ambiguous, true)
     assert.equal(snapshot.closeAllowed, false)
     assert.equal(snapshot.resumePayload?.runStatePath, runStatePath)
@@ -620,7 +620,7 @@ test('SkillTaskSupervisor preserves recovery when all durable sources conflict',
       expectedTaskId: 'dst-four-source',
     })
 
-    assert.equal(snapshot.status, 'background_running')
+    assert.equal(snapshot.status, 'running'); assert.equal(snapshot.liveness, 'background')
     assert.equal(snapshot.hasLiveWork, true)
     assert.equal(snapshot.ambiguous, true)
     assert.equal(snapshot.closeAllowed, false)
