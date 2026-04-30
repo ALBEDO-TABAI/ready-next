@@ -1100,8 +1100,24 @@ export interface LoadSkillRunContractParams {
    * the matching `runStatePath` when known) and surfaces the child handle
    * + close event on the contract. When omitted, the contract falls back
    * to legacy supervisor + projection sources.
+   *
+   * T8 — when `childRunId` / `runStatePath` / `outputDir` / `singleFlightKey`
+   * are explicit on the request, the loader binds to the EXACT matching
+   * row instead of falling through to "latest active row by skill". The
+   * `skillId` filter is applied BEFORE any path-similarity lookup so a
+   * different-skill row sharing an outputDir is never attached.
    */
   skillTaskRunRepository?: SkillTaskRunRepository | null
+  /**
+   * T8 — explicit child-run handle. Wins over every other lookup when set.
+   */
+  childRunId?: string | null
+  /**
+   * T8 — explicit single-flight key. Used when the caller already knows
+   * which collapse bucket the contract should bind to (e.g. resume from a
+   * persisted handle). Lower priority than `runStatePath` / `outputDir`.
+   */
+  singleFlightKey?: string | null
 }
 
 function trimmed(value: unknown): string | null {
@@ -1434,12 +1450,67 @@ export function loadSkillRunContract(
   }
 
   if (params.skillTaskRunRepository && skillId) {
+    // T8 — ordered lookup. Each step is a STRICT match; the `skillId`
+    // filter is applied at every step so a different-skill row sharing an
+    // outputDir / runStatePath is never attached.
+    //
+    // Order:
+    //   1. explicit `childRunId`
+    //   2. exact `runStatePath`
+    //   3. exact `outputDir`
+    //   4. exact `singleFlightKey`
+    //   5. latest active row by `skillId / sessionId / scopeId` (last fallback)
+    //
+    // Each helper is best-effort — when the repository is missing one
+    // (older fakes, partial mocks) the loader silently moves to the next
+    // step instead of throwing.
+    type Repo = NonNullable<typeof params.skillTaskRunRepository>
+    const repo = params.skillTaskRunRepository as Repo & {
+      findChildRunByRunStatePath?: (opts: { runStatePath: string; skillId?: string | null }) => unknown
+      findChildRunByOutputDir?: (opts: { outputDir: string; skillId?: string | null }) => unknown
+      findChildRunBySingleFlightKey?: (opts: { singleFlightKey: string; skillId?: string | null }) => unknown
+    }
+    let childRow: ReturnType<Repo['findLatestChildRunBySkill']> | null = null
     try {
-      const childRow = params.skillTaskRunRepository.findLatestChildRunBySkill({
-        sessionId: params.sessionId ?? null,
-        scopeId: params.scopeId ?? null,
-        skillId,
-      })
+      // Step 1 — explicit childRunId.
+      const explicitChildRunId = trimmed(params.childRunId)
+      if (!childRow && explicitChildRunId && typeof repo.get === 'function') {
+        const candidate = repo.get(explicitChildRunId) as ReturnType<Repo['findLatestChildRunBySkill']> | null
+        // Apply the skillId filter post-lookup so a stale or wrong-skill
+        // explicit id never attaches.
+        if (candidate && candidate.skillId === skillId) {
+          childRow = candidate
+        }
+      }
+      // Step 2 — exact runStatePath.
+      if (!childRow && runStatePath && typeof repo.findChildRunByRunStatePath === 'function') {
+        const candidate = repo.findChildRunByRunStatePath({ runStatePath, skillId }) as
+          ReturnType<Repo['findLatestChildRunBySkill']> | null
+        if (candidate) childRow = candidate
+      }
+      // Step 3 — exact outputDir.
+      if (!childRow && outputDir && typeof repo.findChildRunByOutputDir === 'function') {
+        const candidate = repo.findChildRunByOutputDir({ outputDir, skillId }) as
+          ReturnType<Repo['findLatestChildRunBySkill']> | null
+        if (candidate) childRow = candidate
+      }
+      // Step 4 — exact singleFlightKey.
+      const explicitSingleFlightKey = trimmed(params.singleFlightKey)
+      if (!childRow && explicitSingleFlightKey && typeof repo.findChildRunBySingleFlightKey === 'function') {
+        const candidate = repo.findChildRunBySingleFlightKey({
+          singleFlightKey: explicitSingleFlightKey,
+          skillId,
+        }) as ReturnType<Repo['findLatestChildRunBySkill']> | null
+        if (candidate) childRow = candidate
+      }
+      // Step 5 — last-fallback: latest active row by skill / session / scope.
+      if (!childRow) {
+        childRow = repo.findLatestChildRunBySkill({
+          sessionId: params.sessionId ?? null,
+          scopeId: params.scopeId ?? null,
+          skillId,
+        })
+      }
       const childPayload = childRow
         ? readObjectField(childRow.resumePayload, 'childRun')
         : null

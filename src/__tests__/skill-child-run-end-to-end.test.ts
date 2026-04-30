@@ -856,3 +856,259 @@ test('T5 Case L: contract-stamped childCloseEvent is used when getCloseEvent ret
   const decision = _computeChildContinuationDecision(frame, () => null)
   assert.equal(decision.kind, 'terminal')
 })
+
+// ---------------------------------------------------------------------------
+// T8 (B child-loop, wave 3) — `loadSkillRunContract` lookup ordering must
+// bind a contract to the EXACT child-run identity the request carries
+// (runStatePath / outputDir / singleFlightKey) instead of falling through to
+// "latest active row by skillId / session / scope". Two children running
+// the same skill against different targets in one session MUST resolve to
+// distinct child rows; a different-skill row sharing an outputDir MUST NEVER
+// be attached.
+// ---------------------------------------------------------------------------
+
+interface T8RepoBag {
+  repo: SkillTaskRunRepository
+  state: { rows: Map<string, SkillTaskRunRecord> }
+}
+
+function buildT8ChildRunRow(opts: {
+  childRunId: string
+  scopeId: string | null
+  sessionId: string | null
+  skillId: string
+  outputDir: string
+  runStatePath: string
+  singleFlightKey: string
+  status?: SkillChildDriverState extends { skillId: string } ? string : string
+}): SkillTaskRunRecord {
+  const now = new Date().toISOString()
+  const status = opts.status || 'running'
+  return {
+    id: opts.childRunId,
+    scopeId: opts.scopeId,
+    sessionId: opts.sessionId,
+    agent: null,
+    runId: null,
+    skillId: opts.skillId,
+    skillName: opts.skillId,
+    action: 'video_expert_pipeline',
+    toolName: null,
+    runKind: 'child_run',
+    status: status as SkillTaskRunRecord['status'],
+    interactionState: 'running',
+    goalText: null,
+    resourceRefs: [],
+    params: {},
+    steps: [],
+    currentStepId: null,
+    artifacts: [],
+    outputDir: opts.outputDir,
+    runStatePath: opts.runStatePath,
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    failureKind: null,
+    failureDetail: null,
+    jobId: null,
+    detachedTaskId: null,
+    resumePayload: {
+      childRun: {
+        version: 1,
+        childRunId: opts.childRunId,
+        kind: 'vea',
+        parentScopeId: opts.scopeId,
+        parentSessionId: opts.sessionId,
+        skillId: opts.skillId,
+        skillName: opts.skillId,
+        requestedAction: 'video_expert_pipeline',
+        requestedInput: {},
+        singleFlightKey: opts.singleFlightKey,
+        parentNextHint: 'wait_for_close_event',
+        outputDir: opts.outputDir,
+        runStatePath: opts.runStatePath,
+        eventLogPath: `${opts.outputDir}/events.ndjson`,
+        status,
+        closeEvent: null,
+      },
+    },
+    createdAt: now,
+    startedAt: null,
+    updatedAt: now,
+    finishedAt: null,
+  }
+}
+
+function makeT8Repository(): T8RepoBag {
+  const state: T8RepoBag['state'] = { rows: new Map() }
+  const ACTIVE = new Set(['queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked'])
+
+  const repo = {
+    get: (id: string) => state.rows.get(id) ?? null,
+    findLatestChildRunByKey: (key: string): SkillTaskRunRecord | null => {
+      let best: SkillTaskRunRecord | null = null
+      for (const row of state.rows.values()) {
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (child.singleFlightKey === key && ACTIVE.has(child.status as string)) {
+          if (!best || row.updatedAt > best.updatedAt) best = row
+        }
+      }
+      return best
+    },
+    findLatestChildRunBySkill: (opts: { skillId: string; sessionId?: string | null; scopeId?: string | null }): SkillTaskRunRecord | null => {
+      let best: SkillTaskRunRecord | null = null
+      for (const row of state.rows.values()) {
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (child.skillId !== opts.skillId) continue
+        if (opts.sessionId && row.sessionId !== opts.sessionId) continue
+        if (opts.scopeId && row.scopeId !== opts.scopeId) continue
+        if (!ACTIVE.has(child.status as string)) continue
+        if (!best || row.updatedAt > best.updatedAt) best = row
+      }
+      return best
+    },
+    findChildRunByRunStatePath: (opts: { runStatePath: string; skillId?: string | null }): SkillTaskRunRecord | null => {
+      let best: SkillTaskRunRecord | null = null
+      for (const row of state.rows.values()) {
+        if (row.runStatePath !== opts.runStatePath) continue
+        if (opts.skillId && row.skillId !== opts.skillId) continue
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (!ACTIVE.has(child.status as string)) continue
+        if (!best || row.updatedAt > best.updatedAt) best = row
+      }
+      return best
+    },
+    findChildRunByOutputDir: (opts: { outputDir: string; skillId?: string | null }): SkillTaskRunRecord | null => {
+      let best: SkillTaskRunRecord | null = null
+      for (const row of state.rows.values()) {
+        if (row.outputDir !== opts.outputDir) continue
+        if (opts.skillId && row.skillId !== opts.skillId) continue
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (!ACTIVE.has(child.status as string)) continue
+        if (!best || row.updatedAt > best.updatedAt) best = row
+      }
+      return best
+    },
+    findChildRunBySingleFlightKey: (opts: { singleFlightKey: string; skillId?: string | null }): SkillTaskRunRecord | null => {
+      let best: SkillTaskRunRecord | null = null
+      for (const row of state.rows.values()) {
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (child.singleFlightKey !== opts.singleFlightKey) continue
+        if (opts.skillId && row.skillId !== opts.skillId) continue
+        if (!ACTIVE.has(child.status as string)) continue
+        if (!best || row.updatedAt > best.updatedAt) best = row
+      }
+      return best
+    },
+  } as unknown as SkillTaskRunRepository
+
+  return { repo, state }
+}
+
+describe('T8 — loadSkillRunContract binds to exact child run identity', () => {
+  test('T8 multi-child case: outputDir on contract request wins over latest-active fallback', () => {
+    const { repo, state } = makeT8Repository()
+
+    // Child A — explicit target /tmp/a
+    const childA = buildT8ChildRunRow({
+      childRunId: 'va11111111',
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/a',
+      runStatePath: '/tmp/a/run_state.json',
+      singleFlightKey: 'video-expert-analyzer:hash-a',
+    })
+    state.rows.set(childA.id, childA)
+
+    // Child B — different target /tmp/b. Same skill / session / scope.
+    // Make B newer so the latest-active fallback would otherwise return B.
+    const childB = buildT8ChildRunRow({
+      childRunId: 'vb22222222',
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/b',
+      runStatePath: '/tmp/b/run_state.json',
+      singleFlightKey: 'video-expert-analyzer:hash-b',
+    })
+    childB.updatedAt = '2099-01-01T00:00:00.000Z'
+    state.rows.set(childB.id, childB)
+
+    // Sanity: latest-active fallback would return B.
+    const latest = (repo as unknown as {
+      findLatestChildRunBySkill: (o: { skillId: string }) => SkillTaskRunRecord | null
+    }).findLatestChildRunBySkill({ skillId: 'video-expert-analyzer' })
+    assert.equal(latest?.id, 'vb22222222', 'sanity: without explicit handles latest-active returns child B')
+
+    // Load contract with outputDir='/tmp/a' — must resolve to A, not B.
+    const contract = loadSkillRunContract({
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/a',
+      runStatePath: '/tmp/a/run_state.json',
+      skillTaskRunRepository: repo,
+    })
+    assert.ok(contract, 'expected contract to anchor for explicit outputDir request')
+    assert.equal(
+      contract!.childRunId,
+      'va11111111',
+      `T8: explicit outputDir must bind to child A, never sibling child B (got ${contract!.childRunId})`,
+    )
+  })
+
+  test('T8 cross-skill exclusion case: row with different skillId at the same outputDir is never attached', () => {
+    const { repo, state } = makeT8Repository()
+
+    // Same outputDir, two different skills.
+    const veaChild = buildT8ChildRunRow({
+      childRunId: 'va33333333',
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/shared',
+      runStatePath: '/tmp/shared/run_state.json',
+      singleFlightKey: 'video-expert-analyzer:hash-shared',
+    })
+    state.rows.set(veaChild.id, veaChild)
+
+    const otherSkillChild = buildT8ChildRunRow({
+      childRunId: 'vo44444444',
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'some-other-skill',
+      outputDir: '/tmp/shared',
+      runStatePath: '/tmp/shared/run_state.json',
+      singleFlightKey: 'some-other-skill:hash-shared',
+    })
+    // Make the other-skill row newer to prove the skillId filter — not the
+    // ordering — is what excludes it.
+    otherSkillChild.updatedAt = '2099-01-01T00:00:00.000Z'
+    state.rows.set(otherSkillChild.id, otherSkillChild)
+
+    const contract = loadSkillRunContract({
+      scopeId: 'scope-T8',
+      sessionId: 'session-T8',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/shared',
+      runStatePath: '/tmp/shared/run_state.json',
+      skillTaskRunRepository: repo,
+    })
+    assert.ok(contract, 'expected contract to anchor for VEA outputDir request')
+    assert.equal(
+      contract!.childRunId,
+      'va33333333',
+      `T8: cross-skill row must never be attached (got ${contract!.childRunId})`,
+    )
+    assert.notEqual(
+      contract!.childRunId,
+      'vo44444444',
+      'T8: a different-skill row sharing outputDir must be excluded',
+    )
+  })
+})

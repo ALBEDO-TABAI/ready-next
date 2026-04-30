@@ -515,6 +515,92 @@ export class SkillTaskRunRepository {
   }
 
   /**
+   * T8 (B child-loop, wave 3) — exact-match lookup helpers used by
+   * `loadSkillRunContract` to bind a contract to the EXACT child-run row
+   * the request points at. Two children running the same skill against
+   * different targets in one session must resolve to distinct rows; a
+   * different-skill row sharing an outputDir must NEVER be attached.
+   *
+   * All three helpers apply the same ACTIVE-status filter as
+   * `findLatestChildRunByKey` and pick the most recently updated match.
+   * The optional `skillId` narrows the result so callers never accidentally
+   * attach a child whose skill differs from the contract request.
+   */
+  findChildRunByRunStatePath(opts: {
+    runStatePath: string
+    skillId?: string | null
+  }): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const filters: string[] = ['run_state_path = ?']
+    const values: unknown[] = [opts.runStatePath]
+    if (opts.skillId) {
+      filters.push('skill_id = ?')
+      values.push(opts.skillId)
+    }
+    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
+    const where = filters.join(' AND ')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE ${where}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    return row ? this.mapRow(row) : null
+  }
+
+  findChildRunByOutputDir(opts: {
+    outputDir: string
+    skillId?: string | null
+  }): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const filters: string[] = ['output_dir = ?']
+    const values: unknown[] = [opts.outputDir]
+    if (opts.skillId) {
+      filters.push('skill_id = ?')
+      values.push(opts.skillId)
+    }
+    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
+    const where = filters.join(' AND ')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE ${where}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    return row ? this.mapRow(row) : null
+  }
+
+  findChildRunBySingleFlightKey(opts: {
+    singleFlightKey: string
+    skillId?: string | null
+  }): SkillTaskRunRecord | null {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const filters: string[] = [
+      "json_extract(resume_payload_json, '$.childRun.singleFlightKey') = ?",
+    ]
+    const values: unknown[] = [opts.singleFlightKey]
+    if (opts.skillId) {
+      filters.push('skill_id = ?')
+      values.push(opts.skillId)
+    }
+    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
+    const where = filters.join(' AND ')
+    const row = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE ${where}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    return row ? this.mapRow(row) : null
+  }
+
+  /**
    * Phase 4 — find the most recently updated ACTIVE child-run row for a
    * given `skillId` (optionally narrowed by session/scope). Mirrors the
    * status filter from `findLatestChildRunByKey`.

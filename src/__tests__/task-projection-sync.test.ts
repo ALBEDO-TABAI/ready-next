@@ -1048,3 +1048,97 @@ test('Phase 7: syncTaskProjection reads child-run identity off contract for proj
   assert.equal(result?.taskId, `skill-child:${childRunId}`)
   assert.equal(records.has(`skill-child:${childRunId}`), true)
 })
+
+test('T8: projection identity uses the EXACT child handle attached to the contract (no sibling fallback)', async () => {
+  // T8 invariant: when `loadSkillRunContract` binds to a specific child
+  // (e.g. via exact `outputDir`) and stamps `childRunId` on the contract,
+  // the projection primary key MUST be `skill-child:<that childRunId>`.
+  // It must NOT fall back to a sibling child running the same skill in the
+  // same session (which would happen if projection sync read from a
+  // latest-active heuristic instead of the stamped handle).
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) { records.set(record.taskId, record) },
+    update(taskId, patch) {
+      records.set(taskId, { ...records.get(taskId)!, ...patch })
+    },
+    get(taskId) { return records.get(taskId) || null },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const exactChildRunId = 'vt8exact00'
+  const siblingChildRunId = 'vt8sibling'
+  const summary: ScopeRunSummary = {
+    ...createSummary(),
+    taskType: 'short_task',
+    taskId: 'system-t8',
+    taskContinuation: null,
+    recentArtifacts: [],
+    updatedAt: '2026-04-30T08:00:00.000Z',
+  }
+  const payload: ScopeRunEventPayload = {
+    ...createPayload(),
+    taskId: 'system-t8',
+    runId: 'run-t8',
+    module: 'system',
+    timestamp: '2026-04-30T08:00:00.000Z',
+  }
+
+  const result = await syncTaskProjection(store, summary, payload, {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'VEA',
+        source: 'tool',
+        detachedTaskId: null,
+        runStatePath: '/tmp/exact/run_state.json',
+        outputDir: '/tmp/exact',
+        action: 'video_expert_pipeline',
+        staleBlockerReason: null,
+        runContract: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          toolName: null,
+          actionInput: null,
+          originalInput: null,
+          sourceUrl: null,
+          taskRunId: null,
+          detachedTaskId: null,
+          jobId: null,
+          // Exact handles — same skill / session / scope as the sibling,
+          // but the contract must already have bound to the EXACT child.
+          outputDir: '/tmp/exact',
+          runStatePath: '/tmp/exact/run_state.json',
+          artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+          status: 'running',
+          liveness: 'running_process',
+          progress: { stage: 'init', totalUnits: null, completedUnits: null, coverageRatio: null },
+          blocker: { reason: null, stale: false },
+          // Projection identity stableKey points elsewhere on purpose:
+          // childRunId still wins over the stableKey.
+          projectionIdentity: { stableKey: `skill-child:${siblingChildRunId}` },
+          childRunId: exactChildRunId,
+        },
+      },
+    },
+  })
+
+  assert.equal(
+    result?.taskId,
+    `skill-child:${exactChildRunId}`,
+    'T8: projection identity must use the EXACT contract-attached child handle',
+  )
+  assert.equal(records.has(`skill-child:${exactChildRunId}`), true)
+  assert.equal(
+    records.has(`skill-child:${siblingChildRunId}`),
+    false,
+    'T8: must never alias to a sibling child handle',
+  )
+})
