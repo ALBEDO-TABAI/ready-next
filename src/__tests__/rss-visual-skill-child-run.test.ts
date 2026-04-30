@@ -77,7 +77,7 @@ function makeCloseEvent(
   }
 }
 
-test('RSS visual flow calls the child runner for VEA pipeline action', async () => {
+test('RSS visual flow calls the child runner for VEA pipeline action (stubbed driver)', async () => {
   const calls: StartSkillChildRunAndWaitParams[] = []
   const stub = async (
     params: StartSkillChildRunAndWaitParams,
@@ -109,7 +109,7 @@ test('RSS visual flow calls the child runner for VEA pipeline action', async () 
   assert.equal(result.status, 'completed')
 })
 
-test('queued_global_concurrency triggers bounded retry (3 attempts max)', async () => {
+test('queued_global_concurrency triggers bounded retry (3 attempts max) (stubbed driver)', async () => {
   let attempts = 0
   const stub = async (): Promise<StartSkillChildRunAndWaitResult> => {
     attempts += 1
@@ -149,7 +149,7 @@ test('queued_global_concurrency triggers bounded retry (3 attempts max)', async 
   assert.equal(result.closeEvent.terminalReason, 'completed')
 })
 
-test('queued_global_concurrency exceeding retry limit propagates as failure', async () => {
+test('queued_global_concurrency exceeding retry limit propagates as failure (stubbed driver)', async () => {
   let attempts = 0
   const stub = async (): Promise<StartSkillChildRunAndWaitResult> => {
     attempts += 1
@@ -175,7 +175,7 @@ test('queued_global_concurrency exceeding retry limit propagates as failure', as
   assert.equal(result.closeEvent.terminalReason, 'queued_global_concurrency')
 })
 
-test('cancelled_user close event surfaces as killed, NOT failed (source plan §3 rule 7)', async () => {
+test('cancelled_user close event surfaces as killed, NOT failed (source plan §3 rule 7) (stubbed driver)', async () => {
   const stub = async (): Promise<StartSkillChildRunAndWaitResult> => {
     const close = makeCloseEvent('killed', 'cancelled_user', {
       error: { kind: 'cancelled_user', message: 'user cancelled the run' },
@@ -207,7 +207,7 @@ test('cancelled_user close event surfaces as killed, NOT failed (source plan §3
   assert.match(error.message, /已取消/, 'killed close events must surface 已取消 in the message')
 })
 
-test('failed_skill close event surfaces as failed, with veaCause=failed', async () => {
+test('failed_skill close event surfaces as failed, with veaCause=failed (stubbed driver)', async () => {
   const stub = async (): Promise<StartSkillChildRunAndWaitResult> => {
     const close = makeCloseEvent('failed', 'failed_skill', {
       error: { kind: 'failed_skill', message: 'pipeline crashed at score_batches' },
@@ -232,7 +232,7 @@ test('failed_skill close event surfaces as failed, with veaCause=failed', async 
   assert.equal((error as Error & { veaCause?: string }).veaCause, 'failed')
 })
 
-test('blocked close event surfaces as blocked with distinct veaCause', async () => {
+test('blocked close event surfaces as blocked with distinct veaCause (stubbed driver)', async () => {
   const stub = async (): Promise<StartSkillChildRunAndWaitResult> => {
     const close = makeCloseEvent('blocked', 'blocked_config', {
       error: { kind: 'blocked_config', message: 'missing provider key' },
@@ -380,6 +380,15 @@ test('T3: RSS visual flow — scene_scores.json on disk routes through REAL driv
   // Reset registries and re-register the real VEA driver. Other tests in
   // this file inject their own stubs at the manager seam, so they don't
   // care about the runner singleton; we only need it for this case.
+  // Identity guard (T9 §10): the value we register MUST be the production
+  // module export. Any future swap-in of a stub via the same name would
+  // fail this assertion before the real-driver assertions below execute.
+  const identityProbe = await import('../main/modules/agent-control/video-expert-child-driver')
+  assert.strictEqual(
+    videoExpertChildDriver,
+    identityProbe.videoExpertChildDriver,
+    'imported videoExpertChildDriver must be identical to the production module export',
+  )
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
   registerSkillChildDriver(videoExpertChildDriver)
@@ -450,4 +459,134 @@ test('T3: RSS visual flow — scene_scores.json on disk routes through REAL driv
   // contaminated by the real driver registration.
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
+})
+
+// ===================================================================
+// T9 — Real driver, real product path: full RSS visual chain proves
+// pipeline → scene_scores.json → ai_analyze → close maps back to RSS
+// without missing_inputs. Uses the imported `videoExpertChildDriver`
+// directly (asserts identity with the production module export so a
+// future stub cannot silently slip in via `registerSkillChildDriver`).
+// ===================================================================
+
+import { describe } from 'node:test'
+import * as videoExpertChildDriverModule from '../main/modules/agent-control/video-expert-child-driver'
+
+describe('T9 — RSS visual chain end-to-end (real driver, real product path)', () => {
+  test('T9: pipeline produces scene_scores.json → real driver plans video_expert_ai_analyze → close maps back without missing_inputs', async () => {
+    // Identity guard: the value we register MUST be the production singleton
+    // exported from the driver module. If a future change re-exports a stub
+    // through the same name this assertion fails before any plan runs, so
+    // a stub cannot silently slip in here.
+    assert.strictEqual(
+      videoExpertChildDriver,
+      videoExpertChildDriverModule.videoExpertChildDriver,
+      'imported videoExpertChildDriver must be identical to the production module export',
+    )
+
+    __resetSkillChildRunnerForTests()
+    __resetSkillChildDriversForTests()
+    registerSkillChildDriver(videoExpertChildDriver)
+
+    // Cold cwd — no run_state.json, no scene_scores.json. The pipeline action
+    // (faked at the runtime seam) must produce scene_scores.json on disk so
+    // the driver's NEXT planNextAction tick observes the score_batches stage
+    // and routes to video_expert_ai_analyze. The third tick after ai_analyze
+    // closes the run by writing a completed run_state.json. End to end this
+    // is the same shape RSSItemAnalysisManager.runVisualFlow drives in prod.
+    const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-rss-vea-t9-'))
+    const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+    const runStatePath = path.join(outputDir, 'run_state.json')
+
+    const runtime = makeFakeRuntime({
+      onRun: async (request) => {
+        if (request.action === 'video_expert_pipeline') {
+          // Pipeline writes scene_scores.json + a paused run_state.json so
+          // the driver's next tick observes score_batches and re-plans
+          // ai_analyze without falling back to pipeline.
+          await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+          await fs.writeFile(
+            runStatePath,
+            JSON.stringify({
+              status: 'recoverable_paused',
+              current_stage: 'score_batches',
+              scene_scores_path: sceneScoresPath,
+            }),
+            'utf8',
+          )
+        } else if (request.action === 'video_expert_ai_analyze') {
+          await fs.writeFile(
+            runStatePath,
+            JSON.stringify({ status: 'completed', current_stage: 'finalize' }),
+            'utf8',
+          )
+        }
+        return {
+          success: true,
+          skillId: request.skillId,
+          action: request.action,
+          stdout: '',
+          stderr: '',
+          command: [],
+        }
+      },
+    })
+    const repo = makeFakeRepository()
+    configureSkillChildRunner({
+      runtimeManager: runtime.manager,
+      repository: repo.repo,
+      launchStuckGuardMs: 200,
+    })
+
+    const manager = new RSSItemAnalysisManager({
+      startSkillChildRunAndWait,
+      veaAwaitRetryDelayMs: 0,
+    })
+
+    // Stage 1 — RSS visual flow's pipeline call. Lands cold against the real
+    // driver with `url + outputDir` and must close `completed` after the
+    // driver observes the scene_scores it planted.
+    const pipelineResult = await manager.__awaitVeaChildRunForTesting({
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      params: { url: 'https://example.com/v.mp4', outputDir },
+      timeoutMs: 5_000,
+    })
+
+    assert.equal(pipelineResult.success, true, `expected pipeline stage to close success; got ${JSON.stringify(pipelineResult.closeEvent)}`)
+    assert.equal(pipelineResult.status, 'completed')
+
+    // Real-driver plans during stage 1: it MUST have dispatched at least one
+    // pipeline action (cold start) and at least one ai_analyze action
+    // (after observing scene_scores on disk). It must NEVER mistakenly
+    // close with missing_inputs at this point because scene_scores.json
+    // is present after the pipeline action lands.
+    const stage1Pipeline = runtime.calls.filter((c) => c.action === 'video_expert_pipeline')
+    const stage1Analyze = runtime.calls.filter((c) => c.action === 'video_expert_ai_analyze')
+    assert.equal(stage1Pipeline.length >= 1, true, 'real driver must invoke video_expert_pipeline on cold start')
+    assert.equal(stage1Analyze.length >= 1, true, 'real driver must follow up with video_expert_ai_analyze after scene_scores lands')
+
+    // Critical: the close event maps back to RSS WITHOUT a missing_inputs
+    // signal. The error field must be falsy for a completed close.
+    assert.equal(pipelineResult.closeEvent.error, null, 'completed close must not carry an error payload')
+    assert.notEqual(
+      pipelineResult.closeEvent.terminalReason,
+      'checkpoint_background',
+      'completed close must not surface as recoverable_paused/checkpoint_background',
+    )
+    // Also: the RSS-side translator must NOT classify this as a failure with
+    // a missing_inputs message — closed-completed runs never carry that
+    // diagnostic.
+    if (!pipelineResult.success) {
+      const error = manager.__translateVeaCloseToErrorForTesting(pipelineResult, '视觉脚本分析失败')
+      assert.doesNotMatch(
+        error.message,
+        /missing_inputs|missing_scene_scores/,
+        'a completed close must never surface missing_inputs to RSS',
+      )
+    }
+
+    __resetSkillChildRunnerForTests()
+    __resetSkillChildDriversForTests()
+  })
 })

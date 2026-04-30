@@ -272,8 +272,8 @@ function setupRunner(opts: {
 // Sanity: registry + helpers (no monkey-patches)
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 child-loop helpers — real registry', () => {
-  test('isChildLoopSkillAction is true for VEA pipeline and ai_analyze, false for primitives', () => {
+describe('Phase 6 child-loop helpers — real registry (stubbed driver)', () => {
+  test('isChildLoopSkillAction is true for VEA pipeline and ai_analyze, false for primitives (stubbed driver)', () => {
     // The production VEA driver registers via
     // `import './video-expert-child-driver'` from `runtime.ts`; in this
     // unit test we register a stub VEA driver directly so the registry
@@ -326,8 +326,8 @@ describe('Phase 6 child-loop helpers — real registry', () => {
 // Scenario A — new run
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 scenario A — new VEA run', () => {
-  test('startSkillChildRun returns running with a fresh childRunId', async () => {
+describe('Phase 6 scenario A — new VEA run (stubbed driver)', () => {
+  test('startSkillChildRun returns running with a fresh childRunId (stubbed driver)', async () => {
     const { repo } = setupRunner({ outputsRoot: '/tmp/fake-outputs-A' })
     // Stub driver returns one action then closes done so the test doesn't
     // hang on the runner's internal loop (we only inspect the launch
@@ -407,8 +407,8 @@ describe('Phase 6 scenario A — new VEA run', () => {
 // Scenario B — resume picks ai_analyze when run_state stage is score_batches
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 scenario B — resume from score_batches stage', () => {
-  test('driver picks video_expert_ai_analyze, never dispatches {}', async () => {
+describe('Phase 6 scenario B — resume from score_batches stage (stubbed driver)', () => {
+  test('driver picks video_expert_ai_analyze, never dispatches {} (stubbed driver)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'phase6-resume-'))
     const outputDir = join(root, 'vea-output-B')
     mkdirSync(outputDir, { recursive: true })
@@ -503,8 +503,8 @@ describe('Phase 6 scenario B — resume from score_batches stage', () => {
 // Scenario D — cancel maps to killed + cancelled_user (NEVER failed)
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 scenario D — cancel', () => {
-  test('cancelSkillChildRun produces status=killed terminalReason=cancelled_user', async () => {
+describe('Phase 6 scenario D — cancel (stubbed driver)', () => {
+  test('cancelSkillChildRun produces status=killed terminalReason=cancelled_user (stubbed driver)', async () => {
     setupRunner({ outputsRoot: '/tmp/fake-outputs-D' })
     // Driver hangs on the first plan so cancel fires while the child is
     // mid-flight.
@@ -544,8 +544,8 @@ describe('Phase 6 scenario D — cancel', () => {
 // Scenario G — single-flight collapse
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 scenario G — single-flight', () => {
-  test('same target launched twice returns status=reused with the same id', async () => {
+describe('Phase 6 scenario G — single-flight (stubbed driver)', () => {
+  test('same target launched twice returns status=reused with the same id (stubbed driver)', async () => {
     setupRunner({ outputsRoot: '/tmp/fake-outputs-G' })
     // Driver returns one action + close so the first launch settles.
     registerStubVeaDriver({
@@ -592,8 +592,8 @@ describe('Phase 6 scenario G — single-flight', () => {
 // Resume entrypoint — resumeSkillChildRun on an existing handle
 // ---------------------------------------------------------------------------
 
-describe('Phase 6 resume entrypoint — resumeSkillChildRun', () => {
-  test('resumeSkillChildRun returns the same childRunId on a recoverable_paused row', async () => {
+describe('Phase 6 resume entrypoint — resumeSkillChildRun (stubbed driver)', () => {
+  test('resumeSkillChildRun returns the same childRunId on a recoverable_paused row (stubbed driver)', async () => {
     const { repo } = setupRunner({ outputsRoot: '/tmp/fake-outputs-resume' })
     // Driver: first run pauses immediately so the row is recoverable_paused,
     // then a resume re-enters the loop and closes done.
