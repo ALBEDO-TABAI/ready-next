@@ -68,6 +68,7 @@ import { mapSubAgentCloseToChildClose } from './skill-child-sub-agent-close-mapp
 import { isSkillChildProgressPayload } from './skill-child-sub-agent-events'
 import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'
 import { runSubAgent } from './sub-agent/sub-agent-runner'
+import { disposeTimeout } from './timer-disposal'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
@@ -915,82 +916,75 @@ class SkillChildRunner {
       runDriverCall: (call) => this.runDriverCall(call),
     })
 
-    try {
-      for await (const event of runSubAgent(subagent, {
-        abortSignal: parentAbortLink.childSignal,
-        cleanup,
-        parentScopeId: active.scopeId,
-        parentSessionId: active.sessionId,
-      })) {
-        if (event.type === 'progress' && isSkillChildProgressPayload(event.payload)) {
-          if (event.payload.kind === 'action_started') {
-            const actionStartedAt = new Date().toISOString()
-            actionsStarted = event.payload.actionIndex
-            if (firstActionStartedAt === null) {
-              firstActionStartedAt = actionStartedAt
-              // First action observed — clear the stuck timer.
-              clearTimeout(launchStuckTimer)
-            }
-            await this.appendEvent(active, {
-              type: 'action_started',
-              at: actionStartedAt,
-              action: event.payload.actionName,
-              input: event.payload.actionInput,
-            })
-            continue
+    for await (const event of runSubAgent(subagent, {
+      abortSignal: parentAbortLink.childSignal,
+      cleanup,
+      parentScopeId: active.scopeId,
+      parentSessionId: active.sessionId,
+    })) {
+      if (event.type === 'progress' && isSkillChildProgressPayload(event.payload)) {
+        if (event.payload.kind === 'action_started') {
+          const actionStartedAt = new Date().toISOString()
+          actionsStarted = event.payload.actionIndex
+          if (firstActionStartedAt === null) {
+            firstActionStartedAt = actionStartedAt
           }
-
-          if (event.payload.kind === 'action_completed') {
-            const result = actionResults.shift()
-            await this.appendEvent(active, {
-              type: 'action_completed',
-              at: new Date().toISOString(),
-              action: event.payload.actionName,
-              result: {
-                success: event.payload.success,
-                status: result?.status ?? null,
-                outputDir: result?.outputDir ?? null,
-                error: result?.error ?? null,
-                durationMs: event.payload.durationMs,
-              },
-            })
-            continue
-          }
-
           await this.appendEvent(active, {
-            type: 'state_observed',
+            type: 'action_started',
+            at: actionStartedAt,
+            action: event.payload.actionName,
+            input: event.payload.actionInput,
+          })
+          continue
+        }
+
+        if (event.payload.kind === 'action_completed') {
+          const result = actionResults.shift()
+          await this.appendEvent(active, {
+            type: 'action_completed',
             at: new Date().toISOString(),
-            runStatePath: active.runStatePath,
-            state: {
-              actionsPlanned: actionsStarted,
-              stage: event.payload.stage,
-              fingerprint: event.payload.fingerprint,
+            action: event.payload.actionName,
+            result: {
+              success: event.payload.success,
+              status: result?.status ?? null,
+              outputDir: result?.outputDir ?? null,
+              error: result?.error ?? null,
+              durationMs: event.payload.durationMs,
             },
           })
           continue
         }
 
-        if (event.type === 'terminal') {
-          clearTimeout(launchStuckTimer)
-          const abortReason = (active.controller.signal.reason as Error | undefined)?.message
-            || (typeof active.controller.signal.reason === 'string' ? active.controller.signal.reason : null)
-          const close = mapSubAgentCloseToChildClose(event.closeEvent, {
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            isUserCancel: active.controller.signal.aborted
-              && !isLaunchStuckFired
-              && abortReason !== 'process_restarted',
-            isParentSessionAbort: abortReason === 'process_restarted',
-            isLaunchStuckFired,
-          })
-          this.finalizeRun(active, close)
-          return
-        }
+        await this.appendEvent(active, {
+          type: 'state_observed',
+          at: new Date().toISOString(),
+          runStatePath: active.runStatePath,
+          state: {
+            actionsPlanned: actionsStarted,
+            stage: event.payload.stage,
+            fingerprint: event.payload.fingerprint,
+          },
+        })
+        continue
       }
-    } finally {
-      clearTimeout(launchStuckTimer)
+
+      if (event.type === 'terminal') {
+        const abortReason = (active.controller.signal.reason as Error | undefined)?.message
+          || (typeof active.controller.signal.reason === 'string' ? active.controller.signal.reason : null)
+        const close = mapSubAgentCloseToChildClose(event.closeEvent, {
+          childRunId: active.childRunId,
+          skillId: active.skillId,
+          outputDir: active.outputDir,
+          runStatePath: active.runStatePath,
+          isUserCancel: active.controller.signal.aborted
+            && !isLaunchStuckFired
+            && abortReason !== 'process_restarted',
+          isParentSessionAbort: abortReason === 'process_restarted',
+          isLaunchStuckFired,
+        })
+        this.finalizeRun(active, close)
+        return
+      }
     }
   }
 
@@ -1180,7 +1174,7 @@ function waitForClosePromise(
     const finish = (complete: () => void) => {
       if (settled) return
       settled = true
-      if (timeout) clearTimeout(timeout)
+      disposeTimeout(timeout)
       options.signal?.removeEventListener('abort', onAbort)
       complete()
     }
