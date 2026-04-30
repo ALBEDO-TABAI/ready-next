@@ -26,12 +26,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
+import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
 
 test('tool-registry imports skills-tools / system-tools at module top (not via lazyRequire)', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-registry.ts')
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: electron-vite bundle safety depends on static import topology rather than runtime registry output
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-registry.ts'), 'utf8')
 
   assert.match(
     source,
@@ -46,7 +45,8 @@ test('tool-registry imports skills-tools / system-tools at module top (not via l
 })
 
 test('tool-registry has no lazyRequire or createRequire invocation', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-registry.ts')
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: bundled production regressed specifically through createRequire/lazyRequire topology
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-registry.ts'), 'utf8')
 
   // Allow "createRequire" to appear only inside comments (we intentionally
   // leave a forensic explanation behind). Strip // and /* */ comments first.
@@ -66,20 +66,26 @@ test('tool-registry has no lazyRequire or createRequire invocation', () => {
   )
 })
 
-test('tool-registry still preserves a static fallback for the skills group', () => {
-  // If getSkillsRuntimeManager() throws (e.g. in tests where electron is
-  // absent and `app` is undefined), the try/catch must degrade to the static
-  // name list rather than exposing zero skill tools.
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-registry.ts')
+test('tool-registry falls back to static skills definitions and schemas when dynamic resolution fails', () => {
+  const registry = new ToolRegistry({
+    __testGroupProviders: {
+      skills: {
+        staticToolNames: ['skill_static_fallback_read_skill'],
+        getToolDefinitions: () => {
+          throw new Error('dynamic definitions unavailable')
+        },
+      },
+    },
+  })
 
-  assert.match(
-    source,
-    /resolveSkillToolDefinitions[\s\S]*?usedStaticFallback:\s*true/,
-    'resolveSkillToolDefinitions must keep its try/catch static fallback',
-  )
-  assert.match(
-    source,
-    /resolveSkillToolSchemas[\s\S]*?usedStaticFallback:\s*true/,
-    'resolveSkillToolSchemas must keep its try/catch static fallback',
-  )
+  const definitions = registry.getToolDefinitionsResolutionForGroup('skills')
+  assert.equal(definitions.usedStaticFallback, true)
+  assert.equal(definitions.error, 'dynamic definitions unavailable')
+  assert.deepEqual(definitions.definitions.map((tool) => tool.name), ['skill_static_fallback_read_skill'])
+
+  const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai')
+  assert.equal(schemas.usedStaticFallback, true)
+  assert.deepEqual(schemas.tools.map((tool) => (tool.function as { name: string }).name), [
+    'skill_static_fallback_read_skill',
+  ])
 })

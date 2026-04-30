@@ -31,6 +31,7 @@
     "generate:document-widget-openui": "npx tsx@^4.19.2 ./scripts/generate-document-widget-openui-artifacts.ts",
     "verify": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
     "verify:a0": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-plan-pairing.cjs --all && node scripts/check-commit-message.cjs --message \"feat(agent): implement A0 strategic foundation\" && npm run test:a0:gates && npm run test:a0:focus",
+    "verify:a05": "node scripts/check-eslint-baseline.cjs --area a1-gate --max 0",
     "verify:cloud": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
     "postinstall": "electron-builder install-app-deps"
   },

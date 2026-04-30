@@ -180,6 +180,7 @@ test('Delta D7: skill_cancel_detached emits terminal framePatch (livenessHint !=
  * tests will exercise the full path.
  */
 test('Delta C3+C4: source-level proof — typed-action wrapper emits framePatch.runContract + complete resumePayload', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: typed-action wrapper requires runtime-manager integration that has no isolated node-test harness
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
     'utf-8',
@@ -218,6 +219,7 @@ test('Delta C3+C4: source-level proof — typed-action wrapper emits framePatch.
 })
 
 test('Delta D6: source-level proof — start_detached success path emits framePatch via attachContractFramePatch', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: start_detached framePatch success branch depends on runtime manager manifest resolution
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
     'utf-8',
@@ -563,6 +565,7 @@ test('T7: same-batch contextModifier from tool-A unions onto the seeded roots so
 })
 
 test('Phase 3: source-level proof — VEA typed-action wrapper emits contextModifier when outputDir is present', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: VEA contextModifier emission is coupled to typed-action wrapper integration
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
     'utf-8',

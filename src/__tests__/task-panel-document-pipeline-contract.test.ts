@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 
 describe('task panel document pipeline diagnostics', () => {
   it('renders document pipeline chunk and cache hints from execution diagnostics', () => {
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: TaskPanel document-pipeline placement is a renderer source-surface contract
     const source = readFileSync(
       resolve(process.cwd(), 'src/renderer/components/ready/TaskPanel.tsx'),
       'utf8',

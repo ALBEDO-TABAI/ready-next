@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { executeSkillTool } from '../main/modules/tools/skills-tools'
 import { executeInspectRunState } from '../main/modules/tools/skill-primitives/inspect-run-state'
 import { executeReadArtifact } from '../main/modules/tools/skill-primitives/read-artifact'
 
@@ -306,20 +307,45 @@ test('skill_read_artifact accepts VEA outputDir when additionalAllowedReadRoots 
   }
 })
 
-test('skill_inspect_run_state exposes expectedTaskId through schema and dispatch', () => {
-  const schemaSource = readFileSync(
-    new URL('../main/modules/tools/skill-primitives/primitive-schemas.ts', import.meta.url),
-    'utf-8',
-  )
-  const dispatchSource = readFileSync(
-    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
-    'utf-8',
-  )
+test('skill_inspect_run_state dispatch forwards expectedTaskId to select the matching run_state', async () => {
+  const root = makeTempDir()
+  try {
+    const targetDir = join(root, 'task-target')
+    const otherDir = join(root, 'task-other')
+    mkdirSync(targetDir)
+    mkdirSync(otherDir)
+    const targetRunState = join(targetDir, 'run_state.json')
+    const otherRunState = join(otherDir, 'run_state.json')
+    writeFileSync(targetRunState, JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf-8')
+    writeFileSync(otherRunState, JSON.stringify({
+      task_id: 'other',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf-8')
+    utimesSync(targetRunState, new Date('2026-04-28T01:00:00Z'), new Date('2026-04-28T01:00:00Z'))
+    utimesSync(otherRunState, new Date('2026-04-28T01:05:00Z'), new Date('2026-04-28T01:05:00Z'))
 
-  assert.match(schemaSource, /expectedTaskId/)
-  assert.match(schemaSource, /run_state\.json\.task_id/)
-  assert.match(dispatchSource, /expectedTaskId/)
-  assert.match(dispatchSource, /executeInspectRunState\(\{[\s\S]*expectedTaskId/)
+    const output = await executeSkillTool(
+      'skill_inspect_run_state',
+      { outputDir: root, expectedTaskId: 'target' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { frameSkillId: 'video-expert-analyzer' },
+    )
+    const data = outputData(output)
+    assert.equal(data.runStatePath, targetRunState)
+    assert.equal(data.expectedTaskId, 'target')
+    assert.equal(data.summary.taskId, 'target')
+    assert.equal(data.summary.currentStage, 'score_batches')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 /**

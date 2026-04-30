@@ -39,7 +39,12 @@ function createBaselineAwareRule(rule, meta) {
       return {
         Program(node) {
           const sourceText = context.sourceCode.getText()
-          const findings = scanRuleViolations({ filePath, sourceText, rule })
+          const findings = scanRuleViolations({
+            filePath,
+            sourceText,
+            rule,
+            honorReviewedDisables: false,
+          })
           for (const finding of findings) {
             if (baselineKeys.has(findingKey(finding))) continue
             context.report({

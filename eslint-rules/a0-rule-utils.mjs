@@ -6,12 +6,21 @@ export const RULE_IDS = {
   migrationTodo: 'ready/no-migration-todo',
 }
 
+export const A05_AREAS = {
+  a1Gate: 'a1-gate',
+  uiHistory: 'ui-history',
+  otherA0: 'other-a0',
+}
+
+export const A05_AREA_VALUES = new Set(Object.values(A05_AREAS))
+
 const CODE_FILE_EXT_RE = /\.(?:[cm]?[jt]sx?|mjs|cjs)['"`)]/
 const READ_FILE_SYNC_RE = /\breadFileSync\s*\(/g
 const SOURCE_NAMED_READ_RE = /\b(?:source|Source|executor|Executor|renderer|Renderer)\w*\s*=\s*readFileSync\s*\(/
 const SOURCE_GREP_CONSUMER_RE = /\bassert\.(?:match|doesNotMatch)\s*\(|\.indexOf\s*\(|\.includes\s*\(/
 const MIGRATION_TODO_RE = /(?:todo\b.*\bmigration\b|\bmigration\b.*\btodo\b|remove after migration)/i
 const LEGACY_BACKDOOR_RE = /\bif\s*\([^)]*\blegacy\b[^)]*\)|\blegacy\?\s*:|\blegacy\s*:\s*(?:boolean|true|false|\{|\[)/
+const A1_GATE_KEYWORDS_RE = /(agent|skill|tool|driver|supervisor|child|task|run-state|run-coordinator|rss-(?!draft-store-ui|list-row-style)|browser-task|document-task|continuation|turn-engine|capability|memory|session-recall|sidecar|live-info|workflow|orchestrator|spawn|delivery|primitive|admission|sanitiz)/i
 
 export function normalizeFilePath(filePath) {
   return String(filePath || '').replaceAll('\\', '/')
@@ -28,22 +37,35 @@ export function findingKey(finding) {
   return `${finding.file}|${finding.rule}|${finding.snippetHash}`
 }
 
-export function scanA0RuleViolations({ filePath, sourceText }) {
+export function classifyA05Area(entry) {
+  const file = normalizeFilePath(entry?.file)
+  if (entry?.rule !== RULE_IDS.sourceGrep) return A05_AREAS.otherA0
+  if (file.endsWith('-ui-contract.test.ts') || file.endsWith('-style-contract.test.ts')) {
+    return A05_AREAS.uiHistory
+  }
+  const testName = file.replace(/^src\/__tests__\//, '')
+  if (file.startsWith('src/__tests__/') && A1_GATE_KEYWORDS_RE.test(testName)) {
+    return A05_AREAS.a1Gate
+  }
+  return A05_AREAS.uiHistory
+}
+
+export function scanA0RuleViolations({ filePath, sourceText, honorReviewedDisables = true }) {
   const file = normalizeFilePath(filePath)
   const text = String(sourceText || '')
   return [
-    ...scanNoSourceGrepTest(file, text),
+    ...scanNoSourceGrepTest(file, text, { honorReviewedDisables }),
     ...scanNoLegacyBackdoor(file, text),
     ...scanNoMigrationTodo(file, text),
   ]
 }
 
-export function scanRuleViolations({ filePath, sourceText, rule }) {
-  return scanA0RuleViolations({ filePath, sourceText })
+export function scanRuleViolations({ filePath, sourceText, rule, honorReviewedDisables = true }) {
+  return scanA0RuleViolations({ filePath, sourceText, honorReviewedDisables })
     .filter((finding) => finding.rule === rule)
 }
 
-function scanNoSourceGrepTest(file, sourceText) {
+function scanNoSourceGrepTest(file, sourceText, options) {
   if (!isTestFile(file)) return []
   if (!SOURCE_GREP_CONSUMER_RE.test(sourceText)) return []
 
@@ -51,6 +73,7 @@ function scanNoSourceGrepTest(file, sourceText) {
   for (const lineInfo of iterateLines(sourceText)) {
     if (!READ_FILE_SYNC_RE.test(lineInfo.text)) continue
     READ_FILE_SYNC_RE.lastIndex = 0
+    if (options.honorReviewedDisables && hasReviewedDisableNextLine(lineInfo.previousText, RULE_IDS.sourceGrep)) continue
     const lineAndRest = sourceText.slice(lineInfo.index, Math.min(sourceText.length, lineInfo.index + 300))
     if (!CODE_FILE_EXT_RE.test(lineAndRest) && !SOURCE_NAMED_READ_RE.test(lineInfo.text)) continue
     findings.push(makeFinding({
@@ -122,6 +145,7 @@ function makeFinding({ file, rule, lineInfo, sourceText, messageId, message }) {
 function* iterateLines(sourceText) {
   let index = 0
   let line = 1
+  let previousText = ''
   for (const text of sourceText.split(/\n/)) {
     const firstNonSpace = text.search(/\S/)
     yield {
@@ -129,10 +153,18 @@ function* iterateLines(sourceText) {
       line,
       column: firstNonSpace >= 0 ? firstNonSpace + 1 : 1,
       text,
+      previousText,
     }
     index += text.length + 1
     line += 1
+    previousText = text
   }
+}
+
+function hasReviewedDisableNextLine(previousText, ruleId) {
+  const escapedRule = ruleId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`eslint-disable-next-line\\s+${escapedRule}\\s+--\\s+\\S`)
+  return re.test(previousText || '')
 }
 
 function isCommentOnlyLine(line) {

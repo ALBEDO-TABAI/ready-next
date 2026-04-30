@@ -3,12 +3,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
-
 test('agent session teardown clears reference skill hints and pending ask_user records', () => {
-  const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: IPC session cleanup wiring is closure-local inside setupAgentIPC and has no exported behavior seam
+  const ipcHandler = readFileSync(resolve(process.cwd(), 'src/main/modules/claude-bridge/ipc-handler.ts'), 'utf8')
   const killHandler = ipcHandler.match(/ipcMain\.handle\('agent:kill'[\s\S]*?\n {2}\}\)/)?.[0] || ''
 
   assert.match(ipcHandler, /cleanupSkillSessionState/)

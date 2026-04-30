@@ -115,6 +115,7 @@ describe('shouldInjectBudgetWarning', () => {
 
 describe('long skill action detection', () => {
   it('is based on tool timeout metadata instead of a specific skill/action name', () => {
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: turn-engine long-action helper wiring currently lacks an isolated behavior harness
     const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
     const start = source.indexOf('function isLongTypedSkillActionName')
     const end = source.indexOf('function hasLongTypedSkillAction', start)

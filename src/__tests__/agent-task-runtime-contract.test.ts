@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: agent task runtime wiring spans renderer and main IPC without an isolated harness
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: task projection wiring is a source-surface integration contract
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

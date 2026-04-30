@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: tool executor guard wiring is a dispatch-layer source contract
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -16,7 +17,10 @@ test('tool executor rejects tool calls outside the current allowlist', () => {
   // R3: definition check MUST come before the allowlist check so the model
   // can distinguish "unknown tool" (fabricated name) from "tool not allowed"
   // (real but restricted this turn). See tool-not-allowed-message.ts rationale.
-  assert.match(executor, /const definition = defaultToolGateway\.getToolDefinition\(toolName\)[\s\S]*if \(allowedToolNames && !allowedToolNames\.has\(toolName\)\)/)
+  assert.match(
+    executor,
+    /const definition = defaultToolRegistry\.getToolDefinitionForExecution\(toolName\)[\s\S]*const allowedToolNames = normalizeAllowedToolSet\(context\.allowedToolNames\)[\s\S]*if \(definition\.requiresExplicitAllowlist && !allowedToolNames\?\.has\(toolName\)\)[\s\S]*if \(allowedToolNames && !allowedToolNames\.has\(toolName\)\)/,
+  )
   assert.match(executor, /buildUnknownToolMessage\(toolName\)/)
   assert.match(executor, /buildToolNotAllowedMessage\(toolName, allowedToolNames\)/)
   assert.match(builder, /allowedToolNames\?: Set<string> \| string\[\] \| null/)

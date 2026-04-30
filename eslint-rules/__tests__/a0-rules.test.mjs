@@ -39,6 +39,30 @@ test('source-grep scanner uses file + rule + snippetHash as stable identity', ()
   )
 })
 
+test('source-grep scanner honors reviewed eslint disable reasons only', () => {
+  const disabled = scanA0RuleViolations({
+    filePath: 'src/__tests__/sample.test.ts',
+    sourceText: [
+      "import { readFileSync } from 'node:fs'",
+      '// eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: electron IPC surface has no behavior harness yet',
+      "const source = readFileSync('src/main/foo.ts', 'utf8')",
+      'assert.match(source, /foo/)',
+    ].join('\n'),
+  })
+  const missingReason = scanA0RuleViolations({
+    filePath: 'src/__tests__/sample.test.ts',
+    sourceText: [
+      "import { readFileSync } from 'node:fs'",
+      '// eslint-disable-next-line ready/no-source-grep-test',
+      "const source = readFileSync('src/main/foo.ts', 'utf8')",
+      'assert.match(source, /foo/)',
+    ].join('\n'),
+  })
+
+  assert.equal(disabled.length, 0)
+  assert.equal(missingReason.length, 1)
+})
+
 tester.run('ready/no-source-grep-test', rules['no-source-grep-test'], {
   valid: [
     {

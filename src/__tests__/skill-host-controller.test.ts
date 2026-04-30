@@ -12,8 +12,7 @@
  *   - cleanupSkillArtifacts removes declared paths (and rejects out-of-root)
  *   - Path traversal rejection (e.g. ~/../etc/passwd)
  *   - Missing agent context → prepareSpawnContext throws
- *   - Templater stub refactor: contract-templater re-exports AgentSpawnContext
- *     from skill-host-contract (verified by source-text grep)
+ *   - Templater context uses the shared AgentSpawnContext shape
  */
 
 import assert from 'node:assert/strict'
@@ -27,7 +26,6 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
@@ -37,6 +35,7 @@ import {
   _resetSkillHostControllerForTests,
   getSkillHostController,
 } from '../main/modules/skills-runtime/skill-host-controller'
+import { makeTemplateContext, renderTemplate } from '../main/modules/skills-runtime/contract-templater'
 import type { SkillHostRequirements } from '../shared/skill-host-contract'
 import type { AgentSpawnContext } from '../shared/skill-host-contract'
 
@@ -73,25 +72,33 @@ function makeWorkRoot(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Templater refactor verification
+// Templater shared context verification
 // ---------------------------------------------------------------------------
 
-test('contract-templater imports AgentSpawnContext from skill-host-contract (no local stub)', async () => {
-  const path = fileURLToPath(
-    new URL('../main/modules/skills-runtime/contract-templater.ts', import.meta.url),
+test('contract-templater renders fields from the shared AgentSpawnContext shape', async () => {
+  const context = makeTemplateContext({
+    skill: { id: 'templated-skill', name: 'Templated Skill', assetRoot: '/skills/templated' },
+    agent: makeAgent({
+      provider: 'current-provider',
+      model_id: 'current-model',
+      api_kind: 'openai-responses',
+      fallback_chain: ['fallback-a'],
+    }),
+  })
+
+  assert.equal(
+    renderTemplate('${agent.provider}/${agent.model_id}/${agent.api_kind}', context),
+    'current-provider/current-model/openai-responses',
   )
-  const source = readFileSync(path, 'utf8')
-  // Local interface stub must be gone.
-  assert.ok(
-    !/\binterface\s+AgentSpawnContext\b/.test(source),
-    'contract-templater.ts should no longer declare a local AgentSpawnContext interface',
-  )
-  // Import from skill-host-contract must be present.
-  assert.match(
-    source,
-    /import\s+type\s+\{\s*AgentSpawnContext\s*\}\s+from\s+['"]\.\.\/\.\.\/\.\.\/shared\/skill-host-contract['"]/,
-    'contract-templater.ts must import AgentSpawnContext from shared/skill-host-contract',
-  )
+  assert.deepEqual(context.agent.fallback_chain, ['fallback-a'])
+
+  const sourceAgent = makeAgent({ fallback_chain: ['fallback-b'] })
+  const copied = makeTemplateContext({
+    skill: { id: 'copy-skill', name: 'Copy Skill', assetRoot: '/skills/copy' },
+    agent: sourceAgent,
+  })
+  sourceAgent.fallback_chain.push('mutated-after-copy')
+  assert.deepEqual(copied.agent.fallback_chain, ['fallback-b'])
 })
 
 // ---------------------------------------------------------------------------

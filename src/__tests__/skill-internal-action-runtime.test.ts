@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test, { beforeEach } from 'node:test'
 
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
 import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
 import {
   resolveSkillActionTimeoutMs,
+  resolveStartDetachedActionTool,
 } from '../main/modules/tools/skills-tools'
 import {
   rememberLastReferenceSkill,
@@ -132,22 +133,33 @@ test('skill action timeout falls back to host default action timeout', () => {
   assert.equal(timeout, 30 * 60 * 1000)
 })
 
-test('dispatch validation builds schemas from internal skill actions too', () => {
-  const source = readFileSync(new URL('../main/modules/tools/skills-tools.ts', import.meta.url), 'utf-8')
+test('dispatch validation resolves schema for internal skill actions too', () => {
+  const schema = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
 
-  assert.match(
-    source,
-    /export function getSkillActionSchemas\(\)[\s\S]*getSkillActionToolDefs\(\{\s*includeInternal:\s*true\s*\}\)/,
-  )
+  assert.ok(schema, 'expected a schema for the internal VEA typed action')
+  assert.equal(schema.safeParse({}).success, false)
+  assert.equal(schema.safeParse({ url: 'https://example.com/video.mp4' }).success, true)
 })
 
 test('skill_start_detached normalizes full skill tool names before action gating', () => {
-  const source = readFileSync(new URL('../main/modules/tools/skills-tools.ts', import.meta.url), 'utf-8')
-  const branch = source.match(/if \(tool\.name === 'skill_start_detached'\) \{[\s\S]*?if \(tool\.name === 'skill_run_shell'\) \{/)
-  assert.ok(branch, 'expected skill_start_detached branch before skill_run_shell branch')
+  const result = resolveStartDetachedActionTool({
+    skillId: 'video-expert-analyzer',
+    requestedAction: 'skill_video_expert_pipeline',
+    findByToolName: (name) => name === 'skill_video_expert_pipeline'
+      ? {
+          name,
+          description: 'VEA pipeline',
+          kind: 'skill_action',
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          visibility: 'internal',
+          params: [],
+        }
+      : null,
+    findBySkillAction: () => null,
+  })
 
-  assert.match(branch[0], /requestedAction\.startsWith\('skill_'\)/)
-  assert.match(branch[0], /findSkillToolByNameForExecution\(requestedAction\)/)
-  assert.match(branch[0], /action = resolvedTool\.action/)
-  assert.match(branch[0], /shouldExposeSkillAction\(/)
+  assert.equal(result.action, 'video_expert_pipeline')
+  assert.equal(result.actionTool?.name, 'skill_video_expert_pipeline')
+  assert.equal(result.actionTool?.action, 'video_expert_pipeline')
 })

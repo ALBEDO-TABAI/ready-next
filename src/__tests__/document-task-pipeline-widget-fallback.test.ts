@@ -1,51 +1,110 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 
-const EXECUTOR_PATH = resolve(
-  process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline-executor.ts',
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'electron') {
+      return {
+        url: [
+          'data:text/javascript,',
+          'export const ipcMain={};',
+          'export const dialog={};',
+          'export const shell={};',
+          'export const BrowserWindow=class{};',
+          'export const WebContents=class{};',
+        ].join(''),
+        shortCircuit: true,
+      }
+    }
+    return nextResolve(specifier, context)
+  },
+})
+
+const { DocumentTaskPipelineExecutor } = await import(
+  '../main/modules/agent-control/document-task-pipeline-executor'
 )
 
-describe('document pipeline widget draft fallback contract', () => {
-  const source = readFileSync(EXECUTOR_PATH, 'utf8')
+function buildExecutor(responses: string[]) {
+  const logs: string[] = []
+  const executor = new DocumentTaskPipelineExecutor({
+    log: (message: string) => logs.push(message),
+    requestKimiCodingSimple: async () => responses.shift() || '{}',
+    requestAnthropicSimple: async () => responses.shift() || '{}',
+    requestOpenAISimple: async () => responses.shift() || '{}',
+  } as any)
+  return { executor: executor as any, logs }
+}
 
-  it('throws (never falls back) in update mode when both attempts fail', () => {
-    assert.match(
-      source,
-      /if \(params\.plan\.operation === 'update'\) \{\s*throw new Error\(`Widget componentSpec 两次校验失败：\$\{lastErrors\.join\('；'\)\}`\)/,
-    )
+const snapshot = {
+  tabId: 'tab-1',
+  title: 'Guide.md',
+  path: '/tmp/Guide.md',
+  content: '# Guide\n正文',
+  isDirty: false,
+  charCount: 12,
+}
+
+const createPlan = {
+  taskType: 'document_read_then_widget_create',
+  operation: 'create',
+  question: '根据当前文档做一张信息卡',
+  documentPath: snapshot.path,
+  deepRead: false,
+  preferredWidget: 'info_card',
+  maxChars: 16000,
+}
+
+function buildInsight() {
+  return {
+    question: '根据文档做信息卡',
+    documentPath: snapshot.path,
+    documentTitle: snapshot.title,
+    summary: '文档说明了当前项目指引。',
+    keyPoints: ['先读文档', '再生成卡片', '最后保存结果', '保留证据', '多余点会被裁剪'],
+    evidence: [{ quote: '项目指引' }],
+    recommendedWidget: 'stats_card',
+  }
+}
+
+describe('document pipeline widget draft fallback behavior', () => {
+  it('uses an info_card summary fallback for create mode when both draft attempts are invalid', async () => {
+    const insight = buildInsight()
+    const { executor, logs } = buildExecutor(['not json', 'still not json'])
+
+    const result = await executor.buildDocumentPipelineWidgetDraft({
+      question: '根据当前文档做一张信息卡',
+      snapshot,
+      insight,
+      plan: createPlan,
+      timeoutMs: 1000,
+      providerContext: { isKimiCoding: false, useAnthropicProtocol: false, isKimi: false, config: {}, baseUrl: '' },
+      signal: new AbortController().signal,
+    })
+
+    assert.equal(result.cacheable, false)
+    assert.equal(result.draft.insertionMode, 'append_end')
+    assert.equal(result.draft.componentSpec.component, 'info_card')
+    assert.deepEqual(result.draft.componentSpec.props.points, insight.keyPoints.slice(0, 4))
+    assert.match(result.draft.title, /guide_summary_card/)
+    assert.ok(logs.includes('document pipeline widget draft fallback=applied mode=create'))
   })
 
-  it('produces the summary-card fallback draft for create mode only', () => {
-    assert.match(
-      source,
-      /const fallbackDraft = this\.buildFallbackDocumentWidgetDraft\(\{[\s\S]*?targetWidgetTitle: preferredTargetResolved[\s\S]*?secondAttempt\.draft\.targetWidgetTitle[\s\S]*?firstAttempt\.draft\.targetWidgetTitle/,
-    )
-    assert.match(source, /document pipeline widget draft fallback=applied mode=create/)
-  })
+  it('annotates the insight warnings with the fallback reason', async () => {
+    const insight = buildInsight()
+    const { executor } = buildExecutor(['not json', 'still not json'])
 
-  it('annotates the insight warnings list with the fallback reason', () => {
-    assert.match(
-      source,
-      /this\.appendInsightWarning\(\s*params\.insight,\s*`已使用兜底摘要卡（原因：componentSpec 两次校验失败 · \$\{lastErrors\.join\('；'\)\}）`,\s*\)/,
-    )
-  })
+    await executor.buildDocumentPipelineWidgetDraft({
+      question: '根据当前文档做一张信息卡',
+      snapshot,
+      insight,
+      plan: createPlan,
+      timeoutMs: 1000,
+      providerContext: { isKimiCoding: false, useAnthropicProtocol: false, isKimi: false, config: {}, baseUrl: '' },
+      signal: new AbortController().signal,
+    })
 
-  it('surfaces fallback warnings through executionDiagnostics.pipeline.document', () => {
-    assert.match(
-      source,
-      /const fallbackWarnings = \(pipelineResult\.insight\?\.warnings \|\| \[\]\)\.filter/,
-    )
-    assert.match(source, /fallbackWarning: fallbackWarnings\[0\]/)
-    assert.match(source, /fallbackWarnings,/)
-  })
-
-  it('keeps buildFallbackDocumentWidgetDraft as an info_card summary card', () => {
-    assert.match(
-      source,
-      /private buildFallbackDocumentWidgetDraft\([\s\S]*?component: 'info_card'/,
-    )
+    assert.ok(insight.warnings?.some((warning: string) => warning.includes('已使用兜底摘要卡')))
+    assert.ok(insight.warnings?.some((warning: string) => warning.includes('Widget 草稿未返回可解析 JSON')))
   })
 })

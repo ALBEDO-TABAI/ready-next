@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: skill visual state wiring spans renderer state and IPC surfaces without a stable DOM harness
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

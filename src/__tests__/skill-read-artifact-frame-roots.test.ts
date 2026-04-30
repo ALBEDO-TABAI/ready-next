@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -147,6 +147,7 @@ test('skill_read_artifact resolves relative path against primary artifactRoot fi
  * the primitive's job is to honor whatever the dispatcher passes.
  */
 test('Phase 3: source-level proof — skill_read_artifact dispatch prefers activeFrame.activeArtifactRoots over the legacy fallback', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: full executeSkillTool dispatch needs Electron-backed skill root lookup in tests; primitive behavior below covers root acceptance while this pins the dispatch source.
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
     'utf-8',

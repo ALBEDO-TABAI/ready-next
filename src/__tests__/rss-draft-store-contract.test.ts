@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: RSS draft-store wiring spans persistence and renderer inbox surfaces
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

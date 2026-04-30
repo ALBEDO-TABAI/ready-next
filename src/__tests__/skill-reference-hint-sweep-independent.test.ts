@@ -11,78 +11,63 @@
  */
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import test from 'node:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test, { mock } from 'node:test'
 
 import {
   rememberLastReferenceSkill,
   sweepExpiredReferenceSkillHints,
   _resetLastReferenceSkillHintsForTests,
   REFERENCE_SKILL_HINT_TTL_MS,
+  getLastReferenceSkill,
+  setReferenceHintChangeEmitter,
 } from '../main/modules/agent-control/skill-reference-hints'
+import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf-8')
-}
-
-test('runtime-manager.ts wires the reference-hint sweep with boot delay + hourly interval', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-
-  assert.match(source, /REFERENCE_HINT_BOOT_DELAY_MS\s*=\s*30_?000/)
-  assert.match(source, /REFERENCE_HINT_SWEEP_INTERVAL_MS\s*=\s*60\s*\*\s*60_?000/)
-  assert.match(source, /private startReferenceHintSweep\(\): void/)
-  assert.match(
-    source,
-    /setTimeout\([\s\S]*?sweep,[\s\S]*?SkillsRuntimeManager\.REFERENCE_HINT_BOOT_DELAY_MS/,
-  )
-  assert.match(
-    source,
-    /setInterval\([\s\S]*?sweep,[\s\S]*?SkillsRuntimeManager\.REFERENCE_HINT_SWEEP_INTERVAL_MS/,
-  )
-})
-
-test('runtime-manager constructor calls startReferenceHintSweep, not startTtlSweep', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-
-  assert.match(source, /this\.startReferenceHintSweep\(\)/)
-  // Retired in Phase 4 — must not reappear.
-  assert.doesNotMatch(source, /this\.startTtlSweep\(\)/)
-})
-
-test('runtime-manager no longer declares TTL_* constants tied to skill_executions retention', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
-
-  assert.doesNotMatch(source, /TTL_RETENTION_DAYS\s*=/)
-  assert.doesNotMatch(source, /TTL_SWEEP_INTERVAL_MS\s*=/)
-  assert.doesNotMatch(source, /TTL_BOOT_DELAY_MS\s*=/)
-})
-
-test('sweepExpiredReferenceSkillHints emits the renamed metric', async () => {
+test('runtime-manager reference-hint sweep removes stale hints on its boot timer', () => {
   _resetLastReferenceSkillHintsForTests()
+  const root = mkdtempSync(join(tmpdir(), 'reference-hint-sweep-'))
+  const now = 1_800_000_000_000
+  mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now })
 
-  // Seed a hint and backdate it past the TTL so the sweep removes it.
-  rememberLastReferenceSkill('session-stale', { id: 'novel_writer_system', name: 'Novel' })
-  const internal = await import('../main/modules/agent-control/skill-reference-hints')
-  const map = (internal as unknown as {
-    _resetLastReferenceSkillHintsForTests: () => void
+  const manager = new SkillsRuntimeManager({
+    runtimeRoot: root,
+    startBackgroundTasks: false,
   })
-  void map
+  const changes: Array<{ sessionId: string; change: string }> = []
+  setReferenceHintChangeEmitter((sessionId, change) => {
+    changes.push({ sessionId, change })
+  })
 
-  // There's no direct accessor for the internal Map, but we can instead
-  // bypass with a clock stub by awaiting TTL. Easier: just trust the unit
-  // test in skill-reference-hints-ttl.test.ts for the behavioral branch and
-  // source-pin the emit site here.
-  const metricSource = readWorkspaceFile(
-    'src/main/modules/agent-control/skill-reference-hints.ts',
-  )
-  assert.match(
-    metricSource,
-    /logAgentMetric\(TOOL_ERROR_METRICS\.skillReferenceHintTtlSwept/,
-  )
+  try {
+    rememberLastReferenceSkill('session-stale', { id: 'novel_writer_system', name: 'Novel' })
+    mock.timers.setTime(now + REFERENCE_SKILL_HINT_TTL_MS + 1)
+    ;(manager as unknown as { startReferenceHintSweep: () => void }).startReferenceHintSweep()
+
+    mock.timers.tick(29_999)
+    assert.deepEqual(changes.map((item) => item.change), ['armed'])
+
+    mock.timers.tick(1)
+    assert.equal(getLastReferenceSkill('session-stale'), null)
+    assert.deepEqual(changes, [
+      { sessionId: 'session-stale', change: 'armed' },
+      { sessionId: 'session-stale', change: 'cleared' },
+    ])
+  } finally {
+    manager.stopReferenceHintSweep()
+    setReferenceHintChangeEmitter(null)
+    mock.timers.reset()
+    rmSync(root, { recursive: true, force: true })
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('sweepExpiredReferenceSkillHints is safe on empty state and keeps the TTL contract', () => {
+  _resetLastReferenceSkillHintsForTests()
 
   // Sanity: sweeping an empty map returns 0 without throwing and emits the metric.
-  _resetLastReferenceSkillHintsForTests()
   const removed = sweepExpiredReferenceSkillHints()
   assert.equal(removed, 0)
   // TTL constant is sane.

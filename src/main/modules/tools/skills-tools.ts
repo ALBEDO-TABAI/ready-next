@@ -977,6 +977,28 @@ export function findSkillToolBySkillAction(skillId: string, actionName?: string)
   return defs.find((item) => item.action === actionName) || defs[0] || null
 }
 
+export function resolveStartDetachedActionTool(args: {
+  skillId: string
+  requestedAction: string
+  findByToolName?: (toolName: string) => SkillToolDef | null
+  findBySkillAction?: (skillId: string, actionName?: string) => SkillToolDef | null
+}): { action: string; actionTool: SkillToolDef | null } {
+  const findByToolName = args.findByToolName || findSkillToolByNameForExecution
+  const findBySkillAction = args.findBySkillAction || findSkillToolBySkillAction
+  let action = args.requestedAction
+  let actionTool: SkillToolDef | null = null
+  if (args.requestedAction.startsWith('skill_')) {
+    const resolvedTool = findByToolName(args.requestedAction)
+    if (resolvedTool?.kind === 'skill_action' && resolvedTool.skillId === args.skillId && resolvedTool.action) {
+      actionTool = resolvedTool
+      action = resolvedTool.action
+    }
+  } else {
+    actionTool = findBySkillAction(args.skillId, action)
+  }
+  return { action, actionTool }
+}
+
 export async function executeSkillTool(
   toolName: string,
   args: Record<string, unknown>,
@@ -1290,20 +1312,10 @@ export async function executeSkillTool(
         })
       }
       const requestedAction = asString(args.action)
-      let action = requestedAction
       const params = args.params && typeof args.params === 'object' && !Array.isArray(args.params)
         ? { ...(args.params as Record<string, unknown>) }
         : {}
-      let actionTool: SkillToolDef | null = null
-      if (requestedAction.startsWith('skill_')) {
-        const resolvedTool = findSkillToolByNameForExecution(requestedAction)
-        if (resolvedTool?.kind === 'skill_action' && resolvedTool.skillId === skillId && resolvedTool.action) {
-          actionTool = resolvedTool
-          action = resolvedTool.action
-        }
-      } else {
-        actionTool = findSkillToolBySkillAction(skillId, action)
-      }
+      const { action, actionTool } = resolveStartDetachedActionTool({ skillId, requestedAction })
       const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
       const referenceHintSkillId = sessionId ? getLastReferenceSkill(sessionId)?.id ?? null : null
       const activeSkillId = resolveActiveSkillContext({ sessionId })?.skillId ?? null

@@ -12,10 +12,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
+import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 import {
   STATIC_SKILL_TOOL_NAMES,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
 } from '../main/modules/tools/skills-tools-static'
+import { executeSkillTool } from '../main/modules/tools/skills-tools'
 import {
   filterSkillPrimitivesBySession,
   shouldExposeSkillPrimitive,
@@ -65,17 +68,14 @@ test('filterSkillPrimitivesBySession never leaks retired names back (even if def
   assert.deepEqual(pass.map((t) => t.name), spoofed.map((t) => t.name))
 })
 
-test('source — PRIMITIVE_TOOL_DEFS contains current primitive names (no retired tool smuggled in)', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/tools/skill-primitives/tool-defs.ts'),
-    'utf-8',
-  )
+test('ToolGateway public skills list contains current primitives and excludes retired names', () => {
+  const gateway = new ToolGateway()
+  const names = gateway.getOpenAIToolsForGroups(['skills'])
+    .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
+    .filter(Boolean)
+
   for (const name of RETIRED_NAMES) {
-    assert.doesNotMatch(
-      source,
-      new RegExp(`name:\\s*['"]${name}['"]`),
-      `PRIMITIVE_TOOL_DEFS must not declare ${name}`,
-    )
+    assert.equal(names.includes(name), false, `public skills list must not advertise ${name}`)
   }
   // Positive baseline — current primitives are declared.
   for (const name of [
@@ -89,42 +89,26 @@ test('source — PRIMITIVE_TOOL_DEFS contains current primitive names (no retire
     // Phase 5.1 — generic run_state inspector for long multi-step skills.
     'skill_inspect_run_state',
   ]) {
-    assert.match(
-      source,
-      new RegExp(`name:\\s*['"]${name}['"]`),
-      `PRIMITIVE_TOOL_DEFS must declare ${name}`,
-    )
+    assert.ok(names.includes(name), `public skills list must advertise ${name}`)
   }
 })
 
-test('source — skills-tools.ts no longer references any retired manager execution API', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/tools/skills-tools.ts'),
-    'utf-8',
-  )
-  const retiredApis = [
-    'submitExecutionInput',
-    'submitExecutionConfirmation',
-    'submitExecutionAgentResult',
-    'restartExecutionFromStep',
-    'cancelExecution',
-    'getExecutionStore',
-    'getExecutionCoordinator',
-  ]
-  for (const api of retiredApis) {
-    assert.doesNotMatch(
-      source,
-      new RegExp(`manager\\.${api}\\s*\\(`),
-      `skills-tools must not call manager.${api}() after Phase 4`,
-    )
+test('retired execution-control tool names are not dispatchable skill tools', async () => {
+  for (const name of RETIRED_NAMES) {
+    const output = await executeSkillTool(name, {})
+    assert.equal(output, `Unknown skill tool: ${name}`)
   }
 })
 
 test('source — general skill prompts do not recommend retired execution-control tools', () => {
   const sources = [
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'), 'utf-8'),
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/renderer/modules/agent/messageComposer.ts'), 'utf-8'),
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/skill-context-orchestrator.ts'), 'utf-8'),
+    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-parallelism-policy.ts'), 'utf-8'),
   ].join('\n')
 
@@ -141,25 +125,23 @@ test('source — general skill prompts do not recommend retired execution-contro
   }
 })
 
-test('source — runtime-manager.ts no longer declares any retired execution API', () => {
-  const source = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/skills-runtime/runtime-manager.ts'),
-    'utf-8',
-  )
-  const retiredSignatures = [
-    // Method signatures that used to exist. Both the simple form (`name(`) and
-    // async form (`async name(`) are grep'd as declarations — not inside a
-    // method body.
-    /\n\s*listExecutions\s*\(/,
-    /\n\s*getExecution\s*\(executionId/,
-    /\n\s*async\s+submitExecutionInput\s*\(/,
-    /\n\s*async\s+submitExecutionConfirmation\s*\(/,
-    /\n\s*async\s+submitExecutionAgentResult\s*\(/,
-    /\n\s*async\s+restartExecutionFromStep\s*\(/,
-    /\n\s*cancelExecution\s*\(executionId/,
-  ]
-  for (const re of retiredSignatures) {
-    assert.doesNotMatch(source, re, `runtime-manager must not re-declare retired API matching ${re}`)
+test('SkillsRuntimeManager instances do not expose retired execution APIs', () => {
+  const manager = new SkillsRuntimeManager({
+    runtimeRoot: resolve(process.cwd(), '.tmp-skill-runtime-contract'),
+    startBackgroundTasks: false,
+  }) as unknown as Record<string, unknown>
+  for (const api of [
+    'listExecutions',
+    'getExecution',
+    'submitExecutionInput',
+    'submitExecutionConfirmation',
+    'submitExecutionAgentResult',
+    'restartExecutionFromStep',
+    'cancelExecution',
+    'getExecutionStore',
+    'getExecutionCoordinator',
+  ]) {
+    assert.equal(typeof manager[api], 'undefined', `runtime manager must not expose ${api}`)
   }
 })
 

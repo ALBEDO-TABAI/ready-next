@@ -180,7 +180,7 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 | 阶段 | 内容 | 工作量 | 与前两份文档的关系 |
 |---|---|---|---|
 | **A0 — 战略地基** | 词汇 invariant（根因 1）+ 流程门（根因 5）+ 5 条原则上 CI | 3-4 天 | 与 v2 阶段 A 一致。**任何后续阶段不可能跳过这一步** |
-| **A0.5 — source-grep 清零门** | 清掉 agent / skill / runtime 相关 `eslint-rules/baseline.json` source-grep 条目；UI / 样式历史债只要求 baseline 不增加 | 1-2 天 | **A0 完成不等于 A1 准入**。A1 准入 = A0 + A0.5 硬门 |
+| **A0.5 — source-grep 清零门** | 清掉 agent / skill / runtime 相关 `eslint-rules/baseline.json` source-grep 条目；UI / 样式历史债只要求 baseline 不增加 | [x] completed 2026-04-30 | A1 准入 = A0 commit `7de7ca0` + A0.5 硬门通过；剩余 `ui-history` baseline 不阻塞 A1 |
 | **A1 — Agent 层抽象起点** | 引入 **SubAgent 概念骨架**（lifecycle / context / permission mode）+ 提取 turn-engine 的 generator 化骨架 | 5-7 天（设计 +骨架） | **v1/v2 没有这一阶段** |
 | **B — Child Runtime 迁移** | 把 child runner 改造为 SubAgent 的特化（VEA SubAgent / RSS SubAgent）；`prepareResumeLifecycle` / AbortController 树 / cleanupRegistry 在 SubAgent 框架内实现 | 4-6 天 | **v2 阶段 A 的"AbortController 树 + CleanupRegistry"在这里落地，但作为 SubAgent 子能力** |
 | **C — Coordinator 抽象** | 引入 Coordinator role：browser / document / skill / RSS 各自注册自己的 system prompt + tool list；turn-engine 只调度 | 3-5 天 | **v1/v2 没有这一阶段** |
