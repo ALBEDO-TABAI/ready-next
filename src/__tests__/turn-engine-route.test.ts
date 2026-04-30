@@ -3071,3 +3071,49 @@ test('cancel and resume share the renderChildCommandOutcome helper', () => {
   assert.ok(resumeOutcome.message.length > 0)
   assert.notEqual(cancelOutcome.message, resumeOutcome.message)
 })
+
+test('resume disabled by flag does not call resumeSkillChildRun and emits metric', async () => {
+  // Production rollback gate: when READY_SKILL_CHILD_RESUME_ENABLED='0',
+  // the TurnEngine must skip its automatic resume branch entirely, emit
+  // `skill_child_resume_disabled_by_flag`, and let the turn proceed to
+  // the normal model path. The runner's resume API is not invoked.
+  const previousFlag = process.env.READY_SKILL_CHILD_RESUME_ENABLED
+  process.env.READY_SKILL_CHILD_RESUME_ENABLED = '0'
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const engine = new TurnEngine()
+    const pausedClose = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
+    const { request } = createRequest({
+      userText: '继续',
+      host: {
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'budget_paused', closeEvent: pausedClose }),
+        },
+        resumeSkillChildRun: async () => {
+          assert.fail('resumeSkillChildRun must not be called when READY_SKILL_CHILD_RESUME_ENABLED=0')
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    // Turn finished without crashing (fell through to normal model path).
+    assert.equal(result.success, true)
+    // Metric was emitted on the disabled path.
+    const disabledMetrics = metrics.filter((event) => event.metric === 'skill_child_resume_disabled_by_flag')
+    assert.equal(disabledMetrics.length, 1, 'expected exactly one skill_child_resume_disabled_by_flag emit')
+    assert.equal(disabledMetrics[0].childRunId, 'vchild001')
+    assert.equal(disabledMetrics[0].childStatus, 'budget_paused')
+    // No resume-success metric was emitted (resume branch was skipped).
+    const resumedMetrics = metrics.filter((event) => event.metric === 'turn_child_run_resumed')
+    assert.equal(resumedMetrics.length, 0, 'turn_child_run_resumed must not be emitted on the disabled path')
+  } finally {
+    __setMetricSinkForTests(null)
+    if (typeof previousFlag === 'undefined') {
+      delete process.env.READY_SKILL_CHILD_RESUME_ENABLED
+    } else {
+      process.env.READY_SKILL_CHILD_RESUME_ENABLED = previousFlag
+    }
+  }
+})

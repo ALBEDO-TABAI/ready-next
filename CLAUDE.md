@@ -144,6 +144,10 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
 - SQLite-backed 验收前必须先跑 `npm run rebuild:native`；若 `better-sqlite3` ABI 与当前 Node/Electron 不匹配，只能标记为 DB 路径未证明，不能算验收通过
+- **Feature flags（生产降级开关）**：
+  - `READY_SKILL_CHILD_INTERNAL_STRICT_ADMISSION`：默认 `'1'`，控制 child-internal tool 的严格 admission；`'0'` 退回到 telemetry-only 旧行为。
+  - `READY_SKILL_CHILD_RESUME_ENABLED`：默认 `'1'`，控制 turn-engine 的 child resume 自动分支是否启用；`'0'` 时遇到 paused child + 用户 resume 意图也不会调 `resumeSkillChildRun`，turn 退化为普通 model 回复，emit `skill_child_resume_disabled_by_flag` metric。runner 自身的 `resumeSkillChildRun` API 不受影响。
+  默认全开，问题出现切 `'0'` 即可，不允许通过删代码回退。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

@@ -28,6 +28,14 @@ export const TOOL_ERROR_METRICS = {
   /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
   skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
   /**
+   * Skill child-runtime feature-flag observability. Emitted when the
+   * `READY_SKILL_CHILD_RESUME_ENABLED` rollback flag is set to `'0'` and
+   * the TurnEngine skips its automatic child-resume branch, falling
+   * through to the normal model turn instead of calling
+   * `resumeSkillChildRun`. The runner's resume API itself is unaffected.
+   */
+  childResumeDisabledByFlag: 'skill_child_resume_disabled_by_flag',
+  /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
    * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明
    * 策略在 turn-engine 构建 bundle 和 openai-client 重算 bundle 之间发生了漂移，
