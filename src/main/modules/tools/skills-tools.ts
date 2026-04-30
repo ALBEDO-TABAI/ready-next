@@ -1930,6 +1930,23 @@ export type { SkillToolDef, ToolParam, SkillActionDefinition }
 export type { SkillInputValue }
 
 /**
+ * Test-only handle for the legacy-status leakage guard tests (T2). These
+ * three helpers are the adapter edge between the legacy detached vocabulary
+ * (`running / done / cancelled / failed / blocked`) and the public supervisor
+ * vocabulary (`running / completed / killed / failed / blocked / ...`).
+ *
+ * Exposed via a single namespaced object so the production surface stays
+ * unchanged while the regression guards can iterate the legacy set
+ * exhaustively and assert the produced snapshot fields never reintroduce
+ * `'background_running'`, `'done'`, or `'cancelled'`.
+ */
+export const __skillsToolsInternalsForTests = {
+  detachedStatusToSupervisorStatus,
+  detachedStatusToLiveness,
+  makeSupervisorSnapshotForContract,
+}
+
+/**
  * Phase 6 — dispatch a child-loop owned typed action through
  * `startSkillChildRun`. Returns a `ToolExecutionOutput` with:
  *   - text body  : a JSON envelope the model can read

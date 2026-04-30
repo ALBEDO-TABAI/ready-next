@@ -310,3 +310,140 @@ test('Phase 5: skill_failure (success:false) vs infra_error (throw) split correc
   const closeB = await pollUntil(() => getSkillChildRunCloseEvent(b.childRunId))
   assert.equal(closeB.terminalReason, 'infra_error')
 })
+
+// =====================================================================
+// Legacy status leakage guards (T2)
+//
+// Lock the adapter edge between the legacy `DetachedSkillTaskStatus` set
+// (`running / done / cancelled / failed / blocked`) and the typed public
+// supervisor vocabulary so a future change cannot silently reintroduce
+// `background_running` / `done` / `cancelled` into a snapshot returned
+// from `makeSupervisorSnapshotForContract` or its callers.
+// =====================================================================
+
+import { __skillsToolsInternalsForTests } from '../main/modules/tools/skills-tools'
+import type { SkillTaskSupervisorStatus, SkillTaskSupervisorLiveness } from '../main/modules/agent-control/skill-task-supervisor'
+
+const PUBLIC_SUPERVISOR_STATUS_VALUES: ReadonlySet<SkillTaskSupervisorStatus> = new Set<SkillTaskSupervisorStatus>([
+  'running',
+  'completed',
+  'killed',
+  'failed',
+  'blocked',
+  'recoverable_paused',
+  'budget_paused',
+  'unknown',
+])
+
+const LEGACY_STATUS_LEAK_VALUES = ['background_running', 'done', 'cancelled'] as const
+
+const LEGACY_DETACHED_STATUSES = ['running', 'done', 'cancelled', 'failed', 'blocked'] as const
+
+test('T2 guard — detachedStatusToSupervisorStatus maps the entire legacy set into the public union (no legacy leakage)', () => {
+  const { detachedStatusToSupervisorStatus } = __skillsToolsInternalsForTests
+  for (const legacy of LEGACY_DETACHED_STATUSES) {
+    const mapped = detachedStatusToSupervisorStatus(legacy)
+    assert.ok(
+      PUBLIC_SUPERVISOR_STATUS_VALUES.has(mapped),
+      `mapped status for legacy='${legacy}' must be in public union; got '${mapped}'`,
+    )
+    for (const leak of LEGACY_STATUS_LEAK_VALUES) {
+      assert.notEqual(
+        mapped as string, leak,
+        `mapped status for legacy='${legacy}' must not be legacy '${leak}'`,
+      )
+    }
+  }
+})
+
+test('T2 guard — cancellation maps to killed (NOT failed) — explicit assertion', () => {
+  const { detachedStatusToSupervisorStatus } = __skillsToolsInternalsForTests
+  const mapped = detachedStatusToSupervisorStatus('cancelled')
+  assert.equal(mapped, 'killed')
+  assert.notEqual(mapped as string, 'failed',
+    'cancellation must NEVER collapse to `failed` (source plan §3 rule 7)')
+  assert.notEqual(mapped as string, 'cancelled',
+    'cancellation must be normalized to `killed`, never left as legacy `cancelled`')
+})
+
+test('T2 guard — done maps to completed; running maps to running (no legacy passthrough)', () => {
+  const { detachedStatusToSupervisorStatus } = __skillsToolsInternalsForTests
+  assert.equal(detachedStatusToSupervisorStatus('done'), 'completed')
+  assert.notEqual(detachedStatusToSupervisorStatus('done') as string, 'done')
+  assert.equal(detachedStatusToSupervisorStatus('running'), 'running')
+  // failed / blocked are 1:1 (still in the public union).
+  assert.equal(detachedStatusToSupervisorStatus('failed'), 'failed')
+  assert.equal(detachedStatusToSupervisorStatus('blocked'), 'blocked')
+})
+
+test('T2 guard — detachedStatusToLiveness only sets background for live work, null otherwise', () => {
+  const { detachedStatusToLiveness } = __skillsToolsInternalsForTests
+  const validLiveness: ReadonlySet<SkillTaskSupervisorLiveness> = new Set<SkillTaskSupervisorLiveness>([
+    'foreground',
+    'background',
+    null,
+  ])
+  for (const legacy of LEGACY_DETACHED_STATUSES) {
+    const liveness = detachedStatusToLiveness(legacy)
+    assert.ok(
+      validLiveness.has(liveness),
+      `liveness for legacy='${legacy}' must be in {foreground, background, null}; got '${String(liveness)}'`,
+    )
+  }
+  // `running` is the only status that should produce `background` here —
+  // the adapter's whole job is to preserve liveness while the supervisor
+  // status loses the `background_running` channel.
+  assert.equal(detachedStatusToLiveness('running'), 'background')
+  for (const terminalLike of ['done', 'cancelled', 'failed', 'blocked'] as const) {
+    assert.equal(detachedStatusToLiveness(terminalLike), null)
+  }
+})
+
+test('T2 guard — makeSupervisorSnapshotForContract: liveness is populated when status === running', () => {
+  const { makeSupervisorSnapshotForContract, detachedStatusToSupervisorStatus, detachedStatusToLiveness } = __skillsToolsInternalsForTests
+  // Drive the helper through the same legacy → public adapter the production
+  // call sites use, so any future change that drops `liveness` from the
+  // path will fail this guard.
+  const status = detachedStatusToSupervisorStatus('running')
+  const liveness = detachedStatusToLiveness('running')
+  const snapshot = makeSupervisorSnapshotForContract({
+    skillId: 'test-skill-liveness-guard',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    action: 'video_expert_pipeline',
+    status,
+    liveness,
+    detachedTaskId: 'detached-1',
+  })
+  assert.equal(snapshot.status, 'running')
+  // Liveness completeness: when status is running, the snapshot must
+  // surface a non-null liveness so consumers can distinguish foreground
+  // from background work (the old `background_running` channel was
+  // removed; this contract replaces it).
+  assert.notEqual(snapshot.liveness, null,
+    'liveness must be populated when status === running')
+  assert.equal(snapshot.liveness, 'background')
+})
+
+test('T2 guard — makeSupervisorSnapshotForContract: legacy-string status inputs are rejected by the typed surface', () => {
+  // The helper's TS signature constrains `status` to the public union;
+  // this guard documents that the only legitimate way to feed it is via
+  // the adapter. The runtime test just verifies the public union is
+  // accepted and the produced fields stay typed — `background_running`
+  // / `done` / `cancelled` are not callable inputs (TypeScript rejects
+  // them at compile time; the typecheck step in CI is the second leg of
+  // this guard).
+  const { makeSupervisorSnapshotForContract } = __skillsToolsInternalsForTests
+  for (const status of PUBLIC_SUPERVISOR_STATUS_VALUES) {
+    const snapshot = makeSupervisorSnapshotForContract({
+      skillId: 'test-skill-public-union',
+      status,
+      liveness: status === 'running' ? 'background' : null,
+    })
+    assert.equal(snapshot.status, status)
+    for (const leak of LEGACY_STATUS_LEAK_VALUES) {
+      assert.notEqual(snapshot.status as string, leak,
+        `snapshot.status must never be legacy '${leak}' for any public input`)
+    }
+  }
+})

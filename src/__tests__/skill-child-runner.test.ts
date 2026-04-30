@@ -687,3 +687,211 @@ test('Phase 5: budget constant is exposed', () => {
   assert.equal(typeof MAX_ACTIONS_PER_CHILD_RUN, 'number')
   assert.ok(MAX_ACTIONS_PER_CHILD_RUN > 0)
 })
+
+// =====================================================================
+// Status / liveness contract regression guards (T2)
+//
+// These tests lock the boundary against any future change that would
+// reintroduce the legacy status vocabulary (`background_running` / `done` /
+// `cancelled`) into typed child-loop close events. The fixture synthesises
+// real runs through the same launch path the production runner uses, so a
+// regression in the close-event mapper or the cancellation path will fail
+// here even if no one updated the dedicated status-mapper tests.
+// =====================================================================
+
+/**
+ * Public supervisor-status union (mirrors `SkillTaskSupervisorStatus`). Any
+ * status produced by a public-surface adapter must be a member of this set.
+ */
+const PUBLIC_SUPERVISOR_STATUS_VALUES: ReadonlySet<string> = new Set([
+  'running',
+  'completed',
+  'killed',
+  'failed',
+  'blocked',
+  'recoverable_paused',
+  'budget_paused',
+  'unknown',
+])
+
+/**
+ * Legacy / internal status strings that MUST NOT appear in any public
+ * surface output. `done` and `cancelled` are upstream raw signals only;
+ * `background_running` was retired in favor of `liveness='background'`.
+ */
+const LEGACY_STATUS_LEAK_VALUES: readonly string[] = [
+  'background_running',
+  'done',
+  'cancelled',
+] as const
+
+function expectSupervisorStatusInPublicSet(status: string): void {
+  assert.ok(
+    PUBLIC_SUPERVISOR_STATUS_VALUES.has(status),
+    `status='${status}' is not a member of the public supervisor-status union`,
+  )
+}
+
+test('T2 guard — cancelled child run NEVER leaks legacy status strings into the close event', async () => {
+  const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+  let resolveStall!: () => void
+  const stallPromise = new Promise<void>((r) => { resolveStall = r })
+  runtime.manager.runSkill = (async () => {
+    await stallPromise
+    return {
+      success: true, skillId: 'test-skill-cancel-guard', action: 'do_thing',
+      stdout: '', stderr: '', command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-cancel-guard', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-cancel-guard', 'completed', 'completed'),
+    ],
+  })
+  const result = await startSkillChildRun({
+    scopeId: 'scope-guard',
+    sessionId: 'session-guard',
+    skillId: 'test-skill-cancel-guard',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/cancel-guard' },
+  })
+  await sleep(20)
+  const closePromise = cancelSkillChildRun(result.childRunId, 'user_pressed_cancel')
+  resolveStall()
+  const close = await closePromise
+
+  // (1) Cancellation maps to `killed`, never `failed` (re-asserted as a
+  // canonical regression line; the legacy code path used to produce
+  // `failed` for SIGTERM-shaped aborts).
+  assert.equal(close.status, 'killed')
+  assert.notEqual(close.status as string, 'failed')
+
+  // (2) The close.status is one of the typed Exclude<SkillChildRunStatus,
+  // 'queued' | 'running'> values — and crucially NOT one of the legacy
+  // strings that historically leaked through unguarded mappers.
+  for (const legacy of LEGACY_STATUS_LEAK_VALUES) {
+    assert.notEqual(close.status as string, legacy,
+      `cancelled close.status must never be legacy '${legacy}'`)
+  }
+  assert.equal(close.terminalReason, 'cancelled_user')
+})
+
+test('T2 guard — launch_stuck close is NOT cancelled_user and status is failed (not killed)', async () => {
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  configureSkillChildRunner({
+    runtimeManager: makeFakeRuntime().manager,
+    repository: makeFakeRepository().repo,
+    launchStuckGuardMs: 30,
+  })
+  // Driver hangs in planNextAction so the runner records `started` but
+  // never reaches `action_started` — same shape an observer/await timeout
+  // would take.
+  let resolveDriver!: () => void
+  const stall = new Promise<void>((r) => { resolveDriver = r })
+  registerSkillChildDriver({
+    skillId: 'test-skill-launch-stuck-guard',
+    canStart: () => true,
+    canResume: () => true,
+    createInitialState: async (params) => ({
+      skillId: 'test-skill-launch-stuck-guard',
+      requestedInput: params.requestedInput,
+    }),
+    planNextAction: async () => {
+      await stall
+      return makeTerminalClose('test-skill-launch-stuck-guard', 'completed', 'completed')
+    },
+    observeAfterAction: async (state) => state,
+  })
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-launch',
+    sessionId: 'session-launch',
+    skillId: 'test-skill-launch-stuck-guard',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/launch-stuck' },
+  })
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId), 1_500)
+
+  // The whole point: a launch / observer timeout MUST NOT masquerade as a
+  // user cancel — neither in `status` nor in `terminalReason`.
+  assert.notEqual(close.status, 'killed', 'launch-stuck must not be reported as killed')
+  assert.notEqual(close.terminalReason, 'cancelled_user',
+    'launch-stuck must not be reported as cancelled_user')
+  assert.equal(close.status, 'failed')
+  assert.equal(close.terminalReason, 'launch_stuck')
+
+  // Status is still typed against the public child-status union; legacy
+  // strings must not leak even on the timeout/observer path.
+  for (const legacy of LEGACY_STATUS_LEAK_VALUES) {
+    assert.notEqual(close.status as string, legacy,
+      `launch-stuck close.status must never be legacy '${legacy}'`)
+  }
+
+  resolveDriver()
+})
+
+test('T2 guard — every typed close event status is in the public child-status union', async () => {
+  // Iterate the lifecycle once over completion and once over skill-failure
+  // to assert the close event status field never carries a legacy string.
+  // The cancellation + launch-stuck cases are covered by their own tests
+  // above; this case nails down the success / skill-failure branches.
+  const successCases: Array<{
+    skillId: string
+    runtime: ReturnType<typeof makeFakeRuntime>
+    expected: SkillChildCloseEvent['status']
+  }> = [
+    {
+      skillId: 'test-skill-completed-guard',
+      runtime: makeFakeRuntime(),
+      expected: 'completed',
+    },
+    {
+      skillId: 'test-skill-failed-guard',
+      runtime: makeFakeRuntime({
+        results: [{
+          success: false,
+          skillId: 'test-skill-failed-guard',
+          action: 'do_thing',
+          stdout: '', stderr: '', command: [],
+          error: 'declared failure',
+        }],
+      }),
+      expected: 'failed',
+    },
+  ]
+  for (const c of successCases) {
+    setupRunner({ runtime: c.runtime })
+    registerStubDriver(c.skillId, {
+      plans: [
+        { action: 'do_thing', input: {} },
+        makeTerminalClose(c.skillId, 'completed', 'completed'),
+      ],
+    })
+    const launched = await startSkillChildRun({
+      scopeId: 'scope-status-union',
+      sessionId: 'session-status-union',
+      skillId: c.skillId,
+      action: 'do_thing',
+      requestedInput: { url: `https://example.com/${c.skillId}` },
+    })
+    const close = await pollUntil(() => getSkillChildRunCloseEvent(launched.childRunId))
+    // Public union membership: status must be one of the allowed values.
+    assert.ok(
+      PUBLIC_SUPERVISOR_STATUS_VALUES.has(close.status as string)
+        // The child-status union additionally allows `recoverable_paused`
+        // and `budget_paused`, both already in the public set, plus the
+        // closed-only states `completed/failed/killed`. We test against
+        // the supervisor union as a tighter superset.
+        || close.status === 'completed'
+        || close.status === 'killed'
+        || close.status === 'failed',
+      `close.status='${close.status}' must be in the public union`,
+    )
+    expectSupervisorStatusInPublicSet(close.status as string)
+    for (const legacy of LEGACY_STATUS_LEAK_VALUES) {
+      assert.notEqual(close.status as string, legacy,
+        `close.status must never be legacy '${legacy}' (skill=${c.skillId})`)
+    }
+  }
+})
