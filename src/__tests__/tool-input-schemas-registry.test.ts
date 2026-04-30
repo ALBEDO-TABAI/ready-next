@@ -95,3 +95,91 @@ test('resolveToolInputSchemaForExecution returns null for unknown tool names', (
   // skill_-prefixed but not registered: same passthrough.
   assert.equal(resolveToolInputSchemaForExecution('skill_made_up_action'), null)
 })
+
+// ------------------------------------------------------------------
+// T6 (B child-loop, wave 3) — child-internal admission via the
+// unified tool gateway.
+//
+// `executeSkillActionViaToolGateway` is the runner's single entry to
+// `runSkill`. It must run the SAME Zod schema that the public typed
+// dispatch path uses, so a malformed input fails the same way for both
+// the model surface and the child runner.
+// ------------------------------------------------------------------
+
+test('T6: gateway rejects invalid input with errorKind=input_validation and never reaches the runtime manager', async () => {
+  const { executeSkillActionViaToolGateway } = await import(
+    '../main/modules/agent-control/tool-registry'
+  )
+  const fakeRuntime = {
+    callCount: 0,
+    runSkill: async (_req: unknown) => {
+      fakeRuntime.callCount += 1
+      throw new Error('runtime should not have been called for invalid input')
+    },
+  }
+  const result = await executeSkillActionViaToolGateway({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    // Empty input — VEA actions both require at least one field, so the
+    // resolver-backed Zod schema rejects this.
+    input: {},
+    childRunId: 'vt6inval0',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    outputDir: null,
+    runStatePath: null,
+    childInternal: true,
+    // Inject the fake so we don't trigger the production singleton.
+    runtimeManager: fakeRuntime as unknown as Parameters<
+      typeof executeSkillActionViaToolGateway
+    >[0]['runtimeManager'],
+  })
+  assert.equal(fakeRuntime.callCount, 0, 'runtime manager must not be invoked when admission fails')
+  assert.equal(result.skillRunResult, null, 'gateway must surface a structured failure, not a runtime result')
+  assert.equal(
+    (result.data as { errorKind?: string } | null)?.errorKind,
+    'input_validation',
+    'gateway error must use the same input_validation kind public dispatch returns',
+  )
+})
+
+test('T6: gateway succeeds when input matches the same schema the public dispatch path resolves', async () => {
+  const { executeSkillActionViaToolGateway } = await import(
+    '../main/modules/agent-control/tool-registry'
+  )
+  // Build a fake runtime that captures the request and returns success.
+  const fakeRuntime = {
+    lastRequest: null as Record<string, unknown> | null,
+    runSkill: async (req: unknown) => {
+      fakeRuntime.lastRequest = req as Record<string, unknown>
+      return {
+        success: true,
+        status: 'completed',
+        outputDir: '/tmp/t6-fake-output',
+      }
+    },
+  }
+  const result = await executeSkillActionViaToolGateway({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    input: { sceneScoresPath: '/tmp/t6-fake-output/scene_scores.json' },
+    childRunId: 'vt6valid0',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    outputDir: '/tmp/t6-fake-output',
+    runStatePath: '/tmp/t6-fake-output/run_state.json',
+    childInternal: true,
+    runtimeManager: fakeRuntime as unknown as Parameters<
+      typeof executeSkillActionViaToolGateway
+    >[0]['runtimeManager'],
+  })
+  assert.ok(result.skillRunResult, 'gateway must surface the SkillRunResult on success')
+  assert.equal(result.skillRunResult?.success, true)
+  // Child metadata must reach the runtime via the request envelope so the
+  // host controller keeps it visible to downstream observers.
+  const params = (fakeRuntime.lastRequest?.params as Record<string, unknown> | null) || null
+  const ctx = params?.__childRunContext as Record<string, unknown> | undefined
+  assert.ok(ctx, 'request.params must carry __childRunContext')
+  assert.equal(ctx?.childRunId, 'vt6valid0')
+  assert.equal(ctx?.outputDir, '/tmp/t6-fake-output')
+})

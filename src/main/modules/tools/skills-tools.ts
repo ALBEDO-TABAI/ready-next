@@ -139,6 +139,19 @@ function buildToolName(skillId: string, actionName: string): string {
   return `skill_${sanitizeToolToken(skillId)}_${sanitizeToolToken(actionName)}`
 }
 
+/**
+ * T6 (B child-loop) — exported wrapper over the deterministic
+ * `buildToolName` helper so the gateway executor (`tool-registry.ts`) can
+ * resolve a (skillId, action) pair to the same tool name the public
+ * dispatch path uses. Routing identical inputs through the same name keeps
+ * the schema cache (`getSkillActionSchemas()`) authoritative for both the
+ * model-facing typed dispatch and the child runner's internal action
+ * dispatch. No new mapping table — same source of truth.
+ */
+export function buildSkillToolName(skillId: string, actionName: string): string {
+  return buildToolName(skillId, actionName)
+}
+
 function buildSkillToolDescription(skill: SkillState, action: SkillActionDefinition): string {
   if (skill.executionMode === 'advisory' && action.runtime === 'reference') {
     return `读取并应用技能 ${skill.name} 的方法说明，再继续完成当前任务。${skill.description}`

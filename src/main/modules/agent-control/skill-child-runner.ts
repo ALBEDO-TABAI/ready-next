@@ -31,13 +31,13 @@ import { mkdirSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
 import type {
-  SkillRunRequest,
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 
 import { logAgentMetric } from './metrics'
+import { executeSkillActionViaToolGateway } from './tool-registry'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
   appendChildRunEvent,
@@ -857,44 +857,66 @@ class SkillChildRunner {
           input: plan.input,
         })
 
-        // Dispatch through runtime-manager. childInternal short-circuits
-        // any wrap routing; the driver is the source of truth here.
-        const request: SkillRunRequest = {
+        // Dispatch through the unified tool admission gateway. This
+        // routes the driver's planned action through the SAME Zod
+        // validation and tool-definition lookup the public tool dispatch
+        // path uses, so a malformed input fails the same way for both.
+        // T6 wave 3: see `tool-registry.executeSkillActionViaToolGateway`.
+        // The gateway returns `{ ...ToolExecutionOutput, skillRunResult }`.
+        // When `skillRunResult` is non-null the runtime executed the
+        // action and the rest of the loop uses it as the legacy `result`.
+        // When it's null an admission failure occurred (input_validation /
+        // host_unavailable / aborted / tool_failed) and we close the run
+        // with a structured terminal.
+        const gateway = await executeSkillActionViaToolGateway({
           skillId: active.skillId,
           action: plan.action,
-          params: plan.input,
+          input: plan.input,
+          childRunId: active.childRunId,
+          scopeId: active.scopeId,
+          sessionId: active.sessionId,
+          outputDir: active.outputDir || null,
+          runStatePath: active.runStatePath || null,
+          childInternal: true,
           signal: active.controller.signal,
-          triggerType: 'tool',
-        }
-        let result: SkillRunResult
-        try {
-          // The runtime-manager exposes `runSkillFromChildRunner` for
-          // child-internal calls. If the manager hasn't been upgraded
-          // yet, fall back to plain `runSkill` — both have the same
-          // signature.
-          const fromChild = (this.config.runtimeManager as unknown as {
-            runSkillFromChildRunner?: (req: SkillRunRequest) => Promise<SkillRunResult>
-          }).runSkillFromChildRunner
-          result = fromChild
-            ? await fromChild.call(this.config.runtimeManager, request)
-            : await this.config.runtimeManager.runSkill(request)
-        } catch (error) {
-          // A throw from runSkill is treated as infra-level — runtime
-          // contract guarantees normal failures come back as
-          // `result.success === false`.
+          runtimeManager: this.config.runtimeManager,
+        })
+        if (!gateway.skillRunResult) {
+          const gatewayKind = (gateway.data?.errorKind as string | undefined) || 'tool_failed'
+          // Map the gateway's transport-level errorKind to the runner's
+          // close-event vocabulary. The runner specifically dispatches
+          // skill action handlers whose throws indicate a process-level
+          // failure of the underlying skill runtime — so `tool_failed`
+          // here means "the runtime threw" which is `child_process_crashed`
+          // in the runner's lifecycle vocabulary.
+          const errorKind: string =
+            gatewayKind === 'aborted' ? 'cancelled_user'
+            : gatewayKind === 'input_validation' ? 'input_validation'
+            : gatewayKind === 'host_unavailable' ? 'host_unavailable'
+            : gatewayKind === 'tool_failed' ? 'child_process_crashed'
+            : gatewayKind
+          const terminalReason: SkillChildRunTerminalReason =
+            gatewayKind === 'input_validation' ? 'failed_skill'
+            : gatewayKind === 'aborted' ? 'cancelled_user'
+            : 'infra_error'
+          const status: SkillChildRunStatus =
+            gatewayKind === 'aborted' ? 'killed' : 'failed'
           const close = makeCloseEvent({
             childRunId: active.childRunId,
             skillId: active.skillId,
-            status: 'failed',
-            terminalReason: classifyThrowAsTerminal(error),
+            status,
+            terminalReason,
             outputDir: active.outputDir,
             runStatePath: active.runStatePath,
-            errorKind: 'child_process_crashed',
-            message: errorMessage(error),
+            errorKind,
+            message: typeof gateway.data?.message === 'string'
+              ? (gateway.data.message as string)
+              : gateway.text || `gateway ${gatewayKind}`,
           })
           this.finalizeRun(active, close)
           return
         }
+        const result: SkillRunResult = gateway.skillRunResult
 
         const completedAt = new Date().toISOString()
         await this.appendEvent(active, {
@@ -1111,16 +1133,10 @@ function isCloseEvent(value: unknown): value is SkillChildCloseEvent {
     && 'progress' in v
 }
 
-function classifyThrowAsTerminal(error: unknown): SkillChildRunTerminalReason {
-  const msg = errorMessage(error).toLowerCase()
-  if (msg.includes('aborted') || msg.includes('cancel')) return 'cancelled_user'
-  if (msg.includes('crash') || msg.includes('sigkill') || msg.includes('signal')
-      || msg.includes('exit code') || msg.includes('out of memory') || msg.includes('oom')
-      || msg.includes('spawn')) {
-    return 'infra_error'
-  }
-  return 'infra_error'
-}
+// `classifyThrowAsTerminal` was removed when T6 routed dispatch through
+// `executeSkillActionViaToolGateway`; the gateway already classifies
+// abort vs. handler-throw at the boundary, so the runner reads
+// `gateway.data.errorKind` instead of inspecting raw error text.
 
 interface ComputeDigestArgs {
   runStatePath: string | null

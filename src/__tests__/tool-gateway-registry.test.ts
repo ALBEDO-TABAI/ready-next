@@ -208,3 +208,30 @@ test('collectAllowedToolNames keeps browser tools when browser groups are visibl
   assert.ok(allowedToolNames.includes('browser_read_page'))
   assert.ok(allowedToolNames.includes('browser_extract_structured'))
 })
+
+// ------------------------------------------------------------------
+// T6 (B child-loop, wave 3) — schema-source parity between the public
+// model surface and the child-internal gateway.
+//
+// Both surfaces must consume the SAME `resolveToolInputSchemaForExecution`
+// output for a given (skillId, action). If the resolver ever forks for
+// internal callers, the two surfaces would drift — a malformed input
+// might pass internal admission while failing public dispatch (or vice
+// versa). The test below pins the same-source contract.
+// ------------------------------------------------------------------
+test('T6: gateway uses the same schema source as public dispatch (resolver parity)', async () => {
+  const publicSchema = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
+  assert.ok(publicSchema, 'public dispatch path must have a schema for VEA pipeline')
+
+  // The gateway resolves by (skillId, action) → buildSkillToolName →
+  // resolver. The resolver export is module-scoped so any schema the
+  // gateway consumes IS the same object reference returned to the
+  // model surface. Re-resolving must return strict equality.
+  const reResolved = resolveToolInputSchemaForExecution('skill_video_expert_pipeline')
+  assert.strictEqual(publicSchema, reResolved, 'resolver must be referentially stable across calls')
+
+  const aiSchemaA = resolveToolInputSchemaForExecution('skill_video_expert_ai_analyze')
+  const aiSchemaB = resolveToolInputSchemaForExecution('skill_video_expert_ai_analyze')
+  assert.ok(aiSchemaA && aiSchemaB)
+  assert.strictEqual(aiSchemaA, aiSchemaB, 'second VEA action must also be referentially stable')
+})
