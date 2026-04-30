@@ -5,6 +5,18 @@
 ## 0. 前置思考
 请使用第一性原理思考。不要默认用户已经把目标、限制和最佳路径都描述完整；当目标不清晰时先澄清，当路径不优时先提出更好的方案。
 
+## 0.5 战略级架构原则（不可绕过）
+
+下列 5 条原则适用于本仓所有架构级改动。具体规则（§6.x、§10、§12 等）是这些原则在不同子系统下的展开；当具体规则与原则冲突时，以原则为准。每条原则的详细展开（反例、正例、自检问题、复发签名）见 `.claude/architectural-principles.md`。
+
+1. **先合同，后代码。** 任何架构级 PR 开工前，先写"如果这个改动成功，CI 能机器验证哪几条合同"。合同写不出来 = 不知道在修什么 = 不开始。
+2. **修根因，不修症状。** 看到 N 个相似 bug 时，先归并到根因簇再 PR。看到 1 个症状时，先问"它属于哪条根因的投影"。"先把这个 bug 修了下次再说" 是技术债的标准入口。
+3. **拒绝 legacy 兼容分支。** `if (legacy) ...`、union 留旧成员不删、"暂时保留" —— 这些都是根因复发的种子。删除 legacy 词汇 / 路径 是合同的一部分，不是技术债。
+4. **形态意识。** 抄 CC-Source / 任何外部"标准答案"前先问："它没这个问题，是因为根本没这个需求，还是因为它解得更好？" 前者照抄 = 引入复杂度，后者 = 解债。
+5. **CI 强制 > 文档约束 > 人审。** 合同必须 CI 强制；CI 不行再用文档；文档不行才用人审。**永远不要用"我下次注意" 当解决方案。**
+
+为什么要立这 5 条？参考 `docs/superpowers/plans/2026-04-30-skill-runtime-residual-architectural-debt.md` §0 与 `docs/superpowers/plans/2026-04-30-skill-runtime-cc-source-comparison-and-ideal-architecture.md` §6——Layer 1 完成时识别出 26 项遗留架构债共享少数几条根因；按症状逐个补丁是战略级失败的稳定签名。
+
 ## 1. 项目定位
 Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS、日程、AI Agent、技能中心与远程协作。
 
@@ -177,6 +189,7 @@ npm run build
 - 关键页面可正常渲染与切换
 - Browser / Agent / Settings 关键链路至少做一次基础回归
 - 若改动跨多层，必须同步更新根目录协作文档
+- 架构级改动必须能配对到 `docs/superpowers/plans/YYYY-MM-DD-*-implementation.md`；`*-arrangement.md` / `*-counterplan.md` 只作反提案，历史材料需在 frontmatter 标 `enforce: false`
 
 ## 11. 当前关键日志
 - Agent / 浏览器决策：`<系统临时目录>/ready-directchat.log`

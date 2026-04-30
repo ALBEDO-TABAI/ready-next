@@ -1,3 +1,7 @@
+---
+enforce: false
+---
+
 # Skill Runtime Child-Loop Final Closure — Claude Counter-Proposal
 
 > 用途：在 Codex 的 arrangement（同目录 `...arrangement.md`）基础上重组下一阶段计划。本文档是审查 + 反提案，不是 implementation plan；Codex 据此重写 implementation plan，再交回审查。

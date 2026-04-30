@@ -1,3 +1,7 @@
+---
+enforce: false
+---
+
 # Skill Runtime Child-Loop Final Closure Arrangement
 
 > **For agentic workers:** This is a planning-arrangement brief, not the final implementation plan. Claude should first rewrite/supplement this into a concrete execution plan with failing tests and exact edits. Do not begin code changes until the rewritten plan explicitly closes every acceptance gate below.
