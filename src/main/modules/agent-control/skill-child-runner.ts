@@ -393,7 +393,7 @@ class SkillChildRunner {
       outputDir: payload.outputDir,
     }
     try {
-      this.config.repository.updateChildRun(childRunId, { status: 'running' })
+      this.prepareResumeLifecycle(childRunId)
     } catch (error) {
       return makePausedOnLaunchResult({
         skillId: payload.skillId,
@@ -417,6 +417,10 @@ class SkillChildRunner {
   }
 
   async cancelSkillChildRun(childRunId: string, reason?: string): Promise<SkillChildCloseEvent> {
+    // Compatible with multi-lifecycle resume: if the row was resumed and is
+    // active again, this targets the new ActiveRun's controller (active.get
+    // returns the resumed entry). The old paused close in `recentCloses` is
+    // not consulted here.
     const active = this.active.get(childRunId)
     if (!active) {
       // Already terminal — return the cached close if we have one.
@@ -613,7 +617,7 @@ class SkillChildRunner {
         parentNextHint: payload.parentNextHint,
       }
       try {
-        this.config.repository.updateChildRun(existing.id, { status: 'running' })
+        this.prepareResumeLifecycle(existing.id)
       } catch (error) {
         logAgentMetric('skill_child_runner_resume_update_failed', {
           childRunId: existing.id,
@@ -636,6 +640,27 @@ class SkillChildRunner {
     // No driver / insufficient handles — pin to recoverable_paused with
     // terminalReason='process_restarted'.
     return this.markRowProcessRestarted(existing.id, existingPayload)
+  }
+
+  /**
+   * Reset all in-memory and persisted state that would leak across the
+   * resume boundary. Centralized here so any future lifecycle transition
+   * (pause-detach, fork-from-snapshot) goes through the same gate.
+   */
+  private prepareResumeLifecycle(childRunId: string): void {
+    // 1. Drop the previous lifecycle's close from the in-memory ring so
+    //    finalize for the resumed lifecycle won't see a stale entry. The
+    //    identity guard in finalizeRun already handles this for the active
+    //    map; here we keep recentCloses semantically aligned.
+    this.recentCloses.delete(childRunId)
+    // 2. Clear the row's stored closeEvent so any cross-process load via
+    //    loadSkillRunContract doesn't read the previous paused close as
+    //    if it were the current state. Status flips to 'running' atomically
+    //    with the close clear.
+    this.config.repository.updateChildRun(childRunId, {
+      status: 'running',
+      closeEvent: null,
+    })
   }
 
   /**
@@ -1061,8 +1086,14 @@ class SkillChildRunner {
   }
 
   private finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): void {
-    if (this.recentCloses.has(active.childRunId)) {
-      // Already finalized — ignore the duplicate.
+    // Identity guard — only the lifecycle that owns the current `active` map
+    // entry may finalize. Two protections in one:
+    //   1. Same-lifecycle race (abort + driver throw): the second call sees
+    //      `active.get(id)` returning undefined (first call deleted) and bails.
+    //   2. Cross-lifecycle resume: the previous lifecycle's ActiveRun is no
+    //      longer in the map (replaced by the resumed one), so its delayed
+    //      finalize bails out without overwriting the new lifecycle's state.
+    if (this.active.get(active.childRunId) !== active) {
       return
     }
     void this.appendEvent(active, {
@@ -1081,13 +1112,17 @@ class SkillChildRunner {
         error: errorMessage(error),
       })
     }
+    // Delete the active entry BEFORE recordCloses + resolveClose so any
+    // re-entrant finalize attempt (or a downstream lookup that races
+    // resolveClose) cannot find this lifecycle's `active` and accidentally
+    // double-resolve or overwrite a freshly-resumed lifecycle's state.
+    this.active.delete(active.childRunId)
     this.recentCloses.set(active.childRunId, close)
     if (this.recentCloses.size > 64) {
       // Drop oldest. JS Maps preserve insertion order.
       const firstKey = this.recentCloses.keys().next().value
       if (firstKey) this.recentCloses.delete(firstKey)
     }
-    this.active.delete(active.childRunId)
     active.resolveClose(close)
   }
 
