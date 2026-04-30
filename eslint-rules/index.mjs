@@ -131,6 +131,7 @@ function isAgentControlOutsideSubagent(filePath) {
 
 function isBStageChildSubagentConsumer(filePath) {
   return filePath === 'src/main/modules/agent-control/skill-child-runner.ts'
+    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts'
     || filePath === 'src/main/modules/agent-control/skill-child-sub-agent.ts'
     || filePath === 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts'
 }

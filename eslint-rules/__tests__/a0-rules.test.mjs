@@ -147,6 +147,10 @@ tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
       code: "import type { SubAgent } from './sub-agent/sub-agent-types'",
     },
     {
+      filename: 'src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts',
+      code: "import type { SubAgentCloseEvent } from './sub-agent/sub-agent-types'",
+    },
+    {
       filename: 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts',
       code: "import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'",
     },
