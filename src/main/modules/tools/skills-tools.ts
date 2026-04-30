@@ -10,6 +10,13 @@ import {
   type ToolExecutionOutput,
 } from '../agent-control/tool-result-types'
 import {
+  buildContractFramePatch,
+  loadSkillRunContract,
+  type SkillRunContract,
+} from '../agent-control/run-contracts'
+import type { SkillTaskSupervisorSnapshot } from '../agent-control/skill-task-supervisor'
+import type { TurnFramePatch } from '../agent-control/turn-frame'
+import {
   getLatestActiveSkillTaskRun,
   isSkillTaskProjectionLive,
   readSkillTaskProjection,
@@ -510,6 +517,148 @@ function outputPathsFromToolOutput(output?: ToolExecutionOutput): {
   }
 }
 
+/**
+ * Stage C/D — synthesize the minimum supervisor-shaped snapshot that
+ * `loadSkillRunContract` consumes. Used by typed-action wrapper and the
+ * three inline detached handlers (start/inspect/cancel) to build a
+ * `framePatch.runContract` carrying the handles, paths, and liveness the
+ * executor observed.
+ *
+ * Only the fields the loader actually reads are filled; everything else
+ * defaults to safe, neutral values so the loader's status/liveness/progress
+ * mappings produce coherent output.
+ */
+function makeSupervisorSnapshotForContract(params: {
+  skillId?: string | null
+  scopeId?: string | null
+  sessionId?: string | null
+  action?: string | null
+  status: SkillTaskSupervisorSnapshot['status']
+  taskRunId?: string | null
+  detachedTaskId?: string | null
+  outputDir?: string | null
+  runStatePath?: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+  hasLiveWork?: boolean
+  hasRecentProgress?: boolean
+  blockers?: string[]
+  pauseReason?: string | null
+  observedAt?: string
+  lastProgressAt?: string | null
+}): SkillTaskSupervisorSnapshot {
+  return {
+    taskRunId: params.taskRunId ?? null,
+    detachedTaskId: params.detachedTaskId ?? null,
+    skillId: params.skillId ?? null,
+    scopeId: params.scopeId ?? null,
+    sessionId: params.sessionId ?? null,
+    action: params.action ?? null,
+    status: params.status,
+    hasLiveWork: Boolean(params.hasLiveWork),
+    hasRecentProgress: Boolean(params.hasRecentProgress),
+    closeAllowed: false,
+    ambiguous: false,
+    stale: false,
+    outputDir: params.outputDir ?? null,
+    runStatePath: params.runStatePath ?? null,
+    sceneScoresPath: params.sceneScoresPath ?? null,
+    deliveryReportPath: params.deliveryReportPath ?? null,
+    progress: {
+      currentStage: params.action ?? null,
+      totalScenes: null,
+      completedScenes: null,
+      coverageRatio: null,
+    },
+    blockers: Array.isArray(params.blockers) ? params.blockers : [],
+    pauseReason: params.pauseReason ?? null,
+    resumePayload: null,
+    sourceObservations: [],
+    progressFingerprint: null,
+    observedAt: params.observedAt || new Date().toISOString(),
+    lastProgressAt: params.lastProgressAt ?? null,
+  }
+}
+
+/**
+ * Stage C/D — derive the source URL the typed action's contract should
+ * preserve. Pipeline actions take a `url` argument; analyze/deliver do not.
+ * Returns the trimmed string or null. Stays in sync with `originalInput` /
+ * `actionInput` shape so Epsilon's force-tool dispatch can rebuild the
+ * next action input on resume.
+ */
+function deriveSourceUrlFromActionInput(input?: Record<string, unknown> | null): string | null {
+  if (!input) return null
+  const url = stringFromRecord(input, 'url') || stringFromRecord(input, 'source')
+  return url
+}
+
+/**
+ * Stage D — translate `DetachedSkillTaskStatus` to the supervisor status
+ * the contract loader consumes. Used by start/inspect/cancel inline
+ * handlers so the framePatch's runContract `status` / `liveness` reflect
+ * the detached tracker's truth.
+ */
+function detachedStatusToSupervisorStatus(
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked',
+): SkillTaskSupervisorSnapshot['status'] {
+  switch (status) {
+    case 'running': return 'background_running'
+    case 'done': return 'done'
+    case 'failed': return 'failed'
+    case 'cancelled': return 'cancelled'
+    case 'blocked': return 'blocked'
+    default: return 'unknown'
+  }
+}
+
+/**
+ * Stage C/D — wrap a tool output with a `framePatch` carrying the contract.
+ * The caller computes the snapshot; this helper invokes Beta's
+ * `loadSkillRunContract` + `buildContractFramePatch` and re-creates the
+ * output preserving any existing projectionPatch / interactionHint / data /
+ * shape so downstream consumers (projection sync, capsule render) keep
+ * their existing behaviour.
+ */
+function attachContractFramePatch(
+  output: ToolExecutionOutput,
+  loaderParams: Parameters<typeof loadSkillRunContract>[0],
+  patchOverrides?: {
+    activeArtifactRoots?: string[] | null
+    livenessHint?: SkillRunContract['liveness'] | null
+    skillStatusUpdates?: TurnFramePatch['skillStatusUpdates']
+  },
+): ToolExecutionOutput {
+  const contract = loadSkillRunContract(loaderParams)
+  if (!contract && !patchOverrides?.skillStatusUpdates && !patchOverrides?.activeArtifactRoots) {
+    return output
+  }
+  const framePatch = buildContractFramePatch({
+    contract,
+    activeArtifactRoots: patchOverrides?.activeArtifactRoots ?? null,
+    livenessHint: patchOverrides?.livenessHint ?? null,
+  })
+  if (patchOverrides?.skillStatusUpdates) {
+    framePatch.skillStatusUpdates = {
+      ...(framePatch.skillStatusUpdates || {}),
+      ...patchOverrides.skillStatusUpdates,
+    }
+  }
+  // Merge with any existing framePatch the upstream handler attached.
+  const existing = output.framePatch
+  const merged: TurnFramePatch = existing ? { ...existing, ...framePatch } : framePatch
+  if (existing?.runContract && framePatch.runContract) {
+    merged.runContract = { ...existing.runContract, ...framePatch.runContract }
+  }
+  return createToolExecutionOutput(output.text, {
+    shape: output.shape,
+    data: output.data,
+    projectionPatch: output.projectionPatch,
+    interactionHint: output.interactionHint,
+    framePatch: merged,
+  })
+}
+
 const MONITOR_ONLY_PRIMITIVE_TOOLS = new Set([
   'skill_run_shell',
   'skill_read_artifact',
@@ -542,8 +691,33 @@ function buildContinuityResumePayload(params: {
   jobId?: string | null
   outputDir?: string | null
   runStatePath?: string | null
+  /**
+   * Stage C — typed action wrapper supplies the original user/source input
+   * (e.g. `{ url: 'https://...' }` for video_expert_pipeline) so the next
+   * turn's force-tool dispatch can rebuild the action input via
+   * Epsilon's `buildContractFramePatch` flow without re-asking the user.
+   */
+  originalInput?: Record<string, unknown> | null
+  /** VEA `video_expert_ai_analyze` reads this from supervisor on resume. */
+  sceneScoresPath?: string | null
+  /** VEA `video_expert_deliver` reads this from supervisor on resume. */
+  deliveryReportPath?: string | null
+  /** Action name preserved so resume can pick the correct typed action. */
+  action?: string | null
+  /** Tool name preserved alongside action for symmetry with FrameAction. */
+  toolName?: string | null
 }): Record<string, unknown> | undefined {
-  if (!params.blockerType && !params.detachedTaskId && !params.taskRunId && !params.jobId && !params.outputDir && !params.runStatePath) {
+  if (
+    !params.blockerType
+    && !params.detachedTaskId
+    && !params.taskRunId
+    && !params.jobId
+    && !params.outputDir
+    && !params.runStatePath
+    && !params.sceneScoresPath
+    && !params.deliveryReportPath
+    && !params.originalInput
+  ) {
     return undefined
   }
   return {
@@ -555,6 +729,13 @@ function buildContinuityResumePayload(params: {
     jobId: params.jobId || null,
     outputDir: params.outputDir || null,
     runStatePath: params.runStatePath || null,
+    sceneScoresPath: params.sceneScoresPath || null,
+    deliveryReportPath: params.deliveryReportPath || null,
+    originalInput: params.originalInput && Object.keys(params.originalInput).length > 0
+      ? { ...params.originalInput }
+      : null,
+    action: params.action || null,
+    toolName: params.toolName || null,
   }
 }
 
@@ -602,6 +783,9 @@ function attachSkillProjection(output: string | ToolExecutionOutput, params: {
     data: normalized.data,
     projectionPatch,
     interactionHint: normalized.interactionHint,
+    // Stage 5 — preserve any structured frame patch the underlying handler
+    // attached so the turn engine post-batch consumer still sees it.
+    framePatch: normalized.framePatch,
   })
 }
 
@@ -831,9 +1015,40 @@ export async function executeSkillTool(
           data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
         })
       }
-      return createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
+      // Stage D4 — emit framePatch with handles, status, liveness, output
+      // paths, artifact roots so the next iteration's frame sees the
+      // tracker's truth without re-inspecting.
+      const supervisorSnapshot = makeSupervisorSnapshotForContract({
+        skillId: record.skillId,
+        scopeId: record.scopeId || sessionId || null,
+        sessionId: record.sessionId || sessionId || null,
+        action: record.action,
+        status: detachedStatusToSupervisorStatus(record.status),
+        detachedTaskId: record.id,
+        outputDir: record.outputDir,
+        runStatePath: record.runStatePath,
+        sceneScoresPath: record.sceneScoresPath,
+        deliveryReportPath: record.deliveryReportPath,
+        hasLiveWork: record.status === 'running',
+        blockers: record.error ? [record.error] : [],
+        pauseReason: record.error || null,
+        observedAt: record.updatedAt,
+      })
+      const baseOutput = createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
         shape: 'json',
         data: { task: record },
+      })
+      return attachContractFramePatch(baseOutput, {
+        scopeId: record.scopeId || sessionId || null,
+        sessionId: record.sessionId || sessionId || null,
+        skillId: record.skillId,
+        outputDir: record.outputDir,
+        runStatePath: record.runStatePath,
+        supervisorSnapshot,
+        toolName: tool.name,
+        actionInput: { taskId: record.id, ...(record.params || {}) },
+      }, {
+        activeArtifactRoots: record.outputDir ? [record.outputDir] : null,
       })
     }
     if (tool.name === 'skill_cancel_detached') {
@@ -852,9 +1067,50 @@ export async function executeSkillTool(
           data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
         })
       }
-      return createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
+      // Stage D7 — emit terminal framePatch so the frame and projection
+      // do NOT keep showing recoverable/running work after cancellation.
+      // The supervisor's `cancelled` status maps to the contract's
+      // `failed` bucket per loadSkillRunContract; liveness is forced to
+      // a non-running value via livenessHint.
+      const supervisorSnapshot = makeSupervisorSnapshotForContract({
+        skillId: record.skillId,
+        scopeId: record.scopeId || sessionId || null,
+        sessionId: record.sessionId || sessionId || null,
+        action: record.action,
+        status: detachedStatusToSupervisorStatus(record.status),
+        detachedTaskId: record.id,
+        outputDir: record.outputDir,
+        runStatePath: record.runStatePath,
+        sceneScoresPath: record.sceneScoresPath,
+        deliveryReportPath: record.deliveryReportPath,
+        hasLiveWork: false,
+        blockers: record.error ? [record.error] : [],
+        pauseReason: record.error || 'cancelled',
+        observedAt: record.updatedAt,
+      })
+      const baseOutput = createToolExecutionOutput(`Detached skill task ${record.id}: ${record.status}`, {
         shape: 'json',
         data: { task: record },
+      })
+      return attachContractFramePatch(baseOutput, {
+        scopeId: record.scopeId || sessionId || null,
+        sessionId: record.sessionId || sessionId || null,
+        skillId: record.skillId,
+        outputDir: record.outputDir,
+        runStatePath: record.runStatePath,
+        supervisorSnapshot,
+        toolName: tool.name,
+        actionInput: { taskId: record.id },
+      }, {
+        // Force the next-frame liveness off `running_process`. For a
+        // cancelled task, `failed` is the safest non-running terminal
+        // value since the contract's status enum buckets cancellation
+        // into `failed`. This blocks projection from continuing to
+        // show "background running" after the explicit cancel.
+        livenessHint: 'failed',
+        skillStatusUpdates: {
+          status: 'cancelled',
+        },
       })
     }
     if (!skillId) {
@@ -1051,10 +1307,43 @@ export async function executeSkillTool(
           status: 'running',
           message: `后台技能任务已启动：${record.id}`,
         })
-        return createToolExecutionOutput(`Detached skill task started: ${record.id}`, {
+        // Stage D6 — emit framePatch with detached/job handles so the next
+        // iteration's frame sees the spawned task without re-inspecting.
+        // `outputDir` / `runStatePath` are populated by the tracker when
+        // known at start time (some skills resolve them only once the
+        // child process writes its first run_state.json).
+        const supervisorSnapshot = makeSupervisorSnapshotForContract({
+          skillId,
+          scopeId: sessionId || null,
+          sessionId: sessionId || null,
+          action,
+          status: 'background_running',
+          detachedTaskId: record.id,
+          outputDir: record.outputDir,
+          runStatePath: record.runStatePath,
+          sceneScoresPath: record.sceneScoresPath,
+          deliveryReportPath: record.deliveryReportPath,
+          hasLiveWork: true,
+          observedAt: record.startedAt,
+        })
+        const baseOutput = createToolExecutionOutput(`Detached skill task started: ${record.id}`, {
           shape: 'json',
           data: { task: record },
           projectionPatch: buildSkillProjectionPatch({ sessionId, skillId }),
+        })
+        return attachContractFramePatch(baseOutput, {
+          scopeId: sessionId || null,
+          sessionId: sessionId || null,
+          skillId,
+          outputDir: record.outputDir,
+          runStatePath: record.runStatePath,
+          supervisorSnapshot,
+          toolName: tool.name,
+          actionInput: { action, params },
+          originalInput: params,
+        }, {
+          activeArtifactRoots: record.outputDir ? [record.outputDir] : null,
+          livenessHint: 'running_process',
         })
       } catch (error) {
         return createToolExecutionOutput('Detached skill task failed to start.', {
@@ -1202,12 +1491,37 @@ export async function executeSkillTool(
         status: 'running',
       })
       try {
+        // Stage 5 — derive additional read-only roots from the active
+        // TurnFrame skill slice so the model can read live task artifacts
+        // (run_state.json / scene_scores.json / delivery report) without
+        // falling back to `skill_run_shell cat`. The same active-skill
+        // context that feeds the frame resolver is reused here so dispatch
+        // and frame stay aligned.
+        const activeContextForRoots = sessionId ? resolveActiveSkillContext({ sessionId }) : null
+        const additionalRootCandidates: string[] = []
+        const seenRoots = new Set<string>()
+        const pushRoot = (path: string | null | undefined) => {
+          if (typeof path !== 'string') return
+          const trimmed = path.trim()
+          if (!trimmed || seenRoots.has(trimmed)) return
+          seenRoots.add(trimmed)
+          additionalRootCandidates.push(trimmed)
+        }
+        if (activeContextForRoots) {
+          pushRoot(activeContextForRoots.outputDir)
+          if (activeContextForRoots.runStatePath) pushRoot(dirname(activeContextForRoots.runStatePath))
+          if (activeContextForRoots.sceneScoresPath) pushRoot(dirname(activeContextForRoots.sceneScoresPath))
+          if (activeContextForRoots.deliveryReportPath) pushRoot(dirname(activeContextForRoots.deliveryReportPath))
+        }
         const output = await executeReadArtifact(
           {
             relativePath: asString(args.relativePath),
             maxBytes: typeof args.maxBytes === 'number' ? args.maxBytes : undefined,
           },
-          { skillId },
+          {
+            skillId,
+            additionalAllowedReadRoots: additionalRootCandidates,
+          },
         )
         recordPrimitiveOutcome({
           scopeId: runtimeContext?.scopeId,
@@ -1255,6 +1569,11 @@ export async function executeSkillTool(
           taskId: typeof args.taskId === 'string' ? args.taskId : undefined,
           expectedTaskId: typeof args.expectedTaskId === 'string' ? args.expectedTaskId : undefined,
           maxRawBytes: typeof args.maxRawBytes === 'number' ? args.maxRawBytes : undefined,
+          // Stage D3 — thread the active skillId through so the emitted
+          // `framePatch.runContract` is anchored to the right skill and
+          // can be persisted by `applyTurnFramePatch` even when no prior
+          // contract exists on the frame.
+          skillId: typeof skillId === 'string' && skillId.length > 0 ? skillId : undefined,
         })
         const status = inferSkillRunStatusFromOutput(output)
         recordPrimitiveOutcome({
@@ -1307,6 +1626,11 @@ export async function executeSkillTool(
     goalText: goalTextFromParams(toolName, tool.action || '', args),
     resourceRefs: resourceRefsFromParams(args),
   })
+  // TODO(skill-child-loop): this awaited runSkill call blocks the parent's
+  // tool batch on the entire long-skill run. When the child-loop runner
+  // lands, this becomes a launch-and-acknowledge call; the structured close
+  // event arrives via a separate channel and only then do we build the
+  // framePatch below. See docs/architecture/skill-child-loop-boundary.md §5.2.
   const result = await getManager().runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
@@ -1371,6 +1695,13 @@ export async function executeSkillTool(
     outputDir: outputDir || undefined,
     runStatePath: runStatePath || undefined,
     pauseReason: runStatus === 'blocked' ? 'blocked' : undefined,
+    // Stage C resume payload completeness — preserve the original action
+    // input AND the action-specific paths Epsilon's force-tool dispatch
+    // reads on resume:
+    //   - pipeline (`video_expert_pipeline`): `originalInput.url` survives
+    //     so the next turn can reconstruct the same action input.
+    //   - analyze (`video_expert_ai_analyze`): `sceneScoresPath` survives.
+    //   - deliver: `deliveryReportPath` survives.
     resumePayload: buildContinuityResumePayload({
       taskId: taskRunId || detachedTaskId || result.jobId || null,
       stepId: started.stepId,
@@ -1380,6 +1711,11 @@ export async function executeSkillTool(
       jobId: result.jobId || null,
       outputDir,
       runStatePath,
+      sceneScoresPath,
+      deliveryReportPath,
+      originalInput: args,
+      action: tool.action || null,
+      toolName,
     }),
     summary: formatted.slice(0, 240),
   })
@@ -1387,8 +1723,90 @@ export async function executeSkillTool(
     sessionId,
     skillId: tool.skillId || undefined,
   })
-  if (!projectionPatch) return formatted
-  return createToolExecutionOutput(formatted, { projectionPatch })
+
+  // Stage C C3 + C4 — emit framePatch carrying the SkillRunContract that
+  // Epsilon's force-tool dispatch will read on the next turn. The
+  // contract preserves the validated action input, the original user
+  // input (for input rebuild), the source URL (pipeline only), the
+  // detached/task-run/job handles, the output paths discovered by the
+  // skill runtime, and the status/liveness/progress observed.
+  //
+  // Special-cased because typed action wrappers carry the most precise
+  // signal: the result.outputs map is authoritative for sceneScoresPath /
+  // deliveryReportPath, more so than the file-system probe a primitive
+  // would have to do. Liveness derived from the runStatus enum.
+  //
+  // TODO(skill-child-loop): this contract construction runs inline inside
+  // the parent's tool batch because the parent-only loop has no other place
+  // to fold the close into. When the child-loop runner lands, the same
+  // construction runs at the child's structured close event — the typed
+  // action wrapper returns immediately on launch, and the close event
+  // produces the framePatch. See docs/architecture/skill-child-loop-boundary.md §5.2.
+  const supervisorStatusForContract: SkillTaskSupervisorSnapshot['status'] = (() => {
+    if (runStatus === 'done') return 'done'
+    if (runStatus === 'error') return 'failed'
+    if (runStatus === 'blocked') return 'blocked'
+    return 'background_running'
+  })()
+  const livenessHintForContract: SkillRunContract['liveness'] = (() => {
+    if (runStatus === 'done') return 'done'
+    if (runStatus === 'error') return 'failed'
+    if (runStatus === 'blocked') return 'blocked'
+    return 'running_process'
+  })()
+  const supervisorSnapshot = makeSupervisorSnapshotForContract({
+    skillId: tool.skillId || null,
+    scopeId: runtimeContext?.scopeId || sessionId || null,
+    sessionId: sessionId || null,
+    action: tool.action || null,
+    status: supervisorStatusForContract,
+    taskRunId,
+    detachedTaskId,
+    outputDir,
+    runStatePath,
+    sceneScoresPath,
+    deliveryReportPath,
+    hasLiveWork: runStatus === 'blocked',
+    blockers: result.success ? [] : [result.error || result.stderr || '技能执行失败'],
+    pauseReason: runStatus === 'blocked' ? 'blocked' : (result.error || null),
+  })
+  const contract = loadSkillRunContract({
+    scopeId: runtimeContext?.scopeId || sessionId || null,
+    sessionId: sessionId || null,
+    skillId: tool.skillId || null,
+    outputDir,
+    runStatePath,
+    supervisorSnapshot,
+    projectionSibling: null,
+    referenceHint: sessionId ? getLastReferenceSkill(sessionId) : null,
+    originalInput: args,
+    sourceUrl: deriveSourceUrlFromActionInput(args),
+    toolName,
+    actionInput: args,
+    jobId: result.jobId || null,
+  })
+  // Patch the contract with the precise output paths the runtime
+  // produced, in case `loadSkillRunContract` populated them from a
+  // different source.
+  if (contract) {
+    contract.artifactPaths = {
+      sceneScoresPath: sceneScoresPath || contract.artifactPaths.sceneScoresPath,
+      deliveryReportPath: deliveryReportPath || contract.artifactPaths.deliveryReportPath,
+    }
+    if (outputDir && !contract.artifactRoots.includes(outputDir)) {
+      contract.artifactRoots = [outputDir, ...contract.artifactRoots]
+    }
+  }
+  const framePatch = buildContractFramePatch({
+    contract,
+    activeArtifactRoots: outputDir ? [outputDir] : null,
+    livenessHint: livenessHintForContract,
+  })
+
+  return createToolExecutionOutput(formatted, {
+    projectionPatch,
+    framePatch,
+  })
 }
 
 export type { SkillToolDef, ToolParam, SkillActionDefinition }

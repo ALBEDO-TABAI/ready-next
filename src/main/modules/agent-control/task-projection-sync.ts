@@ -86,36 +86,57 @@ function stableProjectionHash(parts: string[]): string {
   return createHash('sha1').update(parts.join('\0')).digest('hex').slice(0, 16)
 }
 
+/**
+ * Stage F1 (Zeta) — extract the durable `runContract` snippet from a frame
+ * snapshot. The contract is the highest-priority source of truth for
+ * skill identity / handles / paths / status. Returns null when no
+ * contract was emitted by the producer chain this turn.
+ */
+function readFrameContract(
+  projectionTruth?: ProjectionTruthSnapshot | null,
+): NonNullable<NonNullable<ProjectionTruthSnapshot['frameSnapshot']>['skill']>['runContract'] | null {
+  return projectionTruth?.frameSnapshot?.skill?.runContract || null
+}
+
 function resolveStableSkillProjectionTaskId(
   summary: ScopeRunSummary,
   payload: ScopeRunEventPayload,
   truthPatch?: Record<string, unknown> | null,
+  contract?: ReturnType<typeof readFrameContract>,
 ): string | null {
   if (summary.taskType !== 'short_task' || payload.module !== 'system') return null
   const continuation = truthContinuation(truthPatch)
   const artifacts = truthArtifacts(truthPatch) || summary.recentArtifacts
+  // Stage F1 — contract truth wins over summary/artifact heuristics for
+  // stable identity. Fall back to existing sources when the producer chain
+  // did not emit a contract this turn.
   const skillId =
-    stringFromRecord(continuation, 'skillId')
+    (contract?.skillId || null)
+    || stringFromRecord(continuation, 'skillId')
     || summary.taskContinuation?.skillId
     || firstArtifactMetaString(artifacts, 'skillId')
   if (!skillId) return null
   const detachedTaskId =
-    stringFromRecord(continuation, 'detachedTaskId')
+    (contract?.detachedTaskId || null)
+    || stringFromRecord(continuation, 'detachedTaskId')
     || summary.taskContinuation?.detachedTaskId
     || firstArtifactMetaString(artifacts, 'detachedTaskId')
   if (detachedTaskId) return `skill:detached:${detachedTaskId}`
   const runStatePath =
-    stringFromRecord(continuation, 'runStatePath')
+    (contract?.runStatePath || null)
+    || stringFromRecord(continuation, 'runStatePath')
     || summary.taskContinuation?.runStatePath
     || artifactPathByOutputKey(artifacts, 'runStatePath')
     || artifactPathEnding(artifacts, 'run_state.json')
   if (runStatePath) return `skill:run_state:${stableProjectionHash([skillId, runStatePath])}`
   const outputDir =
-    stringFromRecord(continuation, 'outputDir')
+    (contract?.outputDir || null)
+    || stringFromRecord(continuation, 'outputDir')
     || summary.taskContinuation?.outputDir
     || artifactPathByOutputKey(artifacts, 'outputDir')
   const action =
-    stringFromRecord(continuation, 'action')
+    (contract?.action || null)
+    || stringFromRecord(continuation, 'action')
     || summary.taskContinuation?.action
     || firstArtifactMetaString(artifacts, 'action')
     || summary.currentStepId
@@ -127,14 +148,101 @@ function resolveTaskId(
   summary: ScopeRunSummary,
   payload: ScopeRunEventPayload,
   truthPatch?: Record<string, unknown> | null,
+  contract?: ReturnType<typeof readFrameContract>,
 ): string | null {
-  return resolveStableSkillProjectionTaskId(summary, payload, truthPatch)
+  // Stage F1 — when the contract carries a stable projection key (e.g.
+  // VEA's typed action wrapper computed it from skillId+detachedTaskId),
+  // prefer it directly over recomputing the same key from heuristics.
+  const stableFromContract = contract?.projectionIdentity?.stableKey || null
+  if (stableFromContract && stableFromContract.startsWith('skill:')) {
+    return stableFromContract
+  }
+  return resolveStableSkillProjectionTaskId(summary, payload, truthPatch, contract)
     || summary.taskId
     || payload.taskId
     || summary.taskProjectionId
     || payload.taskProjectionId
     || payload.runId
     || null
+}
+
+function resolveSkillArtifactIdentity(
+  summary: ScopeRunSummary,
+  truthPatch?: Record<string, unknown> | null,
+  contract?: ReturnType<typeof readFrameContract>,
+): { skillId: string | null; outputDir: string | null; runStatePath: string | null } {
+  const continuation = truthContinuation(truthPatch)
+  const artifacts = truthArtifacts(truthPatch) || summary.recentArtifacts
+  // Stage F1 — contract handles win over summary/artifact heuristics so
+  // sibling lookup uses the durable cross-turn identity even when this
+  // turn's summary is sparse.
+  const skillId =
+    (contract?.skillId || null)
+    || stringFromRecord(continuation, 'skillId')
+    || summary.taskContinuation?.skillId
+    || firstArtifactMetaString(artifacts, 'skillId')
+    || null
+  const outputDir =
+    (contract?.outputDir || null)
+    || stringFromRecord(continuation, 'outputDir')
+    || summary.taskContinuation?.outputDir
+    || artifactPathByOutputKey(artifacts, 'outputDir')
+    || firstArtifactMetaString(artifacts, 'outputDir')
+    || null
+  const runStatePath =
+    (contract?.runStatePath || null)
+    || stringFromRecord(continuation, 'runStatePath')
+    || summary.taskContinuation?.runStatePath
+    || artifactPathByOutputKey(artifacts, 'runStatePath')
+    || artifactPathEnding(artifacts, 'run_state.json')
+    || null
+  return { skillId, outputDir, runStatePath }
+}
+
+async function supersedeLegacySiblings(
+  store: TaskProjectionStore,
+  next: TaskProjectionRecord,
+  identity: { skillId: string | null; outputDir: string | null; runStatePath: string | null },
+): Promise<void> {
+  if (!next.taskId.startsWith('skill:')) return
+  if (!identity.outputDir && !identity.runStatePath) return
+  if (typeof store.findByArtifactSiblings !== 'function') return
+  let siblings: TaskProjectionRecord[] = []
+  try {
+    siblings = await store.findByArtifactSiblings({
+      scopeId: next.scopeId,
+      skillId: identity.skillId,
+      outputDir: identity.outputDir,
+      runStatePath: identity.runStatePath,
+    })
+  } catch (error) {
+    // Sibling lookup is advisory; never let it block the main commit.
+    console.warn('[task-projection-sync] findByArtifactSiblings failed', error)
+    return
+  }
+  for (const sibling of siblings) {
+    if (sibling.taskId === next.taskId) continue
+    if (sibling.status === 'cancelled' || sibling.status === 'done') continue
+    try {
+      await store.update(sibling.taskId, {
+        status: 'cancelled',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        blockedReason: null,
+        continuationRef: {
+          taskId: next.taskId,
+          blockerType: 'superseded',
+        },
+        updatedAt: next.updatedAt,
+      })
+    } catch (error) {
+      // Race recovery — sibling may have been concurrently mutated/deleted.
+      console.warn(
+        `[task-projection-sync] supersede update failed for ${sibling.taskId}`,
+        error,
+      )
+    }
+  }
 }
 
 function isTaskProjectionUniqueRace(error: unknown): boolean {
@@ -160,8 +268,10 @@ function resolveRecordInteractionState(
   status: TaskProjectionRecord['status'],
 ): TaskInteractionState {
   const interactionState = resolveInteractionState(summary)
+  // Terminal status must never persist with `running` or `resuming` interaction
+  // state — both signal active work, which contradicts done/failed/cancelled.
   if (
-    interactionState === 'running'
+    (interactionState === 'running' || interactionState === 'resuming')
     && (status === 'done' || status === 'failed' || status === 'cancelled')
   ) {
     return 'suspended'
@@ -426,7 +536,8 @@ export function buildTaskProjectionRecord(
   projectionTruth?: ProjectionTruthSnapshot | null,
 ): TaskProjectionRecord | null {
   const truthPatch = readProjectionTruthPatch(projectionTruth)
-  const taskId = resolveTaskId(summary, payload, truthPatch)
+  const contract = readFrameContract(projectionTruth)
+  const taskId = resolveTaskId(summary, payload, truthPatch, contract)
   if (!taskId) return null
   const effectiveSummary: ScopeRunSummary = {
     ...summary,
@@ -481,9 +592,19 @@ export function buildTaskProjectionRecord(
 
   const status = resolveStatus(effectiveSummary)
   const blockedReasonWasCleared = truthPatch?.blockedReason === null || summary.blockedReason === null
+  // Auto-clear stale blocker when frame explicitly says no stale blocker
+  // exists for this skill — only when there is also no fresh blocker on
+  // this commit. We don't drop a current blocker; we just refuse to carry
+  // forward the previous row's blocker without a frame signal supporting it.
+  const frameClearsStaleBlocker = (() => {
+    const skillSnapshot = projectionTruth?.frameSnapshot?.skill
+    if (!skillSnapshot) return false
+    if (!('staleBlockerReason' in skillSnapshot)) return false
+    return skillSnapshot.staleBlockerReason === null
+  })()
   const blockedReason =
     effectiveSummary.blockedReason
-    || (status === 'blocked' && !blockedReasonWasCleared ? previous?.blockedReason : null)
+    || (status === 'blocked' && !blockedReasonWasCleared && !frameClearsStaleBlocker ? previous?.blockedReason : null)
     || null
 
   return {
@@ -526,7 +647,8 @@ export async function syncTaskProjection(
   projectionTruth?: ProjectionTruthSnapshot | null,
 ): Promise<TaskProjectionRecord | null> {
   const truthPatch = readProjectionTruthPatch(projectionTruth)
-  const taskId = resolveTaskId(summary, payload, truthPatch)
+  const contract = readFrameContract(projectionTruth)
+  const taskId = resolveTaskId(summary, payload, truthPatch, contract)
   if (!taskId) return null
   const previous = await store.get(taskId)
   let next = buildTaskProjectionRecord(summary, payload, previous, projectionTruth)
@@ -559,5 +681,6 @@ export async function syncTaskProjection(
     clearContinuationState(next.scopeId, next.taskId)
   }
   await syncParentProjectionFromChild(store, next)
+  await supersedeLegacySiblings(store, next, resolveSkillArtifactIdentity(summary, truthPatch, contract))
   return next
 }

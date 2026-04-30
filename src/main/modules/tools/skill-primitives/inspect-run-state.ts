@@ -33,6 +33,12 @@ import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
 import { getDetachedSkillTaskTracker } from '../../agent-control/detached-skill-task-tracker'
 import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skill-progress-artifacts'
 import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/run-state-selection'
+import {
+  buildContractFramePatch,
+  loadSkillRunContract,
+  type SkillRunContract,
+} from '../../agent-control/run-contracts'
+import type { TurnFrame, TurnFramePatch } from '../../agent-control/turn-frame'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_MAX_RAW_BYTES = 16_384
@@ -44,6 +50,14 @@ export interface InspectRunStateArgs {
   taskId?: string
   expectedTaskId?: string
   maxRawBytes?: number
+  /**
+   * Stage D3 — optional skill identifier supplied by the dispatch layer
+   * (`skills-tools.ts`). Carried into the emitted `framePatch.runContract`
+   * so the next frame can anchor the contract to a specific skill. When
+   * absent, the contract still emits but downstream `applyTurnFramePatch`
+   * may decline to create a fresh contract object without a skillId anchor.
+   */
+  skillId?: string
 }
 
 interface RunStateSummary {
@@ -154,6 +168,231 @@ function deriveReconciledLiveness(summary: RunStateSummary, artifactProgress: Sk
     return 'unknown'
   }
   return 'unknown'
+}
+
+/**
+ * Stage D3 — derive `SkillRunContract.status` from the reconciled liveness
+ * value so the next frame's contract reflects what the inspect actually
+ * observed. Falls back to `unknown` for indeterminate states.
+ */
+function contractStatusFromReconciledLiveness(reconciled: string): SkillRunContract['status'] {
+  switch (reconciled) {
+    case 'done':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'blocked':
+      return 'blocked'
+    case 'recoverable_paused':
+      return 'recoverable_paused'
+    default:
+      return 'unknown'
+  }
+}
+
+/**
+ * Stage D3 — translate reconciled liveness string into the strict
+ * `TurnFrame['liveness']` enum. Anything that isn't an explicit terminal /
+ * paused / blocked state falls back to `'unknown'` so the frame engine
+ * doesn't treat an indeterminate inspect result as live progress.
+ */
+function frameLivenessFromReconciled(reconciled: string): TurnFrame['liveness'] {
+  switch (reconciled) {
+    case 'done':
+    case 'failed':
+    case 'blocked':
+    case 'recoverable_paused':
+      return reconciled
+    default:
+      return 'unknown'
+  }
+}
+
+interface InspectContractInputs {
+  outputDir: string
+  runStatePath: string
+  effectiveExpectedTaskId: string | null
+  resolvedFromTaskId: string | null
+  summary: RunStateSummary
+  artifactProgress: SkillProgressArtifacts
+  reconciledLiveness: string
+  parseError: string | null
+  skillId: string | null
+}
+
+/**
+ * Stage D3 — build a `TurnFramePatch` that lets the next frame see the
+ * artifacts the inspect just discovered without re-resolving from summary
+ * text. Uses Beta's `loadSkillRunContract` + `buildContractFramePatch` so
+ * Gamma + Delta producers stay symmetric.
+ *
+ * The patch carries:
+ *   - `runContract` — handles (taskRunId / detachedTaskId / runStatePath /
+ *     outputDir / action), discovered `artifactPaths.sceneScoresPath`
+ *     (and `deliveryReportPath` when the run state references one), status
+ *     derived from reconciled liveness, and progress fields.
+ *   - `activeArtifactRoots` — the inspect's `outputDir` so a same-turn
+ *     `skill_read_artifact` call can read the freshly-discovered run state.
+ *   - `livenessHint` — the reconciled liveness value so frame.liveness
+ *     upgrades correctly.
+ *   - `skillStatusUpdates` — current run-state status string + any blocker
+ *     reason derived from `summary.lastError` (kept independent of the
+ *     contract status so producers can clear it explicitly later).
+ */
+function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch | null {
+  const {
+    outputDir,
+    runStatePath,
+    effectiveExpectedTaskId,
+    resolvedFromTaskId,
+    summary,
+    artifactProgress,
+    reconciledLiveness,
+  } = inputs
+
+  const summaryTaskId = typeof summary.taskId === 'string' && summary.taskId.trim()
+    ? summary.taskId.trim()
+    : null
+  const taskRunId = effectiveExpectedTaskId || resolvedFromTaskId || summaryTaskId
+  const detachedTaskId = resolvedFromTaskId || null
+  const action = typeof summary.currentStage === 'string' && summary.currentStage.trim()
+    ? summary.currentStage.trim()
+    : null
+
+  const sceneScoresPath = artifactProgress.sceneScoresPath || null
+  // run_state.json may reference a delivery report path under various keys.
+  // Defensive lookup so we don't fabricate one that isn't there.
+  const summaryRecord = summary as unknown as Record<string, unknown>
+  const deliveryReportPath = (() => {
+    const candidates: unknown[] = [
+      summaryRecord.deliveryReportPath,
+      summaryRecord.delivery_report_path,
+      summaryRecord.deliveryReport,
+    ]
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim()
+    }
+    return null
+  })()
+
+  const status = contractStatusFromReconciledLiveness(reconciledLiveness)
+  const liveness = frameLivenessFromReconciled(reconciledLiveness)
+  const totalScenes = typeof summary.totalScenes === 'number'
+    ? summary.totalScenes
+    : (typeof artifactProgress.totalScenes === 'number' ? artifactProgress.totalScenes : null)
+  const completedScenes = typeof summary.completedScenes === 'number'
+    ? summary.completedScenes
+    : (typeof artifactProgress.completedScenes === 'number' ? artifactProgress.completedScenes : null)
+  const coverageRatio = typeof summary.coverageRatio === 'number'
+    ? summary.coverageRatio
+    : (typeof artifactProgress.coverageRatio === 'number' ? artifactProgress.coverageRatio : null)
+
+  const blockerReason = typeof summary.lastError === 'string' && summary.lastError.trim().length > 0
+    ? summary.lastError.trim()
+    : null
+
+  // Synthesize a minimal supervisor-shaped snapshot so `loadSkillRunContract`
+  // can populate paths/status/progress consistently with the rest of the
+  // pipeline. We only fill the fields the loader reads.
+  const supervisorSnapshot = {
+    taskRunId,
+    detachedTaskId,
+    skillId: null,
+    scopeId: null,
+    sessionId: null,
+    action,
+    status: (() => {
+      switch (status) {
+        case 'completed':
+          return 'done' as const
+        case 'failed':
+          return 'failed' as const
+        case 'blocked':
+          return 'blocked' as const
+        case 'recoverable_paused':
+          return 'recoverable_paused' as const
+        case 'running':
+          return 'running' as const
+        default:
+          return 'running' as const
+      }
+    })(),
+    hasLiveWork: reconciledLiveness === 'recoverable_paused' || reconciledLiveness === 'blocked',
+    hasRecentProgress: artifactProgress.hasEvidence,
+    closeAllowed: false,
+    ambiguous: false,
+    stale: false,
+    outputDir,
+    runStatePath,
+    sceneScoresPath,
+    deliveryReportPath,
+    progress: {
+      currentStage: action,
+      totalScenes,
+      completedScenes,
+      coverageRatio,
+    },
+    blockers: blockerReason ? [blockerReason] : [],
+    pauseReason: blockerReason,
+    resumePayload: null,
+    sourceObservations: [],
+    progressFingerprint: null,
+    observedAt: new Date().toISOString(),
+    lastProgressAt: null,
+  }
+
+  const contract = loadSkillRunContract({
+    skillId: inputs.skillId,
+    outputDir,
+    runStatePath,
+    supervisorSnapshot: supervisorSnapshot as any,
+    projectionSibling: null,
+    referenceHint: null,
+  })
+
+  // Inject discovered artifact paths even if loadSkillRunContract returned a
+  // null path (it relies on supervisor shape which we synthesize above —
+  // belt-and-braces in case the field name drifts in the future).
+  if (contract) {
+    contract.artifactPaths = {
+      sceneScoresPath,
+      deliveryReportPath,
+    }
+    contract.progress = {
+      ...contract.progress,
+      stage: action ?? contract.progress.stage,
+      totalUnits: totalScenes ?? contract.progress.totalUnits,
+      completedUnits: completedScenes ?? contract.progress.completedUnits,
+      coverageRatio: coverageRatio ?? contract.progress.coverageRatio,
+    }
+    contract.status = status
+    contract.liveness = liveness
+    contract.blocker = {
+      reason: blockerReason,
+      stale: contract.blocker.stale,
+    }
+  }
+
+  const patch = buildContractFramePatch({
+    contract,
+    activeArtifactRoots: [outputDir],
+    livenessHint: liveness !== 'unknown' ? liveness : null,
+  })
+
+  // Carry per-skill-slice status updates so the frame's skill slice keeps
+  // its `status` / `staleBlockerReason` fields aligned with this primitive's
+  // observation, independent of the durable run contract.
+  patch.skillStatusUpdates = {
+    ...(patch.skillStatusUpdates || {}),
+    status: typeof summary.status === 'string' ? summary.status : null,
+    staleBlockerReason: blockerReason,
+    runStatePath,
+    outputDir,
+    action: action ?? null,
+    artifactPaths: { sceneScoresPath, deliveryReportPath },
+  }
+
+  return patch
 }
 
 export async function executeInspectRunState(
@@ -334,6 +573,25 @@ export async function executeInspectRunState(
     truncated,
   })
 
+  // Stage D3 — emit framePatch so the next iteration's frame sees the
+  // run_state path, output dir, scene scores path, and reconciled status
+  // without re-resolving from summary text. Beta's `applyTurnFramePatch`
+  // persists the durable slots (`activeArtifactRoots`, `runContract`,
+  // `configValidation`) into the next frame.
+  const framePatch = buildInspectFramePatch({
+    outputDir,
+    runStatePath,
+    effectiveExpectedTaskId,
+    resolvedFromTaskId,
+    summary,
+    artifactProgress,
+    reconciledLiveness,
+    parseError,
+    skillId: typeof args.skillId === 'string' && args.skillId.trim().length > 0
+      ? args.skillId.trim()
+      : null,
+  })
+
   return createToolExecutionOutput(
     `Inspected run_state at ${runStatePath}. Found keys: ${summary.knownKeysFound.join(', ') || '(none of the known keys)'}.`,
     {
@@ -354,6 +612,7 @@ export async function executeInspectRunState(
         rawBytes: raw.length,
         truncated,
       },
+      framePatch,
     },
   )
 }

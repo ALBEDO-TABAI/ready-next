@@ -79,6 +79,25 @@ import {
  * caller can wrap it in any role (currently `user` per the existing IPC
  * shape).
  */
+/**
+ * Stage 7 — pure helper for the `turn_frame_summary` metric's
+ * `allowedPreferredMismatch` flag. Returns true when at least one preferred
+ * tool name is not present in the allowed-tools surface for this turn —
+ * a useful diagnostic for "frame says steer toward X, but X isn't even on
+ * the model's tool surface" mismatches that previously took root-cause
+ * digging through scattered logs.
+ *
+ * Empty preferred list is never a mismatch (no preference == no mismatch).
+ */
+export function detectAllowedPreferredMismatch(
+  allowedToolNames: ReadonlyArray<string>,
+  preferredToolNames: ReadonlyArray<string>,
+): boolean {
+  if (preferredToolNames.length === 0) return false
+  const allowedSet = new Set(allowedToolNames)
+  return preferredToolNames.some((name) => !allowedSet.has(name))
+}
+
 export function buildBudgetWarningMessage(params: {
   iterations: number
   effectiveMaxIterations: number
@@ -109,7 +128,15 @@ import {
   type ActiveSkillContext,
 } from './active-skill-context'
 import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
-import { summarizeTurnFrame, type TurnFrame, type TurnTerminalReason } from './turn-frame'
+import { applySteeringToTurnFrame } from './turn-frame-steering'
+import {
+  applyTurnFramePatch,
+  mergeTurnFramePatches,
+  summarizeTurnFrame,
+  type TurnFrame,
+  type TurnFramePatch,
+  type TurnTerminalReason,
+} from './turn-frame'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import {
   buildSkillDetectionInputs,
@@ -124,6 +151,7 @@ import {
 } from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
 import { defaultToolRegistry } from './tool-registry'
+import { getToolInputSchemas } from '../tools/schemas'
 import {
   selectDomainAdapter,
   type DomainAdapter,
@@ -441,7 +469,10 @@ function buildSkillResumeContextPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
-function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
+function buildProjectionTruthSnapshot(
+  events: TurnTranscriptEvent[],
+  turnFrame?: TurnFrame | null,
+) {
   let projectionPatch: Record<string, unknown> | null = null
   for (const event of events) {
     if (event.kind !== 'structured_payload' || !event.projectionPatch) continue
@@ -450,9 +481,67 @@ function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
       ...event.projectionPatch,
     }
   }
+  // Stage 6 wiring — surface the live TurnFrame skill slice so
+  // task-projection-sync's auto-clear-stale-blocker / supersede paths can read
+  // `frame.skill.staleBlockerReason` and identity. Inlined to the structural
+  // shape declared in run-contracts.ts (no TurnFrameSkillSlice import needed
+  // by the consumer).
+  //
+  // Stage F1 (Zeta) — additionally surface the durable `runContract` from
+  // `turnFrame.skill.runContract` so projection sync can prefer contract
+  // truth (status / liveness / progress / artifact paths / stable identity)
+  // over the older summary+artifact heuristics.
+  const skillSlice = turnFrame?.skill || null
+  const contract = skillSlice?.runContract || null
+  const frameSnapshot = turnFrame
+    ? {
+      skill: skillSlice
+        ? {
+          skillId: skillSlice.skillId,
+          skillName: skillSlice.skillName,
+          source: String(skillSlice.source || ''),
+          detachedTaskId: skillSlice.detachedTaskId,
+          runStatePath: skillSlice.runStatePath,
+          outputDir: skillSlice.outputDir,
+          action: skillSlice.action,
+          staleBlockerReason: skillSlice.staleBlockerReason,
+          runContract: contract
+            ? {
+              skillId: contract.skillId,
+              action: contract.action,
+              toolName: contract.toolName,
+              actionInput: contract.actionInput,
+              originalInput: contract.originalInput,
+              sourceUrl: contract.sourceUrl,
+              taskRunId: contract.taskRunId,
+              detachedTaskId: contract.detachedTaskId,
+              jobId: contract.jobId,
+              outputDir: contract.outputDir,
+              runStatePath: contract.runStatePath,
+              artifactPaths: { ...contract.artifactPaths },
+              status: contract.status,
+              liveness: contract.liveness,
+              progress: {
+                stage: contract.progress?.stage ?? null,
+                totalUnits: contract.progress?.totalUnits ?? null,
+                completedUnits: contract.progress?.completedUnits ?? null,
+                coverageRatio: contract.progress?.coverageRatio ?? null,
+              },
+              blocker: { ...contract.blocker },
+              projectionIdentity: {
+                stableKey: contract.projectionIdentity?.stableKey ?? null,
+              },
+            }
+            : null,
+        }
+        : null,
+      terminalReason: turnFrame.terminalReason,
+    }
+    : null
   return {
     projectionPatch,
     transcriptEvents: events.slice(),
+    frameSnapshot,
   }
 }
 
@@ -669,7 +758,7 @@ export class TurnEngine {
       skillTaskLifecycle?: SkillTaskLifecycleSignal | null
       terminalReason?: TurnTerminalReason | null
     }) => {
-      const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents())
+      const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents(), turnFrame)
       transcript.emitOutput('', params.doneEventType || 'done')
       const status = params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error')
       const terminalReason = params.terminalReason
@@ -682,6 +771,36 @@ export class TurnEngine {
               : 'infra_error')
       if (turnFrame) {
         turnFrame.terminalReason = terminalReason
+      }
+      // Stage 7 — single per-turn diagnostic. Emit exactly once per turn at
+      // closure so logs carry one structured row that explains the whole
+      // turn (skill identity, liveness, allowed/preferred mismatch, terminal
+      // reason). Existing scattered metrics stay for telemetry; this is the
+      // diagnostic-friendly aggregate.
+      try {
+        const summaryAllowed = Array.isArray(turnSummaryAllowedToolNames)
+          ? turnSummaryAllowedToolNames
+          : []
+        const preferredFromFrame = turnFrame?.steering?.preferredToolNames || []
+        const allowedPreferredMismatch = detectAllowedPreferredMismatch(summaryAllowed, preferredFromFrame)
+        logAgentMetric('turn_frame_summary', {
+          sessionId: request.sessionId,
+          requestId: request.runId,
+          skillId: turnFrame?.skill?.skillId || null,
+          source: turnFrame?.skill?.source || null,
+          liveness: turnFrame?.liveness || 'unknown',
+          action: turnFrame?.skill?.action || null,
+          mode: turnFrame?.steering?.mode || 'ask_model',
+          allowedToolNames: summaryAllowed,
+          preferredToolNames: preferredFromFrame,
+          allowedPreferredMismatch,
+          terminalReason,
+          budgetExhausted: Boolean(turnFrame?.budget?.exhausted),
+          longSkillResume: Boolean(turnSummaryLongSkillResume),
+          iterations: turnSummaryIterations,
+        })
+      } catch {
+        // metrics must never break the control path
       }
       transcript.emitStatus(status)
       return {
@@ -698,6 +817,14 @@ export class TurnEngine {
         terminalReason,
       }
     }
+    // Stage 7 — captured at terminal closure for the `turn_frame_summary`
+    // metric. `turnSummaryAllowedToolNames` is rebound after the run-policy
+    // resolves `routedAllowedToolNames`. `turnSummaryIterations` is updated
+    // by the iteration loop. `turnSummaryLongSkillResume` snapshots whether
+    // this turn was on the long-skill resume budget.
+    let turnSummaryAllowedToolNames: string[] = []
+    let turnSummaryIterations = 0
+    let turnSummaryLongSkillResume = false
 
     try {
       const session = request.session
@@ -990,6 +1117,19 @@ export class TurnEngine {
           }
         }
       }
+      // Stage E — fetch supervisor snapshot so the resolver can hand it to
+      // `loadSkillRunContract`. Without this the contract's `actionInput` /
+      // `originalInput` (read from snapshot.resumePayload) stay null and
+      // forced-action input synthesis can't dispatch with valid input.
+      let supervisorSnapshotForFrame: SkillTaskSupervisorSnapshot | null = null
+      try {
+        supervisorSnapshotForFrame = inspectLatestSkillTaskForHost({
+          sessionId: request.sessionId,
+          scopeId: request.sessionId,
+        })
+      } catch {
+        supervisorSnapshotForFrame = null
+      }
       turnFrame = resolveTurnFrame({
         sessionId: request.sessionId,
         requestId: request.runId,
@@ -999,6 +1139,7 @@ export class TurnEngine {
             ? 'continue'
             : 'unknown',
         activeContext: activeSkillContextForTurn,
+        supervisorSnapshot: supervisorSnapshotForFrame,
         referenceHint: currentReferenceHintForContext
           ? { ...currentReferenceHintForContext, at: Date.now() }
           : null,
@@ -1413,6 +1554,12 @@ export class TurnEngine {
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      // Stage 7 — capture the allowed-tool surface and long-skill flag once so
+      // `finish()` can include them in the per-turn `turn_frame_summary` log.
+      turnSummaryAllowedToolNames = Array.isArray(routedAllowedToolNames)
+        ? [...routedAllowedToolNames]
+        : []
+      turnSummaryLongSkillResume = Boolean(shouldUseLongSkillResumeBudget)
       logAgentMetric('turn_frame_tool_policy', {
         sessionId: request.sessionId,
         mode: turnFrame?.mode || null,
@@ -1662,6 +1809,17 @@ export class TurnEngine {
       const recentToolCalls: Array<{ name: string; argsHash: string }> = []
       const RECENT_TOOL_CALLS_RING_SIZE = 5
       const REPETITION_THRESHOLD = 3
+      // Stage 7 — force-tool dispatch tracking. When the steering layer marks
+      // the frame as `mode='force_tool'`, the next iteration synthesizes a
+      // tool batch directly instead of calling the model. We:
+      //   1. cap force_tool dispatches to 1 per turn (no chaining; if the
+      //      user wants chained resume they can do it via model in the next
+      //      turn);
+      //   2. set `recentForceToolDispatched=true` after a force_tool fires so
+      //      the steering layer's next evaluation falls back to ask_model and
+      //      we cannot loop on the same forced tool.
+      let forceToolDispatchedThisTurn = false
+      let recentForceToolDispatched = false
       // skill-resume C3: prepend a system warning when 70% of the iteration
       // budget is consumed, reminding the LLM to summarize and consult the user.
       let warned70Pct = false
@@ -1785,6 +1943,28 @@ export class TurnEngine {
             host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
             logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
           }
+        } else if (turnFrame?.skill) {
+          // Stage 7 — when `hasPlannedLeaseTrigger` is true the engine has
+          // already committed to long-skill resume (preferredSkillToolNames
+          // contains the typed action OR shouldUseLongSkillResumeBudget is
+          // set), but `observedLeaseSnapshot` is null so the frame's
+          // liveness has never been reconciled against the supervisor.
+          // Sample once now so the steering layer can decide between
+          // force_tool and ask_model with a real liveness signal instead
+          // of `unknown`. If the sample fails (no DB / no live task) the
+          // frame stays as `unknown` and steering falls back to ask_model.
+          try {
+            const plannedSnapshot = sampleSkillLeaseSnapshot(true)
+            if (plannedSnapshot && plannedSnapshot.skillId === turnFrame.skill.skillId) {
+              turnFrame = applySupervisorRuntimeToTurnFrame(turnFrame, plannedSnapshot)
+              previousLeaseSnapshot = plannedSnapshot
+              lastLeaseSnapshot = plannedSnapshot
+              host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
+              logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
+            }
+          } catch {
+            // sampling errors must never break the turn
+          }
         }
         ensureSkillBudgetLease(observedLeaseSnapshot ? 'observed_supervisor_snapshot' : 'planned')
         if (observedLeaseSnapshot) {
@@ -1863,6 +2043,10 @@ export class TurnEngine {
           convergencePromptInjected = true
         }
         iterations += 1
+        // Stage 7 — keep the per-turn diagnostic snapshot in sync so the
+        // terminal `turn_frame_summary` metric reports the actual iteration
+        // count regardless of which closure path fires.
+        turnSummaryIterations = iterations
         Object.assign(state.runBudgetState, consumeIterationBudget(state.runBudgetState))
         if (state.stepBudgetState) {
           state.stepBudgetState = {
@@ -1918,33 +2102,228 @@ export class TurnEngine {
           preferTextToolBridge: preferTextToolBridgeOnce,
         })
         appendLoggedToolSnapshot(state, host, toolLoopRequestSnapshot)
+        // Stage 7 — deterministic typed-action dispatch. When the steering
+        // layer flagged the frame as `mode='force_tool'` AND we haven't
+        // already force-dispatched this turn AND the typed tool is in the
+        // allowed set, skip the model call and synthesize a tool batch
+        // directly. The synthesized response flows through the existing
+        // post-batch pipeline (consumeExecutedToolBatch) so framePatch +
+        // projection commits + lease evaluation all run as usual. We cap at
+        // one force_tool dispatch per turn — chaining a second resume must
+        // come from the model in the next user turn.
+        //
+        // TODO(skill-child-loop): the force-tool dispatch + force-loop guard
+        // here is the parent loop pretending to be the child runner. When the
+        // child-loop runner lands, the parent will instead call
+        // `launchChildRun(contract, action.input)` and wait for one structured
+        // close event; the synthesized `tool_use`, the per-turn cap, and the
+        // cross-turn `forceLoopGuard` all move into the child. See
+        // docs/architecture/skill-child-loop-boundary.md §5.1.
+        // Stage E — force-tool dispatch decision. The steering layer publishes
+        // an explicit `FrameAction` carrying tool name, validated input, and
+        // an `inputDigest` keyed for cross-turn dedup. We never dispatch
+        // `{}`: missing required fields surface in `action.missingInputs[]`
+        // and route to a checkpoint instead.
+        const steeringAction = turnFrame?.steering?.action || null
+        const forceToolName = (
+          turnFrame
+            && turnFrame.steering?.mode === 'force_tool'
+            && !forceToolDispatchedThisTurn
+            && typeof turnFrame.steering.requiredToolName === 'string'
+            && turnFrame.steering.requiredToolName
+            && Array.isArray(routedAllowedToolNames)
+            && routedAllowedToolNames.includes(turnFrame.steering.requiredToolName)
+        ) ? turnFrame.steering.requiredToolName : null
+        // Cross-turn force-loop guard: when `runContract.forceLoopGuard`
+        // recorded the same `(toolName, inputDigest)` from a prior turn AND
+        // we are about to dispatch the same `(toolName, inputDigest)` again,
+        // checkpoint instead of forcing to break the loop deterministically.
+        const priorGuard = turnFrame?.skill?.runContract?.forceLoopGuard || null
+        const wouldRepeat = Boolean(
+          forceToolName
+            && steeringAction
+            && steeringAction.mode === 'force_tool'
+            && steeringAction.toolName === forceToolName
+            && priorGuard
+            && priorGuard.lastForceToolName === forceToolName
+            && priorGuard.lastForceInputDigest != null
+            && priorGuard.lastForceInputDigest === steeringAction.inputDigest
+            && (priorGuard.consecutiveForceCount || 0) >= 1,
+        )
+        // Schema preflight: same registry + Zod path tool-executor uses.
+        // When the FrameAction's mode is already 'checkpoint' (steering
+        // surfaced missing inputs at frame-build time), skip preflight; we
+        // already know we cannot dispatch.
+        let preflightFailureReason: string | null = null
+        let preflightMissingInputs: string[] = []
+        if (forceToolName && steeringAction && steeringAction.mode === 'force_tool') {
+          const definition = defaultToolRegistry.getToolDefinitionForExecution(forceToolName)
+          if (!definition) {
+            preflightFailureReason = 'tool_not_registered'
+          } else {
+            const schema = getToolInputSchemas()[forceToolName]
+            if (schema) {
+              const parsed = schema.safeParse(steeringAction.input || {})
+              if (!parsed.success) {
+                preflightMissingInputs = Array.from(new Set(
+                  parsed.error.issues.map((issue) => Array.isArray(issue.path) && issue.path.length > 0
+                    ? issue.path.map((segment) => String(segment)).join('.')
+                    : '(root)'),
+                ))
+                preflightFailureReason = preflightMissingInputs.length > 0
+                  ? `missing_${preflightMissingInputs[0]}`
+                  : 'input_validation_failed'
+              }
+            }
+          }
+        }
+        const shouldCheckpointInsteadOfForce = Boolean(
+          forceToolName
+            && (
+              wouldRepeat
+              || (steeringAction && steeringAction.mode === 'checkpoint')
+              || (steeringAction && steeringAction.missingInputs.length > 0)
+              || preflightFailureReason
+            ),
+        )
         let response: TurnModelResponse
-        try {
-          response = await host.requestToolLoopResponse({
-            session: toolLoopSession,
-            signal: request.abortSignal,
-            toolPolicy,
-            allowedToolNames: routedAllowedToolNames,
-            hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
-            allowBrowserTools: toolPolicy.allowBrowserTools,
-            providerContext: host.providerContext,
-            hasVideoInputs,
-            browserDecisionMode: browserDecision.mode,
-            runtimeSnapshot: {
-              browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
-              groups: reconciledRunCapabilities.runtimeSnapshot.groups,
-            },
-            visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
-            suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
-            capabilityLogLine: reconciledRunCapabilities.capabilityLogLine,
+        if (forceToolName && shouldCheckpointInsteadOfForce) {
+          // Tag the per-turn flag so the next iteration's steering re-eval
+          // doesn't immediately try to force again, then break to the
+          // post-iteration checkpoint path. We do NOT increment
+          // `forceToolDispatchedThisTurn` because no dispatch occurred.
+          recentForceToolDispatched = true
+          const checkpointReason = wouldRepeat
+            ? 'force_loop_guard'
+            : preflightFailureReason
+              || (steeringAction?.reason || 'missing_input')
+          const reminderTokens: string[] = [
+            `系统补充：本轮 force_tool 已挡板（reason=${checkpointReason}）。`,
+          ]
+          if (preflightMissingInputs.length > 0 || (steeringAction?.missingInputs.length || 0) > 0) {
+            const missing = preflightMissingInputs.length > 0
+              ? preflightMissingInputs
+              : (steeringAction?.missingInputs || [])
+            reminderTokens.push(`缺少必需输入：${missing.join(', ')}。`)
+          }
+          if (wouldRepeat) {
+            reminderTokens.push('上一轮已用相同输入强制调用过同一工具，避免死循环，请变更输入或换工具。')
+          }
+          reminderTokens.push('请补齐参数或换路径，再继续。')
+          session.messages.push({ role: 'user', content: reminderTokens.join('\n') })
+          logAgentMetric('turn_force_tool_checkpoint', {
+            sessionId: request.sessionId,
+            skillId: turnFrame?.skill?.skillId || null,
+            toolName: forceToolName,
+            reason: checkpointReason,
+            missingInputs: preflightMissingInputs.length > 0
+              ? preflightMissingInputs
+              : (steeringAction?.missingInputs || []),
             iteration: iterations,
-            requestedTransport: toolLoopRequestSnapshot.requestedTransport,
-            supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
-            preferTextToolBridgeOnce,
-            compressContext: () => compressSessionMessagesForRetry(session),
-          }) as TurnModelResponse
-        } finally {
+          })
+          host.log(
+            `[turn_force_tool_checkpoint] tool=${forceToolName} reason=${checkpointReason} iteration=${iterations}`,
+          )
+          // Mid-iteration checkpoint: surface the standard budget-limited
+          // termination path so the existing post-loop machinery (lifecycle,
+          // task projection, transcript) closes the turn with one structured
+          // event. Counts as a single close — never an unresolved tool_use.
+          budgetLimitedBeforeCompletion = true
+          if (turnFrame) {
+            turnFrame.terminalReason = 'checkpoint_user_input'
+          }
+          break
+        } else if (forceToolName) {
+          forceToolDispatchedThisTurn = true
+          recentForceToolDispatched = true
+          // FrameAction.input is guaranteed non-null/object here because
+          // steering only emits mode='force_tool' when validateForcedActionInput
+          // returned ok. Belt: if action somehow missing, fall back to {}.
+          const forcedInput: Record<string, unknown> = (steeringAction && steeringAction.input)
+            ? { ...steeringAction.input }
+            : {}
+          const forcedToolCall: TurnToolCall = {
+            id: `force_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+            name: forceToolName,
+            input: forcedInput,
+          }
+          response = {
+            text: '',
+            toolCalls: [forcedToolCall],
+            stopReason: 'tool_calls',
+            toolTransport: 'native',
+          } as TurnModelResponse
+          // Stage E — write back the cross-turn force-loop guard so the next
+          // turn's contract knows what (toolName, inputDigest) was just
+          // dispatched. We materialise this on the active turn frame as a
+          // synthetic framePatch.runContract; consumeExecutedToolBatch will
+          // merge this with whatever framePatch the typed action returns,
+          // and `applyTurnFramePatch` persists it on `frame.skill.runContract`.
+          if (turnFrame && turnFrame.skill) {
+            const dispatchedAt = new Date().toISOString()
+            const newDigest = steeringAction?.inputDigest || null
+            const sameAsPrior = Boolean(
+              priorGuard
+                && priorGuard.lastForceToolName === forceToolName
+                && priorGuard.lastForceInputDigest === newDigest,
+            )
+            const guardPatch: TurnFramePatch = {
+              runContract: {
+                ...(turnFrame.skill.runContract ? {
+                  // Preserve the contract anchor when we already have one so
+                  // mergeRunContractPartials can update without re-creating.
+                  skillId: turnFrame.skill.runContract.skillId,
+                } : {}),
+                forceLoopGuard: {
+                  lastForceToolName: forceToolName,
+                  lastForceInputDigest: newDigest,
+                  lastForceToolDispatchedAt: dispatchedAt,
+                  consecutiveForceCount: sameAsPrior
+                    ? (priorGuard?.consecutiveForceCount || 0) + 1
+                    : 1,
+                },
+              },
+            }
+            turnFrame = applyTurnFramePatch(turnFrame, guardPatch)
+          }
+          logAgentMetric('turn_force_tool_dispatched', {
+            sessionId: request.sessionId,
+            skillId: turnFrame?.skill?.skillId || null,
+            toolName: forceToolName,
+            iteration: iterations,
+            inputDigest: steeringAction?.inputDigest || null,
+            consecutiveForceCount: turnFrame?.skill?.runContract?.forceLoopGuard?.consecutiveForceCount || 1,
+          })
+          host.log(`[turn_force_tool_dispatched] tool=${forceToolName} iteration=${iterations} digest=${steeringAction?.inputDigest || 'null'}`)
           preferTextToolBridgeOnce = false
+        } else {
+          try {
+            response = await host.requestToolLoopResponse({
+              session: toolLoopSession,
+              signal: request.abortSignal,
+              toolPolicy,
+              allowedToolNames: routedAllowedToolNames,
+              hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
+              allowBrowserTools: toolPolicy.allowBrowserTools,
+              providerContext: host.providerContext,
+              hasVideoInputs,
+              browserDecisionMode: browserDecision.mode,
+              runtimeSnapshot: {
+                browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+                groups: reconciledRunCapabilities.runtimeSnapshot.groups,
+              },
+              visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+              suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+              capabilityLogLine: reconciledRunCapabilities.capabilityLogLine,
+              iteration: iterations,
+              requestedTransport: toolLoopRequestSnapshot.requestedTransport,
+              supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
+              preferTextToolBridgeOnce,
+              compressContext: () => compressSessionMessagesForRetry(session),
+            }) as TurnModelResponse
+          } finally {
+            preferTextToolBridgeOnce = false
+          }
         }
         if (response.fallback) {
           state.latestFallback = response.fallback
@@ -2211,6 +2590,12 @@ export class TurnEngine {
           longTypedSkillActionHeartbeatTimers.clear()
         }
 
+        // TODO(skill-child-loop): the long-typed-skill heartbeat + duration
+        // bookkeeping below is the parent loop watching the child's progress
+        // through the keyhole of one tool batch. When the child-loop runner
+        // lands, heartbeat + duration are the child's internal concern; the
+        // parent only observes one structured close event and applies its
+        // framePatch. See docs/architecture/skill-child-loop-boundary.md §5.1.
         const executeBatch = async () => {
           try {
             return normalizeToolBatchResult(await host.executeToolBatch({
@@ -2341,6 +2726,59 @@ export class TurnEngine {
               serializedResult,
             })
           }
+          // Stage 5 — collect any structured `framePatch` payloads returned
+          // by tools in this batch and apply them to the live TurnFrame so
+          // the next iteration's steering / dispatch sees the updated skill
+          // slice (newly-discovered task handles, validated config, liveness
+          // upgrades). Patches do NOT cross turns — each new user turn
+          // rebuilds the frame from the resolver.
+          const framePatches: TurnFramePatch[] = []
+          for (const executedTool of executedToolBatch.results) {
+            const result = executedTool.result as ToolExecutionOutput
+            if (result && result.framePatch) {
+              framePatches.push(result.framePatch)
+            }
+          }
+          if (framePatches.length > 0 && turnFrame) {
+            const merged = mergeTurnFramePatches(framePatches)
+            turnFrame = applyTurnFramePatch(turnFrame, merged)
+            const patchKeys = Object.keys(merged).filter((key) => {
+              const value = (merged as Record<string, unknown>)[key]
+              if (value == null) return false
+              if (Array.isArray(value)) return value.length > 0
+              if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0
+              return true
+            })
+            if (patchKeys.length > 0) {
+              try {
+                logAgentMetric('turn_frame_patch_applied', {
+                  sessionId: request.sessionId,
+                  iteration: iterations,
+                  patchKeys,
+                  skillId: turnFrame?.skill?.skillId || null,
+                  liveness: turnFrame?.liveness || null,
+                })
+              } catch {
+                // metrics must never break the turn
+              }
+            }
+          }
+          // Stage 7 — after each batch the next iteration's steering decision
+          // must see the freshly-patched frame AND the recent-force flag so
+          // we cannot infinite-loop on the same forced typed action. Re-runs
+          // `applySteeringToTurnFrame` (idempotent) with the updated extras.
+          if (turnFrame) {
+            turnFrame = applySteeringToTurnFrame(turnFrame, {
+              recentForceToolDispatched,
+            })
+          }
+          // The recent-force flag only suppresses the IMMEDIATELY-following
+          // iteration's force_tool re-issue; once we've consumed it for one
+          // steering re-evaluation, clear it so a later iteration that
+          // legitimately needs force_tool again (different liveness path)
+          // can use it. Combined with `forceToolDispatchedThisTurn`, the
+          // overall cap is still 1 force_tool dispatch per turn.
+          recentForceToolDispatched = false
           if (skillBudgetLeaseState) {
             const currentSnapshot = sampleSkillLeaseSnapshot()
             const currentFingerprint = currentSnapshot?.progressFingerprint || skillBudgetLeaseState.lastFingerprint

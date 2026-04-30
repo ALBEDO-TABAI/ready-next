@@ -417,6 +417,16 @@ export class SkillTaskSupervisor {
 
     const detachedStatus = statusFromDetached(detached?.status)
     const taskRunStatus = statusFromTaskRun(taskRun?.status)
+    // TODO(skill-child-loop): this reconciliation is the parent's
+    // out-of-band probe to answer "is something running and how far has it
+    // got?" without reading the child's transcript. When the child-loop
+    // runner lands the supervisor stays — it remains the parent's only
+    // sanctioned way to observe liveness — but its consumer set shrinks to
+    // the parent's next-turn resolver, used purely to choose between
+    // resume / wait-for-blocker / give-up. The fields produced here become
+    // the contract's `liveness` / `progress` / `status` /
+    // `progressFingerprint` / durable handles, nothing more.
+    // See docs/architecture/skill-child-loop-boundary.md §5.3.
     const runStateStatus = statusFromRunState(runState?.status)
     const normalizedStatuses = [detachedStatus, taskRunStatus, runStateStatus].filter(Boolean) as SkillTaskSupervisorStatus[]
     const terminalStatuses = normalizedStatuses.filter((status) => isTerminal(status))

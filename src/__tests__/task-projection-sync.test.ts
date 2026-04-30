@@ -615,6 +615,190 @@ test('syncTaskProjection keeps parent blocked while a detached child is still ru
   assert.equal(parent?.steps[0]?.childTasks?.[0]?.status, 'blocked')
 })
 
+test('syncTaskProjection demotes resuming interaction state when status is terminal', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    interactionState: 'resuming',
+    waitingFor: 'none',
+    blockedReason: null,
+    taskSummary: '已完成',
+    updatedAt: '2026-04-28T01:11:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    timestamp: '2026-04-28T01:11:00.000Z',
+  })
+
+  assert.equal(result?.status, 'done')
+  assert.equal(result?.interactionState, 'suspended')
+})
+
+test('syncTaskProjection clears stale blockedReason when frame snapshot says no stale blocker', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  records.set('task-with-stale-blocker', {
+    taskId: 'task-with-stale-blocker',
+    scopeId: 'scope-1',
+    runId: 'run-1',
+    taskType: 'short_task',
+    module: 'system',
+    taskTitle: '历史投影',
+    taskSummary: '历史摘要',
+    status: 'blocked',
+    interactionState: 'suspended',
+    waitingFor: 'background',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    blockedReason: '自动并行评分失败：ValueError: 未找到 provider: zai',
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: null,
+    recentArtifacts: [],
+    createdAt: '2026-04-26T10:00:00.000Z',
+    updatedAt: '2026-04-26T10:00:00.000Z',
+  })
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-with-stale-blocker',
+    phase: 'tool_running',
+    interactionState: 'running',
+    waitingFor: 'none',
+    blockedReason: null,
+    taskSummary: '继续运行',
+    updatedAt: '2026-04-29T05:00:00.000Z',
+  }, {
+    ...createPayload(),
+    taskId: 'task-with-stale-blocker',
+    phase: 'tool_running',
+    timestamp: '2026-04-29T05:00:00.000Z',
+  }, {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'VEA',
+        source: 'supervisor',
+        detachedTaskId: 'dst-x',
+        runStatePath: null,
+        outputDir: null,
+        action: null,
+        staleBlockerReason: null,
+      },
+    },
+  })
+
+  assert.equal(result?.blockedReason, null)
+})
+
+test('syncTaskProjection preserves stale blockedReason when no frame snapshot is provided', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  records.set('task-with-stale-blocker-2', {
+    taskId: 'task-with-stale-blocker-2',
+    scopeId: 'scope-1',
+    runId: 'run-1',
+    taskType: 'short_task',
+    module: 'system',
+    taskTitle: '历史投影',
+    taskSummary: '历史摘要',
+    status: 'blocked',
+    interactionState: 'suspended',
+    waitingFor: 'background',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    blockedReason: '自动并行评分失败：ValueError: 未找到 provider: zai',
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: null,
+    recentArtifacts: [],
+    createdAt: '2026-04-26T10:00:00.000Z',
+    updatedAt: '2026-04-26T10:00:00.000Z',
+  })
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  // Same scenario as the previous test, but no frame snapshot is provided —
+  // the existing carry-forward behavior must remain intact when the new turn
+  // does not explicitly clear the blocker (`blockedReason` left undefined).
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-with-stale-blocker-2',
+    phase: 'takeover',
+    interactionState: 'awaiting_confirmation',
+    waitingFor: 'background',
+    taskSummary: '继续待续跑',
+    updatedAt: '2026-04-29T05:01:00.000Z',
+  }, {
+    ...createPayload(),
+    taskId: 'task-with-stale-blocker-2',
+    phase: 'takeover',
+    timestamp: '2026-04-29T05:01:00.000Z',
+  })
+
+  assert.equal(result?.blockedReason, '自动并行评分失败：ValueError: 未找到 provider: zai')
+})
+
 test('syncTaskProjection preserves continuation data and retry action for failed projections', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const existing = {
@@ -683,4 +867,97 @@ test('syncTaskProjection preserves continuation data and retry action for failed
   assert.equal(result?.status, 'failed')
   assert.deepEqual(result?.resumableActions, ['retry'])
   assert.deepEqual(result?.continuationRef, existing.continuationRef)
+})
+
+test('Stage F1: syncTaskProjection prefers frame snapshot runContract truth for stable identity', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  // Summary intentionally lacks taskContinuation.skillId / detachedTaskId so
+  // the heuristic fallback path cannot resolve a skill-keyed identity. The
+  // frame snapshot's runContract is the only durable source of truth.
+  const summary: ScopeRunSummary = {
+    ...createSummary(),
+    taskType: 'short_task',
+    taskId: 'system-fallback',
+    taskContinuation: null,
+    recentArtifacts: [],
+    updatedAt: '2026-04-29T05:00:00.000Z',
+  }
+  const payload: ScopeRunEventPayload = {
+    ...createPayload(),
+    taskId: 'system-fallback',
+    runId: 'run-fallback',
+    module: 'system',
+    timestamp: '2026-04-29T05:00:00.000Z',
+  }
+
+  const result = await syncTaskProjection(store, summary, payload, {
+    projectionPatch: null,
+    transcriptEvents: [],
+    frameSnapshot: {
+      skill: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'VEA',
+        source: 'supervisor',
+        detachedTaskId: 'dst-from-contract',
+        runStatePath: '/tmp/contract/run_state.json',
+        outputDir: '/tmp/contract',
+        action: 'video_expert_pipeline',
+        staleBlockerReason: null,
+        runContract: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          toolName: 'skill_video_expert_pipeline',
+          actionInput: { url: 'https://example.com/v1' },
+          originalInput: { url: 'https://example.com/v1' },
+          sourceUrl: 'https://example.com/v1',
+          taskRunId: 'str-contract',
+          detachedTaskId: 'dst-from-contract',
+          jobId: null,
+          outputDir: '/tmp/contract',
+          runStatePath: '/tmp/contract/run_state.json',
+          artifactPaths: {
+            sceneScoresPath: '/tmp/contract/scene_scores.json',
+            deliveryReportPath: '/tmp/contract/delivery_report.json',
+          },
+          status: 'recoverable_paused',
+          liveness: 'recoverable_paused',
+          progress: {
+            stage: 'score_batches',
+            totalUnits: 97,
+            completedUnits: 12,
+            coverageRatio: 12 / 97,
+          },
+          blocker: { reason: 'budget_exhausted', stale: false },
+          projectionIdentity: { stableKey: 'skill:detached:dst-from-contract' },
+        },
+      },
+    },
+  })
+
+  // The contract's projectionIdentity.stableKey is the durable id this
+  // projection row should use — even though the summary's taskContinuation
+  // was empty.
+  assert.equal(result?.taskId, 'skill:detached:dst-from-contract')
+  assert.equal(records.has('skill:detached:dst-from-contract'), true)
 })

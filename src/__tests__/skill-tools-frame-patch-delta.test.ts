@@ -1,0 +1,240 @@
+/**
+ * Stage C C3+C4 + Stage D D2/D4/D6/D7 — Delta (Wave 2) framePatch emission.
+ *
+ * Verifies that the three inline detached handlers in `skills-tools.ts`
+ * (`skill_inspect_detached`, `skill_cancel_detached`, `skill_start_detached`)
+ * each emit a non-null `framePatch` carrying the contract-derived
+ * `runContract` slot, output paths, and discovered handles. These patches
+ * are read by Beta's `applyTurnFramePatch` at the end of every batch so the
+ * next iteration's frame and the next turn's contract loader see the
+ * tracker's truth without re-inspecting.
+ *
+ * Acceptance criterion 4: each handler emits a non-null `framePatch`.
+ */
+
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+import { executeSkillTool } from '../main/modules/tools/skills-tools'
+import { registerDetachedSkillTaskTracker } from '../main/modules/agent-control/detached-skill-task-tracker'
+import {
+  rememberLastReferenceSkill,
+  _resetLastReferenceSkillHintsForTests,
+} from '../main/modules/agent-control/skill-reference-hints'
+
+const SESSION_ID = 'scope-delta-detached'
+const SKILL_ID = 'video-expert-analyzer'
+
+function makeTracker(record: {
+  id: string
+  scopeId: string | null
+  sessionId: string | null
+  skillId: string
+  action: string
+  params: Record<string, unknown>
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+  outputDir: string | null
+  runStatePath: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+  startedAt: string
+  updatedAt: string
+  error?: string | null
+}) {
+  return {
+    inspect: (taskId: string) => (taskId === record.id ? { ...record } : null),
+    cancel: (taskId: string) => {
+      if (taskId !== record.id) return null
+      return { ...record, status: 'cancelled' as const, updatedAt: '2026-04-29T02:00:00.000Z' }
+    },
+    start: (request: Record<string, unknown>) => ({
+      ...record,
+      action: typeof request.action === 'string' ? request.action : record.action,
+      params: (typeof request.params === 'object' && request.params !== null)
+        ? request.params as Record<string, unknown>
+        : record.params,
+      startedAt: '2026-04-29T01:55:00.000Z',
+      updatedAt: '2026-04-29T01:55:00.000Z',
+      status: 'running' as const,
+    }),
+    list: () => [record],
+    findLatestForScope: () => null,
+    waitForTask: async () => null,
+  } as any
+}
+
+test('Delta D4: skill_inspect_detached emits framePatch with runContract carrying handles + paths', async () => {
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill(SESSION_ID, { id: SKILL_ID, name: 'Video Expert Analyzer' })
+  const tracker = makeTracker({
+    id: 'dst-inspect-1',
+    scopeId: SESSION_ID,
+    sessionId: SESSION_ID,
+    skillId: SKILL_ID,
+    action: 'video_expert_pipeline',
+    params: { url: 'https://example.com/video.mp4' },
+    status: 'running',
+    outputDir: '/tmp/vea-delta-inspect/output',
+    runStatePath: '/tmp/vea-delta-inspect/output/run_state.json',
+    sceneScoresPath: '/tmp/vea-delta-inspect/output/scene_scores.json',
+    deliveryReportPath: null,
+    startedAt: '2026-04-29T01:00:00.000Z',
+    updatedAt: '2026-04-29T01:30:00.000Z',
+  })
+  registerDetachedSkillTaskTracker(tracker)
+  try {
+    const result = await executeSkillTool(
+      'skill_inspect_detached',
+      { taskId: 'dst-inspect-1' },
+      SESSION_ID,
+    )
+    assert.notEqual(typeof result, 'string', 'expected ToolExecutionOutput shape, not bare string')
+    if (typeof result === 'string') return // type guard
+    assert.ok(result.framePatch, 'D4 regression: skill_inspect_detached did not emit framePatch')
+    const contract = result.framePatch?.runContract
+    assert.ok(contract, 'D4 regression: framePatch.runContract is null')
+    assert.equal(contract?.skillId, SKILL_ID)
+    assert.equal(contract?.detachedTaskId, 'dst-inspect-1')
+    assert.equal(contract?.outputDir, '/tmp/vea-delta-inspect/output')
+    assert.equal(contract?.runStatePath, '/tmp/vea-delta-inspect/output/run_state.json')
+    assert.equal(contract?.artifactPaths?.sceneScoresPath, '/tmp/vea-delta-inspect/output/scene_scores.json')
+    assert.equal(contract?.action, 'video_expert_pipeline')
+  } finally {
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('Delta D7: skill_cancel_detached emits terminal framePatch (livenessHint != running, status updates)', async () => {
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill(SESSION_ID, { id: SKILL_ID, name: 'Video Expert Analyzer' })
+  const tracker = makeTracker({
+    id: 'dst-cancel-1',
+    scopeId: SESSION_ID,
+    sessionId: SESSION_ID,
+    skillId: SKILL_ID,
+    action: 'video_expert_pipeline',
+    params: { url: 'https://example.com/video.mp4' },
+    status: 'running',
+    outputDir: '/tmp/vea-delta-cancel/output',
+    runStatePath: '/tmp/vea-delta-cancel/output/run_state.json',
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    startedAt: '2026-04-29T01:00:00.000Z',
+    updatedAt: '2026-04-29T01:30:00.000Z',
+  })
+  registerDetachedSkillTaskTracker(tracker)
+  try {
+    const result = await executeSkillTool(
+      'skill_cancel_detached',
+      { taskId: 'dst-cancel-1' },
+      SESSION_ID,
+    )
+    assert.notEqual(typeof result, 'string', 'expected ToolExecutionOutput shape')
+    if (typeof result === 'string') return
+    assert.ok(result.framePatch, 'D7 regression: skill_cancel_detached did not emit framePatch')
+    // After cancel, the next-frame liveness must NOT be `running_process` so
+    // the projection / capsule do not keep showing the task as live.
+    assert.notEqual(result.framePatch?.livenessHint, 'running_process')
+    // skillStatusUpdates carries the cancellation so the frame's skill
+    // slice's status flips off `running`.
+    assert.equal(result.framePatch?.skillStatusUpdates?.status, 'cancelled')
+    const contract = result.framePatch?.runContract
+    assert.ok(contract, 'D7 regression: framePatch.runContract is null')
+    assert.equal(contract?.detachedTaskId, 'dst-cancel-1')
+  } finally {
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+/**
+ * Delta D6 — `skill_start_detached` framePatch emission.
+ *
+ * The success path of `start_detached` calls `tracker.start(...)` and emits
+ * a framePatch carrying the new detached handles, paths inferred from the
+ * spawn params, and `livenessHint: 'running_process'`. Verifying this in
+ * isolation requires the runtime manager to know the skill's manifest so
+ * the action validation (`findSkillToolByNameForExecution`) resolves
+ * before the tracker call. Under `tsx --test` the runtime manager is
+ * unavailable (sqlite/electron deps fail to load), so this case is
+ * covered by source-level inspection: the implementation in
+ * `skills-tools.ts` lines ~1278–1340 wraps the success-path tracker
+ * record in `attachContractFramePatch` with `livenessHint: 'running_process'`
+ * and `activeArtifactRoots: [record.outputDir]`. End-to-end coverage
+ * lands in Wave 3 / Wave 4 integration tests.
+ */
+/**
+ * Delta C3+C4 — typed-action wrapper framePatch + resume payload completeness.
+ *
+ * The typed-action branch at the end of `executeSkillTool` (after the
+ * primitives branch returns) calls `getManager().runSkill(...)` and on the
+ * result must (a) emit `framePatch.runContract` carrying the validated
+ * `actionInput`, `originalInput`, `sourceUrl`, output paths, handles,
+ * status, liveness, and (b) call `rememberSkillRun` with a
+ * `resumePayload` that includes `originalInput`, action-specific paths
+ * (`sceneScoresPath` / `deliveryReportPath`), and the source URL.
+ *
+ * `getManager().runSkill(...)` requires the runtime manager which is not
+ * available under `tsx --test`. We verify the contract via source-level
+ * inspection of the typed-action wrapper region — Wave 4 integration
+ * tests will exercise the full path.
+ */
+test('Delta C3+C4: source-level proof — typed-action wrapper emits framePatch.runContract + complete resumePayload', () => {
+  const source = readFileSync(
+    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
+    'utf-8',
+  )
+
+  // The typed-action branch must call buildContractFramePatch with the
+  // action's contract and pass the runStatus-derived liveness hint.
+  // (We rely on a single-region grep — the helper functions and other
+  // branches above do not call `loadSkillRunContract` outside their
+  // respective branches.)
+  assert.match(
+    source,
+    /const contract = loadSkillRunContract\(\{[\s\S]+?actionInput: args[\s\S]+?\}\)/,
+    'C3 regression: typed-action wrapper must call loadSkillRunContract with actionInput=args (validated typed input).',
+  )
+  assert.match(
+    source,
+    /buildContractFramePatch\(\{[\s\S]+?contract,[\s\S]+?livenessHint: livenessHintForContract/,
+    'C3 regression: typed-action wrapper must call buildContractFramePatch with the loaded contract + liveness.',
+  )
+
+  // resumePayload completeness — must carry sceneScoresPath / deliveryReportPath / originalInput.
+  assert.match(
+    source,
+    /resumePayload: buildContinuityResumePayload\(\{[\s\S]+?sceneScoresPath,[\s\S]+?deliveryReportPath,[\s\S]+?originalInput: args/,
+    'C4 regression: rememberSkillRun resumePayload must include sceneScoresPath, deliveryReportPath, originalInput=args so the next turn can rebuild the action input.',
+  )
+
+  // The action and toolName must also be carried so the next turn picks
+  // the correct typed action wrapper to force.
+  assert.match(
+    source,
+    /resumePayload: buildContinuityResumePayload\(\{[\s\S]+?action: tool\.action[\s\S]+?toolName,/,
+    'C4 regression: resumePayload must include action + toolName for FrameAction reconstruction.',
+  )
+})
+
+test('Delta D6: source-level proof — start_detached success path emits framePatch via attachContractFramePatch', () => {
+  const source = readFileSync(
+    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
+    'utf-8',
+  )
+  // The success branch must invoke attachContractFramePatch and pass
+  // livenessHint: 'running_process' so the next-frame liveness reflects
+  // the freshly-spawned detached worker.
+  const startDetachedRegion = source.split("if (tool.name === 'skill_start_detached')")[1] || ''
+  const successBranch = startDetachedRegion.split("if (tool.name === 'skill_run_shell')")[0] || ''
+  assert.match(
+    successBranch,
+    /attachContractFramePatch\([\s\S]+?livenessHint: 'running_process'/,
+    'D6 regression: start_detached success branch must emit framePatch with livenessHint=running_process',
+  )
+  assert.match(
+    successBranch,
+    /detachedTaskId: record\.id/,
+    'D6 regression: start_detached must include detachedTaskId in the supervisor snapshot',
+  )
+})

@@ -1,0 +1,405 @@
+/**
+ * Stage 7 — `selectSteeringMode` / `buildTurnFrameSteering` decision matrix.
+ *
+ * Steering modes drive how the turn engine resolves the next iteration's
+ * action:
+ *   - `force_tool`  — frame is recoverable, typed action resolved → engine
+ *                     synthesizes a tool batch and skips the model call.
+ *   - `checkpoint`  — terminal failure or budget-exhausted-with-live-worker
+ *                     → engine ends the turn and returns to the user.
+ *   - `ask_model`   — default; preserves preferred-tool steering as before.
+ *
+ * `recentForceToolDispatched=true` always falls back to `ask_model` so we
+ * cannot infinite-loop on the same forced tool.
+ */
+
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  buildFrameAction,
+  buildTurnFrameSteering,
+  computeForceInputDigest,
+  deriveForcedActionInput,
+  selectSteeringMode,
+  validateForcedActionInput,
+} from '../main/modules/agent-control/turn-frame-steering'
+import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/turn-frame'
+import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
+
+/**
+ * Stage E test fixture — mints a `SkillRunContract` populated with the
+ * fields a force_tool dispatch needs (sourceUrl, paths, handles). Used by
+ * the new E2 assertions that exercise contract-derived input synthesis.
+ */
+function makeContract(overrides?: Partial<SkillRunContract>): SkillRunContract {
+  return {
+    skillId: 'video-expert-analyzer',
+    skillName: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    action: 'video_expert_pipeline',
+    actionInput: null,
+    originalInput: null,
+    sourceUrl: 'https://example.com/video.mp4',
+    taskRunId: 'str-vea',
+    detachedTaskId: 'dst-vea',
+    jobId: null,
+    outputDir: '/tmp/vea-output',
+    runStatePath: '/tmp/vea-output/run_state.json',
+    artifactRoots: ['/tmp/vea-output'],
+    artifactPaths: {
+      sceneScoresPath: '/tmp/vea-output/scene_scores.json',
+      deliveryReportPath: '/tmp/vea-output/delivery_report.json',
+    },
+    status: 'recoverable_paused',
+    liveness: 'recoverable_paused',
+    progress: {
+      stage: 'score_batches',
+      totalUnits: 97,
+      completedUnits: 0,
+      coverageRatio: 0,
+      fingerprint: 'score_batches:0/97',
+    },
+    blocker: { reason: null, stale: false },
+    projectionIdentity: { stableKey: 'projection-stable-key', supersedesProjectionIds: [] },
+    forceLoopGuard: {
+      lastForceToolName: null,
+      lastForceInputDigest: null,
+      lastForceToolDispatchedAt: null,
+      consecutiveForceCount: 0,
+    },
+    updatedAt: '2026-04-29T01:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeFrame(overrides?: Partial<TurnFrame>): TurnFrame {
+  // Stage E: `makeFrame` now ships a contract by default so input synthesis
+  // produces a dispatch-ready `url` for VEA pipeline. Tests that need to
+  // exercise the missing-inputs path explicitly null out `runContract`.
+  return {
+    ids: { sessionId: 'scope-vea', requestId: 'req-1' },
+    mode: 'skill_resume',
+    userIntent: 'continue',
+    skill: {
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      source: 'supervisor',
+      confidence: 80,
+      taskRunId: 'str-vea',
+      detachedTaskId: 'dst-vea',
+      action: 'video_expert_pipeline',
+      runStatePath: '/tmp/vea-output/run_state.json',
+      outputDir: '/tmp/vea-output',
+      artifactPaths: {
+        sceneScoresPath: '/tmp/vea-output/scene_scores.json',
+        deliveryReportPath: '/tmp/vea-output/delivery_report.json',
+      },
+      status: 'recoverable_paused',
+      staleBlockerReason: null,
+      runContract: makeContract(),
+    },
+    liveness: 'recoverable_paused',
+    progress: { stage: 'score_batches', totalUnits: 97, completedUnits: 0, coverageRatio: 0, fingerprint: 'fp' },
+    steering: { mode: 'ask_model', requiredToolName: null, preferredToolNames: [], systemReminder: null, action: null },
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: false },
+    activeArtifactRoots: [],
+    configValidation: null,
+    terminalReason: null,
+    ...overrides,
+  }
+}
+
+test('selectSteeringMode: skill_resume + recoverable_paused + typed action → force_tool', () => {
+  const frame = makeFrame()
+  assert.equal(selectSteeringMode(frame), 'force_tool')
+})
+
+test('buildTurnFrameSteering: force_tool sets requiredToolName to typed action', () => {
+  const frame = makeFrame()
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'force_tool')
+  assert.equal(steering.requiredToolName, 'skill_video_expert_pipeline')
+  assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+  assert.match(steering.systemReminder || '', /force_tool/)
+  assert.match(steering.systemReminder || '', /skill_video_expert_pipeline/)
+})
+
+test('selectSteeringMode: skill_repair + ready_to_resume → force_tool', () => {
+  const frame = makeFrame({
+    mode: 'skill_repair',
+    liveness: 'ready_to_resume',
+    userIntent: 'repair_config',
+  })
+  assert.equal(selectSteeringMode(frame), 'force_tool')
+})
+
+test('selectSteeringMode: budget exhausted + running_process → checkpoint', () => {
+  const frame = makeFrame({
+    liveness: 'running_process',
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: true },
+  })
+  assert.equal(selectSteeringMode(frame), 'checkpoint')
+})
+
+test('buildTurnFrameSteering: checkpoint clears requiredToolName/preferredToolNames', () => {
+  const frame = makeFrame({
+    liveness: 'running_process',
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: true },
+  })
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'checkpoint')
+  assert.equal(steering.requiredToolName, null)
+  assert.deepEqual(steering.preferredToolNames, [])
+  assert.match(steering.systemReminder || '', /checkpoint/)
+})
+
+test('selectSteeringMode: failed liveness with skill present → checkpoint', () => {
+  const frame = makeFrame({ liveness: 'failed' })
+  assert.equal(selectSteeringMode(frame), 'checkpoint')
+})
+
+test('selectSteeringMode: blocked liveness → ask_model (user input may be needed)', () => {
+  const frame = makeFrame({ liveness: 'blocked' })
+  assert.equal(selectSteeringMode(frame), 'ask_model')
+})
+
+test('selectSteeringMode: recent_progress liveness → ask_model (work may already be progressing)', () => {
+  const frame = makeFrame({ liveness: 'recent_progress' })
+  assert.equal(selectSteeringMode(frame), 'ask_model')
+})
+
+test('selectSteeringMode: no skill slice → ask_model', () => {
+  const frame = makeFrame({ skill: null, mode: 'general' })
+  assert.equal(selectSteeringMode(frame), 'ask_model')
+})
+
+test('selectSteeringMode: recentForceToolDispatched=true downgrades force_tool to ask_model', () => {
+  const frame = makeFrame()
+  // First call returns force_tool.
+  assert.equal(selectSteeringMode(frame), 'force_tool')
+  // Caller signals that the immediately preceding iteration already
+  // force-dispatched the same typed action — fall back to ask_model so we
+  // cannot loop on the same forced tool.
+  assert.equal(
+    selectSteeringMode(frame, { recentForceToolDispatched: true }),
+    'ask_model',
+  )
+})
+
+test('buildTurnFrameSteering: recentForceToolDispatched still preserves preferredToolNames', () => {
+  const frame = makeFrame()
+  const steering = buildTurnFrameSteering(frame, { recentForceToolDispatched: true })
+  assert.equal(steering.mode, 'ask_model')
+  // ask_model retains the typed action in preferredToolNames so the model
+  // still sees the recommended next step. This keeps the model nudged
+  // toward the typed action even when we cannot force it.
+  assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+})
+
+test('selectSteeringMode: force_tool requires resolvable typed action — falls back when action unresolvable', () => {
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      skillId: 'no-default-skill',
+      action: null,
+    },
+    mode: 'skill_resume',
+    liveness: 'recoverable_paused',
+  })
+  // Without a default resume action AND no explicit action, we cannot
+  // resolve a typed tool name, so we fall back to ask_model.
+  assert.equal(selectSteeringMode(frame), 'ask_model')
+})
+
+test('selectSteeringMode: failed liveness short-circuits even with typed action available', () => {
+  const frame = makeFrame({ liveness: 'failed' })
+  // Once terminal, no typed action gets forced. Checkpoint and let the user
+  // decide.
+  assert.equal(selectSteeringMode(frame), 'checkpoint')
+})
+
+const NON_FORCE_LIVENESS_STATES: TurnFrameLiveness[] = [
+  'unknown',
+  'blocked',
+  'recent_progress',
+  'running_process',
+  'done',
+]
+
+for (const liveness of NON_FORCE_LIVENESS_STATES) {
+  test(`selectSteeringMode: liveness=${liveness} does not produce force_tool`, () => {
+    const frame = makeFrame({ liveness })
+    assert.notEqual(selectSteeringMode(frame), 'force_tool')
+  })
+}
+
+// ─── Stage E2: contract-derived input synthesis ──────────────────────────
+
+test('E2: deriveForcedActionInput pulls url from contract.sourceUrl for video_expert_pipeline', () => {
+  const frame = makeFrame()
+  const contract = frame.skill!.runContract!
+  const input = deriveForcedActionInput({
+    toolName: 'skill_video_expert_pipeline',
+    contract,
+    frame,
+  })
+  assert.equal(input.url, 'https://example.com/video.mp4')
+  assert.equal(input.outputDir, '/tmp/vea-output')
+})
+
+test('E2: deriveForcedActionInput pulls sceneScoresPath from contract.artifactPaths for video_expert_ai_analyze', () => {
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    skill: { ...makeFrame().skill!, action: 'video_expert_ai_analyze', runContract: contract },
+  })
+  const input = deriveForcedActionInput({
+    toolName: 'skill_video_expert_ai_analyze',
+    contract,
+    frame,
+  })
+  assert.equal(input.sceneScoresPath, '/tmp/vea-output/scene_scores.json')
+  assert.equal(input.outputDir, '/tmp/vea-output')
+})
+
+test('E2: validateForcedActionInput surfaces missing url for video_expert_pipeline when contract lacks sourceUrl', () => {
+  const contract = makeContract({ sourceUrl: null, originalInput: null, actionInput: null })
+  const frame = makeFrame({
+    skill: { ...makeFrame().skill!, runContract: contract },
+  })
+  const input = deriveForcedActionInput({
+    toolName: 'skill_video_expert_pipeline',
+    contract,
+    frame,
+  })
+  const validated = validateForcedActionInput('skill_video_expert_pipeline', input)
+  assert.equal(validated.ok, false)
+  if (!validated.ok) {
+    assert.deepEqual(validated.missingInputs, ['url'])
+  }
+})
+
+test('E2: validateForcedActionInput surfaces missing sceneScoresPath for video_expert_ai_analyze', () => {
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      runContract: contract,
+      artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+    },
+  })
+  const input = deriveForcedActionInput({
+    toolName: 'skill_video_expert_ai_analyze',
+    contract,
+    frame,
+  })
+  const validated = validateForcedActionInput('skill_video_expert_ai_analyze', input)
+  assert.equal(validated.ok, false)
+  if (!validated.ok) {
+    assert.deepEqual(validated.missingInputs, ['sceneScoresPath'])
+  }
+})
+
+test('E2: computeForceInputDigest is deterministic regardless of property order', () => {
+  const a = { url: 'https://example.com/v.mp4', outputDir: '/tmp/x' }
+  const b = { outputDir: '/tmp/x', url: 'https://example.com/v.mp4' }
+  assert.equal(computeForceInputDigest(a), computeForceInputDigest(b))
+})
+
+test('E2: computeForceInputDigest distinguishes different inputs', () => {
+  const a = { url: 'https://example.com/v.mp4' }
+  const b = { url: 'https://example.com/other.mp4' }
+  assert.notEqual(computeForceInputDigest(a), computeForceInputDigest(b))
+})
+
+test('E2: computeForceInputDigest distinguishes null from {}', () => {
+  assert.notEqual(computeForceInputDigest(null), computeForceInputDigest({}))
+})
+
+test('E2: buildFrameAction returns force_tool action with input + digest when contract is complete', () => {
+  const frame = makeFrame()
+  const action = buildFrameAction({
+    frame,
+    decidedMode: 'force_tool',
+    toolName: 'skill_video_expert_pipeline',
+  })
+  assert.ok(action, 'expected non-null FrameAction')
+  assert.equal(action!.mode, 'force_tool')
+  assert.equal(action!.toolName, 'skill_video_expert_pipeline')
+  assert.equal((action!.input as Record<string, unknown>)?.url, 'https://example.com/video.mp4')
+  assert.ok(typeof action!.inputDigest === 'string' && action!.inputDigest.length === 16)
+  assert.deepEqual(action!.missingInputs, [])
+})
+
+test('E2: buildFrameAction downgrades to checkpoint with missingInputs when contract lacks url', () => {
+  const contract = makeContract({ sourceUrl: null, originalInput: null, actionInput: null })
+  const frame = makeFrame({
+    skill: { ...makeFrame().skill!, runContract: contract },
+  })
+  const action = buildFrameAction({
+    frame,
+    decidedMode: 'force_tool',
+    toolName: 'skill_video_expert_pipeline',
+  })
+  assert.ok(action, 'expected non-null FrameAction')
+  assert.equal(action!.mode, 'checkpoint')
+  assert.equal(action!.toolName, 'skill_video_expert_pipeline')
+  assert.deepEqual(action!.missingInputs, ['url'])
+  assert.match(action!.reason, /missing_url/)
+})
+
+test('E2: buildTurnFrameSteering populates steering.action with FrameAction when force_tool', () => {
+  const frame = makeFrame()
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'force_tool')
+  assert.ok(steering.action, 'expected steering.action to be populated')
+  assert.equal(steering.action!.mode, 'force_tool')
+  assert.equal(steering.action!.toolName, 'skill_video_expert_pipeline')
+  assert.equal(
+    (steering.action!.input as Record<string, unknown>)?.url,
+    'https://example.com/video.mp4',
+  )
+  assert.ok(typeof steering.action!.inputDigest === 'string' && steering.action!.inputDigest.length === 16)
+})
+
+test('E2: buildTurnFrameSteering downgrades to checkpoint when contract lacks required url', () => {
+  const contract = makeContract({ sourceUrl: null, originalInput: null, actionInput: null })
+  const frame = makeFrame({
+    skill: { ...makeFrame().skill!, runContract: contract },
+  })
+  const steering = buildTurnFrameSteering(frame)
+  // Engine reads steering.mode for dispatch eligibility; downgrade flips it
+  // from force_tool → checkpoint so dispatch never sees `{}`.
+  assert.equal(steering.mode, 'checkpoint')
+  assert.ok(steering.action, 'expected steering.action to be populated')
+  assert.equal(steering.action!.mode, 'checkpoint')
+  assert.deepEqual(steering.action!.missingInputs, ['url'])
+  assert.match(steering.action!.reason, /missing_url/)
+  assert.match(steering.systemReminder || '', /url/)
+})
+
+test('E2: buildTurnFrameSteering preserves contract.actionInput when provided (Wave 2 happy path)', () => {
+  const contract = makeContract({
+    actionInput: { url: 'https://wave2.example/movie.mp4', outputDir: '/tmp/wave2' },
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    skill: { ...makeFrame().skill!, runContract: contract },
+  })
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'force_tool')
+  assert.equal(
+    (steering.action!.input as Record<string, unknown>)?.url,
+    'https://wave2.example/movie.mp4',
+  )
+  // outputDir came from actionInput, not contract.outputDir directly.
+  assert.equal((steering.action!.input as Record<string, unknown>)?.outputDir, '/tmp/wave2')
+})

@@ -31,6 +31,7 @@ import { BROWSER_INTERACTION_SCHEMAS } from './browser-interaction-schemas'
 import { BROWSER_CONTENT_SCHEMAS } from './browser-content-schemas'
 import { SYSTEM_SCHEMAS } from './system-schemas'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
+import { getStaticSkillActionSchemas } from '../skills-tools-static'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SKILL_PRIMITIVE_SCHEMAS,
@@ -44,6 +45,13 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...BROWSER_INTERACTION_SCHEMAS,
   ...BROWSER_CONTENT_SCHEMAS,
   ...SYSTEM_SCHEMAS,
+  // Stage B5 — static manifest-derived skill-action schemas. Spread BEFORE
+  // the per-domain entries so any name collision (in practice none — skill_*
+  // names are namespaced) is overridden by the curated static maps. The
+  // tool-executor already merges `{...getSkillActionSchemas(), ...getToolInputSchemas()}`
+  // with dynamic-first / static-second precedence, so when the runtime manager
+  // boots its dynamic schemas still win over this static fallback.
+  ...getStaticSkillActionSchemas(),
   // PR 12 folds in the dynamic skill-action schemas via getSkillActionSchemas().
 }
 

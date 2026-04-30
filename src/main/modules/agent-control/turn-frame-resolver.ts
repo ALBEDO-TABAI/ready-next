@@ -1,5 +1,5 @@
 import type { ReferenceSkillHint } from './skill-reference-hints'
-import type { TaskProjectionRecord } from './run-contracts'
+import { loadSkillRunContract, type TaskProjectionRecord } from './run-contracts'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import {
@@ -164,6 +164,22 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
       : null
 
   const userIntent = inputs.userIntent || 'unknown'
+
+  // Step C5 — when supervisor snapshot exposes durable handles, build a
+  // SkillRunContract read model and place it on frame.skill.runContract so
+  // the next iteration's steering / dispatch decisions can derive forced
+  // typed action input from the contract instead of from in-memory locals.
+  const runContract = context
+    ? loadSkillRunContract({
+      sessionId: inputs.sessionId,
+      skillId: context.skillId,
+      outputDir: context.outputDir,
+      runStatePath: context.runStatePath,
+      supervisorSnapshot: supervisorForContext,
+      referenceHint: inputs.referenceHint || null,
+    })
+    : null
+
   const frame: TurnFrame = {
     ids: {
       sessionId: inputs.sessionId || null,
@@ -188,6 +204,7 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
         },
         status: context.status,
         staleBlockerReason: context.staleBlockerReason,
+        runContract,
       }
       : null,
     liveness: inferLiveness(context, supervisorForContext),
@@ -197,12 +214,15 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
       requiredToolName: null,
       preferredToolNames: [],
       systemReminder: null,
+      action: null,
     },
     budget: {
       leaseEndIteration: null,
       hardCapIteration: null,
       exhausted: false,
     },
+    activeArtifactRoots: [],
+    configValidation: null,
     terminalReason: null,
   }
   return applySteeringToTurnFrame(frame)

@@ -505,25 +505,39 @@ function buildStaticSkillMetadata(toolNames: readonly string[]): Map<string, Too
   return metadata
 }
 
+function buildStaticSkillToolDefinition(toolName: string): ToolDefinition | null {
+  if (!STATIC_SKILL_TOOL_NAMES_BOOT_SAFE.includes(toolName)) return null
+  const skillMeta = getStaticSkillActionMeta(toolName)
+  return buildToolDefinition('skills', toolName, {
+    description: `${toolName} fallback schema`,
+    schema: null,
+    executionTimeoutMs: skillMeta?.timeoutMs,
+    requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
+  })
+}
+
 function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinition | null {
   try {
     const def = findSkillToolByNameForExecution(toolName)
-    if (!def) return null
-    return buildToolDefinition('skills', def.name, {
-      description: def.description,
-      schema: null,
-      executionTimeoutMs: def.timeoutMs,
-      requiresExplicitAllowlist: def.visibility === 'internal',
-    })
+    if (def) {
+      return buildToolDefinition('skills', def.name, {
+        description: def.description,
+        schema: null,
+        executionTimeoutMs: def.timeoutMs,
+        requiresExplicitAllowlist: def.visibility === 'internal',
+      })
+    }
+    // B1 — when the runtime-manager lookup returns null (e.g. boot ordering
+    // or test contexts where electron's `app` is unavailable), fall back to
+    // the boot-safe static skill tool table the same way the catch-path does.
+    // Without this, `findSkillToolByNameForExecution` swallows the throw and
+    // returns null, so the catch branch below never runs and dispatch fails
+    // with `tool_not_registered` even when the action exists in the static
+    // manifest. Aligning both branches makes "static skill action exists" ≡
+    // "dispatch can execute it."
+    return buildStaticSkillToolDefinition(toolName)
   } catch {
-    if (!STATIC_SKILL_TOOL_NAMES_BOOT_SAFE.includes(toolName)) return null
-    const skillMeta = getStaticSkillActionMeta(toolName)
-    return buildToolDefinition('skills', toolName, {
-      description: `${toolName} fallback schema`,
-      schema: null,
-      executionTimeoutMs: skillMeta?.timeoutMs,
-      requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
-    })
+    return buildStaticSkillToolDefinition(toolName)
   }
 }
 

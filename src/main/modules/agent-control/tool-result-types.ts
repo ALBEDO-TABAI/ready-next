@@ -1,3 +1,5 @@
+import type { TurnFramePatch } from './turn-frame'
+
 export type ToolResultShape = 'text' | 'json' | 'projection_patch'
 
 export type ToolInteractionHint =
@@ -10,6 +12,14 @@ export interface ToolExecutionOutput {
   data: Record<string, unknown> | null
   projectionPatch: Record<string, unknown> | null
   interactionHint: ToolInteractionHint | null
+  /**
+   * Stage 5 — optional structured updates a tool can return to mutate the
+   * next iteration's TurnFrame (active artifact roots, validated config,
+   * discovered task handles, liveness hints). Null when the tool didn't
+   * surface any frame-level change. The turn engine merges patches across
+   * a batch and applies them deterministically.
+   */
+  framePatch: TurnFramePatch | null
 }
 
 export type ToolExecutionResultLike = string | ToolExecutionOutput
@@ -21,6 +31,7 @@ export function createToolExecutionOutput(
     data?: Record<string, unknown> | null
     projectionPatch?: Record<string, unknown> | null
     interactionHint?: ToolInteractionHint | null
+    framePatch?: TurnFramePatch | null
   },
 ): ToolExecutionOutput {
   const projectionPatch = options?.projectionPatch || null
@@ -34,6 +45,7 @@ export function createToolExecutionOutput(
     data,
     projectionPatch,
     interactionHint: options?.interactionHint || null,
+    framePatch: options?.framePatch || null,
   }
 }
 
@@ -48,6 +60,7 @@ export function normalizeToolExecutionOutput(output: ToolExecutionResultLike): T
     data: output.data && typeof output.data === 'object' ? output.data : null,
     projectionPatch: output.projectionPatch && typeof output.projectionPatch === 'object' ? output.projectionPatch : null,
     interactionHint: output.interactionHint || null,
+    framePatch: output.framePatch && typeof output.framePatch === 'object' ? output.framePatch : null,
   }
 }
 

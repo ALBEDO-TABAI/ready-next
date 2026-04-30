@@ -51,6 +51,60 @@ function safeParse<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+function artifactsMatchSibling(
+  artifacts: Array<Record<string, unknown>> | undefined | null,
+  normalizedOutputDir: string | null,
+  runStatePath: string | null,
+): boolean {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return false
+  for (const artifact of artifacts) {
+    if (!artifact || typeof artifact !== 'object') continue
+    const path = typeof artifact.path === 'string' ? artifact.path : ''
+    if (runStatePath && path && path === runStatePath) return true
+    if (
+      normalizedOutputDir
+      && path
+      && path.split(/[\\/]/).pop() === 'run_state.json'
+      && (path.startsWith(`${normalizedOutputDir}/`) || path.startsWith(`${normalizedOutputDir}\\`))
+    ) {
+      return true
+    }
+    if (normalizedOutputDir) {
+      const meta = artifact.meta as Record<string, unknown> | undefined
+      const metaOutputDir = typeof meta?.outputDir === 'string' ? meta.outputDir : null
+      if (metaOutputDir && metaOutputDir.replace(/[\\/]+$/, '') === normalizedOutputDir) return true
+      if (
+        path
+        && (path === normalizedOutputDir
+          || path.startsWith(`${normalizedOutputDir}/`)
+          || path.startsWith(`${normalizedOutputDir}\\`))
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Stage F3 (Zeta) — extract any skillId carried on artifact meta. Rows that
+ * never recorded a skillId (legacy short_task) return null and remain
+ * matchable; rows that explicitly carry a different skillId are rejected
+ * by the caller so cross-skill non-supersede holds.
+ */
+function artifactSiblingSkillId(
+  artifacts: Array<Record<string, unknown>> | undefined | null,
+): string | null {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return null
+  for (const artifact of artifacts) {
+    if (!artifact || typeof artifact !== 'object') continue
+    const meta = artifact.meta as Record<string, unknown> | undefined
+    const value = typeof meta?.skillId === 'string' ? meta.skillId.trim() : ''
+    if (value) return value
+  }
+  return null
+}
+
 export class TaskProjectionRepository implements TaskProjectionStore {
   constructor(private readonly dbManager: TaskProjectionDatabaseAccessor) {}
 
@@ -166,6 +220,57 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     db.prepare('DELETE FROM task_projections WHERE scope_id = ?').run(scopeId)
+  }
+
+  /**
+   * Stage 6 supersede helper. Returns non-terminal (`running`/`blocked`/`queued`)
+   * legacy `module='system' task_type='short_task'` projections in the same
+   * scope whose recentArtifacts JSON references the same outputDir (via
+   * artifact path prefix or `meta.outputDir`) or the same runStatePath
+   * (via artifact path equality, or any `run_state.json` filename inside
+   * the outputDir). Skill-keyed rows (taskId starting with `skill:`) are
+   * excluded — those are already the new identities being committed.
+   *
+   * Stage F3 (Zeta) — `skillId` is plumbed into the filter so two skills
+   * that happen to share an output path do NOT supersede each other:
+   *   - When `args.skillId` is null/undefined the helper behaves as before.
+   *   - When `args.skillId` is provided and a candidate row carries a
+   *     different `meta.skillId` on its artifacts, that row is rejected.
+   *   - Legacy rows without any `meta.skillId` continue to match (they
+   *     pre-date the skill-keyed identity scheme and must still be
+   *     superseded by the freshly-committed skill row).
+   */
+  findByArtifactSiblings(args: {
+    scopeId: string
+    skillId: string | null
+    outputDir: string | null
+    runStatePath: string | null
+  }): TaskProjectionRecord[] {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const { scopeId, skillId, outputDir, runStatePath } = args
+    if (!outputDir && !runStatePath) return []
+    const rows = db.prepare(
+      `SELECT * FROM task_projections
+       WHERE scope_id = ?
+         AND module = 'system'
+         AND task_type = 'short_task'
+         AND status NOT IN ('cancelled', 'done')`,
+    ).all<TaskProjectionRow>(scopeId)
+    const normalizedOutputDir = outputDir ? outputDir.replace(/[\\/]+$/, '') : null
+    const normalizedSkillId = typeof skillId === 'string' && skillId.trim() ? skillId.trim() : null
+    return rows
+      .filter((row) => !row.task_id.startsWith('skill:'))
+      .map((row) => this.mapRow(row))
+      .filter((record) => {
+        const artifacts = record.recentArtifacts as Array<Record<string, unknown>> | undefined
+        if (!artifactsMatchSibling(artifacts, normalizedOutputDir, runStatePath)) return false
+        if (!normalizedSkillId) return true
+        const siblingSkillId = artifactSiblingSkillId(artifacts)
+        // Reject rows that explicitly belong to a different skill. Legacy
+        // rows without a recorded skillId remain matchable.
+        return !siblingSkillId || siblingSkillId === normalizedSkillId
+      })
   }
 
   private mapRow(row: TaskProjectionRow): TaskProjectionRecord {

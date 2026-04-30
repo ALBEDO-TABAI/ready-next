@@ -14,6 +14,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import type { SkillHostRequirements } from '../../../../shared/skill-host-contract'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
+import type { TurnFramePatch } from '../../agent-control/turn-frame'
 
 export interface PatchConfigOperation {
   op: 'set' | 'delete'
@@ -391,6 +392,44 @@ export async function executePatchConfig(
   parseJsonFile(target.resolvedPath)
   const validation = validateConfig(deps.skillId, files)
   const staleBlocker = clearStaleConfigBlockerAfterValidation(deps, validation)
+
+  // Stage D5 — emit framePatch.configValidation so the next iteration's
+  // frame sees the validation outcome without re-reading the config file.
+  // On success, also clear the contract blocker via a runContract partial so
+  // steering does not keep showing the run as `blocked`. On failure, surface
+  // the first issue as the blocker reason so the frame stays blocked.
+  const framePatch: TurnFramePatch = {
+    configValidation: {
+      valid: validation.ok,
+      reason: validation.ok ? undefined : (validation.issues[0] || 'config_validation_failed'),
+      message: validation.ok
+        ? `Config "${target.id}" validated successfully.`
+        : validation.issues.join('; ') || 'Config validation failed.',
+    },
+  }
+  if (validation.ok) {
+    framePatch.runContract = {
+      blocker: { reason: null, stale: false },
+      ...(deps.skillId ? { skillId: deps.skillId } : {}),
+    }
+    if (staleBlocker?.cleared) {
+      framePatch.skillStatusUpdates = {
+        ...(framePatch.skillStatusUpdates || {}),
+        staleBlockerReason: null,
+        status: 'running',
+      }
+    }
+  } else {
+    framePatch.runContract = {
+      blocker: {
+        reason: validation.issues[0] || 'config_validation_failed',
+        stale: false,
+      },
+      status: 'blocked',
+      ...(deps.skillId ? { skillId: deps.skillId } : {}),
+    }
+  }
+
   return createToolExecutionOutput(
     `Patched config "${target.id}" (${operations.length} operation${operations.length === 1 ? '' : 's'}). Validation ${validation.ok ? 'passed' : 'blocked'}${staleBlocker?.cleared ? '; stale blocker cleared' : ''}.`,
     {
@@ -405,6 +444,7 @@ export async function executePatchConfig(
         validation,
         staleBlocker,
       },
+      framePatch,
     },
   )
 }

@@ -130,3 +130,86 @@ test('resolveTurnFrame keeps typed resume steering for recoverable paused VEA ou
   assert.equal(frame.liveness, 'recoverable_paused')
   assert.equal(frame.steering.preferredToolNames[0], 'skill_video_expert_pipeline')
 })
+
+test('resolveTurnFrame produces force_tool steering for recoverable paused VEA frame', () => {
+  // Stage 7 — typed-action force path. Recoverable paused supervisor frames
+  // with a resolvable typed skill action should mark steering as `force_tool`
+  // so the turn engine can synthesize the tool batch instead of asking the
+  // model for another diagnostic loop.
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-vea',
+    requestId: 'req-force',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+
+  assert.equal(frame.steering.mode, 'force_tool')
+  assert.equal(frame.steering.requiredToolName, 'skill_video_expert_pipeline')
+})
+
+test('buildTurnFrameSteering: budget-exhausted running_process produces checkpoint mode', () => {
+  // Stage 7 — budget exhausted with a still-live background worker means the
+  // user-facing turn must close cleanly. Force/preferred fields are cleared.
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-vea',
+    requestId: 'req-bg',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'background_running' as any,
+      hasLiveWork: true,
+      hasRecentProgress: true,
+    }),
+  })
+  // Mark the budget as exhausted (the resolver does not own budget; the
+  // turn engine sets this at lease evaluation time, so we patch it here
+  // for the steering re-derivation contract under test).
+  const exhaustedFrame = {
+    ...frame,
+    budget: { ...frame.budget, exhausted: true },
+  }
+  const steering = buildTurnFrameSteering(exhaustedFrame)
+  assert.equal(steering.mode, 'checkpoint')
+  assert.equal(steering.requiredToolName, null)
+  assert.deepEqual(steering.preferredToolNames, [])
+})
+
+test('buildTurnFrameSteering: failed-liveness skill frame produces checkpoint mode', () => {
+  // Stage 7 — a terminal failure cannot be force-resumed; the user has to
+  // see the failure first.
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-vea',
+    requestId: 'req-failed',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'failed' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'checkpoint')
+})
+
+test('buildTurnFrameSteering: recentForceToolDispatched falls back to ask_model', () => {
+  // Stage 7 — once a force_tool has just dispatched, the very next iteration
+  // must NOT force again, otherwise we infinite-loop on the same typed
+  // action. The `extras.recentForceToolDispatched=true` signal downgrades
+  // the steering mode to ask_model while keeping preferred-tool nudging.
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-vea',
+    requestId: 'req-recent',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+  const steering = buildTurnFrameSteering(frame, { recentForceToolDispatched: true })
+  assert.equal(steering.mode, 'ask_model')
+  assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+})
