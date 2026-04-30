@@ -4,6 +4,7 @@ export const RULE_IDS = {
   sourceGrep: 'ready/no-source-grep-test',
   legacyBackdoor: 'ready/no-legacy-backdoor',
   migrationTodo: 'ready/no-migration-todo',
+  subagentLeak: 'ready/no-subagent-leak',
 }
 
 export const A05_AREAS = {

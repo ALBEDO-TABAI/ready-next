@@ -106,6 +106,12 @@ export const TOOL_ERROR_METRICS = {
    * `{ originalCallsCount, recoveredCallsCount, recoveredToolNames, route }`。
    */
   xmlToolCallsRecoveredFromNative: 'xml_tool_calls_recovered_from_native',
+  /**
+   * A1 SubAgent skeleton — lifecycle cleanup drain failed. The runner logs this
+   * but preserves the original terminal result because cleanup telemetry must
+   * not rewrite the SubAgent contract outcome.
+   */
+  subagentCleanupDrainFailed: 'subagent_cleanup_drain_failed',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

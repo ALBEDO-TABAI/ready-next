@@ -58,7 +58,8 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       'ready/no-source-grep-test': 'error',
       'ready/no-legacy-backdoor': 'error',
-      'ready/no-migration-todo': 'error'
+      'ready/no-migration-todo': 'error',
+      'ready/no-subagent-leak': 'error'
     }
   }
 ]

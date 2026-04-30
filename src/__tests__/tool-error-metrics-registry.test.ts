@@ -15,21 +15,26 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 12 documented keys (skill-resume G4 added skillReferenceHintRecoveredFromCapsule)', () => {
+test('registry exposes documented tool-error metric keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
+    'childResumeDisabledByFlag',
     'domainToolNarrowingApplied',
     'inputValidation',
+    'metaParseCorrupted',
     'resolutionViolation',
     'sessionRecallAutoAttached',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
     'skillReferenceHintRecoveredFromCapsule',
     'skillReferenceHintTtlSwept',
+    'subagentCleanupDrainFailed',
     'surfaced',
+    'toolCallTextIntercepted',
     'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
+    'xmlToolCallsRecoveredFromNative',
   ])
 })
 
@@ -67,4 +72,6 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
   // skill-resume G4 — last-recourse hint recovery from auto-attached capsule text
   assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
+  // A1 SubAgent skeleton — lifecycle cleanup drain failure observability
+  assert.equal(TOOL_ERROR_METRICS.subagentCleanupDrainFailed, 'subagent_cleanup_drain_failed')
 })

@@ -127,3 +127,47 @@ tester.run('ready/no-migration-todo', rules['no-migration-todo'], {
     },
   ],
 })
+
+tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
+  valid: [
+    {
+      filename: 'src/main/modules/agent-control/sub-agent/sub-agent-runner.ts',
+      code: "import { createContext } from './sub-agent-types'",
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "import { createContext } from './turn-frame'",
+    },
+    {
+      filename: 'src/shared/sub-agent-debug.ts',
+      code: "import { createContext } from '../main/modules/agent-control/sub-agent/sub-agent-types'",
+    },
+  ],
+  invalid: [
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "import { runSubAgent } from './sub-agent/sub-agent-runner'",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/skill-domain-adapter.ts',
+      code: "export { runSubAgent } from './sub-agent/sub-agent-runner'",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/run-coordinator.ts',
+      code: "const runner = require('./sub-agent/sub-agent-runner')",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/run-coordinator.ts',
+      code: "import runner = require('./sub-agent/sub-agent-runner')",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/runtime.ts',
+      code: "async function load() { return import('./sub-agent/sub-agent-runner') }",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+  ],
+})
