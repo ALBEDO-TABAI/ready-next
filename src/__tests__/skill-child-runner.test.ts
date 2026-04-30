@@ -480,6 +480,33 @@ function installTestSkillToolDefinitions(): void {
   }
 }
 
+/**
+ * IMPORTANT — singleton lifecycle in tests:
+ *
+ * `setupRunner()` calls `__resetSkillChildRunnerForTests()` which wipes the
+ * SkillChildRunner singleton (active map, recentCloses cache). Production
+ * NEVER resets the singleton mid-session — `configureSkillChildRunner` is
+ * called once at boot.
+ *
+ * RULE: do NOT call `setupRunner()` (or `__resetSkillChildRunnerForTests()`)
+ * between two lifecycle events on the SAME childRunId. Doing so can mask
+ * production bugs where in-memory caches don't transition correctly across
+ * lifecycles (e.g., the historical A1 bug where finalizeRun's recentCloses
+ * guard early-returned on resume because the previous lifecycle's close
+ * was still cached).
+ *
+ * EXCEPTION: tests that intentionally simulate process restart (T4 Case C/D
+ * below) MUST reset the singleton to test the durable recovery path. Mark
+ * such tests with an inline comment explaining the simulation.
+ *
+ * If a test needs to change runner config (e.g., maxActionsPerRun) between
+ * lifecycle events on the same childRunId, prefer one of:
+ *   1. Set the larger budget at initial setupRunner() and trigger
+ *      budget_paused via the driver's plan list size, not the budget cap.
+ *   2. Re-register the driver with new plans (registerStubDriver with
+ *      same skillId), keeping the runner singleton intact.
+ * See `skill-child-runner-resume-lifecycle.test.ts` for examples.
+ */
 function setupRunner(opts: {
   runtime?: ReturnType<typeof makeFakeRuntime>
   repo?: ReturnType<typeof makeFakeRepository>
@@ -642,13 +669,21 @@ test('Phase 5: budget exhaustion closes status=budget_paused terminalReason=chec
 })
 
 test('Phase 5: resume — pause via budget then resume continues', async () => {
-  // Two phases: first start hits a low budget, then resume completes.
-  const { repo } = setupRunner({ maxActionsPerRun: 1 })
+  // Initial budget is set high enough that the SECOND lifecycle can
+  // finish (2 actions). The FIRST lifecycle hits budget_paused because
+  // the driver plan list is intentionally longer than the budget; this
+  // way budget_paused is driven by plan-count, not by reconfiguring the
+  // runner mid-test. See helper banner above for the rationale.
+  const { repo } = setupRunner({ maxActionsPerRun: 3 })
+
+  // First-lifecycle plans: 4 actions before any terminal close → exhausts
+  // the 3-action budget after action #3 with another action still pending.
   registerStubDriver('test-skill-resume', {
     plans: [
       { action: 'step_a', input: {} },
       { action: 'step_b', input: {} },
-      makeTerminalClose('test-skill-resume', 'completed', 'completed'),
+      { action: 'step_c', input: {} },
+      { action: 'step_d', input: {} },
     ],
   })
 
@@ -662,24 +697,28 @@ test('Phase 5: resume — pause via budget then resume continues', async () => {
   const firstClose = await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId))
   assert.equal(firstClose.status, 'budget_paused')
 
-  // Reconfigure with a larger budget so resume can finish.
-  setupRunner({ repo, maxActionsPerRun: 5 })
+  // Re-register the driver with a SHORT plan list so the second lifecycle
+  // finishes within the same 3-action budget. NO singleton reset — same
+  // runner instance, same recentCloses, same active map. registerStubDriver
+  // calls registerSkillChildDriver which Map.set's by skillId (replace
+  // semantics + fresh `idx = 0` closure), so the second lifecycle sees a
+  // clean plan iterator.
   registerStubDriver('test-skill-resume', {
     plans: [
-      { action: 'step_b', input: {} },
+      { action: 'step_resume', input: {} },
       makeTerminalClose('test-skill-resume', 'completed', 'completed'),
     ],
   })
-  // Reset the row's status manually so the resume helper doesn't trip
-  // over the terminal projection.
+  // The first lifecycle ended in budget_paused; mark the row as
+  // recoverable_paused so resumeSkillChildRun's resumability check passes.
   repo.repo.updateChildRun(first.childRunId, { status: 'recoverable_paused' })
 
   const second = await resumeSkillChildRun(first.childRunId)
   assert.equal(second.childRunId, first.childRunId)
   const secondClose = await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId), 3_000)
-  // After resume the recentCloses map has been overwritten with the new
-  // close; it should be completed.
   assert.equal(secondClose.status, 'completed')
+  // Sanity: the close is the NEW completed close, not the previous paused one.
+  assert.notStrictEqual(secondClose, firstClose)
 })
 
 test('resumeSkillChildRun rejects blocked child without updating row', async () => {
@@ -1031,8 +1070,10 @@ test('T4 Case C: getCloseEvent reads durable close after recentCloses is cleared
   // Wait for the run to terminate.
   await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
 
-  // Tear down the runner singleton (proxy for "process restarted") but
-  // keep the repository state so the durable close persists in the row.
+  // Intentional singleton reset to simulate process restart: this test
+  // verifies the durable recovery path where recentCloses is empty but
+  // the row's persisted closeEvent must be read back. Do NOT mimic this
+  // pattern in single-process resume tests — see helper banner above.
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
   configureSkillChildRunner({
@@ -1079,9 +1120,10 @@ test('T4 Case D: cancel on persisted-but-inactive row uses the row real skillId 
   assert.ok(realOutputDir, 'real outputDir must be persisted')
   assert.ok(realRunStatePath, 'real runStatePath must be persisted')
 
-  // Tear down the runner singleton; the row stays in the repo. Now the
-  // active map is empty so `cancelSkillChildRun` falls through to the
-  // synthesizing branch.
+  // Intentional singleton reset to simulate process restart: this test
+  // verifies that cancel on a persisted-but-inactive row uses the row's
+  // real skillId / outputDir / runStatePath. Do NOT mimic this pattern
+  // in single-process resume tests — see helper banner above.
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
   configureSkillChildRunner({
