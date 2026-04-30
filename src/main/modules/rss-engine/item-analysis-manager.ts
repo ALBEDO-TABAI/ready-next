@@ -572,8 +572,9 @@ export class RSSItemAnalysisManager {
       // that deserves a retry — the next slot opens once another VEA
       // child completes. Bounded so a fully saturated host doesn't hang
       // the RSS queue.
+      const close = result.closeEvent
       if (
-        result.closeEvent.terminalReason === 'queued_global_concurrency'
+        close?.terminalReason === 'queued_global_concurrency'
         && attempt < VEA_AWAIT_RETRY_LIMIT - 1
       ) {
         attempt += 1
@@ -594,6 +595,11 @@ export class RSSItemAnalysisManager {
     fallbackMessage: string,
   ): Error {
     const close = result.closeEvent
+    if (!close) {
+      const error = new Error(`${fallbackMessage}（仍在后台运行：observer_timeout）`)
+      ;(error as Error & { veaCause?: string }).veaCause = 'paused'
+      return error
+    }
     const baseMessage = close.error?.message || fallbackMessage
     let qualifier = ''
     let cause: 'killed' | 'blocked' | 'paused' | 'failed' = 'failed'

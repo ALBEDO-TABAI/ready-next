@@ -1,11 +1,36 @@
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import test from 'node:test'
 
+import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
+import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import {
   SkillTaskRunRepository,
   createSkillTaskRunId,
+  type CreateChildRunInput,
   type SkillTaskRunRecord,
 } from '../main/modules/repositories/skill-task-run-repository'
+
+const requireFromHere = createRequire(import.meta.url)
+
+type SqliteCtor = new (path: string, options?: { readonly?: boolean }) => {
+  exec: (sql: string) => void
+  prepare: (sql: string) => {
+    run: (...params: unknown[]) => { changes?: number }
+    get: <T = unknown>(...params: unknown[]) => T | undefined
+    all: <T = unknown>(...params: unknown[]) => T[]
+  }
+  close: () => void
+}
+
+function loadSqlite(): SqliteCtor | null {
+  try {
+    return requireFromHere('better-sqlite3') as SqliteCtor
+  } catch {
+    return null
+  }
+}
 
 function createRepositoryHarness() {
   const rows = new Map<string, Record<string, unknown>>()
@@ -186,6 +211,19 @@ function createRepositoryHarness() {
   return { repository, rows }
 }
 
+function createSqliteRepositoryHarness(): { repository: SkillTaskRunRepository; closeDb: () => void } | null {
+  const Sqlite = loadSqlite()
+  if (!Sqlite) return null
+  const rawDb = new Sqlite(':memory:')
+  runMigrations(rawDb as unknown as MigrationDatabase)
+  return {
+    repository: new SkillTaskRunRepository({
+      getRawDb: () => rawDb as never,
+    } as never),
+    closeDb: () => rawDb.close(),
+  }
+}
+
 function makeRun(overrides: Partial<SkillTaskRunRecord> = {}): SkillTaskRunRecord {
   return {
     id: overrides.id || 'str-test001',
@@ -226,6 +264,58 @@ function makeRun(overrides: Partial<SkillTaskRunRecord> = {}): SkillTaskRunRecor
     updatedAt: overrides.updatedAt || '2026-04-27T08:00:00.000Z',
     finishedAt: overrides.finishedAt ?? null,
   }
+}
+
+function makeChildInput(overrides: Partial<CreateChildRunInput> = {}): CreateChildRunInput {
+  return {
+    childRunId: overrides.childRunId ?? createSkillChildRunId('vea'),
+    scopeId: overrides.scopeId ?? 'scope-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    skillId: overrides.skillId ?? 'video-expert-analyzer',
+    skillName: overrides.skillName ?? 'Video Expert Analyzer (VNext)',
+    action: overrides.action ?? 'video_expert_pipeline',
+    requestedInput: overrides.requestedInput ?? { url: 'https://example.com/v1' },
+    singleFlightKey: overrides.singleFlightKey
+      ?? 'scope-1:session-1:video-expert-analyzer:digest-aaaa',
+    parentNextHint: overrides.parentNextHint ?? 'wait_for_close_event',
+    outputDir: overrides.outputDir ?? '/tmp/vea-output-1',
+    runStatePath: overrides.runStatePath ?? '/tmp/vea-output-1/run_state.json',
+    eventLogPath: overrides.eventLogPath
+      ?? '/tmp/vea-output-1/.ready/child-runs/run.jsonl',
+    status: overrides.status,
+  }
+}
+
+function makeCloseEvent(input: CreateChildRunInput): SkillChildCloseEvent {
+  return {
+    childRunId: input.childRunId,
+    skillId: input.skillId,
+    status: 'completed',
+    terminalReason: 'completed',
+    outputDir: input.outputDir,
+    runStatePath: input.runStatePath,
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    progress: { stage: 'done', totalUnits: 1, completedUnits: 1, coverageRatio: 1, fingerprint: 'fp-1' },
+    framePatch: null,
+    projectionPatch: null,
+    error: null,
+  }
+}
+
+function createTerminalChildRun(repository: SkillTaskRunRepository, overrides: Partial<CreateChildRunInput> = {}) {
+  const input = makeChildInput(overrides)
+  const closeEvent = makeCloseEvent(input)
+  repository.createChildRun(input)
+  repository.updateChildRun(input.childRunId, {
+    status: 'completed',
+    closeEvent,
+  })
+  return { input, closeEvent }
+}
+
+function getChildPayload(record: SkillTaskRunRecord | null) {
+  return (record?.resumePayload as { childRun?: { childRunId?: string; closeEvent?: SkillChildCloseEvent | null } } | null)?.childRun
 }
 
 test('SkillTaskRunRepository persists and updates recoverable skill task runs', () => {
@@ -304,6 +394,126 @@ test('SkillTaskRunRepository finds detached task archive rows', () => {
 
   const byDetached = repository.findByDetachedTaskId('dst-123')
   assert.equal(byDetached?.id, 'str-detached')
+})
+
+test('terminal child lookup by outputDir still returns childRunId and close event', () => {
+  const setup = createSqliteRepositoryHarness()
+  if (!setup) {
+    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
+    return
+  }
+  try {
+    const { input, closeEvent } = createTerminalChildRun(setup.repository)
+
+    const found = setup.repository.findChildRunByOutputDir({
+      outputDir: input.outputDir,
+      skillId: input.skillId,
+    })
+    const payload = getChildPayload(found)
+
+    assert.equal(found?.id, input.childRunId)
+    assert.equal(payload?.childRunId, input.childRunId)
+    assert.deepEqual(payload?.closeEvent, closeEvent)
+  } finally {
+    setup.closeDb()
+  }
+})
+
+test('terminal child lookup by runStatePath still returns childRunId and close event', () => {
+  const setup = createSqliteRepositoryHarness()
+  if (!setup) {
+    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
+    return
+  }
+  try {
+    const { input, closeEvent } = createTerminalChildRun(setup.repository)
+
+    const found = setup.repository.findChildRunByRunStatePath({
+      runStatePath: input.runStatePath,
+      skillId: input.skillId,
+    })
+    const payload = getChildPayload(found)
+
+    assert.equal(found?.id, input.childRunId)
+    assert.equal(payload?.childRunId, input.childRunId)
+    assert.deepEqual(payload?.closeEvent, closeEvent)
+  } finally {
+    setup.closeDb()
+  }
+})
+
+test('terminal child lookup by singleFlightKey still returns childRunId and close event', () => {
+  const setup = createSqliteRepositoryHarness()
+  if (!setup) {
+    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
+    return
+  }
+  try {
+    const { input, closeEvent } = createTerminalChildRun(setup.repository)
+
+    const found = setup.repository.findChildRunBySingleFlightKey({
+      singleFlightKey: input.singleFlightKey,
+      skillId: input.skillId,
+    })
+    const payload = getChildPayload(found)
+
+    assert.equal(found?.id, input.childRunId)
+    assert.equal(payload?.childRunId, input.childRunId)
+    assert.deepEqual(payload?.closeEvent, closeEvent)
+  } finally {
+    setup.closeDb()
+  }
+})
+
+test('findLatestChildRunByKey remains active-only after terminal', () => {
+  const setup = createSqliteRepositoryHarness()
+  if (!setup) {
+    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
+    return
+  }
+  try {
+    const { input } = createTerminalChildRun(setup.repository)
+
+    const found = setup.repository.findLatestChildRunByKey(input.singleFlightKey)
+
+    assert.equal(found, null)
+  } finally {
+    setup.closeDb()
+  }
+})
+
+test('exact child lookup by outputDir still narrows terminal rows by skillId', () => {
+  const setup = createSqliteRepositoryHarness()
+  if (!setup) {
+    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
+    return
+  }
+  try {
+    const sharedOutputDir = '/tmp/shared-output'
+    const sharedRunStatePath = '/tmp/shared-output/run_state.json'
+    const target = createTerminalChildRun(setup.repository, {
+      outputDir: sharedOutputDir,
+      runStatePath: sharedRunStatePath,
+      singleFlightKey: 'scope-1:session-1:video-expert-analyzer:shared',
+    })
+    createTerminalChildRun(setup.repository, {
+      childRunId: createSkillChildRunId('skill'),
+      skillId: 'other-skill',
+      skillName: 'Other Skill',
+      outputDir: sharedOutputDir,
+      runStatePath: sharedRunStatePath,
+      singleFlightKey: 'scope-1:session-1:other-skill:shared',
+    })
+
+    const found = setup.repository.findChildRunByOutputDir({
+      outputDir: sharedOutputDir,
+      skillId: 'video-expert-analyzer',
+    })
+
+    assert.equal(found?.id, target.input.childRunId)
+  } finally {
+    setup.closeDb()
+  }
 })
 
 test('createSkillTaskRunId uses the lightweight skill task prefix', () => {

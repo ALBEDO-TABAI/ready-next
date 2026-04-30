@@ -36,17 +36,23 @@
  * is clearly still operating on a skill, even if the hint TTL passed.
  * Defense-in-depth — Phase 1's persistence work makes hint loss rare, but
  * this is the OR fallback when it does happen.
+ *
+ * Wave 2 parent-loop closure: an active child-run row is also a live skill
+ * task signal. Child-owned frames must keep primitives visible for status
+ * observation while the child runner owns resume/cancel.
  */
 export function shouldExposeSkillPrimitive(
   sessionId: string | undefined,
   hasActiveExecution: (sessionId: string) => boolean,
   hasReferenceSkillHint: (sessionId: string) => boolean,
   hasActiveSkillTaskProjection?: (sessionId: string) => boolean,
+  hasActiveSkillTaskRun?: (sessionId: string) => boolean,
 ): boolean {
   if (!sessionId) return true
   if (hasActiveExecution(sessionId)) return true
   if (hasReferenceSkillHint(sessionId)) return true
   if (hasActiveSkillTaskProjection?.(sessionId)) return true
+  if (hasActiveSkillTaskRun?.(sessionId)) return true
   return false
 }
 
@@ -69,8 +75,15 @@ export function filterSkillPrimitivesBySession<T extends { name: string }>(
   hasActiveExecution: (sessionId: string) => boolean,
   hasReferenceSkillHint: (sessionId: string) => boolean,
   hasActiveSkillTaskProjection?: (sessionId: string) => boolean,
+  hasActiveSkillTaskRun?: (sessionId: string) => boolean,
 ): T[] {
-  if (shouldExposeSkillPrimitive(sessionId, hasActiveExecution, hasReferenceSkillHint, hasActiveSkillTaskProjection)) {
+  if (shouldExposeSkillPrimitive(
+    sessionId,
+    hasActiveExecution,
+    hasReferenceSkillHint,
+    hasActiveSkillTaskProjection,
+    hasActiveSkillTaskRun,
+  )) {
     return [...defs]
   }
   return []

@@ -106,9 +106,9 @@ export function buildBudgetWarningMessage(params: {
 }): string {
   if (params.isLongSkillContext) {
     if (params.level === 'converge') {
-      return `系统提醒：长任务接近预算上限（${params.iterations}/${params.effectiveMaxIterations}）。继续用 typed skill action 推进剩余步骤；只有遇到真实 blocker（如等待用户确认）才用 skill_ask_user。不要在这一步停下来总结。`
+      return `系统提醒：长任务接近预算上限（${params.iterations}/${params.effectiveMaxIterations}）。继续沿用当前 skill 流程推进剩余步骤；只有遇到真实 blocker（如等待用户确认）才用 skill_ask_user。不要在这一步停下来总结。`
     }
-    return `系统提醒：长任务进度 ${params.iterations}/${params.effectiveMaxIterations}。继续推进当前 skill 流程，优先 typed skill action 而不是 skill_run_shell；如果 run_state 表明在等某个文件，先用 skill_read_artifact 看清楚再推进，不需要在这一步问用户。`
+    return `系统提醒：长任务进度 ${params.iterations}/${params.effectiveMaxIterations}。继续推进当前 skill 流程，避免用 skill_run_shell 反复诊断；如果 run_state 表明在等某个文件，先用 skill_read_artifact 看清楚再推进，不需要在这一步问用户。`
   }
   if (params.level === 'converge') {
     return '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。'
@@ -217,7 +217,11 @@ import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import { shouldParentForceLongSkillTool } from './run-contracts'
-import { getSkillChildRunCloseEvent } from './skill-child-runner'
+import {
+  cancelSkillChildRun,
+  getSkillChildRunCloseEvent,
+  resumeSkillChildRun,
+} from './skill-child-runner'
 import type { SkillChildCloseEvent } from './skill-child-run-types'
 import type {
   RunBudgetHint,
@@ -316,6 +320,19 @@ export function computeChildContinuationDecision(
     return { kind: 'checkpoint_paused', childRunId, closeEvent: live }
   }
   return { kind: 'wait', childRunId }
+}
+
+function matchesChildCancelIntent(...texts: Array<string | null | undefined>): boolean {
+  return texts.some((text) => {
+    const normalized = String(text || '').trim()
+    if (!normalized) return false
+    return /^(?:取消|停止|中止|终止|别跑了|不要继续|cancel|stop|abort)$/i.test(normalized)
+      || /(?:取消|停止|中止|终止|cancel|stop|abort)(?:这个|当前|child|任务|运行|run)/i.test(normalized)
+  })
+}
+
+function isDirectlyResumableChildStatus(status: SkillChildCloseEvent['status']): boolean {
+  return status === 'recoverable_paused' || status === 'budget_paused'
 }
 
 interface SkillContextOrchestratorLike {
@@ -1277,6 +1294,102 @@ export class TurnEngine {
             ? 'true' : 'false'
         } activeExecution=${hasActiveSkill} referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
       )
+      const childCommand = computeChildContinuationDecision(
+        turnFrame,
+        getSkillChildRunCloseEvent,
+      )
+      if (turnFrame?.skill?.runContract && childCommand.kind !== 'none') {
+        const contract = turnFrame.skill.runContract
+        if (childCommand.kind === 'terminal' || childCommand.kind === 'checkpoint_paused') {
+          contract.childCloseEvent = childCommand.closeEvent
+          contract.childStatus = childCommand.closeEvent.status
+          contract.parentNextHint = 'continue_other_work'
+        } else if (childCommand.kind === 'wait') {
+          contract.parentNextHint = 'wait_for_close_event'
+        }
+      }
+      const childRunIdForCommand = childCommand.kind === 'none' ? null : childCommand.childRunId
+      const isChildCancelTurn = Boolean(childRunIdForCommand) && matchesChildCancelIntent(
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        requestEnvelope.rawUserText,
+      )
+      if (isChildCancelTurn && childRunIdForCommand) {
+        const cancelChild = (host as unknown as {
+          cancelSkillChildRun?: typeof cancelSkillChildRun
+        }).cancelSkillChildRun || cancelSkillChildRun
+        const close = await cancelChild(childRunIdForCommand, 'cancelled_user')
+        if (turnFrame?.skill?.runContract) {
+          turnFrame.skill.runContract.childCloseEvent = close
+          turnFrame.skill.runContract.childStatus = close.status
+          turnFrame.skill.runContract.parentNextHint = 'continue_other_work'
+        }
+        if (turnFrame) turnFrame.terminalReason = 'cancelled_user'
+        const message = `已取消 child run ${childRunIdForCommand}。`
+        transcript.emitOutput(message, 'text')
+        pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+        logAgentMetric('turn_child_run_user_cancelled', {
+          sessionId: request.sessionId,
+          childRunId: childRunIdForCommand,
+          childStatus: close.status,
+          terminalReason: close.terminalReason,
+        })
+        return finish({
+          success: true,
+          cancelled: true,
+          status: 'cancelled',
+          terminalReason: 'cancelled_user',
+        })
+      }
+      if (
+        childCommand.kind === 'checkpoint_paused'
+        && isSkillResumeTurnDetected
+        && !isConfigRepairTurnDetected
+      ) {
+        const childStatus = childCommand.closeEvent.status
+        if (!isDirectlyResumableChildStatus(childStatus)) {
+          const detail = childCommand.closeEvent.error?.message
+            || childCommand.closeEvent.terminalReason
+            || 'child run blocked'
+          const message = `当前 child run ${childCommand.childRunId} 处于 blocked，不能直接继续；需要先处理阻塞原因：${detail}。`
+          transcript.emitOutput(message, 'text')
+          pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+          logAgentMetric('turn_child_run_resume_rejected', {
+            sessionId: request.sessionId,
+            childRunId: childCommand.childRunId,
+            childStatus,
+            terminalReason: childCommand.closeEvent.terminalReason,
+          })
+          return finish({
+            success: true,
+            status: 'done',
+            terminalReason: 'done',
+          })
+        }
+        const resumeChild = (host as unknown as {
+          resumeSkillChildRun?: typeof resumeSkillChildRun
+        }).resumeSkillChildRun || resumeSkillChildRun
+        const resumed = await resumeChild(childCommand.childRunId)
+        if (turnFrame?.skill?.runContract) {
+          turnFrame.skill.runContract.childStatus = resumed.closeEvent?.status || 'running'
+          turnFrame.skill.runContract.childCloseEvent = resumed.closeEvent
+          turnFrame.skill.runContract.parentNextHint = resumed.parentNextHint
+        }
+        const message = `已继续同一个 child run ${resumed.childRunId}。`
+        transcript.emitOutput(message, 'text')
+        pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+        logAgentMetric('turn_child_run_resumed', {
+          sessionId: request.sessionId,
+          childRunId: resumed.childRunId,
+          childStatus: resumed.status,
+          previousStatus: childStatus,
+        })
+        return finish({
+          success: true,
+          status: 'done',
+          terminalReason: 'done',
+        })
+      }
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
         feishuConnected: host.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,

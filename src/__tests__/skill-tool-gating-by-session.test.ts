@@ -147,6 +147,19 @@ test('active skill task projection alone is enough to expose primitives', () => 
   assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
 })
 
+test('active childRunId keeps primitives visible when session has a running child', () => {
+  const filtered = filterSkillPrimitivesBySession(
+    ALL_PRIMITIVE_TOOLS,
+    'session-with-running-child',
+    neverActive,
+    neverHint,
+    () => false,
+    () => true,
+  )
+
+  assert.equal(filtered.length, ALL_PRIMITIVE_TOOLS.length)
+})
+
 test('active skill context can expose internal typed actions without a reference hint', () => {
   assert.equal(shouldExposeSkillAction({
     actionVisibility: 'internal',

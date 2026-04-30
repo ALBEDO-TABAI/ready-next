@@ -127,7 +127,7 @@ test('Phase 3.3 — non-skill 90% converge nudge keeps the historical text', () 
   assert.match(msg, /剩余轮次内收敛/)
 })
 
-test('Phase 3.3 — long-skill 70% nudge tells the model to KEEP GOING with typed actions, not summarize', () => {
+test('Phase 3.3 — long-skill 70% nudge tells the model to keep going without typed-action guidance', () => {
   const msg = buildBudgetWarningMessage({
     iterations: 50,
     effectiveMaxIterations: 80,
@@ -139,9 +139,10 @@ test('Phase 3.3 — long-skill 70% nudge tells the model to KEEP GOING with type
   // "summarize" instructions; that was the reverse-instruction bug.
   assert.doesNotMatch(msg, /询问用户是否继续/)
   assert.doesNotMatch(msg, /总结当前进度/)
-  // Must include the affirmative recovery cue: typed action + read run_state
-  // when blocked on a file.
-  assert.match(msg, /typed skill action/)
+  // Child-loop owned flows must not nudge the parent model toward typed
+  // action dispatch anymore; observation primitives remain the recovery cue.
+  assert.doesNotMatch(msg, /typed skill action/)
+  assert.match(msg, /skill_read_artifact/)
 })
 
 test('Phase 3.3 — long-skill 90% converge nudge tells the model to keep going, only ask on real blockers', () => {

@@ -48,6 +48,7 @@ import {
   isChildOwnedSkill,
 } from './skill-child-drivers'
 import type {
+  ChildWaitResult,
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
@@ -57,6 +58,11 @@ import type {
   SkillChildRunStatus,
   SkillChildRunTerminalReason,
 } from './skill-child-run-types'
+import {
+  classifySkillChildRunStatus,
+  coerceSkillChildTerminalReason,
+  isSkillChildRunResumable,
+} from './skill-child-state-machine'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
@@ -107,6 +113,11 @@ export interface StartSkillChildRunResult {
   /** null when started normally; non-null when paused-on-launch (concurrency
    *  overflow, nested guard, or any other launch-time refusal). */
   closeEvent: SkillChildCloseEvent | null
+}
+
+export interface WaitForSkillChildRunCloseOptions {
+  timeoutMs?: number | null
+  signal?: AbortSignal
 }
 
 // =====================================================================
@@ -336,6 +347,34 @@ class SkillChildRunner {
         parentNextHint: 'wait_for_close_event',
       })
     }
+    const statusClass = classifySkillChildRunStatus(payload.status)
+    if (!isSkillChildRunResumable(payload.status)) {
+      if (statusClass === 'active') {
+        return {
+          childRunId,
+          status: 'reused',
+          outputDir: payload.outputDir,
+          runStatePath: payload.runStatePath,
+          eventLogPath: payload.eventLogPath,
+          parentNextHint: payload.parentNextHint,
+          closeEvent: null,
+        }
+      }
+      return makeResumeRefusalResult({
+        childRunId,
+        skillId: payload.skillId,
+        status: payload.status,
+        terminalReason: payload.closeEvent?.terminalReason ?? defaultTerminalReasonForStatus(payload.status),
+        outputDir: payload.outputDir,
+        runStatePath: payload.runStatePath,
+        eventLogPath: payload.eventLogPath,
+        errorKind: statusClass === 'blocked' ? 'still_blocked' : 'terminal_not_resumable',
+        message: statusClass === 'blocked'
+          ? 'Child run is blocked and cannot be resumed directly'
+          : 'Child run is already terminal and cannot be resumed',
+        parentNextHint: payload.parentNextHint,
+      })
+    }
     const params: StartSkillChildRunParams = {
       scopeId: payload.parentScopeId ?? record.scopeId ?? null,
       sessionId: payload.parentSessionId ?? record.sessionId ?? null,
@@ -447,6 +486,22 @@ class SkillChildRunner {
       return payload.closeEvent
     }
     return null
+  }
+
+  waitForClose(
+    childRunId: string,
+    options: WaitForSkillChildRunCloseOptions,
+  ): Promise<ChildWaitResult> {
+    const close = this.getCloseEvent(childRunId)
+    if (close) {
+      return Promise.resolve({
+        kind: 'closed',
+        childRunId,
+        closeEvent: close,
+      })
+    }
+    const active = this.active.get(childRunId)
+    return waitForClosePromise(childRunId, active?.closePromise ?? null, options)
   }
 
   private tryGetRecord(childRunId: string): ReturnType<SkillTaskRunRepository['get']> | null {
@@ -882,7 +937,11 @@ class SkillChildRunner {
           runtimeManager: this.config.runtimeManager,
         })
         if (!gateway.skillRunResult) {
-          const gatewayKind = (gateway.data?.errorKind as string | undefined) || 'tool_failed'
+          const rawGatewayKind = (gateway.data?.errorKind as string | undefined) || 'tool_failed'
+          const gatewayReason = gateway.data?.reason as string | undefined
+          const gatewayKind = gatewayReason === 'tool_not_registered'
+            ? 'tool_not_registered'
+            : rawGatewayKind
           // Map the gateway's transport-level errorKind to the runner's
           // close-event vocabulary. The runner specifically dispatches
           // skill action handlers whose throws indicate a process-level
@@ -893,12 +952,18 @@ class SkillChildRunner {
             gatewayKind === 'aborted' ? 'cancelled_user'
             : gatewayKind === 'input_validation' ? 'input_validation'
             : gatewayKind === 'host_unavailable' ? 'host_unavailable'
+            : gatewayKind === 'tool_not_registered' ? 'tool_not_registered'
             : gatewayKind === 'tool_failed' ? 'child_process_crashed'
             : gatewayKind
-          const terminalReason: SkillChildRunTerminalReason =
-            gatewayKind === 'input_validation' ? 'failed_skill'
-            : gatewayKind === 'aborted' ? 'cancelled_user'
-            : 'infra_error'
+          const terminalReason = coerceSkillChildTerminalReason({
+            terminalReason: gatewayKind === 'aborted' ? 'cancelled_user' : 'infra_error',
+            error: {
+              kind: errorKind,
+              message: typeof gateway.data?.message === 'string'
+                ? (gateway.data.message as string)
+                : gateway.text || `gateway ${gatewayKind}`,
+            },
+          })
           const status: SkillChildRunStatus =
             gatewayKind === 'aborted' ? 'killed' : 'failed'
           const close = makeCloseEvent({
@@ -1096,6 +1161,14 @@ export function getSkillChildRunCloseEvent(childRunId: string): SkillChildCloseE
   return runner.getCloseEvent(childRunId)
 }
 
+export function waitForSkillChildRunClose(
+  childRunId: string,
+  options: WaitForSkillChildRunCloseOptions,
+): Promise<ChildWaitResult> {
+  const runner = ensureRunner()
+  return runner.waitForClose(childRunId, options)
+}
+
 export { isChildOwnedSkill }
 
 function ensureRunner(): SkillChildRunner {
@@ -1113,6 +1186,75 @@ function ensureRunner(): SkillChildRunner {
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function waitForClosePromise(
+  childRunId: string,
+  closePromise: Promise<SkillChildCloseEvent> | null,
+  options: WaitForSkillChildRunCloseOptions,
+): Promise<ChildWaitResult> {
+  if (options.signal?.aborted) {
+    return Promise.reject(makeAbortError(options.signal.reason))
+  }
+  const timeoutMs = normalizeObserverTimeoutMs(options.timeoutMs)
+
+  return new Promise<ChildWaitResult>((resolve, reject) => {
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const startedAt = Date.now()
+    const onAbort = () => finish(() => reject(makeAbortError(options.signal?.reason)))
+    const finish = (complete: () => void) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', onAbort)
+      complete()
+    }
+
+    if (closePromise) {
+      closePromise.then((close) => {
+        finish(() => resolve({
+          kind: 'closed',
+          childRunId,
+          closeEvent: close,
+        }))
+      }, (error) => {
+        finish(() => reject(error))
+      })
+    } else if (timeoutMs === null) {
+      finish(() => resolve({
+        kind: 'observer_timeout',
+        childRunId,
+        elapsedMs: 0,
+      }))
+      return
+    }
+
+    if (timeoutMs !== null) {
+      timeout = setTimeout(() => {
+        finish(() => resolve({
+          kind: 'observer_timeout',
+          childRunId,
+          elapsedMs: Date.now() - startedAt,
+        }))
+      }, timeoutMs)
+    }
+
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function normalizeObserverTimeoutMs(timeoutMs: number | null | undefined): number | null {
+  if (typeof timeoutMs !== 'number') return null
+  if (!Number.isFinite(timeoutMs)) return null
+  return Math.max(0, timeoutMs)
+}
+
+function makeAbortError(reason: unknown): Error {
+  if (reason instanceof Error) return reason
+  const error = new Error(typeof reason === 'string' && reason ? reason : 'wait aborted')
+  error.name = 'AbortError'
+  return error
 }
 
 function trim(value: unknown): string | null {
@@ -1220,6 +1362,79 @@ function makePausedOnLaunchResult(opts: {
     eventLogPath: '',
     parentNextHint: opts.parentNextHint,
     closeEvent: close,
+  }
+}
+
+function makeResumeRefusalResult(opts: {
+  childRunId: string
+  skillId: string
+  terminalReason: SkillChildRunTerminalReason
+  status: SkillChildRunStatus
+  outputDir: string
+  runStatePath: string
+  eventLogPath: string
+  errorKind: string
+  message: string
+  parentNextHint: SkillChildRunParentNextHint
+}): StartSkillChildRunResult {
+  const close = makeCloseEvent({
+    childRunId: opts.childRunId,
+    skillId: opts.skillId,
+    status: opts.status === 'queued' || opts.status === 'running'
+      ? 'recoverable_paused'
+      : opts.status,
+    terminalReason: opts.terminalReason,
+    outputDir: opts.outputDir,
+    runStatePath: opts.runStatePath,
+    errorKind: opts.errorKind,
+    message: opts.message,
+  })
+  return {
+    childRunId: opts.childRunId,
+    status: startStatusForChildStatus(opts.status),
+    outputDir: opts.outputDir,
+    runStatePath: opts.runStatePath,
+    eventLogPath: opts.eventLogPath,
+    parentNextHint: opts.parentNextHint,
+    closeEvent: close,
+  }
+}
+
+function startStatusForChildStatus(status: SkillChildRunStatus): StartChildRunStatus {
+  switch (status) {
+    case 'completed':
+      return 'completed'
+    case 'killed':
+      return 'killed'
+    case 'blocked':
+      return 'blocked'
+    case 'recoverable_paused':
+    case 'budget_paused':
+      return 'recoverable_paused'
+    case 'queued':
+    case 'running':
+      return 'reused'
+    case 'failed':
+      return 'failed'
+  }
+}
+
+function defaultTerminalReasonForStatus(status: SkillChildRunStatus): SkillChildRunTerminalReason {
+  switch (status) {
+    case 'completed':
+      return 'completed'
+    case 'killed':
+      return 'cancelled_user'
+    case 'blocked':
+      return 'blocked_external'
+    case 'failed':
+      return 'failed_skill'
+    case 'budget_paused':
+      return 'checkpoint_budget'
+    case 'recoverable_paused':
+    case 'queued':
+    case 'running':
+      return 'checkpoint_background'
   }
 }
 

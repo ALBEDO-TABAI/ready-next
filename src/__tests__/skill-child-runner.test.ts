@@ -219,6 +219,7 @@ import {
   cancelSkillChildRun,
   resumeSkillChildRun,
   getSkillChildRunCloseEvent,
+  waitForSkillChildRunClose,
   MAX_ACTIONS_PER_CHILD_RUN,
 } from '../main/modules/agent-control/skill-child-runner'
 import {
@@ -236,6 +237,9 @@ import type {
   SkillsRuntimeManager,
   SkillRunRequest,
 } from '../main/modules/skills-runtime/runtime-manager'
+import { startSkillChildRunAndWait } from '../main/modules/skills-runtime/runtime-manager'
+import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 // `SkillTaskRunRepository` is already imported as a value (the class
 // constructor) on line 25; ESLint flags a redeclare if we re-import it
@@ -444,6 +448,38 @@ function makeTerminalClose(skillId: string, status: SkillChildCloseEvent['status
   }
 }
 
+let testSkillToolDefinitionsInstalled = false
+
+function installTestSkillToolDefinitions(): void {
+  if (testSkillToolDefinitionsInstalled) return
+  testSkillToolDefinitionsInstalled = true
+  const registry = defaultToolRegistry as unknown as {
+    getToolDefinitionForExecution: (toolName: string) => ToolDefinition | null
+  }
+  const original = registry.getToolDefinitionForExecution.bind(defaultToolRegistry)
+  registry.getToolDefinitionForExecution = (toolName: string) => {
+    if (toolName.startsWith('skill_test_')) {
+      return {
+        name: toolName,
+        groupId: 'skills',
+        domain: 'skill',
+        kind: 'job',
+        concurrency: 'serialized',
+        interruptBehavior: 'host_managed',
+        timeoutProfile: 'skill_long',
+        supportsTextBridge: true,
+        projectionHint: null,
+        description: `${toolName} test fixture`,
+        schema: null,
+        executionVisibility: 'internal',
+        requiresExplicitAllowlist: true,
+        resultShape: 'json',
+      }
+    }
+    return original(toolName)
+  }
+}
+
 function setupRunner(opts: {
   runtime?: ReturnType<typeof makeFakeRuntime>
   repo?: ReturnType<typeof makeFakeRepository>
@@ -454,6 +490,7 @@ function setupRunner(opts: {
   runtime: ReturnType<typeof makeFakeRuntime>
   repo: ReturnType<typeof makeFakeRepository>
 } {
+  installTestSkillToolDefinitions()
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
   const runtime = opts.runtime ?? makeFakeRuntime()
@@ -532,7 +569,7 @@ test('Phase 5: cancellation produces status=killed terminalReason=cancelled_user
   assert.notEqual(close.status, 'failed', 'cancellation must NEVER map to failed')
 })
 
-test('Phase 5: process-crash-shaped throw closes status=failed terminalReason=infra_error', async () => {
+test('Phase 5: process-crash-shaped throw closes status=failed terminalReason=child_process_crashed', async () => {
   const crash = new Error('child process crashed (signal SIGKILL exit code 137)')
   const { runtime } = setupRunner({ runtime: makeFakeRuntime({ throwOnce: crash }) })
   registerStubDriver('test-skill-crash', {
@@ -550,7 +587,7 @@ test('Phase 5: process-crash-shaped throw closes status=failed terminalReason=in
   })
   const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
   assert.equal(close.status, 'failed')
-  assert.equal(close.terminalReason, 'infra_error')
+  assert.equal(close.terminalReason, 'child_process_crashed')
   assert.ok(close.error)
   assert.equal(close.error!.kind, 'child_process_crashed')
   // Ensure the call was made.
@@ -643,6 +680,75 @@ test('Phase 5: resume — pause via budget then resume continues', async () => {
   // After resume the recentCloses map has been overwritten with the new
   // close; it should be completed.
   assert.equal(secondClose.status, 'completed')
+})
+
+test('resumeSkillChildRun rejects blocked child without updating row', async () => {
+  const { runtime, repo } = setupRunner()
+  registerStubDriver('test-skill-resume-blocked', {
+    plans: [
+      { action: 'step_a', input: {} },
+      makeTerminalClose('test-skill-resume-blocked', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRun({
+    scopeId: 'scope-resume-blocked',
+    sessionId: 'session-resume-blocked',
+    skillId: 'test-skill-resume-blocked',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/resume-blocked' },
+  })
+  await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  repo.repo.updateChildRun(result.childRunId, {
+    status: 'blocked',
+    closeEvent: makeTerminalClose('test-skill-resume-blocked', 'blocked', 'blocked_external'),
+  })
+  const callCountBeforeResume = runtime.calls.length
+
+  const refused = await resumeSkillChildRun(result.childRunId)
+
+  assert.equal(refused.childRunId, result.childRunId)
+  assert.equal(refused.status, 'blocked')
+  assert.equal(refused.closeEvent?.status, 'blocked')
+  assert.equal(refused.closeEvent?.terminalReason, 'blocked_external')
+  assert.equal(refused.closeEvent?.error?.kind, 'still_blocked')
+  assert.equal(runtime.calls.length, callCountBeforeResume, 'blocked resume must not dispatch a child action')
+  const row = repo.state.rows.get(result.childRunId)
+  const payload = (row!.resumePayload as { childRun: Record<string, unknown> }).childRun
+  assert.equal(payload.status, 'blocked')
+})
+
+test('resumeSkillChildRun rejects terminal child without updating row', async () => {
+  const { runtime, repo } = setupRunner()
+  registerStubDriver('test-skill-resume-terminal', {
+    plans: [
+      { action: 'step_a', input: {} },
+      makeTerminalClose('test-skill-resume-terminal', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRun({
+    scopeId: 'scope-resume-terminal',
+    sessionId: 'session-resume-terminal',
+    skillId: 'test-skill-resume-terminal',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/resume-terminal' },
+  })
+  const completed = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  const callCountBeforeResume = runtime.calls.length
+
+  const refused = await resumeSkillChildRun(result.childRunId)
+
+  assert.equal(refused.childRunId, result.childRunId)
+  assert.equal(refused.status, 'completed')
+  assert.equal(refused.closeEvent?.status, 'completed')
+  assert.equal(refused.closeEvent?.terminalReason, 'completed')
+  assert.equal(refused.closeEvent?.error?.kind, 'terminal_not_resumable')
+  assert.equal(runtime.calls.length, callCountBeforeResume, 'terminal resume must not dispatch a child action')
+  const row = repo.state.rows.get(result.childRunId)
+  const payload = (row!.resumePayload as { childRun: Record<string, unknown> }).childRun
+  assert.equal(payload.status, 'completed')
+  assert.equal((payload.closeEvent as SkillChildCloseEvent).terminalReason, completed.terminalReason)
 })
 
 test('Phase 5: nested-child guard rejects re-entrant startSkillChildRun without childInternal', async () => {
@@ -1052,4 +1158,144 @@ test('T4 Case E: observer / launch timeout MUST NOT mark the child as killed / c
   assert.equal(close.terminalReason, 'launch_stuck')
 
   resolveDriver()
+})
+
+test('observer timeout does not cancel or persist a close event', async () => {
+  const { repo, runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+  let resolveStall!: () => void
+  const stall = new Promise<void>((resolve) => { resolveStall = resolve })
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    await stall
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-observer-wait-timeout', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-observer-wait-timeout', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRunAndWait({
+    scopeId: 'scope-observer-wait',
+    sessionId: 'session-observer-wait',
+    skillId: 'test-skill-observer-wait-timeout',
+    action: 'do_thing',
+    params: { url: 'https://example.com/observer-wait-timeout' },
+    timeoutMs: 25,
+  })
+
+  assert.equal(result.status, 'running')
+  assert.equal(result.success, false)
+  assert.equal(result.closeEvent, null)
+  assert.ok(result.observerTimeout)
+  const row = repo.state.rows.get(result.childRunId)
+  assert.ok(row, 'child row must remain persisted')
+  const child = (row!.resumePayload as { childRun?: { status?: string; closeEvent?: unknown } }).childRun
+  assert.equal(child?.status, 'running')
+  assert.equal(child?.closeEvent, null)
+  assert.equal(getSkillChildRunCloseEvent(result.childRunId), null)
+
+  resolveStall()
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  assert.equal(close.status, 'completed')
+  assert.equal(close.terminalReason, 'completed')
+})
+
+test('multiple waiters receive the same eventual close event', async () => {
+  const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+  let resolveStall!: () => void
+  const stall = new Promise<void>((resolve) => { resolveStall = resolve })
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    await stall
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-waiter-fanout', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-waiter-fanout', 'completed', 'completed'),
+    ],
+  })
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-waiter-fanout',
+    sessionId: 'session-waiter-fanout',
+    skillId: 'test-skill-waiter-fanout',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/waiter-fanout' },
+  })
+
+  const first = waitForSkillChildRunClose(launch.childRunId, { timeoutMs: 1_000 })
+  const second = waitForSkillChildRunClose(launch.childRunId, { timeoutMs: 1_000 })
+  resolveStall()
+
+  const [firstResult, secondResult] = await Promise.all([first, second])
+  assert.equal(firstResult.kind, 'closed')
+  assert.equal(secondResult.kind, 'closed')
+  assert.equal(firstResult.childRunId, launch.childRunId)
+  assert.equal(secondResult.childRunId, launch.childRunId)
+  assert.strictEqual(firstResult.closeEvent, secondResult.closeEvent)
+  assert.equal(firstResult.closeEvent.terminalReason, 'completed')
+})
+
+test('aborting one waiter does not detach other waiters', async () => {
+  const { repo, runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+  let resolveStall!: () => void
+  const stall = new Promise<void>((resolve) => { resolveStall = resolve })
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    await stall
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-waiter-abort', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-waiter-abort', 'completed', 'completed'),
+    ],
+  })
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-waiter-abort',
+    sessionId: 'session-waiter-abort',
+    skillId: 'test-skill-waiter-abort',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/waiter-abort' },
+  })
+
+  const controller = new AbortController()
+  const abortedWaiter = waitForSkillChildRunClose(launch.childRunId, {
+    timeoutMs: 1_000,
+    signal: controller.signal,
+  })
+  const survivingWaiter = waitForSkillChildRunClose(launch.childRunId, { timeoutMs: 1_000 })
+  controller.abort(new Error('observer no longer needs the result'))
+  await assert.rejects(abortedWaiter, /observer no longer needs the result/)
+
+  const row = repo.state.rows.get(launch.childRunId)
+  const child = (row?.resumePayload as { childRun?: { status?: string; closeEvent?: unknown } } | null)?.childRun
+  assert.equal(child?.status, 'running')
+  assert.equal(child?.closeEvent, null)
+
+  resolveStall()
+  const result = await survivingWaiter
+  assert.equal(result.kind, 'closed')
+  assert.equal(result.closeEvent.status, 'completed')
+  assert.equal(result.closeEvent.terminalReason, 'completed')
 })

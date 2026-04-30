@@ -521,8 +521,9 @@ export class SkillTaskRunRepository {
    * different targets in one session must resolve to distinct rows; a
    * different-skill row sharing an outputDir must NEVER be attached.
    *
-   * All three helpers apply the same ACTIVE-status filter as
-   * `findLatestChildRunByKey` and pick the most recently updated match.
+   * These helpers are exact identity lookups and intentionally include
+   * terminal rows so contract rebuilding can recover the child-run id and
+   * close event after completion.
    * The optional `skillId` narrows the result so callers never accidentally
    * attach a child whose skill differs from the contract request.
    */
@@ -538,15 +539,13 @@ export class SkillTaskRunRepository {
       filters.push('skill_id = ?')
       values.push(opts.skillId)
     }
-    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
-    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
     const where = filters.join(' AND ')
     const row = db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE ${where}
       ORDER BY updated_at DESC
       LIMIT 1
-    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    `).get<SkillTaskRunRow>(...values)
     return row ? this.mapRow(row) : null
   }
 
@@ -562,15 +561,13 @@ export class SkillTaskRunRepository {
       filters.push('skill_id = ?')
       values.push(opts.skillId)
     }
-    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
-    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
     const where = filters.join(' AND ')
     const row = db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE ${where}
       ORDER BY updated_at DESC
       LIMIT 1
-    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    `).get<SkillTaskRunRow>(...values)
     return row ? this.mapRow(row) : null
   }
 
@@ -588,15 +585,13 @@ export class SkillTaskRunRepository {
       filters.push('skill_id = ?')
       values.push(opts.skillId)
     }
-    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
-    filters.push(`json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})`)
     const where = filters.join(' AND ')
     const row = db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE ${where}
       ORDER BY updated_at DESC
       LIMIT 1
-    `).get<SkillTaskRunRow>(...values, ...CHILD_RUN_ACTIVE_STATUSES)
+    `).get<SkillTaskRunRow>(...values)
     return row ? this.mapRow(row) : null
   }
 

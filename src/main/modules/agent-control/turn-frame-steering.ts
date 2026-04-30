@@ -14,6 +14,12 @@ export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_ask_user',
 ] as const
 
+const CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
+  'skill_inspect_run_state',
+  'skill_read_artifact',
+  'skill_ask_user',
+] as const
+
 // Phase 6 — VEA's `video_expert_pipeline` was the legacy parent-force
 // fallback action for `mode='skill_resume'` frames missing an explicit
 // action. The child-loop runner now owns VEA execution, so the parent
@@ -407,13 +413,13 @@ export function buildTurnFrameSteering(
     const childRunId = frame.skill?.runContract?.childRunId || ''
     const childStatus = frame.skill?.runContract?.childStatus || null
     const reminderTokens = [
-      `系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=${childRunId}${childStatus ? `, status=${childStatus}` : ''}）。父循环只负责 resume / wait / cancel；不要调用 typed skill_<id>_<action>（已被 gate 到 child runner）。`,
-      '请用 skill_ask_user / skill_inspect_run_state / skill_read_artifact 做必要的诊断，或直接对用户说明当前等待 close event 的状态。',
+      `系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=${childRunId}${childStatus ? `, status=${childStatus}` : ''}）。父循环只处理 status / resume / cancel，并等待 child close event。`,
+      '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。',
     ]
     return {
       mode: 'ask_model',
       requiredToolName: null,
-      preferredToolNames: [...FRAME_STEERING_PRIMITIVE_TOOL_NAMES],
+      preferredToolNames: [...CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES],
       systemReminder: reminderTokens.join('\n'),
       action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: null }),
     }

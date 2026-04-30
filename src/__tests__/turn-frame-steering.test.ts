@@ -298,6 +298,10 @@ test('T5: child-owned frame (childRunId set, no close) steers ask_model with pri
     steering.systemReminder.includes('vt5child0'),
     'reminder must include the live childRunId so the model can correlate',
   )
+  assert.ok(!/typed skill action/i.test(steering.systemReminder))
+  assert.ok(/status/.test(steering.systemReminder))
+  assert.ok(/resume/.test(steering.systemReminder))
+  assert.ok(/cancel/.test(steering.systemReminder))
 })
 
 test('T5: child-owned frame with terminal close (status=completed) releases parent steering', () => {

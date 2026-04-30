@@ -2002,7 +2002,10 @@ export function getSkillsRuntimeManager(): SkillsRuntimeManager {
 // SkillChildRunnerConfig already depends on this file).
 // ────────────────────────────────────────────────────────────────────────
 
-import type { SkillChildCloseEvent, SkillChildRunStatus } from '../agent-control/skill-child-run-types'
+import type {
+  SkillChildCloseEvent,
+  SkillChildRunStatus,
+} from '../agent-control/skill-child-run-types'
 
 export interface StartSkillChildRunAndWaitParams {
   skillId: string
@@ -2010,20 +2013,22 @@ export interface StartSkillChildRunAndWaitParams {
   params: Record<string, unknown>
   scopeId?: string | null
   sessionId?: string | null
-  /** Hard upper bound on wait time. When elapsed the helper cancels the
-   *  child run via `cancelSkillChildRun(id, 'await_timeout')` and returns
-   *  the resulting close event. Set null/undefined for no timeout. */
+  /** Hard upper bound on observer wait time. When elapsed the helper
+   *  returns `status:'running'` with observerTimeout metadata; it does
+   *  not cancel or mutate the child run. Set null/undefined for no timeout. */
   timeoutMs?: number
   triggerType?: 'tool' | 'product' | 'agent'
 }
 
 export interface StartSkillChildRunAndWaitResult {
   childRunId: string
-  /** Final status from the close event. `running` is never returned — the
-   *  helper always waits for the child run to terminate (or be cancelled
-   *  on timeout). */
-  status: Exclude<SkillChildRunStatus, 'queued' | 'running'>
-  closeEvent: SkillChildCloseEvent
+  /** Final status from the close event, or `running` when only this
+   *  observer timed out while the child continues in the background. */
+  status: Exclude<SkillChildRunStatus, 'queued'>
+  closeEvent: SkillChildCloseEvent | null
+  observerTimeout?: {
+    elapsedMs: number
+  } | null
   /** True only when `closeEvent.status === 'completed'`. Provided as a
    *  convenience so existing product code doesn't have to re-derive it. */
   success: boolean
@@ -2064,35 +2069,28 @@ export async function startSkillChildRunAndWait(
     }
   }
 
-  // Wait for the runner's recorded close event. The runner stores the
-  // close in `recentCloses` once the loop drains; we poll because the
-  // public surface (`getSkillChildRunCloseEvent`) is the only stable
-  // way to read it across the runner instance + reused-key paths.
-  const start = Date.now()
-  const pollIntervalMs = 100
   const timeoutMs = typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs) && params.timeoutMs > 0
     ? params.timeoutMs
     : null
 
-  while (true) {
-    const close = childRunner.getSkillChildRunCloseEvent(launch.childRunId)
-    if (close) {
-      return {
-        childRunId: launch.childRunId,
-        status: close.status,
-        closeEvent: close,
-        success: close.status === 'completed',
-      }
+  const waitResult = await childRunner.waitForSkillChildRunClose(launch.childRunId, { timeoutMs })
+  if (waitResult.kind === 'closed') {
+    return {
+      childRunId: launch.childRunId,
+      status: waitResult.closeEvent.status,
+      closeEvent: waitResult.closeEvent,
+      success: waitResult.closeEvent.status === 'completed',
+      observerTimeout: null,
     }
-    if (timeoutMs !== null && Date.now() - start >= timeoutMs) {
-      const cancelled = await childRunner.cancelSkillChildRun(launch.childRunId, 'await_timeout')
-      return {
-        childRunId: launch.childRunId,
-        status: cancelled.status,
-        closeEvent: cancelled,
-        success: false,
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+
+  return {
+    childRunId: launch.childRunId,
+    status: 'running',
+    closeEvent: null,
+    success: false,
+    observerTimeout: {
+      elapsedMs: waitResult.elapsedMs,
+    },
   }
 }

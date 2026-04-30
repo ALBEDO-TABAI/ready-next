@@ -48,6 +48,10 @@ export type SkillChildRunTerminalReason =
   | 'cancelled_user'
   | 'failed_skill'
   | 'infra_error'
+  | 'child_process_crashed'
+  | 'host_unavailable'
+  | 'tool_not_registered'
+  | 'input_validation'
   | 'process_restarted'
 
 export type SkillChildRunParentNextHint =
@@ -81,6 +85,18 @@ export interface SkillChildCloseEvent {
     message: string
   } | null
 }
+
+export type ChildWaitResult =
+  | {
+      kind: 'closed'
+      childRunId: string
+      closeEvent: SkillChildCloseEvent
+    }
+  | {
+      kind: 'observer_timeout'
+      childRunId: string
+      elapsedMs: number
+    }
 
 /**
  * Source plan §5.2. Stored under `skill_task_runs.resumePayload.childRun`

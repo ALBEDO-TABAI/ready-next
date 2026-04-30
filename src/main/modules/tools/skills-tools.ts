@@ -16,7 +16,6 @@ import {
 } from '../agent-control/run-contracts'
 import {
   isChildOwnedSkill,
-  resumeSkillChildRun,
   startSkillChildRun,
 } from '../agent-control/skill-child-runner'
 import type {
@@ -26,6 +25,7 @@ import type {
 import type { TurnFramePatch } from '../agent-control/turn-frame'
 import {
   getLatestActiveSkillTaskRun,
+  hasActiveSkillTaskRun,
   isSkillTaskProjectionLive,
   readSkillTaskProjection,
   recordSkillTaskEvent,
@@ -301,6 +301,7 @@ function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
     () => false,
     hasReferenceHint,
     hasActiveSkillTaskProjection,
+    hasActiveSkillTaskRun,
   )
   // B2: pass referenceHintSkillId through so internal actions whitelisted
   // via host_requirements.expose_when_hint_armed surface for the LLM.

@@ -8,6 +8,7 @@ import type {
   ToolDefinition,
   ToolDefinitionSchema,
   ToolDomain,
+  ToolExecutionVisibility,
   ToolInterruptBehavior,
   ToolKind,
   ToolProjectionHint,
@@ -56,16 +57,14 @@ import {
 } from '../tools/skills-tools'
 import { getToolInputSchemas } from '../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
-import { logAgentMetric } from './metrics'
 import { getLastReferenceSkill } from './skill-reference-hints'
 import { resolveActiveSkillContext } from './active-skill-context'
-import { validateToolInput } from '../tools/tool-input-validator'
+import { hasActiveSkillTaskRun } from './skill-task-tracker'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tool-result-types'
 import type {
-  SkillRunRequest,
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
@@ -333,6 +332,7 @@ function isStaticSkillToolVisible(toolName: string, sessionId?: string): boolean
       () => false,
       (sid) => getLastReferenceSkill(sid) !== null,
       (sid) => Boolean(activeSkillContext && sid === sessionId),
+      hasActiveSkillTaskRun,
     )
   }
   const meta = getStaticSkillActionMeta(toolName)
@@ -403,6 +403,7 @@ function buildToolDefinition(
     description: metadata?.description || toolName,
     schema: metadata?.schema || null,
     executionTimeoutMs: metadata?.executionTimeoutMs,
+    executionVisibility: metadata?.executionVisibility || 'model',
     requiresExplicitAllowlist: metadata?.requiresExplicitAllowlist,
     resultShape: resolveToolResultShape(toolName, domain),
   }
@@ -441,6 +442,7 @@ interface ToolDefinitionMetadata {
   description: string
   schema: ToolDefinitionSchema | null
   executionTimeoutMs?: number
+  executionVisibility?: ToolExecutionVisibility
   requiresExplicitAllowlist?: boolean
 }
 
@@ -514,6 +516,7 @@ function buildStaticSkillMetadata(toolNames: readonly string[]): Map<string, Too
       description: `${toolName} fallback schema`,
       schema: null,
       executionTimeoutMs: skillMeta?.timeoutMs,
+      executionVisibility: skillMeta?.visibility === 'internal' ? 'internal' : 'model',
       requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
     })
   }
@@ -527,6 +530,7 @@ function buildStaticSkillToolDefinition(toolName: string): ToolDefinition | null
     description: `${toolName} fallback schema`,
     schema: null,
     executionTimeoutMs: skillMeta?.timeoutMs,
+    executionVisibility: skillMeta?.visibility === 'internal' ? 'internal' : 'model',
     requiresExplicitAllowlist: skillMeta?.visibility === 'internal',
   })
 }
@@ -539,6 +543,7 @@ function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinitio
         description: def.description,
         schema: null,
         executionTimeoutMs: def.timeoutMs,
+        executionVisibility: def.visibility === 'internal' ? 'internal' : 'model',
         requiresExplicitAllowlist: def.visibility === 'internal',
       })
     }
@@ -617,6 +622,7 @@ function resolveSkillToolDefinitions(sessionId?: string): ToolDefinitionResoluti
         description: def.description,
         schema: null,
         executionTimeoutMs: def.timeoutMs,
+        executionVisibility: def.visibility === 'internal' ? 'internal' : 'model',
         requiresExplicitAllowlist: def.visibility === 'internal',
       })
     }
@@ -860,6 +866,7 @@ export class ToolRegistry implements ToolRegistryReader {
               : fallback.description,
           schema: definition.schema || fallback.schema,
           executionTimeoutMs: definition.executionTimeoutMs ?? fallback.executionTimeoutMs,
+          executionVisibility: definition.executionVisibility ?? fallback.executionVisibility,
           requiresExplicitAllowlist: definition.requiresExplicitAllowlist ?? fallback.requiresExplicitAllowlist,
           resultShape: definition.resultShape || fallback.resultShape,
         }
@@ -934,46 +941,9 @@ export function resolveToolInputSchemaForExecution(
 }
 
 // =====================================================================
-// T6 (B child-loop) — child-internal gateway executor.
-//
-// The skill-child-runner historically called `runtimeManager.runSkill`
-// directly to dispatch a driver-planned action. That bypassed the Zod
-// admission contract the public typed dispatch path runs in
-// `tool-executor.ts:executeToolCall` — a malformed input would fail
-// loudly for the model but pass through into the runtime for child runs.
-//
-// `executeSkillActionViaToolGateway` collapses the two surfaces into one
-// admission contract:
-//
-//   1. Tool-name resolution     — same `buildSkillToolName` table the
-//                                 public dispatch consults.
-//   2. Definition lookup        — same `getToolDefinitionForExecution`.
-//   3. Input validation         — same `resolveToolInputSchemaForExecution`
-//                                 + `validateToolInput`. Validation
-//                                 failure returns `errorKind:'input_validation'`
-//                                 with the SAME structured shape the
-//                                 public dispatch path returns.
-//   4. Runtime dispatch         — calls the runtime manager's
-//                                 `runSkillFromChildRunner` (preferred)
-//                                 or falls back to `runSkill`. Child
-//                                 metadata (childRunId, scope, session,
-//                                 outputDir, runStatePath) flows through
-//                                 the request's `params` envelope so the
-//                                 runtime keeps it visible to the host
-//                                 controller without changing the public
-//                                 SkillRunRequest shape.
-//   5. Error normalization      — handler exceptions become
-//                                 `errorKind:'tool_failed'` ToolExecutionOutput;
-//                                 abort signals propagate as
-//                                 `errorKind:'aborted'`.
-//
-// Recursion is NOT guarded here. The runner's `inDriverDepth` (in
-// `skill-child-runner.ts`) and the public surface's
-// `dispatchChildLoopSkillAction` already enforce nested-child semantics
-// at the layers where re-entry is actually possible.
-//
-// The runtime manager is injectable so tests can wire a fake without
-// having to mutate the module-scoped `getSkillsRuntimeManager()` singleton.
+// T6 (B child-loop) — child-internal gateway executor. The child runner enters
+// through the same `executeToolCall` admission path as model-facing dispatch,
+// but with an explicit child internal context.
 // =====================================================================
 
 export interface ChildGatewayParams {
@@ -1018,61 +988,27 @@ export async function executeSkillActionViaToolGateway(
 ): Promise<ChildGatewayResult> {
   const { skillId, action, input, childRunId, scopeId, sessionId, outputDir, runStatePath, signal } = params
 
-  // The internal gateway intentionally does NOT add a `nested_child_run`
-  // recursion guard here. Calls into this gateway come from the
-  // child runner's own dispatch loop (or test fixtures driving the same
-  // path) — they execute the underlying skill action directly via
-  // `runSkill` / `runSkillFromChildRunner`, which never re-enters
-  // `startSkillChildRun`. A child-loop action like
-  // `video-expert-analyzer/video_expert_pipeline` is therefore the
-  // EXPECTED dispatch shape here, not a recursion attempt.
-  //
-  // The real nested-child guard lives where it can actually fire:
-  //   - `startSkillChildRun` rejects re-entrant calls without
-  //     `childInternal: true` via `inDriverDepth` (skill-child-runner.ts).
-  //   - `dispatchChildLoopSkillAction` (public surface, skills-tools.ts)
-  //     refuses to wrap an already-running child run for the same key.
-  // Adding a duplicate guard here would misclassify legitimate runner
-  // dispatches as recursion and break the entire integration.
-
   const toolName = buildSkillToolName(skillId, action)
 
-  // (2) Definition lookup — best-effort. The public model surface uses
-  // `getToolDefinitionForExecution` to resolve a model-callable tool
-  // name, but the gateway dispatches via the runtime manager directly,
-  // not via the registry's handler. Some test fixtures (and any future
-  // internal-only skill action) will have a schema in the dynamic
-  // cache without a registered tool definition. Treat the missing
-  // definition as informational telemetry and continue — the Zod
-  // schema check below is the real admission contract.
   const registryDefinition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
   if (!registryDefinition) {
-    logAgentMetric('skill_child_gateway_definition_missing', {
-      toolName,
-      skillId,
-      action,
-      childRunId,
+    return makeChildGatewayError({
+      errorKind: 'host_unavailable',
+      message: `Tool is not registered: ${toolName}`,
+      detail: {
+        reason: 'tool_not_registered',
+        toolName,
+        skillId,
+        action,
+        childRunId,
+      },
     })
   }
 
-  // (3) Validation — single resolver, identical to public dispatch. Empty
-  // schema → passthrough (`validateToolInput` returns `{ ok: true }`).
-  const resolvedSchema = resolveToolInputSchemaForExecution(toolName)
-  const schemas = resolvedSchema ? { [toolName]: resolvedSchema } : {}
   const rawArgs = (input && typeof input === 'object' && !Array.isArray(input))
     ? (input as Record<string, unknown>)
     : {}
-  const outcome = validateToolInput(toolName, rawArgs, schemas)
-  if (!outcome.ok) {
-    return {
-      ...outcome.output,
-      skillRunResult: null,
-    }
-  }
 
-  // (4) Abort check before reaching the runtime — propagates the structured
-  // aborted envelope so the runner's close-event mapper sees a uniform
-  // shape.
   if (signal?.aborted) {
     return makeChildGatewayError({
       errorKind: 'aborted',
@@ -1081,47 +1017,31 @@ export async function executeSkillActionViaToolGateway(
     })
   }
 
-  // (5) Runtime dispatch. Child metadata is forwarded via the request's
-  // `params` envelope under a `__childRunContext` key so downstream host
-  // controllers can read it without changing the public SkillRunRequest
-  // shape. Same key both for the public path (when callers inject) and
-  // here, so behavior stays uniform.
-  const runtimeManager = params.runtimeManager ?? getDefaultSkillsRuntimeManager()
-  if (!runtimeManager) {
-    return makeChildGatewayError({
-      errorKind: 'host_unavailable',
-      message: 'Skills runtime manager is not configured',
-      detail: { reason: 'runtime_manager_missing', skillId, action },
-    })
-  }
-
-  const request: SkillRunRequest = {
-    skillId,
-    action,
-    params: {
-      ...outcome.data,
-      __childRunContext: {
+  try {
+    const { executeToolCall } = await import('../tools/tool-executor')
+    const output = await executeToolCall(toolName, rawArgs, {
+      allowedToolNames: new Set([toolName]),
+      abortSignal: signal,
+      sessionId: sessionId ?? undefined,
+      scopeId: scopeId ?? undefined,
+      invoker: 'child_runner',
+      allowInternal: true,
+      skillRuntimeManager: params.runtimeManager,
+      childInternalSkillAction: {
+        skillId,
+        action,
         childRunId,
-        scopeId,
-        sessionId,
         outputDir,
         runStatePath,
       },
-    },
-    signal,
-    triggerType: 'tool',
-    sessionId: sessionId ?? undefined,
-  }
-
-  const fromChild = (runtimeManager as unknown as {
-    runSkillFromChildRunner?: (req: SkillRunRequest) => Promise<SkillRunResult>
-  }).runSkillFromChildRunner
-
-  let result: SkillRunResult
-  try {
-    result = fromChild
-      ? await fromChild.call(runtimeManager, request)
-      : await runtimeManager.runSkill(request)
+    })
+    const skillRunResult = (output.data && typeof output.data === 'object')
+      ? ((output.data as { skillRunResult?: SkillRunResult }).skillRunResult ?? null)
+      : null
+    return {
+      ...output,
+      skillRunResult,
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const looksAborted = signal?.aborted
@@ -1132,28 +1052,6 @@ export async function executeSkillActionViaToolGateway(
       message,
       detail: { skillId, action, childRunId, toolName },
     })
-  }
-
-  // (6) Successful dispatch — embed the SkillRunResult on the output so
-  // the runner can keep its existing observe-after-action contract. The
-  // text body summarizes for any consumer that ignores `data`.
-  const text = result.success
-    ? `child gateway ok: ${skillId}/${action}`
-    : `child gateway skill_action_failed: ${result.error || 'skill returned success=false'}`
-  const output = createToolExecutionOutput(text, {
-    shape: 'json',
-    data: {
-      ok: result.success,
-      skillId,
-      action,
-      childRunId,
-      runStatus: result.status ?? null,
-      outputDir: result.outputDir ?? null,
-    },
-  })
-  return {
-    ...output,
-    skillRunResult: result,
   }
 }
 
@@ -1175,28 +1073,5 @@ function makeChildGatewayError(args: {
   return {
     ...output,
     skillRunResult: null,
-  }
-}
-
-/**
- * Lazy singleton accessor — module-scoped so the registry never imports
- * the runtime-manager module at top-level (which would pull `electron`
- * into every test that loads the registry). The `require` shape mirrors
- * the lazy access pattern used elsewhere in the registry. Returns null
- * when the runtime manager cannot be acquired (e.g. test contexts where
- * electron's `app` is unavailable) — the gateway then surfaces a
- * `host_unavailable` error rather than throwing.
- */
-function getDefaultSkillsRuntimeManager(): SkillsRuntimeManager | null {
-  try {
-    // Resolved lazily so tests that exercise the gateway with their own
-    // injected manager never trigger the singleton's electron-touching
-    // constructor.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod: typeof import('../skills-runtime/runtime-manager') =
-      require('../skills-runtime/runtime-manager')
-    return mod.getSkillsRuntimeManager()
-  } catch {
-    return null
   }
 }

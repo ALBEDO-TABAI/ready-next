@@ -10,11 +10,20 @@ import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
 } from '../agent-control/tool-registry'
+import {
+  isChildInternalStrictAdmissionEnabled,
+  type ToolDefinition,
+} from '../agent-control/tool-definition'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
+import type {
+  SkillRunRequest,
+  SkillRunResult,
+  SkillsRuntimeManager,
+} from '../skills-runtime/runtime-manager'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
@@ -24,7 +33,6 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
-import { executeFileManagementTool } from './file-management-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool } from './skills-tools'
 import { executeSystemTool } from './system-tools'
@@ -70,6 +78,16 @@ export interface ToolContext {
    * roots / handles emitted by an earlier tool in the same batch.
    */
   activeFrame?: ToolRuntimeActiveFrameContext | null
+  invoker?: 'model' | 'child_runner' | 'host'
+  allowInternal?: boolean
+  skillRuntimeManager?: SkillsRuntimeManager | null
+  childInternalSkillAction?: {
+    skillId: string
+    action: string
+    childRunId: string
+    outputDir: string | null
+    runStatePath: string | null
+  } | null
 }
 
 export async function executeToolCall(
@@ -87,6 +105,23 @@ export async function executeToolCall(
       data: {
         errorKind: 'host_unavailable',
         reason: 'tool_not_registered',
+        toolName,
+      },
+    })
+  }
+
+  const allowsChildInternal =
+    context.allowInternal === true && context.invoker === 'child_runner'
+  if (
+    isChildInternalStrictAdmissionEnabled()
+    && definition.executionVisibility === 'internal'
+    && !allowsChildInternal
+  ) {
+    return createToolExecutionOutput(`Tool ${toolName} is internal-only and cannot be called from this context.`, {
+      shape: 'json',
+      data: {
+        errorKind: 'host_unavailable',
+        reason: 'internal_tool_not_allowed',
         toolName,
       },
     })
@@ -164,7 +199,10 @@ export async function executeToolCall(
           })
 
         case 'file':
-          return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
+          {
+            const { executeFileManagementTool } = await import('./file-management-tools')
+            return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
+          }
 
         case 'rss':
           return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
@@ -173,6 +211,9 @@ export async function executeToolCall(
           return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
 
         case 'skill':
+          if (definition.executionVisibility === 'internal' && allowsChildInternal) {
+            return executeChildInternalSkillTool(toolName, args, definition, context)
+          }
           return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
@@ -254,4 +295,115 @@ function inferToolInteractionHint(toolName: string, resultText: string): ToolInt
     return 'awaiting_clarification'
   }
   return null
+}
+
+async function executeChildInternalSkillTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  definition: ToolDefinition,
+  context: ToolContext,
+): Promise<ToolExecutionOutput> {
+  const action = context.childInternalSkillAction
+  if (!action) {
+    return createInternalSkillError({
+      errorKind: 'host_unavailable',
+      message: 'Child internal skill context is missing',
+      detail: { reason: 'child_internal_context_missing', toolName },
+    })
+  }
+
+  const runtimeManager = context.skillRuntimeManager ?? await getDefaultSkillsRuntimeManager()
+  if (!runtimeManager) {
+    return createInternalSkillError({
+      errorKind: 'host_unavailable',
+      message: 'Skills runtime manager is not configured',
+      detail: { reason: 'runtime_manager_missing', toolName },
+    })
+  }
+
+  const request: SkillRunRequest = {
+    skillId: action.skillId,
+    action: action.action,
+    params: {
+      ...args,
+      __childRunContext: {
+        childRunId: action.childRunId,
+        scopeId: context.scopeId || context.scope?.id || context.sessionId || null,
+        sessionId: context.sessionId || null,
+        outputDir: action.outputDir,
+        runStatePath: action.runStatePath,
+      },
+    },
+    timeoutMs: definition.executionTimeoutMs,
+    signal: context.abortSignal,
+    triggerType: 'tool',
+    sessionId: context.sessionId,
+    agentContext: context.agentContext,
+  }
+
+  const fromChild = (runtimeManager as unknown as {
+    runSkillFromChildRunner?: (req: SkillRunRequest) => Promise<SkillRunResult>
+  }).runSkillFromChildRunner
+
+  let result: SkillRunResult
+  try {
+    result = fromChild
+      ? await fromChild.call(runtimeManager, request)
+      : await runtimeManager.runSkill(request)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const looksAborted = context.abortSignal?.aborted
+      || (error instanceof Error && (error.name === 'AbortError' || /abort|cancel/i.test(error.message)))
+    return createInternalSkillError({
+      errorKind: looksAborted ? 'aborted' : 'tool_failed',
+      message,
+      detail: {
+        toolName,
+        skillId: action.skillId,
+        action: action.action,
+        childRunId: action.childRunId,
+      },
+    })
+  }
+
+  const text = result.success
+    ? `child gateway ok: ${action.skillId}/${action.action}`
+    : `child gateway skill_action_failed: ${result.error || 'skill returned success=false'}`
+  return createToolExecutionOutput(text, {
+    shape: 'json',
+    data: {
+      ok: result.success,
+      skillId: action.skillId,
+      action: action.action,
+      childRunId: action.childRunId,
+      runStatus: result.status ?? null,
+      outputDir: result.outputDir ?? null,
+      skillRunResult: result as unknown as Record<string, unknown>,
+    },
+  })
+}
+
+function createInternalSkillError(args: {
+  errorKind: string
+  message: string
+  detail?: Record<string, unknown>
+}): ToolExecutionOutput {
+  return createToolExecutionOutput(`child gateway ${args.errorKind}: ${args.message}`, {
+    shape: 'json',
+    data: {
+      status: 'error',
+      errorKind: args.errorKind,
+      message: args.message,
+      ...(args.detail || {}),
+    },
+  })
+}
+
+async function getDefaultSkillsRuntimeManager(): Promise<SkillsRuntimeManager | null> {
+  try {
+    const mod = await import('../skills-runtime/runtime-manager')
+    return mod.getSkillsRuntimeManager()
+  } catch {
+    return null
+  }
 }

@@ -7,7 +7,7 @@ import { buildRequestEnvelope } from '../main/modules/agent-control/request-enve
 import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
-import { TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { buildBudgetWarningMessage, TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
@@ -20,6 +20,7 @@ import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
 
 function createSession(userText: string): TurnEngineSession {
   return {
@@ -272,6 +273,72 @@ function makeSkillSnapshot(overrides?: Partial<SkillTaskSupervisorSnapshot>): Sk
   }
 }
 
+function makeChildCloseEvent(
+  status: SkillChildCloseEvent['status'],
+  terminalReason: SkillChildCloseEvent['terminalReason'],
+): SkillChildCloseEvent {
+  return {
+    childRunId: 'vchild001',
+    skillId: 'video-expert-analyzer',
+    status,
+    terminalReason,
+    outputDir: '/tmp/ready/output',
+    runStatePath: '/tmp/ready/output/run_state.json',
+    sceneScoresPath: '/tmp/ready/output/scene_scores.json',
+    deliveryReportPath: '/tmp/ready/output/delivery_report.json',
+    progress: {
+      stage: 'score_batches',
+      totalUnits: 120,
+      completedUnits: 12,
+      coverageRatio: 0.1,
+      fingerprint: 'score_batches:12/120',
+    },
+    framePatch: null,
+    projectionPatch: null,
+    error: status === 'blocked'
+      ? { kind: 'blocked_external', message: 'waiting for external input' }
+      : null,
+  }
+}
+
+function makeChildOwnedSnapshot(params: {
+  status: SkillChildCloseEvent['status'] | 'running'
+  closeEvent?: SkillChildCloseEvent | null
+}): SkillTaskSupervisorSnapshot {
+  return makeSkillSnapshot({
+    status: params.status === 'running' ? 'running' : params.status as SkillTaskSupervisorSnapshot['status'],
+    liveness: params.status === 'running' ? 'background' : null,
+    hasLiveWork: params.status === 'running',
+    hasRecentProgress: false,
+    pauseReason: params.status === 'budget_paused' ? 'budget_exhausted' : null,
+    resumePayload: {
+      childRun: {
+        version: 1,
+        childRunId: 'vchild001',
+        kind: 'vea',
+        parentScopeId: 'scope-test',
+        parentSessionId: 'scope-test',
+        skillId: 'video-expert-analyzer',
+        skillName: 'Video Expert Analyzer',
+        requestedAction: 'video_expert_pipeline',
+        requestedInput: { url: 'https://example.com/video.mp4', outputDir: '/tmp/ready/output' },
+        singleFlightKey: 'scope-test|scope-test|video-expert-analyzer|video',
+        parentNextHint: 'wait_for_close_event',
+        outputDir: '/tmp/ready/output',
+        runStatePath: '/tmp/ready/output/run_state.json',
+        eventLogPath: '/tmp/ready/output/child-run.jsonl',
+        status: params.status,
+        closeEvent: typeof params.closeEvent === 'undefined' ? null : params.closeEvent,
+        legacy: {
+          taskRunId: 'str-loop',
+          detachedTaskId: 'dst-loop',
+          projectionTaskId: null,
+        },
+      },
+    },
+  })
+}
+
 function createRequest(params: {
   userText: string
   host?: Record<string, unknown>
@@ -300,6 +367,152 @@ function createRequest(params: {
   }
   return { request, events: events.events }
 }
+
+test('budget_paused child resumes through TurnEngine', async () => {
+  const engine = new TurnEngine()
+  const calls: string[] = []
+  const close = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'budget_paused', closeEvent: close }),
+      },
+      resumeSkillChildRun: async (childRunId: string) => {
+        calls.push(childRunId)
+        return {
+          childRunId,
+          status: 'running',
+          outputDir: '/tmp/ready/output',
+          runStatePath: '/tmp/ready/output/run_state.json',
+          eventLogPath: '/tmp/ready/output/child-run.jsonl',
+          parentNextHint: 'wait_for_close_event',
+          closeEvent: null,
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.deepEqual(calls, ['vchild001'])
+  assert.equal(result.status, 'done')
+  assert.match(result.finalText, /已继续/)
+})
+
+test('recoverable_paused child resumes through TurnEngine', async () => {
+  const engine = new TurnEngine()
+  const calls: string[] = []
+  const close = makeChildCloseEvent('recoverable_paused', 'checkpoint_background')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'recoverable_paused', closeEvent: close }),
+      },
+      resumeSkillChildRun: async (childRunId: string) => {
+        calls.push(childRunId)
+        return {
+          childRunId,
+          status: 'running',
+          outputDir: '/tmp/ready/output',
+          runStatePath: '/tmp/ready/output/run_state.json',
+          eventLogPath: '/tmp/ready/output/child-run.jsonl',
+          parentNextHint: 'wait_for_close_event',
+          closeEvent: null,
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.deepEqual(calls, ['vchild001'])
+  assert.equal(result.status, 'done')
+  assert.match(result.finalText, /同一个 child run/)
+})
+
+test('blocked child is not directly resumable', async () => {
+  const engine = new TurnEngine()
+  let resumeCalls = 0
+  const close = makeChildCloseEvent('blocked', 'blocked_external')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'blocked', closeEvent: close }),
+      },
+      resumeSkillChildRun: async () => {
+        resumeCalls += 1
+        throw new Error('blocked child must not resume')
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeCalls, 0)
+  assert.equal(result.status, 'done')
+  assert.match(result.finalText, /不能直接继续/)
+  assert.equal(result.terminalReason, 'done')
+})
+
+test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
+  const engine = new TurnEngine()
+  const cancelReasons: string[] = []
+  const activeSnapshot = makeChildOwnedSnapshot({ status: 'running', closeEvent: null })
+  const { request: continueRequest } = createRequest({
+    userText: '继续',
+    host: {
+      maxToolIterations: 1,
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => activeSnapshot,
+      },
+      cancelSkillChildRun: async (_childRunId: string, reason?: string) => {
+        cancelReasons.push(reason || '')
+        return makeChildCloseEvent('killed', 'cancelled_user')
+      },
+    },
+  })
+  await engine.execute(continueRequest)
+  assert.deepEqual(cancelReasons, [], 'observer/wait path must not cancel the child')
+
+  const { request: cancelRequest } = createRequest({
+    userText: '取消',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => activeSnapshot,
+      },
+      cancelSkillChildRun: async (childRunId: string, reason?: string) => {
+        cancelReasons.push(`${childRunId}:${reason || ''}`)
+        return makeChildCloseEvent('killed', 'cancelled_user')
+      },
+    },
+  })
+  const result = await engine.execute(cancelRequest)
+
+  assert.deepEqual(cancelReasons, ['vchild001:cancelled_user'])
+  assert.equal(result.status, 'cancelled')
+  assert.equal(result.terminalReason, 'cancelled_user')
+})
+
+test('budget warning does not mention typed skill action', () => {
+  const warning = buildBudgetWarningMessage({
+    iterations: 56,
+    effectiveMaxIterations: 80,
+    level: 'warning',
+    isLongSkillContext: true,
+  })
+  const converge = buildBudgetWarningMessage({
+    iterations: 76,
+    effectiveMaxIterations: 80,
+    level: 'converge',
+    isLongSkillContext: true,
+  })
+
+  assert.ok(!/typed skill action/i.test(warning))
+  assert.ok(!/typed skill action/i.test(converge))
+})
 
 test('TurnEngine uses the direct simple-response path for non-tool runs', async () => {
   const engine = new TurnEngine()
@@ -1013,7 +1226,8 @@ test('TurnEngine records tool snapshots and clears browser text-bridge nudges af
       },
       domainAdapters: [browserAdapter],
       requestToolLoopResponse: async (params: { preferTextToolBridgeOnce?: boolean }) => {
-        preferTextBridgeFlags.push(Boolean(params.preferTextToolBridgeOnce))
+        const preferTextBridge = params.preferTextToolBridgeOnce === true
+        preferTextBridgeFlags.push(preferTextBridge)
         const toolSnapshots = [
           {
             stage: 'provider_request',
@@ -1030,10 +1244,10 @@ test('TurnEngine records tool snapshots and clears browser text-bridge nudges af
             visibleCapabilityGroupIds: ['browser_interaction'],
             suppressedCapabilityGroupIds: [],
             allowedToolNames: ['browser_search', 'browser_read_page'],
-            requestedTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
-            effectiveTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
+            requestedTransport: preferTextBridge ? 'text' : 'native',
+            effectiveTransport: preferTextBridge ? 'text' : 'native',
             supportsNativeTools: true,
-            preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
+            preferTextToolBridge: preferTextBridge,
             fallbackReason: null,
             toolCallsCount: 0,
           },
@@ -1052,10 +1266,10 @@ test('TurnEngine records tool snapshots and clears browser text-bridge nudges af
             visibleCapabilityGroupIds: ['browser_interaction'],
             suppressedCapabilityGroupIds: [],
             allowedToolNames: ['browser_search', 'browser_read_page'],
-            requestedTransport: Boolean(params.preferTextToolBridgeOnce) ? 'text' : 'native',
+            requestedTransport: preferTextBridge ? 'text' : 'native',
             effectiveTransport: 'text',
             supportsNativeTools: true,
-            preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
+            preferTextToolBridge: preferTextBridge,
             fallbackReason: preferTextBridgeFlags.length === 1 ? 'missing_native_tools' : null,
             toolCallsCount: 0,
           },
@@ -1438,7 +1652,12 @@ test('TurnEngine emits a typed skill action duration metric from tool hooks', as
             stopReason: 'stop',
           }
         },
-        executeToolBatch: async (params: { hooks?: { onToolStart?: Function; onToolResult?: Function } }) => {
+        executeToolBatch: async (params: {
+          hooks?: {
+            onToolStart?: (payload: unknown) => void
+            onToolResult?: (payload: unknown) => void
+          }
+        }) => {
           const toolCall = { id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }
           params.hooks?.onToolStart?.({ toolCall })
           params.hooks?.onToolResult?.({
@@ -1540,7 +1759,12 @@ test('TurnEngine emits a generic running projection as soon as a long skill acti
           }
           return { text: '完成', toolCalls: [], stopReason: 'stop' }
         },
-        executeToolBatch: async (params: { hooks?: { onToolStart?: Function; onToolResult?: Function } }) => {
+        executeToolBatch: async (params: {
+          hooks?: {
+            onToolStart?: (payload: unknown) => void
+            onToolResult?: (payload: unknown) => void
+          }
+        }) => {
           const toolCall = { id: 'tool-1', name: 'skill_video_expert_pipeline', input: {} }
           params.hooks?.onToolStart?.({ toolCall })
           params.hooks?.onToolResult?.({ toolCall, result: { text: 'done' } })

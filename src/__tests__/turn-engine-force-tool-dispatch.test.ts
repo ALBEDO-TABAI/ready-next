@@ -31,6 +31,10 @@ import type { ToolDefinition } from '../main/modules/agent-control/tool-definiti
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 import type {
+  SkillChildCloseEvent,
+  SkillChildRunStatus,
+} from '../main/modules/agent-control/skill-child-run-types'
+import type {
   RunBudgetSeed,
   RunBudgetUsage,
   TaskProjectionStore,
@@ -169,6 +173,60 @@ function makeRecoverableSnapshot(): SkillTaskSupervisorSnapshot {
   }
 }
 
+function makeChildCloseEvent(
+  childRunId: string,
+  status: SkillChildCloseEvent['status'],
+  terminalReason: SkillChildCloseEvent['terminalReason'],
+): SkillChildCloseEvent {
+  return {
+    childRunId,
+    skillId: 'video-expert-analyzer',
+    status,
+    terminalReason,
+    outputDir: '/tmp/vea-force/output',
+    runStatePath: '/tmp/vea-force/output/run_state.json',
+    sceneScoresPath: '/tmp/vea-force/output/scene_scores.json',
+    deliveryReportPath: null,
+    progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null, fingerprint: null },
+    framePatch: null,
+    projectionPatch: null,
+    error: status === 'blocked' ? { kind: terminalReason, message: 'missing input' } : null,
+  }
+}
+
+function makeChildOwnedSnapshot(params: {
+  childRunId: string
+  status: SkillChildRunStatus
+  terminalReason?: SkillChildCloseEvent['terminalReason']
+  closeEvent?: SkillChildCloseEvent | null
+}): SkillTaskSupervisorSnapshot {
+  const base = makeRecoverableSnapshot()
+  return {
+    ...base,
+    status: params.status === 'running' ? 'running'
+      : params.status === 'blocked' ? 'blocked'
+      : params.status === 'budget_paused' ? 'budget_paused'
+      : params.status === 'recoverable_paused' ? 'recoverable_paused'
+      : base.status,
+    hasLiveWork: params.status === 'running',
+    resumePayload: {
+      ...(base.resumePayload || {}),
+      childRun: {
+        childRunId: params.childRunId,
+        parentNextHint: 'wait_for_close_event',
+        status: params.status,
+        closeEvent: params.closeEvent === undefined && params.status !== 'running' && params.status !== 'queued'
+          ? makeChildCloseEvent(
+            params.childRunId,
+            params.status,
+            params.terminalReason || 'checkpoint_budget',
+          )
+          : params.closeEvent,
+      },
+    },
+  }
+}
+
 function createForceToolHost(overrides: Record<string, unknown> = {}) {
   return {
     log: () => {},
@@ -298,6 +356,144 @@ function createForceToolHost(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+test('budget_paused child resumes through TurnEngine', async () => {
+  const engine = new TurnEngine()
+  let resumeChildRunId: string | null = null
+  let modelCalls = 0
+  const childRunId = 'vbudget01'
+  const { request, events } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({
+          childRunId,
+          status: 'budget_paused',
+          terminalReason: 'checkpoint_budget',
+        }),
+      },
+      resumeSkillChildRun: async (id: string) => {
+        resumeChildRunId = id
+        return {
+          childRunId: id,
+          status: 'running',
+          closeEvent: null,
+          parentNextHint: 'wait_for_close_event',
+          outputDir: '/tmp/vea-force/output',
+          runStatePath: '/tmp/vea-force/output/run_state.json',
+        }
+      },
+      requestToolLoopResponse: async () => {
+        modelCalls += 1
+        return { text: 'should not call model', toolCalls: [], stopReason: 'stop' }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeChildRunId, childRunId)
+  assert.equal(modelCalls, 0)
+  assert.equal(result.status, 'done')
+  assert.equal(events.some((event) => event.kind === 'output' && String(event.chunk).includes(childRunId)), true)
+})
+
+test('recoverable_paused child resumes through TurnEngine', async () => {
+  const engine = new TurnEngine()
+  let resumeChildRunId: string | null = null
+  const childRunId = 'vrecover1'
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({
+          childRunId,
+          status: 'recoverable_paused',
+          terminalReason: 'checkpoint_budget',
+        }),
+      },
+      resumeSkillChildRun: async (id: string) => {
+        resumeChildRunId = id
+        return {
+          childRunId: id,
+          status: 'running',
+          closeEvent: null,
+          parentNextHint: 'wait_for_close_event',
+          outputDir: '/tmp/vea-force/output',
+          runStatePath: '/tmp/vea-force/output/run_state.json',
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeChildRunId, childRunId)
+  assert.equal(result.status, 'done')
+})
+
+test('blocked child is not directly resumable through TurnEngine', async () => {
+  const engine = new TurnEngine()
+  let resumeCalls = 0
+  const childRunId = 'vblocked1'
+  const { request, events } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({
+          childRunId,
+          status: 'blocked',
+          terminalReason: 'blocked_external',
+        }),
+      },
+      resumeSkillChildRun: async () => {
+        resumeCalls += 1
+        throw new Error('blocked child must not resume')
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeCalls, 0)
+  assert.equal(result.status, 'done')
+  assert.equal(events.some((event) =>
+    event.kind === 'output' && String(event.chunk).includes('不能直接继续')), true)
+})
+
+test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
+  const engine = new TurnEngine()
+  let cancelArgs: { childRunId: string; reason?: string } | null = null
+  let resumeCalls = 0
+  const childRunId = 'vcancel1'
+  const { request } = createRequest({
+    userText: '取消当前任务',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({
+          childRunId,
+          status: 'running',
+          closeEvent: null,
+        }),
+      },
+      cancelSkillChildRun: async (id: string, reason?: string) => {
+        cancelArgs = { childRunId: id, reason }
+        return makeChildCloseEvent(id, 'killed', 'cancelled_user')
+      },
+      resumeSkillChildRun: async () => {
+        resumeCalls += 1
+        throw new Error('cancel turn must not resume')
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.deepEqual(cancelArgs, { childRunId, reason: 'cancelled_user' })
+  assert.equal(resumeCalls, 0)
+  assert.equal(result.status, 'cancelled')
+  assert.equal(result.terminalReason, 'cancelled_user')
+})
 
 function createRequest(params: {
   userText: string
