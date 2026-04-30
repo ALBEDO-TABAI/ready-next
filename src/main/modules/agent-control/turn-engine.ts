@@ -171,7 +171,10 @@ import {
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskType } from './task-type-resolver'
-import { buildToolRuntimeContext } from './tool-runtime-context-builder'
+import {
+  buildActiveFrameContextFromTurnFrame,
+  buildToolRuntimeContext,
+} from './tool-runtime-context-builder'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
@@ -814,6 +817,15 @@ export class TurnEngine {
       agentContext: buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
         baseUrl: host.providerContext.baseUrl,
       }),
+      // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
+      // snapshot BEFORE any same-batch `contextModifier` runs. The first
+      // tool dispatched in this turn must already see the frame's durable
+      // active artifact roots and `runContract` (without needing an
+      // earlier tool to publish them via contextModifier first). Earlier
+      // same-batch tools' contextModifier patches still apply on TOP of
+      // this seed — `applyContextModifier` unions roots + last-write-wins
+      // the contract, so freshly-discovered state always wins on overlap.
+      activeFrame: buildActiveFrameContextFromTurnFrame(turnFrame),
     })
 
     const finish = (params: {

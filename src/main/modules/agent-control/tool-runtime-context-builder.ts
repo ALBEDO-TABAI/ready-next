@@ -8,7 +8,36 @@ import {
   type ToolRuntimeActiveFrameContext,
   type ToolRuntimeContext,
 } from './tool-runtime'
+import type { TurnFrame } from './turn-frame'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+
+/**
+ * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
+ * snapshot from the current `TurnFrame`. The first tool dispatched in a
+ * turn must already see the frame's durable signals (active artifact roots,
+ * latest run contract) before any same-batch `contextModifier` mutates the
+ * slot.
+ *
+ * Shape mapping:
+ *   - `frame.activeArtifactRoots` → `activeArtifactRoots`
+ *   - `frame.skill?.runContract` → `runContract`
+ *   - `discoveredHandles` is always `[]` here — `TurnFrame` folds discovered
+ *     handles into the skill slice fields rather than carrying a top-level
+ *     array, so the runtime context starts empty and accumulates additive
+ *     handles via `applyContextModifier` during the batch.
+ */
+export function buildActiveFrameContextFromTurnFrame(
+  frame: TurnFrame | null | undefined,
+): ToolRuntimeActiveFrameContext {
+  if (!frame) return createEmptyActiveFrameContext()
+  return {
+    activeArtifactRoots: Array.isArray(frame.activeArtifactRoots)
+      ? [...frame.activeArtifactRoots]
+      : [],
+    runContract: frame.skill?.runContract ?? null,
+    discoveredHandles: [],
+  }
+}
 
 export function buildToolRuntimeContext(params: {
   browserController: BrowserController | null

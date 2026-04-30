@@ -312,6 +312,256 @@ test('Phase 3: applyContextModifier mutates activeFrame.activeArtifactRoots in p
   )
 })
 
+/**
+ * Phase 3 (skill-child-loop, Team T7) — engine-level seeding contract.
+ *
+ * Before any same-batch `contextModifier` runs, the FIRST tool dispatched in
+ * a turn must already see the active `TurnFrame`'s durable signals on its
+ * `ToolRuntimeContext.activeFrame`:
+ *   - `frame.activeArtifactRoots` → seeded into `activeFrame.activeArtifactRoots`
+ *   - `frame.skill?.runContract`  → seeded into `activeFrame.runContract`
+ *
+ * This protects the dispatch path: today the seed only happens AFTER the
+ * first tool ran (because the only writer was `applyContextModifier`). If
+ * the model's first call is `skill_read_artifact` against a path under
+ * `frame.activeArtifactRoots`, that call must succeed without a prior
+ * "discovery" tool.
+ */
+test('T7: ToolRuntimeContext.activeFrame is seeded from TurnFrame BEFORE any same-batch contextModifier runs', async () => {
+  const { buildToolRuntimeContext, buildActiveFrameContextFromTurnFrame } = await import(
+    '../main/modules/agent-control/tool-runtime-context-builder'
+  )
+
+  // Construct a minimal TurnFrame fixture mimicking what the resolver
+  // produces after a prior turn discovered an artifact root and minted a
+  // SkillRunContract carrying a child run id.
+  const seededFrame: any = {
+    ids: { sessionId: 's-t7', requestId: 'r-t7' },
+    mode: 'skill_resume',
+    userIntent: 'continue',
+    skill: {
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      source: 'reference_hint',
+      confidence: 0.9,
+      taskRunId: null,
+      detachedTaskId: null,
+      action: 'video_expert_pipeline',
+      runStatePath: null,
+      outputDir: null,
+      artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+      status: null,
+      staleBlockerReason: null,
+      runContract: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'Video Expert Analyzer',
+        toolName: 'skill_video_expert_pipeline',
+        action: 'video_expert_pipeline',
+        actionInput: null,
+        originalInput: null,
+        sourceUrl: null,
+        taskRunId: null,
+        detachedTaskId: null,
+        jobId: null,
+        outputDir: null,
+        runStatePath: null,
+        artifactRoots: [],
+        artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+        status: 'running',
+        liveness: 'running_process',
+        progress: {
+          stage: null,
+          totalUnits: null,
+          completedUnits: null,
+          coverageRatio: null,
+          fingerprint: null,
+        },
+        blocker: { reason: null, stale: false },
+        projectionIdentity: { stableKey: null, supersedesProjectionIds: [] },
+        forceLoopGuard: {
+          lastForceToolName: null,
+          lastForceInputDigest: null,
+          lastForceToolDispatchedAt: null,
+          consecutiveForceCount: 0,
+        },
+        updatedAt: '2026-04-30T01:00:00.000Z',
+        childRunId: 'vt7seed00',
+      },
+    },
+    liveness: 'running_process',
+    progress: {
+      stage: null,
+      totalUnits: null,
+      completedUnits: null,
+      coverageRatio: null,
+      fingerprint: null,
+    },
+    steering: {
+      mode: 'ask_model',
+      requiredToolName: null,
+      preferredToolNames: [],
+      systemReminder: null,
+    },
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: false },
+    activeArtifactRoots: ['/tmp/seed-root'],
+    configValidation: null,
+    terminalReason: null,
+  }
+
+  // Helper sanity — derived snapshot exposes the seed signals.
+  const seedSnapshot = buildActiveFrameContextFromTurnFrame(seededFrame)
+  assert.deepEqual(seedSnapshot.activeArtifactRoots, ['/tmp/seed-root'])
+  assert.equal(seedSnapshot.runContract?.childRunId, 'vt7seed00')
+  assert.deepEqual(seedSnapshot.discoveredHandles, [])
+
+  // The engine's call site builds the runtime context with the snapshot —
+  // we inline that here so the assertion mirrors the dispatcher's view of
+  // the FIRST tool's `ToolRuntimeContext` BEFORE any contextModifier ran.
+  const ctx = buildToolRuntimeContext({
+    browserController: null,
+    sidecarManager: null,
+    runtime: null,
+    emitToolAction: () => {},
+    abortSignal: new AbortController().signal,
+    activeFrame: buildActiveFrameContextFromTurnFrame(seededFrame),
+  })
+
+  assert.deepEqual(
+    ctx.activeFrame.activeArtifactRoots,
+    ['/tmp/seed-root'],
+    'T7 regression: first tool must see seeded /tmp/seed-root before any contextModifier runs',
+  )
+  assert.equal(
+    ctx.activeFrame.runContract?.childRunId,
+    'vt7seed00',
+    'T7 regression: first tool must see seeded runContract.childRunId before any contextModifier runs',
+  )
+})
+
+test('T7: same-batch contextModifier from tool-A unions onto the seeded roots so tool-B sees BOTH', async () => {
+  const { applyContextModifier } = await import(
+    '../main/modules/agent-control/tool-runtime'
+  )
+  const { buildToolRuntimeContext, buildActiveFrameContextFromTurnFrame } = await import(
+    '../main/modules/agent-control/tool-runtime-context-builder'
+  )
+  const { createToolExecutionOutput } = await import(
+    '../main/modules/agent-control/tool-result-types'
+  )
+
+  const seededFrame: any = {
+    ids: { sessionId: 's-t7', requestId: 'r-t7' },
+    mode: 'skill_resume',
+    userIntent: 'continue',
+    skill: {
+      skillId: 'video-expert-analyzer',
+      skillName: 'Video Expert Analyzer',
+      source: 'reference_hint',
+      confidence: 0.9,
+      taskRunId: null,
+      detachedTaskId: null,
+      action: 'video_expert_pipeline',
+      runStatePath: null,
+      outputDir: null,
+      artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+      status: null,
+      staleBlockerReason: null,
+      runContract: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'Video Expert Analyzer',
+        toolName: 'skill_video_expert_pipeline',
+        action: 'video_expert_pipeline',
+        actionInput: null,
+        originalInput: null,
+        sourceUrl: null,
+        taskRunId: null,
+        detachedTaskId: null,
+        jobId: null,
+        outputDir: null,
+        runStatePath: null,
+        artifactRoots: [],
+        artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+        status: 'running',
+        liveness: 'running_process',
+        progress: {
+          stage: null,
+          totalUnits: null,
+          completedUnits: null,
+          coverageRatio: null,
+          fingerprint: null,
+        },
+        blocker: { reason: null, stale: false },
+        projectionIdentity: { stableKey: null, supersedesProjectionIds: [] },
+        forceLoopGuard: {
+          lastForceToolName: null,
+          lastForceInputDigest: null,
+          lastForceToolDispatchedAt: null,
+          consecutiveForceCount: 0,
+        },
+        updatedAt: '2026-04-30T01:00:00.000Z',
+        childRunId: 'vt7seed00',
+      },
+    },
+    liveness: 'running_process',
+    progress: {
+      stage: null,
+      totalUnits: null,
+      completedUnits: null,
+      coverageRatio: null,
+      fingerprint: null,
+    },
+    steering: {
+      mode: 'ask_model',
+      requiredToolName: null,
+      preferredToolNames: [],
+      systemReminder: null,
+    },
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: false },
+    activeArtifactRoots: ['/tmp/seed-root'],
+    configValidation: null,
+    terminalReason: null,
+  }
+
+  // Engine-style runtime context with the seed in place.
+  const ctx = buildToolRuntimeContext({
+    browserController: null,
+    sidecarManager: null,
+    runtime: null,
+    emitToolAction: () => {},
+    abortSignal: new AbortController().signal,
+    activeFrame: buildActiveFrameContextFromTurnFrame(seededFrame),
+  })
+
+  // Pre-condition: only the seed is visible before any contextModifier ran.
+  assert.deepEqual(ctx.activeFrame.activeArtifactRoots, ['/tmp/seed-root'])
+  assert.equal(ctx.activeFrame.runContract?.childRunId, 'vt7seed00')
+
+  // Tool-A in the same batch (e.g. VEA pipeline) discovers an additional
+  // artifact root and emits a contextModifier carrying it.
+  const toolAResult = createToolExecutionOutput('tool-A discovered fresh output', {
+    contextModifier: {
+      activeFrame: {
+        activeArtifactRoots: ['/tmp/discovered-root'],
+      },
+    },
+  })
+  applyContextModifier(ctx, toolAResult)
+
+  // Tool-B in the same batch (e.g. skill_read_artifact) must now see BOTH
+  // the seed AND the freshly-discovered root, in seed-first order.
+  assert.deepEqual(
+    ctx.activeFrame.activeArtifactRoots,
+    ['/tmp/seed-root', '/tmp/discovered-root'],
+    'T7 regression: tool-B must see BOTH /tmp/seed-root (seeded) AND /tmp/discovered-root (same-batch contextModifier)',
+  )
+  // The seeded runContract is preserved (tool-A did not override it).
+  assert.equal(
+    ctx.activeFrame.runContract?.childRunId,
+    'vt7seed00',
+    'T7 regression: tool-A omitting runContract must not erase the seeded contract',
+  )
+})
+
 test('Phase 3: source-level proof — VEA typed-action wrapper emits contextModifier when outputDir is present', () => {
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
