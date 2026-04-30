@@ -660,6 +660,11 @@ export class RSSItemAnalysisManager {
       params: {
         sceneScoresPath,
         mode: 'api',
+        // Pass the same outputDir the pipeline used so the child driver
+        // can resolve run_state.json without inferring it from the scene
+        // scores path. Reduces ambiguity but the driver's cold-start
+        // path no longer requires it.
+        outputDir,
       },
       timeoutMs: 35 * 60 * 1000,
     })

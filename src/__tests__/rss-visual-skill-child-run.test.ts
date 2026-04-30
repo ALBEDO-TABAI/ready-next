@@ -16,14 +16,39 @@
  */
 
 import assert from 'node:assert/strict'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import { RSSItemAnalysisManager } from '../main/modules/rss-engine/item-analysis-manager'
 import type {
   StartSkillChildRunAndWaitParams,
   StartSkillChildRunAndWaitResult,
+  SkillRunRequest,
+  SkillRunResult,
+  SkillsRuntimeManager,
 } from '../main/modules/skills-runtime/runtime-manager'
-import type { SkillChildCloseEvent, SkillChildRunTerminalReason } from '../main/modules/agent-control/skill-child-run-types'
+import { startSkillChildRunAndWait } from '../main/modules/skills-runtime/runtime-manager'
+import {
+  configureSkillChildRunner,
+  __resetSkillChildRunnerForTests,
+} from '../main/modules/agent-control/skill-child-runner'
+import {
+  registerSkillChildDriver,
+  __resetSkillChildDriversForTests,
+} from '../main/modules/agent-control/skill-child-drivers'
+// Importing the module re-registers the real VEA driver as a side effect.
+// We grab the singleton instance so we can re-register it after a test reset.
+import { videoExpertChildDriver } from '../main/modules/agent-control/video-expert-child-driver'
+import type {
+  SkillChildCloseEvent,
+  SkillChildRunTerminalReason,
+} from '../main/modules/agent-control/skill-child-run-types'
+import type {
+  SkillTaskRunRecord,
+  SkillTaskRunRepository,
+} from '../main/modules/repositories/skill-task-run-repository'
 
 function makeCloseEvent(
   status: SkillChildCloseEvent['status'],
@@ -232,4 +257,197 @@ test('blocked close event surfaces as blocked with distinct veaCause', async () 
   assert.equal((error as Error & { veaCause?: string }).veaCause, 'blocked')
   assert.notEqual((error as Error & { veaCause?: string }).veaCause, 'failed')
   assert.match(error.message, /已阻塞/)
+})
+
+// ===================================================================
+// T3 — End-to-end: scene_scores.json on disk → real driver → ai_analyze
+// ===================================================================
+
+interface FakeRepoState {
+  rows: Map<string, SkillTaskRunRecord>
+}
+
+function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoState } {
+  const state: FakeRepoState = { rows: new Map() }
+  const repo = {
+    createChildRun: (input: Parameters<SkillTaskRunRepository['createChildRun']>[0]) => {
+      const now = new Date().toISOString()
+      const record: SkillTaskRunRecord = {
+        id: input.childRunId,
+        scopeId: input.scopeId ?? null,
+        sessionId: input.sessionId ?? null,
+        agent: null,
+        runId: null,
+        skillId: input.skillId,
+        skillName: input.skillName ?? null,
+        action: input.action,
+        toolName: null,
+        runKind: 'child_run',
+        status: 'running',
+        interactionState: 'running',
+        goalText: null,
+        resourceRefs: [],
+        params: input.requestedInput,
+        steps: [],
+        currentStepId: null,
+        artifacts: [],
+        outputDir: input.outputDir,
+        runStatePath: input.runStatePath,
+        sceneScoresPath: null,
+        deliveryReportPath: null,
+        failureKind: null,
+        failureDetail: null,
+        jobId: null,
+        detachedTaskId: null,
+        resumePayload: {
+          childRun: {
+            version: 1,
+            childRunId: input.childRunId,
+            kind: 'vea',
+            parentScopeId: input.scopeId,
+            parentSessionId: input.sessionId,
+            skillId: input.skillId,
+            skillName: input.skillName,
+            requestedAction: input.action,
+            requestedInput: input.requestedInput,
+            singleFlightKey: input.singleFlightKey,
+            parentNextHint: input.parentNextHint,
+            outputDir: input.outputDir,
+            runStatePath: input.runStatePath,
+            eventLogPath: input.eventLogPath,
+            status: input.status ?? 'running',
+            closeEvent: null,
+            legacy: { taskRunId: null, detachedTaskId: null, projectionTaskId: null },
+          },
+        },
+        createdAt: now,
+        startedAt: null,
+        updatedAt: now,
+        finishedAt: null,
+      }
+      state.rows.set(input.childRunId, record)
+      return record
+    },
+    updateChildRun: (childRunId: string, patch: Record<string, unknown>) => {
+      const existing = state.rows.get(childRunId)
+      if (!existing) throw new Error(`no row ${childRunId}`)
+      const payload = (existing.resumePayload as { childRun: Record<string, unknown> }).childRun
+      const merged = { ...payload, ...patch }
+      existing.resumePayload = { childRun: merged }
+      if (typeof patch.status === 'string') existing.status = patch.status as SkillTaskRunRecord['status']
+      existing.updatedAt = new Date().toISOString()
+    },
+    findLatestChildRunByKey: (key: string): SkillTaskRunRecord | null => {
+      const ACTIVE = new Set(['queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked'])
+      for (const row of state.rows.values()) {
+        const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+        if (!child) continue
+        if (child.singleFlightKey === key && ACTIVE.has(child.status as string)) return row
+      }
+      return null
+    },
+    findLatestChildRunBySkill: () => null,
+    get: (id: string) => state.rows.get(id) ?? null,
+  } as unknown as SkillTaskRunRepository
+  return { repo, state }
+}
+
+function makeFakeRuntime(opts: {
+  onRun: (request: SkillRunRequest) => Promise<SkillRunResult> | SkillRunResult
+}): { manager: SkillsRuntimeManager; calls: SkillRunRequest[] } {
+  const calls: SkillRunRequest[] = []
+  const fake = {
+    getRuntimeInfo: () => ({
+      runtimeRoot: '/tmp/fake-runtime',
+      skillsRoot: '/tmp/fake-runtime/skills',
+      customSkillsRoot: '/tmp/fake-runtime/custom',
+      outputsRoot: '/tmp/fake-runtime/outputs',
+      venvRoot: '/tmp/fake-runtime/venv',
+    }),
+    runSkill: async (request: SkillRunRequest): Promise<SkillRunResult> => {
+      calls.push(request)
+      return opts.onRun(request)
+    },
+    runSkillFromChildRunner: async (request: SkillRunRequest): Promise<SkillRunResult> => {
+      calls.push(request)
+      return opts.onRun(request)
+    },
+  } as unknown as SkillsRuntimeManager
+  return { manager: fake, calls }
+}
+
+test('T3: RSS visual flow — scene_scores.json on disk routes through REAL driver to video_expert_ai_analyze', async () => {
+  // Reset registries and re-register the real VEA driver. Other tests in
+  // this file inject their own stubs at the manager seam, so they don't
+  // care about the runner singleton; we only need it for this case.
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
+  registerSkillChildDriver(videoExpertChildDriver)
+
+  const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-rss-vea-aiscore-'))
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  // Phase: pipeline already produced scene_scores.json. We do NOT pre-write
+  // run_state.json — the manager's product call lands cold against the real
+  // driver, mirroring item-analysis-manager.ts §runVisualFlow.
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+
+  const runtime = makeFakeRuntime({
+    // The expensive python action is faked. The driver's stage decision
+    // (which action to plan) is real. After the action 'runs', we write a
+    // completed run_state.json so the next driver tick closes cleanly.
+    onRun: async (request) => {
+      if (request.action === 'video_expert_ai_analyze') {
+        await fs.writeFile(
+          path.join(outputDir, 'run_state.json'),
+          JSON.stringify({ status: 'completed', current_stage: 'finalize' }),
+          'utf8',
+        )
+      }
+      return {
+        success: true,
+        skillId: request.skillId,
+        action: request.action,
+        stdout: '',
+        stderr: '',
+        command: [],
+      }
+    },
+  })
+  const repo = makeFakeRepository()
+  configureSkillChildRunner({
+    runtimeManager: runtime.manager,
+    repository: repo.repo,
+    launchStuckGuardMs: 200,
+  })
+
+  // Mirror runVisualFlow's second-stage call: only sceneScoresPath + mode +
+  // outputDir. The driver should plan video_expert_ai_analyze, not pause
+  // with missing_inputs.
+  const manager = new RSSItemAnalysisManager({
+    startSkillChildRunAndWait,
+    veaAwaitRetryDelayMs: 0,
+  })
+
+  const result = await manager.__awaitVeaChildRunForTesting({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    params: { sceneScoresPath, mode: 'api', outputDir },
+    timeoutMs: 5_000,
+  })
+
+  assert.equal(result.success, true, `expected success; got close=${JSON.stringify(result.closeEvent)}`)
+  assert.equal(result.status, 'completed')
+  // The real driver must have invoked the runtime with ai_analyze, NOT
+  // pipeline. This is the regression we are guarding against.
+  const aiCalls = runtime.calls.filter((c) => c.action === 'video_expert_ai_analyze')
+  assert.equal(aiCalls.length >= 1, true, 'driver must dispatch video_expert_ai_analyze at least once')
+  assert.equal(aiCalls[0].params.sceneScoresPath, sceneScoresPath)
+  assert.equal(aiCalls[0].params.mode, 'api')
+  const pipelineCalls = runtime.calls.filter((c) => c.action === 'video_expert_pipeline')
+  assert.equal(pipelineCalls.length, 0, 'driver must NOT fall back to video_expert_pipeline when scene scores are present')
+
+  // Cleanup so the next test that depends on a fresh registry isn't
+  // contaminated by the real driver registration.
+  __resetSkillChildRunnerForTests()
+  __resetSkillChildDriversForTests()
 })

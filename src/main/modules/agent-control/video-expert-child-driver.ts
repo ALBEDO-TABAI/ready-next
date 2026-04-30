@@ -17,7 +17,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 
@@ -198,7 +198,15 @@ class VideoExpertChildDriver implements SkillChildDriver {
 
   async createInitialState(params: SkillChildLaunchParams): Promise<SkillChildDriverState> {
     const requestedInput = { ...(params.requestedInput || {}) }
-    const outputDirInput = trim(requestedInput.outputDir) || trim(params.outputDir)
+    // Prefer an explicit outputDir (from requestedInput or the launch
+    // params). When the caller only provides `sceneScoresPath` (the AI
+    // scoring cold-start case from RSS visual flow), derive outputDir
+    // from the parent directory so the driver still has somewhere to
+    // read run_state.json from after the action runs.
+    const explicitOutputDir = trim(requestedInput.outputDir) || trim(params.outputDir)
+    const requestedSceneScoresPath = trim(requestedInput.sceneScoresPath)
+    const outputDirInput = explicitOutputDir
+      || (requestedSceneScoresPath ? dirname(requestedSceneScoresPath) : null)
     const runStatePath = outputDirInput ? join(outputDirInput, 'run_state.json') : null
     const parsedRunState = readRunState(runStatePath)
     const state: VeaDriverState = {
@@ -257,8 +265,12 @@ class VideoExpertChildDriver implements SkillChildDriver {
       }
     }
 
-    // Resume into ai_analyze when we already have scene_scores.
-    const sceneScoresPath = inferSceneScoresPath(parsed, state.outputDir)
+    // Prefer the caller's explicit sceneScoresPath before falling back to
+    // inference from run_state / outputDir. This is what unlocks the AI
+    // scoring cold-start path where the caller already produced
+    // scene_scores.json out-of-band (e.g. RSS visual flow's second stage).
+    const explicitSceneScoresPath = trim(state.requestedInput.sceneScoresPath)
+    const sceneScoresPath = explicitSceneScoresPath ?? inferSceneScoresPath(parsed, state.outputDir)
     const stagePostScore = parsed?.currentStage
       ? POST_SCORE_STAGES.has(parsed.currentStage)
       : false
@@ -267,6 +279,23 @@ class VideoExpertChildDriver implements SkillChildDriver {
       const input: Record<string, unknown> = { sceneScoresPath }
       const mode = trim(state.requestedInput.mode)
       if (mode) input.mode = mode
+      state.actionsPlanned += 1
+      return { action: AI_ANALYZE_ACTION, input }
+    }
+
+    // Cold-start AI-analyze: caller passed an explicit sceneScoresPath and
+    // the run_state (if any) does not place us inside an active pipeline
+    // stage. We treat this as a direct AI scoring request rather than
+    // forcing the full pipeline. The actionsPlanned guard keeps us from
+    // re-planning the same action forever after the runtime has already
+    // executed it once — the runner re-reads run_state via
+    // observeAfterAction, so subsequent ticks should fall through to the
+    // run_state-driven branches above (or close on completion).
+    if (explicitSceneScoresPath && state.actionsPlanned === 0 && !parsed) {
+      const input: Record<string, unknown> = { sceneScoresPath: explicitSceneScoresPath }
+      const mode = trim(state.requestedInput.mode)
+      if (mode) input.mode = mode
+      if (state.outputDir) input.outputDir = state.outputDir
       state.actionsPlanned += 1
       return { action: AI_ANALYZE_ACTION, input }
     }

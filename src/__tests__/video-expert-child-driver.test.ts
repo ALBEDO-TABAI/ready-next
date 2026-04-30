@@ -235,3 +235,50 @@ test('Phase 5: cold start with url plans video_expert_pipeline', async () => {
   assert.equal(action.input.url, 'https://example.com/video.mp4')
   assert.equal(action.input.outputDir, outputDir)
 })
+
+test('T3: cold start with explicit sceneScoresPath (no url, no run_state) plans video_expert_ai_analyze', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  // Intentionally NO run_state.json — direct AI-analyze cold start.
+
+  const driver = videoExpertChildDriver
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { sceneScoresPath, mode: 'api', outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
+  assert.equal(action.input.mode, 'api')
+})
+
+test('T3: cold start with sceneScoresPath but no outputDir derives outputDir from dirname', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  // No run_state.json, no outputDir on requestedInput or launch params.
+
+  const driver = videoExpertChildDriver
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { sceneScoresPath, mode: 'api' },
+    parentNextHint: 'wait_for_close_event',
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
+  assert.equal(action.input.mode, 'api')
+})
