@@ -214,6 +214,8 @@ import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import { shouldParentForceLongSkillTool } from './run-contracts'
+import { getSkillChildRunCloseEvent } from './skill-child-runner'
+import type { SkillChildCloseEvent } from './skill-child-run-types'
 import type {
   RunBudgetHint,
   SkillBudgetLeaseState,
@@ -246,6 +248,71 @@ function isLongTypedSkillActionName(toolName: string): boolean {
 
 function hasLongTypedSkillAction(toolNames: string[] | null | undefined): boolean {
   return Boolean(toolNames?.some((toolName) => isLongTypedSkillActionName(toolName)))
+}
+
+/**
+ * Phase 6 (Wave 3 — T5) — child-loop continuation routing decision.
+ *
+ * The parent turn engine no longer synthesizes typed VEA tool_use for
+ * skills that the child runner owns. When a frame carries
+ * `runContract.childRunId` we route through the child runner's status:
+ *
+ *   - `terminal`        — close event with `status` in
+ *                         `{completed | failed | killed}`. The engine
+ *                         surfaces the close event onto the frame patch
+ *                         and stops the child short-circuit cleanly.
+ *
+ *   - `checkpoint_paused` — close event with `status` in
+ *                         `{recoverable_paused | budget_paused | blocked}`.
+ *                         Checkpoint without dispatching anything; the
+ *                         user picks whether to resume.
+ *
+ *   - `wait`            — no close event (child is still running).
+ *                         Engine emits `parentNextHint='wait_for_close_event'`
+ *                         on the frame patch and does NOT ask the model
+ *                         to choose a typed VEA action. Steering already
+ *                         excludes typed actions for child-owned frames
+ *                         (see `turn-frame-steering.isChildOwnedFrame`).
+ *
+ *   - `none`            — frame is not child-owned. Caller falls through
+ *                         to the legacy parent-force path.
+ *
+ * Pure helper: takes the frame and an injectable close-event lookup so
+ * tests can stub the child runner without configuring the singleton.
+ */
+export type ChildContinuationDecision =
+  | { kind: 'none' }
+  | { kind: 'wait'; childRunId: string }
+  | { kind: 'checkpoint_paused'; childRunId: string; closeEvent: SkillChildCloseEvent }
+  | { kind: 'terminal'; childRunId: string; closeEvent: SkillChildCloseEvent }
+
+const TERMINAL_CHILD_CLOSE_STATUSES = new Set<SkillChildCloseEvent['status']>([
+  'completed',
+  'failed',
+  'killed',
+])
+
+export function computeChildContinuationDecision(
+  frame: TurnFrame | null,
+  getCloseEvent: (childRunId: string) => SkillChildCloseEvent | null,
+): ChildContinuationDecision {
+  const contract = frame?.skill?.runContract || null
+  // Single source of truth for child ownership — same predicate the
+  // engine uses elsewhere (`shouldParentForceLongSkillTool`).
+  if (shouldParentForceLongSkillTool(contract)) return { kind: 'none' }
+  const childRunId = (contract?.childRunId || '').trim()
+  if (!childRunId) return { kind: 'none' }
+  // Prefer the runner's durable lookup (T4 wave 2 added a persistence-backed
+  // fallback). Fall back to whatever was stamped on the contract — the
+  // loader copies the close event off the repository row if it exists.
+  const live = getCloseEvent(childRunId) ?? contract?.childCloseEvent ?? null
+  if (live && typeof live === 'object') {
+    if (TERMINAL_CHILD_CLOSE_STATUSES.has(live.status)) {
+      return { kind: 'terminal', childRunId, closeEvent: live }
+    }
+    return { kind: 'checkpoint_paused', childRunId, closeEvent: live }
+  }
+  return { kind: 'wait', childRunId }
 }
 
 interface SkillContextOrchestratorLike {
@@ -2055,6 +2122,78 @@ export class TurnEngine {
           }
         }
         state.syncBudgetWarning()
+
+        // Phase 6 (T5 wave 3) — child-loop continuation routing.
+        //
+        // When the active frame's runContract carries a childRunId, the
+        // child runner owns "what runs next". Before any model invocation
+        // or force-tool decision, ask the child runner for its current
+        // close event (durable lookup, post-T4) and route accordingly:
+        //
+        //   - terminal       — completed/failed/killed: stamp the close
+        //                      onto the contract, set the matching turn
+        //                      terminal reason, finish the turn.
+        //   - checkpoint_paused — recoverable_paused/budget_paused/blocked:
+        //                      stamp the close, set the turn to
+        //                      checkpoint_user_input so the parent waits
+        //                      for the user (or background runner) to
+        //                      resume; never re-derive a typed action.
+        //   - wait           — child still running: stamp parentNextHint
+        //                      so steering / contract summary stay in
+        //                      sync; fall through to the model so it can
+        //                      talk to the user about the in-flight work.
+        //   - none           — frame isn't child-owned; existing flow.
+        const childContinuation = computeChildContinuationDecision(
+          turnFrame,
+          getSkillChildRunCloseEvent,
+        )
+        if (turnFrame?.skill?.runContract && childContinuation.kind !== 'none') {
+          const contract = turnFrame.skill.runContract
+          if (childContinuation.kind === 'terminal'
+              || childContinuation.kind === 'checkpoint_paused') {
+            contract.childCloseEvent = childContinuation.closeEvent
+            contract.childStatus = childContinuation.closeEvent.status
+            contract.parentNextHint = 'continue_other_work'
+          } else if (childContinuation.kind === 'wait') {
+            contract.parentNextHint = 'wait_for_close_event'
+          }
+        }
+        if (childContinuation.kind === 'terminal') {
+          // Map child-close status to the parent turn's terminal vocabulary.
+          // Child 'completed' is the only "natural done"; failed/killed
+          // surface as the same parent reasons the supervisor uses.
+          const childStatus = childContinuation.closeEvent.status
+          const turnTerminalReason: TurnTerminalReason =
+            childStatus === 'completed' ? 'done'
+            : childStatus === 'failed' ? 'failed_skill'
+            : childStatus === 'killed' ? 'cancelled_user'
+            : 'done'
+          if (turnFrame) {
+            turnFrame.terminalReason = turnTerminalReason
+          }
+          finishedBeforeLimit = true
+          logAgentMetric('turn_child_run_terminal_routed', {
+            sessionId: request.sessionId,
+            childRunId: childContinuation.childRunId,
+            childStatus,
+            turnTerminalReason,
+            iteration: iterations,
+          })
+          break
+        }
+        if (childContinuation.kind === 'checkpoint_paused') {
+          if (turnFrame) {
+            turnFrame.terminalReason = 'checkpoint_user_input'
+          }
+          budgetLimitedBeforeCompletion = true
+          logAgentMetric('turn_child_run_checkpoint_routed', {
+            sessionId: request.sessionId,
+            childRunId: childContinuation.childRunId,
+            childStatus: childContinuation.closeEvent.status,
+            iteration: iterations,
+          })
+          break
+        }
 
         // skill-resume C3: 70% iteration warning — fire ONCE per run.
         if (shouldInjectBudgetWarning({

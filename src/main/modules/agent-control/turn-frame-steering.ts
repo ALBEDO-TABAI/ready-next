@@ -4,6 +4,7 @@ import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
 import { resolveToolInputSchemaForExecution } from './tool-registry'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
+import type { SkillChildCloseEvent } from './skill-child-run-types'
 
 export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_inspect_run_state',
@@ -271,8 +272,49 @@ export function resolveTurnFrameSkillActionToolName(frame: TurnFrame): string | 
   return getStaticSkillToolNameForAction(skillId, action) || fallbackToolName(skillId, action)
 }
 
+/**
+ * Phase 6 (Wave 3 — T5) — child-loop ownership signals.
+ *
+ * When `frame.skill?.runContract?.childRunId` is set AND there is no
+ * terminal close event attached, the child runner now owns "what action
+ * runs next" for this skill. Parent steering MUST NOT surface the typed
+ * VEA action (e.g. `skill_video_expert_pipeline`) in `preferredToolNames`,
+ * MUST NOT enter `force_tool` mode, and MUST NOT set `requiredToolName`.
+ *
+ * A close event whose `status` is one of `completed | failed | killed` is
+ * terminal. `recoverable_paused | budget_paused | blocked` close events
+ * are non-terminal — the run is paused and may resume — so the child is
+ * still considered the owner and steering still excludes the typed action.
+ */
+const TERMINAL_CHILD_CLOSE_STATUSES = new Set<SkillChildCloseEvent['status']>([
+  'completed',
+  'failed',
+  'killed',
+])
+
+export function hasTerminalChildCloseEvent(
+  contract: SkillRunContract | null | undefined,
+): boolean {
+  const close = contract?.childCloseEvent
+  if (!close || typeof close !== 'object') return false
+  return TERMINAL_CHILD_CLOSE_STATUSES.has(close.status)
+}
+
+export function isChildOwnedFrame(frame: TurnFrame): boolean {
+  const childRunId = frame.skill?.runContract?.childRunId
+  if (typeof childRunId !== 'string' || childRunId.trim().length === 0) {
+    return false
+  }
+  // Once the child has terminally closed, parent steering may resume
+  // surfacing typed actions for follow-on user turns. Until then the
+  // child runner owns the resume.
+  return !hasTerminalChildCloseEvent(frame.skill?.runContract ?? null)
+}
+
 function shouldPreferTypedAction(frame: TurnFrame): boolean {
   if (!frame.skill) return false
+  // Phase 6 — child-loop runner owns the resume for child-owned frames.
+  if (isChildOwnedFrame(frame)) return false
   if (frame.mode === 'skill_start') return true
   if (frame.mode !== 'skill_resume' && frame.mode !== 'skill_repair') return false
   return frame.liveness === 'recoverable_paused'
@@ -323,6 +365,9 @@ export function selectSteeringMode(
   if (extras?.recentForceToolDispatched) return 'ask_model'
 
   if (!frame.skill) return 'ask_model'
+  // Phase 6 — child-loop runner owns the resume; never parent-force the
+  // typed action when a child run is in flight.
+  if (isChildOwnedFrame(frame)) return 'ask_model'
   if (!FORCE_TOOL_LIVENESS_MODES.includes(frame.mode)) return 'ask_model'
   if (!FORCE_TOOL_LIVENESS_STATES.includes(frame.liveness)) return 'ask_model'
 
@@ -349,6 +394,28 @@ export function buildTurnFrameSteering(
       preferredToolNames: [],
       systemReminder: reason,
       action: buildFrameAction({ frame, decidedMode: 'checkpoint', toolName: null }),
+    }
+  }
+
+  // Phase 6 — child-loop ownership steering. When a child run is in
+  // flight (childRunId set, no terminal close), the parent MUST NOT
+  // surface the typed VEA action. Steering keeps primitives available
+  // (so the model can probe state with `skill_inspect_run_state` etc.)
+  // and emits an explicit child-aware reminder so the model never
+  // re-derives a typed call from the contract handles.
+  if (isChildOwnedFrame(frame)) {
+    const childRunId = frame.skill?.runContract?.childRunId || ''
+    const childStatus = frame.skill?.runContract?.childStatus || null
+    const reminderTokens = [
+      `系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=${childRunId}${childStatus ? `, status=${childStatus}` : ''}）。父循环只负责 resume / wait / cancel；不要调用 typed skill_<id>_<action>（已被 gate 到 child runner）。`,
+      '请用 skill_ask_user / skill_inspect_run_state / skill_read_artifact 做必要的诊断，或直接对用户说明当前等待 close event 的状态。',
+    ]
+    return {
+      mode: 'ask_model',
+      requiredToolName: null,
+      preferredToolNames: [...FRAME_STEERING_PRIMITIVE_TOOL_NAMES],
+      systemReminder: reminderTokens.join('\n'),
+      action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: null }),
     }
   }
 

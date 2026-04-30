@@ -713,3 +713,146 @@ function makeRecoverableVeaSnapshot(opts: {
     lastProgressAt: '2026-04-30T00:00:00.000Z',
   }
 }
+
+// ---------------------------------------------------------------------------
+// T5 (B child-loop, wave 3) — engine-side child continuation routing.
+//
+// `computeChildContinuationDecision(frame, getCloseEvent)` is the pure
+// helper the TurnEngine consults at the top of each iteration. The engine
+// uses the result to:
+//
+//   - terminal:           stamp the close, set the turn terminal reason,
+//                         break out of the iteration loop.
+//   - checkpoint_paused:  stamp the close, set checkpoint_user_input,
+//                         break out.
+//   - wait:               stamp parentNextHint='wait_for_close_event';
+//                         the iteration falls through to the model.
+//   - none:               frame isn't child-owned; existing flow.
+//
+// The decisions are a pure function of the frame and an injected
+// close-event lookup, so a unit test can assert the exact case
+// returned for each scenario without instantiating the engine.
+// ---------------------------------------------------------------------------
+
+import { computeChildContinuationDecision as _computeChildContinuationDecision } from '../main/modules/agent-control/turn-engine'
+
+function makeT5Frame(opts: {
+  childRunId: string | null
+  childStatus?: string
+  childCloseEvent?: SkillChildCloseEvent | null
+}): any {
+  return {
+    skill: {
+      skillId: 'video-expert-analyzer',
+      runContract: {
+        childRunId: opts.childRunId,
+        childStatus: opts.childStatus ?? null,
+        parentNextHint: opts.childCloseEvent ? 'continue_other_work' : 'wait_for_close_event',
+        childCloseEvent: opts.childCloseEvent ?? null,
+      },
+    },
+  }
+}
+
+function fakeClose(status: SkillChildCloseEvent['status'], childRunId: string): SkillChildCloseEvent {
+  return {
+    childRunId,
+    skillId: 'video-expert-analyzer',
+    status,
+    terminalReason: status === 'completed' ? 'completed'
+      : status === 'killed' ? 'cancelled_user'
+      : status === 'failed' ? 'failed_skill'
+      : 'checkpoint_background',
+    outputDir: '/tmp/vea-output',
+    runStatePath: '/tmp/vea-output/run_state.json',
+    progress: null,
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    finishedAt: '2026-04-30T00:00:00.000Z',
+    error: null,
+  }
+}
+
+test('T5 Case G: wait — childRunId set, no close event yet → kind=wait', () => {
+  const frame = makeT5Frame({ childRunId: 'vt5wait00' })
+  const decision = _computeChildContinuationDecision(frame, () => null)
+  assert.equal(decision.kind, 'wait')
+  if (decision.kind === 'wait') {
+    assert.equal(decision.childRunId, 'vt5wait00')
+  }
+})
+
+test('T5 Case H: terminal — completed close → kind=terminal with full event', () => {
+  const close = fakeClose('completed', 'vt5done00')
+  const frame = makeT5Frame({ childRunId: 'vt5done00' })
+  const decision = _computeChildContinuationDecision(frame, () => close)
+  assert.equal(decision.kind, 'terminal')
+  if (decision.kind === 'terminal') {
+    assert.equal(decision.childRunId, 'vt5done00')
+    assert.equal(decision.closeEvent.status, 'completed')
+    assert.equal(decision.closeEvent.terminalReason, 'completed')
+  }
+})
+
+test('T5 Case H2: terminal — failed close also routes through the same path (no parent re-derivation)', () => {
+  const close = fakeClose('failed', 'vt5fail00')
+  const frame = makeT5Frame({ childRunId: 'vt5fail00' })
+  const decision = _computeChildContinuationDecision(frame, () => close)
+  assert.equal(decision.kind, 'terminal')
+  if (decision.kind === 'terminal') {
+    assert.equal(decision.closeEvent.status, 'failed')
+  }
+})
+
+test('T5 Case H3: terminal — killed close routes terminal (NEVER re-mapped to failed)', () => {
+  const close = fakeClose('killed', 'vt5kil000')
+  const frame = makeT5Frame({ childRunId: 'vt5kil000' })
+  const decision = _computeChildContinuationDecision(frame, () => close)
+  assert.equal(decision.kind, 'terminal')
+  if (decision.kind === 'terminal') {
+    assert.equal(decision.closeEvent.status, 'killed')
+    assert.equal(decision.closeEvent.terminalReason, 'cancelled_user')
+  }
+})
+
+test('T5 Case I: checkpoint_paused — recoverable_paused close → kind=checkpoint_paused', () => {
+  const close = fakeClose('recoverable_paused', 'vt5paus00')
+  const frame = makeT5Frame({ childRunId: 'vt5paus00' })
+  const decision = _computeChildContinuationDecision(frame, () => close)
+  assert.equal(decision.kind, 'checkpoint_paused')
+  if (decision.kind === 'checkpoint_paused') {
+    assert.equal(decision.childRunId, 'vt5paus00')
+    assert.equal(decision.closeEvent.status, 'recoverable_paused')
+  }
+})
+
+test('T5 Case I2: checkpoint_paused — budget_paused and blocked also route as checkpoint_paused', () => {
+  for (const status of ['budget_paused', 'blocked'] as const) {
+    const close = fakeClose(status, `vt5${status.slice(0, 5)}`)
+    const frame = makeT5Frame({ childRunId: `vt5${status.slice(0, 5)}` })
+    const decision = _computeChildContinuationDecision(frame, () => close)
+    assert.equal(decision.kind, 'checkpoint_paused', `${status} must be checkpoint_paused`)
+  }
+})
+
+test('T5 Case J: none — frame without a childRunId returns kind=none and the engine falls through to legacy flow', () => {
+  const frame = makeT5Frame({ childRunId: null })
+  const decision = _computeChildContinuationDecision(frame, () => null)
+  assert.equal(decision.kind, 'none')
+})
+
+test('T5 Case K: none — frame is null (no skill turn) returns kind=none', () => {
+  const decision = _computeChildContinuationDecision(null, () => null)
+  assert.equal(decision.kind, 'none')
+})
+
+test('T5 Case L: contract-stamped childCloseEvent is used when getCloseEvent returns null (durable fallback already attached)', () => {
+  // Production: `loadSkillRunContract` may stamp a close event on the
+  // contract from the persisted child-run row when the runner's in-memory
+  // `recentCloses` ring has evicted. The decision helper falls back to
+  // `contract.childCloseEvent` when the live lookup returns null.
+  const close = fakeClose('completed', 'vt5stamp0')
+  const frame = makeT5Frame({ childRunId: 'vt5stamp0', childCloseEvent: close })
+  const decision = _computeChildContinuationDecision(frame, () => null)
+  assert.equal(decision.kind, 'terminal')
+})

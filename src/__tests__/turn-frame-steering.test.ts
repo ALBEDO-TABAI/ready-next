@@ -235,3 +235,148 @@ test('buildTurnFrameSteering: recentForceToolDispatched falls back to ask_model'
   assert.equal(steering.mode, 'ask_model')
   assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
 })
+
+// ------------------------------------------------------------------
+// T5 (B child-loop, wave 3) — child-aware steering.
+//
+// When `frame.skill?.runContract?.childRunId` is set AND no terminal
+// close event is attached, the child runner owns the long-skill
+// execution. Parent steering MUST NOT surface the typed VEA action,
+// MUST NOT enter `force_tool` mode, and MUST emit a child-aware
+// reminder text so the model never re-derives a typed call from the
+// contract handles.
+// ------------------------------------------------------------------
+
+import { resolveTurnFrame as _resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
+import {
+  isChildOwnedFrame as _isChildOwnedFrame,
+  hasTerminalChildCloseEvent as _hasTerminalChildCloseEvent,
+} from '../main/modules/agent-control/turn-frame-steering'
+
+test('T5: child-owned frame (childRunId set, no close) steers ask_model with primitives only and child-aware reminder', () => {
+  // Build a recoverable_paused frame the same way the legacy force-tool
+  // tests do, then inject a runContract with childRunId. The legacy path
+  // would have returned a typed-action steering; the child-owned branch
+  // must instead return ask_model with no required tool.
+  const frame = _resolveTurnFrame({
+    sessionId: 'scope-vea-child',
+    requestId: 'req-child-1',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+  // Pin a runContract with a live childRunId. Production gets this from
+  // `loadSkillRunContract` after the child runner has been launched; the
+  // test injects it directly so we don't need a repository fixture.
+  if (frame.skill) {
+    (frame.skill as any).runContract = {
+      childRunId: 'vt5child0',
+      childStatus: 'running',
+      parentNextHint: 'wait_for_close_event',
+      childCloseEvent: null,
+    }
+  }
+  assert.equal(_isChildOwnedFrame(frame), true)
+  const steering = buildTurnFrameSteering(frame)
+  assert.equal(steering.mode, 'ask_model')
+  assert.equal(steering.requiredToolName, null)
+  // Typed VEA actions are absent from preferredToolNames — only primitives.
+  assert.ok(!steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+  assert.ok(!steering.preferredToolNames.includes('skill_video_expert_ai_analyze'))
+  assert.ok(steering.preferredToolNames.includes('skill_inspect_run_state'))
+  // Reminder text is child-aware so the model knows why the typed
+  // action is absent.
+  assert.ok(steering.systemReminder, 'child-owned frames must emit a system reminder')
+  assert.ok(
+    steering.systemReminder.includes('child-loop runner') || steering.systemReminder.includes('child run'),
+    'reminder must mention child-loop ownership',
+  )
+  assert.ok(
+    steering.systemReminder.includes('vt5child0'),
+    'reminder must include the live childRunId so the model can correlate',
+  )
+})
+
+test('T5: child-owned frame with terminal close (status=completed) releases parent steering', () => {
+  const frame = _resolveTurnFrame({
+    sessionId: 'scope-vea-child',
+    requestId: 'req-child-2',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+  if (frame.skill) {
+    (frame.skill as any).runContract = {
+      childRunId: 'vt5done00',
+      childStatus: 'completed',
+      parentNextHint: 'continue_other_work',
+      childCloseEvent: {
+        childRunId: 'vt5done00',
+        skillId: 'video-expert-analyzer',
+        status: 'completed',
+        terminalReason: 'completed',
+        outputDir: '/tmp/vea-output',
+        runStatePath: '/tmp/vea-output/run_state.json',
+        progress: null,
+        sceneScoresPath: null,
+        deliveryReportPath: null,
+        finishedAt: '2026-04-30T00:00:00.000Z',
+        error: null,
+      },
+    }
+  }
+  // hasTerminalChildCloseEvent: completed/failed/killed are terminal.
+  assert.equal(
+    _hasTerminalChildCloseEvent((frame.skill as any).runContract),
+    true,
+  )
+  // Once the close is terminal the frame is no longer "child-owned" for
+  // steering purposes — parent may resume typed-action steering for any
+  // follow-on user turn.
+  assert.equal(_isChildOwnedFrame(frame), false)
+})
+
+test('T5: non-terminal close (status=recoverable_paused) keeps the frame child-owned', () => {
+  const frame = _resolveTurnFrame({
+    sessionId: 'scope-vea-child',
+    requestId: 'req-child-3',
+    userIntent: 'continue',
+    supervisorSnapshot: snapshot({
+      status: 'recoverable_paused' as any,
+      hasLiveWork: false,
+      hasRecentProgress: false,
+    }),
+  })
+  if (frame.skill) {
+    (frame.skill as any).runContract = {
+      childRunId: 'vt5pause0',
+      childStatus: 'recoverable_paused',
+      parentNextHint: 'wait_for_close_event',
+      childCloseEvent: {
+        childRunId: 'vt5pause0',
+        skillId: 'video-expert-analyzer',
+        status: 'recoverable_paused',
+        terminalReason: 'checkpoint_background',
+        outputDir: '/tmp/vea-output',
+        runStatePath: '/tmp/vea-output/run_state.json',
+        progress: null,
+        sceneScoresPath: null,
+        deliveryReportPath: null,
+        finishedAt: '2026-04-30T00:00:00.000Z',
+        error: null,
+      },
+    }
+  }
+  assert.equal(
+    _hasTerminalChildCloseEvent((frame.skill as any).runContract),
+    false,
+    'recoverable_paused is non-terminal — the child may still resume',
+  )
+  assert.equal(_isChildOwnedFrame(frame), true)
+})
