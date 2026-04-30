@@ -38,6 +38,7 @@ import type {
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 
 import { logAgentMetric } from './metrics'
+import { linkParentAbort } from './link-parent-abort'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
   appendChildRunEvent,
@@ -869,6 +870,8 @@ class SkillChildRunner {
 
     const cleanup = createSubAgentCleanupHandle(active.childRunId)
     cleanup.register(() => clearTimeout(launchStuckTimer))
+    const parentAbortLink = linkParentAbort(this.getParentAbortSignal(active), active.controller)
+    cleanup.register(() => parentAbortLink.dispose())
     const subagent = createSkillChildSubAgent({
       childRunId: active.childRunId,
       outputDir: active.outputDir,
@@ -889,7 +892,7 @@ class SkillChildRunner {
               runStatePath: active.runStatePath || null,
             },
           },
-          signal: active.controller.signal,
+          signal: parentAbortLink.childSignal,
           triggerType: 'tool',
           sessionId: active.sessionId ?? undefined,
         }
@@ -914,7 +917,7 @@ class SkillChildRunner {
 
     try {
       for await (const event of runSubAgent(subagent, {
-        abortSignal: active.controller.signal,
+        abortSignal: parentAbortLink.childSignal,
         cleanup,
         parentScopeId: active.scopeId,
         parentSessionId: active.sessionId,
@@ -998,6 +1001,13 @@ class SkillChildRunner {
     } finally {
       this.inDriverDepth = Math.max(0, this.inDriverDepth - 1)
     }
+  }
+
+  private getParentAbortSignal(active: ActiveRun): AbortSignal | null {
+    const repository = this.config.repository as SkillTaskRunRepository & {
+      getSessionAbortSignal?: (scopeId: string | null, sessionId: string | null) => AbortSignal | null
+    }
+    return repository.getSessionAbortSignal?.(active.scopeId, active.sessionId) ?? null
   }
 
   private async appendEvent(

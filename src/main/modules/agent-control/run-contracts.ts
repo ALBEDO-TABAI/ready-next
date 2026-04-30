@@ -70,6 +70,11 @@ export interface TurnEngineSessionMessage {
 
 export interface TurnEngineSession {
   messages: TurnEngineSessionMessage[]
+  /**
+   * B-stage: this is load-bearing. DirectChat owns the controller and
+   * AgentControlRuntime registers it so in-flight SkillChildSubAgent runs
+   * can receive parent-session aborts without touching turn-engine.execute().
+   */
   abortController: AbortController | null
   systemPrompt: string
   generation: number

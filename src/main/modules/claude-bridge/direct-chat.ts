@@ -505,6 +505,32 @@ export class DirectChatEngine extends EventEmitter {
     log('Runtime set on DirectChatEngine')
   }
 
+  private registerSessionAbortSource(
+    name: string,
+    sessionId: string | undefined,
+    controller: AbortController,
+  ): void {
+    const normalizedSessionId = sessionId || null
+    const scopeId = normalizedSessionId || name || null
+    this.runtime?.registerSessionAbortController(scopeId, normalizedSessionId, controller)
+    if (scopeId !== name || normalizedSessionId !== null) {
+      this.runtime?.registerSessionAbortController(name, null, controller)
+    }
+  }
+
+  private unregisterSessionAbortSource(
+    name: string,
+    sessionId: string | undefined,
+    controller: AbortController,
+  ): void {
+    const normalizedSessionId = sessionId || null
+    const scopeId = normalizedSessionId || name || null
+    this.runtime?.unregisterSessionAbortController(scopeId, normalizedSessionId, controller)
+    if (scopeId !== name || normalizedSessionId !== null) {
+      this.runtime?.unregisterSessionAbortController(name, null, controller)
+    }
+  }
+
   setRunCleanupRegistry(registry: {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null): void {
@@ -662,7 +688,9 @@ export class DirectChatEngine extends EventEmitter {
     const runId = session.activeRunId
     session.generation += 1
     if (session.abortController) {
-      session.abortController.abort()
+      const previousAbortController = session.abortController
+      this.unregisterSessionAbortSource(name, undefined, previousAbortController)
+      previousAbortController.abort(new Error('cancelled_user'))
       session.abortController = null
     }
     if (runId) {
@@ -729,13 +757,15 @@ export class DirectChatEngine extends EventEmitter {
       ? sanitizedContinuationRequest.requestEnvelope
       : executionOptions?.requestEnvelope
     if (session.abortController) {
+      const previousAbortController = session.abortController
       try {
         this.cancelPendingToolActions?.(name, sessionId)
       } catch (cancelError) {
         log(`sendMessage cancelPendingToolActions failed: ${(cancelError as Error)?.message || cancelError}`)
       }
       session.generation += 1
-      session.abortController.abort()
+      this.unregisterSessionAbortSource(name, sessionId, previousAbortController)
+      previousAbortController.abort(new Error('process_restarted'))
       session.abortController = null
       log(`sendMessage preempted previous in-flight run for agent=${name}`)
     }
@@ -853,6 +883,7 @@ export class DirectChatEngine extends EventEmitter {
 
     const abortController = new AbortController()
     session.abortController = abortController
+    this.registerSessionAbortSource(name, sessionId, abortController)
     const ensureNotAborted = (): void => {
       if (abortController.signal.aborted || !isCurrentRun()) {
         const error = new Error('Operation aborted')
@@ -952,6 +983,7 @@ export class DirectChatEngine extends EventEmitter {
         taskProjectionId: taskId,
       }
     } finally {
+      this.unregisterSessionAbortSource(name, sessionId, abortController)
       if (session.abortController === abortController) {
         session.abortController = null
       }

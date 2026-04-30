@@ -415,7 +415,7 @@ src/main/modules/agent-control/
   run-contracts.ts               # TurnEngineSession.abortController 升格为 load-bearing
   runtime.ts                     # 共享 repository + register/unregister session abort
   
-src/main/modules/direct-chat.ts  # DirectChat 注册/注销 session abort controller
+src/main/modules/claude-bridge/direct-chat.ts  # DirectChat 注册/注销 session abort controller
 
 src/main/modules/repositories/skill-task-run-repository.ts  # 新增 session abort signal registry
 
@@ -665,7 +665,7 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 - `src/main/modules/agent-control/run-contracts.ts`（保留 `TurnEngineSession.abortController` 字段，**新增**注释说明此字段现在是 load-bearing）
 - `src/main/modules/repositories/skill-task-run-repository.ts`（新增 session abort signal registry）
 - `src/main/modules/agent-control/runtime.ts`（共享 repository 实例，并暴露 register/unregister 入口）
-- `src/main/modules/direct-chat.ts`（DirectChat 持有 abort controller，负责注册/注销）
+- `src/main/modules/claude-bridge/direct-chat.ts`（DirectChat 持有 abort controller，负责注册/注销）
 - `src/main/modules/agent-control/link-parent-abort.ts`（**新增**，F4 显式 unlink helper）
 - `src/main/modules/agent-control/skill-child-runner.ts`（`beginRunLoop` 接父 signal，linkParent → child）
 - `src/__tests__/skill-child-abort-tree.test.ts`（**新增**，C4 合同）
@@ -912,7 +912,7 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 - `src/main/modules/agent-control/skill-child-runner.ts`（W2 / W4）
 - `src/main/modules/agent-control/run-contracts.ts`（W3，加注释）
 - `src/main/modules/agent-control/runtime.ts`（W3，共享 repository + session abort 注册入口）
-- `src/main/modules/direct-chat.ts`（W3，注册/注销 DirectChat abort controller）
+- `src/main/modules/claude-bridge/direct-chat.ts`（W3，注册/注销 DirectChat abort controller）
 - `src/main/modules/repositories/skill-task-run-repository.ts`（W3，新方法）
 - `eslint-rules/index.mjs`（W0b，no-subagent-leak path 调整）
 - `package.json`（W0b/W5，verify:a1 已重塑；W5 加 verify:b）

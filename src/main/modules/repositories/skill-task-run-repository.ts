@@ -207,8 +207,44 @@ const CHILD_RUN_TERMINAL_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
   'killed',
 ]
 
+function sessionAbortKey(scopeId: string | null, sessionId: string | null): string {
+  return `${scopeId ?? '_'}|${sessionId ?? '_'}`
+}
+
 export class SkillTaskRunRepository {
+  private readonly sessionAbortSources = new Map<string, AbortController>()
+
   constructor(private readonly dbManager: SkillTaskRunDatabaseAccessor) {}
+
+  registerSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller: AbortController,
+  ): void {
+    this.sessionAbortSources.set(sessionAbortKey(scopeId, sessionId), controller)
+  }
+
+  unregisterSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller?: AbortController,
+  ): void {
+    const key = sessionAbortKey(scopeId, sessionId)
+    if (controller && this.sessionAbortSources.get(key) !== controller) return
+    this.sessionAbortSources.delete(key)
+  }
+
+  getSessionAbortSignal(scopeId: string | null, sessionId: string | null): AbortSignal | null {
+    const exact = this.sessionAbortSources.get(sessionAbortKey(scopeId, sessionId))
+    if (exact) return exact.signal
+    if (sessionId) {
+      const sessionScoped = this.sessionAbortSources.get(sessionAbortKey(sessionId, sessionId))
+      if (sessionScoped) return sessionScoped.signal
+      const sessionOnly = this.sessionAbortSources.get(sessionAbortKey(sessionId, null))
+      if (sessionOnly) return sessionOnly.signal
+    }
+    return null
+  }
 
   create(record: SkillTaskRunRecord): void {
     const db = this.dbManager.getRawDb()

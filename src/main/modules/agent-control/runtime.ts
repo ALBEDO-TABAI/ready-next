@@ -176,6 +176,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkillTasks: DetachedSkillTaskTracker
   private readonly pendingInboundChannels = new Map<
     string,
@@ -243,7 +244,7 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       configureSkillChildRunner({
         runtimeManager: getSkillsRuntimeManager(),
-        repository: new SkillTaskRunRepository(this.db),
+        repository: this.skillTaskRunRepository,
       })
     } catch (error) {
       // Boot-time wiring failure is best-effort logged; the parent loop
@@ -266,6 +267,22 @@ export class AgentControlRuntime extends EventEmitter {
 
   getMemoryLifecycleManager(): MemoryLifecycleManager {
     return this.memoryLifecycle
+  }
+
+  registerSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller: AbortController,
+  ): void {
+    this.skillTaskRunRepository.registerSessionAbortController(scopeId, sessionId, controller)
+  }
+
+  unregisterSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller?: AbortController,
+  ): void {
+    this.skillTaskRunRepository.unregisterSessionAbortController(scopeId, sessionId, controller)
   }
 
   getPromptAssembly(): PromptAssemblyService {
