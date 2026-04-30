@@ -938,18 +938,20 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 
 ---
 
-## 8. B Acceptance — Recorded YYYY-MM-DD（W5 land 时填写）
+## 8. B Acceptance — Recorded 2026-05-01
 
 ```markdown
-- C1 ✅ — check-skill-child-runner-api.cjs exit 0；公共 API 5 个签名 snapshot 完全 match
-- C2 ✅ — Layer 1 5 条 contract test 全绿，diff 0 行
-- C3 ✅ — 全部 skill-child-* 测试套件绿（共 N 个测试），既有测试文件 diff 0 行
+- C1 ✅ — check-skill-child-runner-api.cjs exit 0；公共 API 5 个签名 snapshot 完全 match（verify:b 内与 W4 post-land 均验证）
+- C2 ✅ — Layer 1 contract 全绿：test:a0:gates 42 pass；sub-agent contract/runner 8 pass；a1-gate current entries = 0
+- C3 ✅ — 全部 skill-child-* 测试套件绿：114 pass / 0 fail；既有测试文件未为通过而改写或 skip
 - C4 ✅ — skill-child-abort-tree.test.ts 4 it 全绿
 - C5 ✅ — skill-child-cleanup-registry.test.ts 3 it 全绿；skill-child-runner.ts 内 clearTimeout/clearInterval 出现次数 = 1
-- C6 ✅ — skill-child-subagent.test.ts 6 it 全绿
+- C6 ✅ — skill-child-subagent.test.ts 14 it 全绿（含 F1 terminal mapping / F2 executeAction 注入 / F3 progress payload）
 - C7 ✅ — scripts/check-a1-boundary.cjs 已在 W0b 删除；no-subagent-leak path 限制已开放最小例外；verify:a1 已重塑
-- C8 ✅ — verify:a0 / verify:a05 / verify:a1 全绿
-- C9 ✅ — verify:b 退出码 0
+- C8 ✅ — verify:a0 / verify:a05 / verify:a1 全绿；lint:check 0 errors / 537 existing warnings；A0 ESLint baseline = 143 entries
+- C9 ✅ — npm run verify:b 退出码 0；main-process VEA smoke 43 pass / 0 fail，覆盖启动、暂停继续、取消、重启恢复、resume flag off
+
+已验证实现 tip：fdf73f1（W4）；W5 acceptance commit 在本段落提交后由 git history 记录。
 
 **B 阶段（Child Runtime → SubAgent 特化）admission gate 现已关闭。C 阶段（Coordinator 抽象）admission gate 现已打开。**
 

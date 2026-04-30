@@ -182,12 +182,16 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 | **A0 — 战略地基** | 词汇 invariant（根因 1）+ 流程门（根因 5）+ 5 条原则上 CI | 3-4 天 | 与 v2 阶段 A 一致。**任何后续阶段不可能跳过这一步** |
 | **A0.5 — source-grep 清零门** | 清掉 agent / skill / runtime 相关 `eslint-rules/baseline.json` source-grep 条目；UI / 样式历史债只要求 baseline 不增加 | [x] completed 2026-04-30 | A1 准入 = A0 commit `7de7ca0` + A0.5 硬门通过；剩余 `ui-history` baseline 不阻塞 A1 |
 | **A1 — Agent 层抽象起点** | 引入 **SubAgent 概念骨架**（lifecycle / context / permission mode）+ `runSubAgent` generator skeleton；不改 `turn-engine` / child runtime | [x] completed 2026-05-01 | **v1/v2 没有这一阶段**；B 开工首个 PR 需移除 A1 临时 boundary gate |
-| **B — Child Runtime 迁移** | 把 child runner 改造为 SubAgent 的特化（VEA SubAgent / RSS SubAgent）；`prepareResumeLifecycle` / AbortController 树 / cleanupRegistry 在 SubAgent 框架内实现 | 4-6 天 | **v2 阶段 A 的"AbortController 树 + CleanupRegistry"在这里落地，但作为 SubAgent 子能力** |
+| **B — Child Runtime 迁移** | 把 child runner 改造为 SubAgent 的特化（VEA SubAgent / RSS SubAgent）；`prepareResumeLifecycle` / AbortController 树 / cleanupRegistry 在 SubAgent 框架内实现 | [x] completed 2026-05-01 | **v2 阶段 A 的"AbortController 树 + CleanupRegistry"在这里落地，但作为 SubAgent 子能力** |
 | **C — Coordinator 抽象** | 引入 Coordinator role：browser / document / skill / RSS 各自注册自己的 system prompt + tool list；turn-engine 只调度 | 3-5 天 | **v1/v2 没有这一阶段** |
 | **D — 系统 reminder registry**（根因 2）+ Compaction 分层 + Hook 系统骨架 | 引入 reminder registry / 分层 compaction / 简单 hook 触发点 | 4-5 天 | v2 阶段 D 的提质升级版 |
 | **E — 防爆 + 减脆**（O1 outputDir GC、O4 atomic write、O6 retry、O8 PermissionContext） | 这些都在 SubAgent 框架内统一实现 | 3-4 天 | **v2 的 B + C 在这里完成，但成本下降——因为有了 A1 的骨架** |
 | **F — 测试规约 + e2e 链路** | 根因 3 + O5 | 5-7 天 | v2 阶段 B + E 合并 |
 | **G — 提质（剩余的 N1-N4 + O7）** | Layer 1 次生债收尾 + 用户控制面 | 2-3 天 | v2 阶段 D |
+
+### 5.1.2 C 阶段准入
+
+**C（Coordinator 抽象）准入**：B 的 9 条 hard contract 全部 land，`verify:b` 退出码 0；child runtime 已是 SubAgent 特化（VEA SubAgent）。C 阶段开工 PR 必须把 turn-engine 内嵌的 mode switch 重构为 Coordinator role 注册。
 
 ### 5.2 关键差异
 
