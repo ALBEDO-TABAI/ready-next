@@ -82,7 +82,7 @@ function createNoSubagentLeakRule() {
       const filePath = normalizeFilePath(
         isAbsolute(rawFilePath) ? relative(process.cwd(), rawFilePath) : rawFilePath,
       )
-      if (!isAgentControlOutsideSubagent(filePath)) return {}
+      if (!isAgentControlOutsideSubagent(filePath) || isBStageChildSubagentConsumer(filePath)) return {}
 
       function checkSpecifier(node, specifier) {
         if (typeof specifier !== 'string') return
@@ -127,6 +127,12 @@ function createNoSubagentLeakRule() {
 function isAgentControlOutsideSubagent(filePath) {
   return filePath.startsWith('src/main/modules/agent-control/')
     && !filePath.startsWith('src/main/modules/agent-control/sub-agent/')
+}
+
+function isBStageChildSubagentConsumer(filePath) {
+  return filePath === 'src/main/modules/agent-control/skill-child-runner.ts'
+    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent.ts'
+    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts'
 }
 
 function importsSubagentDirectory(filePath, specifier) {

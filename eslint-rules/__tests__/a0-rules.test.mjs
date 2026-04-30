@@ -139,6 +139,18 @@ tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
       code: "import { createContext } from './turn-frame'",
     },
     {
+      filename: 'src/main/modules/agent-control/skill-child-runner.ts',
+      code: "import { runSubAgent } from './sub-agent/sub-agent-runner'",
+    },
+    {
+      filename: 'src/main/modules/agent-control/skill-child-sub-agent.ts',
+      code: "import type { SubAgent } from './sub-agent/sub-agent-types'",
+    },
+    {
+      filename: 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts',
+      code: "import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'",
+    },
+    {
       filename: 'src/shared/sub-agent-debug.ts',
       code: "import { createContext } from '../main/modules/agent-control/sub-agent/sub-agent-types'",
     },
