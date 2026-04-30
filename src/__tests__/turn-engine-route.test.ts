@@ -7,7 +7,7 @@ import { buildRequestEnvelope } from '../main/modules/agent-control/request-enve
 import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
-import { buildBudgetWarningMessage, TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { buildBudgetWarningMessage, renderChildCommandOutcome, TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
@@ -2897,4 +2897,177 @@ test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor thr
   assert.equal(result.interactionState, 'suspended')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
   assert.equal(result.projectionTruth?.projectionPatch?.blockedReason, '本轮预算已用完，技能任务状态检查失败或暂时不可用')
+})
+
+// =====================================================================
+// Team 2 — A2 / D3: resume outcome failure paths must surface `failed`
+// terminalReason and "恢复失败" copy instead of silently lying as "已继续".
+// `makeFailedClose` / `makeKilledClose` build close events `makeChildCloseEvent`
+// can't (it hardcodes error=null for non-blocked statuses).
+// =====================================================================
+
+function makeFailedClose(errorKind: string, errorMessage: string): SkillChildCloseEvent {
+  return {
+    childRunId: 'vchild001',
+    skillId: 'video-expert-analyzer',
+    status: 'failed',
+    terminalReason: 'infra_error',
+    outputDir: '',
+    runStatePath: '',
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    progress: {
+      stage: null,
+      totalUnits: null,
+      completedUnits: null,
+      coverageRatio: null,
+      fingerprint: null,
+    },
+    framePatch: null,
+    projectionPatch: null,
+    error: { kind: errorKind, message: errorMessage },
+  }
+}
+
+function makeKilledClose(): SkillChildCloseEvent {
+  return {
+    childRunId: 'vchild001',
+    skillId: 'video-expert-analyzer',
+    status: 'killed',
+    terminalReason: 'cancelled_user',
+    outputDir: '/tmp/ready/output',
+    runStatePath: '/tmp/ready/output/run_state.json',
+    sceneScoresPath: '/tmp/ready/output/scene_scores.json',
+    deliveryReportPath: '/tmp/ready/output/delivery_report.json',
+    progress: {
+      stage: 'score_batches',
+      totalUnits: 120,
+      completedUnits: 12,
+      coverageRatio: 0.1,
+      fingerprint: 'score_batches:12/120',
+    },
+    framePatch: null,
+    projectionPatch: null,
+    error: null,
+  }
+}
+
+test('resume failure with no_record surfaces failed terminalReason and failure message', async () => {
+  const engine = new TurnEngine()
+  const pausedClose = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
+  let cancelCalls = 0
+  const failedClose = makeFailedClose('no_record', 'No child-run record for id vchild001')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'budget_paused', closeEvent: pausedClose }),
+      },
+      cancelSkillChildRun: async () => {
+        cancelCalls += 1
+        return makeKilledClose()
+      },
+      resumeSkillChildRun: async (childRunId: string) => ({
+        childRunId,
+        status: 'failed',
+        outputDir: '',
+        runStatePath: '',
+        eventLogPath: '',
+        parentNextHint: 'wait_for_close_event',
+        closeEvent: failedClose,
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(cancelCalls, 0, 'resume failure path must not call cancel')
+  assert.equal(result.terminalReason, 'failed_skill')
+  assert.equal(result.status, 'error')
+  assert.match(result.finalText, /恢复.*失败/)
+  assert.ok(!/已继续/.test(result.finalText), 'must not claim "已继续" on a failed resume')
+})
+
+test('resume failure with no_payload surfaces failed terminalReason', async () => {
+  const engine = new TurnEngine()
+  const pausedClose = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
+  const failedClose = makeFailedClose('no_payload', 'Missing child-run payload for vchild001')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'budget_paused', closeEvent: pausedClose }),
+      },
+      resumeSkillChildRun: async (childRunId: string) => ({
+        childRunId,
+        status: 'failed',
+        outputDir: '',
+        runStatePath: '',
+        eventLogPath: '',
+        parentNextHint: 'wait_for_close_event',
+        closeEvent: failedClose,
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.terminalReason, 'failed_skill')
+  assert.notEqual(result.terminalReason, 'done')
+  assert.match(result.finalText, /恢复.*失败/)
+})
+
+test('resume that returns a killed close surfaces cancelled_user terminalReason', async () => {
+  const engine = new TurnEngine()
+  const pausedClose = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
+  const killedClose = makeKilledClose()
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'budget_paused', closeEvent: pausedClose }),
+      },
+      resumeSkillChildRun: async (childRunId: string) => ({
+        childRunId,
+        status: 'killed',
+        outputDir: '/tmp/ready/output',
+        runStatePath: '/tmp/ready/output/run_state.json',
+        eventLogPath: '/tmp/ready/output/child-run.jsonl',
+        parentNextHint: 'continue_other_work',
+        closeEvent: killedClose,
+      }),
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.terminalReason, 'cancelled_user')
+  assert.equal(result.cancelled, true)
+  assert.equal(result.status, 'cancelled')
+  assert.match(result.finalText, /被取消/)
+})
+
+test('cancel and resume share the renderChildCommandOutcome helper', () => {
+  const killed = makeKilledClose()
+  const cancelOutcome = renderChildCommandOutcome({
+    childRunId: 'vchild001',
+    command: 'cancel',
+    close: killed,
+  })
+  const resumeOutcome = renderChildCommandOutcome({
+    childRunId: 'vchild001',
+    command: 'resume',
+    close: killed,
+  })
+
+  // Same close → both routes converge on cancelled_user / cancelled.
+  assert.equal(cancelOutcome.terminalReason, 'cancelled_user')
+  assert.equal(resumeOutcome.terminalReason, 'cancelled_user')
+  assert.equal(cancelOutcome.status, 'cancelled')
+  assert.equal(resumeOutcome.status, 'cancelled')
+
+  // Both messages are non-empty and distinct (cancel-vs-resume copy).
+  assert.ok(cancelOutcome.message.length > 0)
+  assert.ok(resumeOutcome.message.length > 0)
+  assert.notEqual(cancelOutcome.message, resumeOutcome.message)
 })

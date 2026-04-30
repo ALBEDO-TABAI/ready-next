@@ -335,6 +335,100 @@ function isDirectlyResumableChildStatus(status: SkillChildCloseEvent['status']):
   return status === 'recoverable_paused' || status === 'budget_paused'
 }
 
+/**
+ * D3 — shared renderer for the user-visible outcome of a child-run command
+ * (`cancel` / `resume`). Centralizes the message + terminalReason mapping
+ * so cancel and resume cannot drift; in particular ensures resume's
+ * synchronous failure path (`closeEvent.status === 'failed'`) surfaces a
+ * "恢复失败" message + `terminalReason: 'failed'` instead of the legacy
+ * "已继续" / `'done'` lie.
+ *
+ * Inputs:
+ *   - `command: 'cancel'` — close MUST be non-null (cancelSkillChildRun
+ *     always returns a close).
+ *   - `command: 'resume'` — close MAY be null (resume launched the child
+ *     and the next close will arrive asynchronously) or non-null (resume
+ *     produced an immediate close: running heartbeat, completed, killed,
+ *     failed, or — defensively — a still-paused state).
+ *
+ * Output is consumed by turn-engine's resume/cancel branches to:
+ *   - `transcript.emitOutput(message, 'text')`
+ *   - `pushAssistantTextSafely(session, message, ...)`
+ *   - `finish({ status, terminalReason, success: status !== 'error',
+ *       cancelled: status === 'cancelled' })`
+ */
+export type ChildCommandKind = 'cancel' | 'resume'
+
+/**
+ * `terminalReason` is constrained to `TurnTerminalReason` so callers can
+ * pass it straight to `finish({ terminalReason })` without coercion. Resume
+ * failure maps to `'failed_skill'` (not the bare `'failed'` literal in the
+ * source plan, which isn't a valid `TurnTerminalReason` member).
+ */
+export interface ChildCommandOutcome {
+  message: string
+  terminalReason: 'done' | 'cancelled_user' | 'failed_skill'
+  status: 'done' | 'cancelled' | 'error'
+}
+
+export function renderChildCommandOutcome(args: {
+  childRunId: string
+  command: ChildCommandKind
+  close: SkillChildCloseEvent | null
+}): ChildCommandOutcome {
+  const { childRunId, command, close } = args
+  if (command === 'cancel') {
+    return {
+      message: `已取消 child run ${childRunId}。`,
+      terminalReason: 'cancelled_user',
+      status: 'cancelled',
+    }
+  }
+  // command === 'resume'
+  if (!close) {
+    return {
+      message: `已继续同一个 child run ${childRunId}。`,
+      terminalReason: 'done',
+      status: 'done',
+    }
+  }
+  // Note: `SkillChildCloseEvent['status']` excludes 'queued' / 'running',
+  // so the "resume launched and is running" case is represented by a null
+  // close (handled above), not a non-null close with status='running'.
+  switch (close.status) {
+    case 'completed':
+      return {
+        message: `child run ${childRunId} 已完成。`,
+        terminalReason: 'done',
+        status: 'done',
+      }
+    case 'failed': {
+      const detail = close.error?.message || close.terminalReason
+      return {
+        message: `恢复 child run ${childRunId} 失败：${detail}`,
+        terminalReason: 'failed_skill',
+        status: 'error',
+      }
+    }
+    case 'killed':
+      return {
+        message: `恢复 child run ${childRunId} 时被取消。`,
+        terminalReason: 'cancelled_user',
+        status: 'cancelled',
+      }
+    default:
+      // Defensive: resume returning a still-paused close (budget_paused /
+      // recoverable_paused / blocked) means resume didn't actually advance.
+      // Surface it as a failure so the user/model can react instead of
+      // claiming success.
+      return {
+        message: `恢复 child run ${childRunId} 时回到暂停状态：${close.terminalReason}`,
+        terminalReason: 'failed_skill',
+        status: 'error',
+      }
+  }
+}
+
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
   findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId?: string; id?: string; name?: string }>
@@ -1325,9 +1419,13 @@ export class TurnEngine {
           turnFrame.skill.runContract.parentNextHint = 'continue_other_work'
         }
         if (turnFrame) turnFrame.terminalReason = 'cancelled_user'
-        const message = `已取消 child run ${childRunIdForCommand}。`
-        transcript.emitOutput(message, 'text')
-        pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+        const outcome = renderChildCommandOutcome({
+          childRunId: childRunIdForCommand,
+          command: 'cancel',
+          close,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
         logAgentMetric('turn_child_run_user_cancelled', {
           sessionId: request.sessionId,
           childRunId: childRunIdForCommand,
@@ -1336,9 +1434,9 @@ export class TurnEngine {
         })
         return finish({
           success: true,
-          cancelled: true,
-          status: 'cancelled',
-          terminalReason: 'cancelled_user',
+          cancelled: outcome.status === 'cancelled',
+          status: outcome.status,
+          terminalReason: outcome.terminalReason,
         })
       }
       if (
@@ -1370,24 +1468,35 @@ export class TurnEngine {
           resumeSkillChildRun?: typeof resumeSkillChildRun
         }).resumeSkillChildRun || resumeSkillChildRun
         const resumed = await resumeChild(childCommand.childRunId)
+        // B6 — explicitly null out stale closeEvent on the contract when
+        // resume launched cleanly without an immediate close, so future
+        // contract reloads don't read the previous paused close back as
+        // "the current close".
         if (turnFrame?.skill?.runContract) {
           turnFrame.skill.runContract.childStatus = resumed.closeEvent?.status || 'running'
-          turnFrame.skill.runContract.childCloseEvent = resumed.closeEvent
+          turnFrame.skill.runContract.childCloseEvent = resumed.closeEvent ?? null
           turnFrame.skill.runContract.parentNextHint = resumed.parentNextHint
         }
-        const message = `已继续同一个 child run ${resumed.childRunId}。`
-        transcript.emitOutput(message, 'text')
-        pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+        const outcome = renderChildCommandOutcome({
+          childRunId: resumed.childRunId,
+          command: 'resume',
+          close: resumed.closeEvent,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
         logAgentMetric('turn_child_run_resumed', {
           sessionId: request.sessionId,
           childRunId: resumed.childRunId,
           childStatus: resumed.status,
           previousStatus: childStatus,
+          outcomeStatus: outcome.status,
+          outcomeTerminalReason: outcome.terminalReason,
         })
         return finish({
-          success: true,
-          status: 'done',
-          terminalReason: 'done',
+          success: outcome.status !== 'error',
+          cancelled: outcome.status === 'cancelled',
+          status: outcome.status,
+          terminalReason: outcome.terminalReason,
         })
       }
       const runtimeAvailability = {
