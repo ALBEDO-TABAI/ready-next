@@ -390,9 +390,12 @@ interface SkillTaskRunRepository {
 
 新建：
 ```
-src/main/modules/agent-control/sub-agent/
+src/main/modules/agent-control/
   skill-child-sub-agent.ts                # SubAgent 特化实现
   skill-child-sub-agent-factory.ts        # createSkillChildSubAgent + createSkillChildSubAgentFromPersisted
+  skill-child-sub-agent-close-mapping.ts  # F1 terminal mapping
+  skill-child-sub-agent-events.ts         # F3 progress payload
+  link-parent-abort.ts                    # F4 parent abort explicit unlink
 
 src/__tests__/
   skill-child-subagent.test.ts            # C6 合同
@@ -410,19 +413,18 @@ scripts/
 src/main/modules/agent-control/
   skill-child-runner.ts          # 内部 runLoop 切换到 runSubAgent；保持公共 API
   run-contracts.ts               # TurnEngineSession.abortController 升格为 load-bearing
-  turn-engine.ts                 # 入口处把 session.abortController 注入到 request（最小改动）
+  runtime.ts                     # 共享 repository + register/unregister session abort
   
-src/main/modules/skills-runtime/
-  runtime.ts                     # 注入 getSessionAbortSignal 到 SkillChildRunnerConfig
+src/main/modules/direct-chat.ts  # DirectChat 注册/注销 session abort controller
 
-src/main/modules/skill-task-run-repository.ts  # 新增 getSessionAbortSignal 方法
+src/main/modules/repositories/skill-task-run-repository.ts  # 新增 session abort signal registry
 
 eslint-rules/
-  index.mjs                      # no-subagent-leak rule 移除对 child-runner 的限制（per A1 §8）
+  index.mjs                      # W0b 已开放 child runner 必需例外
 
-package.json                     # +verify:b script，调整 verify:a1（移除 a1-boundary check）
+package.json                     # +verify:b script；verify:a1 已在 W0b 重塑
 
-scripts/                         # 删除 check-a1-boundary.cjs + 测试
+scripts/                         # W0a 已新增 API checker，W0b 已删除 check-a1-boundary
 
 docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md  # §5.1 B 行 [x]
 ```
@@ -490,8 +492,10 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 **Owner agent type**: general-purpose
 
 **目标文件**（**全部新增**）：
-- `src/main/modules/agent-control/sub-agent/skill-child-sub-agent.ts`
-- `src/main/modules/agent-control/sub-agent/skill-child-sub-agent-factory.ts`
+- `src/main/modules/agent-control/skill-child-sub-agent.ts`
+- `src/main/modules/agent-control/skill-child-sub-agent-factory.ts`
+- `src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts`
+- `src/main/modules/agent-control/skill-child-sub-agent-events.ts`
 - `src/__tests__/skill-child-subagent.test.ts`
 
 **改动清单**：
@@ -504,6 +508,10 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
      readonly outputDir: string
      readonly driver: SkillChildDriver
      readonly initialState: SkillChildDriverState
+     readonly executeAction: (
+       action: SkillChildDriverAction,
+       state: SkillChildDriverState,
+     ) => Promise<SkillRunResult>
      readonly parentScopeId: string | null
      readonly parentSessionId: string | null
      readonly maxActions?: number  // 默认 24
@@ -514,12 +522,33 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 
    `subagent.run(context)` 内部循环：
    - 每次 `driver.planNextAction(state)` 前 check `context.abortSignal.aborted`
-   - 如果 driver 返回 action：执行 → `driver.observeAfterAction(state, result)` → yield `progress` event
+   - 如果 driver 返回 action：调用注入的 `executeAction(action, state)` → `driver.observeAfterAction(state, result)` → yield `progress` event
    - 如果 driver 返回 closeEvent（terminal）：return SubAgentRunResult { state, terminalReason, framePatch, projectionPatch, error, ... }
    - 如果 budget 耗尽：return { state: 'blocked', terminalReason: 'checkpoint_budget' }（or yield paused budget then return）
    - 如果 driver throw：让异常上抛（runSubAgent 包成 failed terminal）
 
-2. **`skill-child-sub-agent-factory.ts`**: 实现工厂函数：
+   **F2 execution 注入合同**：`executeAction` 是 `SkillChildSubAgentParams` 字段，不是 `SubAgent` 公共接口字段；runner orchestrator 注入 closure 捕获 `SkillsRuntimeManager`。测试可注入 stub，SubAgent 只负责 driver loop。
+
+   **F3 progress payload 合同**：`skill-child-sub-agent-events.ts` 定义三种 typed payload：
+   - `action_started`: `{ kind, actionName, actionInput, actionIndex }`，`actionIndex` 为 1-indexed。
+   - `action_completed`: `{ kind, actionName, success, durationMs }`。
+   - `state_observed`: `{ kind, stage, fingerprint }`。
+   runner 只用 type narrowing 把 payload 写入 child JSONL，不再由 SubAgent 直接写 runner log。
+
+3. **`skill-child-sub-agent-close-mapping.ts`**：实现纯函数 `mapSubAgentCloseToChildClose(subAgentClose, runtimeContext)`，无副作用。
+
+   **F1 terminal mapping 合同**：
+   - completed/completed → completed/completed。
+   - cancelled/aborted → killed/cancelled_user（用户 cancel）或 killed/process_restarted（父 session abort），由 runner runtime context 标记决定。
+   - failed/failed_subagent → failed_skill、child_process_crashed、launch_stuck、input_validation、host_unavailable，按 error.kind 与 runtime context 分流。
+   - failed/persistence_failed → failed/persistence_failed。
+   - blocked/checkpoint_budget → budget_paused/checkpoint_budget。
+   - blocked/checkpoint_background → budget_paused/checkpoint_background。
+   - blocked/blocked_external → blocked/blocked_external。
+   - blocked/blocked_config → blocked/blocked_config。
+   runtime context 必须由 runner 持有 `isUserCancel / isParentSessionAbort / isLaunchStuckFired`，SubAgent 自己不推断这些来源。
+
+4. **`skill-child-sub-agent-factory.ts`**: 实现工厂函数：
 
    ```typescript
    export function createSkillChildSubAgent(params: SkillChildSubAgentParams): SubAgent
@@ -634,9 +663,10 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 
 **目标文件**：
 - `src/main/modules/agent-control/run-contracts.ts`（保留 `TurnEngineSession.abortController` 字段，**新增**注释说明此字段现在是 load-bearing）
-- `src/main/modules/agent-control/turn-engine.ts`（入口处把 session.abortController 注入到 request 上下文）
-- `src/main/modules/skill-task-run-repository.ts`（新增 `getSessionAbortSignal` 方法）
-- `src/main/modules/skills-runtime/runtime.ts`（注入 session abort 注册器到 SkillChildRunnerConfig）
+- `src/main/modules/repositories/skill-task-run-repository.ts`（新增 session abort signal registry）
+- `src/main/modules/agent-control/runtime.ts`（共享 repository 实例，并暴露 register/unregister 入口）
+- `src/main/modules/direct-chat.ts`（DirectChat 持有 abort controller，负责注册/注销）
+- `src/main/modules/agent-control/link-parent-abort.ts`（**新增**，F4 显式 unlink helper）
 - `src/main/modules/agent-control/skill-child-runner.ts`（`beginRunLoop` 接父 signal，linkParent → child）
 - `src/__tests__/skill-child-abort-tree.test.ts`（**新增**，C4 合同）
 
@@ -645,28 +675,44 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 1. **`run-contracts.ts`**: `TurnEngineSession.abortController` 字段加块注释：
    > **B-stage**: this field is now load-bearing. Aborting it cascades to in-flight `SkillChildSubAgent` instances via `SkillTaskRunRepository.getSessionAbortSignal()`. See `docs/superpowers/plans/2026-04-30-B-child-runtime-subagent-migration-implementation.md` §3 D3.
 
-2. **`turn-engine.ts`** 入口：在 `execute()` 起始处确保 `request.abortSignal` 来源于 session.abortController（如果不是，建立链接）。仅在最小集合内修改——不重构其他逻辑。
-
-3. **`skill-task-run-repository.ts`**: 新增方法 + 内部 Map：
+2. **`skill-task-run-repository.ts`**: 新增方法 + 内部 Map：
    ```typescript
    private sessionAbortSources = new Map<string, AbortController>()
    
    registerSessionAbortController(scopeId: string | null, sessionId: string | null, controller: AbortController): void
-   unregisterSessionAbortController(scopeId: string | null, sessionId: string | null): void
+   unregisterSessionAbortController(scopeId: string | null, sessionId: string | null, controller?: AbortController): void
    getSessionAbortSignal(scopeId: string | null, sessionId: string | null): AbortSignal | null
    ```
-   key = `${scopeId ?? '_'}|${sessionId ?? '_'}`
+   key = `${scopeId ?? '_'}|${sessionId ?? '_'}`。注销时如果传入 controller，必须做 identity check，避免旧 finally 清掉新 controller。
 
-4. **`runtime.ts`**: 在 `AgentControlRuntime` 入口处（session 启动 / 关闭）调 `repository.registerSessionAbortController` / `unregisterSessionAbortController`。
+3. **`runtime.ts`**: 使用一个共享 `SkillTaskRunRepository` 实例配置 child runner，并暴露 register/unregister 入口。不要改 `turn-engine.execute()` 主循环。
 
-5. **`skill-child-runner.ts`** `beginRunLoop`: 启动 `ActiveRun.controller` 之前 query parent signal，建立 cascade listener（D3）。
+4. **`direct-chat.ts`**: DirectChat 创建/持有 session abort controller 后调用 runtime register；finally 中调用 unregister。DirectChat 是真实 abort controller owner，Runtime 不接管生命周期。
 
-6. **`skill-child-abort-tree.test.ts`** 写 4 个 it（C4 合同）。
+5. **`link-parent-abort.ts`**：新增显式 unlink helper：
+
+   ```typescript
+   export interface ParentAbortLink {
+     readonly childSignal: AbortSignal
+     readonly dispose: () => void
+   }
+
+   export function linkParentAbort(
+     parent: AbortSignal | null,
+     childController: AbortController,
+   ): ParentAbortLink
+   ```
+
+   **F4 listener 合同**：如果 parent 已 abort，同步 abort child 并返回 no-op dispose；如果 parent 未 abort，注册 `{ once: true }` listener，同时返回 `dispose()` 显式 `removeEventListener`。child 正常结束、child 自己 cancel、父 abort 三条路径都必须经 cleanup drain 调用 dispose，避免长寿父 signal 上 listener 泄漏。
+
+6. **`skill-child-runner.ts`** `beginRunLoop`: 启动 SubAgent 前 query parent signal，`const link = linkParentAbort(parentSignal, active.controller)`，并 `cleanup.register(() => link.dispose())`。
+
+7. **`skill-child-abort-tree.test.ts`** 写 4 个 it（C4 合同），其中第 4 个必须覆盖：`parent listener is removed when child terminates normally (no listener leak on long-lived parent signal)`。
 
 **关键约束**：
 - 父 → 子是单向 cascade
 - 子 abort 不回传父
-- listener 用 `{ once: true }` 避免泄漏
+- listener 用 `{ once: true }` + cleanup dispose 显式 unlink 避免泄漏
 - 重复 abort 父 → 子 listener 已 once，无副作用
 
 **完成判据**：
@@ -682,7 +728,7 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 
 **目标文件**：
 - `src/main/modules/agent-control/skill-child-runner.ts`（`launchStuckTimer` + 其他 timer / listener 走 `cleanup.register`）
-- `src/main/modules/agent-control/sub-agent/skill-child-sub-agent.ts`（如果 SubAgent.run 内部有 timer，也走 register）
+- `src/main/modules/agent-control/skill-child-sub-agent.ts`（如果 SubAgent.run 内部有 timer，也走 register）
 - `src/__tests__/skill-child-cleanup-registry.test.ts`（**新增**，C5 合同）
 
 **改动清单**：
@@ -702,50 +748,37 @@ W0 必先 land；W1 land 后 W2/W3/W4 可顺序串行；W5 是 closure。
 
 ---
 
-### W5 — A1 boundary teardown + verify:b
+### W5 — Acceptance closure + verify:b
 
 **Owner agent type**: general-purpose
 
 **目标文件**：
-- `scripts/check-a1-boundary.cjs`（**删除**）
-- `scripts/__tests__/check-a1-boundary.test.cjs`（**删除**）
-- `eslint-rules/index.mjs`（移除 `no-subagent-leak` 对 child-runner 路径的限制）
-- `eslint.config.mjs`（如有 rule 启用配置改动，同步）
-- `package.json`（`verify:a1` 移除 `check-a1-boundary` 调用；新增 `verify:b`）
+- `package.json`（新增 `verify:b`；`verify:a1` 已在 W0b 重塑）
 - `docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md`（§5.1 B 行 `[x] completed YYYY-MM-DD`）
 - `docs/superpowers/plans/2026-04-30-B-child-runtime-subagent-migration-implementation.md`（§8 B Acceptance 段，commit 时填）
-- `scripts/check-skill-child-runner-api.cjs`（**新增**，C1 实现）
 
 **改动清单**：
 
-1. **删除 check-a1-boundary.cjs + 其测试**：独立 commit，不与其他改动混。
-2. **`no-subagent-leak` rule 调整**：现在允许 `skill-child-runner.ts`、`sub-agent/skill-child-sub-agent*.ts`、`turn-engine.ts` 之间的相互 import（B 引入了合法跨界）。具体修改 `eslint-rules/a0-rule-utils.mjs::scanRuleViolations` 中此 rule 的 path filter。
-3. **`verify:a1` 调整**：移除 `node scripts/check-a1-boundary.cjs --base ...` 这一段。其他保留（typecheck / lint:check / a1-gate / subagent-isolation / contract test 等）。
-4. **新增 `verify:b` script**：
+1. **新增 `verify:b` script**：
 
    ```json
    "verify:b": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-eslint-baseline.cjs --area a1-gate --max 0 && node scripts/check-subagent-isolation.cjs && node scripts/check-skill-child-runner-api.cjs && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-*.test.ts src/__tests__/sub-agent-contract.test.ts src/__tests__/sub-agent-runner.test.ts && npm run test:a0:gates && npm run verify:a0 && npm run verify:a05 && npm run verify:a1"
    ```
 
-5. **`check-skill-child-runner-api.cjs`**: 实现 C1 合同。
-   - 用 TypeScript compiler API（同 isolation script 模式）解析 `skill-child-runner.ts`
-   - 提取 module-level `export` 语句的签名
-   - 与 `scripts/snapshots/skill-child-runner-api.snapshot.json` 比对
-   - 任何字段不一致 → exit 1 + 输出 diff
-
-6. **更新 v3 §5.1**：B 行 `[x] completed YYYY-MM-DD`，并在表后追加 §5.1.2 "C 阶段准入" 段：
+2. **更新 v3 §5.1**：B 行 `[x] completed YYYY-MM-DD`，并在表后追加 §5.1.2 "C 阶段准入" 段：
    > **C（Coordinator 抽象）准入**：B 的 9 条 hard contract 全部 land，verify:b 退出码 0；child runtime 已是 SubAgent 特化（VEA SubAgent）。C 阶段开工 PR 必须把 turn-engine 内嵌的 mode switch 重构为 Coordinator role 注册。
 
-7. **B Acceptance 段**（plan §8）：跑完 verify:b 后填写真实结果。
+3. **B Acceptance 段**（plan §8）：跑完 verify:b 后填写真实结果，包括退出码、关键测试条数、lint baseline 与最终 commit hash。
+4. **dev 烟测**：VEA 启动、暂停继续、取消、重启恢复、resume flag 关闭 5 个手动烟测；不能用假输出填 acceptance。
 
 **关键约束**：
-- A1 boundary 删除是独立 commit（小、可 revert、PR review 友好）
+- A1 boundary teardown 与 API checker 已前移到 W0a/W0b，W5 不再重复动这些文件
 - verify:b 必须真跑过 + 全绿后才能 land
 
 **完成判据**：
-- C7 通过：`scripts/check-a1-boundary.cjs` 已删除
 - `verify:b` 退出 0
 - v3 §5.1 + plan §8 更新
+- acceptance commit 落地
 
 ---
 
@@ -865,9 +898,12 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 **新建**（W0 / W1 / W3 / W4 / W5）：
 - `docs/superpowers/plans/2026-04-30-B-child-runtime-subagent-migration-implementation.md`（W0，本文件）
 - `scripts/snapshots/skill-child-runner-api.snapshot.json`（W0）
-- `scripts/check-skill-child-runner-api.cjs`（W5）
-- `src/main/modules/agent-control/sub-agent/skill-child-sub-agent.ts`（W1）
-- `src/main/modules/agent-control/sub-agent/skill-child-sub-agent-factory.ts`（W1）
+- `scripts/check-skill-child-runner-api.cjs`（W0a）
+- `src/main/modules/agent-control/skill-child-sub-agent.ts`（W1）
+- `src/main/modules/agent-control/skill-child-sub-agent-factory.ts`（W1）
+- `src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts`（W1）
+- `src/main/modules/agent-control/skill-child-sub-agent-events.ts`（W1）
+- `src/main/modules/agent-control/link-parent-abort.ts`（W3）
 - `src/__tests__/skill-child-subagent.test.ts`（W1）
 - `src/__tests__/skill-child-abort-tree.test.ts`（W3）
 - `src/__tests__/skill-child-cleanup-registry.test.ts`（W4）
@@ -875,15 +911,14 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 **修改**：
 - `src/main/modules/agent-control/skill-child-runner.ts`（W2 / W4）
 - `src/main/modules/agent-control/run-contracts.ts`（W3，加注释）
-- `src/main/modules/agent-control/turn-engine.ts`（W3，最小化）
-- `src/main/modules/skill-task-run-repository.ts`（W3，新方法）
-- `src/main/modules/skills-runtime/runtime.ts`（W3，注入 session abort）
-- `eslint-rules/index.mjs`（W5，no-subagent-leak path 调整）
-- `eslint-rules/a0-rule-utils.mjs`（W5，如必要）
-- `package.json`（W5，verify:b + 调整 verify:a1）
+- `src/main/modules/agent-control/runtime.ts`（W3，共享 repository + session abort 注册入口）
+- `src/main/modules/direct-chat.ts`（W3，注册/注销 DirectChat abort controller）
+- `src/main/modules/repositories/skill-task-run-repository.ts`（W3，新方法）
+- `eslint-rules/index.mjs`（W0b，no-subagent-leak path 调整）
+- `package.json`（W0b/W5，verify:a1 已重塑；W5 加 verify:b）
 - `docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md`（W5，§5.1 B 行 + §5.1.2 C 准入）
 
-**删除**（W5）：
+**删除**（W0b）：
 - `scripts/check-a1-boundary.cjs`
 - `scripts/__tests__/check-a1-boundary.test.cjs`
 
@@ -912,7 +947,7 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 - C4 ✅ — skill-child-abort-tree.test.ts 4 it 全绿
 - C5 ✅ — skill-child-cleanup-registry.test.ts 3 it 全绿；skill-child-runner.ts 内 clearTimeout/clearInterval 出现次数 = 1
 - C6 ✅ — skill-child-subagent.test.ts 6 it 全绿
-- C7 ✅ — scripts/check-a1-boundary.cjs 已删除；no-subagent-leak path 限制已移除；verify:a1 已重塑
+- C7 ✅ — scripts/check-a1-boundary.cjs 已在 W0b 删除；no-subagent-leak path 限制已开放最小例外；verify:a1 已重塑
 - C8 ✅ — verify:a0 / verify:a05 / verify:a1 全绿
 - C9 ✅ — verify:b 退出码 0
 
@@ -947,7 +982,7 @@ getSessionAbortSignal(scopeId, sessionId): AbortSignal | null { ... }
 | W2 | Layer 1 5 条 contract test 全绿；公共 API snapshot match；既有 skill-child-* 测试套件全绿 |
 | W3 | skill-child-abort-tree.test.ts 4 it 全绿；既有测试零回归 |
 | W4 | skill-child-cleanup-registry.test.ts 3 it 全绿；clearTimeout/clearInterval 计数 ≤ 1 |
-| W5 | check-a1-boundary.cjs 已删除；verify:b 退出 0；v3 §5.1 + plan §8 更新 |
+| W5 | verify:b 退出 0；v3 §5.1 + plan §8 更新；acceptance 填真实输出和 commit hash |
 | 集成 | 全套 skill-child-* + sub-agent-* 测试全绿；公共 API 0 改动；Layer 1 测试文件 diff 0 行；dev mode 烟测 5 场景全绿 |
 
 ---

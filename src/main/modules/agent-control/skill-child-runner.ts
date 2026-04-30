@@ -31,13 +31,13 @@ import { mkdirSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
 import type {
+  SkillRunRequest,
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 
 import { logAgentMetric } from './metrics'
-import { executeSkillActionViaToolGateway } from './tool-registry'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
   appendChildRunEvent,
@@ -50,7 +50,6 @@ import {
 import type {
   ChildWaitResult,
   SkillChildCloseEvent,
-  SkillChildDriverAction,
   SkillChildDriverState,
   SkillChildLaunchParams,
   SkillChildRunParentNextHint,
@@ -63,6 +62,11 @@ import {
   decodeStoredSkillChildCloseEvent,
   isSkillChildRunResumable,
 } from './skill-child-state-machine'
+import { createSkillChildSubAgent } from './skill-child-sub-agent'
+import { mapSubAgentCloseToChildClose } from './skill-child-sub-agent-close-mapping'
+import { isSkillChildProgressPayload } from './skill-child-sub-agent-events'
+import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'
+import { runSubAgent } from './sub-agent/sub-agent-runner'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
@@ -813,7 +817,6 @@ class SkillChildRunner {
     if (!driver) return // typescript narrowing; checked at caller
     const startedAt = new Date().toISOString()
     let firstActionStartedAt: string | null = null
-    let actionsPlanned = 0
     let state: SkillChildDriverState
     try {
       state = await driver.createInitialState(launchParams)
@@ -839,10 +842,15 @@ class SkillChildRunner {
       input: { ...launchParams.requestedInput, __resume: resume || undefined },
     })
 
+    let isLaunchStuckFired = false
+    let actionsStarted = 0
+    const actionResults: SkillRunResult[] = []
+
     // Launch-stuck guard: schedule a timer that synthesizes a close if
     // we never see an action_started.
     const launchStuckTimer = setTimeout(() => {
       if (firstActionStartedAt !== null) return
+      isLaunchStuckFired = true
       const close = makeCloseEvent({
         childRunId: active.childRunId,
         skillId: active.skillId,
@@ -859,217 +867,136 @@ class SkillChildRunner {
     // Don't keep the process alive on this timer.
     if (typeof launchStuckTimer.unref === 'function') launchStuckTimer.unref()
 
-    try {
-      while (true) {
-        if (active.controller.signal.aborted) {
-          const reason = (active.controller.signal.reason as Error | undefined)?.message
-            || 'cancelled_user'
-          const cancelled = makeCloseEvent({
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            status: 'killed',
-            terminalReason: reason === 'launch_stuck' ? 'launch_stuck' : 'cancelled_user',
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            errorKind: reason === 'launch_stuck' ? 'launch_stuck' : 'cancelled_user',
-            message: reason,
-          })
-          clearTimeout(launchStuckTimer)
-          this.finalizeRun(active, cancelled)
-          return
-        }
-
-        let plan: SkillChildDriverAction | SkillChildCloseEvent
-        this.inDriverDepth += 1
-        try {
-          plan = await driver.planNextAction(state)
-        } catch (error) {
-          const close = makeCloseEvent({
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            status: 'failed',
-            terminalReason: 'child_process_crashed',
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            errorKind: 'driver_plan_failed',
-            message: errorMessage(error),
-          })
-          clearTimeout(launchStuckTimer)
-          this.finalizeRun(active, close)
-          return
-        } finally {
-          this.inDriverDepth = Math.max(0, this.inDriverDepth - 1)
-        }
-
-        if (isCloseEvent(plan)) {
-          // Driver decided to terminate.
-          const close = { ...plan, childRunId: active.childRunId }
-          clearTimeout(launchStuckTimer)
-          this.finalizeRun(active, close)
-          return
-        }
-
-        // Budget check BEFORE the next action. Run-state tells us the
-        // run is still in flight, so the right answer is checkpoint
-        // background — not failed.
-        if (actionsPlanned >= this.config.maxActionsPerRun) {
-          const close = makeCloseEvent({
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            status: 'budget_paused',
-            terminalReason: 'checkpoint_budget',
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            errorKind: 'checkpoint_budget',
-            message: `Child action budget exhausted (max=${this.config.maxActionsPerRun})`,
-          })
-          clearTimeout(launchStuckTimer)
-          this.finalizeRun(active, close)
-          return
-        }
-
-        actionsPlanned += 1
-        const actionStartedAt = new Date().toISOString()
-        if (firstActionStartedAt === null) {
-          firstActionStartedAt = actionStartedAt
-          // First action observed — clear the stuck timer.
-          clearTimeout(launchStuckTimer)
-        }
-        await this.appendEvent(active, {
-          type: 'action_started',
-          at: actionStartedAt,
-          action: plan.action,
-          input: plan.input,
-        })
-
-        // Dispatch through the unified tool admission gateway. This
-        // routes the driver's planned action through the SAME Zod
-        // validation and tool-definition lookup the public tool dispatch
-        // path uses, so a malformed input fails the same way for both.
-        // T6 wave 3: see `tool-registry.executeSkillActionViaToolGateway`.
-        // The gateway returns `{ ...ToolExecutionOutput, skillRunResult }`.
-        // When `skillRunResult` is non-null the runtime executed the
-        // action and the rest of the loop uses it as the legacy `result`.
-        // When it's null an admission failure occurred (input_validation /
-        // host_unavailable / aborted / tool_failed) and we close the run
-        // with a structured terminal.
-        const gateway = await executeSkillActionViaToolGateway({
+    const cleanup = createSubAgentCleanupHandle(active.childRunId)
+    cleanup.register(() => clearTimeout(launchStuckTimer))
+    const subagent = createSkillChildSubAgent({
+      childRunId: active.childRunId,
+      outputDir: active.outputDir,
+      runStatePath: active.runStatePath,
+      driver,
+      initialState: state,
+      executeAction: async (action) => {
+        const request: SkillRunRequest = {
           skillId: active.skillId,
-          action: plan.action,
-          input: plan.input,
-          childRunId: active.childRunId,
-          scopeId: active.scopeId,
-          sessionId: active.sessionId,
-          outputDir: active.outputDir || null,
-          runStatePath: active.runStatePath || null,
-          childInternal: true,
-          signal: active.controller.signal,
-          runtimeManager: this.config.runtimeManager,
-        })
-        if (!gateway.skillRunResult) {
-          const rawGatewayKind = (gateway.data?.errorKind as string | undefined) || 'tool_failed'
-          const gatewayReason = gateway.data?.reason as string | undefined
-          const gatewayKind = gatewayReason === 'tool_not_registered'
-            ? 'tool_not_registered'
-            : rawGatewayKind
-          // Map the gateway's transport-level errorKind to the runner's
-          // close-event vocabulary. The runner specifically dispatches
-          // skill action handlers whose throws indicate a process-level
-          // failure of the underlying skill runtime — so `tool_failed`
-          // here means "the runtime threw" which is `child_process_crashed`
-          // in the runner's lifecycle vocabulary.
-          const errorKind: string =
-            gatewayKind === 'aborted' ? 'cancelled_user'
-            : gatewayKind === 'input_validation' ? 'input_validation'
-            : gatewayKind === 'host_unavailable' ? 'host_unavailable'
-            : gatewayKind === 'tool_not_registered' ? 'tool_not_registered'
-            : gatewayKind === 'tool_failed' ? 'child_process_crashed'
-            : gatewayKind
-          const terminalReason: SkillChildRunTerminalReason =
-            gatewayKind === 'aborted' ? 'cancelled_user'
-            : errorKind === 'input_validation' ? 'input_validation'
-            : errorKind === 'host_unavailable' ? 'host_unavailable'
-            : errorKind === 'tool_not_registered' ? 'tool_not_registered'
-            : 'child_process_crashed'
-          const status: SkillChildRunStatus =
-            gatewayKind === 'aborted' ? 'killed' : 'failed'
-          const close = makeCloseEvent({
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            status,
-            terminalReason,
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            errorKind,
-            message: typeof gateway.data?.message === 'string'
-              ? (gateway.data.message as string)
-              : gateway.text || `gateway ${gatewayKind}`,
-          })
-          this.finalizeRun(active, close)
-          return
-        }
-        const result: SkillRunResult = gateway.skillRunResult
-
-        const completedAt = new Date().toISOString()
-        await this.appendEvent(active, {
-          type: 'action_completed',
-          at: completedAt,
-          action: plan.action,
-          result: {
-            success: result.success,
-            status: result.status ?? null,
-            outputDir: result.outputDir ?? null,
-            error: result.error ?? null,
+          action: action.action,
+          params: {
+            ...action.input,
+            __childRunContext: {
+              childRunId: active.childRunId,
+              scopeId: active.scopeId,
+              sessionId: active.sessionId,
+              outputDir: active.outputDir || null,
+              runStatePath: active.runStatePath || null,
+            },
           },
-        })
-
-        // Skill-declared failure (NOT infra) — close as failed_skill.
-        if (!result.success) {
-          const close = makeCloseEvent({
-            childRunId: active.childRunId,
-            skillId: active.skillId,
-            status: 'failed',
-            terminalReason: 'failed_skill',
-            outputDir: active.outputDir,
-            runStatePath: active.runStatePath,
-            errorKind: 'failed_skill',
-            message: result.error || 'skill action returned success=false',
-          })
-          this.finalizeRun(active, close)
-          return
+          signal: active.controller.signal,
+          triggerType: 'tool',
+          sessionId: active.sessionId ?? undefined,
         }
-
-        this.inDriverDepth += 1
+        const runFromChild = (this.config.runtimeManager as unknown as {
+          runSkillFromChildRunner?: (request: SkillRunRequest) => Promise<SkillRunResult>
+        }).runSkillFromChildRunner
         try {
-          state = await driver.observeAfterAction(state, result)
+          const result = runFromChild
+            ? await runFromChild.call(this.config.runtimeManager, request)
+            : await this.config.runtimeManager.runSkill(request)
+          actionResults.push(result)
+          return result
         } catch (error) {
-          const close = makeCloseEvent({
+          throw makeSkillActionExecutionError(error, active.controller.signal)
+        }
+      },
+      parentScopeId: active.scopeId,
+      parentSessionId: active.sessionId,
+      maxActions: this.config.maxActionsPerRun,
+      runDriverCall: (call) => this.runDriverCall(call),
+    })
+
+    try {
+      for await (const event of runSubAgent(subagent, {
+        abortSignal: active.controller.signal,
+        cleanup,
+        parentScopeId: active.scopeId,
+        parentSessionId: active.sessionId,
+      })) {
+        if (event.type === 'progress' && isSkillChildProgressPayload(event.payload)) {
+          if (event.payload.kind === 'action_started') {
+            const actionStartedAt = new Date().toISOString()
+            actionsStarted = event.payload.actionIndex
+            if (firstActionStartedAt === null) {
+              firstActionStartedAt = actionStartedAt
+              // First action observed — clear the stuck timer.
+              clearTimeout(launchStuckTimer)
+            }
+            await this.appendEvent(active, {
+              type: 'action_started',
+              at: actionStartedAt,
+              action: event.payload.actionName,
+              input: event.payload.actionInput,
+            })
+            continue
+          }
+
+          if (event.payload.kind === 'action_completed') {
+            const result = actionResults.shift()
+            await this.appendEvent(active, {
+              type: 'action_completed',
+              at: new Date().toISOString(),
+              action: event.payload.actionName,
+              result: {
+                success: event.payload.success,
+                status: result?.status ?? null,
+                outputDir: result?.outputDir ?? null,
+                error: result?.error ?? null,
+                durationMs: event.payload.durationMs,
+              },
+            })
+            continue
+          }
+
+          await this.appendEvent(active, {
+            type: 'state_observed',
+            at: new Date().toISOString(),
+            runStatePath: active.runStatePath,
+            state: {
+              actionsPlanned: actionsStarted,
+              stage: event.payload.stage,
+              fingerprint: event.payload.fingerprint,
+            },
+          })
+          continue
+        }
+
+        if (event.type === 'terminal') {
+          clearTimeout(launchStuckTimer)
+          const abortReason = (active.controller.signal.reason as Error | undefined)?.message
+            || (typeof active.controller.signal.reason === 'string' ? active.controller.signal.reason : null)
+          const close = mapSubAgentCloseToChildClose(event.closeEvent, {
             childRunId: active.childRunId,
             skillId: active.skillId,
-            status: 'failed',
-            terminalReason: 'child_process_crashed',
             outputDir: active.outputDir,
             runStatePath: active.runStatePath,
-            errorKind: 'driver_observe_failed',
-            message: errorMessage(error),
+            isUserCancel: active.controller.signal.aborted
+              && !isLaunchStuckFired
+              && abortReason !== 'process_restarted',
+            isParentSessionAbort: abortReason === 'process_restarted',
+            isLaunchStuckFired,
           })
           this.finalizeRun(active, close)
           return
-        } finally {
-          this.inDriverDepth = Math.max(0, this.inDriverDepth - 1)
         }
-
-        await this.appendEvent(active, {
-          type: 'state_observed',
-          at: new Date().toISOString(),
-          runStatePath: active.runStatePath,
-          state: { actionsPlanned },
-        })
       }
     } finally {
-      // Per-call depth bookkeeping is owned by the inDriverDepth
-      // try/finally pairs around each driver call site; nothing to do
-      // here. Kept as an extension point.
+      clearTimeout(launchStuckTimer)
+    }
+  }
+
+  private async runDriverCall<T>(call: () => Promise<T>): Promise<T> {
+    this.inDriverDepth += 1
+    try {
+      return await call()
+    } finally {
+      this.inDriverDepth = Math.max(0, this.inDriverDepth - 1)
     }
   }
 
@@ -1305,17 +1232,31 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-function isCloseEvent(value: unknown): value is SkillChildCloseEvent {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  return typeof v.status === 'string' && typeof v.terminalReason === 'string'
-    && 'progress' in v
+function makeSkillActionExecutionError(error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) {
+    const abortError = new Error(errorMessage(signal.reason) || errorMessage(error) || 'cancelled_user')
+    abortError.name = 'cancelled_user'
+    return abortError
+  }
+  const originalName = error instanceof Error ? error.name : ''
+  const name =
+    originalName === 'ProcessExitError' || originalName === 'ChildProcessTerminationError'
+      ? 'child_process_crashed'
+      : originalName === 'ZodError' || originalName === 'SchemaValidationError'
+        ? 'input_validation'
+        : originalName === 'ToolHostUnavailableError'
+          ? 'host_unavailable'
+          : originalName === 'failed_skill'
+            || originalName === 'child_process_crashed'
+            || originalName === 'input_validation'
+            || originalName === 'host_unavailable'
+            || originalName === 'tool_not_registered'
+            ? originalName
+            : 'child_process_crashed'
+  const wrapped = new Error(errorMessage(error))
+  wrapped.name = name
+  return wrapped
 }
-
-// `classifyThrowAsTerminal` was removed when T6 routed dispatch through
-// `executeSkillActionViaToolGateway`; the gateway already classifies
-// abort vs. handler-throw at the boundary, so the runner reads
-// `gateway.data.errorKind` instead of inspecting raw error text.
 
 interface ComputeDigestArgs {
   runStatePath: string | null

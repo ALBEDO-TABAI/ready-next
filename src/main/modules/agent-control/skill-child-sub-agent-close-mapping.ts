@@ -53,6 +53,13 @@ export function mapSubAgentCloseToChildClose(
   }
 
   if (subAgentClose.state === 'cancelled' && subAgentClose.terminalReason === 'aborted') {
+    if (runtimeContext.isLaunchStuckFired) {
+      return makeMappedClose(runtimeContext, subAgentClose, {
+        status: 'failed',
+        terminalReason: 'launch_stuck',
+        errorKind: 'launch_stuck',
+      })
+    }
     const terminalReason: SkillChildRunTerminalReason = runtimeContext.isParentSessionAbort
       ? 'process_restarted'
       : 'cancelled_user'
@@ -125,6 +132,11 @@ function terminalReasonFromFailedSubAgent(
 ): SkillChildRunTerminalReason {
   if (runtimeContext.isLaunchStuckFired) return 'launch_stuck'
   const errorKind = subAgentClose.error?.kind ?? ''
+  if (errorKind === 'failed_skill') return 'failed_skill'
+  if (errorKind === 'child_process_crashed') return 'child_process_crashed'
+  if (errorKind === 'input_validation') return 'input_validation'
+  if (errorKind === 'host_unavailable') return 'host_unavailable'
+  if (errorKind === 'tool_not_registered') return 'tool_not_registered'
   if (errorKind === 'ProcessExitError' || errorKind === 'ChildProcessTerminationError') {
     return 'child_process_crashed'
   }
