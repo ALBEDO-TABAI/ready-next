@@ -154,3 +154,51 @@ Database initialization failed: ... NODE_MODULE_VERSION 132 vs 127 ... `npm rebu
 ```
 
 This came from a non-failing path (an unrelated module that lazily inits a `Database`); it did not cause any subtest to fail in this run because the failing fixtures use their own fresh `new Database(dbPath)`. It is **not** a regression. If a later phase needs the production `DatabaseManager.init()` path in tests, run `npm run rebuild:native` per CLAUDE §6.13.
+
+---
+
+## 5. Remediation Reset (post-`452f01a`)
+
+> **Added 2026-04-30 — keep §§1–4 unchanged for history; this section governs the current state.**
+
+### 5.1 Why this section exists
+
+Commit `452f01a` ("feat(skill): introduce child-owned long-skill runtime architecture") landed Phases 1–7 of the original architecture plan and the targeted child-runtime suite reported "108/108 PASS". A subsequent independent code review (recorded as `docs/superpowers/plans/2026-04-30-skill-runtime-child-loop-remediation.md`) found that the green test count was misleading: several of the green tests run against **stub drivers** rather than the real `videoExpertChildDriver`, so the most important product-path decisions are not being exercised.
+
+Outside the test surface, the same review identified concrete code gaps that survived `452f01a`:
+
+- Real VEA driver ignores direct `sceneScoresPath` input for `video_expert_ai_analyze`; cold-start without a URL returns `recoverable_paused/missing_inputs`.
+- RSS visual call site passes `sceneScoresPath` only — no `outputDir` — so the product path can pause on `missing_inputs`.
+- `SkillChildRunner.startSkillChildRun` returns `status:'reused'` from a DB row without checking that the in-memory runner is still alive.
+- `SkillChildRunner.getCloseEvent` reads only `recentCloses`; durable terminal closes persisted in the repository are never read back.
+- `turn-engine.ts:2136–2155` only **suppresses** parent force-tool steering; it does not actively route continuation through `resumeSkillChildRun` / `waitForSkillChildRunClose`.
+- `turn-frame-steering.ts buildTurnFrameSteering` emits no child-aware reminder when `runContract.childRunId` is set.
+- `loadSkillRunContract` looks up by `childRunId` first but has no exact `runStatePath` / `outputDir` ordering before path-similarity fallback.
+- Child-run internal skill action calls bypass the unified Zod / tool-gateway admission path used by public typed dispatch.
+- Status vocabulary still mixes legacy supervisor strings (`background_running` / `done` / `cancelled`) with the new child-run vocabulary at adapter edges.
+
+### 5.2 Current baseline status
+
+- `npm run typecheck` — **PASSES** as of `452f01a`. The remediation doc's "Step 1: record FAIL" instruction is stale.
+- Targeted child-runtime suite — green, but the green is partly stub-driven; the no-stub product-shaped paths from remediation Tasks 3 and 9 are the real bar.
+- Branch is **not** ready for the §1 acceptance criteria of the remediation doc until the migration of Tasks 1–11 lands.
+
+### 5.3 What replaces this triage as the bar
+
+Three concrete checkpoints, in order:
+
+1. **Wave 1 of remediation** (Tasks T1–T3 of meta-plan `~/.claude/plans/bubbly-floating-mccarthy.md`) — direct `sceneScoresPath` real-driver test green; status leak guards green.
+2. **Wave 5** (Task T9) — at least one no-stub real-driver real-product-path test asserts `videoExpertChildDriver === imported real driver` and that RSS reaches AI scoring without `missing_inputs`.
+3. **Wave 7** (Task T11) — full §1 acceptance of remediation doc; `npm run verify` clean (or unrelated baseline failures documented).
+
+Until checkpoint 3 holds, this branch's "108/108 PASS" must not be cited as verification evidence.
+
+### 5.4 Watch-list deltas vs. §4.1
+
+The §4.1 watch list described the original architecture's Phase mapping. After remediation:
+
+- Phase 2 / 6 items there now belong to remediation Tasks T2 / T5 / T6.
+- Phase 5 / 6 items belong to T5.
+- Phase 5 / 7 fixture drift (`waiting_for`) is unchanged — still a fixture-level fix outside this route.
+
+Re-classify entries against the meta-plan when re-checking before Wave 7.
