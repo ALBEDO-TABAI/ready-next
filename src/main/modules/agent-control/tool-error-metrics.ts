@@ -37,6 +37,16 @@ export const TOOL_ERROR_METRICS = {
   hookHandlerTimeout: 'hook_handler_timeout',
   /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
   skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
+  /** E W2 — outputDir retained/legacy GC completed once. */
+  outputDirGc: 'output_dir_gc',
+  /** E W2 — outputDir sweep saw one or more deletion/read failures. */
+  outputDirSweepFailed: 'output_dir_sweep_failed',
+  /** E W2 — runtime-root child-run JSONL log GC completed once. */
+  childRunLogGc: 'child_run_log_gc',
+  /** E W2 — child-run outputDir lifecycle marker could not be written. */
+  childRunnerLifecycleWriteFailed: 'skill_child_runner_lifecycle_write_failed',
+  /** E W3 — child-run circuit breaker opened or blocked a launch. */
+  childRunCircuitBreak: 'child_run_circuit_break',
   /**
    * Skill child-runtime feature-flag observability. Emitted when the
    * `READY_SKILL_CHILD_RESUME_ENABLED` rollback flag is set to `'0'` and

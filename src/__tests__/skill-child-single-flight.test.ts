@@ -136,6 +136,10 @@ function makeFakeRuntime(): SkillsRuntimeManager {
       await stall
       return { success: true, skillId: '', action: '', stdout: '', stderr: '', command: [] }
     },
+    runSkillFromChildRunner: async (request: SkillRunRequest): Promise<SkillRunResult> => {
+      await stall
+      return { success: true, skillId: request.skillId, action: request.action, stdout: '', stderr: '', command: [] }
+    },
   } as unknown as SkillsRuntimeManager
 }
 
@@ -147,9 +151,9 @@ function registerStallingDriver(skillId: string): void {
     createInitialState: async (params) => ({ skillId, requestedInput: params.requestedInput }),
     // Always returns an action that the (stalled) runtime will hold,
     // keeping the run in 'running' so the single-flight key is active.
-    planNextAction: async (): Promise<SkillChildDriverAction | SkillChildCloseEvent> => ({
-      action: 'do_thing',
-      input: {},
+    planNextAction: async (state): Promise<SkillChildDriverAction | SkillChildCloseEvent> => ({
+      action: 'video_expert_pipeline',
+      input: state.requestedInput as Record<string, unknown>,
     }),
     observeAfterAction: async (state) => state,
   }

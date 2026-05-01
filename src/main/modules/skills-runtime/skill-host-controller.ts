@@ -22,11 +22,12 @@
  *     errors)
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, isAbsolute, resolve as resolvePath, sep } from 'node:path'
+import { isAbsolute, resolve as resolvePath, sep } from 'node:path'
 
 import type { AgentSpawnContext, SkillHostRequirements } from '../../../shared/skill-host-contract'
+import { atomicWriteText } from '../agent-control/atomic-write'
 import { getCurrentAgentContext } from './agent-context-source'
 import {
   TemplateError,
@@ -233,8 +234,7 @@ export class SkillHostController {
 
         // 2) Render and write the new content.
         const rendered = renderConfigFileContent(configSpec, originalContent, ctx)
-        mkdirSync(dirname(targetPath), { recursive: true })
-        writeFileSync(targetPath, rendered, 'utf8')
+        atomicWriteText(targetPath, rendered)
       }
 
       // ---- Secondary files -------------------------------------------
@@ -242,8 +242,7 @@ export class SkillHostController {
       for (const spec of secondaries) {
         const targetPath = resolveAndGuardPath(spec.path, ctx)
         const content = renderTemplate(spec.content_template, ctx)
-        mkdirSync(dirname(targetPath), { recursive: true })
-        writeFileSync(targetPath, content, 'utf8')
+        atomicWriteText(targetPath, content)
         handle.secondaryFilesCreated.push(targetPath)
       }
 
@@ -284,8 +283,7 @@ export class SkillHostController {
     if (backup) {
       try {
         if (backup.existed && backup.content !== null) {
-          mkdirSync(dirname(backup.path), { recursive: true })
-          writeFileSync(backup.path, backup.content, 'utf8')
+          atomicWriteText(backup.path, backup.content)
         } else {
           // No prior file, or we couldn't read it → unlink ours.
           try {

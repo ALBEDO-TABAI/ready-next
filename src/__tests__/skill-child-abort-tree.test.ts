@@ -22,6 +22,8 @@ import {
   registerSkillChildDriver,
   type SkillChildDriver,
 } from '../main/modules/agent-control/skill-child-drivers'
+import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
@@ -121,6 +123,7 @@ function setup(opts: {
   parentSignal: AbortSignal | null
   runtime: ReturnType<typeof makeRuntime>
 }): void {
+  installTestSkillToolDefinitions()
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
   configureSkillChildRunner({
@@ -158,6 +161,38 @@ function makeRuntime(): {
       manager.runSkill(request),
   } as unknown as SkillsRuntimeManager
   return { manager, calls }
+}
+
+let testSkillToolDefinitionsInstalled = false
+
+function installTestSkillToolDefinitions(): void {
+  if (testSkillToolDefinitionsInstalled) return
+  testSkillToolDefinitionsInstalled = true
+  const registry = defaultToolRegistry as unknown as {
+    getToolDefinitionForExecution: (toolName: string) => ToolDefinition | null
+  }
+  const original = registry.getToolDefinitionForExecution.bind(defaultToolRegistry)
+  registry.getToolDefinitionForExecution = (toolName: string) => {
+    if (toolName.startsWith('skill_test_')) {
+      return {
+        name: toolName,
+        groupId: 'skills',
+        domain: 'skill',
+        kind: 'job',
+        concurrency: 'serialized',
+        interruptBehavior: 'host_managed',
+        timeoutProfile: 'skill_long',
+        supportsTextBridge: true,
+        projectionHint: null,
+        description: `${toolName} test fixture`,
+        schema: null,
+        executionVisibility: 'internal',
+        requiresExplicitAllowlist: true,
+        resultShape: 'json',
+      }
+    }
+    return original(toolName)
+  }
 }
 
 function makeStallingRuntime(): ReturnType<typeof makeRuntime> {

@@ -38,6 +38,7 @@ import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
 } from '../main/modules/agent-control/skill-child-drivers'
+import { getChildRunRetryPolicy } from '../main/modules/agent-control/child-run-retry-policy'
 // Importing the module re-registers the real VEA driver as a side effect.
 // We grab the singleton instance so we can re-register it after a test reset.
 import { videoExpertChildDriver } from '../main/modules/agent-control/video-expert-child-driver'
@@ -134,10 +135,6 @@ test('queued_global_concurrency triggers bounded retry (3 attempts max) (stubbed
 
   const manager = new RSSItemAnalysisManager({ startSkillChildRunAndWait: stub, veaAwaitRetryDelayMs: 0 })
 
-  // Override the retry delay via a fake setTimeout wrapper isn't necessary;
-  // the helper sleeps 5s between retries which adds ~10s here. That's fine
-  // for a one-off acceptance test. If this becomes flaky we can reduce the
-  // module-level VEA_AWAIT_RETRY_DELAY_MS in the future.
   const result = await manager.__awaitVeaChildRunForTesting({
     skillId: 'video-expert-analyzer',
     action: 'video_expert_pipeline',
@@ -147,6 +144,13 @@ test('queued_global_concurrency triggers bounded retry (3 attempts max) (stubbed
   assert.equal(attempts, 3, 'expected exactly 3 attempts before success')
   assert.equal(result.success, true)
   assert.equal(result.closeEvent.terminalReason, 'completed')
+})
+
+test('queued_global_concurrency RSS retry contract remains 3 attempts at 5 seconds', () => {
+  const policy = getChildRunRetryPolicy('queued_global_concurrency')
+
+  assert.equal(policy.maxAttempts, 3)
+  assert.deepEqual(policy.backoffMs, [5000, 5000, 5000])
 })
 
 test('queued_global_concurrency exceeding retry limit propagates as failure (stubbed driver)', async () => {

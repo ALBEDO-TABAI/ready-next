@@ -18,6 +18,7 @@ const electronModule = (() => {
 })()
 const { app } = electronModule
 import { getDatabase } from '../database'
+import { atomicWriteJson } from '../agent-control/atomic-write'
 import { getWhichCommand } from '../../utils/platform'
 import { EMBEDDED_SKILLS, EMBEDDED_SKILL_IDS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
 import type {
@@ -44,6 +45,10 @@ import { SkillLoader } from './skill-loader'
 // PR1-E.
 import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
 import { logAgentMetric } from '../agent-control/metrics'
+import {
+  sweepChildRunLogs,
+  sweepOutputDirs,
+} from './output-dir-sweep'
 import {
   getSkillHostController,
   type SkillHostController,
@@ -96,6 +101,14 @@ function mergeSkillRunStatus(
   if (current === 'blocked' || current === 'error') return current
   if (detected === 'blocked' || detected === 'error') return detected
   return current || detected
+}
+
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return parsed
 }
 
 /**
@@ -406,6 +419,8 @@ export class SkillsRuntimeManager {
   private schedulerTimer: NodeJS.Timeout | null = null
   private referenceHintBootTimer: NodeJS.Timeout | null = null
   private referenceHintIntervalTimer: NodeJS.Timeout | null = null
+  private outputDirSweepBootTimer: NodeJS.Timeout | null = null
+  private outputDirSweepIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
   private orphanCleanupRan = false
 
@@ -431,6 +446,7 @@ export class SkillsRuntimeManager {
     if (options.startBackgroundTasks !== false) {
       this.startScheduler()
       this.startReferenceHintSweep()
+      this.startOutputDirSweep()
       // B-arch-4 — best-effort one-shot orphan cleanup. Failures must not block
       // boot, so swallow + log internally. Test mode (startBackgroundTasks=false)
       // skips this so tests don't accidentally rm fixture skill dirs.
@@ -479,6 +495,46 @@ export class SkillsRuntimeManager {
     if (this.referenceHintIntervalTimer) {
       clearInterval(this.referenceHintIntervalTimer)
       this.referenceHintIntervalTimer = null
+    }
+  }
+
+  private startOutputDirSweep(): void {
+    const sweep = (): void => {
+      void (async () => {
+        try {
+          await sweepOutputDirs({
+            runtimeRoot: this.runtimeRoot,
+            retentionDays: envNumber('READY_OUTPUT_DIR_RETENTION_DAYS', 7),
+            legacyGraceDays: envNumber('READY_OUTPUT_DIR_LEGACY_GRACE_DAYS', 30),
+          })
+          await sweepChildRunLogs({
+            runtimeRoot: this.runtimeRoot,
+            retentionDays: envNumber('READY_CHILD_RUN_LOG_RETENTION_DAYS', 30),
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('[SkillsRuntimeManager] outputDir sweep failed:', message)
+        }
+      })()
+    }
+    this.outputDirSweepBootTimer = setTimeout(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
+    )
+    this.outputDirSweepIntervalTimer = setInterval(
+      sweep,
+      SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
+    )
+  }
+
+  stopOutputDirSweep(): void {
+    if (this.outputDirSweepBootTimer) {
+      clearTimeout(this.outputDirSweepBootTimer)
+      this.outputDirSweepBootTimer = null
+    }
+    if (this.outputDirSweepIntervalTimer) {
+      clearInterval(this.outputDirSweepIntervalTimer)
+      this.outputDirSweepIntervalTimer = null
     }
   }
 
@@ -1514,7 +1570,7 @@ export class SkillsRuntimeManager {
           installedAt: new Date().toISOString(),
           venvId: venvState?.venvId,
         }
-        writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8')
+        atomicWriteJson(statePath, state)
         return { success: true, skillId: manifest.id, skillPath, venvPython }
       } catch (error) {
         return {
@@ -1569,7 +1625,7 @@ export class SkillsRuntimeManager {
         installedAt: new Date().toISOString(),
         venvId: venvState?.venvId,
       }
-      writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8')
+      atomicWriteJson(statePath, state)
       return { success: true, skillId: customSkill.id, skillPath: customSkill.managedPath, venvPython }
     } catch (error) {
       return {
@@ -1633,15 +1689,14 @@ export class SkillsRuntimeManager {
     rmSync(destination, { recursive: true, force: true })
     mkdirSync(destination, { recursive: true })
     cpSync(source, destination, { recursive: true, force: true })
-    writeFileSync(
+    atomicWriteJson(
       syncStatePath,
-      JSON.stringify({
+      {
         version: manifest.version,
         sourceHash,
         sourcePath: source,
         syncedAt: new Date().toISOString(),
-      }, null, 2),
-      'utf-8',
+      },
     )
     return destination
   }
@@ -1781,7 +1836,7 @@ export class SkillsRuntimeManager {
       pythonVersion: version || 'unknown',
       updatedAt: new Date().toISOString(),
     }
-    writeFileSync(join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME), JSON.stringify(state, null, 2), 'utf-8')
+    atomicWriteJson(join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME), state)
     return state
   }
 

@@ -1,5 +1,6 @@
 import { basename, join } from 'path'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
+import { atomicWriteJson } from '../agent-control/atomic-write'
 import type {
   SkillActionDefinition,
   SkillActionVisibility,
@@ -386,7 +387,7 @@ export function writeManagedCustomSkillManifest(managedPath: string, manifest: C
     updatedAt: new Date().toISOString(),
   }
   const manifestPath = join(managedPath, MANAGED_MANIFEST_FILENAME)
-  writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf-8')
+  atomicWriteJson(manifestPath, nextManifest)
   return {
     ...nextManifest,
     managedPath,

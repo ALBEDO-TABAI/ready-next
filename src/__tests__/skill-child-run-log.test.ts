@@ -16,12 +16,18 @@ import test from 'node:test'
 import {
   appendChildRunEvent,
   deriveChildRunLogPath,
+  deriveLegacyChildRunLogPath,
+  deriveRuntimeChildRunLogPath,
   readChildRunLog,
+  readChildRunLogForResume,
 } from '../main/modules/agent-control/skill-child-run-log'
 import {
   createSkillChildRunId,
 } from '../main/modules/agent-control/skill-child-run-id'
 import type { SkillChildRunEvent } from '../main/modules/agent-control/skill-child-run-types'
+import {
+  sweepChildRunLogs,
+} from '../main/modules/skills-runtime/output-dir-sweep'
 
 async function makeTempOutputDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-log-'))
@@ -31,6 +37,12 @@ test('deriveChildRunLogPath returns <outputDir>/.ready/child-runs/<id>.jsonl', (
   const id = createSkillChildRunId('vea')
   const got = deriveChildRunLogPath('/tmp/abc', id)
   assert.equal(got, path.join('/tmp/abc', '.ready', 'child-runs', `${id}.jsonl`))
+})
+
+test('deriveRuntimeChildRunLogPath returns <runtimeRoot>/.ready/child-runs/<id>.jsonl', () => {
+  const id = createSkillChildRunId('skill')
+  const got = deriveRuntimeChildRunLogPath('/tmp/runtime-root', id)
+  assert.equal(got, path.join('/tmp/runtime-root', '.ready', 'child-runs', `${id}.jsonl`))
 })
 
 test('appendChildRunEvent + readChildRunLog round-trip preserves order', async () => {
@@ -151,4 +163,79 @@ test('appendChildRunEvent creates the .ready/child-runs/ parent directory', asyn
 
   // After append, parent dir must exist.
   await fs.access(path.dirname(logPath))
+})
+
+test('resume reader falls back to legacy outputDir log when runtime-root log is empty', async () => {
+  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-runtime-'))
+  const outputDir = await makeTempOutputDir()
+  const childRunId = createSkillChildRunId('skill')
+  const runtimeLog = deriveRuntimeChildRunLogPath(runtimeRoot, childRunId)
+  const legacyLog = deriveLegacyChildRunLogPath(outputDir, childRunId)
+  await fs.mkdir(path.dirname(runtimeLog), { recursive: true })
+  await fs.writeFile(runtimeLog, '', 'utf8')
+  const legacyEvent: SkillChildRunEvent = {
+    type: 'started',
+    at: '2026-05-01T00:00:00.000Z',
+    childRunId,
+    input: { source: 'legacy' },
+  }
+  await appendChildRunEvent({ logPath: legacyLog, event: legacyEvent })
+
+  const result = await readChildRunLogForResume({ runtimeRoot, outputDir, childRunId })
+
+  assert.equal(result.logPath, legacyLog)
+  assert.deepEqual(result.events, [legacyEvent])
+})
+
+test('resume reader prefers runtime-root log over legacy when both exist', async () => {
+  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-runtime-'))
+  const outputDir = await makeTempOutputDir()
+  const childRunId = createSkillChildRunId('skill')
+  const runtimeLog = deriveRuntimeChildRunLogPath(runtimeRoot, childRunId)
+  const legacyLog = deriveLegacyChildRunLogPath(outputDir, childRunId)
+  const runtimeEvent: SkillChildRunEvent = {
+    type: 'started',
+    at: '2026-05-01T00:00:00.000Z',
+    childRunId,
+    input: { source: 'runtime' },
+  }
+  const legacyEvent: SkillChildRunEvent = {
+    type: 'started',
+    at: '2026-05-01T00:00:01.000Z',
+    childRunId,
+    input: { source: 'legacy' },
+  }
+  await appendChildRunEvent({ logPath: runtimeLog, event: runtimeEvent })
+  await appendChildRunEvent({ logPath: legacyLog, event: legacyEvent })
+
+  const result = await readChildRunLogForResume({ runtimeRoot, outputDir, childRunId })
+
+  assert.equal(result.logPath, runtimeLog)
+  assert.deepEqual(result.events, [runtimeEvent])
+})
+
+test('child-run-log sweep deletes only runtime-root logs older than retention', async () => {
+  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-child-run-runtime-'))
+  const outputDir = await makeTempOutputDir()
+  const oldLog = deriveRuntimeChildRunLogPath(runtimeRoot, 'old-run')
+  const freshLog = deriveRuntimeChildRunLogPath(runtimeRoot, 'fresh-run')
+  const legacyLog = deriveLegacyChildRunLogPath(outputDir, 'legacy-run')
+  await fs.mkdir(path.dirname(oldLog), { recursive: true })
+  await fs.writeFile(oldLog, '{}\n', 'utf8')
+  await fs.writeFile(freshLog, '{}\n', 'utf8')
+  await fs.mkdir(path.dirname(legacyLog), { recursive: true })
+  await fs.writeFile(legacyLog, '{}\n', 'utf8')
+  const oldDate = new Date('2026-03-01T00:00:00.000Z')
+  await fs.utimes(oldLog, oldDate, oldDate)
+
+  const result = await sweepChildRunLogs({
+    runtimeRoot,
+    now: new Date('2026-05-01T00:00:00.000Z'),
+    retentionDays: 30,
+  })
+
+  assert.equal(result.removedCount, 1)
+  await assert.rejects(fs.access(oldLog))
+  await fs.access(freshLog)
+  await fs.access(legacyLog)
 })

@@ -2,6 +2,20 @@
 
 ## [Unreleased] - 2026-04-28
 
+### Skill Runtime E — W2 outputDir lifecycle + child-run log GC
+
+- **outputDir 生命周期 sidecar**：新增 `.lifecycle.json`，终态 `completed / failed / killed / blocked` 写入 `retained` 状态，`budget_paused / recoverable_paused` 不写保留态，避免仍需续跑的目录被后台清扫。
+- **child-run JSONL 新位置**：新启动的 child run 日志写入 `<runtimeRoot>/.ready/child-runs/<childRunId>.jsonl`；恢复读取优先使用持久化路径，缺失时按 runtime-root 新路径、legacy outputDir 旧路径回退。
+- **后台清扫**：`SkillsRuntimeManager` 启动 outputDir 与 child-run log 清扫定时器；默认 outputDir 保留 7 天，legacy 无 lifecycle 目录宽限 30 天，child-run log 保留 30 天，均支持 `READY_*_RETENTION_DAYS` 环境变量覆盖。
+- **防陈旧日志误恢复**：runner 的 legacy fallback 只把不早于记录创建时间的非空日志当作可恢复句柄，避免测试或旧残留文件把无 `eventLogPath` 的 active 行误判成可直接恢复。
+
+### Skill Runtime E — 防爆 + 减脆收口
+
+- **原子写入硬门**：状态类 JSON 写入集中到 `atomicWriteJson`，文本/config 写入集中到 `atomicWriteText`；新增检查脚本阻止 `agent-control/` 与 `skills-runtime/` 下新增 JSON 直写。
+- **retry / circuit breaker**：17 个 child-run 终态原因全部有明确重试策略；同一目标连续失败会进入短 cooldown，可用 `READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED=0` 紧急关闭，重启 Electron 会清掉当前 cooldown。
+- **gateway admission 收口**：child runner 执行动作走 tool gateway，不再直接绕到 runtime `runSkill`；VEA happy-path child-run 链路和 child-internal admission 由回归测试锁住。
+- **E 验证门**：新增 `npm run verify:e`，固定内嵌 `verify:d`，并覆盖 atomic write、outputDir/log lifecycle、legacy resume fallback、retry policy、circuit breaker 与 gateway admission 相关测试。
+
 ### Skill Runtime B — Phase 7 long-task supervisor 收口
 
 - **Phase 3 lifecycle separation 补齐回审缺口**：新增四源冲突 supervisor fixture，覆盖 `skill_task_runs` 已 done、detached 仍 running、`run_state.json` 仍 running、projection 显示 done 的组合；监督器保持 `background_running`、禁止 close，并保留恢复句柄。

@@ -150,7 +150,7 @@ test('T6: gateway succeeds when input matches the same schema the public dispatc
   // Build a fake runtime that captures the request and returns success.
   const fakeRuntime = {
     lastRequest: null as Record<string, unknown> | null,
-    runSkill: async (req: unknown) => {
+    runSkillFromChildRunner: async (req: unknown) => {
       fakeRuntime.lastRequest = req as Record<string, unknown>
       return {
         success: true,

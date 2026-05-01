@@ -7,11 +7,12 @@
  * masked validation summary so provider keys never leak into model context.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 import type { SkillHostRequirements } from '../../../../shared/skill-host-contract'
+import { atomicWriteJson } from '../../agent-control/atomic-write'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import type { TurnFramePatch } from '../../agent-control/turn-frame'
@@ -181,13 +182,6 @@ function applyOperation(root: unknown, operation: PatchConfigOperation): void {
     return
   }
   parent[key] = operation.value
-}
-
-function atomicWriteJson(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const tmp = `${path}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  renameSync(tmp, path)
 }
 
 function getObjectAtPath(root: unknown, path: string[]): Record<string, unknown> | null {

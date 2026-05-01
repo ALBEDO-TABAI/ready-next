@@ -2,10 +2,11 @@ import { app } from 'electron'
 import { createServer } from 'net'
 import { ChildProcess, execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { SidecarStatus } from './types'
+import { atomicWriteJson } from './atomic-write'
 import {
   buildReadyPythonCandidates,
   isSupportedReadyPythonVersion,
@@ -398,7 +399,7 @@ export class SidecarManager {
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...SIDECAR_PIP_ENV },
       })
-      writeFileSync(this.runtimeStatePath, JSON.stringify({ digest, updatedAt: new Date().toISOString() }))
+      atomicWriteJson(this.runtimeStatePath, { digest, updatedAt: new Date().toISOString() })
     }
 
     return venvPython

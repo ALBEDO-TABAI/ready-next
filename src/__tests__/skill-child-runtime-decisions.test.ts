@@ -137,6 +137,10 @@ function makeStallingRuntime(): SkillsRuntimeManager {
       await stall
       return { success: true, skillId: '', action: '', stdout: '', stderr: '', command: [] }
     },
+    runSkillFromChildRunner: async (req: SkillRunRequest): Promise<SkillRunResult> => {
+      await stall
+      return { success: true, skillId: req.skillId, action: req.action, stdout: '', stderr: '', command: [] }
+    },
   } as unknown as SkillsRuntimeManager
 }
 
@@ -258,7 +262,7 @@ test('Phase 5: skill_failure (success:false) vs process crash throw split correc
         customSkillsRoot: '/tmp/fake/c', outputsRoot: '/tmp/fake/o',
         venvRoot: '/tmp/fake/v',
       }),
-      runSkill: async (): Promise<SkillRunResult> => ({
+      runSkillFromChildRunner: async (): Promise<SkillRunResult> => ({
         success: false,
         skillId: 'test-skill-split',
         action: 'do_thing',
@@ -292,7 +296,7 @@ test('Phase 5: skill_failure (success:false) vs process crash throw split correc
         customSkillsRoot: '/tmp/fake/c', outputsRoot: '/tmp/fake/o',
         venvRoot: '/tmp/fake/v',
       }),
-      runSkill: async () => {
+      runSkillFromChildRunner: async () => {
         throw new Error('child process crashed (signal SIGKILL)')
       },
     } as unknown as SkillsRuntimeManager,

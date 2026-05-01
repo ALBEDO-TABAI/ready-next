@@ -185,7 +185,7 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 | **B — Child Runtime 迁移** | 把 child runner 改造为 SubAgent 的特化（VEA SubAgent / RSS SubAgent）；`prepareResumeLifecycle` / AbortController 树 / cleanupRegistry 在 SubAgent 框架内实现 | [x] completed 2026-05-01 | **v2 阶段 A 的"AbortController 树 + CleanupRegistry"在这里落地，但作为 SubAgent 子能力** |
 | **C — Coordinator 抽象** | 引入 Coordinator role：browser / document / skill / RSS 各自注册自己的 system prompt + tool list；turn-engine 只调度 | [x] completed 2026-05-01 | **v1/v2 没有这一阶段** |
 | **D — 系统 reminder registry**（根因 2）+ Compaction 分层 + Hook 系统骨架 | 引入 reminder registry / 分层 compaction / 简单 hook 触发点 | [x] completed 2026-05-01 | v2 阶段 D 的提质升级版；`verify:d` 内嵌 `verify:c`，hard lint 强制禁止 inline system reminder |
-| **E — 防爆 + 减脆**（O1 outputDir GC、O4 atomic write、O6 retry、O8 PermissionContext） | 这些都在 SubAgent 框架内统一实现 | 3-4 天 | **v2 的 B + C 在这里完成，但成本下降——因为有了 A1 的骨架** |
+| **E — 防爆 + 减脆**（O1 outputDir GC、O4 atomic write、O6 retry、O8 PermissionContext） | 这些都在 SubAgent 框架内统一实现 | [x] completed 2026-05-01 | **v2 的 B + C 在这里完成，但成本下降——因为有了 A1 的骨架**；`verify:e` 内嵌 `verify:d` |
 | **F — 测试规约 + e2e 链路** | 根因 3 + O5 | 5-7 天 | v2 阶段 B + E 合并 |
 | **G — 提质（剩余的 N1-N4 + O7）** | Layer 1 次生债收尾 + 用户控制面 | 2-3 天 | v2 阶段 D |
 
@@ -196,6 +196,10 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 ### 5.1.3 E 阶段准入
 
 **E（防爆 + 减脆）准入**：D 的 reminder registry、LayeredCompactor、HookRegistry、hard lint 与 `verify:d` 全部通过；E 阶段不得重新引入 inline system reminder。真实 L2 压缩、reference-skill context 注入策略和后续 hook handler 必须复用 D 已落地的 registry / compactor / hook 合同，不允许另起并行抽象。
+
+### 5.1.4 F 阶段准入
+
+**F（测试规约 + e2e 链路）准入**：E 的 7 条 hard contract 全绿，`npm run verify:e` 退出码 0；atomic write checker、outputDir/log lifecycle、legacy resume fallback、17 reason retry policy、circuit breaker、gateway admission parity 与 VEA happy-path child-run 链路均不得退化。
 
 ### 5.2 关键差异
 

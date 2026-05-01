@@ -239,6 +239,8 @@ import type {
 } from '../main/modules/skills-runtime/runtime-manager'
 import { startSkillChildRunAndWait } from '../main/modules/skills-runtime/runtime-manager'
 import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 // `SkillTaskRunRepository` is already imported as a value (the class
@@ -559,6 +561,30 @@ test('Phase 5: lifecycle — start → action → close', async () => {
   assert.equal(runtime.calls[0].action, 'do_thing')
 })
 
+test('W4: child runner action goes through gateway admission before runtime dispatch', async () => {
+  const { runtime } = setupRunner()
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      { action: 'video_expert_pipeline', input: {} },
+      makeTerminalClose('video-expert-analyzer', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRun({
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/admission' },
+  })
+
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  assert.equal(runtime.calls.length, 0)
+  assert.equal(close.status, 'failed')
+  assert.equal(close.terminalReason, 'input_validation')
+  assert.equal(close.error?.kind, 'input_validation')
+})
+
 test('Phase 5: cancellation produces status=killed terminalReason=cancelled_user (NEVER failed)', async () => {
   const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
   // The runtime stalls on runSkill so cancellation arrives mid-action.
@@ -832,6 +858,98 @@ test('Phase 5: nested-child guard rejects re-entrant startSkillChildRun without 
 test('Phase 5: budget constant is exposed', () => {
   assert.equal(typeof MAX_ACTIONS_PER_CHILD_RUN, 'number')
   assert.ok(MAX_ACTIONS_PER_CHILD_RUN > 0)
+})
+
+test('E W3: repeated failed child runs trip the per-target circuit breaker before row creation', async () => {
+  const previousFlag = process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED
+  const metrics: AgentMetricEvent[] = []
+  delete process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const { repo } = setupRunner()
+    registerStubDriver('test-skill-breaker', {
+      plans: [makeTerminalClose('test-skill-breaker', 'failed', 'failed_skill')],
+    })
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const result = await startSkillChildRun({
+        scopeId: 'scope-breaker',
+        sessionId: 'session-breaker',
+        skillId: 'test-skill-breaker',
+        action: 'do_thing',
+        requestedInput: { url: 'https://example.com/same-target' },
+      })
+      assert.equal(result.status, 'running')
+      const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+      assert.equal(close.status, 'failed')
+      assert.equal(close.terminalReason, 'failed_skill')
+    }
+    assert.equal(repo.state.rows.size, 5)
+
+    const blocked = await startSkillChildRun({
+      scopeId: 'scope-breaker',
+      sessionId: 'session-breaker',
+      skillId: 'test-skill-breaker',
+      action: 'do_thing',
+      requestedInput: { url: 'https://example.com/same-target' },
+      parentNextHint: 'continue_other_work',
+    })
+
+    assert.equal(blocked.status, 'failed')
+    assert.equal(blocked.parentNextHint, 'continue_other_work')
+    assert.equal(blocked.closeEvent?.terminalReason, 'host_unavailable')
+    assert.equal(blocked.closeEvent?.error?.kind, 'child_run_circuit_breaker_open')
+    assert.match(blocked.closeEvent?.error?.message ?? '', /circuit breaker/i)
+    assert.equal(repo.state.rows.size, 5, 'cooldown refusal must not create a repository row')
+    assert.ok(
+      metrics.some((event) => event.metric === TOOL_ERROR_METRICS.childRunCircuitBreak && event.phase === 'blocked'),
+      'blocking should emit the registered circuit-break metric',
+    )
+    assert.ok(
+      metrics.some((event) => event.metric === TOOL_ERROR_METRICS.childRunCircuitBreak && event.phase === 'opened'),
+      'opening should emit the registered circuit-break metric',
+    )
+  } finally {
+    __setMetricSinkForTests(null)
+    if (previousFlag === undefined) {
+      delete process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED
+    } else {
+      process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED = previousFlag
+    }
+  }
+})
+
+test('E W3: disabled circuit breaker flag allows another attempt after repeated failures', async () => {
+  const previousFlag = process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED
+  process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED = '0'
+  try {
+    const { repo } = setupRunner()
+    registerStubDriver('test-skill-breaker-disabled', {
+      plans: [makeTerminalClose('test-skill-breaker-disabled', 'failed', 'failed_skill')],
+    })
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const result = await startSkillChildRun({
+        scopeId: 'scope-breaker-disabled',
+        sessionId: 'session-breaker-disabled',
+        skillId: 'test-skill-breaker-disabled',
+        action: 'do_thing',
+        requestedInput: { url: 'https://example.com/same-target' },
+      })
+      assert.equal(result.status, 'running')
+      const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+      assert.equal(close.status, 'failed')
+      assert.equal(close.terminalReason, 'failed_skill')
+    }
+
+    assert.equal(repo.state.rows.size, 6, 'disabled breaker should not suppress the sixth launch')
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED
+    } else {
+      process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED = previousFlag
+    }
+  }
 })
 
 // =====================================================================

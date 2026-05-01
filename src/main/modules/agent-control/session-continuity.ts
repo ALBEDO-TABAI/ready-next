@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { join } from 'path'
+import { atomicWriteJson } from './atomic-write'
 import type { ContinuationState } from './continuation-state'
 import { normalizeContinuationState } from './continuation-state'
 import {
@@ -287,8 +288,7 @@ function persistToDisk(): void {
   hydrateFromDisk()
   const path = resolveContinuityStoragePath()
   try {
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, JSON.stringify(toPersistedPayload()), 'utf8')
+    atomicWriteJson(path, toPersistedPayload())
   } catch {
     // Persistence must stay best-effort.
   }

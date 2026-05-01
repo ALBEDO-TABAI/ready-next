@@ -27,27 +27,38 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
 import type {
-  SkillRunRequest,
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 
 import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { linkParentAbort } from './link-parent-abort'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
   appendChildRunEvent,
-  deriveChildRunLogPath,
+  deriveLegacyChildRunLogPath,
+  deriveRuntimeChildRunLogPath,
 } from './skill-child-run-log'
+import { writeLifecycle } from './output-dir-lifecycle'
+import {
+  ChildRunCircuitBreaker,
+  isChildRunCircuitBreakerEnabled,
+  shouldCountChildRunCircuitBreakerFailure,
+} from './child-run-circuit-breaker'
 import {
   getSkillChildDriver,
   isChildOwnedSkill,
 } from './skill-child-drivers'
+import {
+  executeSkillActionViaToolGateway,
+  type ChildGatewayResult,
+} from './tool-registry'
 import type {
   ChildWaitResult,
   SkillChildCloseEvent,
@@ -157,6 +168,7 @@ interface ActiveRun {
   runStatePath: string
   eventLogPath: string
   parentNextHint: SkillChildRunParentNextHint
+  singleFlightKey: string
 }
 
 class SkillChildRunner {
@@ -173,6 +185,7 @@ class SkillChildRunner {
   /** Snapshot of close events for completed runs so callers can read the
    *  result after the loop has finished. Capped at a small ring. */
   private readonly recentCloses = new Map<string, SkillChildCloseEvent>()
+  private readonly circuitBreaker: ChildRunCircuitBreaker
 
   constructor(config: SkillChildRunnerConfig) {
     this.config = {
@@ -183,6 +196,9 @@ class SkillChildRunner {
       maxActiveVeaRuns: config.maxActiveVeaRuns ?? MAX_ACTIVE_VEA_CHILD_RUNS,
       sleep: config.sleep ?? defaultSleep,
     }
+    this.circuitBreaker = new ChildRunCircuitBreaker({
+      enabled: isChildRunCircuitBreakerEnabled(process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED),
+    })
   }
 
   // ------------------------------------------------------------------
@@ -253,6 +269,25 @@ class SkillChildRunner {
       })
     }
 
+    const breakerCheck = this.circuitBreaker.check(singleFlightKey)
+    if (!breakerCheck.allowed) {
+      logAgentMetric(TOOL_ERROR_METRICS.childRunCircuitBreak, {
+        phase: 'blocked',
+        skillId: params.skillId,
+        singleFlightKey,
+        remainingMs: breakerCheck.remainingMs,
+        cooldownUntil: new Date(breakerCheck.cooldownUntil).toISOString(),
+      })
+      return makePausedOnLaunchResult({
+        skillId: params.skillId,
+        terminalReason: 'host_unavailable',
+        status: 'failed',
+        errorKind: 'child_run_circuit_breaker_open',
+        message: `Child-run circuit breaker cooling down for this target (${breakerCheck.remainingMs}ms remaining)`,
+        parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
+      })
+    }
+
     // Concurrency cap (VEA-only — other kinds aren't gated yet).
     const isVeaKind = getSkillChildRunKind(`v${'0'.repeat(8)}`) === 'vea' && (
       params.skillId === 'video-expert-analyzer'
@@ -273,7 +308,10 @@ class SkillChildRunner {
     const outputDir = requestedOutputDir
       || join(this.config.runtimeManager.getRuntimeInfo().outputsRoot, params.skillId, childRunId)
     const runStatePath = join(outputDir, 'run_state.json')
-    const eventLogPath = deriveChildRunLogPath(outputDir, childRunId)
+    const eventLogPath = deriveRuntimeChildRunLogPath(
+      this.config.runtimeManager.getRuntimeInfo().runtimeRoot,
+      childRunId,
+    )
 
     // Best-effort create the directory tree before the first append.
     try {
@@ -327,6 +365,7 @@ class SkillChildRunner {
       outputDir,
       runStatePath,
       eventLogPath,
+      singleFlightKey,
     })
   }
 
@@ -361,7 +400,7 @@ class SkillChildRunner {
           status: 'reused',
           outputDir: payload.outputDir,
           runStatePath: payload.runStatePath,
-          eventLogPath: payload.eventLogPath,
+          eventLogPath: this.deriveEventLogPathFromRecord(record),
           parentNextHint: payload.parentNextHint,
           closeEvent: null,
         }
@@ -374,7 +413,7 @@ class SkillChildRunner {
         terminalReason: storedClose?.terminalReason ?? defaultTerminalReasonForStatus(payload.status),
         outputDir: payload.outputDir,
         runStatePath: payload.runStatePath,
-        eventLogPath: payload.eventLogPath,
+        eventLogPath: this.deriveEventLogPathFromRecord(record),
         errorKind: statusClass === 'blocked' ? 'still_blocked' : 'terminal_not_resumable',
         message: statusClass === 'blocked'
           ? 'Child run is blocked and cannot be resumed directly'
@@ -399,6 +438,7 @@ class SkillChildRunner {
       parentNextHint: payload.parentNextHint,
       outputDir: payload.outputDir,
     }
+    const eventLogPath = this.deriveEventLogPathFromRecord(record)
     try {
       this.prepareResumeLifecycle(childRunId)
     } catch (error) {
@@ -418,7 +458,8 @@ class SkillChildRunner {
       launchParams,
       outputDir: payload.outputDir,
       runStatePath: payload.runStatePath,
-      eventLogPath: payload.eventLogPath,
+      eventLogPath,
+      singleFlightKey: payload.singleFlightKey,
       resume: true,
     })
   }
@@ -563,7 +604,7 @@ class SkillChildRunner {
         status: 'reused',
         outputDir: existing.outputDir ?? '',
         runStatePath: existing.runStatePath ?? '',
-        eventLogPath: deriveEventLogPathFromRecord(existing),
+        eventLogPath: this.deriveEventLogPathFromRecord(existing),
         parentNextHint: existingPayload?.parentNextHint
           ?? params.parentNextHint ?? 'wait_for_close_event',
         closeEvent: null,
@@ -587,7 +628,7 @@ class SkillChildRunner {
         status: persistedStatus,
         outputDir: existing.outputDir ?? '',
         runStatePath: existing.runStatePath ?? '',
-        eventLogPath: deriveEventLogPathFromRecord(existing),
+        eventLogPath: this.deriveEventLogPathFromRecord(existing),
         parentNextHint: existingPayload!.parentNextHint
           ?? params.parentNextHint ?? 'wait_for_close_event',
         closeEvent: persistedClose,
@@ -599,14 +640,14 @@ class SkillChildRunner {
     // durable resume if the payload carries enough handles; otherwise
     // mark the row `recoverable_paused/process_restarted`.
     const driver = getSkillChildDriver(existing.skillId)
+    const eventLogPath = this.deriveEventLogPathFromRecord(existing)
     const canResume = !!driver
       && !!existingPayload
       && typeof existingPayload.outputDir === 'string'
       && existingPayload.outputDir.length > 0
       && typeof existingPayload.runStatePath === 'string'
       && existingPayload.runStatePath.length > 0
-      && typeof existingPayload.eventLogPath === 'string'
-      && existingPayload.eventLogPath.length > 0
+      && eventLogPath.length > 0
 
     if (canResume) {
       const payload = existingPayload!
@@ -643,7 +684,8 @@ class SkillChildRunner {
         launchParams,
         outputDir: payload.outputDir,
         runStatePath: payload.runStatePath,
-        eventLogPath: payload.eventLogPath,
+        eventLogPath,
+        singleFlightKey: payload.singleFlightKey,
         resume: true,
       })
     }
@@ -730,6 +772,7 @@ class SkillChildRunner {
     outputDir: string
     runStatePath: string
     eventLogPath: string
+    singleFlightKey: string
     resume?: boolean
   }): Promise<StartSkillChildRunResult> {
     const { childRunId, launchParams, outputDir, runStatePath, eventLogPath } = params
@@ -777,6 +820,7 @@ class SkillChildRunner {
       runStatePath,
       eventLogPath,
       parentNextHint: launchParams.parentNextHint,
+      singleFlightKey: params.singleFlightKey,
     }
     this.active.set(childRunId, active)
 
@@ -880,30 +924,24 @@ class SkillChildRunner {
       driver,
       initialState: state,
       executeAction: async (action) => {
-        const request: SkillRunRequest = {
-          skillId: active.skillId,
-          action: action.action,
-          params: {
-            ...action.input,
-            __childRunContext: {
-              childRunId: active.childRunId,
-              scopeId: active.scopeId,
-              sessionId: active.sessionId,
-              outputDir: active.outputDir || null,
-              runStatePath: active.runStatePath || null,
-            },
-          },
-          signal: parentAbortLink.childSignal,
-          triggerType: 'tool',
-          sessionId: active.sessionId ?? undefined,
-        }
-        const runFromChild = (this.config.runtimeManager as unknown as {
-          runSkillFromChildRunner?: (request: SkillRunRequest) => Promise<SkillRunResult>
-        }).runSkillFromChildRunner
         try {
-          const result = runFromChild
-            ? await runFromChild.call(this.config.runtimeManager, request)
-            : await this.config.runtimeManager.runSkill(request)
+          const gatewayResult = await executeSkillActionViaToolGateway({
+            skillId: active.skillId,
+            action: action.action,
+            input: action.input,
+            childRunId: active.childRunId,
+            scopeId: active.scopeId,
+            sessionId: active.sessionId,
+            outputDir: active.outputDir || null,
+            runStatePath: active.runStatePath || null,
+            childInternal: true,
+            signal: parentAbortLink.childSignal,
+            runtimeManager: this.config.runtimeManager,
+          })
+          const result = gatewayResult.skillRunResult
+          if (!result) {
+            throw makeGatewayExecutionError(gatewayResult)
+          }
           actionResults.push(result)
           return result
         } catch (error) {
@@ -1056,6 +1094,21 @@ class SkillChildRunner {
       const firstKey = this.recentCloses.keys().next().value
       if (firstKey) this.recentCloses.delete(firstKey)
     }
+    if (shouldCountChildRunCircuitBreakerFailure(close)) {
+      const breakerResult = this.circuitBreaker.recordFailure(active.singleFlightKey)
+      if (breakerResult.opened) {
+        logAgentMetric(TOOL_ERROR_METRICS.childRunCircuitBreak, {
+          phase: 'opened',
+          childRunId: active.childRunId,
+          skillId: active.skillId,
+          singleFlightKey: active.singleFlightKey,
+          cooldownUntil: breakerResult.cooldownUntil
+            ? new Date(breakerResult.cooldownUntil).toISOString()
+            : null,
+        })
+      }
+    }
+    this.writeRetainedLifecycle(active, close)
     active.resolveClose(close)
   }
 
@@ -1077,6 +1130,56 @@ class SkillChildRunner {
       if (run.skillId === 'video-expert-analyzer') count += 1
     }
     return count
+  }
+
+  private deriveEventLogPathFromRecord(record: {
+    resumePayload?: unknown
+    outputDir?: string | null
+    id: string
+    createdAt?: string | null
+  }): string {
+    const payload = (record.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+    if (payload?.eventLogPath) return payload.eventLogPath
+    const createdAtMs = record.createdAt ? Date.parse(record.createdAt) : null
+    const runtimePath = deriveRuntimeChildRunLogPath(
+      this.config.runtimeManager.getRuntimeInfo().runtimeRoot,
+      record.id,
+    )
+    if (isNonEmptyFileForRecordSync(runtimePath, createdAtMs)) return runtimePath
+    if (record.outputDir) {
+      const legacyPath = deriveLegacyChildRunLogPath(record.outputDir, record.id)
+      if (isNonEmptyFileForRecordSync(legacyPath, createdAtMs)) return legacyPath
+    }
+    return ''
+  }
+
+  private writeRetainedLifecycle(active: ActiveRun, close: SkillChildCloseEvent): void {
+    if (
+      close.status !== 'completed'
+      && close.status !== 'failed'
+      && close.status !== 'killed'
+      && close.status !== 'blocked'
+    ) {
+      return
+    }
+    const terminalAt = new Date().toISOString()
+    try {
+      writeLifecycle(active.outputDir, {
+        state: 'retained',
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        terminalAt,
+        terminalReason: close.terminalReason,
+        retainUntil: new Date(
+          Date.parse(terminalAt) + getOutputDirRetentionDays() * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      })
+    } catch (error) {
+      logAgentMetric(TOOL_ERROR_METRICS.childRunnerLifecycleWriteFailed, {
+        childRunId: active.childRunId,
+        error: errorMessage(error),
+      })
+    }
   }
 }
 
@@ -1262,6 +1365,22 @@ function makeSkillActionExecutionError(error: unknown, signal: AbortSignal): Err
   return wrapped
 }
 
+function makeGatewayExecutionError(result: ChildGatewayResult): Error {
+  const data = result.data && typeof result.data === 'object'
+    ? result.data as Record<string, unknown>
+    : {}
+  const errorKind = typeof data.errorKind === 'string' ? data.errorKind : null
+  const reason = typeof data.reason === 'string' ? data.reason : null
+  const message = typeof data.message === 'string' && data.message.trim().length > 0
+    ? data.message
+    : result.text || 'Child gateway did not return a skill run result'
+  const error = new Error(message)
+  error.name = reason === 'tool_not_registered'
+    ? 'tool_not_registered'
+    : errorKind || 'host_unavailable'
+  return error
+}
+
 interface ComputeDigestArgs {
   runStatePath: string | null
   outputDir: string | null
@@ -1297,13 +1416,6 @@ function stableStringify(input: unknown): string {
   if (Array.isArray(input)) return `[${input.map(stableStringify).join(',')}]`
   const entries = Object.entries(input as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`
-}
-
-function deriveEventLogPathFromRecord(record: { resumePayload?: unknown; outputDir?: string | null; id: string }): string {
-  const payload = (record.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
-  if (payload?.eventLogPath) return payload.eventLogPath
-  if (record.outputDir) return deriveChildRunLogPath(record.outputDir, record.id)
-  return ''
 }
 
 function makePausedOnLaunchResult(opts: {
@@ -1345,6 +1457,28 @@ function makePausedOnLaunchResult(opts: {
     parentNextHint: opts.parentNextHint,
     closeEvent: close,
   }
+}
+
+function isNonEmptyFileForRecordSync(file: string, createdAtMs: number | null): boolean {
+  try {
+    if (!existsSync(file)) return false
+    const stat = statSync(file)
+    if (!stat.isFile() || stat.size <= 0) return false
+    if (createdAtMs !== null && Number.isFinite(createdAtMs)) {
+      return stat.mtimeMs >= createdAtMs - 1_000
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getOutputDirRetentionDays(): number {
+  const raw = process.env.READY_OUTPUT_DIR_RETENTION_DAYS
+  if (!raw) return 7
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return 7
+  return parsed
 }
 
 function makeResumeRefusalResult(opts: {

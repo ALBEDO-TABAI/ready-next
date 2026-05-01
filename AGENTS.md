@@ -156,6 +156,14 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
 - SQLite-backed 验收前必须先跑 `npm run rebuild:native`；若 `better-sqlite3` ABI 与当前 Node/Electron 不匹配，只能标记为 DB 路径未证明，不能算验收通过
+- **Feature flags（生产降级开关）**：
+  - `READY_SKILL_CHILD_INTERNAL_STRICT_ADMISSION`：默认 `'1'`，控制 child-internal tool 的严格 admission；`'0'` 退回到 telemetry-only 旧行为。
+  - `READY_SKILL_CHILD_RESUME_ENABLED`：默认 `'1'`，控制 turn-engine 的 child resume 自动分支是否启用；`'0'` 时遇到 paused child + 用户 resume 意图也不会调 `resumeSkillChildRun`，turn 退化为普通 model 回复，emit `skill_child_resume_disabled_by_flag` metric。runner 自身的 `resumeSkillChildRun` API 不受影响。
+  - `READY_OUTPUT_DIR_RETENTION_DAYS`：默认 `7`，控制 child-run outputDir 终态后的默认保留天数。
+  - `READY_OUTPUT_DIR_LEGACY_GRACE_DAYS`：默认 `30`，控制无 `.lifecycle.json` 的 legacy outputDir 宽限期。
+  - `READY_CHILD_RUN_LOG_RETENTION_DAYS`：默认 `30`，控制 `<runtimeRoot>/.ready/child-runs/*.jsonl` 日志保留期。
+  - `READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED`：默认 `'1'`；`'0' / 'false' / 'off'` 可关闭 child-run circuit breaker。cooldown 状态只保存在当前 `SkillChildRunner` 进程内存中，紧急情况下重启 Electron 即可清空，不需要 reset API。
+  布尔开关默认全开，问题出现切 `'0'` 即可，不允许通过删代码回退。
 
 ### 6.14 Coordinator role / DomainAdapter 抽象
 - 每个产品（browser / document / skill / rss / calendar / feishu）通过实现 `DomainAdapter` 注册自己的 mode 行为：触发条件、提示注入、工具过滤、仲裁规则、用户文本润色、执行和投影；`turn-engine.ts` 只调度，不持有产品身份。
@@ -169,6 +177,15 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `createLayeredCompactor()` 提供 L1（字符串消息的 cheap 截断/摘要，幂等）+ L2（token-threshold gated，D 阶段 stub）。默认 L2 threshold 为 0，生产路径只启用 L1；连续 3 次 L2 失败后熔断并 emit `compaction_circuit_break`，单次 L2 失败 emit `compaction_l2_failed`。模型输入可使用压缩后的 session 副本，但不得把压缩结果写回持久会话消息。
 - `HookRegistry` 固定 4 个 lifecycle 名：`pre_tool_use / post_tool_use / user_prompt_submit / stop`。`register` 返回 unregister，`fire` 串行 await；handler throw 或 timeout 只 emit `hook_handler_failed` / `hook_handler_timeout` 并继续后续 handler，不得中断 turn 主流程。
 - `npm run verify:d` 必须内嵌 `npm run verify:c`，并覆盖 reminder registry、layered compactor、hook registry、turn-frame steering 与 turn-engine route 相关测试。
+
+### 6.16 防爆 + 减脆（E 阶段）
+- 状态类 JSON 写入必须走 `atomicWriteJson`（tmp write + fsync + rename）；文本/config 写入走 `atomicWriteText`。`scripts/check-atomic-write.cjs` 是硬门，`agent-control/` 与 `skills-runtime/` 内不得新增 JSON 直写。
+- child-run outputDir 终态写 `.lifecycle.json`；默认保留 7 天，无 sidecar 的 legacy 目录有 30 天宽限。outputDir sweep 只扫 `<runtimeRoot>/outputs/`，不得递归误删 `<runtimeRoot>/.ready/child-runs/`。
+- 新 child-run JSONL 写到 `<runtimeRoot>/.ready/child-runs/<childRunId>.jsonl`；resume reader 优先新路径，只有新路径缺失或为空时才回退旧 `<outputDir>/.ready/child-runs/<childRunId>.jsonl`，保证升级前暂停的 run 可续跑。
+- retry policy 必须显式覆盖 17 个 terminal reason：`queued_global_concurrency` 保留 3 次、每次 5s 的重试语义；`nested_child_run_not_supported` 不重试；`resume_launch_failed` 走 2s / 10s 两次退避。
+- 同一个 single-flight key 在 5 分钟内连续 5 次失败会进入 15 分钟 cooldown；期间返回软失败 `error.kind='circuit_break'` 并打 `child_run_circuit_break` metric。该状态是内存态，重启 Electron 会清空。
+- child runner 执行动作必须走 `executeSkillActionViaToolGateway`，不允许再直接绕到 runtime `runSkill`；显式 child-internal permission context 是主路径，implicit admission 只能作为安全兜底。
+- `npm run verify:e` 必须内嵌 `npm run verify:d`，并覆盖 atomic write、outputDir/log lifecycle、legacy resume fallback、retry policy、circuit breaker 与 gateway admission 相关测试。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

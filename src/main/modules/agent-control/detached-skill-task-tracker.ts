@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { dirname } from 'path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import type { SkillRunRequest, SkillRunResult } from '../skills-runtime/runtime-manager'
+import { atomicWriteJson } from './atomic-write'
 import { upsertDetachedSkillTaskRun } from './skill-task-tracker'
 import { selectRunStateCandidate } from './run-state-selection'
 
@@ -354,12 +355,7 @@ export class DetachedSkillTaskTracker {
   }
 
   private persist(): void {
-    mkdirSync(dirname(this.options.storagePath), { recursive: true })
-    writeFileSync(
-      this.options.storagePath,
-      JSON.stringify({ tasks: Array.from(this.records.values()) }, null, 2),
-      'utf-8',
-    )
+    atomicWriteJson(this.options.storagePath, { tasks: Array.from(this.records.values()) })
   }
 }
 

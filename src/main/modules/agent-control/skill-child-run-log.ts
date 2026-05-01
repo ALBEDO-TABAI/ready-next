@@ -2,7 +2,9 @@
  * Phase 1 — Append-only JSONL event log helpers for skill child runs.
  *
  * Each child run owns a single JSONL file under
- * `<outputDir>/.ready/child-runs/<childRunId>.jsonl`. Lines are written
+ * `<runtimeRoot>/.ready/child-runs/<childRunId>.jsonl`. Legacy runs may
+ * still have logs at `<outputDir>/.ready/child-runs/<childRunId>.jsonl`.
+ * Lines are written
  * one event per line, compact JSON, terminated by `\n`. The reader is
  * tolerant of corrupt lines so a partial flush does not poison recovery.
  */
@@ -24,8 +26,36 @@ export interface ReadChildRunLogResult {
   parseErrors: { line: number; raw: string; error: string }[]
 }
 
-export function deriveChildRunLogPath(outputDir: string, childRunId: string): string {
+export interface ReadChildRunLogForResumeOptions {
+  runtimeRoot: string
+  outputDir: string
+  childRunId: string
+  persistedEventLogPath?: string | null
+}
+
+export interface ReadChildRunLogForResumeResult extends ReadChildRunLogResult {
+  logPath: string
+}
+
+export function deriveRuntimeChildRunLogPath(runtimeRoot: string, childRunId: string): string {
+  return path.join(runtimeRoot, CHILD_RUNS_SUBDIR, `${childRunId}.jsonl`)
+}
+
+export function deriveLegacyChildRunLogPath(outputDir: string, childRunId: string): string {
   return path.join(outputDir, CHILD_RUNS_SUBDIR, `${childRunId}.jsonl`)
+}
+
+export const deriveChildRunLogPath = deriveLegacyChildRunLogPath
+
+export async function resolveChildRunLogPathForResume(
+  opts: ReadChildRunLogForResumeOptions,
+): Promise<string> {
+  if (opts.persistedEventLogPath) return opts.persistedEventLogPath
+  const runtimePath = deriveRuntimeChildRunLogPath(opts.runtimeRoot, opts.childRunId)
+  if (await isNonEmptyFile(runtimePath)) return runtimePath
+  const legacyPath = deriveLegacyChildRunLogPath(opts.outputDir, opts.childRunId)
+  if (await isNonEmptyFile(legacyPath)) return legacyPath
+  return runtimePath
 }
 
 export async function appendChildRunEvent(opts: AppendChildRunEventOptions): Promise<void> {
@@ -70,4 +100,23 @@ export async function readChildRunLog(logPath: string): Promise<ReadChildRunLogR
     }
   }
   return { events, parseErrors }
+}
+
+export async function readChildRunLogForResume(
+  opts: ReadChildRunLogForResumeOptions,
+): Promise<ReadChildRunLogForResumeResult> {
+  const logPath = await resolveChildRunLogPathForResume(opts)
+  const result = await readChildRunLog(logPath)
+  return { logPath, ...result }
+}
+
+async function isNonEmptyFile(file: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(file)
+    return stat.isFile() && stat.size > 0
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code
+    if (code === 'ENOENT') return false
+    throw err
+  }
 }

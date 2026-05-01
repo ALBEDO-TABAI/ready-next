@@ -112,6 +112,34 @@ test('child internal action dispatches through executeToolCall', async () => {
   assert.equal(result.data?.ok, true)
 })
 
+test('child internal action requires runSkillFromChildRunner and never falls back to runSkill', async () => {
+  let directRuntimeCalls = 0
+  const runtimeManager = {
+    runSkill: async (request: SkillRunRequest) => {
+      directRuntimeCalls += 1
+      return makeSkillResult(request)
+    },
+  } as unknown as SkillsRuntimeManager
+
+  const result = await executeSkillActionViaToolGateway({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    input: { url: 'https://example.test/video' },
+    childRunId: 'child-no-runner-entrypoint',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    outputDir: '/tmp/child-output',
+    runStatePath: '/tmp/child-output/run_state.json',
+    childInternal: true,
+    runtimeManager,
+  })
+
+  assert.equal(directRuntimeCalls, 0)
+  assert.equal(result.skillRunResult, null)
+  assert.equal(result.data?.errorKind, 'host_unavailable')
+  assert.equal(result.data?.reason, 'runSkillFromChildRunner_missing')
+})
+
 test('strict internal admission flag defaults enabled', () => {
   assert.equal(isChildInternalStrictAdmissionEnabled({}), true)
   assert.equal(isChildInternalStrictAdmissionEnabled({

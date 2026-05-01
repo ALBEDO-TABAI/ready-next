@@ -382,6 +382,10 @@ function makeCaseFRuntime(): SkillsRuntimeManagerForCaseF {
       await stall
       return { success: true, skillId: '', action: '', stdout: '', stderr: '', command: [] }
     },
+    runSkillFromChildRunner: async (request: SkillRunRequestForCaseF): Promise<SkillRunResultForCaseF> => {
+      await stall
+      return { success: true, skillId: request.skillId, action: request.action, stdout: '', stderr: '', command: [] }
+    },
   } as unknown as SkillsRuntimeManagerForCaseF
 }
 
@@ -391,9 +395,9 @@ function registerCaseFDriver(skillId: string): void {
     canStart: () => true,
     canResume: () => true,
     createInitialState: async (params) => ({ skillId, requestedInput: params.requestedInput }),
-    planNextAction: async (): Promise<SkillChildDriverActionForCaseF | SkillChildCloseEventForCaseF> => ({
-      action: 'do_thing',
-      input: {},
+    planNextAction: async (state): Promise<SkillChildDriverActionForCaseF | SkillChildCloseEventForCaseF> => ({
+      action: 'video_expert_pipeline',
+      input: state.requestedInput as Record<string, unknown>,
     }),
     observeAfterAction: async (state) => state,
   }

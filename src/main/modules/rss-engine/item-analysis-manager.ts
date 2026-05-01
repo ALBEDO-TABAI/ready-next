@@ -13,6 +13,7 @@ import {
   startSkillChildRunAndWait,
   type StartSkillChildRunAndWaitResult,
 } from '../skills-runtime/runtime-manager'
+import { getChildRunRetryPolicy } from '../agent-control/child-run-retry-policy'
 import { extractWebContentToFile } from './content-extractor'
 import { rssSubagentRunner } from './subagent-runner'
 
@@ -160,8 +161,9 @@ function toProgress(job: RSSAnalysisJob): RSSItemAnalysisProgress {
  * keeps RSS visual flow alive when the user has 3 other VEA child runs in
  * flight.
  */
-const VEA_AWAIT_RETRY_LIMIT = 3
-const VEA_AWAIT_RETRY_DELAY_MS = 5000
+const QUEUED_GLOBAL_CONCURRENCY_RETRY_POLICY = getChildRunRetryPolicy('queued_global_concurrency')
+const VEA_AWAIT_RETRY_LIMIT = QUEUED_GLOBAL_CONCURRENCY_RETRY_POLICY.maxAttempts
+const VEA_AWAIT_RETRY_DELAY_MS = QUEUED_GLOBAL_CONCURRENCY_RETRY_POLICY.backoffMs[0] ?? 0
 
 export interface RSSItemAnalysisManagerDeps {
   /**

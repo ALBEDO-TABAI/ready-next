@@ -344,12 +344,23 @@ async function executeChildInternalSkillTool(
   const fromChild = (runtimeManager as unknown as {
     runSkillFromChildRunner?: (req: SkillRunRequest) => Promise<SkillRunResult>
   }).runSkillFromChildRunner
+  if (!fromChild) {
+    return createInternalSkillError({
+      errorKind: 'host_unavailable',
+      message: 'Skills runtime manager does not expose child runner execution',
+      detail: {
+        reason: 'runSkillFromChildRunner_missing',
+        toolName,
+        skillId: action.skillId,
+        action: action.action,
+        childRunId: action.childRunId,
+      },
+    })
+  }
 
   let result: SkillRunResult
   try {
-    result = fromChild
-      ? await fromChild.call(runtimeManager, request)
-      : await runtimeManager.runSkill(request)
+    result = await fromChild.call(runtimeManager, request)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const looksAborted = context.abortSignal?.aborted
