@@ -44,6 +44,10 @@ export interface SkillChildDriver {
 
 const driverRegistry = new Map<string, SkillChildDriver>()
 
+export const __breaksInvariants = [
+  'singleton.skill-child-driver-registry.never-reset-mid-session',
+] as const
+
 export function registerSkillChildDriver(driver: SkillChildDriver): void {
   if (driverRegistry.has(driver.skillId)) {
     console.warn(

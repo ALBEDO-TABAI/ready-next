@@ -121,6 +121,8 @@ class SystemReminderRegistry {
 2. **测试规约写入 CLAUDE.md**：禁止 source-string assertion 当行为测试用，并给替代模板。例如"两条路径行为等价" = 同输入两次调用断言输出 deep-equal；"代码不应调 X" = stub X 抛错并断言它没被调用。
 3. **加 ESLint rule**（自定义）：禁止在 `__tests__/` 文件里 `readFileSync(*.ts)` + 后续 regex match 的组合——这是 source-grep 反模式的稳定签名。
 
+> **F 阶段已收口（2026-05-01）**：已落地 `__breaksInvariants` / `__noProductionInvariantBreach` 测试 helper 标记、helper 标记 ESLint rule、source-grep 新增冻结、`docs/superpowers/testing-conventions.md` 与 CLAUDE.md / AGENTS.md §6.17。最终 gate 见 `2026-04-30-F-test-conventions-and-e2e-implementation.md`。
+
 ---
 
 ### 根因 4 — 跨边界的"状态恢复 / 产物复用"语义不完整
@@ -301,6 +303,8 @@ Layer 0 commit message 引用过"SQLite-backed 验收前必须先跑 npm run reb
 
 **严重度**：C 级（基础设施债，但每次大改都被它噎着）。
 
+> **F 阶段已收口（2026-05-01）**：已新增 opt-in VEA happy-path e2e，覆盖 `startSkillChildRun → driver plan → runtime lifecycle → 真 ffmpeg/scenedetect 输出 → close event delivered`；默认本地验证跳过，`READY_E2E=1 npm run verify:f:e2e` 真跑。
+
 ---
 
 ### O6 — Child run 的 retry / circuit-breaker 策略
@@ -362,7 +366,7 @@ review 过 internal admission（B3），但没审 sandbox 链路：
 |---|---|---|---|---|
 | **A0** | 根因 1 — 词汇 invariant（删 `infra_error` + 集中 `mapDriverThrowToTerminalReason`） | 架构债 | ~1 天 | 每加一个新状态就重复 9 处写入端漂移 |
 | **A0** | 根因 5 — 流程硬关卡（plan-before-code + acceptance gate 写法规约） | 流程债 | ~半天 | 每轮大改都漏 1 个 gate / 跳 1 个 plan 步骤 |
-| **A1** | 根因 3 — 测试 helper invariant 标记 + 行为/结构测试规约 | 流程+测试债 | ~半天 | 下次架构 bug 又靠 production 用户 report |
+| **A1** | 根因 3 — 测试 helper invariant 标记 + 行为/结构测试规约 | 流程+测试债 | [x] F completed 2026-05-01 | 已由 `verify:f` 挡新增复发 |
 | **A1** | O1 — outputDir 生命周期 / GC | 运维架构 | ~1-2 天 | 部署超过 3 个月磁盘必爆 |
 | **A2** | O8 — child internal sandbox 边界审计 | 安全 | ~1 天审 + 未知工作量修 | 隐性 sandbox 逃逸 |
 | **A2** | 根因 4 — 产物可复用合同（`findReusableRunByKey`） | 架构债 | ~1 天 | RSS 路径每轮 timeout 都重跑相同视频 |
@@ -373,7 +377,7 @@ review 过 internal admission（B3），但没审 sandbox 链路：
 | **B1** | O7 — child run 用户控制面 | 产品体验 | ~1 天 | 用户失控感 |
 | **B2** | C1 / C2（局部症状） | 小修 | 各 1-2 小时 | 单独都不致命 |
 | **B2** | O2 — 跨 session 复用 / O3 — budget 联动 | 各 1-2 天 | 都是隐性问题 |
-| **C** | O5 — e2e 测试链路 | 测试基础设施 | ~3-5 天 | 大重构后才暴露 |
+| **C** | O5 — e2e 测试链路 | 测试基础设施 | [x] F completed 2026-05-01 | 已有 opt-in VEA 真 ffmpeg e2e 样板 |
 
 **等级语义**：
 - **A0** = 不修不能上规模生产。

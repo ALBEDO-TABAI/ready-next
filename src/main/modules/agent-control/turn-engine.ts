@@ -265,7 +265,7 @@ const NOOP_HOOK_REGISTRY: Pick<HookRegistry, 'fire'> = {
   fire: async () => {},
 }
 
-function isLongTypedSkillActionName(toolName: string): boolean {
+export function isLongTypedSkillActionName(toolName: string): boolean {
   if (!toolName.startsWith('skill_')) return false
   const definition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
   return definition?.domain === 'skill'

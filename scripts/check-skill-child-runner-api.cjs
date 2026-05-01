@@ -7,6 +7,10 @@ const ts = require('typescript')
 
 const DEFAULT_SOURCE = 'src/main/modules/agent-control/skill-child-runner.ts'
 const DEFAULT_SNAPSHOT = 'scripts/snapshots/skill-child-runner-api.snapshot.json'
+const INTERNAL_TEST_MARKER_EXPORTS = new Set([
+  '__breaksInvariants',
+  '__noProductionInvariantBreach',
+])
 
 main()
 
@@ -118,6 +122,7 @@ function collectSkillChildRunnerApi({ root, source }) {
     if (ts.isVariableStatement(statement) && hasExportModifier(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         if (!ts.isIdentifier(declaration.name)) continue
+        if (INTERNAL_TEST_MARKER_EXPORTS.has(declaration.name.text)) continue
         exports.push({
           kind: 'const',
           name: declaration.name.text,

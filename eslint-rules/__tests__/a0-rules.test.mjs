@@ -63,6 +63,30 @@ test('source-grep scanner honors reviewed eslint disable reasons only', () => {
   assert.equal(missingReason.length, 1)
 })
 
+test('source-grep scanner honors allow-source-grep comments with product reasons only', () => {
+  const allowed = scanA0RuleViolations({
+    filePath: 'src/__tests__/sample.test.ts',
+    sourceText: [
+      "import { readFileSync } from 'node:fs'",
+      '// allow-source-grep: reviewed product contract has no behavior harness yet',
+      "const source = readFileSync('src/main/foo.ts', 'utf8')",
+      'assert.match(source, /foo/)',
+    ].join('\n'),
+  })
+  const missingReason = scanA0RuleViolations({
+    filePath: 'src/__tests__/sample.test.ts',
+    sourceText: [
+      "import { readFileSync } from 'node:fs'",
+      '// allow-source-grep:',
+      "const source = readFileSync('src/main/foo.ts', 'utf8')",
+      'assert.match(source, /foo/)',
+    ].join('\n'),
+  })
+
+  assert.equal(allowed.length, 0)
+  assert.equal(missingReason.some((finding) => finding.messageId === 'allowSourceGrepMissingReason'), true)
+})
+
 tester.run('ready/no-source-grep-test', rules['no-source-grep-test'], {
   valid: [
     {
@@ -72,6 +96,15 @@ tester.run('ready/no-source-grep-test', rules['no-source-grep-test'], {
     {
       filename: 'src/main/modules/agent-control/read-config.ts',
       code: "const text = readFileSync('config.json', 'utf8')",
+    },
+    {
+      filename: 'src/__tests__/source-contract.test.ts',
+      code: [
+        "import { readFileSync } from 'node:fs'",
+        '// allow-source-grep: reviewed product contract has no behavior harness yet',
+        "const source = readFileSync('src/main/foo.ts', 'utf8')",
+        'assert.match(source, /executeToolCall/)',
+      ].join('\n'),
     },
   ],
   invalid: [
@@ -83,6 +116,16 @@ tester.run('ready/no-source-grep-test', rules['no-source-grep-test'], {
         'assert.match(source, /executeToolCall/)',
       ].join('\n'),
       errors: [{ messageId: 'noSourceGrepTest' }],
+    },
+    {
+      filename: 'src/__tests__/source-contract.test.ts',
+      code: [
+        "import { readFileSync } from 'node:fs'",
+        '// allow-source-grep:',
+        "const source = readFileSync('src/main/foo.ts', 'utf8')",
+        'assert.match(source, /executeToolCall/)',
+      ].join('\n'),
+      errors: [{ messageId: 'allowSourceGrepMissingReason' }],
     },
   ],
 })

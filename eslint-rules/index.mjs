@@ -29,6 +29,7 @@ function createBaselineAwareRule(rule, meta) {
       },
       messages: {
         [meta.messageId]: meta.message,
+        allowSourceGrepMissingReason: 'allow-source-grep comments must include a product reason.',
       },
       schema: [],
     },
@@ -329,6 +330,181 @@ function createNoInlineSystemReminderWriteRule() {
   }
 }
 
+function createTestHelperMustDeclareInvariantBreachRule() {
+  const helperNamePattern = /^__(reset|seed|stub|forceFlush|breakOpen)\w*ForTests?$/
+
+  function unwrapMarkerExpression(node) {
+    let current = node
+    while (
+      current
+      && (
+        current.type === 'TSAsExpression'
+        || current.type === 'TSTypeAssertion'
+        || current.type === 'TSNonNullExpression'
+      )
+    ) {
+      current = current.expression
+    }
+    return current
+  }
+
+  function isFunctionLike(node) {
+    return node
+      && (
+        node.type === 'FunctionExpression'
+        || node.type === 'ArrowFunctionExpression'
+      )
+  }
+
+  function isTrueLiteral(node) {
+    const unwrapped = unwrapMarkerExpression(node)
+    return unwrapped?.type === 'Literal' && unwrapped.value === true
+  }
+
+  function getArrayExpression(node) {
+    const unwrapped = unwrapMarkerExpression(node)
+    return unwrapped?.type === 'ArrayExpression' ? unwrapped : null
+  }
+
+  function getIdentifierName(node) {
+    return node?.type === 'Identifier' ? node.name : null
+  }
+
+  return {
+    meta: {
+      type: 'problem',
+      docs: {
+        description: 'require exported test helpers that break production invariants to declare their invariant marker',
+      },
+      messages: {
+        testHelperMustDeclareInvariantBreach: 'Exported test helper must declare a non-empty __breaksInvariants marker, or export __noProductionInvariantBreach = true.',
+        testHelperInvariantBreachMarkerEmpty: '__breaksInvariants must list at least one invariant; use __noProductionInvariantBreach = true when no production invariant is broken.',
+        testHelperInvariantBreachMarkerConflict: 'Do not export both __breaksInvariants and __noProductionInvariantBreach; choose the marker that matches this module.',
+      },
+      schema: [],
+    },
+    create(context) {
+      function collectModuleFacts(program) {
+        const exportedNames = new Set()
+        const functionNames = new Set()
+        const variableInits = new Map()
+        const variableNodes = new Map()
+
+        function recordVariableDeclarator(declarator) {
+          const name = getIdentifierName(declarator.id)
+          if (!name) return
+          variableInits.set(name, declarator.init)
+          variableNodes.set(name, declarator.id)
+          if (isFunctionLike(declarator.init)) {
+            functionNames.add(name)
+          }
+        }
+
+        function recordDeclaration(declaration, exported) {
+          if (!declaration) return
+          if (declaration.type === 'FunctionDeclaration') {
+            const name = getIdentifierName(declaration.id)
+            if (!name) return
+            functionNames.add(name)
+            if (exported) exportedNames.add(name)
+            return
+          }
+          if (declaration.type === 'VariableDeclaration') {
+            for (const declarator of declaration.declarations) {
+              const name = getIdentifierName(declarator.id)
+              recordVariableDeclarator(declarator)
+              if (exported && name) exportedNames.add(name)
+            }
+          }
+        }
+
+        for (const statement of program.body) {
+          if (statement.type === 'FunctionDeclaration' || statement.type === 'VariableDeclaration') {
+            recordDeclaration(statement, false)
+            continue
+          }
+          if (statement.type === 'ExportNamedDeclaration') {
+            recordDeclaration(statement.declaration, true)
+            for (const specifier of statement.specifiers || []) {
+              const localName = getIdentifierName(specifier.local)
+              if (localName) exportedNames.add(localName)
+            }
+            continue
+          }
+          if (statement.type === 'ExportDefaultDeclaration') {
+            const declaration = statement.declaration
+            if (declaration?.type === 'FunctionDeclaration') {
+              const name = getIdentifierName(declaration.id)
+              if (name) {
+                functionNames.add(name)
+                exportedNames.add(name)
+              }
+            }
+          }
+        }
+
+        return { exportedNames, functionNames, variableInits, variableNodes }
+      }
+
+      return {
+        Program(node) {
+          const {
+            exportedNames,
+            functionNames,
+            variableInits,
+            variableNodes,
+          } = collectModuleFacts(node)
+          const helperNames = Array.from(exportedNames).filter((name) =>
+            helperNamePattern.test(name) && functionNames.has(name)
+          )
+          const hasBreaksMarker = exportedNames.has('__breaksInvariants')
+            && variableInits.has('__breaksInvariants')
+          const hasNoBreachMarker = exportedNames.has('__noProductionInvariantBreach')
+            && variableInits.has('__noProductionInvariantBreach')
+          const breaksMarkerArray = hasBreaksMarker
+            ? getArrayExpression(variableInits.get('__breaksInvariants'))
+            : null
+          const breaksMarkerNode = variableNodes.get('__breaksInvariants') || node
+          const noBreachMarkerNode = variableNodes.get('__noProductionInvariantBreach') || node
+
+          if (hasBreaksMarker && hasNoBreachMarker) {
+            context.report({
+              node: noBreachMarkerNode,
+              messageId: 'testHelperInvariantBreachMarkerConflict',
+            })
+            return
+          }
+
+          if (breaksMarkerArray && breaksMarkerArray.elements.every((element) => !element)) {
+            context.report({
+              node: breaksMarkerNode,
+              messageId: 'testHelperInvariantBreachMarkerEmpty',
+            })
+            return
+          }
+
+          if (helperNames.length === 0) return
+
+          const hasNonEmptyBreaksMarker = Boolean(
+            breaksMarkerArray && breaksMarkerArray.elements.some((element) => element),
+          )
+          const hasLiteralNoBreachMarker = hasNoBreachMarker
+            && isTrueLiteral(variableInits.get('__noProductionInvariantBreach'))
+
+          if (hasNonEmptyBreaksMarker || hasLiteralNoBreachMarker) return
+
+          for (const name of helperNames) {
+            context.report({
+              node: variableNodes.get(name) || node,
+              messageId: 'testHelperMustDeclareInvariantBreach',
+            })
+          }
+        },
+      }
+    },
+  }
+}
+
 function isAgentControlOutsideSubagent(filePath) {
   return filePath.startsWith('src/main/modules/agent-control/')
     && !filePath.startsWith('src/main/modules/agent-control/sub-agent/')
@@ -374,6 +550,7 @@ const rules = {
   'no-subagent-leak': createNoSubagentLeakRule(),
   'no-coordinator-id-leak': createNoCoordinatorIdLeakRule(),
   'no-inline-system-reminder-write': createNoInlineSystemReminderWriteRule(),
+  'test-helper-must-declare-invariant-breach': createTestHelperMustDeclareInvariantBreachRule(),
 }
 
 export default {

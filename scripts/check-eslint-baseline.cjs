@@ -10,6 +10,7 @@ const AREA_POLICY = {
   'ui-history': 'Frozen; count never grows but cleanup not blocking',
   'other-a0': 'Non-source-grep A0 baseline entries; outside A0.5 cleanup scope',
 }
+const VIRTUAL_AREA_VALUES = new Set(['no-source-grep-test'])
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
@@ -19,11 +20,12 @@ main().catch((error) => {
 async function main() {
   const {
     A05_AREA_VALUES,
+    RULE_IDS,
     classifyA05Area,
     findingKey,
     scanA0RuleViolations,
   } = await import('../eslint-rules/a0-rule-utils.mjs')
-  const options = parseArgs(process.argv.slice(2), A05_AREA_VALUES)
+  const options = parseArgs(process.argv.slice(2), new Set([...A05_AREA_VALUES, ...VIRTUAL_AREA_VALUES]))
   const root = options.root
   const baselinePath = resolve(root, 'eslint-rules/baseline.json')
 
@@ -68,6 +70,7 @@ async function main() {
       current,
       baseline: baseline.entries,
       classifyA05Area,
+      sourceGrepRuleId: RULE_IDS.sourceGrep,
     })
     return
   }
@@ -127,7 +130,7 @@ function parseArgs(argv, allowedAreas) {
 function usage(message) {
   return [
     message,
-    'Usage: node scripts/check-eslint-baseline.cjs [--root <path>] [--update] [--area a1-gate|ui-history|other-a0] [--max <count>]',
+    'Usage: node scripts/check-eslint-baseline.cjs [--root <path>] [--update] [--area a1-gate|ui-history|other-a0|no-source-grep-test] [--max <count>]',
   ].join('\n')
 }
 
@@ -192,9 +195,14 @@ function validateBaselineSchema(baseline, { allowedAreas, classifyA05Area }) {
   }
 }
 
-function reportArea({ area, max, current, baseline, classifyA05Area }) {
-  const currentEntries = current.filter((entry) => classifyA05Area(entry) === area)
-  const baselineEntries = baseline.filter((entry) => entry.area === area)
+function reportArea({ area, max, current, baseline, classifyA05Area, sourceGrepRuleId }) {
+  const isVirtualSourceGrepArea = area === 'no-source-grep-test'
+  const currentEntries = current.filter((entry) =>
+    isVirtualSourceGrepArea ? entry.rule === sourceGrepRuleId : classifyA05Area(entry) === area
+  )
+  const baselineEntries = baseline.filter((entry) =>
+    isVirtualSourceGrepArea ? entry.rule === sourceGrepRuleId : entry.area === area
+  )
   const byFile = new Map()
   for (const entry of currentEntries) {
     byFile.set(entry.file, (byFile.get(entry.file) || 0) + 1)

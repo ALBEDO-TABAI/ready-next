@@ -29,6 +29,10 @@ import { createSkillChildRunId } from '../main/modules/agent-control/skill-child
 
 const requireFromHere = createRequire(import.meta.url)
 
+export const __breaksInvariants = [
+  'test-fixture.skill-child-runner.setupRunner-resets-singleton',
+] as const
+
 type SqliteCtor = new (path: string, options?: { readonly?: boolean }) => {
   exec: (sql: string) => void
   prepare: (sql: string) => {

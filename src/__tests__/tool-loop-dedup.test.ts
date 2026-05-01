@@ -1,13 +1,14 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 import {
   countToolRepetitions,
   computeBudgetWarningThreshold,
+  isLongTypedSkillActionName,
   shouldInjectBudgetWarning,
 } from '../main/modules/agent-control/turn-engine'
+import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 
 // skill-resume plan C1 + C3 — pure helpers extracted from the tool loop:
 //
@@ -115,14 +116,57 @@ describe('shouldInjectBudgetWarning', () => {
 
 describe('long skill action detection', () => {
   it('is based on tool timeout metadata instead of a specific skill/action name', () => {
-    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: turn-engine long-action helper wiring currently lacks an isolated behavior harness
-    const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
-    const start = source.indexOf('function isLongTypedSkillActionName')
-    const end = source.indexOf('function hasLongTypedSkillAction', start)
-    const helperSource = source.slice(start, end)
-
-    assert.match(helperSource, /executionTimeoutMs/)
-    assert.doesNotMatch(helperSource, /video_expert/)
-    assert.doesNotMatch(helperSource, /video-expert-analyzer/)
+    const restoreLongGenericSkill = installSkillToolDefinitionForTest('skill_generic_long_action', {
+      executionTimeoutMs: 30 * 60 * 1000,
+    })
+    const restoreShortVideoSkill = installSkillToolDefinitionForTest('skill_video_expert_pipeline', {
+      executionTimeoutMs: 60 * 1000,
+    })
+    try {
+      assert.equal(isLongTypedSkillActionName('skill_generic_long_action'), true)
+      assert.equal(isLongTypedSkillActionName('skill_video_expert_pipeline'), false)
+    } finally {
+      restoreShortVideoSkill()
+      restoreLongGenericSkill()
+    }
   })
 })
+
+function installSkillToolDefinitionForTest(
+  toolName: string,
+  overrides: Partial<ToolDefinition>,
+): () => void {
+  const registry = defaultToolRegistry as unknown as {
+    getToolDefinitionForExecution: (name: string) => ToolDefinition | null
+  }
+  const original = registry.getToolDefinitionForExecution.bind(defaultToolRegistry)
+  registry.getToolDefinitionForExecution = (name: string): ToolDefinition | null => {
+    const base = original(name)
+    if (name !== toolName) return base
+    return {
+      ...(base || createSkillToolDefinition(toolName)),
+      ...overrides,
+    }
+  }
+  return () => {
+    registry.getToolDefinitionForExecution = original
+  }
+}
+
+function createSkillToolDefinition(name: string): ToolDefinition {
+  return {
+    name,
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'interactive',
+    concurrency: 'serialized',
+    interruptBehavior: 'host_managed',
+    timeoutProfile: 'skill',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: true },
+    description: name,
+    schema: null,
+    executionVisibility: 'model',
+    resultShape: 'projection_patch',
+  }
+}

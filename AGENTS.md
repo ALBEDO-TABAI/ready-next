@@ -187,6 +187,13 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - child runner 执行动作必须走 `executeSkillActionViaToolGateway`，不允许再直接绕到 runtime `runSkill`；显式 child-internal permission context 是主路径，implicit admission 只能作为安全兜底。
 - `npm run verify:e` 必须内嵌 `npm run verify:d`，并覆盖 atomic write、outputDir/log lifecycle、legacy resume fallback、retry policy、circuit breaker 与 gateway admission 相关测试。
 
+### 6.17 测试规约
+- 新测试默认写行为测试：调用真实入口或最小替身，断言可观察结果；不要用 source-grep 伪装行为测试。
+- 结构测试只保留给无法通过行为证明的硬契约；豁免必须写产品理由，禁止无理由 waiver。
+- 破坏 singleton、全局状态、admission 或 lifecycle 的测试 helper 必须声明 `__breaksInvariants`。
+- e2e 只用于真子进程、真实 runtime 或真实外部依赖边界；默认 opt-in，不拖慢常规 verify。
+- 详细规约、示例和运行模式见 `docs/superpowers/testing-conventions.md`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

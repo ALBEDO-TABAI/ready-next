@@ -63,5 +63,11 @@ export default [
       'ready/no-coordinator-id-leak': 'error',
       'ready/no-inline-system-reminder-write': 'error'
     }
+  },
+  {
+    files: ['src/main/**/*.{ts,tsx}', 'src/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      'ready/test-helper-must-declare-invariant-breach': 'error'
+    }
   }
 ]

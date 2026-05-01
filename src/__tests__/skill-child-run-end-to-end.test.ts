@@ -79,6 +79,10 @@ import type {
 } from '../main/modules/repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 
+export const __breaksInvariants = [
+  'test-fixture.skill-child-run-end-to-end.setupRunner-resets-singleton',
+] as const
+
 // ---------------------------------------------------------------------------
 // Stub harness
 // ---------------------------------------------------------------------------

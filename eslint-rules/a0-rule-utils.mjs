@@ -19,6 +19,8 @@ const CODE_FILE_EXT_RE = /\.(?:[cm]?[jt]sx?|mjs|cjs)['"`)]/
 const READ_FILE_SYNC_RE = /\breadFileSync\s*\(/g
 const SOURCE_NAMED_READ_RE = /\b(?:source|Source|executor|Executor|renderer|Renderer)\w*\s*=\s*readFileSync\s*\(/
 const SOURCE_GREP_CONSUMER_RE = /\bassert\.(?:match|doesNotMatch)\s*\(|\.indexOf\s*\(|\.includes\s*\(/
+const ALLOW_SOURCE_GREP_RE = /allow-source-grep:/
+const ALLOW_SOURCE_GREP_WITH_REASON_RE = /allow-source-grep:\s*\S/
 const MIGRATION_TODO_RE = /(?:todo\b.*\bmigration\b|\bmigration\b.*\btodo\b|remove after migration)/i
 const LEGACY_BACKDOOR_RE = /\bif\s*\([^)]*\blegacy\b[^)]*\)|\blegacy\?\s*:|\blegacy\s*:\s*(?:boolean|true|false|\{|\[)/
 const A1_GATE_KEYWORDS_RE = /(agent|skill|tool|driver|supervisor|child|task|run-state|run-coordinator|rss-(?!draft-store-ui|list-row-style)|browser-task|document-task|continuation|turn-engine|capability|memory|session-recall|sidecar|live-info|workflow|orchestrator|spawn|delivery|primitive|admission|sanitiz)/i
@@ -68,13 +70,29 @@ export function scanRuleViolations({ filePath, sourceText, rule, honorReviewedDi
 
 function scanNoSourceGrepTest(file, sourceText, options) {
   if (!isTestFile(file)) return []
-  if (!SOURCE_GREP_CONSUMER_RE.test(sourceText)) return []
 
   const findings = []
+  for (const lineInfo of iterateLines(sourceText)) {
+    if (ALLOW_SOURCE_GREP_RE.test(lineInfo.text) && !ALLOW_SOURCE_GREP_WITH_REASON_RE.test(lineInfo.text)) {
+      findings.push(makeFinding({
+        file,
+        rule: RULE_IDS.sourceGrep,
+        lineInfo,
+        sourceText,
+        messageId: 'allowSourceGrepMissingReason',
+        message: 'allow-source-grep comments must include a product reason.',
+      }))
+    }
+  }
+
+  if (!SOURCE_GREP_CONSUMER_RE.test(sourceText)) return findings
+
   for (const lineInfo of iterateLines(sourceText)) {
     if (!READ_FILE_SYNC_RE.test(lineInfo.text)) continue
     READ_FILE_SYNC_RE.lastIndex = 0
     if (options.honorReviewedDisables && hasReviewedDisableNextLine(lineInfo.previousText, RULE_IDS.sourceGrep)) continue
+    if (ALLOW_SOURCE_GREP_RE.test(lineInfo.previousText || '')) continue
+    if (hasAllowSourceGrepReason(lineInfo.previousText)) continue
     const lineAndRest = sourceText.slice(lineInfo.index, Math.min(sourceText.length, lineInfo.index + 300))
     if (!CODE_FILE_EXT_RE.test(lineAndRest) && !SOURCE_NAMED_READ_RE.test(lineInfo.text)) continue
     findings.push(makeFinding({
@@ -166,6 +184,10 @@ function hasReviewedDisableNextLine(previousText, ruleId) {
   const escapedRule = ruleId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const re = new RegExp(`eslint-disable-next-line\\s+${escapedRule}\\s+--\\s+\\S`)
   return re.test(previousText || '')
+}
+
+function hasAllowSourceGrepReason(previousText) {
+  return ALLOW_SOURCE_GREP_WITH_REASON_RE.test(previousText || '')
 }
 
 function isCommentOnlyLine(line) {

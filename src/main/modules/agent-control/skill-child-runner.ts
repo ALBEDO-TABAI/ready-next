@@ -1189,6 +1189,10 @@ class SkillChildRunner {
 
 let runnerInstance: SkillChildRunner | null = null
 
+export const __breaksInvariants = [
+  'singleton.skill-child-runner.never-reset-mid-session',
+] as const
+
 export function configureSkillChildRunner(config: SkillChildRunnerConfig): SkillChildRunner {
   runnerInstance = new SkillChildRunner(config)
   return runnerInstance

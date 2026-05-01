@@ -631,6 +631,10 @@ export function __setSessionContinuityStoragePathForTests(path: string | null): 
   clearInMemoryState()
 }
 
+export const __breaksInvariants = [
+  'singleton.session-continuity.never-reset-mid-session',
+] as const
+
 export function __resetSessionContinuityForTests(options?: { keepPersisted?: boolean }): void {
   clearInMemoryState()
   continuityHydrated = false

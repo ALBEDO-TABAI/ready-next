@@ -57,6 +57,10 @@ import {
   type SkillTaskRunRecord,
 } from '../main/modules/repositories/skill-task-run-repository'
 
+export const __breaksInvariants = [
+  'test-fixture.skill-child-runner-resume.setupRunner-resets-singleton',
+] as const
+
 // ----------- Local test fixtures -----------
 //
 // Helpers are intentionally inlined here rather than imported from

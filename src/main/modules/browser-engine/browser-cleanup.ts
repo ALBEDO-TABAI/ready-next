@@ -32,6 +32,10 @@ export interface ManagedBrowserHandle {
 
 const liveBrowsers = new Set<ManagedBrowserHandle>()
 
+export const __breaksInvariants = [
+  'singleton.browser-registry.never-reset-mid-session',
+] as const
+
 /**
  * Register a browser instance with the central tracker. The caller passes a
  * launcher thunk (e.g. `() => puppeteer.launch(opts)`); we run it, register
