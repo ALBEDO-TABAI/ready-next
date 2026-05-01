@@ -15,8 +15,35 @@ import type {
   TurnEngineSessionMessage,
 } from './run-contracts'
 
+/**
+ * === Coordinator role (v3 stage C) ===
+ *
+ * Each DomainAdapter is one Coordinator role instance. It owns one product
+ * surface end to end: mode selection, prompt fragments, tool filtering,
+ * capability arbitration, user-text decoration, execution, and projection.
+ * turn-engine.ts should schedule these adapters, not hard-code product
+ * identities.
+ */
+
 export type DomainAdapterProjectionPhase = 'blocked' | 'done'
 export type DomainAdapterApplyPhase = 'no_tool_call' | 'tool_batch' | 'budget_limit'
+
+export interface CoordinatorPromptFragment {
+  id: string
+  label: string
+  priority: number
+  matches: (context: { userText: string; route: TaskExecutionRoute | null }) => boolean
+  refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
+  blocking: boolean
+}
+
+export interface CoordinatorCapabilityArbitration {
+  forceTool?: 'document' | 'browser' | 'skill' | null
+  hideAssistantProcessText?: boolean
+  budgetMultiplier?: number
+}
+
+export type CoordinatorTextDecorationPhase = 'pre_dispatch' | 'post_dispatch'
 
 export interface DomainAdapterProjection {
   phase: DomainAdapterProjectionPhase
@@ -163,6 +190,14 @@ export interface DomainAdapterProjectionParams<TSession extends TurnEngineSessio
 export interface DomainAdapter {
   id: string
   shouldHandle: (params: DomainAdapterSelectionContext) => boolean
+  contributePromptFragment: () => CoordinatorPromptFragment[] | null
+  arbitrateRunCapabilities: (
+    params: DomainAdapterPrepareParams<TurnEngineSession>
+  ) => CoordinatorCapabilityArbitration | null
+  decorateUserText: (
+    text: string,
+    params: { phase: CoordinatorTextDecorationPhase }
+  ) => string
   prepare: (
     params: DomainAdapterPrepareParams<TurnEngineSession>
   ) => DomainAdapterPrepareResult | Promise<DomainAdapterPrepareResult>

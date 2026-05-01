@@ -161,6 +161,12 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
   - `READY_SKILL_CHILD_RESUME_ENABLED`：默认 `'1'`，控制 turn-engine 的 child resume 自动分支是否启用；`'0'` 时遇到 paused child + 用户 resume 意图也不会调 `resumeSkillChildRun`，turn 退化为普通 model 回复，emit `skill_child_resume_disabled_by_flag` metric。runner 自身的 `resumeSkillChildRun` API 不受影响。
   默认全开，问题出现切 `'0'` 即可，不允许通过删代码回退。
 
+### 6.14 Coordinator role / DomainAdapter 抽象
+- 每个产品（browser / document / skill / rss / calendar / feishu）通过实现 `DomainAdapter` 注册自己的 mode 行为：触发条件、提示注入、工具过滤、仲裁规则、用户文本润色、执行和投影；`turn-engine.ts` 只调度，不持有产品身份。
+- 引入新产品 = 实现新 `DomainAdapter` + 在 host `domainAdapters` 注册；`turn-engine.ts` 不新增产品分支。
+- 改产品行为 = 改对应 `*-domain-adapter.ts`，不能反向去 `turn-engine.ts` 内加产品 `if/else` 或 `adapter.id === '<product>'` 比较。
+- CI 强制：`npm run verify:c`、`scripts/check-coordinator-isolation.cjs` 和 `ready/no-coordinator-id-leak` 必须阻止 `turn-engine.ts` 泄漏产品 id；通用 `TRIGGERS` 不承载 product module 规则；6 个 adapter 必须显式实现 `contributePromptFragment / arbitrateRunCapabilities / decorateUserText`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

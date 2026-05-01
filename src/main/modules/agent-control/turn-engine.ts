@@ -777,6 +777,13 @@ function buildHostToolSnapshot(params: {
   }
 }
 
+function readPreparedBrowserDecisionMode(result: DomainAdapterPrepareResult | null | undefined): string | null {
+  const mode = (result?.domainState as {
+    preparedBrowserExecution?: { browserDecision?: { mode?: unknown } }
+  } | null | undefined)?.preparedBrowserExecution?.browserDecision?.mode
+  return typeof mode === 'string' && mode ? mode : null
+}
+
 function appendLoggedToolSnapshot(
   state: TurnState,
   host: TurnEngineHost<any>,
@@ -1572,8 +1579,24 @@ export class TurnEngine {
         allowedToolNames: preparedRunCapabilities.allowedToolNames,
       })
       let toolPolicy = preparedRunCapabilities.toolPolicy
+      const initialCoordinatorArbitrations = domainAdapters
+        .map((adapter) => adapter.arbitrateRunCapabilities?.({
+          route: null,
+          request: requestForAdapters,
+          host: hostForAdapters,
+          session,
+          userText,
+          pureUserInput,
+          requestEnvelope,
+          executionIntentContext,
+          hasTools,
+          toolPolicy,
+          allowedToolNames: preparedRunCapabilities.allowedToolNames,
+          turnFrameSteering: turnFrame?.steering || null,
+        }))
+        .filter((arbitration): arbitration is NonNullable<typeof arbitration> => Boolean(arbitration))
       const shouldPersistDocumentContext =
-        Boolean((toolPolicy as any).forceDocumentTool)
+        initialCoordinatorArbitrations.some((arbitration) => arbitration.forceTool === 'document')
         || executionIntentContext.hasWidgetTargetContext
       if (shouldPersistDocumentContext) {
         session.lastDocumentContextInput = contextualUserInput
@@ -1615,26 +1638,6 @@ export class TurnEngine {
       const continuationState = effectiveProvidedContinuationState
         || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
       const continuationTaskId = continuationState?.taskId || continuationProjection?.taskId || null
-      const initialTaskTypeResolution = resolveTaskType({
-        intent: executionIntentContext.intentClassification as IntentClassification,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
-      })
-      const initialTaskExecutionRoute = resolveTaskExecutionRoute({
-        taskId: request.taskId,
-        resolution: initialTaskTypeResolution,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId
-          ? {
-            continuationTaskId,
-            continuationProjection,
-            continuationState,
-          }
-          : null,
-      })
-
       if (hasTools) {
         const preparedToolContext = buildHostToolContext(preparedRunCapabilities.allowedToolNames)
         await skillContextOrchestrator.maybeInjectExplicitSkillContext({
@@ -1647,29 +1650,7 @@ export class TurnEngine {
         })
       }
 
-      const browserDomainAdapter = domainAdapters.find((adapter) => adapter.id === 'browser') || null
-      const browserPrepareResult = browserDomainAdapter
-        ? await browserDomainAdapter.prepare({
-          route: initialTaskExecutionRoute,
-          request: requestForAdapters,
-          host: hostForAdapters,
-          session,
-          userText,
-          pureUserInput,
-          requestEnvelope,
-          executionIntentContext,
-          hasTools,
-          toolPolicy,
-          allowedToolNames: preparedRunCapabilities.allowedToolNames,
-          turnFrameSteering: turnFrame?.steering || null,
-        })
-        : null
-      browserDecision = {
-        mode: String((browserPrepareResult?.domainState as { preparedBrowserExecution?: { browserDecision?: { mode?: string } } } | undefined)
-          ?.preparedBrowserExecution?.browserDecision?.mode || 'free_tool_loop'),
-        reason: 'domain_adapter',
-      }
-      const reconciledRunCapabilities = reconcileAfterBrowserDecision({
+      let reconciledRunCapabilities = reconcileAfterBrowserDecision({
         prepared: preparedRunCapabilities,
         browserDecisionMode: browserDecision.mode as any,
       })
@@ -1767,34 +1748,70 @@ export class TurnEngine {
         hasTools,
         executionIntentContext,
       })
-      const selectedDomainPrepareResult: DomainAdapterPrepareResult | null =
-        selectedDomainAdapter?.id === 'browser'
-          ? browserPrepareResult
-          : selectedDomainAdapter
-            ? await selectedDomainAdapter.prepare({
-              route: taskExecutionRoute,
-              request: requestForAdapters,
-              host: hostForAdapters,
-              session,
-              userText,
-              pureUserInput,
-              requestEnvelope,
-              executionIntentContext,
-              hasTools,
-              toolPolicy,
-              allowedToolNames: reconciledRunCapabilities.allowedToolNames,
-              isRetryOnlyTurn: isRetryOnlyTurnDetected,
-              turnFrameSteering: turnFrame?.steering || null,
-            })
-            : null
-      const shouldHideBrowserProcessText =
-        selectedDomainAdapter?.id === 'browser'
-        && taskExecutionRoute.chain !== 'direct'
-        && (
-          taskExecutionRoute.executor === 'browser'
-          || Boolean((selectedDomainPrepareResult?.domainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
-            ?.browserToolLoopState?.isBrowserTask)
-        )
+      const selectedDomainPrepareResult: DomainAdapterPrepareResult | null = selectedDomainAdapter
+        ? await selectedDomainAdapter.prepare({
+          route: taskExecutionRoute,
+          request: requestForAdapters,
+          host: hostForAdapters,
+          session,
+          userText,
+          pureUserInput,
+          requestEnvelope,
+          executionIntentContext,
+          hasTools,
+          toolPolicy,
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+          isRetryOnlyTurn: isRetryOnlyTurnDetected,
+          turnFrameSteering: turnFrame?.steering || null,
+        })
+        : null
+      const preparedBrowserDecisionMode = readPreparedBrowserDecisionMode(selectedDomainPrepareResult)
+      if (preparedBrowserDecisionMode && preparedBrowserDecisionMode !== browserDecision.mode) {
+        browserDecision = {
+          mode: preparedBrowserDecisionMode,
+          reason: 'domain_adapter',
+        }
+        reconciledRunCapabilities = reconcileAfterBrowserDecision({
+          prepared: preparedRunCapabilities,
+          browserDecisionMode: browserDecision.mode as any,
+        })
+        toolPolicy = reconciledRunCapabilities.toolPolicy
+        appendLoggedToolResolution({
+          state,
+          host,
+          stage: 'host_effective_after_domain_prepare',
+          resolution: reconciledRunCapabilities.toolResolution,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+          allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        })
+        assertNoToolResolutionViolation({
+          state,
+          host,
+          stage: 'host_effective_after_domain_prepare',
+          resolution: reconciledRunCapabilities.toolResolution,
+          allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        })
+      }
+      const selectedCoordinatorArbitration = selectedDomainAdapter?.arbitrateRunCapabilities?.({
+        route: taskExecutionRoute,
+        request: requestForAdapters,
+        host: hostForAdapters,
+        session,
+        userText,
+        pureUserInput,
+        requestEnvelope,
+        executionIntentContext,
+        hasTools,
+        toolPolicy,
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        isRetryOnlyTurn: isRetryOnlyTurnDetected,
+        turnFrameSteering: turnFrame?.steering || null,
+        domainState: selectedDomainPrepareResult?.domainState,
+      } as Parameters<DomainAdapter['arbitrateRunCapabilities']>[0] & { domainState?: unknown }) || null
+      const shouldHideBrowserProcessText = Boolean(selectedCoordinatorArbitration?.hideAssistantProcessText)
 
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation?.budgetRuntime) {
         state.taskBudgetRuntime = {

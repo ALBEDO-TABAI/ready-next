@@ -13,6 +13,8 @@ import type { ScopeRunTaskStep } from './types'
 // the planner / tool_loop chain, not by running under the feishu adapter.
 const TOOL_PREFIXES = ['feishu_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走飞书执行路径。优先使用 feishu_* 工具完成任务，不要改走无关工具。'
+const FEISHU_DOC_TRIGGER_PATTERN = /(飞书).*(文档|doc)|创建飞书文档|改写飞书文档|写入飞书/i
+const FEISHU_IMAGE_TRIGGER_PATTERN = /(飞书).*(图片|插图|上传)/i
 
 interface FeishuAdapterState {
   steps: ScopeRunTaskStep[]
@@ -65,6 +67,56 @@ function buildSummary(record: Record<string, unknown> | null, toolName: string, 
 
 export class FeishuDomainAdapter implements DomainAdapter {
   readonly id = 'feishu'
+
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return [
+      {
+        id: 'feishu-doc',
+        label: '飞书文档操作',
+        priority: 0,
+        matches: ({ userText }) => FEISHU_DOC_TRIGGER_PATTERN.test(userText),
+        blocking: true,
+        refs: [
+          { path: 'docs/feishu-rules.md', title: '飞书文档规则', summary: '飞书文档创建与改写规则' },
+          {
+            path: 'docs/accounts.md',
+            title: '飞书账号索引',
+            summary: '飞书账号和租户索引',
+            sensitive: true,
+          },
+        ],
+      },
+      {
+        id: 'feishu-image',
+        label: '飞书插图操作',
+        priority: 0,
+        matches: ({ userText }) => FEISHU_IMAGE_TRIGGER_PATTERN.test(userText),
+        blocking: true,
+        refs: [
+          { path: 'docs/feishu-rules.md', title: '飞书插图规则', summary: '飞书图片上传和插入规则' },
+          {
+            path: 'docs/accounts.md',
+            title: '飞书账号索引',
+            summary: '飞书账号和租户索引',
+            sensitive: true,
+          },
+        ],
+      },
+    ]
+  }
+
+  arbitrateRunCapabilities(
+    _params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'feishu'

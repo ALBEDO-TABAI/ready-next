@@ -15,6 +15,7 @@ import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
 import { buildRequestEnvelope } from './request-envelope'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
+import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapter'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'
@@ -34,7 +35,7 @@ export interface PromptMemoryRef {
 export interface PromptTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -86,12 +87,37 @@ interface TriggerDefinition {
   refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
 }
 
+interface CoordinatorTriggerCandidate {
+  adapter: DomainAdapter
+  fragment: CoordinatorPromptFragment
+}
+
 const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
-const RSS_TRIGGER_PATTERN =
-  /(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)/i
+
+function normalizeCoordinatorModule(id: string): PromptTriggerHit['module'] | undefined {
+  return id === 'browser'
+    || id === 'document'
+    || id === 'rss'
+    || id === 'calendar'
+    || id === 'feishu'
+    || id === 'skill'
+    ? id
+    : undefined
+}
+
+function collectCoordinatorTriggerCandidates(coordinators: ReadonlyArray<DomainAdapter>): CoordinatorTriggerCandidate[] {
+  return coordinators
+    .flatMap((adapter) =>
+      (adapter.contributePromptFragment() || []).map((fragment) => ({ adapter, fragment }))
+    )
+    .sort((left, right) =>
+      right.fragment.priority - left.fragment.priority
+      || left.fragment.id.localeCompare(right.fragment.id)
+    )
+}
 
 const DEFAULT_FILES: Record<string, string> = {
   'MEMORY.md': [
@@ -127,80 +153,7 @@ const DEFAULT_FILES: Record<string, string> = {
   'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }
 
-const TRIGGERS: TriggerDefinition[] = [
-  {
-    id: 'feishu-doc',
-    label: '飞书文档操作',
-    module: 'feishu',
-    pattern: /(飞书).*(文档|doc)|创建飞书文档|改写飞书文档|写入飞书/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/feishu-rules.md', title: '飞书文档规则', summary: '飞书文档创建与改写规则' },
-      {
-        path: 'docs/accounts.md',
-        title: '飞书账号索引',
-        summary: '飞书账号和租户索引',
-        sensitive: true
-      }
-    ]
-  },
-  {
-    id: 'feishu-image',
-    label: '飞书插图操作',
-    module: 'feishu',
-    pattern: /(飞书).*(图片|插图|上传)/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/feishu-rules.md', title: '飞书插图规则', summary: '飞书图片上传和插入规则' },
-      {
-        path: 'docs/accounts.md',
-        title: '飞书账号索引',
-        summary: '飞书账号和租户索引',
-        sensitive: true
-      }
-    ]
-  },
-  {
-    id: 'browser-upload',
-    label: '浏览器上传流程',
-    module: 'browser',
-    pattern: /(上传|发送|提交|浏览器|网页)/i,
-    blocking: false,
-    refs: [
-      {
-        path: 'docs/browser-rules.md',
-        title: '浏览器工作流规则',
-        summary: '浏览器上传、输入、发送的阶段规则'
-      }
-    ]
-  },
-  {
-    id: 'document-write',
-    label: '文档改写操作',
-    module: 'document',
-    pattern: /(文档|文件).*(写|改|保存|格式)/i,
-    blocking: false,
-    refs: [{ path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' }]
-  },
-  {
-    id: 'rss-analysis',
-    label: 'RSS 分析操作',
-    module: 'rss',
-    pattern: RSS_TRIGGER_PATTERN,
-    blocking: false,
-    refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }]
-  },
-  {
-    id: 'calendar-write',
-    label: '日程写入操作',
-    module: 'calendar',
-    pattern: /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' }
-    ]
-  }
-]
+const TRIGGERS: TriggerDefinition[] = []
 
 function clip(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`
@@ -688,6 +641,7 @@ export class PromptAssemblyService {
 
   private async resolveTriggers(
     text: string,
+    coordinators: ReadonlyArray<DomainAdapter>,
     intentClassification?: IntentClassification,
   ): Promise<Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }>> {
     const hits: Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> =
@@ -753,6 +707,38 @@ export class PromptAssemblyService {
       } catch (error) {
         console.error('[PromptAssembly] Failed to load database triggers:', error)
       }
+    }
+
+    for (const { adapter, fragment } of collectCoordinatorTriggerCandidates(coordinators)) {
+      if (!fragment.matches({ userText: text, route: null })) continue
+      const trigger: TriggerDefinition = {
+        id: fragment.id,
+        label: fragment.label,
+        module: normalizeCoordinatorModule(adapter.id),
+        pattern: /(?:)/,
+        blocking: fragment.blocking,
+        refs: fragment.refs,
+      }
+      if (shouldSkipTriggerForIntent(trigger, intentClassification)) continue
+      const sections: string[] = []
+      const refs: PromptMemoryRef[] = []
+      for (const ref of trigger.refs) {
+        const body = this.readMemoryFile(ref.path).trim()
+        if (!body) continue
+        sections.push(formatMemorySection(ref.title, body))
+        refs.push(
+          this.makeMemoryRef(
+            'l2',
+            'trigger_rule',
+            ref.title,
+            ref.path,
+            ref.summary,
+            trigger.id,
+            Boolean(ref.sensitive)
+          )
+        )
+      }
+      hits.push({ trigger, sections, refs })
     }
 
     // Fallback to hardcoded triggers (backward compatibility)
@@ -894,6 +880,7 @@ export class PromptAssemblyService {
   async buildForScopedRun(params: {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
+    coordinators: ReadonlyArray<DomainAdapter>
   }): Promise<PromptAssemblyResult> {
     const userText = extractTextFromMessage(params.message)
     const requestEnvelope = buildRequestEnvelope({ userText })
@@ -926,6 +913,7 @@ export class PromptAssemblyService {
     }
     const triggerMatches = await this.resolveTriggers(
       requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
+      params.coordinators,
       intentClassification,
     )
     const l2Sections = triggerMatches.flatMap((item) => item.sections)

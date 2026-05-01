@@ -95,7 +95,7 @@ interface DomainAdapter {
 - `\.id\s*!==\s*['"](browser|document|skill|rss|calendar|feishu)['"]`
 - 字符串字面量 `'browser'/'document'/'skill'/'rss'/'calendar'/'feishu'` 用作 `adapters.find(...)` 比较谓词
 
-**CI 验证**：新增 `eslint-rules/no-coordinator-id-leak.cjs`（hard rule，不进 baseline），AST 层匹配 `BinaryExpression` 左操作数是 `MemberExpression` 且属性名是 `id`，右操作数是 6 个产品名之一的字符串字面量。
+**CI 验证**：在 `eslint-rules/index.mjs` 注册 `ready/no-coordinator-id-leak`（hard rule，不进 baseline），AST 层匹配 `BinaryExpression` 左操作数是 `MemberExpression` 且属性名是 `id`，右操作数是 6 个产品名之一的字符串字面量。
 
 ### C-Contract-2：turn-engine 不导入单产品模块
 
@@ -122,14 +122,19 @@ interface DomainAdapter {
 
 新增 `npm run verify:c`，包含：
 1. `npm run typecheck`
-2. `node scripts/check-coordinator-isolation.cjs`（C-Contract-1/2/3 三个机制都跑）
-3. ESLint 跑 `no-coordinator-id-leak` 规则（hard）
-4. 焦点测试套件：
+2. `npm run lint:check`（包含 `ready/no-coordinator-id-leak` hard rule）
+3. `node scripts/check-coordinator-isolation.cjs`（C-Contract-1/2/3 三个机制都跑）
+4. `node scripts/check-eslint-baseline.cjs`
+5. `npm run test:c:gates`
+6. 焦点测试套件：
    - `src/__tests__/coordinator-contract.test.ts`（C 新增）
    - `src/__tests__/turn-engine-route.test.ts`（既有，必须不退化）
    - `src/__tests__/prompt-assembly.test.ts`（既有，必须不退化）
-   - `src/__tests__/run-capability-controller.test.ts`（如已存在）
-   - 各 `*-domain-adapter.test.ts`（已存在的、新加的）
+   - `src/__tests__/run-capability-controller.test.ts`
+   - `src/__tests__/run-capability-controller-arbitration.test.ts`
+   - `src/__tests__/browser-task-planner.test.ts`
+   - `src/__tests__/browser-domain-orchestrator.test.ts`
+7. `npm run verify:b`
 
 ### C-Contract-6：A0/A1/B 阶段不退化
 
@@ -145,7 +150,7 @@ interface DomainAdapter {
 - `eslint-rules/baseline.json` 在 `coordinator-*` / `domain-adapter-*` 命名空间下零条目（这两类是从 day 1 开始的硬规则，不允许豁免）。
 - 现有 `ui-history` 等历史 baseline 条目允许保留，但 C 提交不得新增任何条目。
 
-**CI 验证**：`scripts/check-baseline-not-grown.cjs`（A0 已落地）继续生效。
+**CI 验证**：`scripts/check-eslint-baseline.cjs` 继续生效。
 
 ---
 
@@ -275,7 +280,7 @@ export interface DomainAdapter {
 
 新建 `scripts/check-coordinator-isolation.cjs` 复用 A1 已成形的 TS Compiler API 模式（`scripts/check-subagent-isolation.cjs`），不再用 grep 正则。**不允许**走 source-grep 反模式（违反 A0 的 invariant）。
 
-新建 `eslint-rules/no-coordinator-id-leak.cjs` 复用 A0 的 ESLint 自定义规则机制。
+在 `eslint-rules/index.mjs` 注册 `ready/no-coordinator-id-leak`，复用 A0 的 ESLint 自定义规则机制。
 
 ### D7. 与 B 共存
 
@@ -464,11 +469,11 @@ C 绝对不进 `skill-child-runner.ts` / `skill-child-sub-agent*.ts`（这些是
 
 **改动清单**：
 
-1. **新建 `eslint-rules/no-coordinator-id-leak.cjs`**：
-   - 模板参考 A0 的 `no-source-grep-anti-pattern.cjs`（如已存在）。
+1. **在 `eslint-rules/index.mjs` 注册 `ready/no-coordinator-id-leak`**：
+   - 模板参考 A0 现有 rule 工厂。
    - 检测 turn-engine.ts 内 `\.id\s*===\s*['"]<6 个产品名>['"]`。
    - hard rule，不进 baseline。
-   - 加到 `.eslintrc` / `eslint.config.js` 的 rule 列表。
+   - 加到 `eslint.config.mjs` 的 rule 列表，并在 `eslint-rules/__tests__/a0-rules.test.mjs` 覆盖有效/无效样例。
 
 2. **新建 `scripts/check-coordinator-isolation.cjs`**：
    - 复用 `scripts/check-subagent-isolation.cjs` 的 TS Compiler API 框架。
@@ -480,7 +485,9 @@ C 绝对不进 `skill-child-runner.ts` / `skill-child-sub-agent*.ts`（这些是
 3. **新建 `npm run verify:c` script**：
    - `package.json` scripts 里加：
      ```json
-     "verify:c": "npm run typecheck && node scripts/check-coordinator-isolation.cjs && eslint . --rule 'ready/no-coordinator-id-leak: error' --no-eslintrc && tsx --test src/__tests__/coordinator-contract.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/*-domain-adapter.test.ts && npm run verify:b"
+     "test:c:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
+     "test:c:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/coordinator-contract.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-capability-controller.test.ts src/__tests__/run-capability-controller-arbitration.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/browser-domain-orchestrator.test.ts",
+     "verify:c": "npm run typecheck && npm run lint:check && node scripts/check-coordinator-isolation.cjs && node scripts/check-eslint-baseline.cjs && npm run test:c:gates && npm run test:c:focus && npm run verify:b"
      ```
    - 内嵌 `verify:b` 调用确保 C-Contract-6 不退化。
 
@@ -547,30 +554,29 @@ W3 受 B 进度门控：如 B 未 land 到 W4，W3 排在最后，W6 可先跑�
 # 1. 类型
 npm run typecheck
 
-# 2. C 自有 lint + isolation
+# 2. lint + C 自有 isolation
+npm run lint:check
 node scripts/check-coordinator-isolation.cjs
-./node_modules/.bin/eslint . --rule 'ready/no-coordinator-id-leak: error'
+node scripts/check-eslint-baseline.cjs
+npm run test:c:gates
 
 # 3. C 焦点测试套件
-npx tsx --test --test-concurrency=1 \
+npx tsx@^4.19.2 --test --test-concurrency=1 \
   src/__tests__/coordinator-contract.test.ts \
   src/__tests__/turn-engine-route.test.ts \
   src/__tests__/prompt-assembly.test.ts \
   src/__tests__/run-capability-controller.test.ts \
-  src/__tests__/browser-domain-adapter.test.ts \
-  src/__tests__/document-domain-adapter.test.ts \
-  src/__tests__/rss-domain-adapter.test.ts \
-  src/__tests__/calendar-domain-adapter.test.ts \
-  src/__tests__/feishu-domain-adapter.test.ts \
-  src/__tests__/skill-domain-adapter.test.ts
+  src/__tests__/run-capability-controller-arbitration.test.ts \
+  src/__tests__/browser-task-planner.test.ts \
+  src/__tests__/browser-domain-orchestrator.test.ts
 
 # 4. 不退化 gate（A0/A1/B 全套）
 npm run verify:b   # 内嵌 verify:a1 / verify:a0
 
-# 5. baseline 不增加
-node scripts/check-baseline-not-grown.cjs
+# 5. 一键验收
+npm run verify:c
 
-# 6. 手动 dev 烟测
+# 6. 手动 dev 烟测（如本轮需要 Electron UI 复查）
 # - 浏览器模式：进站 → 上传 → 提交，过程文本隐藏行为正确
 # - 文档模式：force_document × allow_browser 冲突场景仍降级到 document
 # - skill 模式：长 skill 启动 → budget paused → resume，行为等价
@@ -600,7 +606,7 @@ node scripts/check-baseline-not-grown.cjs
 - `docs/superpowers/plans/2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1（W7）
 
 新建：
-- `eslint-rules/no-coordinator-id-leak.cjs`（W6）
+- `scripts/__tests__/check-coordinator-isolation.test.cjs`（W6）
 - `scripts/check-coordinator-isolation.cjs`（W6）
 - `src/__tests__/coordinator-contract.test.ts`（W1）
 - `docs/superpowers/plans/2026-04-30-C-pre-flight-audit-report.md`（W0）
@@ -677,3 +683,27 @@ node scripts/check-baseline-not-grown.cjs
 - C 完成后更新 `2026-04-30-skill-runtime-agent-layer-reframe.md` §5.1 的 C 行状态。
 - 如 W2-W5 任何一个 worker 实施时发现本计划与现实不符，**优先**修计划 + 在计划里加 implementation_amendment frontmatter 字段，不就地"算了"。
 - 不复制 B 计划的 audit-patch 模式（C 第一版即定稿，因 DomainAdapter 已有底盘）。如有 codex audit 修订，append amendment block，不修主文。
+
+---
+
+## 11. Implementation Completion Record
+
+Date: 2026-05-01
+Branch: `codex/skill-runtime-b-plan`
+HEAD at verification: `a1bcf477535e38c4883841d9473f982567af5d31`
+
+W1-W7 status:
+- W1/W3: completed. Runtime and RunCoordinator pass the real coordinator list per run, and contract tests cover the forwarding path.
+- W2: completed. RSS / Calendar / Feishu prompt fragments live in their adapters.
+- W4: completed. Document trigger and `forceDocumentTool` arbitration live in `DocumentDomainAdapter`.
+- W5: completed. Browser trigger, prepare reuse, and process-text hiding live through `BrowserDomainAdapter`.
+- W6: completed. `check-coordinator-isolation.cjs`, `ready/no-coordinator-id-leak`, and `verify:c` are wired.
+- W7: completed. CLAUDE / AGENTS / roadmap docs are synchronized.
+
+Verification evidence:
+- `npm run verify:c` exited 0.
+- `npm run lint:check` exited 0 with the existing warning baseline (`541 problems`, `0 errors`, `541 warnings`).
+- `node scripts/check-eslint-baseline.cjs` reported `A0 ESLint baseline ok (143 entries)`.
+- `npm run test:c:gates` reported `48` passing tests.
+- `npm run test:c:focus` passed through the `verify:c` chain.
+- `npm run verify:b` completed inside `verify:c` and exited 0.

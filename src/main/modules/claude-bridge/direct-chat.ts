@@ -505,6 +505,10 @@ export class DirectChatEngine extends EventEmitter {
     log('Runtime set on DirectChatEngine')
   }
 
+  getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.domainAdapters
+  }
+
   private registerSessionAbortSource(
     name: string,
     sessionId: string | undefined,

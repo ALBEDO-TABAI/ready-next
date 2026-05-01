@@ -59,7 +59,8 @@ export default [
       'ready/no-source-grep-test': 'error',
       'ready/no-legacy-backdoor': 'error',
       'ready/no-migration-todo': 'error',
-      'ready/no-subagent-leak': 'error'
+      'ready/no-subagent-leak': 'error',
+      'ready/no-coordinator-id-leak': 'error'
     }
   }
 ]

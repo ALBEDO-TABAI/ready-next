@@ -604,6 +604,8 @@ test('TurnEngine keeps browser process narration out of final text when the brow
         evidence: [] as string[],
       },
     }),
+    arbitrateRunCapabilities: ({ route }) =>
+      route?.chain === 'direct' ? null : { hideAssistantProcessText: true },
     dispatch: async ({ domainState }) => ({ domainState }),
     applyResult: ({ phase, domainState, toolBatch }) => {
       if (phase === 'tool_batch') {
@@ -1581,6 +1583,7 @@ test('RunCoordinator drives TurnEngine budget lifecycle through scope event and 
       maxParallelToolGroups: 1,
       reservedToolCalls: 0,
     },
+    coordinators: []
   })
   await Promise.all(projectionSyncs)
 

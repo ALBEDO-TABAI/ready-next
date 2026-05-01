@@ -157,6 +157,12 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
 - SQLite-backed 验收前必须先跑 `npm run rebuild:native`；若 `better-sqlite3` ABI 与当前 Node/Electron 不匹配，只能标记为 DB 路径未证明，不能算验收通过
 
+### 6.14 Coordinator role / DomainAdapter 抽象
+- 每个产品（browser / document / skill / rss / calendar / feishu）通过实现 `DomainAdapter` 注册自己的 mode 行为：触发条件、提示注入、工具过滤、仲裁规则、用户文本润色、执行和投影；`turn-engine.ts` 只调度，不持有产品身份。
+- 引入新产品 = 实现新 `DomainAdapter` + 在 host `domainAdapters` 注册；`turn-engine.ts` 不新增产品分支。
+- 改产品行为 = 改对应 `*-domain-adapter.ts`，不能反向去 `turn-engine.ts` 内加产品 `if/else` 或 `adapter.id === '<product>'` 比较。
+- CI 强制：`npm run verify:c`、`scripts/check-coordinator-isolation.cjs` 和 `ready/no-coordinator-id-leak` 必须阻止 `turn-engine.ts` 泄漏产品 id；通用 `TRIGGERS` 不承载 product module 规则；6 个 adapter 必须显式实现 `contributePromptFragment / arbitrateRunCapabilities / decorateUserText`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

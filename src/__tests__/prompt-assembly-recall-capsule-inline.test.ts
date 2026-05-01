@@ -58,6 +58,7 @@ describe('PromptAssemblyService — recall capsule inline (E2)', () => {
     const result = await service.buildForScopedRun({
       scope: createScope() as never,
       message: '继续',
+      coordinators: []
     })
     const joined = result.bootstrapMessages.join('\n\n')
 
@@ -79,6 +80,7 @@ describe('PromptAssemblyService — recall capsule inline (E2)', () => {
     const result = await service.buildForScopedRun({
       scope: createScope() as never,
       message: '继续上次的视频分析',
+      coordinators: []
     })
     const joined = result.bootstrapMessages.join('\n\n')
 
@@ -99,6 +101,7 @@ describe('PromptAssemblyService — recall capsule inline (E2)', () => {
     const result = await service.buildForScopedRun({
       scope: createScope() as never,
       message: '继续',
+      coordinators: []
     })
     const joined = result.bootstrapMessages.join('\n\n')
 
@@ -120,6 +123,7 @@ describe('PromptAssemblyService — recall capsule inline (E2)', () => {
     const result = await service.buildForScopedRun({
       scope: createScope() as never,
       message: '继续',
+      coordinators: []
     })
     const recallSection = result.bootstrapMessages.find((m) => m.includes('跨会话回看'))
     assert.ok(recallSection, 'recall section exists')

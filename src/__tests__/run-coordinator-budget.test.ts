@@ -85,6 +85,7 @@ test('RunCoordinator seeds scoped runs with a bootstrap budget and rebinds it af
     scope: createScope(),
     message: '你好',
     requestId: 'req-budget-1',
+    coordinators: []
   })
 
   const finalEvent = events[events.length - 1]
@@ -157,6 +158,7 @@ test('RunCoordinator memory reflection event does not overwrite task summary', a
     scope: createScope(),
     message: '记住这个偏好',
     requestId: 'req-memory-1',
+    coordinators: []
   }, {
     onMemoryCapture: () => {
       memoryCaptured?.()
@@ -229,6 +231,7 @@ test('RunCoordinator does not mark an exhausted background skill task as done', 
     scope: createScope(),
     message: '继续视频分析',
     requestId: 'req-budget-background',
+    coordinators: []
   })
 
   const finalEvent = events[events.length - 1]
@@ -287,6 +290,7 @@ test('RunCoordinator prioritizes lifecycle signal over a success result', async 
     scope: createScope(),
     message: '继续视频分析',
     requestId: 'req-lifecycle-priority',
+    coordinators: []
   })
 
   const finalEvent = events[events.length - 1]
@@ -334,6 +338,7 @@ test('RunCoordinator maps terminalReason checkpoint_budget to checkpoint outcome
     scope: createScope(),
     message: '继续视频分析',
     requestId: 'req-terminal-reason',
+    coordinators: []
   })
 
   const finalEvent = events[events.length - 1]
@@ -402,6 +407,7 @@ test('RunCoordinator memory reflection does not convert a paused background skil
     scope: createScope(),
     message: '继续视频分析',
     requestId: 'req-budget-background-memory',
+    coordinators: []
   }, {
     onMemoryCapture: () => {
       memoryCaptured?.()

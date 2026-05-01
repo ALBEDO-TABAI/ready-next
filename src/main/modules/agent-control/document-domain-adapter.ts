@@ -139,6 +139,8 @@ function buildUserMessage(content: string | null | undefined) {
   return content ? [{ role: 'user' as const, content }] : []
 }
 
+const DOCUMENT_WRITE_TRIGGER_PATTERN = /(文档|文件).*(写|改|保存|格式)/i
+
 export class DocumentDomainAdapter implements DomainAdapter {
   readonly id = 'document'
 
@@ -151,6 +153,34 @@ export class DocumentDomainAdapter implements DomainAdapter {
     toolRegistry?: ToolRegistryReader
   }) {
     this.toolRegistry = deps.toolRegistry || defaultToolRegistry
+  }
+
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return [
+      {
+        id: 'document-write',
+        label: '文档改写操作',
+        priority: 0,
+        matches: ({ userText }) => DOCUMENT_WRITE_TRIGGER_PATTERN.test(userText),
+        blocking: false,
+        refs: [
+          { path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' },
+        ],
+      },
+    ]
+  }
+
+  arbitrateRunCapabilities(
+    params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return params.toolPolicy.forceDocumentTool ? { forceTool: 'document' } : null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
   }
 
   private lookupToolDefinition(toolName: string): ToolDefinition | null {

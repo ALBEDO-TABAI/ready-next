@@ -14,6 +14,7 @@ import type { ScopeRunTaskStep } from './types'
 // actually lands.
 const TOOL_PREFIXES = ['calendar_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走日程执行路径。优先使用 calendar_* 工具完成任务，不要改走无关工具。'
+const CALENDAR_WRITE_TRIGGER_PATTERN = /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i
 
 interface CalendarAdapterState {
   steps: ScopeRunTaskStep[]
@@ -64,6 +65,34 @@ function buildSummary(record: Record<string, unknown> | null, toolName: string, 
 
 export class CalendarDomainAdapter implements DomainAdapter {
   readonly id = 'calendar'
+
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return [
+      {
+        id: 'calendar-write',
+        label: '日程写入操作',
+        priority: 0,
+        matches: ({ userText }) => CALENDAR_WRITE_TRIGGER_PATTERN.test(userText),
+        blocking: true,
+        refs: [
+          { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' },
+        ],
+      },
+    ]
+  }
+
+  arbitrateRunCapabilities(
+    _params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'calendar'

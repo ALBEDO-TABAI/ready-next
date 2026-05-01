@@ -187,3 +187,28 @@ tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
     },
   ],
 })
+
+tester.run('ready/no-coordinator-id-leak', rules['no-coordinator-id-leak'], {
+  valid: [
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const selected = selectDomainAdapter(adapters, context)",
+    },
+    {
+      filename: 'src/main/modules/agent-control/browser-domain-adapter.ts',
+      code: "if (adapter.id === 'browser') return true",
+    },
+  ],
+  invalid: [
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "if (adapter.id === 'browser') run()",
+      errors: [{ messageId: 'noCoordinatorIdLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const isDocument = selectedDomainAdapter?.id !== 'document'",
+      errors: [{ messageId: 'noCoordinatorIdLeak' }],
+    },
+  ],
+})

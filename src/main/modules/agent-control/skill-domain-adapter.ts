@@ -140,6 +140,23 @@ function buildProjectionFromPatch(latestProjectionPatch: Record<string, unknown>
 export class SkillDomainAdapter implements DomainAdapter {
   readonly id = 'skill'
 
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return null
+  }
+
+  arbitrateRunCapabilities(
+    _params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
+
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'skill'
   }

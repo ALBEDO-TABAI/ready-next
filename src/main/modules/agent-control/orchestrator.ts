@@ -11,6 +11,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
+import type { DomainAdapter } from './domain-adapter'
 
 interface SessionDescriptor {
   agent: string
@@ -128,6 +129,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
 
   hasBrowserController(): boolean {
     return this.engine.hasBrowserController()
+  }
+
+  getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.engine.getDomainAdapters()
   }
 
   setSidecarManager(manager: SidecarManager): void {

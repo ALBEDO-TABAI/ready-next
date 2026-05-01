@@ -431,6 +431,7 @@ export interface ExecutionRunDiagnostics {
 export interface RunCoordinatorRequest {
   scope: ConversationScope
   message: RunMessage
+  coordinators: ReadonlyArray<DomainAdapter>
   requestId?: string
   taskId?: string
   parentTaskId?: string

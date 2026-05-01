@@ -124,6 +124,61 @@ function createNoSubagentLeakRule() {
   }
 }
 
+function createNoCoordinatorIdLeakRule() {
+  const productIds = new Set(['browser', 'document', 'skill', 'rss', 'calendar', 'feishu'])
+  return {
+    meta: {
+      type: 'problem',
+      docs: {
+        description: 'disallow product adapter id checks in turn-engine',
+      },
+      messages: {
+        noCoordinatorIdLeak: 'Do not compare DomainAdapter id values in turn-engine; move product behavior into the adapter.',
+      },
+      schema: [],
+    },
+    create(context) {
+      const rawFilePath = context.filename && !context.filename.startsWith('<')
+        ? context.filename
+        : context.physicalFilename
+      const filePath = normalizeFilePath(
+        isAbsolute(rawFilePath) ? relative(process.cwd(), rawFilePath) : rawFilePath,
+      )
+      if (filePath !== 'src/main/modules/agent-control/turn-engine.ts') return {}
+
+      function isAdapterIdMember(node) {
+        if (node?.type === 'ChainExpression') {
+          return isAdapterIdMember(node.expression)
+        }
+        if (!node || node.type !== 'MemberExpression') return false
+        const property = node.property
+        return !node.computed && property?.type === 'Identifier' && property.name === 'id'
+      }
+
+      function isProductLiteral(node) {
+        return node?.type === 'Literal'
+          && typeof node.value === 'string'
+          && productIds.has(node.value)
+      }
+
+      return {
+        BinaryExpression(node) {
+          if (node.operator !== '===' && node.operator !== '!==') return
+          if (
+            (isAdapterIdMember(node.left) && isProductLiteral(node.right))
+            || (isProductLiteral(node.left) && isAdapterIdMember(node.right))
+          ) {
+            context.report({
+              node,
+              messageId: 'noCoordinatorIdLeak',
+            })
+          }
+        },
+      }
+    },
+  }
+}
+
 function isAgentControlOutsideSubagent(filePath) {
   return filePath.startsWith('src/main/modules/agent-control/')
     && !filePath.startsWith('src/main/modules/agent-control/sub-agent/')
@@ -167,6 +222,7 @@ const rules = {
     message: 'Do not add migration TODO placeholders; file a staged plan or remove the TODO.',
   }),
   'no-subagent-leak': createNoSubagentLeakRule(),
+  'no-coordinator-id-leak': createNoCoordinatorIdLeakRule(),
 }
 
 export default {

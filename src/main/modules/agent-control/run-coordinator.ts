@@ -32,7 +32,11 @@ function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined):
 export class RunCoordinator {
   constructor(private readonly deps: {
     promptAssembly: {
-      buildForScopedRun: (params: { scope: ConversationScope; message: RunMessage }) => Promise<PreparedRunPayload>
+      buildForScopedRun: (params: {
+        scope: ConversationScope
+        message: RunMessage
+        coordinators: RunCoordinatorRequest['coordinators']
+      }) => Promise<PreparedRunPayload>
       applyToMessage: (message: RunMessage, prepared: PreparedRunPayload) => RunMessage
       recordRunOutcome: (payload: {
         scope: ConversationScope
@@ -85,6 +89,7 @@ export class RunCoordinator {
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
       message: request.message,
+      coordinators: request.coordinators,
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 

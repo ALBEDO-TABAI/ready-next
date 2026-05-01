@@ -23,6 +23,7 @@ import {
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
+import type { DomainAdapter } from './domain-adapter'
 import {
   snapshotLastReferenceSkill,
   restoreLastReferenceSkill,
@@ -287,6 +288,10 @@ export class AgentControlRuntime extends EventEmitter {
 
   getPromptAssembly(): PromptAssemblyService {
     return this.promptAssembly
+  }
+
+  private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.orchestrator.getDomainAdapters()
   }
 
   getExternalMemoryProviderSlot(): ExternalMemoryProviderSlot {
@@ -826,6 +831,7 @@ export class AgentControlRuntime extends EventEmitter {
         parentStepId: payload.parentStepId,
         sessionIdOverride: payload.sessionIdOverride,
         continuationIntent: normalizedContinuationIntent,
+        coordinators: this.getDomainAdapters(),
       },
       {
         onSuccess: async (result) => {
@@ -1411,7 +1417,8 @@ export class AgentControlRuntime extends EventEmitter {
         message: promptPayload as
           | string
           | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId
+        requestId,
+        coordinators: this.getDomainAdapters()
       },
       {
         onFailure: async (errorText) => {
