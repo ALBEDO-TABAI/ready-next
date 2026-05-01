@@ -6,6 +6,7 @@ import type { ToolExecutionOutput } from './tool-result-types'
 import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from './metrics'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
@@ -39,6 +40,13 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   // so reference-skill turns didn't surface it as a recommended next step.
   'skill_inspect_run_state',
 ]
+
+function errorKind(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    return (error as { code: string }).code
+  }
+  return error instanceof Error ? error.name : typeof error
+}
 
 interface SkillToolRef {
   name?: string
@@ -350,6 +358,7 @@ export class SkillContextOrchestrator {
     if (!root || !existsSync(root)) {
       return { text: null, basename: null, truncated: false }
     }
+    const readFailures: Array<{ basename: string; path: string; errorKind: string }> = []
     for (const basename of REFERENCE_SKILL_DOC_CANDIDATES) {
       const absPath = join(root, basename)
       if (!existsSync(absPath)) continue
@@ -358,12 +367,21 @@ export class SkillContextOrchestrator {
         const truncated = raw.length > REFERENCE_SKILL_INLINE_CAP_CHARS
         const text = truncated ? raw.slice(0, REFERENCE_SKILL_INLINE_CAP_CHARS) : raw
         return { text, basename, truncated }
-      } catch {
+      } catch (error) {
+        readFailures.push({ basename, path: absPath, errorKind: errorKind(error) })
         // Permission or read failure — try the next candidate, then fall
         // through to the tool-call path. Don't bubble the error; the whole
         // reference-skill inject is best-effort.
         continue
       }
+    }
+    for (const failure of readFailures) {
+      logAgentMetric(TOOL_ERROR_METRICS.skillReferenceInlineFailed, {
+        skillId: skill.id,
+        basename: failure.basename,
+        path: failure.path,
+        errorKind: failure.errorKind,
+      })
     }
     return { text: null, basename: null, truncated: false }
   }

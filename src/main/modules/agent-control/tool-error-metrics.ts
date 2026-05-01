@@ -105,8 +105,16 @@ export const TOOL_ERROR_METRICS = {
    * Phase 1.4 — `parseScopeMeta` 发现 conversation_scope.meta_json 不是合法 JSON
    * 时打这条。以前默默吞成 `{}`，会让 `lastReferenceSkill` 之类的字段无声丢失。
    * emit 附 `{ scopeId, sample }`（sample 截前 80 字符防爆）。
-   */
+  */
   metaParseCorrupted: 'meta_parse_corrupted',
+  /** H1 — secret decrypt failed; caller falls back to the stored raw value. */
+  secretDecryptFailed: 'secret_decrypt_failed',
+  /** H1 — direct reference-skill SKILL.md/README inline read failed before tool fallback. */
+  skillReferenceInlineFailed: 'skill_reference_inline_failed',
+  /** H1 — long-running skill projection could only partially inspect run_state/artifacts. */
+  skillProjectionPartial: 'skill_projection_partial',
+  /** H1 — run_state candidate traversal skipped an unreadable directory. */
+  runStateSelectionDirSkipped: 'run_state_selection_dir_skipped',
   /**
    * Phase 3.2 — turn-engine 在把模型 assistant 文本写入 session.messages
    * 之前，检测到残留的 tool_call 标记（`<tool_call>` / `<function=` /

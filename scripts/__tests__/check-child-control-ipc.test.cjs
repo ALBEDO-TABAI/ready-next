@@ -22,11 +22,16 @@ test('child control checker accepts the required IPC, preload, type, UI, and run
   const root = mkdtempSync(join(tmpdir(), 'ready-child-control-ok-'))
   try {
     write(root, 'src/main/modules/claude-bridge/ipc-handler.ts', `
+      import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
       ipcMain.handle('agent:listActiveChildRuns', () => {})
-      ipcMain.handle('agent:cancelChildRun', () => {
+      ipcMain.handle('agent:cancelChildRun', () => {})
+    `)
+    write(root, 'src/main/modules/claude-bridge/active-child-run-ipc.ts', `
+      export function listActiveChildRunsForIpc() {}
+      export async function cancelChildRunForIpc() {
         if (!childRunId) return { success: false, error: 'childRunId is required' }
         return cancelSkillChildRun(childRunId, { source: 'ui_button' })
-      })
+      }
     `)
     write(root, 'src/preload/index.ts', `
       const agentAPI = {

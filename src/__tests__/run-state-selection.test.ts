@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { selectRunStateCandidate } from '../main/modules/agent-control/run-state-selection'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
@@ -154,6 +156,26 @@ test('run_state selection accepts explicit legacy blank task id paths', () => {
     assert.equal(selected.ambiguous, false)
     assert.equal(selected.candidates.length, 1)
   } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('run_state selection emits a metric when directory traversal is skipped', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-skipped-dir-'))
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    chmodSync(root, 0o000)
+    const selected = selectRunStateCandidate({ rootDir: root })
+
+    assert.equal(selected.path, null)
+    const event = events.find((item) => item.metric === TOOL_ERROR_METRICS.runStateSelectionDirSkipped)
+    assert.ok(event)
+    assert.equal(event.dir, root)
+    assert.equal(event.errorKind, 'EACCES')
+  } finally {
+    __setMetricSinkForTests(null)
+    chmodSync(root, 0o700)
     rmSync(root, { recursive: true, force: true })
   }
 })

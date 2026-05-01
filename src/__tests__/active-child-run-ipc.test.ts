@@ -1,37 +1,40 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
 
-const root = resolve(import.meta.dirname, '..', '..')
+import {
+  cancelChildRunForIpc,
+  listActiveChildRunsForIpc,
+} from '../main/modules/claude-bridge/active-child-run-ipc'
 
-test('active child run IPC surface stays wired through main, preload, renderer types, and Settings', () => {
-  const ipc = read('src/main/modules/claude-bridge/ipc-handler.ts')
-  const preload = read('src/preload/index.ts')
-  const types = read('src/renderer/types/electron.d.ts')
-  const settings = read('src/renderer/pages/Settings.tsx')
+test('listActiveChildRunsForIpc returns active child run summaries from runtime', () => {
+  const rows = [{
+    childRunId: 'vcr_1',
+    status: 'running',
+    startedAt: '2026-05-02T00:00:00.000Z',
+  }]
+  const runtime = {
+    listActiveChildRuns: () => rows,
+  }
 
-  assert.match(ipc, /agent:listActiveChildRuns/)
-  assert.match(ipc, /agent:cancelChildRun/)
-  assert.match(ipc, /childRunId is required/)
-  assert.match(ipc, /source:\s*['"]ui_button['"]/)
-  assert.match(preload, /listActiveChildRuns:\s*\(\)\s*=>\s*ipcRenderer\.invoke\(['"]agent:listActiveChildRuns['"]\)/)
-  assert.match(preload, /cancelChildRun:\s*\(childRunId:\s*string\)\s*=>/)
-  assert.match(types, /interface ActiveChildRunSummaryData/)
-  assert.match(types, /listActiveChildRuns:\s*\(\)\s*=>\s*Promise<IPCResponse<ActiveChildRunSummaryData\[\]>>/)
-  assert.match(types, /cancelChildRun:\s*\(\s*childRunId:\s*string\s*\)\s*=>\s*Promise<IPCResponse/)
-  assert.match(settings, /ActiveChildRunsDebug/)
+  const response = listActiveChildRunsForIpc(runtime)
+
+  assert.deepEqual(response, { success: true, data: rows })
 })
 
-test('child runner exposes summaries and records cancellation source for metrics', () => {
-  const runner = read('src/main/modules/agent-control/skill-child-runner.ts')
+test('cancelChildRunForIpc validates childRunId and records ui_button source', async () => {
+  const seen: Array<{ childRunId: string; source: string }> = []
+  const closeEvent = { status: 'cancelled', terminalReason: 'cancelled_user' }
+  const runtime = {
+    cancelChildRun: async (childRunId: string, options: { source: 'ui_button' }) => {
+      seen.push({ childRunId, source: options.source })
+      return closeEvent
+    },
+  }
 
-  assert.match(runner, /listActiveRuns\(/)
-  assert.match(runner, /startedAt:\s*string/)
-  assert.match(runner, /CancelSkillChildRunSource\s*=\s*['"]nlp['"]\s*\|\s*['"]ui_button['"]/)
-  assert.match(runner, /skill_child_run_cancel_requested/)
+  const missing = await cancelChildRunForIpc(runtime, { childRunId: '   ' })
+  const cancelled = await cancelChildRunForIpc(runtime, { childRunId: '  vcr_123  ' })
+
+  assert.deepEqual(missing, { success: false, error: 'childRunId is required' })
+  assert.deepEqual(cancelled, { success: true, data: closeEvent })
+  assert.deepEqual(seen, [{ childRunId: 'vcr_123', source: 'ui_button' }])
 })
-
-function read(path: string): string {
-  return readFileSync(resolve(root, path), 'utf8')
-}

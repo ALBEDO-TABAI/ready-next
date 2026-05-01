@@ -73,3 +73,97 @@ test('sweepExpiredReferenceSkillHints is safe on empty state and keeps the TTL c
   // TTL constant is sane.
   assert.equal(REFERENCE_SKILL_HINT_TTL_MS, 30 * 60 * 1000)
 })
+
+test('runtime-manager reference-hint sweep start is idempotent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'reference-hint-sweep-idempotent-'))
+  const capture = captureTimerRegistration()
+  const warns = captureConsoleWarn()
+  const manager = new SkillsRuntimeManager({
+    runtimeRoot: root,
+    startBackgroundTasks: false,
+  })
+  try {
+    ;(manager as unknown as { startReferenceHintSweep: () => void }).startReferenceHintSweep()
+    ;(manager as unknown as { startReferenceHintSweep: () => void }).startReferenceHintSweep()
+
+    assert.equal(capture.timeouts(), 1)
+    assert.equal(capture.intervals(), 1)
+    assert.match(warns.messages().join('\n'), /reference-hint sweep already running/)
+  } finally {
+    manager.stopReferenceHintSweep()
+    capture.restore()
+    warns.restore()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('runtime-manager outputDir sweep start is idempotent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'output-dir-sweep-idempotent-'))
+  const capture = captureTimerRegistration()
+  const warns = captureConsoleWarn()
+  const manager = new SkillsRuntimeManager({
+    runtimeRoot: root,
+    startBackgroundTasks: false,
+  })
+  try {
+    ;(manager as unknown as { startOutputDirSweep: () => void }).startOutputDirSweep()
+    ;(manager as unknown as { startOutputDirSweep: () => void }).startOutputDirSweep()
+
+    assert.equal(capture.timeouts(), 1)
+    assert.equal(capture.intervals(), 1)
+    assert.match(warns.messages().join('\n'), /outputDir sweep already running/)
+  } finally {
+    manager.stopOutputDirSweep()
+    capture.restore()
+    warns.restore()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+function captureTimerRegistration(): {
+  timeouts: () => number
+  intervals: () => number
+  restore: () => void
+} {
+  const originalSetTimeout = globalThis.setTimeout
+  const originalSetInterval = globalThis.setInterval
+  const originalClearTimeout = globalThis.clearTimeout
+  const originalClearInterval = globalThis.clearInterval
+  let timeouts = 0
+  let intervals = 0
+  globalThis.setTimeout = ((..._args: Parameters<typeof setTimeout>) => {
+    timeouts += 1
+    return { kind: 'timeout', id: timeouts } as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout
+  globalThis.setInterval = ((..._args: Parameters<typeof setInterval>) => {
+    intervals += 1
+    return { kind: 'interval', id: intervals } as unknown as ReturnType<typeof setInterval>
+  }) as typeof setInterval
+  globalThis.clearTimeout = ((_handle?: ReturnType<typeof setTimeout>) => {}) as typeof clearTimeout
+  globalThis.clearInterval = ((_handle?: ReturnType<typeof setInterval>) => {}) as typeof clearInterval
+  return {
+    timeouts: () => timeouts,
+    intervals: () => intervals,
+    restore: () => {
+      globalThis.setTimeout = originalSetTimeout
+      globalThis.setInterval = originalSetInterval
+      globalThis.clearTimeout = originalClearTimeout
+      globalThis.clearInterval = originalClearInterval
+    },
+  }
+}
+
+function captureConsoleWarn(): {
+  messages: () => string[]
+  restore: () => void
+} {
+  const originalWarn = console.warn
+  const messages: string[] = []
+  console.warn = (...args: unknown[]) => {
+    messages.push(args.map(String).join(' '))
+  }
+  return {
+    messages: () => messages,
+    restore: () => { console.warn = originalWarn },
+  }
+}

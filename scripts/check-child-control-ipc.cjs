@@ -9,6 +9,15 @@ const REQUIRED = [
     checks: [
       ['list IPC handler', /agent:listActiveChildRuns/],
       ['cancel IPC handler', /agent:cancelChildRun/],
+      ['list IPC helper', /listActiveChildRunsForIpc/],
+      ['cancel IPC helper', /cancelChildRunForIpc/],
+    ],
+  },
+  {
+    file: 'src/main/modules/claude-bridge/active-child-run-ipc.ts',
+    checks: [
+      ['list helper export', /export function listActiveChildRunsForIpc/],
+      ['cancel helper export', /export async function cancelChildRunForIpc/],
       ['cancel IPC validates childRunId', /childRunId is required/],
       ['UI cancel source', /source:\s*['"]ui_button['"]/],
     ],

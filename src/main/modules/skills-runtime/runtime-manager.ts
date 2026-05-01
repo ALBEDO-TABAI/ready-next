@@ -469,6 +469,10 @@ export class SkillsRuntimeManager {
    * `skill_reference_hint_ttl_swept` — see CHANGELOG.md.
    */
   private startReferenceHintSweep(): void {
+    if (this.referenceHintBootTimer || this.referenceHintIntervalTimer) {
+      console.warn('[SkillsRuntimeManager] reference-hint sweep already running; start skipped')
+      return
+    }
     const sweep = (): void => {
       try {
         sweepExpiredReferenceSkillHints()
@@ -499,6 +503,10 @@ export class SkillsRuntimeManager {
   }
 
   private startOutputDirSweep(): void {
+    if (this.outputDirSweepBootTimer || this.outputDirSweepIntervalTimer) {
+      console.warn('[SkillsRuntimeManager] outputDir sweep already running; start skipped')
+      return
+    }
     const sweep = (): void => {
       void (async () => {
         try {

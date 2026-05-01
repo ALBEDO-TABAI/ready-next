@@ -138,8 +138,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - Phase 4 起 `skill_executions` 表和 `ttlSwept = 'skill_executions_ttl_swept'` 指标都已退役。仍需要 TTL 的只剩 reference-skill hints（in-memory Map）：`skillReferenceHintTtlSwept = 'skill_reference_hint_ttl_swept'` 由 `SkillsRuntimeManager.startReferenceHintSweep` 驱动，启动后 30s 首跑、之后每小时跑一次，30 分钟 idle 的 hint 被淘汰。ephemeral ask_user 记录（`eau-<8hex>`）继续用 `EphemeralExecutionStore`，完全独立于 SQLite
 
 ### 6.12 Skill 原语沙箱边界（B Phase 1）
-- `skill_run_shell` 的命令白名单（Phase 1）：`python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / which / mkdir / pwd / echo / awk / sed / yt-dlp / ffmpeg / ffprobe / scenedetect`，维护在 `src/main/modules/tools/skill-primitives/run-shell.ts::SHELL_ALLOWLIST`；扩展机制为 PR 级别修改白名单常量，**不**提供用户配置开关；遇到 embedded skill 需要的命令打点 `skillPrimitiveRejected{reason:'cmd_not_allowlisted'}` 再统一评估；脚本必须通过 `bash scripts/x.sh` 或 `python scripts/x.py` 调用，不允许直接 `./scripts/x.sh`
-- `parseCommand` 仍用于简单命令的双引号分词；简单命令里出现 POSIX 单引号或不平衡的双引号时抛 `CommandParseError`，handler 转换为 `errorKind: 'command_parse_failed'`。若命令包含 `cd`、`$VAR`、`&&`、管道、重定向，或是 `bash/sh` 包裹的 POSIX 单引号写法，或是 `python/node/grep/find/awk/sed/yt-dlp/scenedetect` 这类脚本探针里的单引号片段，则由 `bash -c` 兼容执行，但仍拒绝 `rm/cp/mv` 这类破坏性文件命令
+- `skill_run_shell` 的基础命令白名单（18 个）：`python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / which / mkdir / pwd / echo / awk / sed`，维护在 `src/main/modules/tools/skill-primitives/run-shell.ts::SHELL_ALLOWLIST`；`host_requirements.shell_allowlist_extensions` 只会在当前 session 命中 active/reference skill 时临时并入 effective allowlist，不是用户级全局开关；`yt-dlp / ffmpeg / ffprobe / scenedetect` 不在基础白名单，直调时必须来自 scoped extension，脚本内部查找则依赖 runtime PATH；脚本必须通过 `bash scripts/x.sh` 或 `python scripts/x.py` 调用，不允许直接 `./scripts/x.sh`
+- `parseCommand` 仍用于简单命令的双引号分词；简单命令里出现 POSIX 单引号或不平衡的双引号时抛 `CommandParseError`，handler 转换为 `errorKind: 'command_parse_failed'`。若命令包含 `cd`、`$VAR`、`&&`、管道、重定向，或是 `bash/sh` 包裹的 POSIX 单引号写法，或是 `python/node/grep/find/awk/sed` 这类脚本探针里的单引号片段，则由 `bash -c` 兼容执行，但仍拒绝 `rm/cp/mv` 这类破坏性文件命令
 - `skill_run_shell` 的超时 kill：Unix 走 `spawn({ detached: true })` 并用 `process.kill(-pid, SIGTERM)` 杀整个进程组，覆盖 bash/sh 孕育的孙进程；5s 后若仍存活升级 `SIGKILL`；Windows 回退到 `child.kill`
 - stdout / stderr 默认上限 8K 字符，超出时把完整内容写入 `<artifactRoot>/.logs/shell-<ts>-<uuid>-<stream>.txt` 并返回 `stdoutArtifactPath` / `stderrArtifactPath`；overflow 写入失败不吞掉命令主结果，通过 `stdoutArtifactError` / `stderrArtifactError` 暴露，同时 emit `skillPrimitiveRejected{reason:'overflow_artifact_write_failed'}`
 - `skill_write_artifact` 只能写 `<artifactRoot>` 子树；绝对路径 / `..` 穿越 / symlink 逃逸 / 保留文件（`SKILL.md` / `ready-skill.json` / `skill.workflow.json` / `MANIFEST.json`，大小写不敏感）一律拒绝；单次写入字节上限 `WRITE_ARTIFACT_HARD_CAP_BYTES = 50 MB`，超出返回 `errorKind: 'size_limit'`
@@ -147,7 +147,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `skill_patch_config` 只能修改当前 skill manifest 的 `host_requirements.config_repair.files` 明确声明的 JSON 文件；支持 JSON pointer `set/delete`、原子写入、回读校验，返回值必须 mask key/token/secret。配置校验不过只能保持 blocked，不允许说“已修复”
 - 原语 Phase 1 **不提供并发锁**：同一 skill 对同一 path 的 `skill_write_artifact` 并发写以最后赢家为准；若未来某 skill 证实需要原子性，按需引入文件锁或 `mkdtemp + rename`
 - 原语曝光受 `filterSkillPrimitivesBySession` 管控：Phase 4 起 session 的"有 active execution"信号永久 false（`skill_executions` 已退役），**primitive 的曝光条件 = session 有 reference-skill hint 或 running/blocked skill task run**；`clearAllReferenceSkillHints` 在 `cleanupAgentRuntime`（app 退出）触发，`sweepExpiredReferenceSkillHints` 由 `startReferenceHintSweep` 独立 setInterval 驱动（不再挂在 skill_executions TTL sweep 上），idle 超过 30 分钟的 hint 被淘汰，emit `skillReferenceHintTtlSwept` metric
-- `skill_run_shell` 的子进程 `PATH` 由 dispatch 层（`skills-tools.ts`）自动前置 runtime bin + 共享 venv bin（`SkillsRuntimeManager.getRuntimeBinDir()` → `<runtimeRoot>/bin`，`getSharedVenvBinDir()` → `<venvRoot>/bin` Unix / `<venvRoot>/Scripts` Windows），确保 `ffmpeg/ffprobe` symlink 和 `requirements.txt` 驱动安装到共享 venv 的 Python 依赖都可被脚本找到；handler 本身不做路径解析，缺失时走 no-op
+- `skill_run_shell` 的子进程 `PATH` 由 dispatch 层（`skills-tools.ts`）自动前置 runtime bin + 共享 venv bin（`SkillsRuntimeManager.getRuntimeBinDir()` → `<runtimeRoot>/bin`，`getSharedVenvBinDir()` → `<venvRoot>/bin` Unix / `<venvRoot>/Scripts` Windows），确保 `yt-dlp / ffmpeg / ffprobe / scenedetect` 这类 runtime bin 和 `requirements.txt` 驱动安装到共享 venv 的 Python 依赖都可被脚本找到；handler 本身不做路径解析，缺失时走 no-op
 
 ### 6.13 Skill 长任务状态与续跑
 - `run_state` / VEA 输出目录选择必须以 expected task id 为第一身份；恢复路径、tracker fallback、root `run_state.json` 只有在 task id 匹配或被标记为可信显式路径时才能算命中
@@ -184,7 +184,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 新 child-run JSONL 写到 `<runtimeRoot>/.ready/child-runs/<childRunId>.jsonl`；resume reader 优先新路径，只有新路径缺失或为空时才回退旧 `<outputDir>/.ready/child-runs/<childRunId>.jsonl`，保证升级前暂停的 run 可续跑。
 - retry policy 必须显式覆盖 17 个 terminal reason：`queued_global_concurrency` 保留 3 次、每次 5s 的重试语义；`nested_child_run_not_supported` 不重试；`resume_launch_failed` 走 2s / 10s 两次退避。
 - 同一个 single-flight key 在 5 分钟内连续 5 次失败会进入 15 分钟 cooldown；期间返回软失败 `error.kind='circuit_break'` 并打 `child_run_circuit_break` metric。该状态是内存态，重启 Electron 会清空。
-- child runner 执行动作必须走 `executeSkillActionViaToolGateway`，不允许再直接绕到 runtime `runSkill`；显式 child-internal permission context 是主路径，implicit admission 只能作为安全兜底。
+- child runner 执行动作必须走 `executeSkillActionViaToolGateway`，不允许再直接绕到 runtime `runSkill`；runner 通过 `childInternal: true` 与 `childInternalSkillAction` 上下文进入 gateway，再由 `tool-executor` 做 admission；implicit admission 只能作为安全兜底，不是主路径。
 - `npm run verify:e` 必须内嵌 `npm run verify:d`，并覆盖 atomic write、outputDir/log lifecycle、legacy resume fallback、retry policy、circuit breaker 与 gateway admission 相关测试。
 
 ### 6.17 测试规约

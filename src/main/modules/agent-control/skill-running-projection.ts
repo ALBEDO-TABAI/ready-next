@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { logAgentMetric } from './metrics'
 import { selectRunStateCandidate } from './run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const SEARCH_DEPTH_LIMIT = 1
@@ -31,6 +33,21 @@ interface ArtifactRef {
   meta?: Record<string, unknown>
 }
 
+function errorKind(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    return (error as { code: string }).code
+  }
+  return error instanceof Error ? error.name : typeof error
+}
+
+function emitProjectionPartial(phase: 'stat' | 'parse' | 'readdir', path: string, error: unknown): void {
+  logAgentMetric(TOOL_ERROR_METRICS.skillProjectionPartial, {
+    phase,
+    path,
+    errorKind: errorKind(error),
+  })
+}
+
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -48,6 +65,7 @@ function stringifyStateValue(value: unknown): string | null {
   try {
     return JSON.stringify(value)
   } catch {
+    // silent-catch: stringify of arbitrary value, fallback to String() coercion is acceptable
     return String(value)
   }
 }
@@ -91,7 +109,8 @@ function extractRunStateSummary(parsed: unknown): RunStateSummary {
 function safeStat(path: string) {
   try {
     return statSync(path)
-  } catch {
+  } catch (error) {
+    emitProjectionPartial('stat', path, error)
     return null
   }
 }
@@ -100,7 +119,8 @@ function readRunState(path: string | null): RunStateSummary | null {
   if (!path) return null
   try {
     return extractRunStateSummary(JSON.parse(readFileSync(path, 'utf8')))
-  } catch {
+  } catch (error) {
+    emitProjectionPartial('parse', path, error)
     return null
   }
 }
@@ -166,7 +186,8 @@ function collectArtifacts(params: {
     let entries: Dirent[]
     try {
       entries = readdirSync(dir, { withFileTypes: true }) as unknown as Dirent[]
-    } catch {
+    } catch (error) {
+      emitProjectionPartial('readdir', dir, error)
       return
     }
     for (const entry of entries) {

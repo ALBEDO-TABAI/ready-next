@@ -1,6 +1,8 @@
 import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 
 const DEFAULT_RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_SEARCH_DEPTH = 1
@@ -19,6 +21,13 @@ export interface RunStateSelection {
   candidates: RunStateCandidate[]
 }
 export type NormalizedRunStateStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+
+function errorKind(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    return (error as { code: string }).code
+  }
+  return error instanceof Error ? error.name : typeof error
+}
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
@@ -132,7 +141,11 @@ export function collectRunStateCandidates(params: {
     let entries: Dirent[]
     try {
       entries = readdirSync(dir, { withFileTypes: true }) as unknown as Dirent[]
-    } catch {
+    } catch (error) {
+      logAgentMetric(TOOL_ERROR_METRICS.runStateSelectionDirSkipped, {
+        dir,
+        errorKind: errorKind(error),
+      })
       return
     }
     for (const entry of entries) {

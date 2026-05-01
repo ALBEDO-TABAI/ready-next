@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skill-running-projection'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
 test('long skill running projection includes run_state and intermediate artifacts', () => {
   const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))
@@ -186,4 +188,61 @@ test('long skill running projection still shows a live confirmation before artif
   })
 
   assert.match(String(projection.taskSummary), /工具仍在运行/)
+})
+
+test('long skill running projection emits phase-specific metrics for partial stat and parse failures', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-metric-'))
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    const runStatePath = join(root, 'run_state.json')
+    writeFileSync(runStatePath, '{not-json', 'utf8')
+
+    buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: root },
+      startedAt: 0,
+      now: 10_000,
+    })
+    buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: join(root, 'missing') },
+      startedAt: 0,
+      now: 10_000,
+    })
+
+    const partials = events.filter((event) => event.metric === TOOL_ERROR_METRICS.skillProjectionPartial)
+    assert.ok(partials.some((event) => event.phase === 'parse' && event.path === runStatePath && event.errorKind === 'SyntaxError'))
+    assert.ok(partials.some((event) => event.phase === 'stat' && event.path === join(root, 'missing') && event.errorKind === 'ENOENT'))
+  } finally {
+    __setMetricSinkForTests(null)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('long skill running projection emits readdir phase when artifact traversal cannot read a directory', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-readdir-'))
+  const locked = join(root, 'locked')
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    mkdirSync(locked)
+    chmodSync(locked, 0o000)
+    buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: locked },
+      startedAt: 0,
+      now: 10_000,
+    })
+
+    const partials = events.filter((event) => event.metric === TOOL_ERROR_METRICS.skillProjectionPartial)
+    assert.ok(partials.some((event) => event.phase === 'readdir' && event.path === locked && event.errorKind === 'EACCES'))
+  } finally {
+    __setMetricSinkForTests(null)
+    chmodSync(locked, 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
 })

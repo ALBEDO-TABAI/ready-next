@@ -19,17 +19,31 @@ test('registry exposes documented tool-error metric keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
     'childResumeDisabledByFlag',
+    'childRunCircuitBreak',
+    'childRunLogGc',
+    'childRunnerLifecycleWriteFailed',
+    'compactionCircuitBreak',
+    'compactionL2Failed',
     'domainToolNarrowingApplied',
+    'hookHandlerFailed',
+    'hookHandlerTimeout',
     'inputValidation',
     'metaParseCorrupted',
+    'outputDirGc',
+    'outputDirSweepFailed',
     'resolutionViolation',
+    'runStateSelectionDirSkipped',
+    'secretDecryptFailed',
     'sessionRecallAutoAttached',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
+    'skillProjectionPartial',
     'skillReferenceHintRecoveredFromCapsule',
     'skillReferenceHintTtlSwept',
+    'skillReferenceInlineFailed',
     'subagentCleanupDrainFailed',
     'surfaced',
+    'systemReminderSuppressedByConflict',
     'toolCallTextIntercepted',
     'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
@@ -74,4 +88,9 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
   // A1 SubAgent skeleton — lifecycle cleanup drain failure observability
   assert.equal(TOOL_ERROR_METRICS.subagentCleanupDrainFailed, 'subagent_cleanup_drain_failed')
+  // H1 — previously silent fallback paths now emit observability.
+  assert.equal(TOOL_ERROR_METRICS.secretDecryptFailed, 'secret_decrypt_failed')
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceInlineFailed, 'skill_reference_inline_failed')
+  assert.equal(TOOL_ERROR_METRICS.skillProjectionPartial, 'skill_projection_partial')
+  assert.equal(TOOL_ERROR_METRICS.runStateSelectionDirSkipped, 'run_state_selection_dir_skipped')
 })

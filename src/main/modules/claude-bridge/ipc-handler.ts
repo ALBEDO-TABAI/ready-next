@@ -20,6 +20,7 @@ import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
+import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -569,22 +570,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   })
 
   ipcMain.handle('agent:listActiveChildRuns', (): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listActiveChildRuns() }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+    return listActiveChildRunsForIpc(runtime)
   })
 
   ipcMain.handle('agent:cancelChildRun', async (_, payload: { childRunId?: string }): Promise<IPCResponse> => {
-    try {
-      const childRunId = String(payload?.childRunId || '').trim()
-      if (!childRunId) return { success: false, error: 'childRunId is required' }
-      const close = await runtime!.cancelChildRun(childRunId, { source: 'ui_button' })
-      return { success: true, data: close }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+    return cancelChildRunForIpc(runtime, payload)
   })
 
   ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
