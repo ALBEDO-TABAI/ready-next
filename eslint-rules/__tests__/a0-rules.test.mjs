@@ -212,3 +212,59 @@ tester.run('ready/no-coordinator-id-leak', rules['no-coordinator-id-leak'], {
     },
   ],
 })
+
+tester.run('ready/no-inline-system-reminder-write', rules['no-inline-system-reminder-write'], {
+  valid: [
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const entry = { systemReminder: null }",
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const entry = { systemReminder: registry.compose() }",
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "session.messages.push({ role: 'user', content })",
+    },
+    {
+      filename: 'src/main/modules/agent-control/planner.ts',
+      code: "session.messages.push({ role: 'user', content: '系统补充：planner fixture' })",
+    },
+  ],
+  invalid: [
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const entry = { systemReminder: '系统提醒：请继续' }",
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: 'const entry = { systemReminder: `系统补充：${reason}` }',
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "const entry = { systemReminder: ['系统提醒：请继续', detail].join('\\n') }",
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: [
+        "const reminder = '系统补充：请继续'",
+        'const entry = { systemReminder: reminder }',
+      ].join('\n'),
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: "session.messages.push({ role: 'user', content: '系统补充：请继续' })",
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/turn-engine.ts',
+      code: 'session.messages.push({ role: "user", content: `系统提醒：${step}` })',
+      errors: [{ messageId: 'noInlineSystemReminderWrite' }],
+    },
+  ],
+})

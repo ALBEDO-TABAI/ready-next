@@ -24,8 +24,15 @@ import {
   selectSteeringMode,
   validateForcedActionInput,
 } from '../main/modules/agent-control/turn-frame-steering'
+import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminder-registry'
 import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/turn-frame'
 import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
+
+function composeReminder(topic: ReminderTopic, priority: number, text: string): string | null {
+  const registry = createSystemReminderRegistry()
+  registry.register({ topic, priority, text })
+  return registry.compose()
+}
 
 /**
  * Stage E test fixture — mints a `SkillRunContract` populated with the
@@ -121,8 +128,15 @@ test('buildTurnFrameSteering: force_tool sets requiredToolName to typed action',
   assert.equal(steering.mode, 'force_tool')
   assert.equal(steering.requiredToolName, 'skill_video_expert_pipeline')
   assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
-  assert.match(steering.systemReminder || '', /force_tool/)
-  assert.match(steering.systemReminder || '', /skill_video_expert_pipeline/)
+  const expectedReminder = [
+    '系统补充：本轮 TurnFrame 已锁定 force_tool 模式，必须直接调用 typed skill action skill_video_expert_pipeline 推进任务。',
+    '不要再用 skill_inspect_run_state / skill_read_artifact / skill_run_shell 做诊断；不要先解释、再决定下一步——直接发起 typed action 调用。',
+    'outputDir=/tmp/vea-output runStatePath=/tmp/vea-output/run_state.json',
+  ].join('\n')
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('force-tool-locked', 80, expectedReminder),
+  )
 })
 
 test('selectSteeringMode: skill_repair + ready_to_resume → force_tool', () => {
@@ -195,6 +209,15 @@ test('buildTurnFrameSteering: recentForceToolDispatched still preserves preferre
   // still sees the recommended next step. This keeps the model nudged
   // toward the typed action even when we cannot force it.
   assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+  const expectedReminder = [
+    '系统补充：当前 TurnFrame 已确认本轮是 skill continuation，优先调用 typed skill action skill_video_expert_pipeline 推进任务。',
+    'skill_run_shell 只用于必要诊断；不要用 shell 反复读取同一份 run_state 或脚本目录来替代 typed skill action。',
+    'outputDir=/tmp/vea-output runStatePath=/tmp/vea-output/run_state.json',
+  ].join('\n')
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('typed-action-preferred', 30, expectedReminder),
+  )
 })
 
 test('selectSteeringMode: force_tool requires resolvable typed action — falls back when action unresolvable', () => {
@@ -383,7 +406,15 @@ test('E2: buildTurnFrameSteering downgrades to checkpoint when contract lacks re
   assert.equal(steering.action!.mode, 'checkpoint')
   assert.deepEqual(steering.action!.missingInputs, ['url'])
   assert.match(steering.action!.reason, /missing_url/)
-  assert.match(steering.systemReminder || '', /url/)
+  const expectedReminder = [
+    '系统补充：本轮 TurnFrame 想强制调用 skill_video_expert_pipeline，但运行契约里缺少必需输入（缺少必需字段：url）。',
+    '请先补齐必要参数（例如 url / sceneScoresPath / outputDir），或调用 skill_inspect_run_state / skill_read_artifact 探查产出，再重新尝试。',
+    'outputDir=/tmp/vea-output runStatePath=/tmp/vea-output/run_state.json',
+  ].join('\n')
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('force-tool-missing', 90, expectedReminder),
+  )
 })
 
 test('E2: buildTurnFrameSteering preserves contract.actionInput when provided (Wave 2 happy path)', () => {

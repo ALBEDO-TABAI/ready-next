@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 
 import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
 import { resolveToolInputSchemaForExecution } from './tool-registry'
+import { createSystemReminderRegistry } from './system-reminder-registry'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
 import type { SkillChildCloseEvent } from './skill-child-run-types'
@@ -394,11 +395,13 @@ export function buildTurnFrameSteering(
     const reason = frame.skill && frame.liveness === 'failed'
       ? '系统补充：技能任务已失败，本轮进入 checkpoint，等待用户后续指令；不要继续工具循环。'
       : '系统补充：本轮预算已用尽且后台仍在运行，进入 checkpoint 让用户决定是否继续；不要再发起工具调用。'
+    const registry = createSystemReminderRegistry()
+    registry.register({ topic: 'checkpoint', priority: 100, text: reason })
     return {
       mode: 'checkpoint',
       requiredToolName: null,
       preferredToolNames: [],
-      systemReminder: reason,
+      systemReminder: registry.compose(),
       action: buildFrameAction({ frame, decidedMode: 'checkpoint', toolName: null }),
     }
   }
@@ -416,11 +419,14 @@ export function buildTurnFrameSteering(
       `系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=${childRunId}${childStatus ? `, status=${childStatus}` : ''}）。父循环只处理 status / resume / cancel，并等待 child close event。`,
       '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。',
     ]
+    const reminderText = reminderTokens.join('\n')
+    const registry = createSystemReminderRegistry()
+    registry.register({ topic: 'child-owned', priority: 85, text: reminderText })
     return {
       mode: 'ask_model',
       requiredToolName: null,
       preferredToolNames: [...CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES],
-      systemReminder: reminderTokens.join('\n'),
+      systemReminder: registry.compose(),
       action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: null }),
     }
   }
@@ -465,11 +471,13 @@ export function buildTurnFrameSteering(
         '请先补齐必要参数（例如 url / sceneScoresPath / outputDir），或调用 skill_inspect_run_state / skill_read_artifact 探查产出，再重新尝试。',
         handleText,
       ].filter(Boolean).join('\n')
+      const registry = createSystemReminderRegistry()
+      registry.register({ topic: 'force-tool-missing', priority: 90, text: systemReminder })
       return {
         mode: 'checkpoint',
         requiredToolName: null,
         preferredToolNames,
-        systemReminder,
+        systemReminder: registry.compose(),
         action,
       }
     }
@@ -478,11 +486,13 @@ export function buildTurnFrameSteering(
       '不要再用 skill_inspect_run_state / skill_read_artifact / skill_run_shell 做诊断；不要先解释、再决定下一步——直接发起 typed action 调用。',
       handleText,
     ].filter(Boolean).join('\n')
+    const registry = createSystemReminderRegistry()
+    registry.register({ topic: 'force-tool-locked', priority: 80, text: systemReminder })
     return {
       mode: 'force_tool',
       requiredToolName: typedToolName,
       preferredToolNames,
-      systemReminder,
+      systemReminder: registry.compose(),
       action,
     }
   }
@@ -492,12 +502,14 @@ export function buildTurnFrameSteering(
     'skill_run_shell 只用于必要诊断；不要用 shell 反复读取同一份 run_state 或脚本目录来替代 typed skill action。',
     handleText,
   ].filter(Boolean).join('\n')
+  const registry = createSystemReminderRegistry()
+  registry.register({ topic: 'typed-action-preferred', priority: 30, text: systemReminder })
 
   return {
     mode: 'ask_model',
     requiredToolName: null,
     preferredToolNames,
-    systemReminder,
+    systemReminder: registry.compose(),
     action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: typedToolName }),
   }
 }

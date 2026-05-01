@@ -179,6 +179,156 @@ function createNoCoordinatorIdLeakRule() {
   }
 }
 
+function createNoInlineSystemReminderWriteRule() {
+  return {
+    meta: {
+      type: 'problem',
+      docs: {
+        description: 'disallow inline system reminder writes outside the reminder registry',
+      },
+      messages: {
+        noInlineSystemReminderWrite: 'Compose system reminders through SystemReminderRegistry instead of writing inline reminder text.',
+      },
+      schema: [],
+    },
+    create(context) {
+      const rawFilePath = context.filename && !context.filename.startsWith('<')
+        ? context.filename
+        : context.physicalFilename
+      const filePath = normalizeFilePath(
+        isAbsolute(rawFilePath) ? relative(process.cwd(), rawFilePath) : rawFilePath,
+      )
+      const inlineReminderIdentifiers = new Set()
+
+      function unwrap(node) {
+        let current = node
+        while (
+          current
+          && (
+            current.type === 'TSAsExpression'
+            || current.type === 'TSTypeAssertion'
+            || current.type === 'TSNonNullExpression'
+            || current.type === 'ChainExpression'
+          )
+        ) {
+          current = current.expression
+        }
+        return current
+      }
+
+      function stringStartsReminder(text) {
+        return /^\s*系统(?:提醒|补充)：/.test(String(text || ''))
+      }
+
+      function isReminderLiteral(node, allowIdentifier = true) {
+        const unwrapped = unwrap(node)
+        if (!unwrapped) return false
+        if (unwrapped.type === 'Literal') {
+          return typeof unwrapped.value === 'string' && stringStartsReminder(unwrapped.value)
+        }
+        if (unwrapped.type === 'TemplateLiteral') {
+          return stringStartsReminder(unwrapped.quasis?.[0]?.value?.cooked || unwrapped.quasis?.[0]?.value?.raw || '')
+        }
+        if (allowIdentifier && unwrapped.type === 'Identifier') {
+          return inlineReminderIdentifiers.has(unwrapped.name)
+        }
+        if (unwrapped.type === 'ArrayExpression') {
+          return unwrapped.elements.some((element) => element && isReminderLiteral(element, allowIdentifier))
+        }
+        if (
+          unwrapped.type === 'CallExpression'
+          && unwrapped.callee?.type === 'MemberExpression'
+          && getStaticPropertyName(unwrapped.callee.property, unwrapped.callee.computed) === 'join'
+          && isReminderLiteral(unwrapped.callee.object, allowIdentifier)
+        ) {
+          return true
+        }
+        if (unwrapped.type === 'BinaryExpression' && unwrapped.operator === '+') {
+          return isReminderLiteral(unwrapped.left, allowIdentifier) || isReminderLiteral(unwrapped.right, allowIdentifier)
+        }
+        return false
+      }
+
+      function getStaticPropertyName(property, computed) {
+        if (!computed && property?.type === 'Identifier') return property.name
+        if (property?.type === 'Literal' && typeof property.value === 'string') return property.value
+        return null
+      }
+
+      function isSystemReminderProperty(property) {
+        if (!property || property.type !== 'Property') return false
+        return getStaticPropertyName(property.key, property.computed) === 'systemReminder'
+      }
+
+      function getObjectProperty(objectExpression, propertyName) {
+        if (!objectExpression || objectExpression.type !== 'ObjectExpression') return null
+        return objectExpression.properties.find((property) =>
+          property?.type === 'Property'
+          && getStaticPropertyName(property.key, property.computed) === propertyName
+        ) || null
+      }
+
+      function isUserRoleProperty(property) {
+        return property
+          && property.type === 'Property'
+          && unwrap(property.value)?.type === 'Literal'
+          && unwrap(property.value)?.value === 'user'
+      }
+
+      function isSessionMessagesPush(node) {
+        const callee = unwrap(node.callee)
+        if (!callee || callee.type !== 'MemberExpression') return false
+        if (getStaticPropertyName(callee.property, callee.computed) !== 'push') return false
+        const target = unwrap(callee.object)
+        if (!target || target.type !== 'MemberExpression') return false
+        if (getStaticPropertyName(target.property, target.computed) !== 'messages') return false
+        const owner = unwrap(target.object)
+        return owner?.type === 'Identifier' && owner.name === 'session'
+      }
+
+      function isTestFile() {
+        return filePath.includes('/__tests__/') || filePath.startsWith('src/__tests__/')
+      }
+
+      return {
+        VariableDeclarator(node) {
+          if (node.id?.type !== 'Identifier' || !node.init) return
+          if (isReminderLiteral(node.init, false)) {
+            inlineReminderIdentifiers.add(node.id.name)
+          }
+        },
+        Property(node) {
+          if (isTestFile()) return
+          if (!isSystemReminderProperty(node)) return
+          const value = unwrap(node.value)
+          if (value?.type === 'Literal' && value.value === null) return
+          if (isReminderLiteral(value)) {
+            context.report({
+              node: node.value,
+              messageId: 'noInlineSystemReminderWrite',
+            })
+          }
+        },
+        CallExpression(node) {
+          if (filePath !== 'src/main/modules/agent-control/turn-engine.ts') return
+          if (!isSessionMessagesPush(node)) return
+          const message = unwrap(node.arguments?.[0])
+          if (!message || message.type !== 'ObjectExpression') return
+          const roleProperty = getObjectProperty(message, 'role')
+          if (!isUserRoleProperty(roleProperty)) return
+          const contentProperty = getObjectProperty(message, 'content')
+          if (contentProperty?.type !== 'Property') return
+          if (!isReminderLiteral(contentProperty.value, false)) return
+          context.report({
+            node: contentProperty.value,
+            messageId: 'noInlineSystemReminderWrite',
+          })
+        },
+      }
+    },
+  }
+}
+
 function isAgentControlOutsideSubagent(filePath) {
   return filePath.startsWith('src/main/modules/agent-control/')
     && !filePath.startsWith('src/main/modules/agent-control/sub-agent/')
@@ -223,6 +373,7 @@ const rules = {
   }),
   'no-subagent-leak': createNoSubagentLeakRule(),
   'no-coordinator-id-leak': createNoCoordinatorIdLeakRule(),
+  'no-inline-system-reminder-write': createNoInlineSystemReminderWriteRule(),
 }
 
 export default {

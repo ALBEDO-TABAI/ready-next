@@ -60,7 +60,8 @@ export default [
       'ready/no-legacy-backdoor': 'error',
       'ready/no-migration-todo': 'error',
       'ready/no-subagent-leak': 'error',
-      'ready/no-coordinator-id-leak': 'error'
+      'ready/no-coordinator-id-leak': 'error',
+      'ready/no-inline-system-reminder-write': 'error'
     }
   }
 ]

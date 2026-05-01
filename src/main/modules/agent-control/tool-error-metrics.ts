@@ -25,6 +25,16 @@ export const TOOL_ERROR_METRICS = {
   inputValidation: 'tool_input_validation_failed',
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
+  /** D W1 — SystemReminderRegistry 组装时因 topic 冲突压制了另一条 reminder */
+  systemReminderSuppressedByConflict: 'system_reminder_suppressed_by_conflict',
+  /** D W4 — LayeredCompactor 连续 L2 失败后熔断，后续只走 L1 */
+  compactionCircuitBreak: 'compaction_circuit_break',
+  /** D W4 — LayeredCompactor L2 压缩失败并回退到 L1 */
+  compactionL2Failed: 'compaction_l2_failed',
+  /** D W4 — HookRegistry handler 抛错，已吞掉并继续执行后续 handler */
+  hookHandlerFailed: 'hook_handler_failed',
+  /** D W4 — HookRegistry handler 超时，已跳过并继续执行后续 handler */
+  hookHandlerTimeout: 'hook_handler_timeout',
   /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
   skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
   /**

@@ -38,7 +38,8 @@
     "postinstall": "electron-builder install-app-deps",
     "test:c:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
     "test:c:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/coordinator-contract.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-capability-controller.test.ts src/__tests__/run-capability-controller-arbitration.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/browser-domain-orchestrator.test.ts",
-    "verify:c": "npm run typecheck && npm run lint:check && node scripts/check-coordinator-isolation.cjs && node scripts/check-eslint-baseline.cjs && npm run test:c:gates && npm run test:c:focus && npm run verify:b"
+    "verify:c": "npm run typecheck && npm run lint:check && node scripts/check-coordinator-isolation.cjs && node scripts/check-eslint-baseline.cjs && npm run test:c:gates && npm run test:c:focus && npm run verify:b",
+    "verify:d": "npm run verify:c && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/system-reminder-registry.test.ts src/__tests__/layered-compactor.test.ts src/__tests__/hook-registry.test.ts src/__tests__/turn-frame-steering.test.ts src/__tests__/turn-frame-steering-force-tool.test.ts src/__tests__/turn-engine-route.test.ts"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

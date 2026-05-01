@@ -205,6 +205,9 @@ import {
 } from './tool-result-types'
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
+import { createSystemReminderRegistry, type ReminderEntry } from './system-reminder-registry'
+import { createLayeredCompactor, type LayeredCompactorMetricName } from './layered-compactor'
+import type { HookRegistry } from './hook-registry'
 import { buildLongSkillRunningProjection } from './skill-running-projection'
 import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
 import { inspectLatestSkillTask } from './skill-task-supervisor'
@@ -245,6 +248,22 @@ import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
 const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000
 const LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS = 30 * 1000
+const LAYERED_COMPACTOR_METRIC_MAP: Record<LayeredCompactorMetricName, string> = {
+  compactionCircuitBreak: TOOL_ERROR_METRICS.compactionCircuitBreak,
+  compactionL2Failed: TOOL_ERROR_METRICS.compactionL2Failed,
+}
+const layeredCompactor = createLayeredCompactor({
+  metric: (name, payload) => {
+    try {
+      logAgentMetric(LAYERED_COMPACTOR_METRIC_MAP[name], { ...payload })
+    } catch {
+      // Metrics must never break a turn.
+    }
+  },
+})
+const NOOP_HOOK_REGISTRY: Pick<HookRegistry, 'fire'> = {
+  fire: async () => {},
+}
 
 function isLongTypedSkillActionName(toolName: string): boolean {
   if (!toolName.startsWith('skill_')) return false
@@ -481,6 +500,27 @@ function cloneSession<TSession extends TurnEngineSession>(session: TSession): TS
   }
 }
 
+function buildModelInputSession<TSession extends TurnEngineSession>(session: TSession): TSession {
+  if (session.messages.some((message) => typeof message.content !== 'string')) {
+    return cloneSession(session)
+  }
+
+  const compactedMessages = layeredCompactor.maybeCompact(
+    session.messages.map((message) => ({
+      role: message.role,
+      content: message.content as string,
+    })),
+  )
+
+  return {
+    ...session,
+    messages: compactedMessages.map((message) => ({
+      role: message.role as TurnEngineSessionMessage['role'],
+      content: message.content,
+    })),
+  }
+}
+
 function extractIncomingText(content: string | Array<Record<string, unknown>>): string {
   if (typeof content === 'string') return content
   return content
@@ -559,6 +599,40 @@ function appendSessionMessages<TSession extends TurnEngineSession>(
 ): void {
   if (!messages || messages.length === 0) return
   session.messages.push(...messages)
+}
+
+function pushSystemReminderMessage<TSession extends TurnEngineSession>(
+  session: TSession,
+  entry: ReminderEntry,
+): void {
+  const content = composeSystemReminderText(entry)
+  if (!content) return
+  session.messages.push({ role: 'user', content })
+}
+
+function composeSystemReminderText(entry: ReminderEntry): string | null {
+  const registry = createSystemReminderRegistry()
+  registry.register(entry)
+  return registry.compose()
+}
+
+async function fireUserPromptSubmitHook(
+  registry: Pick<HookRegistry, 'fire'>,
+  payload: { userText: string; sessionId: string | null; timestamp: number },
+): Promise<void> {
+  try {
+    await registry.fire('user_prompt_submit', payload)
+  } catch (error) {
+    try {
+      logAgentMetric(TOOL_ERROR_METRICS.hookHandlerFailed, {
+        hookName: 'user_prompt_submit',
+        handlerName: 'hookRegistry.fire',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } catch {
+      // Metrics must never break a turn.
+    }
+  }
 }
 
 type RecentSkillRunForResume = SkillRunRecord
@@ -1028,6 +1102,12 @@ export class TurnEngine {
       const session = request.session
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
       const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
+      const hookRegistry = host.hookRegistry || NOOP_HOOK_REGISTRY
+      await fireUserPromptSubmitHook(hookRegistry, {
+        userText,
+        sessionId: request.sessionId ?? null,
+        timestamp: Date.now(),
+      })
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
       const previousPureUserInputs = host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)
@@ -2086,8 +2166,9 @@ export class TurnEngine {
 
       if (!shouldUseToolLoop) {
         const hasMediaInputs = host.sessionHasMediaInputs(session.messages)
+        const modelSession = buildModelInputSession(session)
         const simpleResponse = await host.requestSimpleText({
-          session,
+          session: modelSession,
           signal: request.abortSignal,
           providerContext: host.providerContext,
           enableKimiWebSearch: !hasMediaInputs,
@@ -2366,9 +2447,10 @@ export class TurnEngine {
           // Phase 3.3 — skill-aware nudge. For long skill flows, "summarize
           // and ask user" is a reverse instruction; we send "keep going,
           // prefer typed actions" instead. Audit Phase 3 §D4.
-          session.messages.push({
-            role: 'user',
-            content: buildBudgetWarningMessage({
+          pushSystemReminderMessage(session, {
+            topic: 'budget',
+            priority: 80,
+            text: buildBudgetWarningMessage({
               iterations,
               effectiveMaxIterations: effectiveMaxToolIterations,
               level: 'converge',
@@ -2486,9 +2568,10 @@ export class TurnEngine {
             longSkillResume: shouldUseLongSkillResumeBudget,
           })
           // Phase 3.3 — skill-aware 70% nudge. Audit Phase 3 §D3.
-          session.messages.push({
-            role: 'user',
-            content: buildBudgetWarningMessage({
+          pushSystemReminderMessage(session, {
+            topic: 'budget',
+            priority: 80,
+            text: buildBudgetWarningMessage({
               iterations,
               effectiveMaxIterations: effectiveMaxToolIterations,
               level: 'warning',
@@ -2636,7 +2719,11 @@ export class TurnEngine {
             reminderTokens.push('上一轮已用相同输入强制调用过同一工具，避免死循环，请变更输入或换工具。')
           }
           reminderTokens.push('请补齐参数或换路径，再继续。')
-          session.messages.push({ role: 'user', content: reminderTokens.join('\n') })
+          pushSystemReminderMessage(session, {
+            topic: 'missing-input',
+            priority: 90,
+            text: reminderTokens.join('\n'),
+          })
           logAgentMetric('turn_force_tool_checkpoint', {
             sessionId: request.sessionId,
             skillId: turnFrame?.skill?.skillId || null,
@@ -2724,8 +2811,9 @@ export class TurnEngine {
           preferTextToolBridgeOnce = false
         } else {
           try {
+            const modelSession = buildModelInputSession(toolLoopSession as TSession)
             response = await host.requestToolLoopResponse({
-              session: toolLoopSession,
+              session: modelSession,
               signal: request.abortSignal,
               toolPolicy,
               allowedToolNames: routedAllowedToolNames,
@@ -2801,13 +2889,16 @@ export class TurnEngine {
                   })
                 }
                 preferTextToolBridgeOnce = true
-                session.messages.push({
-                  role: 'user',
-                  content: [
-                    buildTextToolBridgeCorrectionMessage(toolPolicy as any),
-                    `系统补充：你刚才输出了未允许的工具 ${disallowedToolNames.join(', ')}。请只调用当前 allowed tools 中的工具；如果没有合适工具，说明缺口而不要把 tool_call 当普通文本结束。`,
-                  ].join('\n'),
+                const reminderText = composeSystemReminderText({
+                  topic: 'checkpoint',
+                  priority: 80,
+                  text: `系统补充：你刚才输出了未允许的工具 ${disallowedToolNames.join(', ')}。请只调用当前 allowed tools 中的工具；如果没有合适工具，说明缺口而不要把 tool_call 当普通文本结束。`,
                 })
+                const correctionText = [
+                  buildTextToolBridgeCorrectionMessage(toolPolicy as any),
+                  reminderText,
+                ].filter(Boolean).join('\n')
+                session.messages.push({ role: 'user', content: correctionText })
                 continue
               }
             }
@@ -2830,13 +2921,16 @@ export class TurnEngine {
               pushAssistantTextSafely(session, assistantHistoryText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             }
             preferTextToolBridgeOnce = true
-            session.messages.push({
-              role: 'user',
-              content: [
-                buildTextToolBridgeCorrectionMessage(toolPolicy as any),
-                '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。',
-              ].join('\n'),
+            const reminderText = composeSystemReminderText({
+              topic: 'checkpoint',
+              priority: 80,
+              text: '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。',
             })
+            const correctionText = [
+              buildTextToolBridgeCorrectionMessage(toolPolicy as any),
+              reminderText,
+            ].filter(Boolean).join('\n')
+            session.messages.push({ role: 'user', content: correctionText })
             continue
           }
           if (response.toolTransport === 'text' && response.rawText) {
@@ -2906,9 +3000,10 @@ export class TurnEngine {
             if (plannerStepCompleted) {
               const advanced = advancePlannerStep(response.text)
               if (advanced) {
-                session.messages.push({
-                  role: 'user',
-                  content: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
+                pushSystemReminderMessage(session, {
+                  topic: 'checkpoint',
+                  priority: 60,
+                  text: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
                 })
                 continue
               }
@@ -2962,9 +3057,10 @@ export class TurnEngine {
             repetitions: matchCount,
             sessionId: request.sessionId,
           })
-          session.messages.push({
-            role: 'user',
-            content: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
+          pushSystemReminderMessage(session, {
+            topic: 'checkpoint',
+            priority: 85,
+            text: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
           })
           recentToolCalls.length = 0
         }
@@ -3366,9 +3462,10 @@ export class TurnEngine {
           if (plannerStepCompleted) {
             const advanced = advancePlannerStep(response.text)
             if (advanced) {
-              session.messages.push({
-                role: 'user',
-                content: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
+              pushSystemReminderMessage(session, {
+                topic: 'checkpoint',
+                priority: 60,
+                text: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
               })
               continue
             }

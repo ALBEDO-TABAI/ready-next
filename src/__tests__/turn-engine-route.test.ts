@@ -514,6 +514,96 @@ test('budget warning does not mention typed skill action', () => {
   assert.ok(!/typed skill action/i.test(converge))
 })
 
+test('TurnEngine injects 70 percent budget reminder immediately before the model call that consumes it', async () => {
+  const engine = new TurnEngine()
+  const capturedMessages: TurnEngineSessionMessage[][] = []
+  let loopPass = 0
+  const { request } = createRequest({
+    userText: '帮我修改这段文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    budget: {
+      maxIterations: 3,
+      maxToolCalls: 3,
+      maxParallelToolGroups: 3,
+      reservedToolCalls: 0,
+    },
+    budgetState: {
+      iterationsUsed: 0,
+      toolCallsUsed: 0,
+      parallelToolGroupsUsed: 0,
+    },
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      requestToolLoopResponse: async (params: { session: TurnEngineSession }) => {
+        capturedMessages.push(params.session.messages.map((message) => ({ ...message })))
+        loopPass += 1
+        if (loopPass === 1) {
+          return {
+            text: '先查一下',
+            toolCalls: [{ id: 'tool-1', name: 'document_replace_text', input: { text: 'step one' } }],
+            stopReason: 'tool_calls',
+          }
+        }
+        return {
+          text: '完成',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => ({
+        results: [{
+          id: 'tool-1',
+          name: 'document_replace_text',
+          input: { text: 'step one' },
+          result: { text: 'saved' },
+        }],
+        budgetLimited: false,
+        recoveryHistory: [],
+      }),
+    },
+  })
+
+  await engine.execute(request)
+
+  assert.equal(capturedMessages.length, 2)
+  assert.equal(
+    capturedMessages[0].some((message) =>
+      typeof message.content === 'string' && message.content.includes('系统提醒：已用 2/3 次工具调用'),
+    ),
+    false,
+  )
+  assert.equal(
+    capturedMessages[1].at(-1)?.content,
+    buildBudgetWarningMessage({
+      iterations: 2,
+      effectiveMaxIterations: 3,
+      level: 'warning',
+      isLongSkillContext: false,
+    }),
+  )
+})
+
 test('TurnEngine uses the direct simple-response path for non-tool runs', async () => {
   const engine = new TurnEngine()
   const { request, events } = createRequest({
@@ -528,6 +618,90 @@ test('TurnEngine uses the direct simple-response path for non-tool runs', async 
   assert.deepEqual(result.usedTools, [])
   assert.equal(result.taskProjectionId, 'task-test')
   assert.equal(events.filter((event) => event.kind === 'output' && event.type === 'text').length, 1)
+})
+
+test('TurnEngine fires user_prompt_submit hook before direct model request', async () => {
+  const engine = new TurnEngine()
+  const calls: Array<{ userText: string; sessionId: string | null; timestamp: number }> = []
+  let hookCallsBeforeModel = 0
+  const { request } = createRequest({
+    userText: '解释一下这个概念',
+    host: {
+      hookRegistry: {
+        fire: async (name: string, payload: { userText: string; sessionId: string | null; timestamp: number }) => {
+          if (name === 'user_prompt_submit') {
+            calls.push(payload)
+          }
+        },
+      },
+      requestSimpleText: async () => {
+        hookCallsBeforeModel = calls.length
+        return { text: 'simple result' }
+      },
+    },
+  })
+
+  await engine.execute(request)
+
+  assert.equal(hookCallsBeforeModel, 1)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.userText, '解释一下这个概念')
+  assert.equal(calls[0]?.sessionId, 'scope-test')
+  assert.equal(typeof calls[0]?.timestamp, 'number')
+})
+
+test('TurnEngine compacts string-only model session without mutating persisted messages', async () => {
+  const engine = new TurnEngine()
+  let modelMessages: TurnEngineSessionMessage[] = []
+  const { request } = createRequest({
+    userText: '请总结以上内容',
+    host: {
+      requestSimpleText: async (params: { session: TurnEngineSession }) => {
+        modelMessages = params.session.messages.map((message) => ({ ...message }))
+        return { text: 'simple result' }
+      },
+    },
+  })
+  request.session.messages = [
+    { role: 'user', content: 'alpha '.repeat(6_000) },
+    { role: 'assistant', content: 'bravo '.repeat(6_000) },
+    { role: 'user', content: 'charlie '.repeat(6_000) },
+    { role: 'assistant', content: 'delta '.repeat(6_000) },
+    { role: 'user', content: 'echo '.repeat(6_000) },
+  ]
+  const originalMessages = request.session.messages.map((message) => ({ ...message }))
+
+  await engine.execute(request)
+
+  assert.ok(modelMessages.length < originalMessages.length)
+  assert.equal(modelMessages[0]?.role, 'system')
+  assert.match(String(modelMessages[0]?.content || ''), /\[ready:l1-compacted\]/)
+  assert.deepEqual(request.session.messages.slice(0, originalMessages.length), originalMessages)
+})
+
+test('TurnEngine skips compaction when session contains rich content blocks', async () => {
+  const engine = new TurnEngine()
+  let modelMessages: TurnEngineSessionMessage[] = []
+  const { request } = createRequest({
+    userText: '描述图片',
+    host: {
+      requestSimpleText: async (params: { session: TurnEngineSession }) => {
+        modelMessages = params.session.messages.map((message) => ({ ...message }))
+        return { text: 'simple result' }
+      },
+    },
+  })
+  request.session.messages = [
+    { role: 'user', content: 'alpha '.repeat(6_000) },
+    { role: 'user', content: [{ type: 'image', mimeType: 'image/png', base64: 'abc' }] },
+    { role: 'assistant', content: 'bravo '.repeat(6_000) },
+    { role: 'user', content: 'charlie '.repeat(6_000) },
+  ] as TurnEngineSessionMessage[]
+
+  await engine.execute(request)
+
+  assert.equal(modelMessages.length, 4)
+  assert.deepEqual(modelMessages[1]?.content, [{ type: 'image', mimeType: 'image/png', base64: 'abc' }])
 })
 
 test('TurnEngine short-circuits browser deterministic work before the model tool loop', async () => {

@@ -3,8 +3,15 @@ import test from 'node:test'
 
 import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
 import { buildTurnFrameSteering } from '../main/modules/agent-control/turn-frame-steering'
+import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminder-registry'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+
+function composeReminder(topic: ReminderTopic, priority: number, text: string): string | null {
+  const registry = createSystemReminderRegistry()
+  registry.register({ topic, priority, text })
+  return registry.compose()
+}
 
 function snapshot(overrides: Partial<SkillTaskSupervisorSnapshot> = {}): SkillTaskSupervisorSnapshot {
   return {
@@ -197,6 +204,11 @@ test('buildTurnFrameSteering: budget-exhausted running_process produces checkpoi
   assert.equal(steering.mode, 'checkpoint')
   assert.equal(steering.requiredToolName, null)
   assert.deepEqual(steering.preferredToolNames, [])
+  const expectedReminder = '系统补充：本轮预算已用尽且后台仍在运行，进入 checkpoint 让用户决定是否继续；不要再发起工具调用。'
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('checkpoint', 100, expectedReminder),
+  )
 })
 
 test('buildTurnFrameSteering: failed-liveness skill frame produces checkpoint mode', () => {
@@ -214,6 +226,11 @@ test('buildTurnFrameSteering: failed-liveness skill frame produces checkpoint mo
   })
   const steering = buildTurnFrameSteering(frame)
   assert.equal(steering.mode, 'checkpoint')
+  const expectedReminder = '系统补充：技能任务已失败，本轮进入 checkpoint，等待用户后续指令；不要继续工具循环。'
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('checkpoint', 100, expectedReminder),
+  )
 })
 
 test('buildTurnFrameSteering: recentForceToolDispatched falls back to ask_model', () => {
@@ -297,6 +314,14 @@ test('T5: child-owned frame (childRunId set, no close) steers ask_model with pri
   assert.ok(
     steering.systemReminder.includes('vt5child0'),
     'reminder must include the live childRunId so the model can correlate',
+  )
+  const expectedReminder = [
+    '系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=vt5child0, status=running）。父循环只处理 status / resume / cancel，并等待 child close event。',
+    '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。',
+  ].join('\n')
+  assert.equal(
+    steering.systemReminder,
+    composeReminder('child-owned', 85, expectedReminder),
   )
   assert.ok(!/typed skill action/i.test(steering.systemReminder))
   assert.ok(/status/.test(steering.systemReminder))

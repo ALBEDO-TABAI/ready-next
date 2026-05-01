@@ -163,6 +163,13 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 改产品行为 = 改对应 `*-domain-adapter.ts`，不能反向去 `turn-engine.ts` 内加产品 `if/else` 或 `adapter.id === '<product>'` 比较。
 - CI 强制：`npm run verify:c`、`scripts/check-coordinator-isolation.cjs` 和 `ready/no-coordinator-id-leak` 必须阻止 `turn-engine.ts` 泄漏产品 id；通用 `TRIGGERS` 不承载 product module 规则；6 个 adapter 必须显式实现 `contributePromptFragment / arbitrateRunCapabilities / decorateUserText`。
 
+### 6.15 System reminder / Compaction / Hook 三件抽象
+- 所有进入模型输入的系统级提醒文案必须通过 `SystemReminderRegistry` 注册和组装，条目包含 `topic / priority / text / conflictsWith`；`turn-frame-steering.ts` 不允许内联写 `systemReminder: <提醒文案>`，`turn-engine.ts` 不允许直接 push `系统补充：` / `系统提醒：` 形态的内联 user message。CI 由 `ready/no-inline-system-reminder-write` 强制。
+- reminder registry 是 per-turn / per-call 的一次性对象，不是全局 singleton；相同 topic 后注册覆盖先注册，输出按 priority 降序、topic 升序稳定排列。默认冲突表必须继续覆盖 child-owned 压制 typed-action-preferred / force-tool 系列提示，避免父循环和 child-loop 同时给模型相反指令。
+- `createLayeredCompactor()` 提供 L1（字符串消息的 cheap 截断/摘要，幂等）+ L2（token-threshold gated，D 阶段 stub）。默认 L2 threshold 为 0，生产路径只启用 L1；连续 3 次 L2 失败后熔断并 emit `compaction_circuit_break`，单次 L2 失败 emit `compaction_l2_failed`。模型输入可使用压缩后的 session 副本，但不得把压缩结果写回持久会话消息。
+- `HookRegistry` 固定 4 个 lifecycle 名：`pre_tool_use / post_tool_use / user_prompt_submit / stop`。`register` 返回 unregister，`fire` 串行 await；handler throw 或 timeout 只 emit `hook_handler_failed` / `hook_handler_timeout` 并继续后续 handler，不得中断 turn 主流程。
+- `npm run verify:d` 必须内嵌 `npm run verify:c`，并覆盖 reminder registry、layered compactor、hook registry、turn-frame steering 与 turn-engine route 相关测试。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

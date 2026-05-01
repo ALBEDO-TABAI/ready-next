@@ -16,6 +16,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
+import type { HookRegistry } from './hook-registry'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { ReferenceSkillHint } from './skill-reference-hints'
 import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from './turn-frame'
@@ -734,6 +735,7 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   } | null
   requestModuleToolAction?: ((tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined
   registerRunCleanup?: ((cleanup: () => void | Promise<void>) => void) | undefined
+  hookRegistry?: HookRegistry | null
   providerContext: TurnProviderContext
   isBrowserAgentV3Enabled: () => boolean
   resolveContinuationProjection: (sessionId: string | undefined, userText: string, options?: {
