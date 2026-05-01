@@ -35,6 +35,14 @@
       "name": "WaitForSkillChildRunCloseOptions"
     },
     {
+      "kind": "type",
+      "name": "CancelSkillChildRunSource"
+    },
+    {
+      "kind": "interface",
+      "name": "CancelSkillChildRunOptions"
+    },
+    {
       "kind": "interface",
       "name": "SkillChildRunnerConfig"
     },
@@ -66,7 +74,7 @@
     {
       "kind": "function",
       "name": "cancelSkillChildRun",
-      "signature": "(childRunId: string, reason?: string): Promise<SkillChildCloseEvent>"
+      "signature": "(childRunId: string, reasonOrOptions?: string | CancelSkillChildRunOptions): Promise<SkillChildCloseEvent>"
     },
     {
       "kind": "function",

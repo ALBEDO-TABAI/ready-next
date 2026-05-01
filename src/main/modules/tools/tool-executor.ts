@@ -10,15 +10,13 @@ import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
 } from '../agent-control/tool-registry'
-import {
-  isChildInternalStrictAdmissionEnabled,
-  type ToolDefinition,
-} from '../agent-control/tool-definition'
+import type { ToolDefinition } from '../agent-control/tool-definition'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
+import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
 import type {
   SkillRunRequest,
   SkillRunResult,
@@ -80,6 +78,7 @@ export interface ToolContext {
   activeFrame?: ToolRuntimeActiveFrameContext | null
   invoker?: 'model' | 'child_runner' | 'host'
   allowInternal?: boolean
+  turnFeatureFlags?: TurnFeatureFlags
   skillRuntimeManager?: SkillsRuntimeManager | null
   childInternalSkillAction?: {
     skillId: string
@@ -112,8 +111,10 @@ export async function executeToolCall(
 
   const allowsChildInternal =
     context.allowInternal === true && context.invoker === 'child_runner'
+  const childInternalStrictAdmission =
+    context.turnFeatureFlags?.childInternalStrictAdmission ?? true
   if (
-    isChildInternalStrictAdmissionEnabled()
+    childInternalStrictAdmission
     && definition.executionVisibility === 'internal'
     && !allowsChildInternal
   ) {

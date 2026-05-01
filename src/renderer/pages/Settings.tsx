@@ -58,6 +58,17 @@ interface RSSDraftStoreSourceRow {
   lastFetchedAt: string | null
 }
 
+interface ActiveChildRunSummaryView {
+  childRunId: string
+  skillId: string
+  sessionId: string | null
+  scopeId: string | null
+  status: string
+  startedAt: string
+  outputDir: string
+  runStatePath: string
+}
+
 const settingsData: SettingSection[] = [
   {
     id: 'account',
@@ -1839,6 +1850,118 @@ function StorageSettingsPanel() {
   )
 }
 
+function ActiveChildRunsDebug() {
+  const [runs, setRuns] = useState<ActiveChildRunSummaryView[]>([])
+  const [loading, setLoading] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setMessage(null)
+    try {
+      const response = await window.electronAPI.agent.listActiveChildRuns()
+      if (!response.success) {
+        setMessage(response.error || '读取 active child runs 失败')
+        return
+      }
+      setRuns(response.data || [])
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const cancelRun = useCallback(async (childRunId: string) => {
+    setBusyId(childRunId)
+    setMessage(null)
+    try {
+      const response = await window.electronAPI.agent.cancelChildRun(childRunId)
+      if (!response.success) {
+        setMessage(response.error || '取消 child run 失败')
+        return
+      }
+      await refresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusyId(null)
+    }
+  }, [refresh])
+
+  return (
+    <div className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '14px 16px' }}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h4 className="text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)', margin: 0 }}>
+            Child Runs
+          </h4>
+          <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '3px 0 0' }}>
+            当前活跃的技能子运行
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-xl border text-[12px] font-medium transition-colors"
+          style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: loading ? 0.7 : 1 }}
+        >
+          {loading ? <Loader2 size={14} className="animate-spin" /> : null}
+          刷新
+        </button>
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {runs.length === 0 ? (
+          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+            暂无 active child run
+          </div>
+        ) : runs.map((run) => (
+          <div
+            key={run.childRunId}
+            className="rounded-xl border"
+            style={{ borderColor: 'var(--border-subtle)', padding: '10px 12px', background: 'var(--surface-muted)' }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div style={{ minWidth: 0 }}>
+                <div className="text-[12px] font-medium truncate" style={{ color: 'var(--text-title)' }}>
+                  {run.skillId} · {run.status}
+                </div>
+                <div className="text-[11px] leading-5 truncate" style={{ color: 'var(--text-muted)' }}>
+                  {run.childRunId} · {new Date(run.startedAt).toLocaleString()}
+                </div>
+                <div className="text-[11px] leading-5 truncate" style={{ color: 'var(--text-light)' }}>
+                  {run.scopeId || run.sessionId || 'no scope'} · {run.outputDir}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void cancelRun(run.childRunId)}
+                disabled={busyId === run.childRunId}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border text-[12px] font-medium transition-colors"
+                style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '7px 10px', opacity: busyId === run.childRunId ? 0.7 : 1 }}
+              >
+                {busyId === run.childRunId ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
+                取消
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {message && (
+        <div className="text-[12px] leading-5" style={{ color: 'var(--color-red)', marginTop: 10 }}>
+          {message}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface SettingsPageProps {
   initialSection?: string
 }
@@ -2026,6 +2149,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                     <div style={{ minHeight: 400 }}>
                       <TriggerManager />
                     </div>
+                    <ActiveChildRunsDebug />
                   </div>
                 )}
 

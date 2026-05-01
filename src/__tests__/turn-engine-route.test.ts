@@ -468,8 +468,8 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
       skillTaskSupervisor: {
         inspectLatestSkillTask: () => activeSnapshot,
       },
-      cancelSkillChildRun: async (_childRunId: string, reason?: string) => {
-        cancelReasons.push(reason || '')
+      cancelSkillChildRun: async (_childRunId: string, options?: { reason?: string; source?: string }) => {
+        cancelReasons.push(`${options?.reason || ''}:${options?.source || ''}`)
         return makeChildCloseEvent('killed', 'cancelled_user')
       },
     },
@@ -483,15 +483,15 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
       skillTaskSupervisor: {
         inspectLatestSkillTask: () => activeSnapshot,
       },
-      cancelSkillChildRun: async (childRunId: string, reason?: string) => {
-        cancelReasons.push(`${childRunId}:${reason || ''}`)
+      cancelSkillChildRun: async (childRunId: string, options?: { reason?: string; source?: string }) => {
+        cancelReasons.push(`${childRunId}:${options?.reason || ''}:${options?.source || ''}`)
         return makeChildCloseEvent('killed', 'cancelled_user')
       },
     },
   })
   const result = await engine.execute(cancelRequest)
 
-  assert.deepEqual(cancelReasons, ['vchild001:cancelled_user'])
+  assert.deepEqual(cancelReasons, ['vchild001:cancelled_user:nlp'])
   assert.equal(result.status, 'cancelled')
   assert.equal(result.terminalReason, 'cancelled_user')
 })

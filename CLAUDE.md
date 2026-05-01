@@ -194,6 +194,14 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - e2e 只用于真子进程、真实 runtime 或真实外部依赖边界；默认 opt-in，不拖慢常规 verify。
 - 详细规约、示例和运行模式见 `docs/superpowers/testing-conventions.md`。
 
+### 6.18 提质 + 控制面（G 阶段）
+- child-run close status 判定只从 `skill-child-run-types.ts` 的 helper 读取；其他文件不得再造 `TERMINAL_CHILD_CLOSE_STATUSES`，也不得新增散落的 `close.status` 字面判断。CI 由 `scripts/check-child-status-vocabulary.cjs` 强制。
+- `resumeSkillChildRun` 成功续跑时返回 `freshContractFields`；turn-engine resume 分支必须整体应用该对象，禁止在 resume 分支手写 `childCloseEvent = closeEvent`。
+- `SkillChildCloseEvent` 对外是 `DeepReadonly<>`，构造/解码出口统一 freeze；多个 awaiter 拿到的是同一个不可变 close event。
+- `TurnFeatureFlags` 在 turn-engine `execute()` 入口 snapshot 一次，tool-executor 等下游只消费显式传入的 snapshot；禁止中途再调 `isXxxEnabled()` 读 env。
+- child-run 调试控制面通过 `agent:listActiveChildRuns` / `agent:cancelChildRun` 暴露；取消来源必须区分 `source: 'nlp' | 'ui_button'`，并进入 `skill_child_run_cancel_requested` metric。
+- `npm run verify:g` 内嵌 `verify:f`，并额外覆盖 status vocabulary、fresh contract、close immutability、turn flag snapshot、child-run IPC/control surface。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

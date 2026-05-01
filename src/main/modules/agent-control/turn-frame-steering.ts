@@ -5,7 +5,7 @@ import { resolveToolInputSchemaForExecution } from './tool-registry'
 import { createSystemReminderRegistry } from './system-reminder-registry'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
-import type { SkillChildCloseEvent } from './skill-child-run-types'
+import { isTerminalChildCloseStatus } from './skill-child-run-types'
 
 export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_inspect_run_state',
@@ -293,18 +293,12 @@ export function resolveTurnFrameSkillActionToolName(frame: TurnFrame): string | 
  * are non-terminal — the run is paused and may resume — so the child is
  * still considered the owner and steering still excludes the typed action.
  */
-const TERMINAL_CHILD_CLOSE_STATUSES = new Set<SkillChildCloseEvent['status']>([
-  'completed',
-  'failed',
-  'killed',
-])
-
 export function hasTerminalChildCloseEvent(
   contract: SkillRunContract | null | undefined,
 ): boolean {
   const close = contract?.childCloseEvent
   if (!close || typeof close !== 'object') return false
-  return TERMINAL_CHILD_CLOSE_STATUSES.has(close.status)
+  return isTerminalChildCloseStatus(close.status)
 }
 
 export function isChildOwnedFrame(frame: TurnFrame): boolean {

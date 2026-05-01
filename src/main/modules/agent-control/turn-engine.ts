@@ -121,7 +121,7 @@ import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
-import { isChildResumeEnabled } from './skill-child-feature-flags'
+import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import {
   rememberActiveSkillContext,
   resolveActiveSkillContext,
@@ -226,7 +226,10 @@ import {
   getSkillChildRunCloseEvent,
   resumeSkillChildRun,
 } from './skill-child-runner'
-import type { SkillChildCloseEvent } from './skill-child-run-types'
+import {
+  isTerminalChildCloseStatus,
+  type SkillChildCloseEvent,
+} from './skill-child-run-types'
 import type {
   RunBudgetHint,
   SkillBudgetLeaseState,
@@ -313,12 +316,6 @@ export type ChildContinuationDecision =
   | { kind: 'checkpoint_paused'; childRunId: string; closeEvent: SkillChildCloseEvent }
   | { kind: 'terminal'; childRunId: string; closeEvent: SkillChildCloseEvent }
 
-const TERMINAL_CHILD_CLOSE_STATUSES = new Set<SkillChildCloseEvent['status']>([
-  'completed',
-  'failed',
-  'killed',
-])
-
 export function computeChildContinuationDecision(
   frame: TurnFrame | null,
   getCloseEvent: (childRunId: string) => SkillChildCloseEvent | null,
@@ -334,7 +331,7 @@ export function computeChildContinuationDecision(
   // loader copies the close event off the repository row if it exists.
   const live = getCloseEvent(childRunId) ?? contract?.childCloseEvent ?? null
   if (live && typeof live === 'object') {
-    if (TERMINAL_CHILD_CLOSE_STATUSES.has(live.status)) {
+    if (isTerminalChildCloseStatus(live.status)) {
       return { kind: 'terminal', childRunId, closeEvent: live }
     }
     return { kind: 'checkpoint_paused', childRunId, closeEvent: live }
@@ -981,6 +978,7 @@ export class TurnEngine {
     const domainAdapters = Array.isArray(host.domainAdapters) ? host.domainAdapters as DomainAdapter[] : []
     const requestForAdapters = request as unknown as TurnEngineRequest
     const hostForAdapters = host as unknown as TurnEngineHost
+    const turnFeatureFlags = snapshotTurnFeatureFlags()
 
     const emitStructuredTaskPayload = (payload: unknown): void => {
       transcript.emitStructuredPayload(payload)
@@ -1010,6 +1008,7 @@ export class TurnEngine {
       agentContext: buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
         baseUrl: host.providerContext.baseUrl,
       }),
+      turnFeatureFlags,
       // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
       // snapshot BEFORE any same-batch `contextModifier` runs. The first
       // tool dispatched in this turn must already see the frame's durable
@@ -1500,7 +1499,7 @@ export class TurnEngine {
         const cancelChild = (host as unknown as {
           cancelSkillChildRun?: typeof cancelSkillChildRun
         }).cancelSkillChildRun || cancelSkillChildRun
-        const close = await cancelChild(childRunIdForCommand, 'cancelled_user')
+        const close = await cancelChild(childRunIdForCommand, { reason: 'cancelled_user', source: 'nlp' })
         if (turnFrame?.skill?.runContract) {
           turnFrame.skill.runContract.childCloseEvent = close
           turnFrame.skill.runContract.childStatus = close.status
@@ -1532,7 +1531,7 @@ export class TurnEngine {
         && isSkillResumeTurnDetected
         && !isConfigRepairTurnDetected
       ) {
-        if (!isChildResumeEnabled()) {
+        if (!turnFeatureFlags.childResumeEnabled) {
           // Production rollback path: when the operator sets
           // READY_SKILL_CHILD_RESUME_ENABLED='0' we emit observability and
           // fall through to the normal model turn so the assistant can
@@ -1571,14 +1570,8 @@ export class TurnEngine {
             resumeSkillChildRun?: typeof resumeSkillChildRun
           }).resumeSkillChildRun || resumeSkillChildRun
           const resumed = await resumeChild(childCommand.childRunId)
-          // B6 — explicitly null out stale closeEvent on the contract when
-          // resume launched cleanly without an immediate close, so future
-          // contract reloads don't read the previous paused close back as
-          // "the current close".
-          if (turnFrame?.skill?.runContract) {
-            turnFrame.skill.runContract.childStatus = resumed.closeEvent?.status || 'running'
-            turnFrame.skill.runContract.childCloseEvent = resumed.closeEvent ?? null
-            turnFrame.skill.runContract.parentNextHint = resumed.parentNextHint
+          if (turnFrame?.skill?.runContract && resumed.freshContractFields) {
+            Object.assign(turnFrame.skill.runContract, resumed.freshContractFields)
           }
           const outcome = renderChildCommandOutcome({
             childRunId: resumed.childRunId,

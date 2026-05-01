@@ -190,6 +190,8 @@ helper 只覆盖了"渲染对用户的 message + finish 参数"。状态判定�
 
 **所属根因**：根因 1 的延伸（词汇 invariant 缺位的局部表现）。修根因 1 时一并处理。
 
+> **G 阶段已收口（2026-05-01）**：`TERMINAL_CHILD_CLOSE_STATUSES` / status helper 已集中到 `skill-child-run-types.ts`，并由 `scripts/check-child-status-vocabulary.cjs` 防止散点复发。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+
 ---
 
 ### N2 — Resume 的"清状态"语义被切成两半
@@ -204,6 +206,8 @@ helper 只覆盖了"渲染对用户的 message + finish 参数"。状态判定�
 
 **修法方向**：让 resume 返回 `{ runHandle, freshContractFields: { childCloseEvent: null, childStatus: 'running', parentNextHint: ... } }`，turn-engine 用 spread `Object.assign(contract, freshContractFields)` 一次性更新——杜绝调用方手动赋值的可能。
 
+> **G 阶段已收口（2026-05-01）**：clean resume 现在返回 `freshContractFields`，turn-engine resume 分支整体应用该对象，H1 脚本挡住手动 `childCloseEvent` 赋值。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+
 ---
 
 ### N3 — Close event 没有 mutability 约束
@@ -216,6 +220,8 @@ Layer 1 Team 1 的 fan-out 测试断言 `firstResult.closeEvent === secondResult
 
 **所属根因**：独立小问题，不归入五大根因。
 
+> **G 阶段已收口（2026-05-01）**：`SkillChildCloseEvent` 对外为 `DeepReadonly<>`，构造/解码出口统一 freeze，`close-event-immutability.test.ts` 覆盖类型层和运行时层。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
+
 ---
 
 ### N4 — Flag 中途切换的测试空白
@@ -227,6 +233,8 @@ Layer 1 Team 1 的 fan-out 测试断言 `firstResult.closeEvent === secondResult
 今天没有"中途读 flag"的代码，所以不爆。但加 flag 时**没有一个测试断言"同一 turn 内 flag 读取一次就好"或"读多次必须缓存"**。下次有人天真地在 turn-engine 内多处读 flag 就会出现行为不一致。
 
 **修法方向**：每个 turn 的入口处一次读所有 flag 到 immutable `TurnFeatureFlags` 对象，下游一律用对象字段而非函数。runtime hot-reload 不存在，无副作用。
+
+> **G 阶段已收口（2026-05-01）**：turn-engine 入口使用 frozen `TurnFeatureFlags` snapshot，下游 tool-executor / gateway 消费显式传入的 snapshot，`scripts/check-turn-feature-flags.cjs` 阻止中途读 env helper。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 
@@ -332,6 +340,8 @@ review 过 turn-engine 处理用户输入"继续"/"取消"，但**没审 UI 端*
 如果只能通过对话 NLP 识别"继续"/"取消"，那 child run 的控制面被 NLP 层强行包装——错过 NLP 识别就丢失控制。系统设计上"用户掌控权"被 NLP 准确率间接限制。
 
 **严重度**：B1 级（产品体验级问题）。
+
+> **G 阶段已收口（2026-05-01）**：新增 `agent:listActiveChildRuns` / `agent:cancelChildRun` 与 Settings 调试区控制面，取消来源区分 `nlp` / `ui_button` 并进入 metric。参 `2026-04-30-G-quality-polish-and-control-surface-implementation.md`。
 
 ---
 

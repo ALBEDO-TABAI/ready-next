@@ -13,6 +13,7 @@
 
 import type { TurnFramePatch } from './turn-frame'
 import type { SkillChildRunKind } from './skill-child-run-id'
+import type { DeepReadonly } from '../../../shared/deep-readonly'
 
 // Re-export for downstream consumers so they only need to import from one place.
 export type { SkillChildRunKind } from './skill-child-run-id'
@@ -63,7 +64,7 @@ export type SkillChildRunParentNextHint =
  * Source plan §5.4. The single close event that replaces parent-loop
  * repeated force dispatch for long skills.
  */
-export interface SkillChildCloseEvent {
+export interface MutableSkillChildCloseEvent {
   childRunId: string
   skillId: string
   status: Exclude<SkillChildRunStatus, 'queued' | 'running'>
@@ -85,6 +86,37 @@ export interface SkillChildCloseEvent {
     kind: string
     message: string
   } | null
+}
+
+export type SkillChildCloseEvent = DeepReadonly<MutableSkillChildCloseEvent>
+
+export type TerminalChildCloseStatus = Extract<
+  SkillChildCloseEvent['status'],
+  'completed' | 'failed' | 'killed'
+>
+
+export const TERMINAL_CHILD_CLOSE_STATUSES = new Set<SkillChildCloseEvent['status']>([
+  'completed',
+  'failed',
+  'killed',
+])
+
+export function isTerminalChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): status is TerminalChildCloseStatus {
+  return TERMINAL_CHILD_CLOSE_STATUSES.has(status)
+}
+
+export function isFailedChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): status is 'failed' {
+  return status === 'failed'
+}
+
+export function isRetainedLifecycleChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): boolean {
+  return isTerminalChildCloseStatus(status) || status === 'blocked'
 }
 
 export type ChildWaitResult =

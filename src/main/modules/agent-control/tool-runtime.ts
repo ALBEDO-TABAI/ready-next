@@ -10,6 +10,7 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import type { TurnFeatureFlags } from './turn-feature-flags'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
@@ -79,6 +80,7 @@ export interface ToolRuntimeContext {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  turnFeatureFlags?: TurnFeatureFlags
   /**
    * Phase 3 — same-turn live frame slot (see `ToolRuntimeActiveFrameContext`).
    * Mutated by `applyContextModifier` between tool calls within the same

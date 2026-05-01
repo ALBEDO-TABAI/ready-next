@@ -10,6 +10,10 @@ import {
 } from './tool-runtime'
 import type { TurnFrame } from './turn-frame'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import {
+  snapshotTurnFeatureFlags,
+  type TurnFeatureFlags,
+} from './turn-feature-flags'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
@@ -58,6 +62,7 @@ export function buildToolRuntimeContext(params: {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  turnFeatureFlags?: TurnFeatureFlags
   /**
    * Phase 3 — initial active-frame snapshot. When the caller has a
    * TurnFrame snapshot to seed the slot from (active artifact roots,
@@ -87,6 +92,7 @@ export function buildToolRuntimeContext(params: {
     frameSkillId: params.frameSkillId ?? null,
     registerRunCleanup: params.registerRunCleanup,
     agentContext: params.agentContext ?? null,
+    turnFeatureFlags: params.turnFeatureFlags ?? snapshotTurnFeatureFlags(),
     activeFrame: params.activeFrame ?? createEmptyActiveFrameContext(),
   }
 }
@@ -111,6 +117,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     frameSkillId: context.frameSkillId ?? null,
     registerRunCleanup: context.registerRunCleanup,
     agentContext: context.agentContext ?? null,
+    turnFeatureFlags: context.turnFeatureFlags,
     // Phase 3 — forward the live active-frame slot so dispatched tools
     // (skills-tools.ts read-artifact, etc.) can read fresh artifact roots.
     activeFrame: context.activeFrame ?? createEmptyActiveFrameContext(),

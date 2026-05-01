@@ -68,6 +68,7 @@ import type {
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
+import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite
@@ -1026,6 +1027,7 @@ export async function executeSkillActionViaToolGateway(
       scopeId: scopeId ?? undefined,
       invoker: 'child_runner',
       allowInternal: true,
+      turnFeatureFlags: snapshotTurnFeatureFlags(),
       skillRuntimeManager: params.runtimeManager,
       childInternalSkillAction: {
         skillId,

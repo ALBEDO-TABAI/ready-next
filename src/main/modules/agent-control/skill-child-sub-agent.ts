@@ -2,12 +2,14 @@ import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 
 import type { SkillChildDriver } from './skill-child-drivers'
 import type {
+  MutableSkillChildCloseEvent,
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
   SkillChildRunStatus,
   SkillChildRunTerminalReason,
 } from './skill-child-run-types'
+import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 import {
   getSkillChildCloseEventFromMetadata,
   SKILL_CHILD_CLOSE_EVENT_METADATA_KEY,
@@ -75,7 +77,10 @@ export function createSkillChildSubAgent(params: SkillChildSubAgentParams): SubA
         }
 
         if (isSkillChildCloseEvent(plan)) {
-          return toSubAgentResult({ ...plan, childRunId: params.childRunId })
+          return toSubAgentResult(freezeSkillChildCloseEvent({
+            ...plan,
+            childRunId: params.childRunId,
+          } as MutableSkillChildCloseEvent))
         }
 
         if (actionsPlanned >= maxActions) {
@@ -172,19 +177,20 @@ export function getSkillChildCloseEventFromSubAgentClose(closeEvent: {
 export { isSkillChildProgressPayload as isSkillChildSubAgentProgressPayload }
 
 function toSubAgentResult(closeEvent: SkillChildCloseEvent): SubAgentRunResult {
+  const frozenCloseEvent = freezeSkillChildCloseEvent(closeEvent as MutableSkillChildCloseEvent)
   return {
-    state: subAgentStateForChildStatus(closeEvent.status),
-    terminalReason: subAgentReasonForChildClose(closeEvent),
-    outputDir: closeEvent.outputDir,
-    runStatePath: closeEvent.runStatePath,
-    sceneScoresPath: closeEvent.sceneScoresPath,
-    deliveryReportPath: closeEvent.deliveryReportPath,
-    progress: closeEvent.progress satisfies SubAgentProgress,
-    framePatch: closeEvent.framePatch,
-    projectionPatch: closeEvent.projectionPatch,
-    error: closeEvent.error,
+    state: subAgentStateForChildStatus(frozenCloseEvent.status),
+    terminalReason: subAgentReasonForChildClose(frozenCloseEvent),
+    outputDir: frozenCloseEvent.outputDir,
+    runStatePath: frozenCloseEvent.runStatePath,
+    sceneScoresPath: frozenCloseEvent.sceneScoresPath,
+    deliveryReportPath: frozenCloseEvent.deliveryReportPath,
+    progress: frozenCloseEvent.progress satisfies SubAgentProgress,
+    framePatch: frozenCloseEvent.framePatch,
+    projectionPatch: frozenCloseEvent.projectionPatch,
+    error: frozenCloseEvent.error,
     metadata: {
-      [SKILL_CHILD_CLOSE_EVENT_METADATA_KEY]: closeEvent,
+      [SKILL_CHILD_CLOSE_EVENT_METADATA_KEY]: frozenCloseEvent,
     },
   }
 }
@@ -247,7 +253,7 @@ function makeCloseEvent(args: {
   const status = args.status === 'queued' || args.status === 'running'
     ? 'recoverable_paused'
     : args.status
-  return {
+  return freezeSkillChildCloseEvent({
     childRunId: args.params.childRunId,
     skillId: args.params.driver.skillId,
     status,
@@ -268,7 +274,7 @@ function makeCloseEvent(args: {
     error: args.errorKind && args.message
       ? { kind: args.errorKind, message: args.message }
       : null,
-  }
+  })
 }
 
 function isSkillChildCloseEvent(value: unknown): value is SkillChildCloseEvent {

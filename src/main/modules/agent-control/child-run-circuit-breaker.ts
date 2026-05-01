@@ -1,4 +1,7 @@
-import type { SkillChildCloseEvent } from './skill-child-run-types'
+import {
+  isFailedChildCloseStatus,
+  type SkillChildCloseEvent,
+} from './skill-child-run-types'
 
 export const CHILD_RUN_CIRCUIT_BREAKER_WINDOW_MS = 5 * 60 * 1000
 export const CHILD_RUN_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
@@ -89,7 +92,7 @@ export class ChildRunCircuitBreaker {
 }
 
 export function shouldCountChildRunCircuitBreakerFailure(close: SkillChildCloseEvent): boolean {
-  return close.status === 'failed'
+  return isFailedChildCloseStatus(close.status)
 }
 
 export function isChildRunCircuitBreakerEnabled(value: string | undefined): boolean {

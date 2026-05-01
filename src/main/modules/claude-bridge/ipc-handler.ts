@@ -568,6 +568,25 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:listActiveChildRuns', (): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.listActiveChildRuns() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:cancelChildRun', async (_, payload: { childRunId?: string }): Promise<IPCResponse> => {
+    try {
+      const childRunId = String(payload?.childRunId || '').trim()
+      if (!childRunId) return { success: false, error: 'childRunId is required' }
+      const close = await runtime!.cancelChildRun(childRunId, { source: 'ui_button' })
+      return { success: true, data: close }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
     try {
       return { success: true, data: runtime!.attachSessionRecallContext(payload.currentScopeId, payload.conversationId) }

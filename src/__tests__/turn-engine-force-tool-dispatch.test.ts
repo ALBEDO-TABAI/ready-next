@@ -463,7 +463,7 @@ test('blocked child is not directly resumable through TurnEngine', async () => {
 
 test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
   const engine = new TurnEngine()
-  let cancelArgs: { childRunId: string; reason?: string } | null = null
+  let cancelArgs: { childRunId: string; reason?: string; source?: string } | null = null
   let resumeCalls = 0
   const childRunId = 'vcancel1'
   const { request } = createRequest({
@@ -476,8 +476,8 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
           closeEvent: null,
         }),
       },
-      cancelSkillChildRun: async (id: string, reason?: string) => {
-        cancelArgs = { childRunId: id, reason }
+      cancelSkillChildRun: async (id: string, options?: { reason?: string; source?: string }) => {
+        cancelArgs = { childRunId: id, reason: options?.reason, source: options?.source }
         return makeChildCloseEvent(id, 'killed', 'cancelled_user')
       },
       resumeSkillChildRun: async () => {
@@ -489,7 +489,7 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
 
   const result = await engine.execute(request)
 
-  assert.deepEqual(cancelArgs, { childRunId, reason: 'cancelled_user' })
+  assert.deepEqual(cancelArgs, { childRunId, reason: 'cancelled_user', source: 'nlp' })
   assert.equal(resumeCalls, 0)
   assert.equal(result.status, 'cancelled')
   assert.equal(result.terminalReason, 'cancelled_user')

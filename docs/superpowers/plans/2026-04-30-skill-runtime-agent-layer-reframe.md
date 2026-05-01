@@ -187,7 +187,9 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 | **D — 系统 reminder registry**（根因 2）+ Compaction 分层 + Hook 系统骨架 | 引入 reminder registry / 分层 compaction / 简单 hook 触发点 | [x] completed 2026-05-01 | v2 阶段 D 的提质升级版；`verify:d` 内嵌 `verify:c`，hard lint 强制禁止 inline system reminder |
 | **E — 防爆 + 减脆**（O1 outputDir GC、O4 atomic write、O6 retry、O8 PermissionContext） | 这些都在 SubAgent 框架内统一实现 | [x] completed 2026-05-01 | **v2 的 B + C 在这里完成，但成本下降——因为有了 A1 的骨架**；`verify:e` 内嵌 `verify:d` |
 | **F — 测试规约 + e2e 链路** | 根因 3 + O5 | [x] completed 2026-05-01 | v2 阶段 B + E 合并；`verify:f` 内嵌 `verify:e`，e2e 通过 `READY_E2E=1 npm run verify:f:e2e` 单独触发 |
-| **G — 提质（剩余的 N1-N4 + O7）** | Layer 1 次生债收尾 + 用户控制面 | 2-3 天 | v2 阶段 D |
+| **G — 提质（剩余的 N1-N4 + O7）** | Layer 1 次生债收尾 + 用户控制面 | [x] completed 2026-05-01 | v2 阶段 D；`verify:g` 内嵌 `verify:f` |
+
+> **v3 路线交付完成（2026-05-01）**：A0 / A0.5 / A1 / B / C / D / E / F / G 全部完成；G 阶段最终 gate 为 `npm run verify:g`。
 
 **G 准入**：F 的 7 条 hard contract 全绿；`docs/superpowers/testing-conventions.md`、CLAUDE.md / AGENTS.md §6.17 同步完成；`npm run verify:f` 退出码 0。
 

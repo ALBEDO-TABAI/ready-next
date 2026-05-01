@@ -1,7 +1,9 @@
 import type {
+  MutableSkillChildCloseEvent,
   SkillChildCloseEvent,
   SkillChildRunTerminalReason,
 } from './skill-child-run-types'
+import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 import type {
   SubAgentCloseEvent,
   SubAgentProgress,
@@ -28,7 +30,9 @@ export function getSkillChildCloseEventFromMetadata(
   metadata: Readonly<Record<string, unknown>> | undefined,
 ): SkillChildCloseEvent | null {
   const childCloseEvent = metadata?.[SKILL_CHILD_CLOSE_EVENT_METADATA_KEY]
-  return isSkillChildCloseEvent(childCloseEvent) ? childCloseEvent : null
+  return isSkillChildCloseEvent(childCloseEvent)
+    ? freezeSkillChildCloseEvent(childCloseEvent as MutableSkillChildCloseEvent)
+    : null
 }
 
 export function mapSubAgentCloseToChildClose(
@@ -37,11 +41,11 @@ export function mapSubAgentCloseToChildClose(
 ): SkillChildCloseEvent {
   const preserved = getSkillChildCloseEventFromMetadata(subAgentClose.metadata)
   if (preserved) {
-    return {
+    return freezeSkillChildCloseEvent({
       ...preserved,
       childRunId: runtimeContext.childRunId,
       skillId: runtimeContext.skillId,
-    }
+    } as MutableSkillChildCloseEvent)
   }
 
   if (subAgentClose.state === 'completed' && subAgentClose.terminalReason === 'completed') {
@@ -159,7 +163,7 @@ function makeMappedClose(
 ): SkillChildCloseEvent {
   const message = subAgentClose.error?.message
     || (args.terminalReason === 'completed' ? null : args.terminalReason)
-  return {
+  return freezeSkillChildCloseEvent({
     childRunId: runtimeContext.childRunId,
     skillId: runtimeContext.skillId,
     status: args.status,
@@ -174,7 +178,7 @@ function makeMappedClose(
     error: args.errorKind && message
       ? { kind: args.errorKind, message }
       : null,
-  }
+  })
 }
 
 function normalizeProgress(

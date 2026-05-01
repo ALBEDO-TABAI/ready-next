@@ -37,7 +37,11 @@ import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
 import { findSkillToolByName } from '../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
-import { configureSkillChildRunner } from './skill-child-runner'
+import {
+  cancelSkillChildRun,
+  configureSkillChildRunner,
+  getSkillChildRunner,
+} from './skill-child-runner'
 // Importing the VEA driver triggers its module-load-time
 // `registerSkillChildDriver(...)` side-effect. The runner relies on the
 // registry being primed before any `startSkillChildRun` call.
@@ -603,6 +607,23 @@ export class AgentControlRuntime extends EventEmitter {
     if (!task) return null
     if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
     return this.detachedSkillTasks.cancel(taskId)
+  }
+
+  listActiveChildRuns(): Array<{
+    childRunId: string
+    skillId: string
+    sessionId: string | null
+    scopeId: string | null
+    status: string
+    startedAt: string
+    outputDir: string
+    runStatePath: string
+  }> {
+    return getSkillChildRunner()?.listActiveRuns() ?? []
+  }
+
+  async cancelChildRun(childRunId: string, options: { source: 'ui_button' }): Promise<unknown> {
+    return cancelSkillChildRun(childRunId, options)
   }
 
   attachSessionRecallContext(

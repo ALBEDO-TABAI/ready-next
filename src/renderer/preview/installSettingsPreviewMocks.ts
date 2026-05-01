@@ -208,6 +208,19 @@ let memoryEntries = Array.from({ length: 7 }).map((_, index) => ({
   tags: ['ui', 'settings', index % 2 === 0 ? 'design' : 'workflow'],
 }))
 
+let activeChildRuns = [
+  {
+    childRunId: 'vea-preview-1',
+    skillId: 'video-expert-analyzer',
+    sessionId: 'conversation:kimi:thread-112',
+    scopeId: 'conversation:kimi:thread-112',
+    status: 'running',
+    startedAt: new Date(now - 1000 * 60 * 4).toISOString(),
+    outputDir: '/tmp/ready-preview/video-expert/run-1',
+    runStatePath: '/tmp/ready-preview/video-expert/run-1/run_state.json',
+  },
+]
+
 const triggerDefinitions = [
   {
     id: 'trigger-1',
@@ -365,6 +378,11 @@ export function installSettingsPreviewMocks(): void {
       onScopeRunEvent: () => () => undefined,
       onConversationEvent: () => () => undefined,
       completeToolActionRequest: async () => undefined,
+      listActiveChildRuns: async () => ({ success: true, data: activeChildRuns }),
+      cancelChildRun: async (childRunId: string) => {
+        activeChildRuns = activeChildRuns.filter((run) => run.childRunId !== childRunId)
+        return { success: true, data: { childRunId, status: 'killed' } }
+      },
       listChannels: async () => ({ success: true, data: channelData }),
       getRuntimeStatus: async () => ({
         success: true,

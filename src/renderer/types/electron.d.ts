@@ -532,6 +532,17 @@ interface DetachedSkillTaskData {
   finishedAt?: string | null
 }
 
+interface ActiveChildRunSummaryData {
+  childRunId: string
+  skillId: string
+  sessionId: string | null
+  scopeId: string | null
+  status: string
+  startedAt: string
+  outputDir: string
+  runStatePath: string
+}
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -684,6 +695,10 @@ interface ElectronAgentAPI {
     taskId: string,
     scopeId: string
   ) => Promise<IPCResponse<DetachedSkillTaskData>>
+  listActiveChildRuns: () => Promise<IPCResponse<ActiveChildRunSummaryData[]>>
+  cancelChildRun: (
+    childRunId: string
+  ) => Promise<IPCResponse<unknown>>
   attachSessionRecallContext: (
     currentScopeId: string,
     conversationId: string
@@ -2326,5 +2341,6 @@ export type {
   TaskProjectionRecordData,
   RecoveryRecordData,
   ReferenceSkillHintData,
-  DetachedSkillTaskData
+  DetachedSkillTaskData,
+  ActiveChildRunSummaryData
 }

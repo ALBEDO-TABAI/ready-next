@@ -83,6 +83,9 @@ const agentAPI = {
     ipcRenderer.invoke('agent:listDetachedSkillTasks', payload || {}),
   cancelDetachedSkillTask: (taskId: string, scopeId: string) =>
     ipcRenderer.invoke('agent:cancelDetachedSkillTask', { taskId, scopeId }),
+  listActiveChildRuns: () => ipcRenderer.invoke('agent:listActiveChildRuns'),
+  cancelChildRun: (childRunId: string) =>
+    ipcRenderer.invoke('agent:cancelChildRun', { childRunId }),
   attachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
     ipcRenderer.invoke('agent:attachSessionRecallContext', { currentScopeId, conversationId }),
   detachSessionRecallContext: (currentScopeId: string, conversationId: string) =>

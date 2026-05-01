@@ -1,8 +1,10 @@
 import type {
+  MutableSkillChildCloseEvent,
   SkillChildCloseEvent,
   SkillChildRunStatus,
   SkillChildRunTerminalReason,
 } from './skill-child-run-types'
+import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 
 export const CANONICAL_SKILL_CHILD_TERMINAL_REASONS = [
   'completed',
@@ -75,10 +77,10 @@ export function decodeStoredSkillChildCloseEvent(
 export function decodeStoredSkillChildCloseEvent(
   close: Omit<SkillChildCloseEvent, 'terminalReason'> & { terminalReason: unknown },
 ): SkillChildCloseEvent {
-  return {
+  return freezeSkillChildCloseEvent({
     ...close,
     terminalReason: decodeStoredSkillChildTerminalReason(close),
-  }
+  } as MutableSkillChildCloseEvent)
 }
 
 export function classifySkillChildRunStatus(status: SkillChildRunStatus): SkillChildRunStatusClass {

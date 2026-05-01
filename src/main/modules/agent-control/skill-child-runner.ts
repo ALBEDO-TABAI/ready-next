@@ -48,7 +48,6 @@ import {
 import { writeLifecycle } from './output-dir-lifecycle'
 import {
   ChildRunCircuitBreaker,
-  isChildRunCircuitBreakerEnabled,
   shouldCountChildRunCircuitBreakerFailure,
 } from './child-run-circuit-breaker'
 import {
@@ -59,27 +58,31 @@ import {
   executeSkillActionViaToolGateway,
   type ChildGatewayResult,
 } from './tool-registry'
-import type {
-  ChildWaitResult,
-  SkillChildCloseEvent,
-  SkillChildDriverState,
-  SkillChildLaunchParams,
-  SkillChildRunParentNextHint,
-  SkillChildRunPayload,
-  SkillChildRunStatus,
-  SkillChildRunTerminalReason,
+import {
+  isRetainedLifecycleChildCloseStatus,
+  type ChildWaitResult,
+  type MutableSkillChildCloseEvent,
+  type SkillChildCloseEvent,
+  type SkillChildDriverState,
+  type SkillChildLaunchParams,
+  type SkillChildRunParentNextHint,
+  type SkillChildRunPayload,
+  type SkillChildRunStatus,
+  type SkillChildRunTerminalReason,
 } from './skill-child-run-types'
 import {
   classifySkillChildRunStatus,
   decodeStoredSkillChildCloseEvent,
   isSkillChildRunResumable,
 } from './skill-child-state-machine'
+import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 import { createSkillChildSubAgent } from './skill-child-sub-agent'
 import { mapSubAgentCloseToChildClose } from './skill-child-sub-agent-close-mapping'
 import { isSkillChildProgressPayload } from './skill-child-sub-agent-events'
 import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'
 import { runSubAgent } from './sub-agent/sub-agent-runner'
 import { disposeTimeout } from './timer-disposal'
+import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
@@ -120,6 +123,12 @@ export interface StartSkillChildRunParams {
 
 export type StartChildRunStatus = 'queued' | 'running' | 'reused' | 'recoverable_paused' | 'failed' | 'completed' | 'blocked' | 'killed'
 
+type FreshSkillChildRunContractFields = Readonly<{
+  childCloseEvent: null
+  childStatus: 'running'
+  parentNextHint: SkillChildRunParentNextHint
+}>
+
 export interface StartSkillChildRunResult {
   childRunId: string
   status: StartChildRunStatus
@@ -127,6 +136,7 @@ export interface StartSkillChildRunResult {
   runStatePath: string
   eventLogPath: string
   parentNextHint: SkillChildRunParentNextHint
+  freshContractFields: FreshSkillChildRunContractFields | null
   /** null when started normally; non-null when paused-on-launch (concurrency
    *  overflow, nested guard, or any other launch-time refusal). */
   closeEvent: SkillChildCloseEvent | null
@@ -135,6 +145,13 @@ export interface StartSkillChildRunResult {
 export interface WaitForSkillChildRunCloseOptions {
   timeoutMs?: number | null
   signal?: AbortSignal
+}
+
+export type CancelSkillChildRunSource = 'nlp' | 'ui_button'
+
+export interface CancelSkillChildRunOptions {
+  reason?: string
+  source: CancelSkillChildRunSource
 }
 
 // =====================================================================
@@ -161,6 +178,8 @@ interface ActiveRun {
   action: string
   scopeId: string | null
   sessionId: string | null
+  status: SkillChildRunStatus
+  startedAt: string
   controller: AbortController
   closePromise: Promise<SkillChildCloseEvent>
   resolveClose(event: SkillChildCloseEvent): void
@@ -197,13 +216,35 @@ class SkillChildRunner {
       sleep: config.sleep ?? defaultSleep,
     }
     this.circuitBreaker = new ChildRunCircuitBreaker({
-      enabled: isChildRunCircuitBreakerEnabled(process.env.READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED),
+      enabled: snapshotTurnFeatureFlags().childRunCircuitBreakerEnabled,
     })
   }
 
   // ------------------------------------------------------------------
   // Public entry points
   // ------------------------------------------------------------------
+
+  listActiveRuns(): Array<{
+    childRunId: string
+    skillId: string
+    sessionId: string | null
+    scopeId: string | null
+    status: SkillChildRunStatus
+    startedAt: string
+    outputDir: string
+    runStatePath: string
+  }> {
+    return Array.from(this.active.values()).map((run) => ({
+      childRunId: run.childRunId,
+      skillId: run.skillId,
+      sessionId: run.sessionId,
+      scopeId: run.scopeId,
+      status: run.status,
+      startedAt: run.startedAt,
+      outputDir: run.outputDir,
+      runStatePath: run.runStatePath,
+    }))
+  }
 
   async startSkillChildRun(params: StartSkillChildRunParams): Promise<StartSkillChildRunResult> {
     const driver = getSkillChildDriver(params.skillId)
@@ -402,6 +443,7 @@ class SkillChildRunner {
           runStatePath: payload.runStatePath,
           eventLogPath: this.deriveEventLogPathFromRecord(record),
           parentNextHint: payload.parentNextHint,
+          freshContractFields: null,
           closeEvent: null,
         }
       }
@@ -464,12 +506,22 @@ class SkillChildRunner {
     })
   }
 
-  async cancelSkillChildRun(childRunId: string, reason?: string): Promise<SkillChildCloseEvent> {
+  async cancelSkillChildRun(
+    childRunId: string,
+    reasonOrOptions?: string | CancelSkillChildRunOptions,
+  ): Promise<SkillChildCloseEvent> {
+    const cancelOptions = normalizeCancelSkillChildRunOptions(reasonOrOptions)
     // Compatible with multi-lifecycle resume: if the row was resumed and is
     // active again, this targets the new ActiveRun's controller (active.get
     // returns the resumed entry). The old paused close in `recentCloses` is
     // not consulted here.
     const active = this.active.get(childRunId)
+    logAgentMetric('skill_child_run_cancel_requested', {
+      childRunId,
+      skillId: active?.skillId ?? null,
+      source: cancelOptions.source,
+      hasActiveRun: Boolean(active),
+    })
     if (!active) {
       // Already terminal — return the cached close if we have one.
       const cached = this.recentCloses.get(childRunId)
@@ -500,7 +552,7 @@ class SkillChildRunner {
         outputDir: payload?.outputDir ?? record?.outputDir ?? null,
         runStatePath: payload?.runStatePath ?? record?.runStatePath ?? null,
         errorKind: 'cancelled_user',
-        message: reason || 'cancelled before launch',
+        message: cancelOptions.reason || 'cancelled before launch',
       })
       try {
         this.config.repository.updateChildRun(childRunId, {
@@ -513,7 +565,7 @@ class SkillChildRunner {
       this.recentCloses.set(childRunId, synth)
       return synth
     }
-    active.controller.abort(new Error(reason || 'cancelled_user'))
+    active.controller.abort(new Error(cancelOptions.reason || 'cancelled_user'))
     return active.closePromise
   }
 
@@ -607,6 +659,7 @@ class SkillChildRunner {
         eventLogPath: this.deriveEventLogPathFromRecord(existing),
         parentNextHint: existingPayload?.parentNextHint
           ?? params.parentNextHint ?? 'wait_for_close_event',
+        freshContractFields: null,
         closeEvent: null,
       }
     }
@@ -631,6 +684,7 @@ class SkillChildRunner {
         eventLogPath: this.deriveEventLogPathFromRecord(existing),
         parentNextHint: existingPayload!.parentNextHint
           ?? params.parentNextHint ?? 'wait_for_close_event',
+        freshContractFields: null,
         closeEvent: persistedClose,
       }
     }
@@ -757,6 +811,7 @@ class SkillChildRunner {
       runStatePath: existingPayload?.runStatePath ?? '',
       eventLogPath: existingPayload?.eventLogPath ?? '',
       parentNextHint: existingPayload?.parentNextHint ?? 'wait_for_close_event',
+      freshContractFields: null,
       closeEvent: close,
     }
   }
@@ -797,11 +852,13 @@ class SkillChildRunner {
         runStatePath,
         eventLogPath,
         parentNextHint: launchParams.parentNextHint,
+        freshContractFields: null,
         closeEvent: close,
       }
     }
 
     const controller = new AbortController()
+    const startedAt = new Date().toISOString()
     let resolveClose!: (event: SkillChildCloseEvent) => void
     const closePromise = new Promise<SkillChildCloseEvent>((resolve) => {
       resolveClose = resolve
@@ -813,6 +870,8 @@ class SkillChildRunner {
       action: params.params.action,
       scopeId: params.params.scopeId,
       sessionId: params.params.sessionId,
+      status: 'running',
+      startedAt,
       controller,
       closePromise,
       resolveClose,
@@ -850,6 +909,13 @@ class SkillChildRunner {
       runStatePath,
       eventLogPath,
       parentNextHint: launchParams.parentNextHint,
+      freshContractFields: params.resume === true
+        ? {
+            childCloseEvent: null,
+            childStatus: 'running',
+            parentNextHint: launchParams.parentNextHint,
+          }
+        : null,
       closeEvent: null,
     }
   }
@@ -861,7 +927,6 @@ class SkillChildRunner {
     resume: boolean,
   ): Promise<void> {
     if (!driver) return // typescript narrowing; checked at caller
-    const startedAt = new Date().toISOString()
     let firstActionStartedAt: string | null = null
     let state: SkillChildDriverState
     try {
@@ -883,7 +948,7 @@ class SkillChildRunner {
 
     await this.appendEvent(active, {
       type: 'started',
-      at: startedAt,
+      at: active.startedAt,
       childRunId: active.childRunId,
       input: { ...launchParams.requestedInput, __resume: resume || undefined },
     })
@@ -1067,15 +1132,16 @@ class SkillChildRunner {
     if (this.active.get(active.childRunId) !== active) {
       return
     }
+    const frozenClose = freezeSkillChildCloseEvent(close as MutableSkillChildCloseEvent)
     void this.appendEvent(active, {
       type: 'close',
       at: new Date().toISOString(),
-      close,
+      close: frozenClose,
     })
     try {
       this.config.repository.updateChildRun(active.childRunId, {
-        status: close.status,
-        closeEvent: close,
+        status: frozenClose.status,
+        closeEvent: frozenClose,
       })
     } catch (error) {
       logAgentMetric('skill_child_runner_finalize_failed', {
@@ -1088,13 +1154,13 @@ class SkillChildRunner {
     // resolveClose) cannot find this lifecycle's `active` and accidentally
     // double-resolve or overwrite a freshly-resumed lifecycle's state.
     this.active.delete(active.childRunId)
-    this.recentCloses.set(active.childRunId, close)
+    this.recentCloses.set(active.childRunId, frozenClose)
     if (this.recentCloses.size > 64) {
       // Drop oldest. JS Maps preserve insertion order.
       const firstKey = this.recentCloses.keys().next().value
       if (firstKey) this.recentCloses.delete(firstKey)
     }
-    if (shouldCountChildRunCircuitBreakerFailure(close)) {
+    if (shouldCountChildRunCircuitBreakerFailure(frozenClose)) {
       const breakerResult = this.circuitBreaker.recordFailure(active.singleFlightKey)
       if (breakerResult.opened) {
         logAgentMetric(TOOL_ERROR_METRICS.childRunCircuitBreak, {
@@ -1108,20 +1174,21 @@ class SkillChildRunner {
         })
       }
     }
-    this.writeRetainedLifecycle(active, close)
-    active.resolveClose(close)
+    this.writeRetainedLifecycle(active, frozenClose)
+    active.resolveClose(frozenClose)
   }
 
   private persistTerminalClose(childRunId: string, close: SkillChildCloseEvent): void {
+    const frozenClose = freezeSkillChildCloseEvent(close as MutableSkillChildCloseEvent)
     try {
       this.config.repository.updateChildRun(childRunId, {
-        status: close.status,
-        closeEvent: close,
+        status: frozenClose.status,
+        closeEvent: frozenClose,
       })
     } catch {
       // best effort
     }
-    this.recentCloses.set(childRunId, close)
+    this.recentCloses.set(childRunId, frozenClose)
   }
 
   private countActiveVeaRuns(): number {
@@ -1154,12 +1221,7 @@ class SkillChildRunner {
   }
 
   private writeRetainedLifecycle(active: ActiveRun, close: SkillChildCloseEvent): void {
-    if (
-      close.status !== 'completed'
-      && close.status !== 'failed'
-      && close.status !== 'killed'
-      && close.status !== 'blocked'
-    ) {
+    if (!isRetainedLifecycleChildCloseStatus(close.status)) {
       return
     }
     const terminalAt = new Date().toISOString()
@@ -1224,10 +1286,10 @@ export async function resumeSkillChildRun(
 
 export async function cancelSkillChildRun(
   childRunId: string,
-  reason?: string,
+  reasonOrOptions?: string | CancelSkillChildRunOptions,
 ): Promise<SkillChildCloseEvent> {
   const runner = ensureRunner()
-  return runner.cancelSkillChildRun(childRunId, reason)
+  return runner.cancelSkillChildRun(childRunId, reasonOrOptions)
 }
 
 export function getSkillChildRunCloseEvent(childRunId: string): SkillChildCloseEvent | null {
@@ -1330,6 +1392,21 @@ function makeAbortError(reason: unknown): Error {
   const error = new Error(typeof reason === 'string' && reason ? reason : 'wait aborted')
   error.name = 'AbortError'
   return error
+}
+
+function normalizeCancelSkillChildRunOptions(
+  reasonOrOptions?: string | CancelSkillChildRunOptions,
+): CancelSkillChildRunOptions {
+  if (typeof reasonOrOptions === 'string') {
+    return { reason: reasonOrOptions, source: 'nlp' }
+  }
+  if (reasonOrOptions && typeof reasonOrOptions === 'object') {
+    return {
+      reason: reasonOrOptions.reason,
+      source: reasonOrOptions.source,
+    }
+  }
+  return { source: 'nlp' }
 }
 
 function trim(value: unknown): string | null {
@@ -1459,6 +1536,7 @@ function makePausedOnLaunchResult(opts: {
     runStatePath: '',
     eventLogPath: '',
     parentNextHint: opts.parentNextHint,
+    freshContractFields: null,
     closeEvent: close,
   }
 }
@@ -1516,6 +1594,7 @@ function makeResumeRefusalResult(opts: {
     runStatePath: opts.runStatePath,
     eventLogPath: opts.eventLogPath,
     parentNextHint: opts.parentNextHint,
+    freshContractFields: null,
     closeEvent: close,
   }
 }
@@ -1577,7 +1656,7 @@ function makeCloseEvent(args: MakeCloseArgs): SkillChildCloseEvent {
       ? 'recoverable_paused'
       : args.status
   )
-  return {
+  return freezeSkillChildCloseEvent({
     childRunId: args.childRunId,
     skillId: args.skillId,
     status: narrowedStatus,
@@ -1598,5 +1677,5 @@ function makeCloseEvent(args: MakeCloseArgs): SkillChildCloseEvent {
     error: args.errorKind && args.message
       ? { kind: args.errorKind, message: args.message }
       : null,
-  }
+  })
 }
