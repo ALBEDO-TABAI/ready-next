@@ -1,8 +1,7 @@
-import { appendFileSync } from 'fs'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { rememberBrowserWorkflowState } from '../agent-control/session-continuity'
 import { executeBrowserTool } from './browser-tools'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
@@ -224,7 +223,7 @@ interface BrowserAgentRunnerOptions {
   emitToolEvent?: (type: 'tool_use' | 'tool_result', text: string) => void
 }
 
-const LOG = getLogPath('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log')
 const STAGE_ATTEMPTS: Record<'ensure_upload' | 'ensure_prompt' | 'submit' | 'final_reconcile' | 'recover', number> = {
   ensure_upload: 2,
   ensure_prompt: 2,
@@ -235,7 +234,7 @@ const STAGE_ATTEMPTS: Record<'ensure_upload' | 'ensure_prompt' | 'submit' | 'fin
 
 function log(message: string): void {
   try {
-    appendFileSync(LOG, `[${new Date().toISOString()}] ${message}\n`)
+    logger.append(`[${new Date().toISOString()}] ${message}\n`)
   } catch {
     // ignore
   }

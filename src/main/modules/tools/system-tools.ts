@@ -1,7 +1,6 @@
-import { appendFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 
 export {
@@ -11,10 +10,10 @@ export {
 } from './system-tool-defs'
 
 const execFileAsync = promisify(execFile)
-const LOG = getLogPath('ready-system-tools.log')
+const logger = createRotatingLogger('ready-system-tools.log')
 
 function log(msg: string) {
-  try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+  try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
 
 function tokenizeCommand(command: string): string[] {

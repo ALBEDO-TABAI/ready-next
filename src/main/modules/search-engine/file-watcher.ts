@@ -29,18 +29,17 @@
  */
 
 import chokidar, { type ChokidarOptions } from 'chokidar'
-import { appendFileSync } from 'fs'
 import { randomBytes } from 'crypto'
 
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { IGNORED_DIR_NAMES } from './adapters'
 
-const SEARCH_LOG = getLogPath('ready-search.log')
+const searchLogger = createRotatingLogger('ready-search.log')
 
 function logWatcher(message: string): void {
   try {
-    appendFileSync(SEARCH_LOG, `[${new Date().toISOString()}] [file-watcher] ${message}\n`)
+    searchLogger.append(`[${new Date().toISOString()}] [file-watcher] ${message}\n`)
   } catch {
     /* best-effort */
   }

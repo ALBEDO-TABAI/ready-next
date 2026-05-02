@@ -1,7 +1,6 @@
-import { appendFileSync } from 'fs'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const METRIC_LOG = getLogPath('ready-agent-metrics.log')
+const metricLogger = createRotatingLogger('ready-agent-metrics.log', { emitMetric: null })
 
 export interface AgentMetricEvent {
   at: string
@@ -36,7 +35,7 @@ export function logAgentMetric(
     return
   }
   try {
-    appendFileSync(METRIC_LOG, `${JSON.stringify(event)}\n`, 'utf8')
+    metricLogger.append(`${JSON.stringify(event)}\n`)
   } catch {
     // Metrics must never break the control path.
   }

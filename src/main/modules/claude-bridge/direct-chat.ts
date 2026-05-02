@@ -6,7 +6,7 @@
 
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import { appendFileSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
@@ -139,14 +139,14 @@ import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
 import { VideoFallbackService } from './video-fallback-service'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const LOG = getLogPath('ready-directchat.log')
+const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
 const chatRepository = new ChatRepository()
 
 function log(msg: string) {
-  try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+  try { directChatLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
 
 function toContinuationUpdatedAt(value?: string | null): number {

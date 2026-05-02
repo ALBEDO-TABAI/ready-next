@@ -7,7 +7,6 @@ import { BrowserController } from '../browser-engine/ipc-handler'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
-import { appendFileSync } from 'fs'
 import { access, mkdir, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { constants as fsConstants, existsSync } from 'fs'
@@ -16,7 +15,7 @@ import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
 import { domainsLikelyMatch } from '../agent-control/browser-action-heuristics'
 import { AgentRepository } from '../repositories/agent-repository'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
   findRecentBrowserAction,
   rememberBrowserAction,
@@ -27,9 +26,9 @@ import {
 } from './browser-tool-catalog'
 import type { BrowserStructuredFieldMapping } from '../browser-engine/capability-types'
 
-const LOG = getLogPath('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
-  try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+  try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
 
 function createBrowserAgentHelpers(controller: BrowserController) {

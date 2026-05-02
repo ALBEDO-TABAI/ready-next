@@ -1,7 +1,6 @@
-import { appendFileSync } from 'fs'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const LOG = getLogPath('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log')
 
 export interface ToolEventLogPayload {
   type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'
@@ -25,7 +24,7 @@ export function appendToolEventLog(payload: ToolEventLogPayload): void {
   }
   if (payload.error) parts.push(`error=${String(payload.error).slice(0, 120)}`)
   try {
-    appendFileSync(LOG, `[${new Date().toISOString()}] ${parts.join(' ')}\n`)
+    logger.append(`[${new Date().toISOString()}] ${parts.join(' ')}\n`)
   } catch {
     /* best-effort */
   }

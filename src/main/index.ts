@@ -29,6 +29,7 @@ import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
+import { registerMainProcessHandlers } from './process-handlers'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 
@@ -158,6 +159,28 @@ function setupApplicationMenu(): void {
   const menu = Menu.buildFromTemplate(buildAppMenuTemplate())
   Menu.setApplicationMenu(menu)
 }
+
+function runFatalProcessCleanup(): Promise<void> {
+  return runBeforeQuitCleanup({
+    cleanupAgentRuntime,
+    cleanupAgentManager: () => agentManager.cleanup(),
+    cleanupRsshubManager: () => rsshubManager.cleanup(),
+    cleanupManagedBrowsers: async () => {
+      const result = await closeAllBrowsers()
+      if (result.errors.length > 0) {
+        console.warn('[process-handlers] closeAllBrowsers errors', result.errors)
+      }
+    },
+    cleanupDbWorker: () => shutdownWorkerDbBridge(),
+    cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
+    closeDatabase: () => getDatabase().close(),
+  }, { timeoutMs: 5_000 })
+}
+
+registerMainProcessHandlers({
+  app,
+  cleanup: runFatalProcessCleanup,
+})
 
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()

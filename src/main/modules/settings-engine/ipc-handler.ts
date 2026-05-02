@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { appendFileSync } from 'fs'
 import {
   AIModelConfig,
   getProviderDef,
@@ -10,7 +9,7 @@ import {
   type AIProviderWorkspace,
 } from '../../../shared/ai-providers'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseJsonResponse } from '../openai-responses'
 
 interface SettingsIPCResponse<T = unknown> {
@@ -19,9 +18,9 @@ interface SettingsIPCResponse<T = unknown> {
   error?: string
 }
 
-const SETTINGS_LOG = getLogPath('ready-settings.log')
+const settingsLogger = createRotatingLogger('ready-settings.log')
 function logSettings(msg: string) {
-  try { appendFileSync(SETTINGS_LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* ignore */ }
+  try { settingsLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* ignore */ }
 }
 
 export function setupSettingsIPC(): void {

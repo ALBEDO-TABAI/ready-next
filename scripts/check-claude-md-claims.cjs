@@ -6,6 +6,7 @@ const { join, relative, resolve } = require('node:path')
 const DOCS = ['CLAUDE.md', 'AGENTS.md']
 const SEARCH_ROOTS = [
   'src/main/modules',
+  'src/main/utils',
   'src/shared',
   'src/preload',
   'scripts',

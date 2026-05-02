@@ -1,7 +1,7 @@
-import { appendFile } from 'fs/promises'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 
-export const BROWSER_DIAGNOSTICS_LOG_PATH = getLogPath('ready-browser.log')
+const browserDiagnosticsLogger = createRotatingLogger('ready-browser.log')
+export const BROWSER_DIAGNOSTICS_LOG_PATH = browserDiagnosticsLogger.path
 
 export interface BrowserTaskDiagnosticsSnapshot {
   sessionId?: string
@@ -53,7 +53,7 @@ export class BrowserDiagnosticsService {
     if (this.recentEntries.length > 80) {
       this.recentEntries.splice(0, this.recentEntries.length - 80)
     }
-    void appendFile(BROWSER_DIAGNOSTICS_LOG_PATH, line, 'utf-8').catch(() => {
+    void browserDiagnosticsLogger.appendAsync(line).catch(() => {
       // ignore file logging failures
     })
     console.log(message)

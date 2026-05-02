@@ -1,6 +1,5 @@
-import { appendFileSync } from 'fs'
 import type { DatabaseConnection } from '../database'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
@@ -16,11 +15,11 @@ import {
   type IndexSourceAdapter,
 } from './adapters'
 
-const SEARCH_LOG = getLogPath('ready-search.log')
+const searchLogger = createRotatingLogger('ready-search.log')
 
 function logSearch(message: string): void {
   try {
-    appendFileSync(SEARCH_LOG, `[${new Date().toISOString()}] ${message}\n`)
+    searchLogger.append(`[${new Date().toISOString()}] ${message}\n`)
   } catch {
     /* best-effort */
   }

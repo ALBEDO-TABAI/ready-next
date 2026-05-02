@@ -1,8 +1,7 @@
-import { appendFileSync } from 'fs'
 import { createRequire } from 'module'
 import { join } from 'path'
 import { runMigrations } from './migrations'
-import { getLogPath } from '../utils/platform'
+import { createRotatingLogger } from '../utils/rotating-logger'
 
 // Use CommonJS `require('electron')` rather than `import { app } from 'electron'`.
 // Electron's Node entry (node_modules/electron/index.js) exports a string path
@@ -303,10 +302,10 @@ export interface ConversationAttachmentRecord {
 
 let DatabaseConstructor: BetterSqliteConstructor | null = null
 const require = createRequire(import.meta.url)
-const DATABASE_LOG = getLogPath('ready-database.log')
+const databaseLogger = createRotatingLogger('ready-database.log')
 
 function logDatabase(message: string): void {
-  try { appendFileSync(DATABASE_LOG, `[${new Date().toISOString()}] ${message}\n`) } catch { /* ignore */ }
+  try { databaseLogger.append(`[${new Date().toISOString()}] ${message}\n`) } catch { /* ignore */ }
 }
 
 // Lazy load better-sqlite3 to handle missing module gracefully

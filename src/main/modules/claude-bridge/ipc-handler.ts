@@ -9,6 +9,7 @@ import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
 import {
   clearAllReferenceSkillHints,
@@ -72,9 +73,9 @@ function looksLikeReadableText(value: string): boolean {
   return printable / sample.length > 0.88
 }
 
-const LOG = getLogPath('ready-directchat.log')
+const directChatLogger = createRotatingLogger('ready-directchat.log')
 function log(msg: string) {
-  try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+  try { directChatLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
 
 export interface IPCResponse<T = unknown> {

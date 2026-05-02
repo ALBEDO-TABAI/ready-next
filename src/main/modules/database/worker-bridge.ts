@@ -18,8 +18,7 @@ import { existsSync } from 'fs'
 import { dirname, join } from 'path'
 import { Worker } from 'worker_threads'
 import { createRequire } from 'module'
-import { appendFileSync } from 'fs'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import type { SearchHit } from '../search-engine/query'
 import type {
   ReindexAllSourcesResult,
@@ -31,9 +30,9 @@ let electronModule: typeof import('electron') | null = null
 try { electronModule = require('electron') as typeof import('electron') }
 catch { electronModule = null }
 
-const DB_BRIDGE_LOG = getLogPath('ready-database.log')
+const dbBridgeLogger = createRotatingLogger('ready-database.log')
 function logBridge(message: string): void {
-  try { appendFileSync(DB_BRIDGE_LOG, `[${new Date().toISOString()}] [worker-bridge] ${message}\n`) }
+  try { dbBridgeLogger.append(`[${new Date().toISOString()}] [worker-bridge] ${message}\n`) }
   catch { /* ignore */ }
 }
 

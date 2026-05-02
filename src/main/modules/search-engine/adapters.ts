@@ -1,17 +1,16 @@
 import { readFile, readdir, stat, open } from 'fs/promises'
 import { createHash } from 'crypto'
 import { basename, extname, join } from 'path'
-import { appendFileSync } from 'fs'
 import { BINARY_EXTENSIONS } from '../document-engine/binary-extensions'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import type { SearchRepository } from './repository'
 
-const SEARCH_LOG = getLogPath('ready-search.log')
+const searchLogger = createRotatingLogger('ready-search.log')
 
 function logSearch(message: string): void {
   try {
-    appendFileSync(SEARCH_LOG, `[${new Date().toISOString()}] ${message}\n`)
+    searchLogger.append(`[${new Date().toISOString()}] ${message}\n`)
   } catch {
     /* best-effort */
   }

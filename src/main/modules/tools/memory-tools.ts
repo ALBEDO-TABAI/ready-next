@@ -1,6 +1,5 @@
-import { appendFileSync } from 'fs'
 import type { ToolContext } from './tool-executor'
-import { getLogPath } from '../../utils/platform'
+import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
   buildToolParamSchema,
   normalizeAnthropicToolSchema,
@@ -10,11 +9,11 @@ import {
 import { MEMORY_SCHEMAS } from './schemas/memory-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 
-const LOG = getLogPath('ready-memory-tools.log')
+const logger = createRotatingLogger('ready-memory-tools.log')
 
 function log(msg: string) {
   try {
-    appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`)
+    logger.append(`[${new Date().toISOString()}] ${msg}\n`)
   } catch {
     /* */
   }
