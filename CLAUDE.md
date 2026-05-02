@@ -156,7 +156,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - continuation 全链路必须保留 durable skill handle：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint`；即使没有 `executionId / todoId`，只要有这些 handle，也必须能构造继续入口
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
-- SQLite-backed 验收前必须先跑 `npm run rebuild:native`；若 `better-sqlite3` ABI 与当前 Node/Electron 不匹配，只能标记为 DB 路径未证明，不能算验收通过
+- SQLite-backed 验收前必须先跑 `npm run verify:native`；该命令会在 rebuild 后用 Electron runtime 真实打开 `better-sqlite3` 并执行 smoke query。若 Electron ABI 下 native check 不通过，只能标记为 DB 路径未证明，不能算验收通过
+- Ready 主应用启动时必须先通过 primary DB 硬门；`better-sqlite3` 加载、真实 `ready.db` 打开、迁移或 settings 表探测失败时必须弹原生错误并退出，不能进入 renderer 展示默认/空 AI 配置
 - **Feature flags（生产降级开关）**：
   - `READY_SKILL_CHILD_INTERNAL_STRICT_ADMISSION`：默认 `'1'`，控制 child-internal tool 的严格 admission；`'0'` 退回到 telemetry-only 旧行为。
   - `READY_SKILL_CHILD_RESUME_ENABLED`：默认 `'1'`，控制 turn-engine 的 child resume 自动分支是否启用；`'0'` 时遇到 paused child + 用户 resume 意图也不会调 `resumeSkillChildRun`，turn 退化为普通 model 回复，emit `skill_child_resume_disabled_by_flag` metric。runner 自身的 `resumeSkillChildRun` API 不受影响。
@@ -195,6 +196,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 结构测试只保留给无法通过行为证明的硬契约；豁免必须写产品理由，禁止无理由 waiver。
 - 破坏 singleton、全局状态、admission 或 lifecycle 的测试 helper 必须声明 `__breaksInvariants`。
 - e2e 只用于真子进程、真实 runtime 或真实外部依赖边界；默认 opt-in，不拖慢常规 verify。
+- 普通 Node 下的 `better-sqlite3` skip 只能证明 host-Node 测试未覆盖该路径；SQLite-backed 验收必须使用 Electron native gate（`npm run native:check` / `npm run verify:native`），不能用 skip 当通过。
 - 详细规约、示例和运行模式见 `docs/superpowers/testing-conventions.md`。
 
 ### 6.18 提质 + 控制面（G 阶段）
@@ -233,6 +235,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 ## 9. 常用命令
 ```bash
 npm run dev
+npm run native:check
+npm run verify:native
 npm run typecheck
 npm run test
 npm run verify
@@ -241,6 +245,7 @@ npm run build
 
 ## 10. 提交前检查
 - `npm run typecheck` 无错误
+- 涉及 SQLite / 设置 / 本地持久化时，`npm run verify:native` 必须通过
 - 关键页面可正常渲染与切换
 - Browser / Agent / Settings 关键链路至少做一次基础回归
 - 若改动跨多层，必须同步更新根目录协作文档

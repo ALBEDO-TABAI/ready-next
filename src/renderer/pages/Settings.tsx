@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
@@ -15,6 +15,10 @@ import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_DANGER_BUTTON_STYLE,
+  SETTINGS_FLAT_BUTTON_STYLE,
+  SETTINGS_FLAT_CARD_STYLE,
+  SETTINGS_FLAT_CHIP_STYLE,
+  SETTINGS_FLAT_INPUT_STYLE,
   SETTINGS_INPUT_STYLE,
   SETTINGS_PRIMARY_BUTTON_STYLE,
   SETTINGS_READONLY_STYLE,
@@ -231,9 +235,9 @@ function AISettingsFieldCard({
 }) {
   return (
     <div
-      className={`glass-surface-card rounded-2xl border ${wide ? 'md:col-span-2' : ''}`}
+      className={`settings-ai-light-card rounded-2xl border ${wide ? 'md:col-span-2' : ''}`}
       style={{
-        ...SETTINGS_CARD_STYLE,
+        ...SETTINGS_FLAT_CARD_STYLE,
         padding: '14px 16px',
       }}
     >
@@ -263,11 +267,10 @@ function AISettingsCapabilityChip({
 
   return (
     <div
-      className="glass-surface-floating flex items-center gap-2 rounded-full border"
+      className="settings-ai-light-chip flex items-center gap-2 rounded-full border"
       style={{
+        ...SETTINGS_FLAT_CHIP_STYLE,
         padding: '6px 10px',
-        borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
-        background: 'color-mix(in srgb, var(--surface-floating-bg) 74%, transparent)',
       }}
     >
       <span className="text-[10px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)' }}>{label}</span>
@@ -285,11 +288,10 @@ function AISettingsInfoChip({
 }) {
   return (
     <div
-      className="glass-surface-floating rounded-xl border"
+      className="settings-ai-light-chip rounded-xl border"
       style={{
+        ...SETTINGS_FLAT_CHIP_STYLE,
         padding: '10px 12px',
-        borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
-        background: 'color-mix(in srgb, var(--surface-floating-bg) 78%, transparent)',
       }}
     >
       <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>{label}</div>
@@ -308,6 +310,8 @@ function AISettingsPanel() {
     testMessage,
     testLatency,
     remoteModels,
+    saveStatus,
+    saveMessage,
     loadConfig,
     updateField,
     updateCapabilityMode,
@@ -342,11 +346,11 @@ function AISettingsPanel() {
     feishuConnected?: boolean
   } | null>(null)
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
+  const requestedCapabilitySnapshotKey = useRef<string | null>(null)
 
   const selectedProfile = getSelectedProfile()
   const activeProfile = getActiveProfile()
   const selectedConfig = selectedProfile?.config || activeConfig
-  const config = selectedConfig
   const activeCategory = (selectedProfile?.category || 'custom') as AIProviderCategory
   const currentProvider = getProviderDef(selectedConfig.provider, selectedConfig.baseUrl)
   const capabilities = resolveAIConfigCapabilities(selectedConfig)
@@ -361,11 +365,11 @@ function AISettingsPanel() {
       ? 'OpenAI /responses'
       : 'OpenAI /chat/completions'
   const compactInputStyle = {
-    ...SETTINGS_INPUT_STYLE,
+    ...SETTINGS_FLAT_INPUT_STYLE,
     padding: '6px 12px',
   }
   const compactSelectStyle = {
-    ...SETTINGS_INPUT_STYLE,
+    ...SETTINGS_FLAT_INPUT_STYLE,
     padding: '6px 28px 6px 12px',
   }
   const stackedInputStyle = {
@@ -374,9 +378,26 @@ function AISettingsPanel() {
     textAlign: 'left' as const,
   }
   const stackedSelectStyle = {
-    ...compactSelectStyle,
+    ...SETTINGS_FLAT_INPUT_STYLE,
+    padding: '6px 28px 6px 12px',
     width: '100%',
   }
+  const capabilityRuntimeConfig = useMemo(() => ({
+    ...selectedConfig,
+    apiKey: '',
+    displayName: selectedConfig.displayName,
+  }), [selectedConfig])
+  const capabilitySnapshotKey = JSON.stringify({
+    provider: capabilityRuntimeConfig.provider,
+    baseUrl: capabilityRuntimeConfig.baseUrl,
+    model: capabilityRuntimeConfig.model,
+    agentProtocol: capabilityRuntimeConfig.agentProtocol,
+    wireApi: capabilityRuntimeConfig.wireApi,
+    toolUseMode: capabilityRuntimeConfig.toolUseMode,
+    visionMode: capabilityRuntimeConfig.visionMode,
+    reasoningEffort: capabilityRuntimeConfig.reasoningEffort,
+    capabilityModes: capabilityRuntimeConfig.capabilityModes || {},
+  })
   const toolTransportLabel = capabilities?.toolCallTransport === 'text'
     ? '文本桥接'
     : capabilities?.toolCallTransport === 'native'
@@ -421,10 +442,10 @@ function AISettingsPanel() {
 
   const refreshCapabilityRuntimeSnapshot = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return
-    const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(config)
+    const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(capabilityRuntimeConfig)
     if (!result.success || !result.data) return
     setCapabilityRuntimeSnapshot(result.data)
-  }, [config, selectedConfig])
+  }, [capabilityRuntimeConfig])
 
   useEffect(() => {
     if (!loaded) void loadConfig()
@@ -432,37 +453,34 @@ function AISettingsPanel() {
 
   useEffect(() => {
     let cancelled = false
-    if (typeof window === 'undefined' || !window.electronAPI?.settings) return
+    if (!loaded || typeof window === 'undefined' || !window.electronAPI?.settings) return
 
     ;(async () => {
-      const keys = [
-        'remote_channels_enabled',
-        'sidecar_autostart',
-        'sidecar_bind_host',
-        'sidecar_bind_port',
-        'agent_message_coalesce_enabled',
-        'agent_message_coalesce_window_ms',
-      ] as const
-      const results = await Promise.all(keys.map((key) => window.electronAPI.settings.get(key)))
+      const allSettingsResult = await window.electronAPI.settings.getAll?.()
       if (cancelled) return
 
-      const [enabledRes, autostartRes, hostRes, portRes, coalesceEnabledRes, coalesceWindowRes] = results
-      if (enabledRes.success && enabledRes.data) setRemoteChannelsEnabled(enabledRes.data !== 'false')
-      if (autostartRes.success && autostartRes.data) setSidecarAutostart(autostartRes.data !== 'false')
-      if (hostRes.success && hostRes.data) setSidecarHost(hostRes.data)
-      if (portRes.success && portRes.data) setSidecarPort(portRes.data)
-      if (coalesceEnabledRes.success && coalesceEnabledRes.data) setMessageCoalesceEnabled(coalesceEnabledRes.data !== 'false')
-      if (coalesceWindowRes.success && coalesceWindowRes.data) setMessageCoalesceWindowMs(coalesceWindowRes.data)
+      const settings = allSettingsResult?.success && allSettingsResult.data ? allSettingsResult.data : {}
+      if (settings.remote_channels_enabled) setRemoteChannelsEnabled(settings.remote_channels_enabled !== 'false')
+      if (settings.sidecar_autostart) setSidecarAutostart(settings.sidecar_autostart !== 'false')
+      if (settings.sidecar_bind_host) setSidecarHost(settings.sidecar_bind_host)
+      if (settings.sidecar_bind_port) setSidecarPort(settings.sidecar_bind_port)
+      if (settings.agent_message_coalesce_enabled) setMessageCoalesceEnabled(settings.agent_message_coalesce_enabled !== 'false')
+      if (settings.agent_message_coalesce_window_ms) setMessageCoalesceWindowMs(settings.agent_message_coalesce_window_ms)
       await refreshRuntimeSummary()
-      await refreshCapabilityRuntimeSnapshot()
     })()
 
     return () => { cancelled = true }
-  }, [refreshCapabilityRuntimeSnapshot, refreshRuntimeSummary])
+  }, [loaded, refreshRuntimeSummary])
 
   useEffect(() => {
-    void refreshCapabilityRuntimeSnapshot()
-  }, [refreshCapabilityRuntimeSnapshot])
+    if (!loaded) return
+    if (requestedCapabilitySnapshotKey.current === capabilitySnapshotKey) return
+    requestedCapabilitySnapshotKey.current = capabilitySnapshotKey
+    const timer = window.setTimeout(() => {
+      void refreshCapabilityRuntimeSnapshot()
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [loaded, capabilitySnapshotKey, refreshCapabilityRuntimeSnapshot])
 
   useEffect(() => {
     setShowAdvanced(false)
@@ -520,7 +538,21 @@ function AISettingsPanel() {
   ]
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="settings-ai-panel flex flex-col gap-6">
+      {saveStatus === 'error' && (
+        <div
+          className="settings-ai-light-card flex items-center gap-2 rounded-2xl border"
+          style={{
+            ...SETTINGS_FLAT_CARD_STYLE,
+            padding: '12px 14px',
+            borderColor: 'color-mix(in srgb, var(--color-red) 26%, var(--surface-border) 74%)',
+            color: 'var(--color-red)',
+          }}
+        >
+          <XCircle className="w-4 h-4 shrink-0" />
+          <span className="text-[12px] leading-5">{saveMessage || '设置保存失败，请重试。'}</span>
+        </div>
+      )}
       <div
         className="glass-surface-card rounded-2xl border"
         style={{
@@ -548,14 +580,15 @@ function AISettingsPanel() {
               <button
                 key={tab.id}
                 onClick={() => selectCategory(tab.id)}
-                className="glass-surface-card rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
+                className="settings-ai-light-card rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
                 style={{
+                  ...SETTINGS_FLAT_CARD_STYLE,
                   padding: '12px 14px',
                   ...(isActive ? {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
                     boxShadow: 'var(--lg-shadow-contact), inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 20%, transparent)',
-                  } : SETTINGS_CARD_STYLE),
+                  } : SETTINGS_FLAT_CARD_STYLE),
                 }}
               >
                 <div className="text-[13px] font-semibold" style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}>{tab.label}</div>
@@ -585,7 +618,9 @@ function AISettingsPanel() {
               onClick={() => addCustomProfile()}
               className="rounded-lg text-[12px] font-medium"
               style={{
-                ...SETTINGS_PRIMARY_BUTTON_STYLE,
+                ...SETTINGS_FLAT_BUTTON_STYLE,
+                background: 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)',
+                color: '#fff',
                 padding: '7px 12px',
               }}
             >
@@ -601,13 +636,14 @@ function AISettingsPanel() {
                 <button
                   key={profile.id}
                   onClick={() => selectProfile(profile.id)}
-                  className="glass-surface-card rounded-xl border text-left transition-[background-color,border-color,color] duration-200"
+                  className="settings-ai-light-card rounded-xl border text-left transition-[background-color,border-color,color] duration-200"
                   style={{
+                    ...SETTINGS_FLAT_CARD_STYLE,
                     padding: '12px 14px',
                     ...(isSelected ? {
                       borderColor: 'color-mix(in srgb, var(--color-blue) 32%, var(--lg-border-soft) 68%)',
                       background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
-                    } : SETTINGS_SUBTLE_CARD_STYLE),
+                    } : SETTINGS_FLAT_CARD_STYLE),
                   }}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -664,7 +700,7 @@ function AISettingsPanel() {
                     onClick={() => activateProfile(selectedProfile.id)}
                     className="rounded-lg text-[12px] font-medium"
                     style={{
-                      ...SETTINGS_SECONDARY_BUTTON_STYLE,
+                      ...SETTINGS_FLAT_BUTTON_STYLE,
                       padding: '7px 12px',
                     }}
                   >
@@ -676,7 +712,10 @@ function AISettingsPanel() {
                     onClick={() => removeCustomProfile(selectedProfile.id)}
                     className="rounded-lg text-[12px] font-medium"
                     style={{
-                      ...SETTINGS_DANGER_BUTTON_STYLE,
+                      ...SETTINGS_FLAT_BUTTON_STYLE,
+                      borderColor: 'color-mix(in srgb, var(--color-red) 34%, var(--surface-border) 66%)',
+                      background: 'color-mix(in srgb, var(--color-red-light) 70%, var(--surface-card-bg) 30%)',
+                      color: 'var(--color-red)',
                       padding: '7px 12px',
                     }}
                   >
@@ -714,7 +753,7 @@ function AISettingsPanel() {
               title="在切换面板显示"
               description="决定它是否会出现在 Agent 聊天区的快速切换面板。"
               control={(
-                <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+                <label className="settings-ai-light-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_FLAT_CARD_STYLE}>
                   <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>showInChatSwitcher</span>
                   <input
                     type="checkbox"
@@ -829,10 +868,9 @@ function AISettingsPanel() {
                       return (
                         <div
                           key={modelId}
-                          className="glass-surface-floating flex items-center gap-2 rounded-full border px-3 py-1.5"
+                          className="settings-ai-light-chip flex items-center gap-2 rounded-full border px-3 py-1.5"
                           style={{
-                            borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
-                            background: 'color-mix(in srgb, var(--surface-floating-bg) 78%, transparent)',
+                            ...SETTINGS_FLAT_CHIP_STYLE,
                           }}
                         >
                           <span className="text-[11px] font-mono" style={{ color: 'var(--text-body)' }}>{modelId}</span>
@@ -878,7 +916,7 @@ function AISettingsPanel() {
                       disabled={!pendingModelId.trim()}
                       className="rounded-lg text-[12px] font-medium disabled:opacity-50"
                       style={{
-                        ...SETTINGS_SECONDARY_BUTTON_STYLE,
+                        ...SETTINGS_FLAT_BUTTON_STYLE,
                         padding: '7px 12px',
                       }}
                     >
@@ -1066,9 +1104,9 @@ function AISettingsPanel() {
                 return (
                   <div
                     key={group.id}
-                    className="glass-surface-card rounded-xl border"
+                    className="settings-ai-light-card rounded-xl border"
                     style={{
-                      ...SETTINGS_SUBTLE_CARD_STYLE,
+                      ...SETTINGS_FLAT_CARD_STYLE,
                       padding: '12px 14px',
                     }}
                   >
@@ -1128,7 +1166,9 @@ function AISettingsPanel() {
                   disabled={testStatus === 'testing'}
                   className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                   style={{
-                    ...SETTINGS_PRIMARY_BUTTON_STYLE,
+                    ...SETTINGS_FLAT_BUTTON_STYLE,
+                    background: 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)',
+                    color: '#fff',
                     padding: '7px 16px',
                   }}
                 >
@@ -1153,9 +1193,9 @@ function AISettingsPanel() {
                 {remoteModels.map((modelId) => (
                   <div
                     key={modelId}
-                    className="glass-surface-floating flex items-center gap-2 rounded-full border px-3 py-1"
+                    className="settings-ai-light-chip flex items-center gap-2 rounded-full border px-3 py-1"
                     style={{
-                      borderColor: 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)',
+                      ...SETTINGS_FLAT_CHIP_STYLE,
                     }}
                   >
                     <span className="text-[11px] font-mono" style={{ color: 'var(--text-body)' }}>

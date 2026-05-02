@@ -16,9 +16,11 @@ test('settings page uses dedicated liquid shell surfaces across header, navigati
   assert.doesNotMatch(settingsPage, /data-liquid-shell="settings-header"[\s\S]*glass-surface-panel/)
   assert.match(settingsPage, /panel-hover-scrollbar flex-shrink-0 overflow-auto/)
   assert.match(settingsPage, /glass-surface-card/)
+  assert.match(settingsPage, /className="settings-ai-panel/)
+  assert.match(settingsPage, /settings-ai-light-card/)
 })
 
-test('shared settings theme tokens define glassy cards and controls', () => {
+test('shared settings theme keeps glass on outer cards while dense controls stay flat', () => {
   const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
 
   assert.match(settingsTheme, /var\(--lg-border-soft\)/)
@@ -26,6 +28,8 @@ test('shared settings theme tokens define glassy cards and controls', () => {
   assert.match(settingsTheme, /backdropFilter:/)
   assert.match(settingsTheme, /WebkitBackdropFilter:/)
   assert.match(settingsTheme, /color-mix\(in srgb, var\(--surface-card-bg\)/)
+  assert.match(settingsTheme, /SETTINGS_FLAT_CARD_STYLE/)
+  assert.match(settingsTheme, /SETTINGS_FLAT_INPUT_STYLE:[\s\S]*backdropFilter:\s*'none'/)
 })
 
 test('compact utility settings opt into short control slots so labels do not collapse into vertical stacks', () => {

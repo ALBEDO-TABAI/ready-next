@@ -33,6 +33,17 @@ export interface DatabaseConnection {
 
 type BetterSqliteConstructor = new (path: string) => DatabaseConnection
 
+export class DatabaseUnavailableError extends Error {
+  readonly code = 'database_unavailable'
+  readonly cause?: unknown
+
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = 'DatabaseUnavailableError'
+    this.cause = cause
+  }
+}
+
 // --- Exported Type Interfaces ---
 
 export interface RSSSource {
@@ -301,11 +312,16 @@ export interface ConversationAttachmentRecord {
 }
 
 let DatabaseConstructor: BetterSqliteConstructor | null = null
+let DatabaseConstructorLoadError: unknown = null
 const require = createRequire(import.meta.url)
 const databaseLogger = createRotatingLogger('ready-database.log')
 
 function logDatabase(message: string): void {
   try { databaseLogger.append(`[${new Date().toISOString()}] ${message}\n`) } catch { /* ignore */ }
+}
+
+function formatDatabaseError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 // Lazy load better-sqlite3 to handle missing module gracefully
@@ -316,8 +332,66 @@ try {
   DatabaseConstructor = betterSqlite3.default || betterSqlite3
   logDatabase('better-sqlite3 loaded successfully')
 } catch (error) {
+  DatabaseConstructorLoadError = error
   logDatabase(`better-sqlite3 load failed: ${error instanceof Error ? error.stack || error.message : String(error)}`)
-  console.warn('better-sqlite3 not available, using in-memory fallback')
+  console.warn('better-sqlite3 not available; primary database cannot open until native bindings are rebuilt')
+}
+
+export function assertBetterSqliteNativeAvailable(): void {
+  if (!DatabaseConstructor) {
+    throw new DatabaseUnavailableError(
+      `better-sqlite3 native binding is unavailable for this runtime (ABI ${process.versions.modules || 'unknown'})`,
+      DatabaseConstructorLoadError,
+    )
+  }
+
+  let probeDb: DatabaseConnection | null = null
+  try {
+    probeDb = new DatabaseConstructor(':memory:')
+    const row = probeDb.prepare('SELECT 1 AS ok').get<{ ok: number }>()
+    if (row?.ok !== 1) {
+      throw new Error(`unexpected sqlite smoke result: ${JSON.stringify(row)}`)
+    }
+  } catch (error) {
+    throw new DatabaseUnavailableError(
+      `better-sqlite3 loaded but failed a SQLite smoke check (ABI ${process.versions.modules || 'unknown'}): ${formatDatabaseError(error)}`,
+      error,
+    )
+  } finally {
+    try { probeDb?.close() } catch { /* ignore probe cleanup */ }
+  }
+}
+
+export function assertDatabaseConnectionReady(
+  db: DatabaseConnection | null,
+  label = 'database',
+): asserts db is DatabaseConnection {
+  if (!db) {
+    throw new DatabaseUnavailableError(`${label} is not available`)
+  }
+}
+
+export interface PrimaryDatabaseReadyOptions {
+  checkNative?: () => void
+  getDatabaseInstance?: () => Pick<DatabaseManager, 'getRawDb'>
+}
+
+export function assertPrimaryDatabaseReady(options: PrimaryDatabaseReadyOptions = {}): void {
+  const checkNative = options.checkNative || assertBetterSqliteNativeAvailable
+  checkNative()
+
+  const manager = options.getDatabaseInstance ? options.getDatabaseInstance() : getDatabase()
+  const rawDb = manager.getRawDb()
+  assertDatabaseConnectionReady(rawDb, 'primary database')
+
+  try {
+    rawDb.prepare('SELECT value FROM settings WHERE key = ?').get('__ready_db_probe__')
+  } catch (error) {
+    throw new DatabaseUnavailableError(
+      `primary database opened but settings table probe failed: ${formatDatabaseError(error)}`,
+      error,
+    )
+  }
 }
 
 function deriveBrowserDomain(url: string): string {
@@ -367,17 +441,28 @@ export class DatabaseManager {
   private useMemoryDb: boolean
 
   constructor(useMemoryDb = false) {
-    this.useMemoryDb = useMemoryDb || !DatabaseConstructor
+    this.useMemoryDb = useMemoryDb
 
     if (this.useMemoryDb) {
       this.dbPath = ':memory:'
     } else {
+      if (!DatabaseConstructor) {
+        throw new DatabaseUnavailableError(
+          'better-sqlite3 native binding is unavailable; cannot open primary ready.db',
+          DatabaseConstructorLoadError,
+        )
+      }
       try {
+        if (!app || typeof app.getPath !== 'function') {
+          throw new Error('Electron app.getPath is unavailable')
+        }
         const userDataPath = app.getPath('userData')
         this.dbPath = join(userDataPath, 'ready.db')
-      } catch {
-        this.dbPath = ':memory:'
-        this.useMemoryDb = true
+      } catch (error) {
+        throw new DatabaseUnavailableError(
+          `Cannot resolve Ready userData database path: ${formatDatabaseError(error)}`,
+          error,
+        )
       }
     }
 
@@ -388,9 +473,10 @@ export class DatabaseManager {
     try {
       if (!DatabaseConstructor) {
         logDatabase('DatabaseConstructor unavailable; database disabled')
-        console.warn('Database module not available, using mock implementation')
-        this.db = null
-        return
+        throw new DatabaseUnavailableError(
+          'better-sqlite3 native binding is unavailable; database disabled',
+          DatabaseConstructorLoadError,
+        )
       }
 
       logDatabase(`opening database path=${this.dbPath}`)
@@ -402,6 +488,11 @@ export class DatabaseManager {
       logDatabase(`database initialization failed path=${this.dbPath} error=${error instanceof Error ? error.stack || error.message : String(error)}`)
       console.error('Database initialization failed:', error)
       this.db = null
+      if (error instanceof DatabaseUnavailableError) throw error
+      throw new DatabaseUnavailableError(
+        `Database initialization failed for ${this.dbPath}: ${formatDatabaseError(error)}`,
+        error,
+      )
     }
   }
 
@@ -1698,7 +1789,7 @@ export class DatabaseManager {
   // ===================== Settings (key-value) =====================
 
   getSetting(key: string): string | undefined {
-    if (!this.db) return undefined
+    assertDatabaseConnectionReady(this.db, 'settings database')
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>(key)
     return row?.value
   }
@@ -1717,7 +1808,7 @@ export class DatabaseManager {
   }
 
   getAllSettings(): Record<string, string> {
-    if (!this.db) return {}
+    assertDatabaseConnectionReady(this.db, 'settings database')
     const rows = this.db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>()
     const result: Record<string, string> = {}
     for (const row of rows) {

@@ -1857,6 +1857,8 @@ describe('useSettings Store', () => {
             testLatency: null,
             remoteModels: [],
             savedConfigs: {},
+            saveStatus: 'idle',
+            saveMessage: '',
         })
     })
 

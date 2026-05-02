@@ -4,7 +4,7 @@ import { resolve } from 'path'
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
 
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions } from 'electron'
 import { join, extname, normalize } from 'path'
 import { createReadStream, statSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -26,7 +26,7 @@ import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
 import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
-import { getDatabase } from './modules/database'
+import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import { registerMainProcessHandlers } from './process-handlers'
@@ -181,6 +181,31 @@ registerMainProcessHandlers({
   app,
   cleanup: runFatalProcessCleanup,
 })
+
+function describeStartupDatabaseFailure(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error)
+  const remediation = app.isPackaged
+    ? '请重新安装或更新 Ready 后再启动。'
+    : '请在项目目录执行 npm run rebuild:native；如果仍失败，执行 npm exec electron-rebuild -- -f -w better-sqlite3。'
+  return [
+    'Ready 无法打开本地数据库，已停止启动以避免显示空配置。',
+    '',
+    detail,
+    '',
+    remediation,
+  ].join('\n')
+}
+
+function stopBootForDatabaseFailure(error: unknown): void {
+  const message = describeStartupDatabaseFailure(error)
+  console.error('[boot] primary database readiness failed:', error)
+  try {
+    dialog.showErrorBox('Ready 启动失败', message)
+  } catch {
+    // showErrorBox can fail in headless checks; the console log above remains.
+  }
+  app.exit(1)
+}
 
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
@@ -467,6 +492,13 @@ app.whenReady().then(() => {
     }
   } catch (err) {
     console.warn('[boot-reaper] failed:', err instanceof Error ? err.message : String(err))
+  }
+
+  try {
+    assertPrimaryDatabaseReady()
+  } catch (error) {
+    stopBootForDatabaseFailure(error)
+    return
   }
 
   console.log('[Main] App ready, registering protocol handler...')

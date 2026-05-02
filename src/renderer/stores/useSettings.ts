@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import {
-  AI_PROVIDERS,
   createConfigFromProvider,
   createCustomAIProviderProfile,
   createDefaultAIWorkspace,
@@ -24,6 +23,7 @@ const SETTINGS_SAVE_DEBOUNCE_MS = 300
 let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null
 let pendingWorkspaceSave: AIProviderWorkspace | null = null
 let flushHandlersRegistered = false
+let loadConfigPromise: Promise<void> | null = null
 
 function clearPendingWorkspaceSave(): void {
   if (pendingSaveTimer) {
@@ -70,6 +70,17 @@ function buildStateFromWorkspace(workspace: AIProviderWorkspace, selectedProfile
   }
 }
 
+function formatSettingsPersistenceError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error || '未知错误')
+}
+
+function assertIPCSuccess(result: { success?: boolean; error?: string } | undefined, fallbackMessage: string): void {
+  if (result && result.success === false) {
+    throw new Error(result.error || fallbackMessage)
+  }
+}
+
 interface AISettingsState {
   config: AIModelConfig
   workspace: AIProviderWorkspace
@@ -80,6 +91,8 @@ interface AISettingsState {
   testLatency: number | null
   remoteModels: string[]
   savedConfigs: Partial<Record<AIProviderType, AIModelConfig>>
+  saveStatus: 'idle' | 'saving' | 'error'
+  saveMessage: string
 
   loadConfig: () => Promise<void>
   saveConfig: (config: AIModelConfig) => Promise<void>
@@ -137,78 +150,127 @@ export const useSettings = create<AISettingsState>((set, get) => ({
   testLatency: null,
   remoteModels: [],
   savedConfigs: defaultState.savedConfigs,
+  saveStatus: 'idle',
+  saveMessage: '',
 
   loadConfig: async () => {
-    try {
-      if (typeof window !== 'undefined' && window.electronAPI?.settings) {
-        const workspaceResult = await window.electronAPI.settings.getAIWorkspace?.()
-        if (workspaceResult?.success && workspaceResult.data) {
-          set({
-            ...buildStateFromWorkspace(workspaceResult.data as AIProviderWorkspace),
-            loaded: true,
-          })
-          return
-        }
+    if (loadConfigPromise) return loadConfigPromise
+    loadConfigPromise = (async () => {
+      try {
+        if (typeof window !== 'undefined' && window.electronAPI?.settings) {
+          const workspaceResult = await window.electronAPI.settings.getAIWorkspace?.()
+          if (workspaceResult) {
+            if (workspaceResult.success && workspaceResult.data) {
+              set({
+                ...buildStateFromWorkspace(workspaceResult.data as AIProviderWorkspace),
+                loaded: true,
+                saveStatus: 'idle',
+                saveMessage: '',
+              })
+              return
+            }
+            throw new Error(workspaceResult.error || 'AI 设置读取失败')
+          }
 
-        const configResult = await window.electronAPI.settings.getAIConfig()
-        if (configResult.success && configResult.data) {
-          const workspace = normalizeAIWorkspace({
-            ...createDefaultAIWorkspace(),
-            profiles: createDefaultAIWorkspace().profiles.map((profile) => (
-              profile.id === createDefaultAIWorkspace().activeProfileId
-                ? {
-                  ...profile,
-                  config: normalizeAIConfig(configResult.data as AIModelConfig),
-                }
-                : profile
-            )),
-          })
-          set({
-            ...buildStateFromWorkspace(workspace),
-            loaded: true,
-          })
-          return
+          const configResult = await window.electronAPI.settings.getAIConfig()
+          if (configResult.success && configResult.data) {
+            const workspace = normalizeAIWorkspace({
+              ...createDefaultAIWorkspace(),
+              profiles: createDefaultAIWorkspace().profiles.map((profile) => (
+                profile.id === createDefaultAIWorkspace().activeProfileId
+                  ? {
+                    ...profile,
+                    config: normalizeAIConfig(configResult.data as AIModelConfig),
+                  }
+                  : profile
+              )),
+            })
+            set({
+              ...buildStateFromWorkspace(workspace),
+              loaded: true,
+              saveStatus: 'idle',
+              saveMessage: '',
+            })
+            return
+          }
         }
+      } catch (error) {
+        const message = formatSettingsPersistenceError(error)
+        console.error('Failed to load AI workspace:', error)
+        set({
+          saveStatus: 'error',
+          saveMessage: `设置读取失败：${message}`,
+          loaded: true,
+        })
+        return
       }
-    } catch (error) {
-      console.error('Failed to load AI workspace:', error)
-    }
 
-    set({
-      ...defaultState,
-      loaded: true,
-    })
+      set({
+        ...defaultState,
+        loaded: true,
+        saveStatus: 'idle',
+        saveMessage: '',
+      })
+    })()
+    try {
+      await loadConfigPromise
+    } finally {
+      loadConfigPromise = null
+    }
   },
 
   saveConfig: async (config: AIModelConfig) => {
     clearPendingWorkspaceSave()
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.settings?.setAIConfig) {
-        await window.electronAPI.settings.setAIConfig(normalizeAIConfig(config))
+        const result = await window.electronAPI.settings.setAIConfig(normalizeAIConfig(config))
+        assertIPCSuccess(result, 'AI 设置保存失败')
       }
       await get().loadConfig()
     } catch (error) {
+      const message = formatSettingsPersistenceError(error)
       console.error('Failed to save AI config:', error)
+      set({
+        saveStatus: 'error',
+        saveMessage: `设置保存失败：${message}`,
+      })
     }
   },
 
   saveWorkspace: async (workspace, options) => {
     clearPendingWorkspaceSave()
+    const previousState = get()
     const normalizedWorkspace = normalizeAIWorkspace(workspace)
     set({
       ...buildStateFromWorkspace(normalizedWorkspace, options?.selectedProfileId),
+      saveStatus: 'saving',
+      saveMessage: '',
     })
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.settings?.setAIWorkspace) {
-        await window.electronAPI.settings.setAIWorkspace(normalizedWorkspace)
+        const result = await window.electronAPI.settings.setAIWorkspace(normalizedWorkspace)
+        assertIPCSuccess(result, 'AI 设置保存失败')
       } else if (typeof window !== 'undefined' && window.electronAPI?.settings?.setAIConfig) {
         const activeConfig = getActiveAIConfig(normalizedWorkspace)
         if (activeConfig) {
-          await window.electronAPI.settings.setAIConfig(activeConfig)
+          const result = await window.electronAPI.settings.setAIConfig(activeConfig)
+          assertIPCSuccess(result, 'AI 设置保存失败')
         }
       }
+      set({ saveStatus: 'idle', saveMessage: '' })
     } catch (error) {
+      const message = formatSettingsPersistenceError(error)
       console.error('Failed to save AI workspace:', error)
+      set({
+        ...buildStateFromWorkspace(previousState.workspace, previousState.selectedProfileId),
+        testStatus: previousState.testStatus,
+        testMessage: previousState.testMessage,
+        testLatency: previousState.testLatency,
+        remoteModels: previousState.remoteModels,
+        loaded: previousState.loaded,
+        saveStatus: 'error',
+        saveMessage: `设置保存失败：${message}`,
+      })
     }
   },
 
@@ -261,6 +323,8 @@ export const useSettings = create<AISettingsState>((set, get) => ({
       ...buildStateFromWorkspace(nextWorkspace, state.selectedProfileId),
       testStatus: 'idle',
       testMessage: '',
+      saveStatus: 'idle',
+      saveMessage: '',
       remoteModels: [],
     })
     scheduleWorkspaceSave(get, nextWorkspace, state.selectedProfileId)

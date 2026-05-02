@@ -5,7 +5,6 @@ const SETTINGS_GLASS_PANEL_BG = 'color-mix(in srgb, var(--surface-panel-bg) 64%,
 const SETTINGS_GLASS_CARD_BG = 'color-mix(in srgb, var(--surface-card-bg) 78%, transparent)'
 const SETTINGS_GLASS_FLOATING_BG = 'color-mix(in srgb, var(--surface-floating-bg) 72%, transparent)'
 const SETTINGS_GLASS_BORDER = '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)'
-const SETTINGS_GLASS_BORDER_STRONG = '1px solid color-mix(in srgb, var(--lg-border-strong) 84%, transparent)'
 const SETTINGS_GLASS_HIGHLIGHT = 'inset 0 1px 0 color-mix(in srgb, var(--lg-border-strong) 42%, transparent)'
 
 export const SETTINGS_CARD_STYLE: CSSProperties = {
@@ -38,6 +37,54 @@ export const SETTINGS_SUBTLE_CARD_STYLE: CSSProperties = {
   boxShadow: SETTINGS_GLASS_HIGHLIGHT,
   backdropFilter: SETTINGS_GLASS_BLUR,
   WebkitBackdropFilter: SETTINGS_GLASS_BLUR,
+}
+
+export const SETTINGS_FLAT_CARD_STYLE: CSSProperties = {
+  border: '1px solid color-mix(in srgb, var(--surface-border) 58%, transparent)',
+  borderRadius: 18,
+  background: 'color-mix(in srgb, var(--surface-card-bg) 82%, var(--bg-content) 18%)',
+  boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--lg-border-strong) 26%, transparent)',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
+}
+
+export const SETTINGS_FLAT_CHIP_STYLE: CSSProperties = {
+  border: '1px solid color-mix(in srgb, var(--surface-border) 62%, transparent)',
+  background: 'color-mix(in srgb, var(--surface-floating-bg) 72%, var(--bg-content) 28%)',
+  boxShadow: 'none',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
+}
+
+export const SETTINGS_FLAT_INPUT_STYLE: CSSProperties = {
+  width: '100%',
+  border: '1px solid var(--input-slot-border)',
+  borderRadius: 16,
+  background: 'color-mix(in srgb, var(--surface-floating-bg) 78%, var(--bg-editor) 22%)',
+  boxShadow: 'var(--input-slot-shadow)',
+  color: 'var(--text-body)',
+  padding: '13px 15px',
+  fontSize: 13,
+  lineHeight: 1.45,
+  outline: 'none',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
+}
+
+export const SETTINGS_FLAT_BUTTON_STYLE: CSSProperties = {
+  minWidth: 96,
+  padding: '10px 14px',
+  borderRadius: 14,
+  fontSize: 12,
+  fontWeight: 600,
+  lineHeight: 1.35,
+  transition: 'transform 160ms ease, filter 160ms ease, opacity 160ms ease, background 160ms ease',
+  border: '1px solid color-mix(in srgb, var(--surface-border) 58%, transparent)',
+  background: 'color-mix(in srgb, var(--surface-card-bg) 76%, var(--bg-content) 24%)',
+  color: 'var(--text-body)',
+  boxShadow: 'none',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
 }
 
 export const SETTINGS_INPUT_STYLE: CSSProperties = {

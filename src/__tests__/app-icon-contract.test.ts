@@ -18,7 +18,9 @@ test('electron packaging includes project-owned app icon assets instead of falli
 
 test('main process applies the project-owned icon during development instead of default electron branding', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
-  const packageJson = readWorkspaceFile('package.json')
+  const packageJson = JSON.parse(readWorkspaceFile('package.json')) as {
+    scripts: Record<string, string>
+  }
   const syncScript = readWorkspaceFile('scripts/sync-dev-icon.mjs')
 
   assert.match(mainIndex, /nativeImage/)
@@ -26,7 +28,15 @@ test('main process applies the project-owned icon during development instead of 
   assert.match(mainIndex, /build\/icon\.png/)
   assert.match(mainIndex, /app\.dock\.setIcon\(/)
   assert.match(mainIndex, /icon:\s*resolveAppIconPath\(\)/)
-  assert.match(packageJson, /"dev":\s*"node \.\/scripts\/sync-dev-icon\.mjs && electron-vite dev"/)
+  assert.equal(
+    packageJson.scripts.dev,
+    'node ./scripts/sync-dev-icon.mjs && npm run rebuild:native && npm run native:check && electron-vite dev',
+  )
+  assert.equal(
+    packageJson.scripts.build,
+    'npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build',
+  )
+  assert.equal(packageJson.scripts['native:check'], 'node scripts/check-better-sqlite3-electron-abi.cjs')
   assert.match(syncScript, /node_modules\/electron\/dist\/Electron\.app\/Contents\/Resources\/electron\.icns/)
   assert.match(syncScript, /copyFileSync/)
   assert.match(syncScript, /process\.platform !== 'darwin'/)

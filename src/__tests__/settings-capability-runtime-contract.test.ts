@@ -15,9 +15,13 @@ test('settings capability status is sourced from a main-process runtime snapshot
   const agentIPC = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
 
-  assert.match(settingsPage, /window\.electronAPI\.agent\.getCapabilityRuntimeSnapshot\(config\)/)
+  assert.match(settingsPage, /window\.electronAPI\.agent\.getCapabilityRuntimeSnapshot\(capabilityRuntimeConfig\)/)
   assert.match(settingsPage, /capabilityRuntimeSnapshot/)
   assert.doesNotMatch(settingsPage, /const getCapabilityStatus = useCallback\(/)
+  assert.doesNotMatch(
+    settingsPage,
+    /await refreshRuntimeSummary\(\)\s*await refreshCapabilityRuntimeSnapshot\(\)/,
+  )
 
   assert.match(preload, /getCapabilityRuntimeSnapshot:\s*\(config\?: unknown\) => ipcRenderer\.invoke\('agent:getCapabilityRuntimeSnapshot', config\)/)
   assert.match(rendererTypes, /getCapabilityRuntimeSnapshot: \(config\?: unknown\) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>/)
