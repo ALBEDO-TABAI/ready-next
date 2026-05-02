@@ -41,5 +41,6 @@ test('task budget runtime applies reserveToolCalls hints to remaining tool-call 
   })
 
   assert.equal(hinted.budget.reservedToolCalls, 3)
-  assert.equal(getRemainingToolCallBudget(hinted), 57)
+  // skill-resume C2: multi_step_task budget reduced 60→40, so remaining is 40-3=37
+  assert.equal(getRemainingToolCallBudget(hinted), 37)
 })

@@ -17,6 +17,10 @@ import type {
   SkillValueSourceRef,
   SkillWorkflow,
 } from '../../../shared/skill-execution-types'
+import {
+  SkillHostRequirementsSchema,
+  type SkillHostRequirements,
+} from '../../../shared/skill-host-contract'
 
 const MANIFEST_CANDIDATES = ['ready-skill.json', '.ready-skill.json', 'skill.json', 'manifest.json']
 const DOCUMENT_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.md']
@@ -84,6 +88,13 @@ function coerceRuntime(value: unknown, fallback: SkillRuntimeKind = 'reference')
 
 function coerceVisibility(value: unknown): SkillActionVisibility {
   return asString(value)?.toLowerCase() === 'internal' ? 'internal' : 'public'
+}
+
+function normalizeReferenceReadSkillVisibility(action: SkillActionDefinition): SkillActionDefinition {
+  if (action.name === 'read_skill' && action.runtime === 'reference') {
+    return { ...action, visibility: 'internal' }
+  }
+  return action
 }
 
 function coerceExecutionMode(value: unknown): Exclude<SkillExecutionMode, 'direct'> | undefined {
@@ -170,20 +181,20 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       const name = asString(obj?.name)
       if (!name) continue
       const normalized = normalizeAction(name, obj, runtime)
-      if (normalized) actions.push(normalized)
+      if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
     }
   } else {
     const obj = asObject(raw)
     if (obj) {
       for (const [name, value] of Object.entries(obj)) {
         const normalized = normalizeAction(name, value, runtime)
-        if (normalized) actions.push(normalized)
+        if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
       }
     }
   }
 
   if (actions.length === 0 && documentEntry) {
-    actions.push({
+    actions.push(normalizeReferenceReadSkillVisibility({
       name: 'read_skill',
       description: '读取并应用该技能的说明与方法完成当前任务',
       runtime: 'reference',
@@ -191,7 +202,7 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       params: [],
       inputMode: 'flags',
       visibility: 'public',
-    })
+    }))
   }
   return actions
 }
@@ -415,6 +426,23 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     executionMode = 'advisory'
   }
 
+  // Skill Host Contract — manifests can opt into a declarative host_requirements
+  // block. Validate at load time so a malformed contract fails fast instead of
+  // surfacing as a confusing spawn-time error. Snake-case in JSON manifest;
+  // camelCase on the SkillDefinition (matches actions[].timeoutMs convention).
+  let hostRequirements: SkillHostRequirements | undefined
+  const rawHostRequirements = manifest?.host_requirements ?? manifest?.hostRequirements
+  if (rawHostRequirements !== undefined && rawHostRequirements !== null) {
+    const parsed = SkillHostRequirementsSchema.safeParse(rawHostRequirements)
+    if (!parsed.success) {
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+        .join('; ')
+      throw new Error(`Skill ${id} host_requirements 校验失败: ${detail}`)
+    }
+    hostRequirements = parsed.data
+  }
+
   return {
     id,
     name,
@@ -435,5 +463,6 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     executionMode,
     workflow,
     manifestValid: true,
+    hostRequirements,
   }
 }

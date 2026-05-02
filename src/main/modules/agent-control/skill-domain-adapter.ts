@@ -22,8 +22,54 @@ import type { RunProjectionPatch } from './run-contracts'
 // filtered list is empty, so an allowedToolNames input that happens to contain
 // zero skill_*/memory_*/session_* tools falls through to passthrough rather
 // than locking the adapter into an empty list.
-const TOOL_PREFIXES = ['skill_', 'memory_', 'session_']
+//
+// D3 retry widening: when isRetryOnlyTurn === true (bare "继续/重试" intent),
+// we widen the prefix list to also keep file_*/document_* so the agent can
+// rediscover what was happening before re-attempting. Without this, retry
+// turns drop those tools and the agent has no way to inspect prior state.
+const BASE_TOOL_PREFIXES = ['skill_', 'memory_', 'session_'] as const
+const RETRY_INTENT_TOOL_PREFIXES = [
+  ...BASE_TOOL_PREFIXES,
+  'file_',
+  'document_',
+] as const
 const INSTRUCTION = '系统执行器：本轮走 skill 执行路径。优先使用 skill_* 工具推进，不要退回无关的通用工具。'
+
+/**
+ * skill-resume D2 — when the prefix narrowing actually drops tools, append a
+ * note to the system instruction so the LLM knows which tools are unavailable
+ * this turn (instead of trying them and getting silent rejections).
+ *
+ * Returns the original INSTRUCTION when nothing was dropped, OR a
+ * concatenated INSTRUCTION + addendum listing up to 5 dropped names.
+ */
+export function buildSkillDomainInstruction(
+  inputAllowed: ReadonlyArray<string> | null | undefined,
+  outputAllowed: ReadonlyArray<string> | null | undefined,
+  frameSteering?: {
+    preferredToolNames?: string[] | null
+    systemReminder?: string | null
+  } | null,
+): string {
+  const sections = [INSTRUCTION]
+  const preferredTypedAction = (frameSteering?.preferredToolNames || [])
+    .find((name) => name.startsWith('skill_') && name !== 'skill_run_shell')
+  if (frameSteering?.systemReminder || preferredTypedAction) {
+    sections.push([
+      frameSteering?.systemReminder || `系统补充：当前 TurnFrame 已确认应优先调用 typed skill action ${preferredTypedAction}。`,
+      preferredTypedAction ? `优先工具：${preferredTypedAction}` : '',
+      'skill_run_shell 只用于必要诊断，不要用 shell 反复读取同一份状态来替代 typed skill action。',
+    ].filter(Boolean).join('\n'))
+  }
+  if (!inputAllowed || inputAllowed.length === 0) return sections.join('\n\n')
+  const kept = new Set(outputAllowed || [])
+  const dropped = inputAllowed.filter((name) => !kept.has(name))
+  if (dropped.length === 0) return sections.join('\n\n')
+  const sample = dropped.slice(0, 5).join('、')
+  const more = dropped.length > 5 ? `（共 ${dropped.length} 个）` : ''
+  sections.push(`⚠️ 本回合限定 skill domain，已暂停 ${dropped.length} 个工具${more}：${sample}。如确实需要 file_search/document_* 等通用工具，请用普通指令（不带"继续/重试"等关键词）让系统切回通用域。`)
+  return sections.join('\n\n')
+}
 
 interface SkillAdapterState {
   latestProjectionPatch: Record<string, unknown> | null
@@ -50,6 +96,7 @@ function normalizeWaitingFor(value: unknown): RunProjectionPatch['waitingFor'] {
   return value === 'input'
     || value === 'confirmation'
     || value === 'agent_result'
+    || value === 'clarification'
     || value === 'background'
     || value === 'none'
     ? value
@@ -93,18 +140,39 @@ function buildProjectionFromPatch(latestProjectionPatch: Record<string, unknown>
 export class SkillDomainAdapter implements DomainAdapter {
   readonly id = 'skill'
 
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return null
+  }
+
+  arbitrateRunCapabilities(
+    _params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
+
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'skill'
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
-    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
+    const prefixes = params.isRetryOnlyTurn ? RETRY_INTENT_TOOL_PREFIXES : BASE_TOOL_PREFIXES
+    const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, prefixes as unknown as string[])
     if (params.host?.log) {
-      logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+      logPrefixNarrowing(params.host.log, 'skill', params.allowedToolNames, narrowed, prefixes as unknown as string[])
     }
+    // skill-resume D2: dynamic instruction tells LLM which tools were dropped
+    // this turn, so it doesn't blindly retry them and waste iterations.
+    const instruction = buildSkillDomainInstruction(params.allowedToolNames, narrowed, params.turnFrameSteering)
     return {
       allowedToolNames: narrowed,
-      sessionMessages: params.hasTools ? [{ role: 'user', content: INSTRUCTION }] : [],
+      sessionMessages: params.hasTools ? [{ role: 'user', content: instruction }] : [],
       domainState: { latestProjectionPatch: null, dispatchedAt: null } satisfies SkillAdapterState,
     }
   }
@@ -162,7 +230,17 @@ export class SkillDomainAdapter implements DomainAdapter {
 
   buildProjectionPatch(params: Parameters<DomainAdapter['buildProjectionPatch']>[0]): Record<string, unknown> | null {
     const state = createState(params.domainState)
-    if (!state.latestProjectionPatch) return null
+    if (!state.latestProjectionPatch) {
+      if (!params.projection) return null
+      return {
+        module: 'skill',
+        taskTitle: 'Skill 任务',
+        taskSummary: params.projection.summary,
+        waitingFor: params.projection.waitingFor ?? 'none',
+        resumableActions: params.projection.resumableActions ?? [],
+        blockedReason: params.projection.blockedReason ?? null,
+      }
+    }
     return {
       ...state.latestProjectionPatch,
       module: 'skill',

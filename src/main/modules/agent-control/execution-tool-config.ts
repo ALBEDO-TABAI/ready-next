@@ -405,7 +405,7 @@ function buildToolResolutionDiagnostics(params: {
   return {
     visibleGroupToolCounts,
     groupSchemaErrors: Object.keys(groupSchemaErrors).length > 0 ? groupSchemaErrors : undefined,
-    usedStaticFallbackGroups: usedStaticFallbackGroups.size > 0 ? Array.from(usedStaticFallbackGroups) : undefined,
+    usedStaticFallbackGroups: Array.from(usedStaticFallbackGroups),
     invariantViolations: invariantViolations.length > 0 ? invariantViolations : undefined,
   }
 }

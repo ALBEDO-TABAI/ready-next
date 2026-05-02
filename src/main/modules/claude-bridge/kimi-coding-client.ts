@@ -4,6 +4,8 @@ import { Buffer } from 'node:buffer'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { parseJsonResponse } from '../openai-responses'
 import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
+import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
+import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
 
 export interface KimiCodingSessionLike {
@@ -77,8 +79,12 @@ export class KimiCodingClient {
     signal: AbortSignal,
   ): Promise<Array<Record<string, unknown>>> {
     const serialized: Array<Record<string, unknown>> = []
+    const sanitizedMessages = sanitizeOpenAICompatibleMessageHistory(
+      messages,
+      { validToolNames: resolveRegisteredToolNamesLazily() },
+    ) as KimiCodingSessionLike['messages']
 
-    for (const msg of messages) {
+    for (const msg of sanitizedMessages) {
       const raw = msg as unknown as Record<string, unknown>
       const role = typeof raw.role === 'string' ? raw.role : 'user'
 

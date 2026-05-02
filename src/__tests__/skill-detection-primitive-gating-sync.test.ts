@@ -12,15 +12,12 @@
  * 没有 skill_run_shell 工具" and gave up on the skill even though the
  * SKILL.md was inlined later in the same turn.
  *
- * The fix adds `rememberDetectedReferenceSkills` on the orchestrator and
- * wires it between detection and prepareInitialRun. This test pins the
- * orchestrator method's contract; a source-level pin in turn-engine.ts
- * guards the call site ordering.
+ * The current route registers the reference hint from explicit user text
+ * before preferred tools are resolved, so primitive tools remain available
+ * in the same turn.
  */
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { SkillContextOrchestrator } from '../main/modules/agent-control/skill-context-orchestrator'
@@ -35,7 +32,7 @@ function makeReferenceSkill(id: string, name: string): any {
     name,
     description: '',
     defaultAction: 'read_skill',
-    executionMode: 'advisory',
+    executionMode: 'direct',
     managedPath: null,
     actions: [
       { name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] },
@@ -43,69 +40,62 @@ function makeReferenceSkill(id: string, name: string): any {
   }
 }
 
-test('rememberDetectedReferenceSkills registers hints for reference-runtime skills', () => {
+test('rememberExplicitReferenceSkillHint registers hints for explicit reference-runtime skills', () => {
   _resetLastReferenceSkillHintsForTests()
+  const skill = makeReferenceSkill('video-expert-analyzer', 'Video Expert Analyzer (VNext)')
   const orch = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [],
+    listSkills: () => [skill],
     resolveSkillToolByAction: () => null,
   })
-  orch.rememberDetectedReferenceSkills('session-A', [
-    makeReferenceSkill('video-expert-analyzer', 'Video Expert Analyzer (VNext)'),
-  ])
+  assert.equal(orch.rememberExplicitReferenceSkillHint('@[Video Expert Analyzer (VNext)] 分析一下', 'session-A'), true)
   assert.equal(getLastReferenceSkill('session-A')?.id, 'video-expert-analyzer')
 })
 
-test('rememberDetectedReferenceSkills ignores non-reference actions', () => {
+test('rememberExplicitReferenceSkillHint ignores non-reference actions', () => {
   _resetLastReferenceSkillHintsForTests()
-  const orch = new SkillContextOrchestrator({
-    extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [],
-    resolveSkillToolByAction: () => null,
-  })
   const pythonOnlySkill: any = {
     id: 'video-expert-analyzer',
     name: 'Video Expert Analyzer',
     description: '',
     defaultAction: 'run_pipeline',
-    executionMode: 'advisory',
+    executionMode: 'direct',
     managedPath: null,
     actions: [
       { name: 'run_pipeline', visibility: 'public', runtime: 'python', params: [] },
     ],
   }
-  orch.rememberDetectedReferenceSkills('session-B', [pythonOnlySkill])
+  const orch = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [pythonOnlySkill],
+    resolveSkillToolByAction: () => null,
+  })
+  assert.equal(orch.rememberExplicitReferenceSkillHint('@[Video Expert Analyzer] 分析一下', 'session-B'), false)
   assert.equal(getLastReferenceSkill('session-B'), null, 'non-reference defaultAction must not register')
 })
 
-test('rememberDetectedReferenceSkills is a no-op without sessionId (boot/static callers)', () => {
+test('rememberExplicitReferenceSkillHint is a no-op without sessionId (boot/static callers)', () => {
   _resetLastReferenceSkillHintsForTests()
+  const skill = makeReferenceSkill('s', 'Skill Alias')
   const orch = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
-    listSkills: () => [],
+    listSkills: () => [skill],
     resolveSkillToolByAction: () => null,
   })
   // Must not throw
-  orch.rememberDetectedReferenceSkills(undefined, [makeReferenceSkill('s', 'S')])
+  assert.equal(orch.rememberExplicitReferenceSkillHint('@[Skill Alias]', undefined), false)
 })
 
-test('turn-engine registers the hint between skill detection and prepareInitialRun', () => {
-  const src = readFileSync(
-    resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'),
-    'utf8',
-  )
-  const rememberIdx = src.indexOf('rememberDetectedReferenceSkills(')
-  const prepareIdx = src.indexOf('prepareInitialRun({')
-  const detectionIdx = src.indexOf('[skill_detection]')
-  assert.notEqual(rememberIdx, -1, 'turn-engine must call rememberDetectedReferenceSkills')
-  assert.notEqual(prepareIdx, -1, 'turn-engine must call prepareInitialRun')
-  assert.notEqual(detectionIdx, -1, 'turn-engine must emit the skill_detection log line')
-  assert.ok(
-    detectionIdx < rememberIdx,
-    'rememberDetectedReferenceSkills must run AFTER skill detection',
-  )
-  assert.ok(
-    rememberIdx < prepareIdx || src.indexOf('prepareInitialRun({', rememberIdx) > rememberIdx,
-    'rememberDetectedReferenceSkills must run BEFORE prepareInitialRun builds the tool snapshot',
-  )
+test('armed explicit reference hint keeps primitives in the preferred tool list', () => {
+  _resetLastReferenceSkillHintsForTests()
+  const skill = makeReferenceSkill('video-expert-analyzer', 'Video Expert Analyzer (VNext)')
+  const orch = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [skill],
+    resolveSkillToolByAction: () => null,
+  })
+  orch.rememberExplicitReferenceSkillHint('@[Video Expert Analyzer (VNext)] 分析一下', 'session-C')
+  const tools = orch.buildPreferredSkillToolNames('继续', 'session-C')
+  assert.ok(tools.includes('skill_run_shell'))
+  assert.ok(tools.includes('skill_ask_user'))
 })

@@ -30,7 +30,7 @@
  * paths. Dependency injection happens in skill-primitives/root-resolver.ts.
  */
 
-import { resolve, sep, isAbsolute, basename } from 'node:path'
+import { resolve, sep, isAbsolute, basename, relative } from 'node:path'
 import { realpathSync } from 'node:fs'
 
 /**
@@ -59,7 +59,8 @@ export class PathSandboxError extends Error {
       | 'absolute_path'
       | 'path_escape'
       | 'symlink_escape'
-      | 'reserved_path',
+      | 'reserved_path'
+      | 'no_root_match',
     message: string,
   ) {
     super(message)
@@ -165,6 +166,101 @@ export function resolveWithinRoot(root: string, rel: string): string {
   }
 
   return absPath
+}
+
+/**
+ * Canonicalize an absolute input path the same way `canonicalizeRoot` does
+ * for a sandbox root. If the path itself exists, run realpath; otherwise
+ * realpath the deepest existing ancestor and rejoin the missing tail. This
+ * keeps symlinked OS tmp dirs (macOS `/var/folders → /private/var/folders`,
+ * Linux per-user `/tmp/.X-lock` cases) from looking like sandbox escapes
+ * when the model passes the user-visible path back through.
+ */
+function canonicalizeInputAbsPath(absPath: string): string {
+  try {
+    return realpathSync.native(absPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
+  }
+  const ancestor = findDeepestExistingAncestor(absPath)
+  if (!ancestor) return absPath
+  try {
+    const realAncestor = realpathSync.native(ancestor)
+    const tail = relative(ancestor, absPath)
+    return tail ? resolve(realAncestor, tail) : realAncestor
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return absPath
+    throw error
+  }
+}
+
+/**
+ * Read helpers can receive absolute paths from previous tool results
+ * (notably skill_run_shell overflow logs). Accept them only when they still
+ * point inside the same root, then reuse the normal relative-path validator.
+ */
+export function resolveReadableWithinRoot(root: string, path: string): string {
+  const cleanPath = assertNonEmpty(path)
+  if (!isAbsolute(cleanPath)) return resolveWithinRoot(root, cleanPath)
+
+  const canonRoot = canonicalizeRoot(root)
+  const absPath = canonicalizeInputAbsPath(resolve(cleanPath))
+  if (!normalizedStartsWithRoot(absPath, canonRoot)) {
+    throw new PathSandboxError(
+      'path_escape',
+      `Absolute path ${absPath} escapes sandbox root ${canonRoot}`,
+    )
+  }
+  return resolveWithinRoot(canonRoot, relative(canonRoot, absPath))
+}
+
+/**
+ * Stage 5 — read primitives may operate over multiple sandbox roots: the
+ * primary per-skill artifact root plus additional read-only roots derived
+ * from the active TurnFrame (active task `outputDir`, parent dir of
+ * `runStatePath`, scene-scores dir, delivery-report dir). Iterate roots in
+ * order and return the first successful match. If every root rejects with
+ * `path_escape`, raise a single `no_root_match` error mentioning every root
+ * that was tried — the caller surfaces the list back to the LLM/log so the
+ * model knows which roots are currently active. Other reasons (`empty_path`,
+ * `absolute_path`, `symlink_escape`, `reserved_path`) bubble up immediately
+ * because they are not "wrong root" errors and re-trying against another
+ * root would still fail in the same way.
+ */
+export function resolveReadableWithinAnyRoot(roots: string[], path: string): string {
+  if (!Array.isArray(roots) || roots.length === 0) {
+    throw new PathSandboxError(
+      'no_root_match',
+      'No sandbox roots configured for read access',
+    )
+  }
+  const attemptedRoots: string[] = []
+  let lastPathEscape: PathSandboxError | null = null
+  for (const root of roots) {
+    if (typeof root !== 'string' || root.trim().length === 0) continue
+    attemptedRoots.push(root)
+    try {
+      return resolveReadableWithinRoot(root, path)
+    } catch (error) {
+      if (error instanceof PathSandboxError && error.reason === 'path_escape') {
+        // Try the next root.
+        lastPathEscape = error
+        continue
+      }
+      throw error
+    }
+  }
+  // If exactly one root was tried, preserve the original `path_escape` error
+  // so single-root callers see no behavior change. Multi-root callers (Stage
+  // 5+ read-artifact dispatch) get a richer `no_root_match` error that lists
+  // every root that was attempted.
+  if (attemptedRoots.length <= 1 && lastPathEscape) {
+    throw lastPathEscape
+  }
+  throw new PathSandboxError(
+    'no_root_match',
+    `Path ${typeof path === 'string' ? path : '(invalid)'} is not inside any of the allowed roots: ${attemptedRoots.join(', ') || '(none)'}`,
+  )
 }
 
 function findDeepestExistingAncestor(absPath: string): string | null {

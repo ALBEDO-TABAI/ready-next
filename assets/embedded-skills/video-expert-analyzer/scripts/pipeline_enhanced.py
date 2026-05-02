@@ -84,7 +84,6 @@ DEFAULT_AUTO_SCORING = {
     "models_json_path": "",
     "preferred_model": "kcode/K2.6-code-preview",
     "fallback_models": [
-        "zai/GLM-5V-Turbo",
         "novacode-openai/gpt-5.4",
     ],
     "max_workers": 4,
@@ -1007,6 +1006,14 @@ class VideoAnalysisPipeline:
         self.report_path = self.video_output_dir / f"{self.video_id}_analysis_report.md"
         self.detailed_report_path = self.video_output_dir / f"{self.video_id}_detailed_analysis.md"
         self.analysis_state = load_analysis_state(self.state_path)
+        mark_stage(
+            self.run_state_path,
+            stage="prepare",
+            status="running",
+            scores_path=str(self.scores_path),
+            video_dir=str(self.video_output_dir),
+            active_output_dir=str(self.video_output_dir),
+        )
 
         # Results tracking
         self.results = {
@@ -1040,6 +1047,7 @@ class VideoAnalysisPipeline:
             completed=completed,
             scores_path=str(self.scores_path),
             video_dir=str(self.video_output_dir),
+            active_output_dir=str(self.video_output_dir),
             **extra,
         )
 

@@ -49,6 +49,10 @@ interface SessionRecallVectorRow {
 }
 
 const SESSION_RECALL_VECTOR_VERSION = 'hashing-v1'
+// D4: Cap session_recall_vectors growth — keep at most this many most-recent
+// rows per write. vector_json can be sizable (per-conv hashing vectors); without
+// a cap, table grows linearly with conversation count for the lifetime of the app.
+const SESSION_RECALL_VECTORS_LRU_CAP = 200
 const SESSION_RECALL_VECTOR_DIMENSIONS = 256
 
 export class SessionRecallService {
@@ -209,6 +213,54 @@ export class SessionRecallService {
     const updatedScope = this.db.updateConversationScopeMeta(params.currentScopeId, nextMeta)
     if (!updatedScope) throw new Error(`Failed to update conversation scope: ${params.currentScopeId}`)
     return { scope: updatedScope }
+  }
+
+  /**
+   * skill-resume E1 — when the user issues a bare retry/continue intent
+   * ("继续 / 接着 / 恢复 ...") on a scope that has no manually-attached recall
+   * refs, auto-attach the top-N predecessors in the same lineage_root so the
+   * prompt assembler picks up prior context (which the LLM needs to know what
+   * "继续" actually means). No-op when:
+   *   - scope already has attached refs (user/UI already chose),
+   *   - scope is the only conv in its lineage (no peers to attach), or
+   *   - DB is unreachable.
+   * Returns the actually-attached capsules so the caller can emit a metric /
+   * surface them in UI.
+   */
+  autoAttachOnResume(params: {
+    currentScopeId: string
+    intent: 'continue'
+    limit?: number
+  }): { attached: SessionRecallCapsule[] } {
+    const limit = Math.max(1, Math.min(5, Number(params.limit ?? 3)))
+    const scope = this.db.getConversationScope(params.currentScopeId)
+    if (!scope) return { attached: [] }
+    const existingRefs = this.readSessionRecallContextRefs(scope)
+    if (existingRefs.length > 0) return { attached: [] }
+    const lineageRootId = scope.lineage_root_id || scope.id
+    const db = this.db.getRawDb()
+    if (!db) return { attached: [] }
+    const candidates = db.prepare(`
+      SELECT *
+      FROM session_recall_metadata
+      WHERE lineage_root_id = ? AND conversation_id != ?
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all<SessionRecallMetadataRow>(lineageRootId, params.currentScopeId, limit)
+    if (candidates.length === 0) return { attached: [] }
+    const attached: SessionRecallCapsule[] = []
+    for (const row of candidates) {
+      try {
+        const result = this.attachSessionRecallContext({
+          currentScopeId: params.currentScopeId,
+          conversationId: row.conversation_id,
+        })
+        attached.push(result.capsule)
+      } catch {
+        // Skip individual attach failures; auto-attach is best-effort.
+      }
+    }
+    return { attached }
   }
 
   resumeSessionCandidate(params: { conversationId?: string; resumeTitle?: string }): SessionRecallHit | null {
@@ -536,6 +588,20 @@ export class SessionRecallService {
       JSON.stringify(vector),
       metadata.updated_at,
     )
+    // D4: LRU eviction — keep only most-recent SESSION_RECALL_VECTORS_LRU_CAP rows.
+    // Cheap (O(N log N) once per upsert; uses idx_session_recall_vectors_updated).
+    try {
+      db.prepare(`
+        DELETE FROM session_recall_vectors
+        WHERE conversation_id NOT IN (
+          SELECT conversation_id FROM session_recall_vectors
+          ORDER BY updated_at DESC LIMIT ?
+        )
+      `).run?.(SESSION_RECALL_VECTORS_LRU_CAP)
+    } catch (err) {
+      // Don't let LRU cleanup failure break vector upsert; log and continue.
+      console.warn('[session-recall] vector LRU eviction failed:', err)
+    }
     return vector
   }
 

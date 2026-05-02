@@ -1,4 +1,4 @@
-import { deriveScopeRunStatePatch, getActiveScopeRunState, isActiveScopePhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
+import { deriveScopeRunStatePatch, getActiveScopeRunState, isStreamingScopeRunState, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
@@ -44,6 +44,7 @@ function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null,
       updatedAt: runState.updatedAt || new Date().toISOString(),
       responseMessageId: runState.responseMessageId || null,
       phase: runState.phase,
+      terminalReason: runState.terminalReason || null,
       toolTrace: (runState.toolTrace || []).map((event) => ({
         id: event.id,
         kind: event.kind,
@@ -83,7 +84,7 @@ export function syncActiveScopeRunAliases(
 ): Pick<{ isStreaming: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'toolTrace' | 'toolTraceStatus'> {
   const activeRunState = getActiveScopeRunState(state.scopeRunStates, state.currentScopeId)
   return {
-    isStreaming: isActiveScopePhase(activeRunState?.phase),
+    isStreaming: isStreamingScopeRunState(activeRunState),
     toolTrace: activeRunState?.toolTrace || [],
     toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
   }
@@ -885,6 +886,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             requestId: event.runId || previous?.requestId || null,
             taskId: event.taskId || previous?.taskId || patch.taskContinuation?.taskId || null,
             phase: patch.phase || event.phase,
+            terminalReason: patch.terminalReason ?? null,
             toolTrace: nextTrace,
             startedAt: previous?.startedAt || event.timestamp,
             updatedAt: event.timestamp,
@@ -930,14 +932,26 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
         const currentState = store.getState()
         if (currentState.currentScopeId === event.scopeId) {
-          if (event.type === 'started') {
+          const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
+          if (event.type === 'started' && !detachedJobEvent) {
             store.setState({ streamingRequestId: event.runId || currentState.streamingRequestId })
           }
-          if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
+          const terminalRunEvent = Boolean(
+            event.terminalReason ||
+            event.phase === 'done' ||
+            event.phase === 'error' ||
+            event.phase === 'cancelled',
+          )
+          if (terminalRunEvent) {
             store.setState({ streamingRequestId: null })
           }
         }
-        if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
+        if (
+          event.terminalReason ||
+          event.phase === 'done' ||
+          event.phase === 'error' ||
+          event.phase === 'cancelled'
+        ) {
           void persistAssistantMessageForRun(event.scopeId, store.getState().scopeRunStates[event.scopeId] || null)
         }
       })

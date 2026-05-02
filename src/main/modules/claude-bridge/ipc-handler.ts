@@ -10,9 +10,18 @@ import { AgentControlRuntime } from '../agent-control/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
 import { getLogPath } from '../../utils/platform'
 import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
+import {
+  clearAllReferenceSkillHints,
+  clearLastReferenceSkill,
+  setReferenceHintChangeEmitter,
+} from '../agent-control/skill-reference-hints'
+import { clearSkillTaskProjection } from '../agent-control/skill-task-tracker'
 import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
 import { registerSkillReferenceInlinedEmitter } from '../agent-control/skill-reference-inlined-bridge'
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
+import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -75,24 +84,49 @@ export interface IPCResponse<T = unknown> {
 let runtime: AgentControlRuntime | null = null
 const chatRepository = new ChatRepository()
 
-export async function cleanupAgentRuntime(): Promise<void> {
-  if (!runtime) return
-  await runtime.stop()
-  runtime = null
-  // Patch A1 — drop every session-scoped reference-skill hint when the
-  // runtime is torn down. The in-memory map is otherwise only pruned by the
-  // idle TTL sweep, which has a 30-minute granularity.
-  const { clearAllReferenceSkillHints } = await import('../agent-control/skill-reference-hints')
+function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
+  if (sessionId) {
+    clearLastReferenceSkill(sessionId)
+    clearSkillTaskProjection(sessionId)
+    getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
+    return
+  }
   clearAllReferenceSkillHints()
-  // B Phase 1 PR2 — drop any pending ask_user records so their awaiting
-  // Promises reject with a synthetic shutdown error rather than hanging.
+  clearSkillTaskProjection()
   getEphemeralExecutionStore().clear()
+}
+
+function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Skill session interaction cancelled'): void {
+  if (sessionId) {
+    getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
+    return
+  }
+  getEphemeralExecutionStore().clear()
+}
+
+export async function cleanupAgentRuntime(): Promise<void> {
+  if (runtime) {
+    await runtime.stop()
+    runtime = null
+  }
+  cleanupSkillSessionState(undefined, 'Agent runtime shut down')
+  // RE-AUDIT FIX 5.4 — release the reference-skill hint emitter so its
+  // closure (which captures mainWindow) doesn't pin the destroyed window
+  // and prevent GC. Idempotent — safe to call when no emitter was set.
+  setReferenceHintChangeEmitter(null)
+  registerSkillReferenceInlinedEmitter(null)
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
   if (!runtime) {
     runtime = new AgentControlRuntime(agentManager, browserController)
     void runtime.start()
+    // Phase 1.3 — kick off the Python venv health check immediately after the
+    // runtime starts. Fire-and-forget: a stale 3.14 venv (left over from a
+    // prior install) gets nuked + rebuilt in the background BEFORE the first
+    // skill_run_shell hits a confused interpreter. The wrapper logs a startup
+    // banner so the version is observable in `<tmp>/ready-startup.log`.
+    void getSkillsRuntimeManager().ensurePythonRuntimeReady()
   } else if (browserController) {
     runtime.getOrchestrator().setBrowserController(browserController)
   }
@@ -103,13 +137,16 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:askUserQuestion', event)
   })
-  // PR5 observability — push a lightweight banner event whenever orchestrator
-  // inlines a reference skill's SKILL.md. The authoritative record stays in
-  // `ready-agent-metrics.log` (`skill_reference_inlined` metric); this IPC is
-  // strictly for the renderer toast that tells the user "skill was loaded".
   registerSkillReferenceInlinedEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:referenceInlined', event)
+  })
+  // Phase 5.3 — push reference-skill hint changes to the renderer so the
+  // "上下文已启用" badge stays in sync without needing scope-run-event ticks
+  // to pull. Audit Phase 5 §E3.
+  setReferenceHintChangeEmitter((scopeId, change) => {
+    if (mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('agent:referenceSkillHintChanged', { scopeId, change })
   })
   // setupAgentIPC runs on every dev reload; strip any prior handler so
   // `ipcMain.handle` doesn't throw on the second registration.
@@ -278,6 +315,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
       cancelToolActionRequestsBySession(agent, sessionId)
+      cleanupSkillSessionState(sessionId, 'Agent session was reset')
       orchestrator.newSession(agent, sessionId)
       return { success: true, data: { cleared: true } }
     } catch (error) {
@@ -292,6 +330,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const agent = typeof payload === 'string' ? payload : payload.agent
       const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
       cancelToolActionRequestsBySession(agent, sessionId)
+      cancelSkillSessionPendingInteractions(sessionId, 'Agent generation was stopped')
       orchestrator.kill(agent, sessionId)
       return { success: true, data: { killed: true } }
     } catch (error) {
@@ -475,6 +514,75 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  ipcMain.handle('agent:getReferenceSkillHint', (_, payload: { scopeId: string }): IPCResponse => {
+    try {
+      const scopeId = String(payload?.scopeId || '').trim()
+      if (!scopeId) return { success: true, data: null }
+      return { success: true, data: runtime!.getReferenceSkillHint(scopeId) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:startDetachedSkillAction', (_, payload: {
+    scopeId?: string
+    sessionId?: string
+    agent?: string
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.startDetachedSkillAction(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:inspectDetachedSkillTask', (_, payload: { taskId: string; scopeId?: string }): IPCResponse => {
+    try {
+      const taskId = String(payload?.taskId || '').trim()
+      const scopeId = String(payload?.scopeId || '').trim()
+      if (!taskId) return { success: false, error: 'taskId is required' }
+      if (!scopeId) return { success: false, error: 'scopeId is required' }
+      const task = runtime!.inspectDetachedSkillTask(taskId, scopeId)
+      if (!task) return { success: false, error: `Detached skill task not found: ${taskId}` }
+      return { success: true, data: task }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:listDetachedSkillTasks', (_, payload?: { scopeId?: string }): IPCResponse => {
+    try {
+      return { success: true, data: runtime!.listDetachedSkillTasks(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:cancelDetachedSkillTask', (_, payload: { taskId: string; scopeId?: string }): IPCResponse => {
+    try {
+      const taskId = String(payload?.taskId || '').trim()
+      const scopeId = String(payload?.scopeId || '').trim()
+      if (!taskId) return { success: false, error: 'taskId is required' }
+      if (!scopeId) return { success: false, error: 'scopeId is required' }
+      const task = runtime!.cancelDetachedSkillTask(taskId, scopeId)
+      if (!task) return { success: false, error: `Detached skill task not found: ${taskId}` }
+      return { success: true, data: task }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:listActiveChildRuns', (): IPCResponse => {
+    return listActiveChildRunsForIpc(runtime)
+  })
+
+  ipcMain.handle('agent:cancelChildRun', async (_, payload: { childRunId?: string }): Promise<IPCResponse> => {
+    return cancelChildRunForIpc(runtime, payload)
+  })
+
   ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
     try {
       return { success: true, data: runtime!.attachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
@@ -558,6 +666,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:sendScoped', async (_, payload: {
     scopeId: string
+    agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
     continuationIntent?: {
@@ -566,10 +675,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       stepId?: string
       blockedReason?: string
       responseText?: string
-      // B Phase 4 PR3: tracker-anchored resumption. `direct-chat.ts`
-      // normalizeContinuationIntent handles the todoId → user-message
-      // synthesis (no executionId lookup against the retired state
-      // machine).
       todoId?: string
       todoTitle?: string
     } | null
@@ -814,7 +919,27 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     id: string; conversationId: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown>
   }): IPCResponse => {
     try {
-      chatRepository.saveMessage(data)
+      // Screenshot-bug hotfix — defense-in-depth: even if streaming leaked
+      // `<tool_call>` markers into the renderer's assembled message, scrub
+      // them here before persisting to chat_messages. Only assistant rows
+      // get cleaned (user / system content is unrelated to leaks). The
+      // primary fix lives in `TurnTranscript.emitOutput`; this layer
+      // catches anything that bypassed it (e.g. legacy code paths).
+      const sanitizedContent = data.role === 'assistant'
+        ? sanitizeAssistantText(data.content, {
+            sessionId: data.conversationId,
+            source: 'chat_save_message',
+          })
+        : data.content
+      chatRepository.saveMessage({ ...data, content: sanitizedContent })
+      // Phase 1.1 — assistant messages saved through this IPC previously
+      // bypassed `runtime.persistReferenceHintToScope`, so local sessions
+      // (the default flow for the chat panel) never wrote `lastReferenceSkill`
+      // to meta_json. Result: a Ready restart re-armed `referenceSkillHintArmed=false`
+      // and the model lost typed skill actions mid-flow. The hook is a no-op
+      // for non-assistant roles and idempotent (skips DB write when persisted
+      // snapshot equals in-memory hint).
+      runtime?.persistReferenceHintAfterAssistantMessage(data.conversationId, data.role)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -1068,7 +1193,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
             ? data.projectionPatch as Record<string, unknown>
             : null
-          const toolText = typeof structured?.message === 'string' ? structured.message : (data.chunk || '')
+          const structuredText = typeof structured?.message === 'string' && structured.message.trim()
+            ? structured.message.trim()
+            : typeof structured?.taskSummary === 'string' && structured.taskSummary.trim()
+              ? structured.taskSummary.trim()
+              : typeof structured?.taskTitle === 'string' && structured.taskTitle.trim()
+                ? structured.taskTitle.trim()
+                : ''
+          const toolText = structured ? (structuredText || '状态已更新') : (data.chunk || '')
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,

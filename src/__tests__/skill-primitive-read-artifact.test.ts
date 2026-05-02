@@ -43,6 +43,25 @@ test('reads a plain text artifact under the sandbox root', async () => {
   }
 })
 
+test('reads an absolute artifact path when it is still under the sandbox root', async () => {
+  const fx = makeFixture()
+  try {
+    const absolutePath = join(fx.artifactRoot, '.logs', 'shell-output.txt')
+    mkdirSync(join(fx.artifactRoot, '.logs'), { recursive: true })
+    writeFileSync(absolutePath, 'full log', 'utf-8')
+
+    const out = await executeReadArtifact(
+      { relativePath: absolutePath },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    assert.equal(out.text, 'full log')
+    assert.equal((out.data as any)?.truncated, false)
+  } finally {
+    fx.cleanup()
+  }
+})
+
 test('honors maxBytes and marks truncated=true when the file is larger', async () => {
   const fx = makeFixture()
   try {

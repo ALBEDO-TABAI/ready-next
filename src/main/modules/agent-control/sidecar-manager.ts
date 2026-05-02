@@ -2,10 +2,16 @@ import { app } from 'electron'
 import { createServer } from 'net'
 import { ChildProcess, execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { SidecarStatus } from './types'
+import { atomicWriteJson } from './atomic-write'
+import {
+  buildReadyPythonCandidates,
+  isSupportedReadyPythonVersion,
+  parsePythonVersionText,
+} from '../skills-runtime/python-runtime-version'
 
 const execFileAsync = promisify(execFile)
 
@@ -369,7 +375,7 @@ export class SidecarManager {
 
     if (existsSync(venvPython)) {
       const venvVersion = await this.getPythonVersion(venvPython)
-      if (venvVersion && (venvVersion.major > 3 || (venvVersion.major === 3 && venvVersion.minor > 13))) {
+      if (!isSupportedReadyPythonVersion(venvVersion)) {
         rmSync(this.venvRoot, { recursive: true, force: true })
       }
     }
@@ -393,7 +399,7 @@ export class SidecarManager {
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...SIDECAR_PIP_ENV },
       })
-      writeFileSync(this.runtimeStatePath, JSON.stringify({ digest, updatedAt: new Date().toISOString() }))
+      atomicWriteJson(this.runtimeStatePath, { digest, updatedAt: new Date().toISOString() })
     }
 
     return venvPython
@@ -408,44 +414,29 @@ export class SidecarManager {
     const sharedSkillPython = process.platform === 'win32'
       ? join(app.getPath('userData'), 'skill-runtime', 'python', 'Scripts', 'python.exe')
       : join(app.getPath('userData'), 'skill-runtime', 'python', 'bin', 'python')
-    const candidates = [
-      process.env.READY_SIDECAR_PYTHON,
-      process.env.PYTHON3,
-      'python3.13',
-      'python3.12',
-      'python3.11',
-      sharedSkillPython,
-      'python3',
-      'python',
-    ].filter((item): item is string => Boolean(item && item.trim()))
+    const candidates = buildReadyPythonCandidates(process.env.READY_SIDECAR_PYTHON, process.env)
+    if (!candidates.includes(sharedSkillPython)) {
+      candidates.splice(Math.min(2, candidates.length), 0, sharedSkillPython)
+    }
 
     for (const candidate of candidates) {
       try {
         const { stdout, stderr } = await execFileAsync(candidate, ['--version'], { timeout: 5_000 })
         const versionText = `${stdout} ${stderr}`.trim()
-        const match = versionText.match(/Python\s+(\d+)\.(\d+)/i)
-        if (match) {
-          const major = Number(match[1])
-          const minor = Number(match[2])
-          if (major > 3 || (major === 3 && minor > 14)) {
-            continue
-          }
-        }
+        if (!isSupportedReadyPythonVersion(parsePythonVersionText(versionText))) continue
         return candidate
       } catch {
         // try next
       }
     }
-    throw new Error('No usable python interpreter found for sidecar runtime')
+    throw new Error('No usable Python 3.9-3.12 interpreter found for sidecar runtime')
   }
 
   private async getPythonVersion(pythonBin: string): Promise<{ major: number; minor: number } | null> {
     try {
       const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 5_000 })
       const versionText = `${stdout} ${stderr}`.trim()
-      const match = versionText.match(/Python\s+(\d+)\.(\d+)/i)
-      if (!match) return null
-      return { major: Number(match[1]), minor: Number(match[2]) }
+      return parsePythonVersionText(versionText)
     } catch {
       return null
     }

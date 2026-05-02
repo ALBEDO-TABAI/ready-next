@@ -1,8 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { AgentRepository } from '../repositories/agent-repository'
 import { MemoryRepository, type MemorySourceType } from '../repositories/memory-repository'
-import type { ConversationScope } from './types'
+import type { ConversationScope, ScopeRunEventPayload } from './types'
 import {
   buildCompressionReport,
   compressHistoryForPrompt,
@@ -14,6 +15,7 @@ import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
 import { buildRequestEnvelope } from './request-envelope'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
+import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapter'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'
@@ -33,7 +35,7 @@ export interface PromptMemoryRef {
 export interface PromptTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'system'
+  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -85,10 +87,37 @@ interface TriggerDefinition {
   refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
 }
 
+interface CoordinatorTriggerCandidate {
+  adapter: DomainAdapter
+  fragment: CoordinatorPromptFragment
+}
+
 const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
+
+function normalizeCoordinatorModule(id: string): PromptTriggerHit['module'] | undefined {
+  return id === 'browser'
+    || id === 'document'
+    || id === 'rss'
+    || id === 'calendar'
+    || id === 'feishu'
+    || id === 'skill'
+    ? id
+    : undefined
+}
+
+function collectCoordinatorTriggerCandidates(coordinators: ReadonlyArray<DomainAdapter>): CoordinatorTriggerCandidate[] {
+  return coordinators
+    .flatMap((adapter) =>
+      (adapter.contributePromptFragment() || []).map((fragment) => ({ adapter, fragment }))
+    )
+    .sort((left, right) =>
+      right.fragment.priority - left.fragment.priority
+      || left.fragment.id.localeCompare(right.fragment.id)
+    )
+}
 
 const DEFAULT_FILES: Record<string, string> = {
   'MEMORY.md': [
@@ -124,80 +153,7 @@ const DEFAULT_FILES: Record<string, string> = {
   'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }
 
-const TRIGGERS: TriggerDefinition[] = [
-  {
-    id: 'feishu-doc',
-    label: '飞书文档操作',
-    module: 'feishu',
-    pattern: /(飞书).*(文档|doc)|创建飞书文档|改写飞书文档|写入飞书/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/feishu-rules.md', title: '飞书文档规则', summary: '飞书文档创建与改写规则' },
-      {
-        path: 'docs/accounts.md',
-        title: '飞书账号索引',
-        summary: '飞书账号和租户索引',
-        sensitive: true
-      }
-    ]
-  },
-  {
-    id: 'feishu-image',
-    label: '飞书插图操作',
-    module: 'feishu',
-    pattern: /(飞书).*(图片|插图|上传)/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/feishu-rules.md', title: '飞书插图规则', summary: '飞书图片上传和插入规则' },
-      {
-        path: 'docs/accounts.md',
-        title: '飞书账号索引',
-        summary: '飞书账号和租户索引',
-        sensitive: true
-      }
-    ]
-  },
-  {
-    id: 'browser-upload',
-    label: '浏览器上传流程',
-    module: 'browser',
-    pattern: /(上传|发送|提交|浏览器|网页)/i,
-    blocking: false,
-    refs: [
-      {
-        path: 'docs/browser-rules.md',
-        title: '浏览器工作流规则',
-        summary: '浏览器上传、输入、发送的阶段规则'
-      }
-    ]
-  },
-  {
-    id: 'document-write',
-    label: '文档改写操作',
-    module: 'document',
-    pattern: /(文档|文件).*(写|改|保存|格式)/i,
-    blocking: false,
-    refs: [{ path: 'docs/document-rules.md', title: '文档写入规则', summary: '文档改写和保存规则' }]
-  },
-  {
-    id: 'rss-analysis',
-    label: 'RSS 分析操作',
-    module: 'rss',
-    pattern: /(rss|订阅|抓取|分析)/i,
-    blocking: false,
-    refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }]
-  },
-  {
-    id: 'calendar-write',
-    label: '日程写入操作',
-    module: 'calendar',
-    pattern: /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i,
-    blocking: true,
-    refs: [
-      { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' }
-    ]
-  }
-]
+const TRIGGERS: TriggerDefinition[] = []
 
 function clip(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`
@@ -206,17 +162,44 @@ function clip(text: string, maxChars: number): string {
 function sanitizeCommandLikeContent(text: string): string {
   if (!text) return ''
   const patterns = [
+    /\b(?:system|document|browser|skill|memory|session|file)_[a-z0-9_]+:\d+>\s*\{[^\n]*\}/gi,
+    /\b(?:system|document|browser|skill|memory|session|file)_[a-z0-9_]+:\d+>[^\n]*/gi,
     /\bsystem_run_[a-z0-9_]+\([^)]*\)/gi,
     /\bdocument_[a-z0-9_]+\([^)]*\)/gi,
     /\bbrowser_[a-z0-9_]+\([^)]*\)/gi,
     /\bskill_[a-z0-9_]+\([^)]*\)/gi,
     /\bopenclaw\s+pairing\s+[^\n]+/gi,
+    /--cookies-from-browser\s+\S+/gi,
+    /\bcookies-from-browser\b/gi,
+    /\b(?:chrome|safari|firefox|edge|browser)\s+cookies?\b/gi,
   ]
   let sanitized = String(text)
   for (const pattern of patterns) {
-    sanitized = sanitized.replace(pattern, '[命令回显已隐藏]')
+    sanitized = sanitized.replace(
+      pattern,
+      pattern.source.includes('cookies') || pattern.source.includes('cookies-from-browser')
+        ? '[浏览器凭据已隐藏]'
+        : '[命令回显已隐藏]',
+    )
   }
   return sanitized.replace(/(?:\[命令回显已隐藏\]\s*){2,}/g, '[命令回显已隐藏]\n').trim()
+}
+
+function hasCurrentExplicitResourceRefs(envelope: RequestEnvelope): boolean {
+  if (envelope.referencedResources.some((ref) => ref.kind === 'mention')) return true
+  if (envelope.resources.some((resource) =>
+    resource.kind === 'attachment'
+    || resource.kind === 'browser_reference'
+    || resource.kind === 'folder_reference'
+    || resource.kind === 'widget_target',
+  )) {
+    return true
+  }
+  return envelope.chunks.some((chunk) =>
+    chunk.source === 'attachment_body'
+    || (chunk.source === 'ui_resource_ref'
+      && /(技能目录引用|浏览页面引用|文件夹引用|引用技能目录)/.test(chunk.text)),
+  )
 }
 
 function formatMemorySection(title: string, body: string): string {
@@ -302,6 +285,36 @@ async function defaultGetScopeMessages(
     role: item.role,
     content: String(item.content || '')
   }))
+}
+
+function shouldSkipTriggerForIntent(
+  trigger: { id: string; module?: PromptTriggerHit['module'] },
+  intentClassification?: IntentClassification,
+): boolean {
+  if (
+    trigger.module &&
+    intentClassification?.excludedDomains?.includes(
+      trigger.module as Exclude<IntentClassification['primaryDomain'], 'generic'>,
+    )
+  ) {
+    logAgentMetric('trigger_disagreement_rate', {
+      triggerId: trigger.id,
+      triggerModule: trigger.module,
+      primaryDomain: intentClassification.primaryDomain,
+      reason: 'excluded_domain',
+    })
+    return true
+  }
+  if (trigger.module && intentClassification?.primaryDomain === 'skill' && trigger.module !== 'system') {
+    logAgentMetric('trigger_disagreement_rate', {
+      triggerId: trigger.id,
+      triggerModule: trigger.module,
+      primaryDomain: intentClassification.primaryDomain,
+      reason: 'explicit_skill_primary',
+    })
+    return true
+  }
+  return false
 }
 
 export class PromptAssemblyService {
@@ -508,7 +521,8 @@ export class PromptAssemblyService {
   }
 
   private async loadL1(
-    scope: ConversationScope
+    scope: ConversationScope,
+    options: { includeDailyMemory?: boolean } = {},
   ): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number; historyCompressed: boolean }> {
     // Load from file-based system (backward compatibility)
     const messages = (await this.getScopeMessages(scope.id)).slice(-4)
@@ -524,14 +538,19 @@ export class PromptAssemblyService {
     const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
     const memoryRoot = this.getMemoryRoot()
     const dayFiles = [`memory/${day}.md`, `memory/${yesterday}.md`]
-    dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
-    const dailySections = dayFiles
-      .map((path) => {
-        const content = sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)).trim()
-        return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
-      })
-      .filter(Boolean)
-      .join('\n\n')
+    const includeDailyMemory = options.includeDailyMemory !== false
+    if (includeDailyMemory) {
+      dayFiles.forEach((path) => this.ensureMemoryRefFile(path, memoryRoot))
+    }
+    const dailySections = includeDailyMemory
+      ? dayFiles
+        .map((path) => {
+          const content = sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)).trim()
+          return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
+        })
+        .filter(Boolean)
+        .join('\n\n')
+      : ''
 
     const sections: string[] = [
       formatMemorySection(
@@ -554,15 +573,17 @@ export class PromptAssemblyService {
         null,
         `Scope ${scope.title} 的最近会话摘要`
       ),
-      ...dayFiles.map((path) =>
-        this.makeMemoryRef(
-          'l1',
-          'scope_memory',
-          path.split('/').pop() || path,
-          path,
-          '当日操作日志'
+      ...(includeDailyMemory
+        ? dayFiles.map((path) =>
+          this.makeMemoryRef(
+            'l1',
+            'scope_memory',
+            path.split('/').pop() || path,
+            path,
+            '当日操作日志'
+          )
         )
-      )
+        : [])
     ]
 
     // Load from database if enabled
@@ -620,6 +641,7 @@ export class PromptAssemblyService {
 
   private async resolveTriggers(
     text: string,
+    coordinators: ReadonlyArray<DomainAdapter>,
     intentClassification?: IntentClassification,
   ): Promise<Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }>> {
     const hits: Array<{ trigger: TriggerDefinition; sections: string[]; refs: PromptMemoryRef[] }> =
@@ -634,6 +656,12 @@ export class PromptAssemblyService {
           const pattern = new RegExp(dbTrigger.pattern, dbTrigger.patternFlags)
           pattern.lastIndex = 0
           if (!pattern.test(text)) continue
+          if (shouldSkipTriggerForIntent({
+            id: dbTrigger.id,
+            module: dbTrigger.module as TriggerDefinition['module'],
+          }, intentClassification)) {
+            continue
+          }
 
           await this.deps.memoryRepository.incrementTriggerHitCount(dbTrigger.id)
 
@@ -681,21 +709,43 @@ export class PromptAssemblyService {
       }
     }
 
+    for (const { adapter, fragment } of collectCoordinatorTriggerCandidates(coordinators)) {
+      if (!fragment.matches({ userText: text, route: null })) continue
+      const trigger: TriggerDefinition = {
+        id: fragment.id,
+        label: fragment.label,
+        module: normalizeCoordinatorModule(adapter.id),
+        pattern: /(?:)/,
+        blocking: fragment.blocking,
+        refs: fragment.refs,
+      }
+      if (shouldSkipTriggerForIntent(trigger, intentClassification)) continue
+      const sections: string[] = []
+      const refs: PromptMemoryRef[] = []
+      for (const ref of trigger.refs) {
+        const body = this.readMemoryFile(ref.path).trim()
+        if (!body) continue
+        sections.push(formatMemorySection(ref.title, body))
+        refs.push(
+          this.makeMemoryRef(
+            'l2',
+            'trigger_rule',
+            ref.title,
+            ref.path,
+            ref.summary,
+            trigger.id,
+            Boolean(ref.sensitive)
+          )
+        )
+      }
+      hits.push({ trigger, sections, refs })
+    }
+
     // Fallback to hardcoded triggers (backward compatibility)
     for (const trigger of TRIGGERS) {
       trigger.pattern.lastIndex = 0
       if (!trigger.pattern.test(text)) continue
-      if (
-        trigger.module &&
-        intentClassification?.excludedDomains?.includes(trigger.module as Exclude<IntentClassification['primaryDomain'], 'generic'>)
-      ) {
-        logAgentMetric('trigger_disagreement_rate', {
-          triggerId: trigger.id,
-          triggerModule: trigger.module,
-          primaryDomain: intentClassification.primaryDomain,
-        })
-        continue
-      }
+      if (shouldSkipTriggerForIntent(trigger, intentClassification)) continue
       const sections: string[] = []
       const refs: PromptMemoryRef[] = []
       for (const ref of trigger.refs) {
@@ -731,6 +781,11 @@ export class PromptAssemblyService {
       return { text: '', refs: [] }
     }
 
+    // skill-resume E2 — emit a recognizable [session-recall-context] marker so
+    // the LLM treats this block as continuation context (e.g. when the user
+    // just said "继续 …" without re-stating what to continue). Section bodies
+    // include latestTaskSummary so the model can see what tool calls / outputs
+    // led to the prior conversation's last state.
     const sections = capsules.slice(0, 4).map((capsule) => {
       const attachmentLine =
         capsule.attachmentNames.length > 0
@@ -740,7 +795,7 @@ export class PromptAssemblyService {
         ? `- 最近任务: ${sanitizeCommandLikeContent(capsule.latestTaskSummary)}`
         : null
       return [
-        `### ${capsule.title}`,
+        `### [session-recall-context] ${capsule.title}`,
         `- 会话 ID: ${capsule.conversationId}`,
         `- 来源: ${capsule.sourceKind}:${capsule.sourceId}`,
         `- 线程: ${capsule.threadKey}`,
@@ -764,8 +819,9 @@ export class PromptAssemblyService {
           capsule.conversationId
         )
       )
+    const header = '以下条目带有 [session-recall-context] 标记，是用户之前会话的续做上下文（含上次工具调用与产出摘要），请优先据此理解"继续/接着"等指令。'
     return {
-      text: clip(sections.join('\n\n'), 3200),
+      text: clip([header, ...sections].join('\n\n'), 4000),
       refs
     }
   }
@@ -824,12 +880,14 @@ export class PromptAssemblyService {
   async buildForScopedRun(params: {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
+    coordinators: ReadonlyArray<DomainAdapter>
   }): Promise<PromptAssemblyResult> {
-    const l0 = await this.loadL0(params.scope)
-    const l1 = await this.loadL1(params.scope)
     const userText = extractTextFromMessage(params.message)
     const requestEnvelope = buildRequestEnvelope({ userText })
     const intentClassification = classifyIntent(requestEnvelope)
+    const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
+    const l0 = await this.loadL0(params.scope)
+    const l1 = await this.loadL1(params.scope, { includeDailyMemory: !hasExplicitResourceRefs })
     const documentExcerptCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'document_excerpt').length
     const attachmentBodyCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'attachment_body').length
     if (documentExcerptCount > 0 || attachmentBodyCount > 0) {
@@ -840,10 +898,12 @@ export class PromptAssemblyService {
       })
     }
     const recall = await this.loadSessionRecall(params.scope)
-    const autoRecall = await this.loadAutomaticSessionRecall(
-      params.scope,
-      requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
-    )
+    const autoRecall = hasExplicitResourceRefs
+      ? { text: '', refs: [] }
+      : await this.loadAutomaticSessionRecall(
+        params.scope,
+        requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
+      )
     if (autoRecall.refs.length > 0) {
       logAgentMetric('recall_influence_rate', {
         scopeId: params.scope.id,
@@ -853,6 +913,7 @@ export class PromptAssemblyService {
     }
     const triggerMatches = await this.resolveTriggers(
       requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
+      params.coordinators,
       intentClassification,
     )
     const l2Sections = triggerMatches.flatMap((item) => item.sections)
@@ -913,17 +974,28 @@ export class PromptAssemblyService {
     finalText: string
     usedTools: string[]
     success: boolean
+    lifecyclePhase?: ScopeRunEventPayload['phase']
+    interactionState?: ScopeRunEventPayload['interactionState']
+    waitingFor?: ScopeRunEventPayload['waitingFor']
+    blockedReason?: string | null
+    resumableActions?: ScopeRunEventPayload['resumableActions']
+    taskContinuation?: ScopeRunEventPayload['taskContinuation']
   }): void {
     const day = this.now().toISOString().slice(0, 10)
     const memoryDir = join(this.getMemoryRoot(), 'memory')
     const path = join(memoryDir, `${day}.md`)
+    const safeSummary = sanitizeCommandLikeContent(params.finalText).trim()
     const lines = [
       `## ${this.now().toISOString()}`,
       `- scope: ${params.scope.title}`,
       `- success: ${params.success ? 'yes' : 'no'}`,
+      params.lifecyclePhase ? `- lifecycle: ${params.lifecyclePhase}` : null,
+      params.interactionState ? `- interaction: ${params.interactionState}` : null,
+      params.waitingFor && params.waitingFor !== 'none' ? `- waiting_for: ${params.waitingFor}` : null,
+      params.blockedReason ? `- blocked: ${clip(params.blockedReason, 240).replace(/\n+/g, ' ')}` : null,
       params.usedTools.length > 0 ? `- tools: ${params.usedTools.join(', ')}` : null,
-      params.finalText.trim()
-        ? `- summary: ${clip(params.finalText.trim(), 600).replace(/\n+/g, ' ')}`
+      safeSummary
+        ? `- summary: ${clip(safeSummary, 600).replace(/\n+/g, ' ')}`
         : null,
       ''
     ].filter(Boolean)
@@ -966,10 +1038,23 @@ export class PromptAssemblyService {
       const db = dbManager.getRawDb()
       if (!db) return null
 
-      db.prepare('INSERT INTO agent_knowledge (key, value, created_at) VALUES (?, ?, ?)').run(
+      // skill-resume G7 — agent_knowledge has `id PRIMARY KEY` and
+      // `agent_name NOT NULL` columns (migration 003); the legacy 3-column
+      // INSERT silently failed every memory_create with a NOT NULL constraint
+      // error which the catch below swallowed into "Failed to create memory".
+      // Always include id + agent_name; ON CONFLICT for the rare case the
+      // contentKey collides (Date.now+random gives ~12 bits of entropy).
+      db.prepare(
+        `INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(
+        `kn-${randomUUID()}`,
+        'memory',
         contentKey,
         params.content,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
+        Math.floor(Date.now() / 1000),
       )
 
       // Create memory metadata

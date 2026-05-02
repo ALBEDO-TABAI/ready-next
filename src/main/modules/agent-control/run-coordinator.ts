@@ -19,13 +19,37 @@ import {
 } from './run-budget-policy'
 import { buildExecutionFallbackState } from '../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
+import type { TurnTerminalReason } from './turn-frame'
+
+function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
+  if (!reason) return null
+  if (reason === 'done') return 'done'
+  if (reason === 'cancelled_runtime' || reason === 'cancelled_user') return 'cancelled'
+  if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'error'
+  return 'checkpoint'
+}
 
 export class RunCoordinator {
   constructor(private readonly deps: {
     promptAssembly: {
-      buildForScopedRun: (params: { scope: ConversationScope; message: RunMessage }) => Promise<PreparedRunPayload>
+      buildForScopedRun: (params: {
+        scope: ConversationScope
+        message: RunMessage
+        coordinators: RunCoordinatorRequest['coordinators']
+      }) => Promise<PreparedRunPayload>
       applyToMessage: (message: RunMessage, prepared: PreparedRunPayload) => RunMessage
-      recordRunOutcome: (payload: { scope: ConversationScope; finalText: string; usedTools: string[]; success: boolean }) => void
+      recordRunOutcome: (payload: {
+        scope: ConversationScope
+        finalText: string
+        usedTools: string[]
+        success: boolean
+        lifecyclePhase?: ScopeRunEventPayload['phase']
+        interactionState?: ScopeRunEventPayload['interactionState']
+        waitingFor?: ScopeRunEventPayload['waitingFor']
+        blockedReason?: string | null
+        resumableActions?: ScopeRunEventPayload['resumableActions']
+        taskContinuation?: ScopeRunEventPayload['taskContinuation']
+      }) => void
     }
     executeAndCollect: (request: ExecutionHostRequest) => Promise<ExecutionHostResult>
     emitScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void
@@ -65,10 +89,13 @@ export class RunCoordinator {
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
       message: request.message,
+      coordinators: request.coordinators,
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
-    const primaryTrigger = prepared.triggerHits[0]
+    const primaryTrigger = prepared.intentClassification?.primaryDomain === 'skill'
+      ? prepared.triggerHits.find((trigger) => trigger.blocking)
+      : prepared.triggerHits[0]
     const planningTaskTitle = primaryTrigger?.label || '正在理解需求'
     const planningTaskSummary = primaryTrigger
       ? `准备开始 ${primaryTrigger.label}`
@@ -138,13 +165,6 @@ export class RunCoordinator {
         ...(result.budgetState || budgetState),
       }
 
-    this.deps.promptAssembly.recordRunOutcome({
-      scope: request.scope,
-      finalText: result.finalText,
-      usedTools: result.usedTools,
-      success: result.success,
-    })
-
     const projectionPatch = result.projectionTruth?.projectionPatch
     const projectionTaskTitle =
       typeof projectionPatch?.taskTitle === 'string' ? projectionPatch.taskTitle : undefined
@@ -157,6 +177,7 @@ export class RunCoordinator {
       projectionPatch?.waitingFor === 'input'
       || projectionPatch?.waitingFor === 'confirmation'
       || projectionPatch?.waitingFor === 'agent_result'
+      || projectionPatch?.waitingFor === 'clarification'
       || projectionPatch?.waitingFor === 'background'
       || projectionPatch?.waitingFor === 'none'
         ? projectionPatch.waitingFor
@@ -174,6 +195,46 @@ export class RunCoordinator {
       projectionPatch?.taskContinuation && typeof projectionPatch.taskContinuation === 'object'
         ? projectionPatch.taskContinuation as ScopeRunEventPayload['taskContinuation']
         : undefined
+    const lifecycleSignal = result.skillTaskLifecycle || null
+    const finalInteractionState = lifecycleSignal?.interactionState || result.interactionState
+    const finalWaitingFor = lifecycleSignal ? lifecycleSignal.waitingFor : projectionWaitingFor
+    const finalResumableActions = lifecycleSignal
+      ? lifecycleSignal.resumableActions
+      : projectionResumableActions as ScopeRunEventPayload['resumableActions'] | undefined
+    const finalBlockedReason = lifecycleSignal
+      ? lifecycleSignal.blockedReason
+      : projectionBlockedReason
+    const finalTaskContinuation = lifecycleSignal
+      ? lifecycleSignal.taskContinuation
+      : projectionTaskContinuation
+    const hasRecoverableWait = Boolean(
+      (finalWaitingFor && finalWaitingFor !== 'none')
+      || finalBlockedReason
+      || (finalInteractionState && finalInteractionState !== 'running'),
+    )
+    const terminalPhase = phaseFromTerminalReason(result.terminalReason)
+    const finalPhase: ScopeRunEventPayload['phase'] = result.cancelled
+      ? 'cancelled'
+      : lifecycleSignal
+        ? lifecycleSignal.phase
+        : terminalPhase
+          ? terminalPhase
+        : result.success
+        ? hasRecoverableWait ? 'checkpoint' : 'done'
+        : 'error'
+
+    this.deps.promptAssembly.recordRunOutcome({
+      scope: request.scope,
+      finalText: result.finalText,
+      usedTools: result.usedTools,
+      success: result.success && finalPhase === 'done',
+      lifecyclePhase: finalPhase,
+      interactionState: finalInteractionState,
+      waitingFor: finalWaitingFor,
+      blockedReason: finalBlockedReason,
+      resumableActions: finalResumableActions,
+      taskContinuation: finalTaskContinuation,
+    })
 
     this.deps.emitScopeRunEvent({
       type: 'updated',
@@ -183,17 +244,18 @@ export class RunCoordinator {
       taskId,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,
-      phase: result.cancelled ? 'cancelled' : result.success ? 'done' : 'error',
+      phase: finalPhase,
+      terminalReason: result.terminalReason || null,
       taskType: result.taskType,
-      interactionState: result.interactionState,
+      interactionState: finalInteractionState,
       taskTitle: projectionTaskTitle,
       taskSummary: projectionTaskSummary,
       steps: projectionSteps as ScopeRunEventPayload['steps'],
       currentStepId: projectionCurrentStepId,
-      waitingFor: projectionWaitingFor,
-      resumableActions: projectionResumableActions as ScopeRunEventPayload['resumableActions'],
-      blockedReason: projectionBlockedReason,
-      taskContinuation: projectionTaskContinuation,
+      waitingFor: finalWaitingFor,
+      resumableActions: finalResumableActions,
+      blockedReason: finalBlockedReason,
+      taskContinuation: finalTaskContinuation,
       taskProjectionId: result.taskProjectionId || result.taskId || taskId,
       executionDiagnostics: {
         taskId: result.taskId || taskId,
@@ -204,6 +266,7 @@ export class RunCoordinator {
           ?? (resolvedTaskBudgetRuntime ? getBudgetUsagePercent(resolvedTaskBudgetRuntime) : null),
         stepBudget: result.executionDiagnostics?.stepBudget ?? null,
         fallback: buildExecutionFallbackState(result.executionDiagnostics?.fallback || null),
+        budgetLease: result.executionDiagnostics?.budgetLease ?? null,
         toolSnapshots: result.executionDiagnostics?.toolSnapshots ?? null,
         toolResolution: result.executionDiagnostics?.toolResolution ?? null,
         recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,
@@ -229,8 +292,13 @@ export class RunCoordinator {
           agent: request.scope.agent,
           runId: request.requestId,
           taskId,
-          phase: 'done',
-          taskSummary: `已记录 ${memoryCapture.items.length} 条常驻偏好/上下文`,
+          phase: finalPhase,
+          terminalReason: result.terminalReason || null,
+          interactionState: finalPhase === 'done' ? undefined : finalInteractionState,
+          waitingFor: finalPhase === 'done' ? undefined : finalWaitingFor,
+          resumableActions: finalPhase === 'done' ? undefined : finalResumableActions,
+          blockedReason: finalPhase === 'done' ? undefined : finalBlockedReason,
+          taskContinuation: finalPhase === 'done' ? undefined : finalTaskContinuation,
           memoryCapture,
           timestamp: new Date().toISOString(),
         })

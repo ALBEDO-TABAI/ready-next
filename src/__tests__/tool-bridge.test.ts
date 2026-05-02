@@ -28,6 +28,28 @@ describe('parseTextToolBridgeResponse', () => {
     ])
     assert.strictEqual(parsed.visibleText, '我先读取当前页面。\n读取后我会继续。')
   })
+
+  it('extracts XML-style tool_call blocks emitted as plain text', () => {
+    const parsed = parseTextToolBridgeResponse([
+      '我先看当前状态。',
+      '<tool_call>',
+      '<function=skill_run_shell>',
+      '<parameter=command>ls -la /tmp/project</parameter>',
+      '</function>',
+      '</tool_call><tool_call>',
+      '<function=skill_read_artifact>',
+      '<parameter=path>run_state.json</parameter>',
+      '</function>',
+      '</tool_call>',
+      '看完后继续。',
+    ].join('\n'))
+
+    assert.deepStrictEqual(parsed.toolCalls, [
+      { name: 'skill_run_shell', args: { command: 'ls -la /tmp/project' } },
+      { name: 'skill_read_artifact', args: { path: 'run_state.json' } },
+    ])
+    assert.strictEqual(parsed.visibleText, '我先看当前状态。\n看完后继续。')
+  })
 })
 
 describe('looksLikeMissingNativeToolsReply', () => {

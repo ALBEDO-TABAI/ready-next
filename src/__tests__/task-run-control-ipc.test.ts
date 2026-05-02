@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: task-run control IPC wiring lacks an electron-free behavior harness
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -29,6 +30,7 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(ipcHandler, /ipcMain\.handle\('agent:respondToInteraction'/)
 
   assert.match(preload, /sendScoped:\s*\(\s*payload:\s*\{\s*scopeId: string/)
+  assert.match(preload, /agent\?: string/)
   assert.match(preload, /continuationIntent\?: ContinuationIntentPayload \| null/)
   assert.match(preload, /ipcRenderer\.invoke\('agent:sendScoped', payload\)/)
   assert.match(preload, /suspendRun:\s*\(payload:\s*\{\s*scopeId: string; taskId\?: string \}\)\s*=>\s*ipcRenderer\.invoke\('agent:suspendRun', payload\)/)
@@ -41,11 +43,16 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(rendererTypes, /resumeRun:\s*\(payload:\s*\{/)
   assert.match(rendererTypes, /respondToInteraction:\s*\(payload:\s*\{/)
   assert.match(rendererTypes, /sendScoped:\s*\(\s*payload:\s*\{/)
+  assert.match(rendererTypes, /agent\?: string/)
   assert.match(rendererTypes, /continuationIntent\?: ContinuationIntentData \| null/)
 
   assert.match(agentStore, /pendingContinuationIntent:/)
   assert.match(agentStore, /setComposerDraft:/)
+  assert.match(agentStore, /agent:\s*currentAgent/)
   assert.match(agentStore, /continuationIntent:\s*pendingContinuationIntent \|\| undefined/)
+  assert.match(ipcHandler, /agent\?: string/)
+  assert.match(runtime, /agent\?: string/)
+  assert.match(runtime, /this\.createLocalScope\(payload\.agent,\s*payload\.scopeId\)/)
 
   assert.match(taskPanel, /window\.electronAPI\.agent\.suspendRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.resumeRun\(/)

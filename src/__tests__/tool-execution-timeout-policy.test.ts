@@ -10,7 +10,8 @@ test('tool execution timeout policy assigns stable budgets by tool family and re
   assert.equal(resolveToolExecutionTimeoutMs('memory_search'), 15_000)
   assert.equal(resolveToolExecutionTimeoutMs('document_save_tab'), 30_000)
   assert.equal(resolveToolExecutionTimeoutMs('browser_click'), 60_000)
-  assert.equal(resolveToolExecutionTimeoutMs('skill_get_state'), 120_000)
+  assert.equal(resolveToolExecutionTimeoutMs('skill_video_copy_analyze'), 120_000)
+  assert.equal(resolveToolExecutionTimeoutMs('skill_run_shell'), 600_000)
   assert.equal(resolveToolExecutionTimeoutMs('feishu_message_send'), 30_000)
 })
 

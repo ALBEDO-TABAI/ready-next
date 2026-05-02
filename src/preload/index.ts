@@ -8,6 +8,17 @@ type ContinuationIntentPayload = {
   stepId?: string
   blockedReason?: string
   responseText?: string
+  todoId?: string
+  todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 // Agent API
@@ -56,6 +67,25 @@ const agentAPI = {
     ipcRenderer.invoke('agent:getSessionRecallCapsule', { conversationId }),
   listAttachedSessionRecallContexts: (scopeId: string) =>
     ipcRenderer.invoke('agent:listAttachedSessionRecallContexts', { scopeId }),
+  getReferenceSkillHint: (scopeId: string) =>
+    ipcRenderer.invoke('agent:getReferenceSkillHint', { scopeId }),
+  startDetachedSkillAction: (payload: {
+    scopeId?: string
+    sessionId?: string
+    agent?: string
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }) => ipcRenderer.invoke('agent:startDetachedSkillAction', payload),
+  inspectDetachedSkillTask: (taskId: string, scopeId: string) =>
+    ipcRenderer.invoke('agent:inspectDetachedSkillTask', { taskId, scopeId }),
+  listDetachedSkillTasks: (payload?: { scopeId?: string }) =>
+    ipcRenderer.invoke('agent:listDetachedSkillTasks', payload || {}),
+  cancelDetachedSkillTask: (taskId: string, scopeId: string) =>
+    ipcRenderer.invoke('agent:cancelDetachedSkillTask', { taskId, scopeId }),
+  listActiveChildRuns: () => ipcRenderer.invoke('agent:listActiveChildRuns'),
+  cancelChildRun: (childRunId: string) =>
+    ipcRenderer.invoke('agent:cancelChildRun', { childRunId }),
   attachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
     ipcRenderer.invoke('agent:attachSessionRecallContext', { currentScopeId, conversationId }),
   detachSessionRecallContext: (currentScopeId: string, conversationId: string) =>
@@ -75,6 +105,7 @@ const agentAPI = {
   sendScoped: (
     payload: {
       scopeId: string
+      agent?: string
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
       continuationIntent?: ContinuationIntentPayload | null
@@ -176,7 +207,15 @@ const agentAPI = {
     const handler = (_: unknown, data: unknown) => callback(data)
     ipcRenderer.on('agent:scopeRunEvent', handler)
     return () => { ipcRenderer.removeListener('agent:scopeRunEvent', handler) }
-  }
+  },
+  // Phase 5.3 — subscribe to reference-skill hint state changes pushed by
+  // main. Renderer uses this to refresh the "上下文已启用" badge immediately
+  // instead of relying on next scope-run tick.
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; change: 'armed' | 'cleared' })
+    ipcRenderer.on('agent:referenceSkillHintChanged', handler)
+    return () => { ipcRenderer.removeListener('agent:referenceSkillHintChanged', handler) }
+  },
 }
 
 // Memory API
@@ -316,7 +355,8 @@ const documentAPI = {
   copyItem: (src: string, dest: string) => ipcRenderer.invoke('document:copy', { src, dest }),
   moveItem: (src: string, dest: string) => ipcRenderer.invoke('document:move', { src, dest }),
   stat: (path: string) => ipcRenderer.invoke('document:stat', path),
-  openFolder: () => ipcRenderer.invoke('document:openFolder'),
+  openFolder: (payload?: { validateAsWorkspace?: boolean }) =>
+    ipcRenderer.invoke('document:openFolder', payload),
   getHome: () => ipcRenderer.invoke('document:getHome'),
   showInFolder: (path: string) => ipcRenderer.invoke('document:showInFolder', path),
   openPath: (path: string) => ipcRenderer.invoke('document:openPath', path),
@@ -341,6 +381,11 @@ const documentAPI = {
     ipcRenderer.invoke('document:getBacklinks', payload),
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) =>
     ipcRenderer.invoke('document:getGraph', payload),
+  // perf-rescue B7 — chokidar watcher for delta incremental indexing.
+  startWatcher: (payload: { workspaceRoot: string }) =>
+    ipcRenderer.invoke('document:startWatcher', payload),
+  stopWatcher: (payload: { watcherId: string }) =>
+    ipcRenderer.invoke('document:stopWatcher', payload),
 }
 
 // RSS API
@@ -412,18 +457,15 @@ const skillsAPI = {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    // Matches ElectronSkillsAPI.run signature in `electron.d.ts`. Legacy
-    // `'workflow'` is still accepted; skills:run handler in main process
-    // normalises it to `undefined` (manifest-declared default).
-    executionMode?: 'auto' | 'direct' | 'workflow'
+    executionMode?: 'auto' | 'workflow' | 'direct'
   }) => ipcRenderer.invoke('skills:run', payload),
   listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
-  // B Phase 4 PR3: `listExecutions / getExecution / submitInput /
-  // submitConfirmation / submitAgentResult / restartFromStep /
-  // cancelExecution` + their `skills:executions:*` IPC handlers are retired
-  // alongside the SkillsRuntimeManager state machine. No renderer code
-  // referenced `electronAPI.skills.executions.*`, so this delete is
-  // non-breaking for product surfaces.
+  // Phase 4: skills:executions:* preload methods retired along with the
+  // skill_executions state machine (listExecutions / getExecution /
+  // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution). Task card progress now lives in the in-memory todo
+  // tracker + primitive projection patch.
+
   // B Phase 1 PR2 — ask_user: submit the user's answer to a pending ephemeral
   // question. Question metadata is pushed separately via `skill:askUserQuestion`.
   submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>
@@ -505,7 +547,11 @@ const appAPI = {
     }): void => callback(data)
     ipcRenderer.on('app:shortcut', handler)
     return () => ipcRenderer.removeListener('app:shortcut', handler)
-  }
+  },
+  // D1: cache stats + cleanup
+  getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
+  clearCache: (opts?: { includePuppeteer?: boolean }) =>
+    ipcRenderer.invoke('app:clearCache', opts ?? {}),
 }
 
 // Window API

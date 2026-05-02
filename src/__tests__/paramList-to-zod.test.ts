@@ -11,9 +11,9 @@ import test from 'node:test'
 
 import { paramListToZodObject } from '../main/modules/tools/paramList-to-zod'
 import { zodObjectToParamList } from '../main/modules/tools/zod-param-derivation'
-// B Phase 4 PR2 — `SKILL_CONTROL_SCHEMAS` retired. The round-trip invariant
-// is now exercised against `SKILL_PRIMITIVE_SCHEMAS`, which covers the same
-// Zod shapes (string / boolean / object / array with enum / required).
+// Phase 4: SKILL_CONTROL_SCHEMAS retired; use SKILL_PRIMITIVE_SCHEMAS as the
+// round-trip fixture set since primitives are our canonical
+// describe()-annotated Zod objects.
 import { SKILL_PRIMITIVE_SCHEMAS } from '../main/modules/tools/skill-primitives/primitive-schemas'
 import type { SkillParamDefinition } from '../shared/skill-execution-types'
 

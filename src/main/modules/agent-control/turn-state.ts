@@ -54,6 +54,9 @@ export class TurnState {
         stepBudget: params.taskBudgetRuntime.stepBudget
           ? { ...params.taskBudgetRuntime.stepBudget }
           : null,
+        lease: params.taskBudgetRuntime.lease
+          ? { ...params.taskBudgetRuntime.lease, renewedFingerprints: [...params.taskBudgetRuntime.lease.renewedFingerprints] }
+          : null,
       }
       : null
     this.effectiveRunBudget = this.taskBudgetRuntime?.budget || (params.budget ? { ...params.budget } : null)
@@ -98,6 +101,7 @@ export class TurnState {
         : null,
       frozen: this.interactionState === 'suspended',
       bootstrapBudget: this.taskBudgetRuntime?.bootstrapBudget,
+      lease: this.taskBudgetRuntime?.lease || null,
     })
     this.taskBudgetRuntime.warningLevel = this.budgetWarningLevel
     return this.taskBudgetRuntime
@@ -121,6 +125,7 @@ export class TurnState {
         : null,
       frozen: this.interactionState === 'suspended',
       bootstrapBudget: this.taskBudgetRuntime?.bootstrapBudget,
+      lease: this.taskBudgetRuntime?.lease || null,
     }).warningLevel
     this.syncTaskBudgetRuntime(resolvedTaskType)
     return this.budgetWarningLevel
@@ -227,6 +232,18 @@ export class TurnState {
       budgetUsagePercent: runtime ? getBudgetUsagePercent(runtime) : null,
       stepBudget: this.stepBudgetState,
       budgetWarningLevel: this.budgetWarningLevel,
+      budgetLease: runtime?.lease
+        ? {
+          leaseId: runtime.lease.leaseId,
+          decision: runtime.lease.decision,
+          reason: runtime.lease.reason,
+          renewalsUsed: runtime.lease.renewalsUsed,
+          progressScore: runtime.lease.progressScore,
+          wasteScore: runtime.lease.wasteScore,
+          lastFingerprint: runtime.lease.lastFingerprint,
+          currentLeaseEndIteration: runtime.lease.currentLeaseEndIteration,
+        }
+        : null,
       fallback: this.latestFallback || null,
       toolSnapshots: this.toolSnapshots.length > 0 ? this.toolSnapshots : null,
       toolResolution: this.toolResolution,

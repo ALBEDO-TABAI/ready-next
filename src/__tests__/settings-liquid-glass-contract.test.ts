@@ -31,7 +31,9 @@ test('shared settings theme tokens define glassy cards and controls', () => {
 test('compact utility settings opt into short control slots so labels do not collapse into vertical stacks', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
 
-  assert.match(settingsPage, /id: 'cacheSize'[\s\S]*slotWidth: 'short'/)
+  // Note: storage section (cacheSize / clearCache) is rendered via the dynamic
+  // StorageSettingsPanel since D1; it manages its own layout and no longer
+  // participates in the legacy slotWidth contract.
   assert.match(settingsPage, /id: 'newTask'[\s\S]*slotWidth: 'short'/)
   assert.match(settingsPage, /id: 'sendMessage'[\s\S]*slotWidth: 'short'/)
   assert.match(settingsPage, /id: 'search'[\s\S]*slotWidth: 'short'/)

@@ -7,6 +7,7 @@ import {
   type ToolTraceEvent
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
+import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 
@@ -279,6 +280,32 @@ function resolveActiveProjection(
   ) || taskProjections[0] || null
 }
 
+function buildProjectionContinuationIntent(
+  activeProjection: TaskProjectionRecordData | null,
+  responseText?: string,
+) {
+  const ref = activeProjection?.continuationRef || null
+  if (!activeProjection?.taskId) return undefined
+  return {
+    taskId: activeProjection.taskId,
+    executionId: ref?.executionId || undefined,
+    stepId: ref?.stepId || activeProjection.currentStepId || undefined,
+    blockedReason: activeProjection.blockedReason || undefined,
+    responseText: responseText || undefined,
+    todoId: ref?.todoId || undefined,
+    todoTitle: ref?.todoTitle || undefined,
+    pauseReason: ref?.pauseReason || undefined,
+    detachedTaskId: ref?.detachedTaskId || undefined,
+    taskRunId: ref?.taskRunId || undefined,
+    jobId: ref?.jobId || undefined,
+    skillId: ref?.skillId || undefined,
+    action: ref?.action || undefined,
+    runStatePath: ref?.runStatePath || undefined,
+    outputDir: ref?.outputDir || undefined,
+    progressFingerprint: ref?.progressFingerprint || undefined,
+  }
+}
+
 export default function TaskPanel() {
   const {
     inputValue,
@@ -334,6 +361,39 @@ export default function TaskPanel() {
       : Math.max(0, Math.min(100, Math.round(activeProjection?.budgetUsagePercent)))
   const safeProjectionBudgetPercent = projectionBudgetPercent ?? 0
   const projectionStepBudget = activeProjection?.budget?.stepBudget || null
+  const isAwaitingSupplement =
+    activeProjection?.interactionState === 'awaiting_clarification'
+    || activeRun?.waitingFor === 'input'
+    || activeRun?.waitingFor === 'clarification'
+  const projectionRuntimeState = useMemo(() => {
+    if (!activeProjection) return null
+    return deriveTaskCardRuntimeState({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId,
+      phase:
+        activeProjection.status === 'done'
+          ? 'done'
+          : activeProjection.status === 'failed'
+            ? 'error'
+            : activeProjection.status === 'cancelled'
+              ? 'cancelled'
+              : activeProjection.status === 'blocked'
+                ? 'checkpoint'
+                : 'tool_running',
+      status: activeProjection.status,
+      title: activeProjection.taskTitle || '任务',
+      taskTitle: activeProjection.taskTitle,
+      taskSummary: activeProjection.taskSummary,
+      waitingFor: activeProjection.waitingFor || 'none',
+      resumableActions: activeProjection.resumableActions,
+      recentArtifacts: activeProjection.recentArtifacts,
+      taskContinuation: activeProjection.continuationRef,
+      interactionState: activeProjection.interactionState,
+      degradationReason: activeProjection.degradationReason,
+      blockedReason: activeProjection.blockedReason,
+      updatedAt: activeProjection.updatedAt,
+    })
+  }, [activeProjection])
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
@@ -346,22 +406,7 @@ export default function TaskPanel() {
     await window.electronAPI.agent.resumeRun({
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
-      continuationIntent: activeProjection.taskId
-        ? {
-          taskId: activeProjection.taskId,
-          executionId: activeProjection.continuationRef?.executionId || undefined,
-          stepId: activeProjection.continuationRef?.stepId || undefined,
-          blockedReason: activeProjection.blockedReason || undefined,
-        }
-        : undefined,
-    })
-  }, [activeProjection])
-
-  const handleSuspendProjection = useCallback(async () => {
-    if (!activeProjection?.scopeId) return
-    await window.electronAPI.agent.suspendRun({
-      scopeId: activeProjection.scopeId,
-      taskId: activeProjection.taskId || undefined,
+      continuationIntent: buildProjectionContinuationIntent(activeProjection),
     })
   }, [activeProjection])
 
@@ -381,15 +426,7 @@ export default function TaskPanel() {
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
       responseText: trimmed,
-      continuationIntent: activeProjection.taskId
-        ? {
-          taskId: activeProjection.taskId,
-          executionId: activeProjection.continuationRef?.executionId || undefined,
-          stepId: activeProjection.continuationRef?.stepId || undefined,
-          blockedReason: activeProjection.blockedReason || undefined,
-          responseText: trimmed,
-        }
-        : undefined,
+      continuationIntent: buildProjectionContinuationIntent(activeProjection, trimmed),
     })
   }, [activeProjection])
 
@@ -397,16 +434,22 @@ export default function TaskPanel() {
     if (!(activeProjection?.resumableActions || []).includes('retry')) return
     setComposerDraft(
       '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
-      activeProjection?.taskId
-        ? {
-          taskId: activeProjection.taskId,
-          executionId: activeProjection.continuationRef?.executionId || undefined,
-          stepId: activeProjection.continuationRef?.stepId || undefined,
-          blockedReason: activeProjection.blockedReason || undefined,
-        }
-        : null,
+      buildProjectionContinuationIntent(activeProjection) || null,
     )
   }, [activeProjection, setComposerDraft])
+
+  const handleCancelProjection = useCallback(async () => {
+    if (!activeProjection?.scopeId) return
+    const detachedTaskId = activeProjection.continuationRef?.detachedTaskId || null
+    if (detachedTaskId && window.electronAPI?.agent?.cancelDetachedSkillTask) {
+      await window.electronAPI.agent.cancelDetachedSkillTask(detachedTaskId, activeProjection.scopeId).catch(() => null)
+      return
+    }
+    await window.electronAPI.agent.suspendRun({
+      scopeId: activeProjection.scopeId,
+      taskId: activeProjection.taskId || undefined,
+    })
+  }, [activeProjection])
 
   const phaseColors = phaseTone(activeRun?.phase)
   const projectionColors = projectionStatusTone(activeProjection?.status)
@@ -489,7 +532,7 @@ export default function TaskPanel() {
                   color: activeProjection ? projectionColors.color : phaseColors.color
                 }}
               >
-                {activeProjection ? projectionStatusLabel(activeProjection?.status) : phaseLabel(activeRun?.phase)}
+                {activeProjection ? projectionRuntimeState?.statusLabel || projectionStatusLabel(activeProjection?.status) : phaseLabel(activeRun?.phase)}
               </span>
               {activeRun ? (
                 <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
@@ -607,7 +650,7 @@ export default function TaskPanel() {
                 资源：{String(activeRun.ownerResourceId).slice(0, 48)}
               </div>
             )}
-            {(activeRun?.blockedReason || activeProjection?.blockedReason) && (
+            {((activeProjection ? activeProjection.blockedReason : activeRun?.blockedReason) || null) && (
               <div
                 className="rounded-[10px] border px-2.5 py-2"
                 style={{
@@ -622,15 +665,13 @@ export default function TaskPanel() {
                   className="mt-1 text-[11px]"
                   style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
                 >
-                  {activeRun?.blockedReason || activeProjection?.blockedReason}
+                  {activeProjection ? activeProjection.blockedReason : activeRun?.blockedReason}
                 </div>
               </div>
             )}
             {activeProjection && (
               <div className="flex flex-wrap gap-1.5">
-                {(activeProjection?.continuationRef
-                  || activeProjection?.interactionState === 'suspended'
-                  || (activeProjection?.resumableActions || []).includes('continue')) && (
+                {projectionRuntimeState?.actionSet.includes('continue') && (
                   <button
                     type="button"
                     onClick={handleResumeProjection}
@@ -640,17 +681,17 @@ export default function TaskPanel() {
                     继续运行
                   </button>
                 )}
-                {(activeProjection?.status === 'running' || activeProjection?.interactionState === 'resuming') && (
+                {projectionRuntimeState?.actionSet.includes('cancel') && (
                   <button
                     type="button"
-                    onClick={handleSuspendProjection}
+                    onClick={handleCancelProjection}
                     className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
-                    暂停任务
+                    取消任务
                   </button>
                 )}
-                {(activeProjection?.interactionState === 'awaiting_clarification'
+                {(isAwaitingSupplement
                   || activeProjection?.interactionState === 'awaiting_confirmation'
                   || activeProjection?.interactionState === 'human_takeover') && (
                   <button
@@ -666,7 +707,7 @@ export default function TaskPanel() {
                         : '补充后继续'}
                   </button>
                 )}
-                {(activeProjection?.resumableActions || []).includes('retry') && (
+                {projectionRuntimeState?.actionSet.includes('retry') && (
                   <button
                     type="button"
                     onClick={handleRetryProjection}

@@ -5,8 +5,26 @@
 // static-names path resolves at bundle time without falling back to the
 // hardcoded list that was triggering `Cannot find module '../tools/skills-tools'`
 // noise in `ready-agent-metrics.log`.
+//
+// Phase 4: the 6 execution-control tool names (skill_get_state /
+// skill_submit_* / skill_restart_from_step / skill_cancel_execution) were
+// removed from the registry along with the skill_executions state machine.
+//
+// Stage B5 (skill-run-contract route): expose static-manifest-derived Zod
+// schemas so `getToolInputSchemas()` can fall back to validation even when
+// the runtime manager isn't ready. Without this, dispatch falls back to the
+// static tool table (B1) but Zod validation is silently skipped — causing
+// forced typed actions to dispatch with `{}` instead of failing as
+// `input_validation`.
 
-const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { ZodObject, ZodRawShape } from 'zod'
+
+import type { SkillParamDefinition } from '../../../shared/skill-execution-types'
+import { paramListToZodObject } from './paramList-to-zod'
+
+export const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
   'video-expert-analyzer:video_expert_ai_analyze': 'skill_video_expert_ai_analyze',
   'video-copy-analyzer:video_copy_analyze': 'skill_video_copy_analyze',
@@ -17,26 +35,38 @@ const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
 
-// B Phase 1 — skill primitives. Still session-gated via
-// `filterSkillPrimitivesBySession` (reference-skill hint or active
-// execution); static fallback lists them unconditionally so tool-registry
-// inventory stays stable during early boot.
-//
-// B Phase 4 PR2 removed the 6 execution-control tool names (`skill_get_state`
-// and the 5 `skill_submit_*` / `skill_restart_from_step` /
-// `skill_cancel_execution` entries). They are retired alongside the state
-// machine.
+export function getStaticSkillToolNameForAction(skillId: string, actionName: string): string | null {
+  return STATIC_SKILL_TOOL_NAMES_BY_ACTION[`${skillId}:${actionName}`] || null
+}
+
+export const STATIC_SKILL_ACTIONS_BY_TOOL_NAME: Record<string, { skillId: string; actionName: string }> = Object.fromEntries(
+  Object.entries(STATIC_SKILL_TOOL_NAMES_BY_ACTION).map(([key, toolName]) => {
+    const [skillId, actionName] = key.split(':')
+    return [toolName, { skillId, actionName }]
+  }),
+)
+
+// B Phase 1 — skill primitives names. Session-gated at runtime via
+// `filterSkillPrimitivesBySession` (only exposed when a reference-skill hint
+// is armed). Names included here so static-fallback tool enumeration still
+// lists them when the runtime manager isn't ready yet (boot path).
 const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_ask_user',
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',
+  'skill_patch_config',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  // Phase 5.1 — generic run_state inspector for long multi-step skills.
+  'skill_inspect_run_state',
 ]
 
 /**
- * Full static tool list — now equal to the boot-safe subset since the 5
- * gated execution-control names were retired in B Phase 4 PR2. Kept as a
- * separate export for stable import sites.
+ * Full static tool list — skill_action + primitives. Boot-path callers
+ * (ToolRegistry static fallback) use this unchanged; session-aware filtering
+ * runs at dispatch time through filterSkillPrimitivesBySession.
  */
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
@@ -44,11 +74,108 @@ export const STATIC_SKILL_TOOL_NAMES: string[] = [
 ]
 
 /**
- * Boot-safe subset retained for backward-compat import paths. Post-PR2 this
- * matches `STATIC_SKILL_TOOL_NAMES` exactly; kept separate so callers that
- * used the boot-safe name continue to resolve without churn.
+ * Boot-safe subset (identical to STATIC_SKILL_TOOL_NAMES since Phase 4
+ * retired the gated execution-control tools). Kept as a separate export for
+ * backward compatibility with the tool-registry import site.
  */
-export const STATIC_SKILL_TOOL_NAMES_BOOT_SAFE: string[] = [
-  ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),
-  ...PRIMITIVE_TOOL_NAMES,
-]
+export const STATIC_SKILL_TOOL_NAMES_BOOT_SAFE: string[] = STATIC_SKILL_TOOL_NAMES
+
+// ---------------------------------------------------------------------------
+// Static manifest schema metadata (Stage B5)
+//
+// The same `assets/embedded-skills/<id>/ready-skill.json` files the runtime
+// manager loads. We re-read them lazily here so the registry / schema layer
+// can derive Zod input schemas without taking a runtime-manager dependency.
+// Pure module: only `node:fs` + `node:path` + Zod.
+// ---------------------------------------------------------------------------
+
+interface StaticSkillActionParams {
+  skillId: string
+  actionName: string
+  toolName: string
+  params: SkillParamDefinition[]
+}
+
+let staticSkillActionParamsCache: Map<string, StaticSkillActionParams> | null = null
+
+function readStaticSkillActionParams(): Map<string, StaticSkillActionParams> {
+  if (staticSkillActionParamsCache) return staticSkillActionParamsCache
+  const map = new Map<string, StaticSkillActionParams>()
+  // Mirror tool-registry.ts: assets/embedded-skills lives at the cwd root.
+  // Test runs (`npx tsx --test`) launch from the project root, so this works
+  // for both production (electron-vite asar) and unit tests.
+  const root = join(process.cwd(), 'assets', 'embedded-skills')
+  if (!existsSync(root)) {
+    staticSkillActionParamsCache = map
+    return map
+  }
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const manifestPath = join(root, entry.name, 'ready-skill.json')
+    if (!existsSync(manifestPath)) continue
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+        id?: unknown
+        actions?: unknown
+      }
+      const skillId = typeof manifest.id === 'string' ? manifest.id : entry.name
+      const actions = Array.isArray(manifest.actions) ? manifest.actions : []
+      for (const rawAction of actions) {
+        if (!rawAction || typeof rawAction !== 'object') continue
+        const action = rawAction as { name?: unknown; params?: unknown }
+        if (typeof action.name !== 'string') continue
+        const aliasKey = `${skillId}:${action.name}`
+        const toolName = STATIC_SKILL_TOOL_NAMES_BY_ACTION[aliasKey]
+        if (!toolName) continue
+        const params: SkillParamDefinition[] = Array.isArray(action.params)
+          ? (action.params as unknown[])
+              .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === 'object')
+              .map((p) => normalizeManifestParam(p))
+              .filter((p): p is SkillParamDefinition => p !== null)
+          : []
+        map.set(toolName, { skillId, actionName: action.name, toolName, params })
+      }
+    } catch {
+      continue
+    }
+  }
+  staticSkillActionParamsCache = map
+  return map
+}
+
+function normalizeManifestParam(raw: Record<string, unknown>): SkillParamDefinition | null {
+  if (typeof raw.name !== 'string' || !raw.name) return null
+  return {
+    name: raw.name,
+    type: typeof raw.type === 'string' ? raw.type : 'string',
+    description: typeof raw.description === 'string' ? raw.description : '',
+    required: raw.required === true,
+    enum: Array.isArray(raw.enum) ? raw.enum.filter((e): e is string => typeof e === 'string') : undefined,
+    items: raw.items && typeof raw.items === 'object' && !Array.isArray(raw.items)
+      ? (raw.items as Record<string, unknown>)
+      : undefined,
+    additionalProperties: raw.additionalProperties === true ? true : undefined,
+  }
+}
+
+/**
+ * Static manifest-derived Zod schemas keyed by tool name. Built lazily on
+ * first call, then cached for the process. Used by `getToolInputSchemas()`
+ * as a fallback when `getSkillActionSchemas()` returns `{}` (runtime manager
+ * unavailable / boot ordering).
+ *
+ * Pure: relies only on assets/embedded-skills/*\/ready-skill.json + Zod.
+ */
+export function getStaticSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> {
+  const params = readStaticSkillActionParams()
+  const out: Record<string, ZodObject<ZodRawShape>> = {}
+  for (const [toolName, entry] of params.entries()) {
+    try {
+      out[toolName] = paramListToZodObject(entry.params)
+    } catch {
+      // Malformed manifest → skip. Static fallback should never crash the
+      // schema registry.
+    }
+  }
+  return out
+}

@@ -1,9 +1,13 @@
+import { randomUUID } from 'crypto'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getProviderDef } from '../../../shared/ai-providers'
 import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { parseJsonResponse } from '../openai-responses'
 import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
+import { parseTextToolBridgeResponse } from './tool-bridge'
 
 export interface AnthropicSessionLike {
   messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | Array<Record<string, unknown>> }>
@@ -21,6 +25,8 @@ export interface AnthropicExecutionResponse {
   toolCalls: AnthropicToolCall[]
   stopReason: string
   fallback?: ExecutionFallbackInfo
+  rawText?: string
+  toolTransport?: 'native' | 'text'
 }
 
 export class AnthropicExecutionClient {
@@ -183,7 +189,7 @@ export class AnthropicExecutionClient {
       content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
       stop_reason?: string
     }
-    return {
+    const nativeResponse: AnthropicExecutionResponse = {
       text: json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || '',
       toolCalls: (json.content || [])
         .filter((block) => block.type === 'tool_use')
@@ -193,6 +199,37 @@ export class AnthropicExecutionClient {
           input: block.input || {},
         })),
       stopReason: json.stop_reason || 'end_turn',
+      toolTransport: 'native',
+    }
+    return this.recoverXmlToolCallsFromNative(nativeResponse)
+  }
+
+  private recoverXmlToolCallsFromNative(response: AnthropicExecutionResponse): AnthropicExecutionResponse {
+    if (response.toolCalls.length > 0) return response
+    if (!response.text || !/<tool_call>|<function=|<parameter=|:::tool_call/i.test(response.text)) return response
+    const parsed = parseTextToolBridgeResponse(response.text)
+    if (parsed.toolCalls.length === 0) return response
+    logAgentMetric(TOOL_ERROR_METRICS.xmlToolCallsRecoveredFromNative, {
+      route: 'anthropic_messages',
+      originalCallsCount: 0,
+      recoveredCallsCount: parsed.toolCalls.length,
+      recoveredToolNames: parsed.toolCalls.map((call) => call.name).slice(0, 5),
+      originalTextLen: response.text.length,
+      cleanedTextLen: parsed.visibleText.length,
+    })
+    this.deps.log(
+      `[xml_recovery] anthropic_messages: model emitted ${parsed.toolCalls.length} XML tool_call(s); recovering as text-bridge so dispatch can proceed.`,
+    )
+    return {
+      ...response,
+      text: parsed.visibleText,
+      rawText: response.text,
+      toolCalls: parsed.toolCalls.map((call) => ({
+        id: `xmlrec_${randomUUID().replace(/-/g, '')}`,
+        name: call.name,
+        input: call.args,
+      })),
+      toolTransport: 'text',
     }
   }
 

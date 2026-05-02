@@ -26,6 +26,7 @@ interface TaskProjectionRow {
   task_summary: string | null
   status: TaskProjectionRecord['status']
   interaction_state: TaskProjectionRecord['interactionState']
+  waiting_for: TaskProjectionRecord['waitingFor'] | null
   steps_json: string
   current_step_id: string | null
   budget_json: string | null
@@ -50,6 +51,60 @@ function safeParse<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+function artifactsMatchSibling(
+  artifacts: Array<Record<string, unknown>> | undefined | null,
+  normalizedOutputDir: string | null,
+  runStatePath: string | null,
+): boolean {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return false
+  for (const artifact of artifacts) {
+    if (!artifact || typeof artifact !== 'object') continue
+    const path = typeof artifact.path === 'string' ? artifact.path : ''
+    if (runStatePath && path && path === runStatePath) return true
+    if (
+      normalizedOutputDir
+      && path
+      && path.split(/[\\/]/).pop() === 'run_state.json'
+      && (path.startsWith(`${normalizedOutputDir}/`) || path.startsWith(`${normalizedOutputDir}\\`))
+    ) {
+      return true
+    }
+    if (normalizedOutputDir) {
+      const meta = artifact.meta as Record<string, unknown> | undefined
+      const metaOutputDir = typeof meta?.outputDir === 'string' ? meta.outputDir : null
+      if (metaOutputDir && metaOutputDir.replace(/[\\/]+$/, '') === normalizedOutputDir) return true
+      if (
+        path
+        && (path === normalizedOutputDir
+          || path.startsWith(`${normalizedOutputDir}/`)
+          || path.startsWith(`${normalizedOutputDir}\\`))
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Stage F3 (Zeta) — extract any skillId carried on artifact meta. Rows that
+ * never recorded a skillId (legacy short_task) return null and remain
+ * matchable; rows that explicitly carry a different skillId are rejected
+ * by the caller so cross-skill non-supersede holds.
+ */
+function artifactSiblingSkillId(
+  artifacts: Array<Record<string, unknown>> | undefined | null,
+): string | null {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return null
+  for (const artifact of artifacts) {
+    if (!artifact || typeof artifact !== 'object') continue
+    const meta = artifact.meta as Record<string, unknown> | undefined
+    const value = typeof meta?.skillId === 'string' ? meta.skillId.trim() : ''
+    if (value) return value
+  }
+  return null
+}
+
 export class TaskProjectionRepository implements TaskProjectionStore {
   constructor(private readonly dbManager: TaskProjectionDatabaseAccessor) {}
 
@@ -59,11 +114,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
 
     db.prepare(`
       INSERT INTO task_projections (
-        task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state,
+        task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, recent_artifacts_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -76,6 +131,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.taskSummary ?? null,
       record.status,
       record.interactionState,
+      record.waitingFor ?? 'none',
       JSON.stringify(record.steps || []),
       record.currentStepId ?? null,
       record.budget ? JSON.stringify(record.budget) : null,
@@ -111,6 +167,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('taskSummary' in patch) assign('task_summary', patch.taskSummary)
     if ('status' in patch) assign('status', patch.status)
     if ('interactionState' in patch) assign('interaction_state', patch.interactionState)
+    if ('waitingFor' in patch) assign('waiting_for', patch.waitingFor)
     if ('steps' in patch) assign('steps_json', JSON.stringify(patch.steps || []))
     if ('currentStepId' in patch) assign('current_step_id', patch.currentStepId)
     if ('budget' in patch) assign('budget_json', patch.budget ? JSON.stringify(patch.budget) : null)
@@ -165,6 +222,79 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     db.prepare('DELETE FROM task_projections WHERE scope_id = ?').run(scopeId)
   }
 
+  /**
+   * Stage 6 supersede helper. Returns non-terminal (`running`/`blocked`/`queued`)
+   * legacy `module='system' task_type='short_task'` projections in the same
+   * scope whose recentArtifacts JSON references the same outputDir (via
+   * artifact path prefix or `meta.outputDir`) or the same runStatePath
+   * (via artifact path equality, or any `run_state.json` filename inside
+   * the outputDir). Skill-keyed rows (taskId starting with `skill:`) are
+   * excluded — those are already the new identities being committed.
+   *
+   * Stage F3 (Zeta) — `skillId` is plumbed into the filter so two skills
+   * that happen to share an output path do NOT supersede each other:
+   *   - When `args.skillId` is null/undefined the helper behaves as before.
+   *   - When `args.skillId` is provided and a candidate row carries a
+   *     different `meta.skillId` on its artifacts, that row is rejected.
+   *   - Legacy rows without any `meta.skillId` continue to match (they
+   *     pre-date the skill-keyed identity scheme and must still be
+   *     superseded by the freshly-committed skill row).
+   */
+  findByArtifactSiblings(args: {
+    scopeId: string
+    skillId: string | null
+    outputDir: string | null
+    runStatePath: string | null
+  }): TaskProjectionRecord[] {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const { scopeId, skillId, outputDir, runStatePath } = args
+    if (!outputDir && !runStatePath) return []
+    const normalizedSkillId = typeof skillId === 'string' && skillId.trim() ? skillId.trim() : null
+    // Phase 7 — apply `skillId` filter in SQL BEFORE path similarity, per
+    // source plan §7. A candidate row is rejected as soon as ANY of its
+    // recorded artifacts carries a `meta.skillId` that differs from
+    // `normalizedSkillId`. Legacy rows that never recorded a skillId have
+    // no such artifact — the inner NOT EXISTS evaluates true and they
+    // remain adoptable. Rows with `skill-child:` / `skill:` prefixes are
+    // also excluded here so we never re-adopt a child-run row by path
+    // similarity.
+    const rows = db.prepare(
+      `SELECT *
+       FROM task_projections tp
+       WHERE tp.scope_id = ?
+         AND tp.module = 'system'
+         AND tp.task_type = 'short_task'
+         AND tp.status NOT IN ('cancelled', 'done', 'killed', 'completed')
+         AND tp.task_id NOT LIKE 'skill:%'
+         AND tp.task_id NOT LIKE 'skill-child:%'
+         AND (
+           ? IS NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM json_each(COALESCE(tp.recent_artifacts_json, '[]')) artifact
+             WHERE TRIM(COALESCE(json_extract(artifact.value, '$.meta.skillId'), '')) <> ''
+               AND TRIM(json_extract(artifact.value, '$.meta.skillId')) <> ?
+           )
+         )`,
+    ).all<TaskProjectionRow>(scopeId, normalizedSkillId, normalizedSkillId ?? '')
+    const normalizedOutputDir = outputDir ? outputDir.replace(/[\\/]+$/, '') : null
+    return rows
+      .map((row) => this.mapRow(row))
+      .filter((record) => {
+        const artifacts = record.recentArtifacts as Array<Record<string, unknown>> | undefined
+        // Path/runStatePath similarity matching applies on the already
+        // skill-filtered candidate set.
+        if (!artifactsMatchSibling(artifacts, normalizedOutputDir, runStatePath)) return false
+        // Defense-in-depth: legacy DBs that pre-date `json_extract` quirks
+        // may still yield mixed-skill artifacts inside one row. Repeat the
+        // JS-side check so cross-skill rows can never sneak through.
+        if (!normalizedSkillId) return true
+        const siblingSkillId = artifactSiblingSkillId(artifacts)
+        return !siblingSkillId || siblingSkillId === normalizedSkillId
+      })
+  }
+
   private mapRow(row: TaskProjectionRow): TaskProjectionRecord {
     return {
       taskId: row.task_id,
@@ -178,6 +308,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       taskSummary: row.task_summary ?? null,
       status: row.status,
       interactionState: row.interaction_state,
+      waitingFor: row.waiting_for || 'none',
       steps: safeParse(row.steps_json, []),
       currentStepId: row.current_step_id ?? null,
       budget: safeParse(row.budget_json, null),

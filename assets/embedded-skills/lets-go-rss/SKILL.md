@@ -14,7 +14,7 @@ when-to-use: |
 ## 执行原则（给执行该技能的 agent 看）
 
 - **优先用 typed 工具**：`skill_rss_add` / `skill_rss_update` / `skill_rss_status` / `skill_rss_list` / `skill_rss_stats` 是这个技能的标准入口，已经把常见参数封装好；该用就用。
-- **复杂场景再走 shell**：只有当 typed 工具不覆盖（例如要直接 cat `assets/latest_update.md`、跑 `./scripts/run_update_cron.sh`），才用 `skill_run_shell` 调下文里给出的命令。
+- **复杂场景再走 shell**：只有当 typed 工具不覆盖（例如要直接 cat `assets/latest_update.md`、跑 `bash scripts/run_update_cron.sh`），才用 `skill_run_shell` 调下文里给出的命令。
 - **Bot 推送严格按下文「Bot 汇报规范」执行**：不重新排版、不加表头、不分多条消息、不替换链接；`--status` 输出原样转发。
 - **不要替用户改 crontab**：要给 cron 配置时，只输出建议的 crontab 行，由用户自己执行。
 
@@ -52,19 +52,19 @@ python3 scripts/lets_go_rss.py --stats
 ### 稳定命令（推荐）
 ```bash
 # 后台更新（内置超时参数 + 并发防重入锁）
-./scripts/run_update_cron.sh
+bash scripts/run_update_cron.sh
 
 # Bot 推送只读缓存
-./scripts/run_status_push.sh
+bash scripts/run_status_push.sh
 ```
 
 ```bash
 # crontab -e
 # 每 2 小时的 55 分更新（提前 5 分钟准备好数据）
-55 */2 * * * cd /path/to/lets-go-rss && ./scripts/run_update_cron.sh >> /tmp/rss_cron.log 2>&1
+55 */2 * * * cd /path/to/lets-go-rss && bash scripts/run_update_cron.sh >> /tmp/rss_cron.log 2>&1
 
 # Bot 在整点读缓存推送（瞬间完成）
-0 */2 * * * cd /path/to/lets-go-rss && ./scripts/run_status_push.sh
+0 */2 * * * cd /path/to/lets-go-rss && bash scripts/run_status_push.sh
 ```
 
 Bot 只需调用 `--status`，该命令直接读取 `assets/latest_update.md` 并输出内容，无需网络请求、无需等待。
@@ -167,4 +167,3 @@ RSS 暂无新更新 ✅
 | `assets/feed.xml` | 标准 RSS 2.0 XML |
 | `assets/summary.md` | 统计摘要 |
 | `assets/subscriptions.opml` | OPML 订阅导出 |
-

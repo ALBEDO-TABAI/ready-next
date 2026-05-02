@@ -101,7 +101,7 @@ import {
 } from '../agent-control/session-continuity'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { executeToolCall } from '../tools'
-import { findSkillToolBySkillAction } from '../tools/skills-tools'
+import { findSkillToolBySkillAction, findSkillToolByName } from '../tools/skills-tools'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import {
   buildTextToolResultMessage,
@@ -127,6 +127,8 @@ import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
 import type { RequestEnvelope } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
+import { recoverLatestSkillRunFromTaskProjections } from '../agent-control/skill-run-recovery'
+import { getLatestRecoverableSkillTaskRun } from '../agent-control/skill-task-tracker'
 import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
@@ -246,7 +248,7 @@ show-widget 规则：
 如果工具列表里出现新的自定义 skill_* 工具，也把它们视为可直接执行的技能能力。
 当用户明确提出这些任务时，优先调用对应 skill_* 工具，不要只给口头建议；若已有匹配 skill，则优先复用它而不是改走手工网页路径。
 当用户明确点名某个 skill（例如“使用 lifepho skill”）时，必须先调用对应的 skill_* 工具或读取其说明，再把 skill 的方法真正用到后续浏览器/文档任务里。
-不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用真实 skill_* 工具或 execution 管理工具。
+不要把 /skill ... 命令当成普通文本回复给用户；如果你决定执行 skill，就直接调用当前工具列表里真实存在的 skill_* 工具。
 如果用户只提到站点名（例如“即梦”）但没有给 URL，且当前页也不能明确复用，先搜索该站点的官方入口并确认，再继续；若搜索结果仍不唯一，先向用户澄清，不要在无关页面反复进出。
 当用户要求执行 openclaw 插件配对、批准飞书配对码、或明确给出类似”openclaw pairing approve feishu CODE”的命令时，优先调用 system_run_openclaw 工具真实执行本地命令，不要只复述命令文本。
 当用户提到“上次那轮对话 / 之前讨论过 / 历史会话 / 旧会话里怎么说的 / 找找以前那次”时，优先使用 session_search 检索历史会话，再基于返回的会话摘要继续回答或引用，不要把 memory_search 当成历史聊天检索。
@@ -322,8 +324,10 @@ export class DirectChatEngine extends EventEmitter {
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),
       resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
-      // B Phase 4 PR2: `listExecutions` dep retired; see
-      // skill-context-orchestrator.ts constructor comment.
+      // skill-resume G2 — reverse `skill_<id>_<action>` → SkillToolRef so the
+      // orchestrator can re-arm the reference-skill hint from prior assistant
+      // tool_use blocks even when the user typed only "继续 / 接着 ...".
+      resolveSkillToolByName: (toolName) => findSkillToolByName(toolName),
     })
     this.anthropicExecutionClient = new AnthropicExecutionClient({
       fetchWithTimeout: (url, init, signal, label, timeoutMs) => this.fetchWithTimeout(url, init, signal, label, timeoutMs),
@@ -501,6 +505,36 @@ export class DirectChatEngine extends EventEmitter {
     log('Runtime set on DirectChatEngine')
   }
 
+  getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.domainAdapters
+  }
+
+  private registerSessionAbortSource(
+    name: string,
+    sessionId: string | undefined,
+    controller: AbortController,
+  ): void {
+    const normalizedSessionId = sessionId || null
+    const scopeId = normalizedSessionId || name || null
+    this.runtime?.registerSessionAbortController(scopeId, normalizedSessionId, controller)
+    if (scopeId !== name || normalizedSessionId !== null) {
+      this.runtime?.registerSessionAbortController(name, null, controller)
+    }
+  }
+
+  private unregisterSessionAbortSource(
+    name: string,
+    sessionId: string | undefined,
+    controller: AbortController,
+  ): void {
+    const normalizedSessionId = sessionId || null
+    const scopeId = normalizedSessionId || name || null
+    this.runtime?.unregisterSessionAbortController(scopeId, normalizedSessionId, controller)
+    if (scopeId !== name || normalizedSessionId !== null) {
+      this.runtime?.unregisterSessionAbortController(name, null, controller)
+    }
+  }
+
   setRunCleanupRegistry(registry: {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null): void {
@@ -658,7 +692,9 @@ export class DirectChatEngine extends EventEmitter {
     const runId = session.activeRunId
     session.generation += 1
     if (session.abortController) {
-      session.abortController.abort()
+      const previousAbortController = session.abortController
+      this.unregisterSessionAbortSource(name, undefined, previousAbortController)
+      previousAbortController.abort(new Error('cancelled_user'))
       session.abortController = null
     }
     if (runId) {
@@ -718,41 +754,22 @@ export class DirectChatEngine extends EventEmitter {
         requestEnvelope: executionOptions?.requestEnvelope || null,
       })
       : null
-    let normalizedContent: string | MultimodalBlock[] = sanitizedContinuationRequest
+    const normalizedContent: string | MultimodalBlock[] = sanitizedContinuationRequest
       ? sanitizedContinuationRequest.content
       : content
     const normalizedRequestEnvelope = sanitizedContinuationRequest
       ? sanitizedContinuationRequest.requestEnvelope
       : executionOptions?.requestEnvelope
-
-    // B Phase 4 PR3: tracker-anchored continuation. When the task-card
-    // "continue" / "retry" buttons fire, the renderer forwards
-    // `continuationIntent.todoId` + `todoTitle` (from
-    // `buildSkillTaskProjectionPatch`). There is no executionId to
-    // rehydrate against — the state machine is retired — so we prepend a
-    // directive line to the user content that tells the agent which todo
-    // to pick up. Only applies when the incoming content is a plain string
-    // (multimodal continuations are expected to carry the anchor in their
-    // own envelope).
-    if (
-      typeof normalizedContent === 'string'
-      && normalizedContinuationIntent?.todoId
-      && normalizedContinuationIntent.todoTitle
-      && !normalizedContinuationIntent.executionId
-    ) {
-      const todoHintLine = `（针对 todo「${normalizedContinuationIntent.todoTitle}」，id=${normalizedContinuationIntent.todoId}）`
-      normalizedContent = normalizedContent.trim().length > 0
-        ? `${todoHintLine}\n\n${normalizedContent}`
-        : todoHintLine
-    }
     if (session.abortController) {
+      const previousAbortController = session.abortController
       try {
         this.cancelPendingToolActions?.(name, sessionId)
       } catch (cancelError) {
         log(`sendMessage cancelPendingToolActions failed: ${(cancelError as Error)?.message || cancelError}`)
       }
       session.generation += 1
-      session.abortController.abort()
+      this.unregisterSessionAbortSource(name, sessionId, previousAbortController)
+      previousAbortController.abort(new Error('process_restarted'))
       session.abortController = null
       log(`sendMessage preempted previous in-flight run for agent=${name}`)
     }
@@ -870,6 +887,7 @@ export class DirectChatEngine extends EventEmitter {
 
     const abortController = new AbortController()
     session.abortController = abortController
+    this.registerSessionAbortSource(name, sessionId, abortController)
     const ensureNotAborted = (): void => {
       if (abortController.signal.aborted || !isCurrentRun()) {
         const error = new Error('Operation aborted')
@@ -969,6 +987,7 @@ export class DirectChatEngine extends EventEmitter {
         taskProjectionId: taskId,
       }
     } finally {
+      this.unregisterSessionAbortSource(name, sessionId, abortController)
       if (session.abortController === abortController) {
         session.abortController = null
       }
@@ -1004,6 +1023,12 @@ export class DirectChatEngine extends EventEmitter {
         isChannelTypeAvailable: (channelType: string) =>
           this.runtime?.isChannelTypeAvailable(channelType as any) ?? false,
         getConversationScope: (sessionId: string) => this.runtime?.getConversationScope(sessionId) || null,
+        getMemoryRepository: () => this.runtime?.getMemoryRepository() || null,
+        getPromptAssembly: () => this.runtime?.getPromptAssembly() || null,
+        searchSessionRecall: (payload?: Record<string, unknown>) =>
+          this.runtime?.searchSessionRecall(payload as any) ?? [],
+        listRecentSessions: (payload?: Record<string, unknown>) =>
+          this.runtime?.listRecentSessions(payload as any) ?? [],
       },
       requestModuleToolAction: params.requestModuleToolAction,
       registerRunCleanup: (cleanup: () => void | Promise<void>) => {
@@ -1019,6 +1044,10 @@ export class DirectChatEngine extends EventEmitter {
           allowImplicitContinuation?: boolean
         },
       ) => this.resolveContinuationProjection(sessionId, userText, options),
+      resolveRecentSkillRun: (sessionId: string | undefined) =>
+        this.resolveRecentSkillRunFromTaskProjections(sessionId),
+      resolveRecentSkillTaskRun: (sessionId: string | undefined) =>
+        this.resolveRecentSkillRunFromTaskRuns(sessionId),
       getIncomingAttachmentHints: (turnContent: RunMessage) => this.getIncomingAttachmentHints(turnContent),
       collectRecentPureUserInputs: (messages: ChatMessage[], limit?: number) => this.collectRecentPureUserInputs(messages, limit),
       sessionHasMediaInputs: (messages: ChatMessage[]) => this.sessionHasMediaInputs(messages),
@@ -1281,6 +1310,55 @@ export class DirectChatEngine extends EventEmitter {
       explicitTaskId: options?.explicitTaskId ?? this.extractTaskIdFromText(userText),
       allowImplicitContinuation: options?.allowImplicitContinuation,
     })
+  }
+
+  private resolveRecentSkillRunFromTaskProjections(sessionId: string | undefined): SkillRunRecord | null {
+    const runtime = this.runtime
+    if (!runtime || !sessionId) return null
+    return recoverLatestSkillRunFromTaskProjections({
+      projections: runtime.listTaskProjections(sessionId),
+      skills: getSkillsRuntimeManager().listSkills(),
+      resolveSkillToolByAction: (skillId, actionName) => findSkillToolBySkillAction(skillId, actionName),
+    })
+  }
+
+  private resolveRecentSkillRunFromTaskRuns(sessionId: string | undefined): SkillRunRecord | null {
+    if (!sessionId) return null
+    const record = getLatestRecoverableSkillTaskRun(sessionId)
+    if (!record?.skillId) return null
+    const action = record.action || record.toolName || ''
+    const toolName = record.toolName
+      || (action ? findSkillToolBySkillAction(record.skillId, action)?.name || '' : '')
+    const resourceSummary = record.resourceRefs && record.resourceRefs.length > 0
+      ? JSON.stringify(record.resourceRefs).slice(0, 240)
+      : ''
+    const summary = [
+      `技能：${record.skillName || record.skillId}`,
+      record.goalText ? `上次目标：${record.goalText}` : '',
+      record.outputDir ? `输出目录：${record.outputDir}` : '',
+      record.runStatePath ? `run_state：${record.runStatePath}` : '',
+      record.sceneScoresPath ? `scene_scores：${record.sceneScoresPath}` : '',
+      record.failureDetail ? `失败原因：${record.failureDetail}` : '',
+      resourceSummary ? `资源：${resourceSummary}` : '',
+    ].filter((item) => item.trim().length > 0).join('；')
+
+    return {
+      toolName,
+      skillId: record.skillId,
+      action,
+      success: record.status === 'done',
+      status: record.status,
+      runKind: 'skill_task_run',
+      taskRunId: record.id,
+      detachedTaskId: record.detachedTaskId || undefined,
+      jobId: record.jobId || undefined,
+      outputDir: record.outputDir || undefined,
+      runStatePath: record.runStatePath || undefined,
+      pauseReason: record.status === 'blocked' ? 'background_running' : undefined,
+      resumePayload: record.resumePayload || undefined,
+      summary,
+      updatedAt: toContinuationUpdatedAt(record.updatedAt),
+    }
   }
 
   private resolveContinuationState(

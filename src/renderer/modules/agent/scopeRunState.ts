@@ -10,6 +10,7 @@ import type {
   ScopeRunResumableAction,
   ScopeRunState,
   ScopeRunTaskContinuation,
+  ScopeRunTerminalReason,
   ScopeRunTaskStep,
   ScopeRunTaskStepStatus,
   ScopeRunWaitingFor,
@@ -50,6 +51,41 @@ export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): b
     phase === 'resuming' ||
     phase === 'responding'
   )
+}
+
+export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
+  if (!run) return false
+  if (run.terminalReason) return false
+  if (
+    run.module === 'skill' &&
+    run.executionKind === 'job' &&
+    typeof run.taskId === 'string' &&
+    run.taskId.startsWith('detached:')
+  ) {
+    return false
+  }
+  return isActiveScopePhase(run.phase)
+}
+
+function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null {
+  const normalized = String(value || '').trim()
+  if (
+    normalized === 'done' ||
+    normalized === 'checkpoint_budget' ||
+    normalized === 'checkpoint_background' ||
+    normalized === 'checkpoint_user_input' ||
+    normalized === 'blocked_config' ||
+    normalized === 'blocked_tool_error' ||
+    normalized === 'failed_skill' ||
+    normalized === 'resume_launch_failed' ||
+    normalized === 'persistence_failed' ||
+    normalized === 'cancelled_user' ||
+    normalized === 'cancelled_runtime' ||
+    normalized === 'infra_error'
+  ) {
+    return normalized
+  }
+  return null
 }
 
 export function phaseToToolTraceStatus(
@@ -204,6 +240,25 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
           attempts: Number((record.fallback as Record<string, unknown>).attempts || 0)
         }
       : null
+  const budgetLease =
+    record.budgetLease && typeof record.budgetLease === 'object'
+      ? {
+          leaseId: String((record.budgetLease as Record<string, unknown>).leaseId || '').trim(),
+          decision: String((record.budgetLease as Record<string, unknown>).decision || '').trim() as NonNullable<ScopeRunExecutionDiagnostics['budgetLease']>['decision'],
+          reason:
+            typeof (record.budgetLease as Record<string, unknown>).reason === 'string'
+              ? String((record.budgetLease as Record<string, unknown>).reason)
+              : null,
+          renewalsUsed: Number((record.budgetLease as Record<string, unknown>).renewalsUsed || 0),
+          progressScore: Number((record.budgetLease as Record<string, unknown>).progressScore || 0),
+          wasteScore: Number((record.budgetLease as Record<string, unknown>).wasteScore || 0),
+          lastFingerprint:
+            typeof (record.budgetLease as Record<string, unknown>).lastFingerprint === 'string'
+              ? String((record.budgetLease as Record<string, unknown>).lastFingerprint)
+              : null,
+          currentLeaseEndIteration: Number((record.budgetLease as Record<string, unknown>).currentLeaseEndIteration || 0),
+        }
+      : null
   const pipeline =
     record.pipeline && typeof record.pipeline === 'object'
       ? {
@@ -231,8 +286,8 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
         }
       : null
 
-  if (!compression && !budget && !fallback && !pipeline) return null
-  return { compression, budget, fallback, pipeline }
+  if (!compression && !budget && !fallback && !pipeline && !budgetLease) return null
+  return { compression, budget, fallback, pipeline, budgetLease }
 }
 
 export function mergeArtifacts(
@@ -280,6 +335,7 @@ function normalizeWaitingFor(value: unknown): ScopeRunWaitingFor {
     normalized === 'input' ||
     normalized === 'confirmation' ||
     normalized === 'agent_result' ||
+    normalized === 'clarification' ||
     normalized === 'background'
   ) {
     return normalized
@@ -379,13 +435,29 @@ function parseMemoryCapture(input: unknown): ScopeRunMemoryCapture | null {
 function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
-  const executionId = String(record.executionId || '').trim()
-  if (!executionId) return null
-  return {
-    executionId,
-    stepId: typeof record.stepId === 'string' ? record.stepId : null,
-    blockerType: typeof record.blockerType === 'string' ? record.blockerType : null
+  const continuation: ScopeRunTaskContinuation = {}
+  const copyString = (key: keyof ScopeRunTaskContinuation): void => {
+    if (typeof record[key] !== 'string') return
+    const value = String(record[key]).trim()
+    if (value) continuation[key] = value
   }
+  copyString('executionId')
+  copyString('taskId')
+  copyString('stepId')
+  copyString('blockerType')
+  copyString('targetUrl')
+  copyString('todoId')
+  copyString('todoTitle')
+  copyString('pauseReason')
+  copyString('detachedTaskId')
+  copyString('taskRunId')
+  copyString('jobId')
+  copyString('skillId')
+  copyString('action')
+  copyString('runStatePath')
+  copyString('outputDir')
+  copyString('progressFingerprint')
+  return Object.keys(continuation).length > 0 ? continuation : null
 }
 
 function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
@@ -399,81 +471,11 @@ function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
   return blockerType ? 'background' : 'none'
 }
 
-interface SkillExecutionTaskInput {
-  executionId: string
-  skillId: string
-  status: string
-  currentStepId?: string | null
-  blockerType?: string | null
-  blockerMessage?: string | null
-  steps: ScopeRunTaskStep[]
-  artifacts: AgentArtifact[]
-}
-
-function buildTaskPatchFromSkillExecutionTask(
-  input: SkillExecutionTaskInput
-): Partial<ScopeRunState> {
-  const waitingFor = toSkillWaitingFor(input.blockerType || null)
-  const resumableActions: ScopeRunResumableAction[] = []
-  if (waitingFor !== 'none') resumableActions.push('continue')
-  if (input.artifacts.length > 0) resumableActions.push('open_artifact')
-  if (input.status === 'failed' || input.status === 'cancelled') resumableActions.push('retry')
-  resumableActions.push('cancel')
-
-  return {
-    taskTitle: `技能执行 · ${input.skillId}`,
-    taskSummary: input.blockerMessage || `当前步骤：${input.currentStepId || '进行中'}`,
-    steps: input.steps,
-    currentStepId: input.currentStepId || null,
-    waitingFor,
-    resumableActions,
-    taskContinuation: {
-      executionId: input.executionId,
-      stepId: input.currentStepId || null,
-      blockerType: input.blockerType || null
-    },
-    recentArtifacts: buildRecentArtifacts(input.artifacts)
-  }
-}
-
-export function createTaskPatchFromSkillExecutionDetail(
-  detail: {
-    id: string
-    skillId: string
-    status: string
-    currentStepId?: string | null
-    blocker?: { type: string; message: string } | null
-    steps?: Array<{ stepId: string; status: string }>
-    artifacts?: Array<{ id?: string; label?: string; path?: string | null }>
-  },
-  timestamp = new Date().toISOString()
-): Partial<ScopeRunState> {
-  return buildTaskPatchFromSkillExecutionTask({
-    executionId: detail.id,
-    skillId: detail.skillId,
-    status: detail.status,
-    currentStepId: detail.currentStepId || null,
-    blockerType: detail.blocker?.type || null,
-    blockerMessage: detail.blocker?.message || null,
-    steps: (detail.steps || []).map((step) => ({
-      id: step.stepId,
-      title: step.stepId,
-      status: toTaskStepStatus(step.status),
-      updatedAt: timestamp
-    })),
-    artifacts: (detail.artifacts || []).map((artifact) => ({
-      id: String(artifact.id || generateArtifactId()),
-      module: 'system',
-      kind: 'artifact',
-      label: String(artifact.label || artifact.path || artifact.id || 'artifact'),
-      path: typeof artifact.path === 'string' ? artifact.path : null,
-      url: null,
-      mimeType: null,
-      sourceRunId: detail.id,
-      createdAt: timestamp
-    }))
-  })
-}
+// Phase 4: createTaskPatchFromSkillExecutionDetail and its helpers were the
+// renderer-side reducer for the retired skill_executions state machine. The
+// new todo-based projection is built in main process
+// (skills-tools.buildSkillProjectionPatch, rewritten in PR2); the renderer
+// consumes the projection patch directly.
 
 function finalizeTaskState(
   phase: ScopeRunState['phase'],
@@ -484,6 +486,19 @@ function finalizeTaskState(
   const steps = patch.steps || previous?.steps || []
   if (steps.length === 0) return
   if (phase === 'done') {
+    const hasBlocker = Boolean((patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason)
+    if (hasBlocker) {
+      patch.steps = steps.map((step) => ({
+        ...step,
+        updatedAt: step.updatedAt || timestamp
+      }))
+      patch.resumableActions =
+        patch.resumableActions && patch.resumableActions.length > 0
+          ? patch.resumableActions
+          : previous?.resumableActions || []
+      patch.taskSummary = patch.taskSummary || previous?.taskSummary || patch.blockedReason || '等待补充后继续'
+      return
+    }
     patch.steps = steps.map((step) => ({
       ...step,
       status: step.status === 'error' ? step.status : 'done',
@@ -523,6 +538,7 @@ export function createEmptyScopeRunState(params: {
     agent: params.agent,
     requestId: params.requestId || null,
     phase: params.phase || 'idle',
+    terminalReason: null,
     toolTrace: [],
     startedAt: null,
     updatedAt: null,
@@ -600,6 +616,7 @@ export function deriveScopeRunStatePatch(
     errorKind?: string
     recoverable?: boolean
     toolName?: string
+    terminalReason?: ScopeRunTerminalReason | string | null
     blockedReason?: string | null
     timestamp: string
   },
@@ -643,8 +660,12 @@ export function deriveScopeRunStatePatch(
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
+  const terminalReason = 'terminalReason' in event
+    ? normalizeTerminalReason(event.terminalReason)
+    : null
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
+    terminalReason: terminalReason || (isActiveScopePhase(event.phase) ? null : previous?.terminalReason || null),
     latestText: event.latestText ?? previous?.latestText ?? null,
     module: eventModule || previous?.module || null,
     intent: typeof event.intent === 'string' ? event.intent : previous?.intent || null,
@@ -663,7 +684,9 @@ export function deriveScopeRunStatePatch(
         ? event.timestamp
         : previous?.lastEvidenceAt || null,
     blockedReason:
-      event.blockedReason ?? previous?.blockedReason ?? null,
+      'blockedReason' in event
+        ? event.blockedReason ?? null
+        : previous?.blockedReason ?? null,
     controllerId: previous?.controllerId ?? null,
     ownerTabId: previous?.ownerTabId ?? null,
     checkpointExpiresAt: previous?.checkpointExpiresAt ?? null,
@@ -745,8 +768,20 @@ export function deriveScopeRunStatePatch(
     patch.phase = 'resuming'
     patch.blockedReason = null
     patch.checkpointExpiresAt = null
-  } else if (event.phase === 'done' || event.phase === 'error' || event.phase === 'cancelled') {
-    patch.blockedReason = null
+  }
+
+  if (patch.phase === 'done' && Boolean((patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason)) {
+    patch.phase = 'checkpoint'
+  }
+
+  if (patch.phase === 'done' || patch.phase === 'error' || patch.phase === 'cancelled') {
+    const hasDoneBlocker = patch.phase === 'done' && Boolean(
+      (patch.waitingFor && patch.waitingFor !== 'none') || patch.blockedReason
+    )
+    if (!hasDoneBlocker) patch.blockedReason = null
+    patch.checkpointExpiresAt = null
+  }
+  if (patch.terminalReason) {
     patch.checkpointExpiresAt = null
   }
 

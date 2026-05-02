@@ -120,9 +120,8 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
     ],
   }
 
-  // Direct stub for the listExecutions dependency so we can assert the
-  // reference path never created an execution row.
-  const executionLog: Array<unknown> = []
+  // Phase 4: listExecutions dep removed from orchestrator; no execution row
+  // is created on the reference path because that code path no longer exists.
 
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
@@ -163,7 +162,8 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const hint = getLastReferenceSkill('test-session-vexpert')
   assert.equal(hint?.id, 'video-expert-analyzer', 'hint arms primitive gating for next turn')
 
-  assert.equal(executionLog.length, 0, 'no skill_executions row should be created on the reference path')
+  // Phase 4: the listExecutions dep is gone; the reference path never creates
+  // an execution row (there is no such concept anymore).
 })
 
 test('vnext SKILL.md fits the existing 12K JS-char cap and is inlined without truncation', async () => {

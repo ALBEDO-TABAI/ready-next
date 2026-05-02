@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: task projection wiring is a source-surface integration contract
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -25,7 +26,7 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(chatPanel, /steps:\s*\(projection\?\.steps && projection\.steps\.length > 0\)\s*\?\s*normalizeProjectionSteps\(projection\.steps\)\s*:\s*\(run\.steps \|\| \[\]\)/)
   assert.match(chatPanel, /currentStepId:\s*projection\?\.currentStepId\s*\|\|\s*run\.currentStepId/)
   assert.match(chatPanel, /recentArtifacts:\s*\(projection\?\.recentArtifacts && projection\.recentArtifacts\.length > 0\)\s*\?\s*projection\.recentArtifacts\s*:\s*\(run\.recentArtifacts \|\| \[\]\)/)
-  assert.match(chatPanel, /blockedReason:\s*projection\?\.blockedReason\s*\|\|\s*run\.blockedReason/)
+  assert.doesNotMatch(chatPanel, /blockedReason:\s*projection\?\.blockedReason\s*\|\|\s*run\.blockedReason/)
   assert.match(chatPanel, /status:\s*projection\?\.status/)
   assert.match(chatPanel, /taskType:\s*projection\?\.taskType/)
   assert.match(chatPanel, /interactionState:\s*projection\?\.interactionState/)
@@ -34,8 +35,14 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(chatPanel, /budgetWarningLevel:\s*projection\?\.budgetWarningLevel/)
   assert.match(chatPanel, /degradationReason:\s*projection\?\.degradationReason/)
   assert.match(chatPanel, /recoveryHistory:\s*projection\?\.recoveryHistory/)
-  assert.match(chatPanel, /taskContinuation:\s*run\.taskContinuation \|\| projection\?\.continuationRef \|\| null/)
-  assert.match(chatPanel, /resumableActions:\s*\(run\.resumableActions && run\.resumableActions\.length > 0\)\s*\?\s*run\.resumableActions\s*:\s*\(projection\?\.resumableActions \|\| \[\]\)/)
+  assert.match(chatPanel, /taskContinuation:\s*resolveTaskContinuationForProjection\(/)
+  assert.match(chatPanel, /blockedReason:\s*resolveProjectionBlockedReason\(/)
+  assert.match(chatPanel, /projection\?\.waitingFor/)
+  assert.doesNotMatch(chatPanel, /waitingFor:\s*projection\?\.status === 'blocked'/)
+  assert.match(chatPanel, /detachedTaskId:\s*run\?\.taskContinuation\?\.detachedTaskId/)
+  assert.match(chatPanel, /runStatePath:\s*run\?\.taskContinuation\?\.runStatePath/)
+  assert.match(chatPanel, /outputDir:\s*run\?\.taskContinuation\?\.outputDir/)
+  assert.doesNotMatch(chatPanel, /resumableActions:\s*\(run\.resumableActions && run\.resumableActions\.length > 0\)\s*\?\s*run\.resumableActions\s*:\s*\(projection\?\.resumableActions \|\| \[\]\)/)
   assert.match(chatPanel, /setComposerDraft\(/)
   assert.match(chatPanel, /continuationIntent:/)
   assert.doesNotMatch(chatPanel, /Task ID:/)
@@ -57,4 +64,16 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(viewModel, /degradationReason\?:/)
   assert.match(viewModel, /recoveryHistory\?:/)
   assert.match(viewModel, /recentArtifacts\?:/)
+})
+
+test('chat detached continue preserves structured continuation handles', () => {
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+
+  assert.match(chatPanel, /const handleContinueDetachedTask = useCallback/)
+  assert.match(chatPanel, /item\.taskContinuation\?\.detachedTaskId === detachedTaskId/)
+  assert.match(chatPanel, /item\.taskContinuation\?\.taskId === detachedTaskId/)
+  assert.match(chatPanel, /pauseReason: 'background_running'/)
+  assert.match(chatPanel, /const continuationRun:/)
+  assert.match(chatPanel, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
+  assert.doesNotMatch(chatPanel, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
 })

@@ -1,0 +1,996 @@
+{
+  "version": 1,
+  "identity": "schema is {file,line,snippetHash}; matching uses file + snippetHash so line drift does not false-clear entries",
+  "entries": [
+    {
+      "file": "src/main/modules/agent-control/active-skill-context.ts",
+      "line": 250,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/agent-control/active-skill-context.ts",
+      "line": 264,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/agent-control/atomic-write.ts",
+      "line": 25,
+      "snippetHash": "7d49365ed99d703d"
+    },
+    {
+      "file": "src/main/modules/agent-control/atomic-write.ts",
+      "line": 32,
+      "snippetHash": "7d49365ed99d703d"
+    },
+    {
+      "file": "src/main/modules/agent-control/browser-action-heuristics.ts",
+      "line": 17,
+      "snippetHash": "b500c2470cf18eb9"
+    },
+    {
+      "file": "src/main/modules/agent-control/browser-action-heuristics.ts",
+      "line": 39,
+      "snippetHash": "4d2e54ade2a710be"
+    },
+    {
+      "file": "src/main/modules/agent-control/browser-domain-orchestrator.ts",
+      "line": 410,
+      "snippetHash": "33b92741a011096e"
+    },
+    {
+      "file": "src/main/modules/agent-control/browser-task-planner.ts",
+      "line": 186,
+      "snippetHash": "7f67c65a15707461"
+    },
+    {
+      "file": "src/main/modules/agent-control/browser-task-planner.ts",
+      "line": 682,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/design-tool-loop-orchestrator.ts",
+      "line": 206,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/detached-skill-task-tracker.ts",
+      "line": 64,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/detached-skill-task-tracker.ts",
+      "line": 306,
+      "snippetHash": "09da80623ea864dc"
+    },
+    {
+      "file": "src/main/modules/agent-control/document-domain-adapter.ts",
+      "line": 189,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/document-domain-helpers.ts",
+      "line": 57,
+      "snippetHash": "6072782b2b0bee24"
+    },
+    {
+      "file": "src/main/modules/agent-control/document-task-pipeline-executor.ts",
+      "line": 364,
+      "snippetHash": "6072782b2b0bee24"
+    },
+    {
+      "file": "src/main/modules/agent-control/document-task-pipeline-executor.ts",
+      "line": 1531,
+      "snippetHash": "9d61441b14b083f6"
+    },
+    {
+      "file": "src/main/modules/agent-control/domain-adapter.ts",
+      "line": 84,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/execution-intent-resolver.ts",
+      "line": 100,
+      "snippetHash": "aff11d7ab040c7d0"
+    },
+    {
+      "file": "src/main/modules/agent-control/layered-compactor.ts",
+      "line": 122,
+      "snippetHash": "148657515265603c"
+    },
+    {
+      "file": "src/main/modules/agent-control/metrics.ts",
+      "line": 35,
+      "snippetHash": "350f36b4d8c4041d"
+    },
+    {
+      "file": "src/main/modules/agent-control/metrics.ts",
+      "line": 40,
+      "snippetHash": "58661bbcbb31454a"
+    },
+    {
+      "file": "src/main/modules/agent-control/prompt-assembly.ts",
+      "line": 352,
+      "snippetHash": "60a186ba96e1c394"
+    },
+    {
+      "file": "src/main/modules/agent-control/prompt-assembly.ts",
+      "line": 637,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/prompt-assembly.ts",
+      "line": 1005,
+      "snippetHash": "440a2c9215e6735b"
+    },
+    {
+      "file": "src/main/modules/agent-control/reflection-service.ts",
+      "line": 259,
+      "snippetHash": "70c7a88a28b307cf"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-capability-controller.ts",
+      "line": 169,
+      "snippetHash": "a81be9351e07d1c6"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-capability-controller.ts",
+      "line": 194,
+      "snippetHash": "a81be9351e07d1c6"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-contracts.ts",
+      "line": 1271,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-contracts.ts",
+      "line": 1279,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-contracts.ts",
+      "line": 1527,
+      "snippetHash": "2497d8f3d11dc65e"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-state-selection.ts",
+      "line": 51,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/run-state-selection.ts",
+      "line": 63,
+      "snippetHash": "12d1c4122d1aaf1d"
+    },
+    {
+      "file": "src/main/modules/agent-control/runtime.ts",
+      "line": 1062,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/agent-control/runtime.ts",
+      "line": 1083,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/agent-control/runtime.ts",
+      "line": 1237,
+      "snippetHash": "fa4339e2ed1b1e86"
+    },
+    {
+      "file": "src/main/modules/agent-control/runtime.ts",
+      "line": 2206,
+      "snippetHash": "62252d7035aaa50f"
+    },
+    {
+      "file": "src/main/modules/agent-control/runtime.ts",
+      "line": 2242,
+      "snippetHash": "ea3630b38f92a868"
+    },
+    {
+      "file": "src/main/modules/agent-control/secret-storage.ts",
+      "line": 37,
+      "snippetHash": "ccc3e3fb98f59aa4"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-continuity.ts",
+      "line": 282,
+      "snippetHash": "3c561dc69a60de72"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-continuity.ts",
+      "line": 292,
+      "snippetHash": "9f4abfaeb356da43"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-continuity.ts",
+      "line": 646,
+      "snippetHash": "e1494423cd337f7b"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-recall-service.ts",
+      "line": 259,
+      "snippetHash": "c5f86445004caa89"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-recall-service.ts",
+      "line": 492,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-recall-service.ts",
+      "line": 500,
+      "snippetHash": "27bb35645e6119cb"
+    },
+    {
+      "file": "src/main/modules/agent-control/session-recall-service.ts",
+      "line": 685,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 149,
+      "snippetHash": "5f59f97a9108fcdd"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 171,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 180,
+      "snippetHash": "5fec596d62a45bb6"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 327,
+      "snippetHash": "cf8152665f81f6bc"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 344,
+      "snippetHash": "b29d7a5e601a9be6"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 371,
+      "snippetHash": "a397c8b6219fa842"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 428,
+      "snippetHash": "9b016743441759a7"
+    },
+    {
+      "file": "src/main/modules/agent-control/sidecar-manager.ts",
+      "line": 440,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-child-runner.ts",
+      "line": 360,
+      "snippetHash": "ca91fd61b305e8c5"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-child-runner.ts",
+      "line": 562,
+      "snippetHash": "5520357e0cf129fc"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-child-runner.ts",
+      "line": 1188,
+      "snippetHash": "8f7ebc4a5187402f"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-child-runner.ts",
+      "line": 1553,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-progress-artifacts.ts",
+      "line": 55,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-progress-artifacts.ts",
+      "line": 64,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 223,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 233,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 243,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 252,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 302,
+      "snippetHash": "6c2d8d0f1f9bca7b"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 416,
+      "snippetHash": "daea446892ea9448"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-supervisor.ts",
+      "line": 430,
+      "snippetHash": "f6845321bca999bf"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 176,
+      "snippetHash": "f7aa271f8c279b52"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 505,
+      "snippetHash": "6c2d8d0f1f9bca7b"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 514,
+      "snippetHash": "f563111eb28501a7"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 574,
+      "snippetHash": "f563111eb28501a7"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 597,
+      "snippetHash": "6c2d8d0f1f9bca7b"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 604,
+      "snippetHash": "f563111eb28501a7"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 648,
+      "snippetHash": "f563111eb28501a7"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 838,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 854,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 880,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 910,
+      "snippetHash": "6c2d8d0f1f9bca7b"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 982,
+      "snippetHash": "a1c3203afd8f6947"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-task-tracker.ts",
+      "line": 1009,
+      "snippetHash": "a1c3203afd8f6947"
+    },
+    {
+      "file": "src/main/modules/agent-control/subtask-runtime.ts",
+      "line": 146,
+      "snippetHash": "33c12d88894521bf"
+    },
+    {
+      "file": "src/main/modules/agent-control/tool-registry.ts",
+      "line": 316,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/agent-control/tool-registry.ts",
+      "line": 560,
+      "snippetHash": "b95b7dd469c4c807"
+    },
+    {
+      "file": "src/main/modules/agent-control/tool-registry.ts",
+      "line": 710,
+      "snippetHash": "03dde1405c4ab3fd"
+    },
+    {
+      "file": "src/main/modules/agent-control/tool-registry.ts",
+      "line": 717,
+      "snippetHash": "f2e728abdc433141"
+    },
+    {
+      "file": "src/main/modules/agent-control/tool-registry.ts",
+      "line": 934,
+      "snippetHash": "f31a3f375c6aadba"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 262,
+      "snippetHash": "3e8c1e6677b9770a"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 629,
+      "snippetHash": "3e8c1e6677b9770a"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 960,
+      "snippetHash": "b83db7a52c9cc7f9"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 1073,
+      "snippetHash": "bed43a812510c62b"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 1200,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 1385,
+      "snippetHash": "1d7127efdaf986e6"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 1407,
+      "snippetHash": "f94d976d93441d99"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 2274,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 2374,
+      "snippetHash": "cbc9cb8bd3202da5"
+    },
+    {
+      "file": "src/main/modules/agent-control/turn-engine.ts",
+      "line": 3276,
+      "snippetHash": "b83db7a52c9cc7f9"
+    },
+    {
+      "file": "src/main/modules/agent-control/video-expert-child-driver.ts",
+      "line": 108,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/video-expert-child-driver.ts",
+      "line": 116,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/agent-control/video-expert-child-driver.ts",
+      "line": 367,
+      "snippetHash": "e7d094fa16e76a0c"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/contract-templater.ts",
+      "line": 142,
+      "snippetHash": "81d698ee684f6b83"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/contract-templater.ts",
+      "line": 264,
+      "snippetHash": "bd3a89f4c24616af"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/contract-templater.ts",
+      "line": 285,
+      "snippetHash": "f13cf9d88aec159d"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 154,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 449,
+      "snippetHash": "05e2c42b01ad82b3"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 16,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 24,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 33,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 42,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 51,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 64,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 91,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 100,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 113,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 134,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 144,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/ipc-handler.ts",
+      "line": 153,
+      "snippetHash": "227e0adea33c54c9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/output-dir-sweep.ts",
+      "line": 67,
+      "snippetHash": "b6647b7e871b6bf0"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/output-dir-sweep.ts",
+      "line": 85,
+      "snippetHash": "1cb9ceec3a219a33"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/output-dir-sweep.ts",
+      "line": 112,
+      "snippetHash": "cdeee86509df2c06"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/output-dir-sweep.ts",
+      "line": 135,
+      "snippetHash": "1cb9ceec3a219a33"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 17,
+      "snippetHash": "93baecb1d7909af4"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 667,
+      "snippetHash": "1c7a3ce72d74225b"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 861,
+      "snippetHash": "d1c3de4a951ad4d3"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 965,
+      "snippetHash": "b39fac00e636bfb5"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1140,
+      "snippetHash": "289cbbe86883f955"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1152,
+      "snippetHash": "fcd1cadbb5c67807"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1223,
+      "snippetHash": "388f91166f3b607d"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1417,
+      "snippetHash": "62252d7035aaa50f"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1531,
+      "snippetHash": "9859506b3e880d31"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1565,
+      "snippetHash": "a2b66adcdf81835d"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1583,
+      "snippetHash": "5ddcb7eda4b60c42"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1615,
+      "snippetHash": "6aa79a77b2aaf750"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1638,
+      "snippetHash": "bfa0b3d2a56c71b9"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1685,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1823,
+      "snippetHash": "63b927bea5883fd2"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1834,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1860,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1888,
+      "snippetHash": "6c525af5b1c72f33"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 1954,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 2026,
+      "snippetHash": "baf4e90e0f71f60a"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 183,
+      "snippetHash": "b18e68197850d168"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 308,
+      "snippetHash": "b18e68197850d168"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 433,
+      "snippetHash": "548eed543a6dbd29"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 448,
+      "snippetHash": "caa76f14a083eede"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 457,
+      "snippetHash": "a6733ebff099b01e"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 544,
+      "snippetHash": "b18e68197850d168"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-host-controller.ts",
+      "line": 584,
+      "snippetHash": "046a6d2495b8b5bd"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-loader.ts",
+      "line": 54,
+      "snippetHash": "43a3215e470bfb3c"
+    },
+    {
+      "file": "src/main/modules/tools/browser-agent-runner.ts",
+      "line": 239,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/main/modules/tools/browser-agent-runner.ts",
+      "line": 248,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/main/modules/tools/browser-agent-runner.ts",
+      "line": 259,
+      "snippetHash": "7dea9fd63297cfcc"
+    },
+    {
+      "file": "src/main/modules/tools/browser-agent-runner.ts",
+      "line": 2386,
+      "snippetHash": "ffbac29ab5dea410"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 32,
+      "snippetHash": "4ee76e8213a7854d"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 53,
+      "snippetHash": "1de0152900ce38e4"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 175,
+      "snippetHash": "2355972e3f4283e8"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 484,
+      "snippetHash": "f3abc59be1ffc0c8"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 1091,
+      "snippetHash": "abfd010f24a286bb"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 1178,
+      "snippetHash": "3f3b95f851fb4961"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 1926,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 2329,
+      "snippetHash": "3db6b73b3debc284"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 2740,
+      "snippetHash": "a217c9e38dc177d0"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 3581,
+      "snippetHash": "b0d1d1f1b4f2196e"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 3588,
+      "snippetHash": "57a73a02a1a1e505"
+    },
+    {
+      "file": "src/main/modules/tools/browser-tools.ts",
+      "line": 3630,
+      "snippetHash": "cf24a3166d7542c4"
+    },
+    {
+      "file": "src/main/modules/tools/browser-vision.ts",
+      "line": 27,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/tools/browser-vision.ts",
+      "line": 148,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/tools/browser-vision.ts",
+      "line": 300,
+      "snippetHash": "b72f44782a2eb36e"
+    },
+    {
+      "file": "src/main/modules/tools/document-tools.ts",
+      "line": 220,
+      "snippetHash": "ac3755bde72c5477"
+    },
+    {
+      "file": "src/main/modules/tools/feishu-tools.ts",
+      "line": 406,
+      "snippetHash": "44553f23228e1ec2"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 36,
+      "snippetHash": "bf9ca3f742db609d"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 86,
+      "snippetHash": "db1e7d15e4560af6"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 152,
+      "snippetHash": "c029418c9d136ef6"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 191,
+      "snippetHash": "7f715488d79e12c3"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 256,
+      "snippetHash": "c029418c9d136ef6"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 286,
+      "snippetHash": "c029418c9d136ef6"
+    },
+    {
+      "file": "src/main/modules/tools/file-management-tools.ts",
+      "line": 319,
+      "snippetHash": "c029418c9d136ef6"
+    },
+    {
+      "file": "src/main/modules/tools/memory-tools.ts",
+      "line": 18,
+      "snippetHash": "4ee76e8213a7854d"
+    },
+    {
+      "file": "src/main/modules/tools/skill-primitives/ephemeral-execution-store.ts",
+      "line": 109,
+      "snippetHash": "51e21546346fd2a9"
+    },
+    {
+      "file": "src/main/modules/tools/skill-primitives/ephemeral-execution-store.ts",
+      "line": 128,
+      "snippetHash": "0e8fe899ad91a9e9"
+    },
+    {
+      "file": "src/main/modules/tools/skill-primitives/run-shell.ts",
+      "line": 214,
+      "snippetHash": "c67c3ce4bb763655"
+    },
+    {
+      "file": "src/main/modules/tools/skill-primitives/run-shell.ts",
+      "line": 346,
+      "snippetHash": "c8e6fc91ab6ed3a1"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools-static.ts",
+      "line": 138,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools-static.ts",
+      "line": 175,
+      "snippetHash": "11904db8fa99f105"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 268,
+      "snippetHash": "7171e0028b340626"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 277,
+      "snippetHash": "4a4e7e8b7c6c41fc"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 474,
+      "snippetHash": "04a129506ba015f8"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 482,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 519,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 962,
+      "snippetHash": "6cc6c277420ac1fa"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 973,
+      "snippetHash": "196cef54f9fd45a6"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 1028,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 1036,
+      "snippetHash": "22eded0f8d81ce0f"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 1439,
+      "snippetHash": "13541c472e314397"
+    },
+    {
+      "file": "src/main/modules/tools/skills-tools.ts",
+      "line": 2013,
+      "snippetHash": "2aa1973ded4ba841"
+    },
+    {
+      "file": "src/main/modules/tools/system-tools.ts",
+      "line": 17,
+      "snippetHash": "4ee76e8213a7854d"
+    },
+    {
+      "file": "src/main/modules/tools/system-tools.ts",
+      "line": 46,
+      "snippetHash": "9b016743441759a7"
+    },
+    {
+      "file": "src/main/modules/tools/tool-event-log.ts",
+      "line": 29,
+      "snippetHash": "6cc690ad3bbc3b2a"
+    },
+    {
+      "file": "src/main/modules/tools/tool-executor.ts",
+      "line": 418,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/main/modules/tools/zod-param-derivation.ts",
+      "line": 154,
+      "snippetHash": "bed6b460b72600f6"
+    }
+  ]
+}

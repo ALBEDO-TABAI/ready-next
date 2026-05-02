@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { FileText, Loader2 } from 'lucide-react'
+import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import { parseDocumentGraph, normalizeSearchText } from '../../../shared/document-graph-parse'
+import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/storage'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
+import Modal from '../ui/Modal'
 
 interface SearchResultItem {
   path: string
@@ -239,6 +241,61 @@ function renderSnippet(snippet: string): ReactNode {
   return <>{parts}</>
 }
 
+// Persisted index status — lets us remember "the user already built an index for
+// this workspace" across panel toggles and app restarts, so we know whether to
+// show the "Build Index" empty state vs. the "Rebuild Index" affordance. Keyed
+// by workspace root because different workspaces have separate FTS5 stores.
+interface IndexStatus {
+  docCount: number
+  lastIndexedAt: string // ISO timestamp
+  workspaceRoot: string
+}
+
+const INDEX_STATUS_KEY_PREFIX = 'ready-search-index-status:'
+
+function indexStatusKey(workspaceRoot: string): string {
+  return `${INDEX_STATUS_KEY_PREFIX}${workspaceRoot}`
+}
+
+function loadIndexStatus(workspaceRoot: string | null): IndexStatus | null {
+  if (!workspaceRoot) return null
+  const raw = readJsonStorage<IndexStatus | null>(indexStatusKey(workspaceRoot), null)
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.workspaceRoot !== workspaceRoot) return null
+  if (typeof raw.docCount !== 'number' || typeof raw.lastIndexedAt !== 'string') return null
+  return raw
+}
+
+function persistIndexStatus(status: IndexStatus): void {
+  writeJsonStorage(indexStatusKey(status.workspaceRoot), status)
+}
+
+function clearIndexStatus(workspaceRoot: string): void {
+  removeStorage(indexStatusKey(workspaceRoot))
+}
+
+function formatLastIndexedAt(iso: string): string {
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    const now = new Date()
+    const sameDay = d.toDateString() === now.toDateString()
+    if (sameDay) {
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mm = String(d.getMinutes()).padStart(2, '0')
+      return `今天 ${hh}:${mm}`
+    }
+    const yyyy = d.getFullYear()
+    const mo = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${yyyy}-${mo}-${dd} ${hh}:${mi}`
+  } catch {
+    return iso
+  }
+}
+
 function highlightText(source: string, query: string): ReactNode {
   const keyword = query.trim()
   if (!keyword) return source
@@ -289,6 +346,18 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const [degraded, setDegraded] = useState(false)
   const searchVersionRef = useRef(0)
 
+  // Explicit index lifecycle. The previous behaviour auto-triggered
+  // reindexAllSources whenever the workspace root changed, which on a Home
+  // directory could scan 600K+ files and balloon FTS5 storage past 80GB.
+  // Building the index is now an opt-in user action gated by a confirmation
+  // modal, and we remember the success so the panel can show "Rebuild" instead
+  // of "Build" on subsequent visits.
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(() => loadIndexStatus(workspaceRoot))
+  const [isIndexing, setIsIndexing] = useState(false)
+  const [indexError, setIndexError] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const indexingRef = useRef(false)
+
   const clearAll = useCallback(() => {
     searchVersionRef.current += 1
     setQuery('')
@@ -304,22 +373,82 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
     clearAll()
   }, [resetSignal, clearAll])
 
-  // When the workspace root changes, ask main to reindex filesystem + shared
-  // sources (bookmarks / RSS / calendar / agent). Reindex is idempotent —
-  // unchanged rows are skipped via content hash.
+  // Reload persisted index status whenever the workspace root changes. We
+  // intentionally do NOT trigger reindexAllSources here — see the comment on
+  // the indexing state above.
   useEffect(() => {
+    setIndexStatus(loadIndexStatus(workspaceRoot))
+    setIndexError(null)
+  }, [workspaceRoot])
+
+  const runReindex = useCallback(async () => {
     if (!workspaceRoot || typeof window === 'undefined') return
     const doc = window.electronAPI?.document
-    if (doc?.reindexAllSources) {
-      void doc.reindexAllSources(workspaceRoot).catch(() => {
-        /* best-effort; user can retry via search */
-      })
-    } else if (doc?.reindexWorkspace) {
-      void doc.reindexWorkspace(workspaceRoot).catch(() => {
-        /* fallback for older bundles */
-      })
+    if (!doc?.reindexAllSources && !doc?.reindexWorkspace) {
+      setIndexError('当前环境不支持索引')
+      return
+    }
+    if (indexingRef.current) return
+    indexingRef.current = true
+    setIsIndexing(true)
+    setIndexError(null)
+    try {
+      let docCount = 0
+      if (doc?.reindexAllSources) {
+        const response = await doc.reindexAllSources(workspaceRoot)
+        if (!response?.success || !response.data) {
+          throw new Error(response?.error || '索引失败')
+        }
+        for (const result of Object.values(response.data.perSource)) {
+          docCount += (result?.indexed ?? 0) + (result?.skipped ?? 0)
+        }
+      } else if (doc?.reindexWorkspace) {
+        const response = await doc.reindexWorkspace(workspaceRoot)
+        if (!response?.success || !response.data) {
+          throw new Error(response?.error || '索引失败')
+        }
+        docCount = (response.data.indexed ?? 0) + (response.data.skipped ?? 0)
+      }
+      const next: IndexStatus = {
+        docCount,
+        lastIndexedAt: new Date().toISOString(),
+        workspaceRoot,
+      }
+      persistIndexStatus(next)
+      setIndexStatus(next)
+    } catch (error) {
+      setIndexError(error instanceof Error ? error.message : String(error))
+    } finally {
+      indexingRef.current = false
+      setIsIndexing(false)
     }
   }, [workspaceRoot])
+
+  const handleBuildIndexClick = useCallback(() => {
+    if (!workspaceRoot) return
+    setConfirmOpen(true)
+  }, [workspaceRoot])
+
+  const handleConfirmBuildIndex = useCallback(() => {
+    setConfirmOpen(false)
+    void runReindex()
+  }, [runReindex])
+
+  const handleCancelBuildIndex = useCallback(() => {
+    setConfirmOpen(false)
+  }, [])
+
+  // If the workspace was cleared while a stale status was cached for a
+  // different root, drop it so the empty state renders correctly.
+  useEffect(() => {
+    if (!workspaceRoot && indexStatus) {
+      const stale = indexStatus.workspaceRoot
+      if (stale) {
+        clearIndexStatus(stale)
+      }
+      setIndexStatus(null)
+    }
+  }, [workspaceRoot, indexStatus])
 
   const runSearch = useCallback(async (keyword: string) => {
     if (!workspaceRoot || typeof window === 'undefined' || !window.electronAPI?.document?.searchIndex) {
@@ -524,7 +653,86 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
     </div>
   )
 
-  const body = (
+  // The panel cycles through four mutually exclusive states. We render each
+  // explicitly rather than overlaying messages on a single layout so the empty
+  // / build / ready transitions stay obvious to the user.
+  const panelState: 'no-workspace' | 'no-index' | 'indexing' | 'ready' = !workspaceRoot
+    ? 'no-workspace'
+    : isIndexing
+      ? 'indexing'
+      : indexStatus
+        ? 'ready'
+        : 'no-index'
+
+  const renderEmptyShell = (children: ReactNode) => (
+    <div className="flex flex-1 min-h-0 flex-col items-center justify-center text-center" style={{ gap: 12, padding: '24px 16px' }}>
+      {children}
+    </div>
+  )
+
+  const noWorkspaceBody = renderEmptyShell(
+    <>
+      <Database className="h-6 w-6" style={{ color: PANEL_COLORS.mutedStrong }} />
+      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
+        请先选择工作区以启用搜索
+      </p>
+      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
+        在文件管理中打开一个工作区后，可在此手动构建索引并开始全局搜索。
+      </p>
+    </>,
+  )
+
+  const noIndexBody = renderEmptyShell(
+    <>
+      <Database className="h-6 w-6" style={{ color: PANEL_COLORS.mutedStrong }} />
+      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
+        尚未构建索引
+      </p>
+      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
+        点击下方按钮扫描当前工作区，仅扫描你选择的目录，不会触碰其它文件夹。
+      </p>
+      <p className="text-[10px] font-medium break-all" style={{ color: PANEL_COLORS.muted, maxWidth: 280 }}>
+        {workspaceRoot}
+      </p>
+      <button
+        type="button"
+        onClick={handleBuildIndexClick}
+        className="border px-[14px] flex items-center gap-[6px] text-[12px] font-semibold transition-colors"
+        style={{
+          height: 32,
+          borderRadius: 10,
+          borderColor: 'transparent',
+          background: PANEL_COLORS.blue,
+          color: '#FFFFFF',
+        }}
+      >
+        <Database className="h-3.5 w-3.5" />
+        构建索引
+      </button>
+      {indexError && (
+        <p className="text-[10px] font-medium" style={{ color: 'var(--color-red, #c0392b)' }}>
+          {indexError}
+        </p>
+      )}
+    </>,
+  )
+
+  const indexingBody = renderEmptyShell(
+    <>
+      <Loader2 className="h-6 w-6 animate-spin" style={{ color: PANEL_COLORS.blue }} />
+      <p className="text-[12px] font-medium" style={{ color: PANEL_COLORS.text }}>
+        正在构建索引…
+      </p>
+      <p className="text-[10px] font-medium leading-[1.45]" style={{ color: PANEL_COLORS.mutedStrong, maxWidth: 240 }}>
+        首次构建可能需要数分钟，请勿关闭工作区。
+      </p>
+      <p className="text-[10px] font-medium break-all" style={{ color: PANEL_COLORS.muted, maxWidth: 280 }}>
+        {workspaceRoot}
+      </p>
+    </>,
+  )
+
+  const readyBody = (
     <div
       className="flex flex-1 min-h-0 flex-col"
       style={{
@@ -685,12 +893,56 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         </p>
       )}
 
-      {!workspaceRoot && query.trim().length > 0 && (
-        <p className="text-[10px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
-          请先在文件管理中打开工作区
+      {indexStatus && (
+        <div className="flex items-center justify-between gap-[8px] pt-[2px]">
+          <p className="text-[10px] font-medium leading-[1.4]" style={{ color: PANEL_COLORS.mutedStrong }}>
+            已索引 {indexStatus.docCount} 项 · {formatLastIndexedAt(indexStatus.lastIndexedAt)}
+          </p>
+          <button
+            type="button"
+            onClick={handleBuildIndexClick}
+            disabled={isIndexing}
+            title="重新扫描当前工作区"
+            className="border px-[8px] flex items-center gap-[4px] text-[10px] font-medium transition-colors disabled:opacity-45"
+            style={{
+              height: 22,
+              borderRadius: 8,
+              borderColor: PANEL_COLORS.inputBorder,
+              color: PANEL_COLORS.muted,
+              background: 'transparent',
+            }}
+          >
+            <RotateCw className="h-3 w-3" />
+            重建索引
+          </button>
+        </div>
+      )}
+
+      {indexError && (
+        <p className="text-[10px] font-medium" style={{ color: 'var(--color-red, #c0392b)' }}>
+          {indexError}
         </p>
       )}
     </div>
+  )
+
+  const body = (
+    <>
+      {panelState === 'no-workspace' && noWorkspaceBody}
+      {panelState === 'no-index' && noIndexBody}
+      {panelState === 'indexing' && indexingBody}
+      {panelState === 'ready' && readyBody}
+      <Modal
+        open={confirmOpen}
+        mode="confirm"
+        title="构建搜索索引"
+        message={`此操作会扫描下列工作区中的所有文件以建立全文搜索索引：\n\n${workspaceRoot ?? ''}\n\n较大的目录可能需要数分钟，并占用磁盘空间。是否继续？`}
+        confirmLabel="开始构建"
+        cancelLabel="取消"
+        onConfirm={handleConfirmBuildIndex}
+        onCancel={handleCancelBuildIndex}
+      />
+    </>
   )
 
   if (children) {

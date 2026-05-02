@@ -1,3 +1,5 @@
+import type { TurnTerminalReason } from './turn-frame'
+
 export type ChannelAdapterType =
   | 'local-debug'
   | 'generic-webhook'
@@ -227,15 +229,21 @@ export interface ScopeRunTaskStep {
 
 export interface ScopeRunTaskContinuation {
   taskId?: string | null
-  executionId: string
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
-  // B Phase 4: tracker-driven continuation fields. Populated by
-  // `buildSkillTaskProjectionPatch`; main-process resume handlers will
-  // hydrate the referenced todo when `executionId` is empty (PR3).
   todoId?: string | null
   todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -284,6 +292,7 @@ export interface ScopeRunExecutionDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  budgetLease?: import('./run-contracts').ExecutionRunDiagnostics['budgetLease']
   recoveryHistory?: Array<{
     kind: string
     source: string
@@ -297,6 +306,7 @@ export interface ScopeRunExecutionDiagnostics {
     restoredUsage: boolean
     grantedIterationSafetyFloor: boolean
     grantedToolCallSafetyFloor: boolean
+    grantedStepBudgetSafetyFloor: boolean
   } | null
   degradationReason?: string | null
   pipeline?: {
@@ -349,6 +359,7 @@ export interface ScopeRunSummary {
   taskProjectionId?: string | null
   blockedReason?: string | null
   error?: string | null
+  terminalReason?: TurnTerminalReason | null
   updatedAt: string
 }
 
@@ -371,6 +382,7 @@ export interface ScopeRunEventPayload {
     | 'done'
     | 'error'
     | 'cancelled'
+  terminalReason?: TurnTerminalReason | null
   latestText?: string
   module?:
     | 'browser'

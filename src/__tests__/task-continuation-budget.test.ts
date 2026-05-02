@@ -92,3 +92,74 @@ test('continuation routes restore prior budget usage and grant a safety floor wh
   assert.equal(route.continuation?.budgetRestore?.grantedIterationSafetyFloor, true)
   assert.equal(route.continuation?.budgetRestore?.grantedToolCallSafetyFloor, true)
 })
+
+test('continuation budget restore grants current-step headroom when the prior step was exhausted', () => {
+  const envelope = buildRequestEnvelope({ userText: '继续刚才那个任务' })
+  const capabilities = createCapabilities()
+  const resolution = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities,
+    currentTaskContext: {
+      continuationTaskId: 'task-prev-step-exhausted',
+    },
+  })
+
+  const route = resolveTaskExecutionRoute({
+    taskId: 'task-resume-step-exhausted',
+    resolution,
+    envelope,
+    capabilities,
+    currentTaskContext: {
+      continuationTaskId: 'task-prev-step-exhausted',
+      continuationProjection: {
+        taskId: 'task-prev-step-exhausted',
+        scopeId: 'scope-1',
+        runId: 'run-prev-step-exhausted',
+        taskType: 'multi_step_task',
+        module: 'skill',
+        status: 'blocked',
+        interactionState: 'resuming',
+        steps: [
+          { id: 'score', title: '继续评分', description: '继续评分', status: 'running' },
+        ],
+        currentStepId: 'score',
+        budget: {
+          taskType: 'multi_step_task',
+          maxIterations: 40,
+          maxToolCalls: 40,
+          maxParallelToolGroups: 5,
+          iterationsUsed: 40,
+          toolCallsUsed: 12,
+          parallelToolGroupsUsed: 1,
+          stepBudget: {
+            stepId: 'score',
+            maxIterations: 40,
+            remainingIterations: 0,
+          },
+        },
+        budgetUsagePercent: 100,
+        recoveryHistory: [],
+        blockedReason: '等待继续',
+        resumableActions: ['continue', 'cancel'],
+        continuationRef: {
+          executionId: 'exec-step-exhausted',
+          stepId: 'score',
+          blockerType: 'need_confirmation',
+          taskId: 'task-prev-step-exhausted',
+        },
+        createdAt: '2026-04-16T00:00:00.000Z',
+        updatedAt: '2026-04-16T00:00:01.000Z',
+      },
+    },
+  })
+
+  assert.equal(route.chain, 'continuation')
+  assert.ok(
+    (route.continuation?.budgetRuntime?.stepBudget?.remainingIterations || 0) >= 4,
+    `expected restored step budget to have headroom, got ${
+      route.continuation?.budgetRuntime?.stepBudget?.remainingIterations
+    }`,
+  )
+  assert.notEqual(route.continuation?.budgetRuntime?.warningLevel, 'exhausted')
+})

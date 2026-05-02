@@ -11,7 +11,7 @@ import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
-import { PathSandboxError, resolveWithinRoot } from './path-sandbox'
+import { PathSandboxError, resolveReadableWithinAnyRoot } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
 const DEFAULT_MAX_BYTES = 32_768
@@ -25,6 +25,21 @@ export interface ReadArtifactArgs {
 export interface ReadArtifactHandlerDeps {
   skillId: string
   lookupSkillRoots?: LookupSkillRoots
+  /**
+   * Stage 5 — additional read-only roots beyond the per-skill `artifactRoot`,
+   * derived from the active TurnFrame skill slice (current task `outputDir`,
+   * parent dir of `runStatePath`, etc.). Allows the LLM to read live task
+   * artifacts that live outside `<outputsRoot>/<skillId>/` without falling
+   * back to `skill_run_shell cat`. The primary artifact root is always tried
+   * first so existing relative-path semantics are preserved.
+   *
+   * Phase 3 (skill-child-loop) — the dispatcher in `skills-tools.ts` now
+   * sources this list from `ToolRuntimeContext.activeFrame.activeArtifactRoots`
+   * first (same-turn live signal), falling back to `resolveActiveSkillContext`.
+   * This parameter remains the legacy plumbing surface — keep it.
+   * TODO(skill-child-loop): drop fallback after child-run path is stable.
+   */
+  additionalAllowedReadRoots?: string[]
 }
 
 export async function executeReadArtifact(
@@ -46,19 +61,29 @@ export async function executeReadArtifact(
     )
   }
 
+  // Build the candidate root list: per-skill artifactRoot first (existing
+  // relative-path semantics keep working), then any additional read-only
+  // roots declared by the active TurnFrame skill slice.
+  const additionalRoots = Array.isArray(deps.additionalAllowedReadRoots)
+    ? deps.additionalAllowedReadRoots.filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
+    : []
+  const candidateRoots = [roots.artifactRoot, ...additionalRoots]
+
   let absPath: string
   try {
-    absPath = resolveWithinRoot(roots.artifactRoot, args.relativePath)
+    absPath = resolveReadableWithinAnyRoot(candidateRoots, args.relativePath)
   } catch (error) {
     if (error instanceof PathSandboxError) {
       logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
         primitive: 'skill_read_artifact',
         reason: error.reason,
         relativePath: args.relativePath,
+        attemptedRoots: candidateRoots,
       })
       throw new ToolDomainError(error.reason, error.message, {
         relativePath: args.relativePath,
         artifactRoot: roots.artifactRoot,
+        attemptedRoots: candidateRoots,
       })
     }
     throw error

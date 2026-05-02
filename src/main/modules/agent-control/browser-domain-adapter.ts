@@ -126,6 +126,43 @@ export class BrowserDomainAdapter implements DomainAdapter {
 
   constructor(private readonly orchestrator: BrowserDomainOrchestratorLike) {}
 
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return [
+      {
+        id: 'browser-upload',
+        label: '浏览器上传流程',
+        priority: 50,
+        matches: ({ userText }) => /(上传|发送|提交|浏览器|网页)/i.test(userText),
+        blocking: false,
+        refs: [
+          {
+            path: 'docs/browser-rules.md',
+            title: '浏览器工作流规则',
+            summary: '浏览器上传、输入、发送的阶段规则',
+          },
+        ],
+      },
+    ]
+  }
+
+  arbitrateRunCapabilities(
+    params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    const route = params.route
+    if (!route || route.chain === 'direct') return null
+    const domainState = (params as typeof params & { domainState?: BrowserAdapterState | null }).domainState
+    const isBrowserTask = Boolean(domainState?.browserToolLoopState?.isBrowserTask)
+    if (route.executor !== 'browser' && !isBrowserTask) return null
+    return { hideAssistantProcessText: true }
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
+
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'browser' || params.route.executor === 'tool_loop' || params.route.executor === 'planner'
   }

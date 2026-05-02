@@ -19,7 +19,7 @@ import {
   shouldPreferSectionRewrite,
   type DocumentWidgetTaskKind,
 } from '../claude-bridge/tool-policy-heuristics'
-import { resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
+import { isRetryOnlyPrompt, resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
 import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-task-plan'
@@ -41,6 +41,28 @@ export interface ExecutionIntentContext {
   shouldUseDocumentTaskPlan: boolean
 }
 
+function normalizeRegisteredSkillToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, '')
+    .trim()
+}
+
+function findRegisteredSkillHistoryInput(previousInputs: string[], registeredSkillTokens?: string[] | null): string | null {
+  const tokens = (registeredSkillTokens || [])
+    .map((token) => normalizeRegisteredSkillToken(token))
+    .filter((token) => token.length >= 6)
+  if (tokens.length === 0) return null
+  for (const previousInput of previousInputs) {
+    const normalized = normalizeRegisteredSkillToken(previousInput)
+    if (!normalized) continue
+    if (tokens.some((token) => normalized.includes(token))) {
+      return previousInput
+    }
+  }
+  return null
+}
+
 export function resolveExecutionIntentContext(params: {
   requestEnvelope: RequestEnvelope
   previousInputs: string[]
@@ -51,12 +73,19 @@ export function resolveExecutionIntentContext(params: {
   registeredSkillTokens?: string[] | null
 }): ExecutionIntentContext {
   const envelopeHasWidgetTarget = params.requestEnvelope.environmentHints.hasWidgetTargetContext
-  const contextualUserInput = resolveToolPolicyInput(
-    params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText,
-    params.lastDocumentContextInput
-      ? [params.lastDocumentContextInput, ...params.previousInputs]
-      : params.previousInputs,
+  const primaryInput = params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText
+  const registeredSkillHistoryInput = findRegisteredSkillHistoryInput(
+    params.previousInputs,
+    params.registeredSkillTokens,
   )
+  const contextualUserInput = isRetryOnlyPrompt(primaryInput) && registeredSkillHistoryInput
+    ? registeredSkillHistoryInput
+    : resolveToolPolicyInput(
+      primaryInput,
+      params.lastDocumentContextInput
+        ? [params.lastDocumentContextInput, ...params.previousInputs]
+        : params.previousInputs,
+    )
   const userInstructionText = extractPrimaryUserInstruction(contextualUserInput)
   const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent(contextualUserInput)
   const leaseValid = params.activeWidgetEditLease
@@ -88,6 +117,14 @@ export function resolveExecutionIntentContext(params: {
     documentTaskPlan.blockedReason || (documentTaskPlan.requiresStructuredPlan && documentTaskPlan.jobs.length > 0),
   )
 
+  const computedIntentClassification = classifyIntent(effectiveEnvelope, {
+    registeredSkillTokens: params.registeredSkillTokens || undefined,
+  })
+  const intentClassification = computedIntentClassification.primaryDomain === 'skill'
+    && params.intentClassification?.primaryDomain !== 'skill'
+    ? computedIntentClassification
+    : (params.intentClassification || computedIntentClassification)
+
   logAgentMetric('intent_context', {
     envelopeHasWidgetTarget,
     leaseValid: Boolean(leaseValid),
@@ -100,19 +137,22 @@ export function resolveExecutionIntentContext(params: {
     shouldUseDocumentTaskPlan,
     primaryInstruction: (params.requestEnvelope.primaryInstruction || '').slice(0, 120),
     contextualInputPreview: contextualUserInput.slice(0, 120),
+    registeredSkillHistoryReused: Boolean(isRetryOnlyPrompt(primaryInput) && registeredSkillHistoryInput),
     leaseWidgetId: params.activeWidgetEditLease?.widgetId || null,
     leaseTabId: params.activeWidgetEditLease?.tabId || null,
     leaseAgeMs: params.activeWidgetEditLease
       ? Math.max(0, Date.now() - params.activeWidgetEditLease.acquiredAt)
       : null,
     leaseRefreshed,
+    providedPrimaryDomain: params.intentClassification?.primaryDomain || null,
+    resolvedPrimaryDomain: intentClassification.primaryDomain,
+    skillIntentUpgraded: computedIntentClassification.primaryDomain === 'skill'
+      && params.intentClassification?.primaryDomain !== 'skill',
   })
 
   return {
     requestEnvelope: effectiveEnvelope,
-    intentClassification: params.intentClassification || classifyIntent(effectiveEnvelope, {
-      registeredSkillTokens: params.registeredSkillTokens || undefined,
-    }),
+    intentClassification,
     contextualUserInput,
     userInstructionText,
     hasDocumentEnvironment: params.requestEnvelope.rawUserText.includes('## 环境信息') && params.requestEnvelope.rawUserText.includes('当前模式: 文档模式'),

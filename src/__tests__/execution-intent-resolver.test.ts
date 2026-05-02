@@ -78,6 +78,38 @@ test('resolveExecutionIntentContext keeps live external info lookups out of docu
   assert.equal(context.documentWidgetTaskKind, null)
 })
 
+test('resolveExecutionIntentContext upgrades a provided generic intent when the current text names a registered skill', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '使用@[Video Expert Analyzer (VNext)]分析这个 YouTube 视频',
+  })
+  const genericIntent = classifyIntent(requestEnvelope)
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
+    previousInputs: [],
+    intentClassification: genericIntent,
+    registeredSkillTokens: ['videoexpertanalyzervnext'],
+  })
+
+  assert.equal(genericIntent.primaryDomain, 'generic')
+  assert.equal(context.intentClassification.primaryDomain, 'skill')
+})
+
+test('resolveExecutionIntentContext keeps a previous widget context from hiding an explicit registered skill', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '再重试一次',
+  })
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
+    previousInputs: ['使用@[Video Expert Analyzer (VNext)]分析这个 YouTube 视频'],
+    lastDocumentContextInput: '更新当前文档里的趋势图 widget：把边框去掉',
+    intentClassification: classifyIntent(requestEnvelope),
+    registeredSkillTokens: ['videoexpertanalyzervnext'],
+  })
+
+  assert.equal(context.intentClassification.primaryDomain, 'skill')
+  assert.match(context.contextualUserInput, /Video Expert Analyzer/)
+})
+
 test('buildExecutionToolState keeps browser tools visible for live external info lookups even before browser workflow planning is attached', () => {
   const requestEnvelope = buildRequestEnvelope({
     userText: '明天广州天气怎么样',

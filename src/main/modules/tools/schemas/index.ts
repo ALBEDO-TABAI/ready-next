@@ -18,6 +18,8 @@
 
 import type { ZodObject, ZodRawShape } from 'zod'
 
+// Phase 4: SKILL_CONTROL_SCHEMAS retired along with the skill_executions
+// state machine. Skill primitives keep their own schemas below.
 import { MEMORY_SCHEMAS } from './memory-schemas'
 import { RSS_SCHEMAS } from './rss-schemas'
 import { CALENDAR_SCHEMAS } from './calendar-schemas'
@@ -29,10 +31,9 @@ import { BROWSER_INTERACTION_SCHEMAS } from './browser-interaction-schemas'
 import { BROWSER_CONTENT_SCHEMAS } from './browser-content-schemas'
 import { SYSTEM_SCHEMAS } from './system-schemas'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
+import { getStaticSkillActionSchemas } from '../skills-tools-static'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
-  // B Phase 4 PR2: `SKILL_CONTROL_SCHEMAS` retired together with the
-  // `skill_submit_*` / `skill_get_state` / restart / cancel tools.
   ...SKILL_PRIMITIVE_SCHEMAS,
   ...MEMORY_SCHEMAS,
   ...RSS_SCHEMAS,
@@ -44,7 +45,18 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...BROWSER_INTERACTION_SCHEMAS,
   ...BROWSER_CONTENT_SCHEMAS,
   ...SYSTEM_SCHEMAS,
-  // PR 12 folds in the dynamic skill-action schemas via getSkillActionSchemas().
+  // Stage B5 — static manifest-derived skill-action schemas. Spread BEFORE
+  // the per-domain entries so any name collision (in practice none — skill_*
+  // names are namespaced) is overridden by the curated static maps.
+  //
+  // Phase 2 (B child-loop): admission no longer happens through this map
+  // alone. `resolveToolInputSchemaForExecution()` in tool-registry.ts
+  // consults this static map first, then falls back to the dynamic
+  // getSkillActionSchemas() cache for tools the static map does not cover.
+  // tool-executor / turn-engine / turn-frame-steering all consume that one
+  // resolver, so dispatch-time and forced-preflight admission see the same
+  // schemas. This accessor stays callable for tests and any legacy callers.
+  ...getStaticSkillActionSchemas(),
 }
 
 export function getToolInputSchemas(): Record<string, ZodObject<ZodRawShape>> {

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
+import threading
+import time
 import uuid
 from collections import deque
 from datetime import datetime, timezone
@@ -18,8 +21,47 @@ from ready_sidecar.channels.feishu_app_adapter import FeishuAppAdapter
 from ready_sidecar.channels.feishu_plugin_ops import FeishuPluginOperations
 
 
+# ---------------------------------------------------------------------------
+# Parent-PID watchdog
+#
+# When Ready (Electron parent) crashes or is force-killed, this Python sidecar
+# would otherwise be reparented to launchd/init (PID 1) and survive forever.
+# Audit found 63 leaked sidecar processes. Poll the original parent PID every
+# WATCHDOG_INTERVAL_SEC and exit cleanly when it disappears.
+# ---------------------------------------------------------------------------
+PARENT_PID = os.getppid()
+WATCHDOG_INTERVAL_SEC = 30
+
+# Bounded event queue: drop oldest events when full so a stalled consumer
+# can't grow memory unboundedly. Logged every EVENT_DROP_LOG_EVERY evictions.
+EVENT_QUEUE_MAXLEN = 10000
+EVENT_DROP_LOG_EVERY = 100
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parent_watchdog() -> None:
+    """Polls parent PID every WATCHDOG_INTERVAL_SEC. Exits cleanly when parent gone.
+
+    Uses os.kill(pid, 0) — sends signal 0 which doesn't actually signal but
+    raises ProcessLookupError if pid doesn't exist. Cross-platform on POSIX
+    (macOS, Linux). On Windows ppid checking is different — skip there for now.
+    """
+    if sys.platform == "win32":
+        return  # TODO: Windows parent-watch via psutil
+    while True:
+        time.sleep(WATCHDOG_INTERVAL_SEC)
+        try:
+            os.kill(PARENT_PID, 0)
+        except (ProcessLookupError, OSError):
+            print(f"[sidecar] parent PID {PARENT_PID} gone, exiting", flush=True)
+            os._exit(0)  # _exit (not sys.exit) — bypass cleanup hooks; clean shutdown is parent's job
+
+
+def _start_parent_watchdog() -> None:
+    threading.Thread(target=_parent_watchdog, daemon=True, name="parent-watchdog").start()
 
 
 class ChannelConfig(BaseModel):
@@ -57,7 +99,8 @@ class RuntimeState:
         self.last_heartbeat_at: Optional[str] = None
         self.channels: Dict[str, ChannelConfig] = {}
         self.schedules: Dict[str, ScheduleConfig] = {}
-        self.events: Deque[Dict[str, Any]] = deque()
+        self.events: Deque[Dict[str, Any]] = deque(maxlen=EVENT_QUEUE_MAXLEN)
+        self.dropped_event_count = 0
         self.lock = Lock()
         self.scheduler = BackgroundScheduler(timezone="UTC")
         self.scheduler.start()
@@ -65,6 +108,10 @@ class RuntimeState:
 
     def enqueue_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         with self.lock:
+            # When the deque is at maxlen, append() silently evicts the oldest
+            # entry. Detect that case and log periodically so a stalled puller
+            # is visible in the sidecar log.
+            at_capacity = len(self.events) == self.events.maxlen
             self.events.append(
                 {
                     "id": str(uuid.uuid4()),
@@ -73,6 +120,14 @@ class RuntimeState:
                     "payload": payload,
                 }
             )
+            if at_capacity:
+                self.dropped_event_count += 1
+                if self.dropped_event_count % EVENT_DROP_LOG_EVERY == 0:
+                    print(
+                        f"[sidecar] event queue at capacity, dropping oldest "
+                        f"(total dropped: {self.dropped_event_count})",
+                        flush=True,
+                    )
 
     def pull_events(self, limit: int) -> List[Dict[str, Any]]:
         with self.lock:
@@ -581,7 +636,14 @@ async def feishu_file_download(payload: FeishuFileDownloadPayload, _: None = Dep
     return await ops.file_download(payload.file_token, payload.save_path)
 
 
-if __name__ == "__main__":
+def main() -> None:
     host = os.environ.get("READY_SIDECAR_HOST", "127.0.0.1")
     port = int(os.environ.get("READY_SIDECAR_PORT", "18777"))
+    # Start watchdog before the listener so a parent that dies during
+    # uvicorn boot is still detected on the next tick.
+    _start_parent_watchdog()
     uvicorn.run("ready_sidecar.main:app", host=host, port=port, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

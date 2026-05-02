@@ -19,6 +19,10 @@ export { executeWriteArtifact } from './write-artifact'
 export type { WriteArtifactArgs, WriteArtifactHandlerDeps } from './write-artifact'
 export { executeReadArtifact } from './read-artifact'
 export type { ReadArtifactArgs, ReadArtifactHandlerDeps } from './read-artifact'
+export { executePatchConfig } from './patch-config'
+export type { PatchConfigArgs, PatchConfigDeps, PatchConfigOperation } from './patch-config'
+export { executeInspectRunState } from './inspect-run-state'
+export type { InspectRunStateArgs } from './inspect-run-state'
 export {
   executeRunShell,
   parseCommand,

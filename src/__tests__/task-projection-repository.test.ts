@@ -26,19 +26,20 @@ test('TaskProjectionRepository persists and updates structured task projection r
                   task_summary: params[8],
                   status: params[9],
                   interaction_state: params[10],
-                  steps_json: params[11],
-                  current_step_id: params[12],
-                  budget_json: params[13],
-                  budget_usage_percent: params[14],
-                  budget_warning_level: params[15],
-                  recovery_history_json: params[16],
-                  degradation_reason: params[17],
-                  blocked_reason: params[18],
-                  resumable_actions_json: params[19],
-                  continuation_ref_json: params[20],
-                  recent_artifacts_json: params[21],
-                  created_at: params[22],
-                  updated_at: params[23],
+                  waiting_for: params[11],
+                  steps_json: params[12],
+                  current_step_id: params[13],
+                  budget_json: params[14],
+                  budget_usage_percent: params[15],
+                  budget_warning_level: params[16],
+                  recovery_history_json: params[17],
+                  degradation_reason: params[18],
+                  blocked_reason: params[19],
+                  resumable_actions_json: params[20],
+                  continuation_ref_json: params[21],
+                  recent_artifacts_json: params[22],
+                  created_at: params[23],
+                  updated_at: params[24],
                 })
                 return { changes: 1 }
               },
@@ -117,6 +118,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
     taskSummary: '正在采集参考链接',
     status: 'running',
     interactionState: 'running',
+    waitingFor: 'input',
     steps: [
       {
         id: 'collect',
@@ -167,6 +169,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
   repository.update('task-1', {
     status: 'blocked',
     interactionState: 'awaiting_confirmation',
+    waitingFor: 'confirmation',
     budgetUsagePercent: 70,
     degradationReason: 'browser unavailable',
     blockedReason: '需要确认后继续',
@@ -183,6 +186,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
   assert.equal(stored?.taskSummary, '正在采集参考链接')
   assert.equal(stored?.status, 'blocked')
   assert.equal(stored?.interactionState, 'awaiting_confirmation')
+  assert.equal(stored?.waitingFor, 'confirmation')
   assert.equal(stored?.budgetUsagePercent, 70)
   assert.equal(stored?.budgetWarningLevel, 'warning')
   assert.equal(stored?.budget?.stepBudget?.remainingIterations, 12)
@@ -217,19 +221,20 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
                   task_summary: params[8],
                   status: params[9],
                   interaction_state: params[10],
-                  steps_json: params[11],
-                  current_step_id: params[12],
-                  budget_json: params[13],
-                  budget_usage_percent: params[14],
-                  budget_warning_level: params[15],
-                  recovery_history_json: params[16],
-                  degradation_reason: params[17],
-                  blocked_reason: params[18],
-                  resumable_actions_json: params[19],
-                  continuation_ref_json: params[20],
-                  recent_artifacts_json: params[21],
-                  created_at: params[22],
-                  updated_at: params[23],
+                  waiting_for: params[11],
+                  steps_json: params[12],
+                  current_step_id: params[13],
+                  budget_json: params[14],
+                  budget_usage_percent: params[15],
+                  budget_warning_level: params[16],
+                  recovery_history_json: params[17],
+                  degradation_reason: params[18],
+                  blocked_reason: params[19],
+                  resumable_actions_json: params[20],
+                  continuation_ref_json: params[21],
+                  recent_artifacts_json: params[22],
+                  created_at: params[23],
+                  updated_at: params[24],
                 })
                 return { changes: 1 }
               },

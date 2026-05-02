@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "frozenAt": "B-stage W0a (2026-05-01)",
+  "source": "src/main/modules/agent-control/skill-child-runner.ts",
+  "exports": [
+    {
+      "kind": "const",
+      "name": "MAX_ACTIVE_VEA_CHILD_RUNS",
+      "initializer": "3"
+    },
+    {
+      "kind": "const",
+      "name": "MAX_ACTIONS_PER_CHILD_RUN",
+      "initializer": "24"
+    },
+    {
+      "kind": "const",
+      "name": "LAUNCH_STUCK_GUARD_MS",
+      "initializer": "30_000"
+    },
+    {
+      "kind": "interface",
+      "name": "StartSkillChildRunParams"
+    },
+    {
+      "kind": "type",
+      "name": "StartChildRunStatus"
+    },
+    {
+      "kind": "interface",
+      "name": "StartSkillChildRunResult"
+    },
+    {
+      "kind": "interface",
+      "name": "WaitForSkillChildRunCloseOptions"
+    },
+    {
+      "kind": "type",
+      "name": "CancelSkillChildRunSource"
+    },
+    {
+      "kind": "interface",
+      "name": "CancelSkillChildRunOptions"
+    },
+    {
+      "kind": "interface",
+      "name": "SkillChildRunnerConfig"
+    },
+    {
+      "kind": "function",
+      "name": "configureSkillChildRunner",
+      "signature": "(config: SkillChildRunnerConfig): SkillChildRunner"
+    },
+    {
+      "kind": "function",
+      "name": "getSkillChildRunner",
+      "signature": "(): SkillChildRunner | null"
+    },
+    {
+      "kind": "function",
+      "name": "__resetSkillChildRunnerForTests",
+      "signature": "(): void"
+    },
+    {
+      "kind": "function",
+      "name": "startSkillChildRun",
+      "signature": "(params: StartSkillChildRunParams): Promise<StartSkillChildRunResult>"
+    },
+    {
+      "kind": "function",
+      "name": "resumeSkillChildRun",
+      "signature": "(childRunId: string): Promise<StartSkillChildRunResult>"
+    },
+    {
+      "kind": "function",
+      "name": "cancelSkillChildRun",
+      "signature": "(childRunId: string, reasonOrOptions?: string | CancelSkillChildRunOptions): Promise<SkillChildCloseEvent>"
+    },
+    {
+      "kind": "function",
+      "name": "getSkillChildRunCloseEvent",
+      "signature": "(childRunId: string): SkillChildCloseEvent | null"
+    },
+    {
+      "kind": "function",
+      "name": "waitForSkillChildRunClose",
+      "signature": "(childRunId: string, options: WaitForSkillChildRunCloseOptions): Promise<ChildWaitResult>"
+    },
+    {
+      "kind": "reexport",
+      "name": "isChildOwnedSkill",
+      "propertyName": null,
+      "moduleSpecifier": null
+    }
+  ]
+}

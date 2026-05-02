@@ -6,9 +6,9 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import {
   CommandParseError,
@@ -48,13 +48,19 @@ test('parseCommand tokenizes whitespace and preserves double-quoted segments', (
   assert.equal(parseCommand('   '), null)
 })
 
-test('SHELL_ALLOWLIST exposes the Phase 1 base whitelist', () => {
-  for (const expected of ['python', 'python3', 'node', 'bash', 'sh', 'cat', 'echo']) {
+test('SHELL_ALLOWLIST exposes the Phase 1 base whitelist without VEA-only binaries', () => {
+  for (const expected of ['python', 'python3', 'node', 'bash', 'sh', 'cat', 'echo', 'pwd', 'which']) {
     assert.ok(SHELL_ALLOWLIST.has(expected), `expected ${expected} in allowlist`)
   }
   // Commands known NOT to be in the Phase 1 list
-  assert.equal(SHELL_ALLOWLIST.has('ffmpeg'), false)
   assert.equal(SHELL_ALLOWLIST.has('vim'), false)
+  assert.equal(SHELL_ALLOWLIST.has('yt-dlp'), false)
+  assert.equal(SHELL_ALLOWLIST.has('ffmpeg'), false)
+  assert.equal(SHELL_ALLOWLIST.has('ffprobe'), false)
+  assert.equal(SHELL_ALLOWLIST.has('scenedetect'), false)
+  assert.equal(SHELL_ALLOWLIST.has('rm'), false)
+  assert.equal(SHELL_ALLOWLIST.has('cp'), false)
+  assert.equal(SHELL_ALLOWLIST.has('mv'), false)
 })
 
 test('rejects command_empty for a blank command', async () => {
@@ -84,6 +90,55 @@ test('rejects cmd_not_allowlisted for non-whitelisted binaries', async () => {
   }
 })
 
+test('script wrappers are invoked through bash/python rather than direct ./scripts entrypoints', async () => {
+  const fx = makeFixture()
+  try {
+    const captured: { bin?: string; args?: string[]; cwd?: string } = {}
+    const fakeSpawn = ((bin: string, args: string[], options: any) => {
+      captured.bin = bin
+      captured.args = args
+      captured.cwd = options?.cwd
+      let closeCb: ((code: number) => void) | null = null
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: any) => {
+          if (event === 'close') {
+            closeCb = cb
+            setImmediate(() => closeCb?.(0))
+          }
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: 'bash scripts/run_update_cron.sh' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        spawnFn: fakeSpawn,
+      },
+    )
+    assert.equal(captured.bin, 'bash')
+    assert.deepEqual(captured.args, ['scripts/run_update_cron.sh'])
+    assert.equal(captured.cwd, fx.assetRoot)
+
+    await assert.rejects(
+      executeRunShell(
+        { command: './scripts/run_update_cron.sh' },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup, spawnFn: fakeSpawn },
+      ),
+      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'cmd_not_allowlisted',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
 test('echo produces stdout and exitCode=0 with env CLAUDE_SKILL_DIR set to assetRoot', async () => {
   const fx = makeFixture()
   try {
@@ -103,6 +158,154 @@ test('echo produces stdout and exitCode=0 with env CLAUDE_SKILL_DIR set to asset
     const lsData = ls.data as any
     assert.equal(lsData?.exitCode, 0)
     assert.ok((lsData?.stdout || '').includes('marker.txt'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('shell-style commands expand skill env vars and support pipelines', async () => {
+  const fx = makeFixture()
+  try {
+    writeFileSync(join(fx.assetRoot, 'marker.txt'), 'ok', 'utf-8')
+    const envOut = await executeRunShell(
+      { command: 'echo $CLAUDE_SKILL_DIR && echo $CLAUDE_SKILL_OUTPUT_DIR' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    const envData = envOut.data as any
+    assert.equal(envData?.exitCode, 0)
+    assert.ok((envData?.stdout || '').includes(fx.assetRoot))
+    assert.ok((envData?.stdout || '').includes(fx.artifactRoot))
+    assert.equal(envData?.command?.bin, 'bash')
+
+    const pipeOut = await executeRunShell(
+      { command: 'find . -name "marker.txt" | head -n 1' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    const pipeData = pipeOut.data as any
+    assert.equal(pipeData?.exitCode, 0)
+    assert.ok((pipeData?.stdout || '').includes('marker.txt'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('shell-style command can cd to the skill dir before running a script', async () => {
+  const fx = makeFixture()
+  try {
+    mkdirSync(join(fx.assetRoot, 'scripts'), { recursive: true })
+    writeFileSync(
+      join(fx.assetRoot, 'scripts', 'print_cwd.py'),
+      'import os\nprint(os.path.basename(os.getcwd()))\n',
+      'utf-8',
+    )
+
+    const out = await executeRunShell(
+      { command: 'cd "$CLAUDE_SKILL_DIR" && python3 scripts/print_cwd.py' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    const data = out.data as any
+    assert.equal(data?.exitCode, 0)
+    assert.ok((data?.stdout || '').trim().length > 0)
+    assert.equal(data?.command?.bin, 'bash')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('pwd is allowed as a harmless cwd probe', async () => {
+  const fx = makeFixture()
+  try {
+    const out = await executeRunShell(
+      { command: 'pwd' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    const data = out.data as any
+    assert.equal(data?.exitCode, 0)
+    assert.equal((data?.stdout || '').trim(), fx.assetRoot)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('bash -lc commands with POSIX single quotes use shell compatibility mode', async () => {
+  const fx = makeFixture()
+  try {
+    const out = await executeRunShell(
+      { command: "bash -lc 'echo $CLAUDE_SKILL_DIR'" },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    const data = out.data as any
+    assert.equal(data?.exitCode, 0)
+    assert.equal((data?.stdout || '').trim(), fx.assetRoot)
+    assert.equal(data?.command?.bin, 'bash')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('shell compatibility uses non-login bash so injected PATH remains authoritative', async () => {
+  const fx = makeFixture()
+  const runtimeBinDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-prim-runtime-bin-')))
+  const venvBinDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-prim-venv-bin-')))
+  try {
+    const captured: { args?: string[]; env?: NodeJS.ProcessEnv } = {}
+    const fakeSpawn = ((bin: string, args: string[], options: any) => {
+      captured.args = args
+      captured.env = options?.env
+      let closeCb: ((code: number) => void) | null = null
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: any) => {
+          if (event === 'close') {
+            closeCb = cb
+            setImmediate(() => closeCb?.(0))
+          }
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: 'cd scripts && python3 run.py' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        runtimeBinDir,
+        venvBinDir,
+        spawnFn: fakeSpawn,
+      },
+    )
+
+    assert.deepEqual(captured.args, ['-c', 'cd scripts && python3 run.py'])
+    const pathEntries = String(captured.env?.PATH || '').split(delimiter)
+    assert.equal(pathEntries[0], runtimeBinDir)
+    assert.equal(pathEntries[1], venvBinDir)
+  } finally {
+    rmSync(runtimeBinDir, { recursive: true, force: true })
+    rmSync(venvBinDir, { recursive: true, force: true })
+    fx.cleanup()
+  }
+})
+
+test('common script probes with POSIX single quotes run through shell compatibility', async () => {
+  const fx = makeFixture()
+  try {
+    const out = await executeRunShell(
+      { command: "python3 -c 'print(\"ready\")'" },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    const data = out.data as any
+    assert.equal(data?.exitCode, 0)
+    assert.equal((data?.stdout || '').trim(), 'ready')
+    assert.equal(data?.command?.bin, 'bash')
   } finally {
     fx.cleanup()
   }

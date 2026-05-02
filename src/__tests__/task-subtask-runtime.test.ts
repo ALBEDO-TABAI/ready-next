@@ -305,6 +305,7 @@ test('RunCoordinator preserves parent-child task linkage in emitted scope events
     taskId: 'child-1',
     parentTaskId: 'parent-1',
     parentStepId: 'collect',
+    coordinators: []
   } as any)
 
   assert.equal((events[0] as any).parentTaskId, 'parent-1')

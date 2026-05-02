@@ -137,6 +137,34 @@ test('buildContinuationStateFromProjection keeps a single continuation identity 
   assert.deepEqual(continuationState.resumableActions, ['continue', 'cancel'])
 })
 
+test('buildContinuationStateFromProjection preserves durable skill handles without execution id', () => {
+  const projection = createProjection({
+    continuationRef: {
+      taskId: 'task-prev',
+      blockerType: 'background_running',
+      pauseReason: 'budget_exhausted',
+      detachedTaskId: 'dst-1234',
+      taskRunId: 'e-1234',
+      jobId: 'job-1234',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      runStatePath: '/tmp/vea/run_state.json',
+      outputDir: '/tmp/vea',
+      progressFingerprint: 'fp-1234',
+    },
+  })
+
+  const continuationState = buildContinuationStateFromProjection(projection)
+
+  assert.equal(continuationState.continuationRef?.taskId, 'task-prev')
+  assert.equal(continuationState.continuationRef?.executionId, null)
+  assert.equal(continuationState.continuationRef?.detachedTaskId, 'dst-1234')
+  assert.equal(continuationState.continuationRef?.taskRunId, 'e-1234')
+  assert.equal(continuationState.continuationRef?.runStatePath, '/tmp/vea/run_state.json')
+  assert.equal(continuationState.continuationRef?.outputDir, '/tmp/vea')
+  assert.equal(continuationState.continuationRef?.pauseReason, 'budget_exhausted')
+})
+
 test('normalizeContinuationIntent trims values and requires a task id', () => {
   const normalized = normalizeContinuationIntent({
     taskId: '  task-prev  ',
@@ -144,6 +172,10 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
     stepId: '  approve  ',
     blockedReason: '  等待确认  ',
     responseText: '  可以继续  ',
+    detachedTaskId: '  dst-1234  ',
+    runStatePath: '  /tmp/vea/run_state.json  ',
+    outputDir: '  /tmp/vea  ',
+    pauseReason: '  budget_exhausted  ',
   })
 
   assert.deepEqual(normalized, {
@@ -152,31 +184,12 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
     stepId: 'approve',
     blockedReason: '等待确认',
     responseText: '可以继续',
-    // B Phase 4 PR3: tracker-anchored continuation fields. Always normalize
-    // to `undefined` when omitted so existing `{ executionId, stepId, … }`
-    // callers don't accidentally forward stale todo state.
-    todoId: undefined,
-    todoTitle: undefined,
+    detachedTaskId: 'dst-1234',
+    runStatePath: '/tmp/vea/run_state.json',
+    outputDir: '/tmp/vea',
+    pauseReason: 'budget_exhausted',
   })
   assert.equal(normalizeContinuationIntent({ taskId: '   ' }), null)
-})
-
-test('normalizeContinuationIntent preserves todoId + todoTitle for tracker-anchored resumption', () => {
-  const normalized = normalizeContinuationIntent({
-    taskId: 'task-tracker',
-    todoId: '  st-abc12345  ',
-    todoTitle: '  运行命令: python3 scripts/analyze.py  ',
-  })
-
-  assert.deepEqual(normalized, {
-    taskId: 'task-tracker',
-    executionId: undefined,
-    stepId: undefined,
-    blockedReason: undefined,
-    responseText: undefined,
-    todoId: 'st-abc12345',
-    todoTitle: '运行命令: python3 scripts/analyze.py',
-  })
 })
 
 test('applyContinuationIntentToState keeps task identity while applying explicit continuation overrides', () => {

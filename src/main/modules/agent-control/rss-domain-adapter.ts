@@ -13,6 +13,8 @@ import type { ScopeRunTaskStep } from './types'
 // call its subsequent actions without the adapter stripping them.
 const TOOL_PREFIXES = ['rss_', 'skill_rss_', 'memory_', 'session_']
 const INSTRUCTION = '系统执行器：本轮走 RSS 执行路径。优先使用 rss_* 或 skill_rss_* 工具完成任务，不要改走无关工具。'
+const RSS_TRIGGER_PATTERN =
+  /(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)/i
 
 interface RSSAdapterState {
   steps: ScopeRunTaskStep[]
@@ -70,6 +72,32 @@ function buildSummary(record: Record<string, unknown> | null, toolName: string, 
 
 export class RSSDomainAdapter implements DomainAdapter {
   readonly id = 'rss'
+
+  contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    return [
+      {
+        id: 'rss-analysis',
+        label: 'RSS 分析操作',
+        priority: 0,
+        matches: ({ userText }) => RSS_TRIGGER_PATTERN.test(userText),
+        blocking: false,
+        refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }],
+      },
+    ]
+  }
+
+  arbitrateRunCapabilities(
+    _params: Parameters<DomainAdapter['arbitrateRunCapabilities']>[0],
+  ): ReturnType<DomainAdapter['arbitrateRunCapabilities']> {
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: Parameters<DomainAdapter['decorateUserText']>[1],
+  ): string {
+    return text
+  }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
     return params.route.executor === 'rss'

@@ -20,6 +20,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: legacy IPC payload shape is protected as a source-surface compatibility check
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

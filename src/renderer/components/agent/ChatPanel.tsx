@@ -43,17 +43,15 @@ import {
 } from '../../modules/workbench/panel-motion'
 import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import { IconButton } from '../ui/IconButton'
-// B Phase 4 PR3: `createTaskPatchFromSkillExecutionDetail` import retired
-// alongside `applySkillExecutionDetailToScope` (both are dead code now
-// that the state machine is gone).
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
   type TaskCardRunLike,
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
+import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
-import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
+import type { RecoveryRecordData, ReferenceSkillHintData, TaskProjectionRecordData } from '../../types/electron'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -172,6 +170,49 @@ function resolveProjectionForTaskRun(
   return items.find((item) =>
     item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
   ) || items[0] || null
+}
+
+function resolveProjectionWaitingFor(
+  projection: PersistedTaskProjection | null,
+  fallback?: ScopeRunState['waitingFor'],
+): ScopeRunState['waitingFor'] {
+  if (!projection) return fallback || 'none'
+  if (projection?.waitingFor) return projection.waitingFor
+  if (projection.interactionState === 'awaiting_confirmation') return 'confirmation'
+  if (projection.interactionState === 'awaiting_clarification') return 'clarification'
+  if (projection.interactionState === 'human_takeover') return 'agent_result'
+  return fallback || 'none'
+}
+
+function resolveProjectionBlockedReason(
+  projection: PersistedTaskProjection | null,
+  fallback?: string | null,
+): string | null {
+  if (!projection) return fallback || null
+  return projection.blockedReason ?? null
+}
+
+function shouldPreferProjectionContinuation(projection: PersistedTaskProjection | null): boolean {
+  return Boolean(
+    projection?.continuationRef &&
+    (
+      projection.status === 'blocked' ||
+      projection.interactionState === 'suspended' ||
+      projection.continuationRef.pauseReason ||
+      projection.continuationRef.detachedTaskId ||
+      projection.continuationRef.taskRunId ||
+      projection.continuationRef.runStatePath ||
+      projection.continuationRef.outputDir
+    ),
+  )
+}
+
+function resolveTaskContinuationForProjection(
+  projection: PersistedTaskProjection | null,
+  fallback?: ScopeRunState['taskContinuation'],
+): ScopeRunState['taskContinuation'] {
+  if (shouldPreferProjectionContinuation(projection)) return projection?.continuationRef || null
+  return fallback || projection?.continuationRef || null
 }
 
 function memoryCaptureSourceLabel(
@@ -489,6 +530,8 @@ function TaskCard({
   onRetry,
   onSuspendRun,
   onResumeRun,
+  onCancelDetachedTask,
+  onContinueDetachedTask,
 }: {
   run: TaskCardRun
   taskKey: string
@@ -508,6 +551,8 @@ function TaskCard({
   onRetry?: (scopeId: string) => void
   onSuspendRun?: (scopeId: string) => void
   onResumeRun?: (scopeId: string) => void
+  onCancelDetachedTask?: (scopeId: string, taskId?: string | null) => void
+  onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
@@ -517,9 +562,10 @@ function TaskCard({
   const planStepsToRender = showAllPlanSteps ? steps : steps.slice(0, PLAN_STEP_COLLAPSE_THRESHOLD)
   const hiddenPlanStepCount = Math.max(0, steps.length - planStepsToRender.length)
   const recentArtifacts = run.recentArtifacts || []
+  const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
-  const collapsedSummary = vm.summary
+  const summaryPreview = formatSingleLinePreview(vm.summary)
   const metaBadges = [
     run.taskType ? taskTypeBadgeLabel(run.taskType) : null,
     run.interactionState && run.interactionState !== 'running'
@@ -616,7 +662,7 @@ function TaskCard({
             {primaryTitle}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
-            {expanded ? vm.summary : collapsedSummary}
+            {summaryPreview}
           </div>
           {metaBadges.length > 0 && (
             <div className="flex flex-wrap gap-1.5" style={{ marginTop: 6 }}>
@@ -850,13 +896,31 @@ function TaskCard({
       {expanded &&
         (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
           <div className="flex flex-wrap gap-1.5">
-            {(run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
+            {!isDetachedTask && (run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
               <button
                 type="button"
                 onClick={() => onSuspendRun?.(run.scopeId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
                 暂停任务
+              </button>
+            )}
+            {isDetachedTask && (run.resumableActions || []).includes('cancel') && (
+              <button
+                type="button"
+                onClick={() => onCancelDetachedTask?.(run.scopeId, run.taskId || null)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                取消后台任务
+              </button>
+            )}
+            {isDetachedTask && (run.resumableActions || []).includes('continue') && (
+              <button
+                type="button"
+                onClick={() => onContinueDetachedTask?.(run.scopeId, run.taskId || null)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                继续后台任务
               </button>
             )}
             {run.interactionState === 'suspended' && (
@@ -868,7 +932,7 @@ function TaskCard({
                 继续运行
               </button>
             )}
-            {run.waitingFor === 'input' && (
+            {(run.waitingFor === 'input' || run.waitingFor === 'clarification') && (
               <button
                 type="button"
                 onClick={() => onContinueInput?.(run.scopeId)}
@@ -940,8 +1004,8 @@ function ToolTraceCard({
   onToggleExpanded?: () => void
 }) {
   if (events.length === 0) return null
-  const visibleEvents = expanded ? events : events.slice(-1)
   const latestEvent = events[events.length - 1]
+  const latestPreview = formatToolTracePreview(latestEvent?.text)
   return (
     <div
       style={{
@@ -994,7 +1058,7 @@ function ToolTraceCard({
                 flex: 1
               }}
             >
-              {latestEvent.text}
+              {latestPreview}
             </div>
           ) : null}
         </div>
@@ -1008,25 +1072,27 @@ function ToolTraceCard({
           }}
         />
       </button>
-      <div className="flex flex-col" style={{ gap: 4 }}>
-        {visibleEvents.map((event) => (
-          <div
-            key={event.id}
-            className="flex items-start gap-2"
-            style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
-          >
-            <span
-              style={{
-                color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
-                marginTop: 1
-              }}
+      {expanded ? (
+        <div className="flex flex-col" style={{ gap: 4 }}>
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="flex items-start gap-2"
+              style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
             >
-              {event.kind === 'call' ? '•' : '✓'}
-            </span>
-            <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
-          </div>
-        ))}
-      </div>
+              <span
+                style={{
+                  color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
+                  marginTop: 1
+                }}
+              >
+                {event.kind === 'call' ? '•' : '✓'}
+              </span>
+              <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1686,6 +1752,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
     SessionRecallCapsule[]
   >([])
+  const [referenceSkillHint, setReferenceSkillHint] = useState<ReferenceSkillHintData | null>(null)
   const [sessionRecallSearching, setSessionRecallSearching] = useState(false)
   const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1771,6 +1838,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     () => attachedSessionRecallCapsules.map((capsule) => capsule.conversationId),
     [attachedSessionRecallCapsules]
   )
+  const currentScopeRunUpdatedAt = currentScopeId
+    ? scopeRunStates[currentScopeId]?.updatedAt || null
+    : null
 
   const refreshPersistedScopeRuns = useCallback(async () => {
     if (!window.electronAPI?.agent?.listScopeRuns) return
@@ -1829,6 +1899,21 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       return
     }
     setAttachedSessionRecallCapsules(result.data as SessionRecallCapsule[])
+  }, [])
+
+  const refreshReferenceSkillHint = useCallback(async (scopeId?: string | null) => {
+    if (!scopeId || !window.electronAPI?.agent?.getReferenceSkillHint) {
+      setReferenceSkillHint(null)
+      return
+    }
+    const result = await window.electronAPI.agent
+      .getReferenceSkillHint(scopeId)
+      .catch(() => null)
+    if (!result?.success || !result.data) {
+      setReferenceSkillHint(null)
+      return
+    }
+    setReferenceSkillHint(result.data as ReferenceSkillHintData)
   }, [])
 
   const runSessionRecallSearch = useCallback(
@@ -1984,16 +2069,18 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
-        waitingFor: run.waitingFor,
+        waitingFor: projection
+          ? resolveProjectionWaitingFor(projection, run.waitingFor)
+          : run.waitingFor,
         resumableActions:
-          (run.resumableActions && run.resumableActions.length > 0)
-            ? run.resumableActions
-            : (projection?.resumableActions || []),
+          (projection?.resumableActions && projection.resumableActions.length > 0)
+            ? projection.resumableActions
+            : (run.resumableActions || []),
         recentArtifacts:
           (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
-        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
+        taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
         memoryCapture: run.memoryCapture,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
@@ -2002,7 +2089,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: projection?.blockedReason || run.blockedReason,
+        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason),
         error: run.error,
         updatedAt: run.updatedAt,
         toolTrace: []
@@ -2028,15 +2115,18 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? normalizeProjectionSteps(projection.steps)
             : (run.steps || []),
         currentStepId: projection?.currentStepId || run.currentStepId,
+        waitingFor: projection
+          ? resolveProjectionWaitingFor(projection, run.waitingFor)
+          : run.waitingFor,
         resumableActions:
-          (run.resumableActions && run.resumableActions.length > 0)
-            ? run.resumableActions
-            : (projection?.resumableActions || []),
+          (projection?.resumableActions && projection.resumableActions.length > 0)
+            ? projection.resumableActions
+            : (run.resumableActions || []),
         recentArtifacts:
           (projection?.recentArtifacts && projection.recentArtifacts.length > 0)
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
-        taskContinuation: run.taskContinuation || projection?.continuationRef || null,
+        taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
@@ -2044,7 +2134,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: projection?.blockedReason || run.blockedReason
+        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason)
       })
     }
     return Array.from(merged.values()).sort(
@@ -2273,6 +2363,28 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   }, [currentScopeId, refreshAttachedSessionRecall])
 
   useEffect(() => {
+    setReferenceSkillHint(null)
+  }, [currentScopeId])
+
+  useEffect(() => {
+    void refreshReferenceSkillHint(currentScopeId)
+  }, [currentScopeId, currentScopeRunUpdatedAt, isStreaming, refreshReferenceSkillHint])
+
+  // Phase 5.3 — subscribe to push-based hint changes from main so the badge
+  // updates the instant the orchestrator arms/clears/sweeps a hint, instead
+  // of lagging behind scope-run-event ticks. Audit Phase 5 §E3.
+  useEffect(() => {
+    if (!window.electronAPI?.agent?.onReferenceSkillHintChanged) return
+    const unsubscribe = window.electronAPI.agent.onReferenceSkillHintChanged((data) => {
+      // Only refresh when the event targets the currently displayed scope —
+      // hint changes for other scopes shouldn't ping this view.
+      if (!currentScopeId || data.scopeId !== currentScopeId) return
+      void refreshReferenceSkillHint(currentScopeId)
+    })
+    return unsubscribe
+  }, [currentScopeId, refreshReferenceSkillHint])
+
+  useEffect(() => {
     void refreshPersistedScopeRuns()
   }, [refreshPersistedScopeRuns, currentScopeId, scopes.length])
 
@@ -2369,10 +2481,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     []
   )
 
-  // B Phase 4 PR3: `applySkillExecutionDetailToScope` retired. Its only
-  // caller was the `handleRetryTask` branch that invoked
-  // `skills.restartFromStep` — both were deleted together in PR3 when the
-  // state machine IPC went away.
+  // Phase 4: applySkillExecutionDetailToScope removed — the only caller was
+  // handleRetryTask's restartFromStep branch, also retired.
 
   const buildRunContinuationIntent = useCallback(
     (
@@ -2387,6 +2497,17 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         stepId: run?.taskContinuation?.stepId || undefined,
         blockedReason: run?.blockedReason || undefined,
         responseText: responseText || undefined,
+        todoId: run?.taskContinuation?.todoId || undefined,
+        todoTitle: run?.taskContinuation?.todoTitle || undefined,
+        pauseReason: run?.taskContinuation?.pauseReason || undefined,
+        detachedTaskId: run?.taskContinuation?.detachedTaskId || undefined,
+        taskRunId: run?.taskContinuation?.taskRunId || undefined,
+        jobId: run?.taskContinuation?.jobId || undefined,
+        skillId: run?.taskContinuation?.skillId || undefined,
+        action: run?.taskContinuation?.action || undefined,
+        runStatePath: run?.taskContinuation?.runStatePath || undefined,
+        outputDir: run?.taskContinuation?.outputDir || undefined,
+        progressFingerprint: run?.taskContinuation?.progressFingerprint || undefined,
       }
     },
     [],
@@ -2458,6 +2579,47 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     })
   }, [mergedTaskRuns])
 
+  const handleCancelDetachedTask = useCallback(async (_scopeId: string, taskId?: string | null) => {
+    const detachedTaskId = typeof taskId === 'string' && taskId.startsWith('detached:')
+      ? taskId.slice('detached:'.length)
+      : ''
+    if (!detachedTaskId || !window.electronAPI?.agent?.cancelDetachedSkillTask) return
+    await window.electronAPI.agent.cancelDetachedSkillTask(detachedTaskId, _scopeId).catch(() => null)
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [refreshPersistedScopeRuns, refreshPersistedTaskProjections])
+
+  const handleContinueDetachedTask = useCallback((scopeId: string, taskId?: string | null) => {
+    const detachedTaskId = typeof taskId === 'string' && taskId.startsWith('detached:')
+      ? taskId.slice('detached:'.length)
+      : ''
+    if (!detachedTaskId) return
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    const run =
+      useAgent.getState().scopeRunStates[scopeId] ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId && (
+        item.taskId === taskId ||
+        item.taskId === detachedTaskId ||
+        item.taskContinuation?.detachedTaskId === detachedTaskId ||
+        item.taskContinuation?.taskId === detachedTaskId
+      )) ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId)
+    const continuationRun: Pick<ScopeRunState, 'taskId' | 'taskContinuation' | 'blockedReason'> = run || {
+      taskId: detachedTaskId,
+      blockedReason: '后台任务仍在运行',
+      taskContinuation: {
+        taskId: detachedTaskId,
+        detachedTaskId,
+        pauseReason: 'background_running',
+        blockerType: 'background_running',
+      },
+    }
+    setComposerDraft(`继续后台任务 ${detachedTaskId}`, buildRunContinuationIntent(continuationRun) || null)
+    focusInputWithResize()
+  }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
+
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =
       useAgent.getState().scopeRunStates[scopeId] ||
@@ -2471,14 +2633,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
 
   const handleRetryTask = useCallback(
     async (scopeId: string) => {
-      // B Phase 4 PR3: the direct `skills.restartFromStep` IPC path is
-      // retired alongside the state machine. Retry now always goes through
-      // a composer-draft prompt — the agent layer picks up the
-      // `continuationIntent` (now carrying `todoId` / `todoTitle`, PR1)
-      // and regenerates the tool calls for the referenced todo.
       const run =
         useAgent.getState().scopeRunStates[scopeId] ||
         mergedTaskRuns.find((item) => item.scopeId === scopeId)
+      // Phase 4: skill_executions state machine retired — the legacy
+      // `restartFromStep` IPC bridge is gone. Retry now always goes through
+      // the composer draft path; the LLM re-plans from the current state.
       setComposerDraft(
         '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
         buildRunContinuationIntent(run) || null,
@@ -2592,11 +2752,15 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           onRetry={handleRetryTask}
           onSuspendRun={handleSuspendTask}
           onResumeRun={handleResumeTask}
+          onCancelDetachedTask={handleCancelDetachedTask}
+          onContinueDetachedTask={handleContinueDetachedTask}
         />
       )
     },
     [
       handleContinueTaskInput,
+      handleCancelDetachedTask,
+      handleContinueDetachedTask,
       handleDismissMemoryCapture,
       handleOpenTaskArtifact,
       handleRetryTask,
@@ -2801,11 +2965,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
               }
             ])
 
-            // Insert `@[Skill Name]` — same syntax the @-menu produces
-            // (ChatInput.tsx::insertAtReference). The skill is already in
-            // filePool via addAttachments, so the orchestrator's
-            // `findExplicitlyRequestedSkills` matches on the mention and
-            // messageComposer appends the skillId/path context block on send.
+            // Insert the same mention syntax as the @-menu; the skill has
+            // already been attached to filePool above.
             const mention = `@[${data.name}]`
             const currentInput = useAgent.getState().inputValue
             const trimmedEnd = currentInput.replace(/\s+$/, '')
@@ -3119,9 +3280,68 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           boxShadow: 'none'
         }}
       >
+        {referenceSkillHint && (
+          <div
+            className="glass-surface-card"
+            data-reference-skill-hint="true"
+            style={{
+              borderRadius: 8,
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--surface-panel-bg) 44%, transparent)',
+              padding: '8px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <Puzzle
+                style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
+                strokeWidth={2}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--text-light)',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  技能上下文
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: 'var(--text-body)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {referenceSkillHint.name || referenceSkillHint.id}
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                flexShrink: 0,
+                fontSize: 11,
+                color: 'var(--text-muted)'
+              }}
+            >
+              上下文已启用
+            </div>
+          </div>
+        )}
+
         {attachedSessionRecallCapsules.length > 0 && (
           <div
             className="glass-surface-card"
+            data-session-recall-attachments="true"
             style={{
               borderRadius: 12,
               border: '1px solid var(--border-default)',

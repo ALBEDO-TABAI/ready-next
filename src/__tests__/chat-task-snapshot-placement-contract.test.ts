@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: snapshot placement wiring crosses chat rendering and runtime projection surfaces
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -33,9 +34,12 @@ test('chat messages expose a temporary pending task block while the next reply i
 test('task and tool cards stay collapsed by default and only reveal the latest line until expanded', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
-  assert.match(chatPanel, /const collapsedSummary = /)
-  assert.match(chatPanel, /expanded \? vm\.summary : collapsedSummary/)
-  assert.match(chatPanel, /const visibleEvents = expanded \? events : events\.slice\(-1\)/)
+  assert.match(chatPanel, /const summaryPreview = formatSingleLinePreview\(vm\.summary\)/)
+  assert.match(chatPanel, /\{summaryPreview\}/)
+  assert.match(chatPanel, /!expanded && latestEvent/)
+  assert.match(chatPanel, /const latestPreview = formatToolTracePreview\(latestEvent\?\.text\)/)
+  assert.match(chatPanel, /expanded && vm\.currentStep/)
+  assert.match(chatPanel, /\{events\.map\(\(event\) =>/)
   assert.doesNotMatch(chatPanel, /最近一步：/)
   assert.match(chatPanel, /whiteSpace:\s*'nowrap'/)
   assert.match(chatPanel, /flexShrink:\s*0/)

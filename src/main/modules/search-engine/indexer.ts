@@ -5,6 +5,7 @@ import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
 import {
+  AbortError,
   AgentMessageAdapter,
   BookmarkAdapter,
   CalendarAdapter,
@@ -46,6 +47,10 @@ export interface ReindexAllSourcesResult {
 
 export interface SearchEngineOptions {
   fts5Available: boolean
+  // perf-rescue B8: override the debounced workspace-wide wikilink resolve
+  // window. Default: 5000ms. Tests pass a small value (or 0) to assert the
+  // backup pass actually runs without sleeping for 5 seconds.
+  workspaceResolveDebounceMs?: number
 }
 
 export class SearchEngine {
@@ -53,6 +58,20 @@ export class SearchEngine {
   private readonly fsAdapter: FileSystemAdapter
   private readonly sharedAdapters: IndexSourceAdapter[]
   private readonly adaptersByType: Map<string, IndexSourceAdapter>
+  // perf-rescue B8: debounced workspace-wide wikilink resolve. Each per-doc
+  // index call only resolves THAT doc's outgoing + incoming links; an edge
+  // case the per-doc path can miss (deletions, renames, ambiguous names)
+  // is reconciled by a delayed full-workspace pass that aggregates rapid
+  // bursts of saves into one DB scan.
+  //
+  // Map keyed by workspaceId so multiple workspaces don't share a debounce.
+  // Each entry tracks its setTimeout handle + the AbortController used to
+  // cancel it (e.g. on workspace close / app quit).
+  private readonly workspaceResolveTimers: Map<number, {
+    timer: NodeJS.Timeout
+    controller: AbortController
+  }> = new Map()
+  private static readonly DEFAULT_WORKSPACE_RESOLVE_DEBOUNCE_MS = 5_000
 
   constructor(private readonly db: DatabaseConnection, private readonly options: SearchEngineOptions) {
     this.repository = new SearchRepository(db, options.fts5Available)
@@ -77,7 +96,8 @@ export class SearchEngine {
     return Array.from(this.adaptersByType.keys())
   }
 
-  async reindexWorkspace(root: string): Promise<ReindexWorkspaceResult> {
+  async reindexWorkspace(opts: { root: string; signal?: AbortSignal }): Promise<ReindexWorkspaceResult> {
+    const { root, signal } = opts
     const started = Date.now()
     const result: ReindexWorkspaceResult = {
       ok: false,
@@ -98,6 +118,7 @@ export class SearchEngine {
         workspaceId,
         workspaceRoot: root,
         repository: this.repository,
+        signal,
       })
       result.indexed = adapterResult.indexed
       result.skipped = adapterResult.skipped
@@ -106,7 +127,14 @@ export class SearchEngine {
       this.repository.touchWorkspace(workspaceId, Math.floor(Date.now() / 1000))
       result.ok = true
     } catch (error) {
-      result.error = error instanceof Error ? error.message : String(error)
+      // perf-rescue B6: AbortError is a first-class signal for callers; we
+      // still log it but surface a structured `aborted: true` flag so the
+      // worker can distinguish cancellation from a real failure.
+      const message = error instanceof Error ? error.message : String(error)
+      result.error = message
+      if (error instanceof AbortError) {
+        ;(result as ReindexWorkspaceResult & { aborted?: boolean }).aborted = true
+      }
     }
     result.elapsedMs = Date.now() - started
     logSearch(
@@ -115,12 +143,13 @@ export class SearchEngine {
     return result
   }
 
-  async reindexAllSources(root: string): Promise<ReindexAllSourcesResult> {
+  async reindexAllSources(opts: { root: string; signal?: AbortSignal }): Promise<ReindexAllSourcesResult> {
+    const { root, signal } = opts
     const started = Date.now()
     const perSource: Record<string, AdapterReindexResult & { error?: string }> = {}
 
     // Filesystem (per-root) runs first
-    const fsResult = await this.reindexWorkspace(root)
+    const fsResult = await this.reindexWorkspace({ root, signal })
     perSource[this.fsAdapter.sourceType] = {
       indexed: fsResult.indexed,
       skipped: fsResult.skipped,
@@ -129,15 +158,26 @@ export class SearchEngine {
       ...(fsResult.error ? { error: fsResult.error } : {}),
     }
 
+    // If the FS pass was aborted, skip shared adapters too — caller wants
+    // the whole reindex stopped, not partially advanced into bookmark/RSS.
+    if ((fsResult as ReindexWorkspaceResult & { aborted?: boolean }).aborted || signal?.aborted) {
+      return { ok: false, perSource, elapsedMs: Date.now() - started }
+    }
+
     // Shared adapters run under the @shared workspace
     const sharedWorkspaceId = this.repository.ensureWorkspace(SHARED_WORKSPACE_ROOT)
     for (const adapter of this.sharedAdapters) {
+      if (signal?.aborted) {
+        perSource[adapter.sourceType] = { indexed: 0, skipped: 0, removed: 0, scanned: 0, error: 'aborted' }
+        continue
+      }
       try {
         // eslint-disable-next-line no-await-in-loop
         const r = await adapter.reindex({
           workspaceId: sharedWorkspaceId,
           workspaceRoot: SHARED_WORKSPACE_ROOT,
           repository: this.repository,
+          signal,
         })
         perSource[adapter.sourceType] = r
       } catch (error) {
@@ -179,14 +219,93 @@ export class SearchEngine {
         this.repository.replaceTags(documentId, parsed.tags)
         this.repository.replaceLinks(documentId, parsed.wikilinks, parsed.mdlinks)
         this.repository.replaceAttachments(documentId, parsed.attachments)
-        this.repository.resolveWikilinkTargets(workspaceId)
+        // perf-rescue B8: per-document wikilink resolve.
+        //
+        // Was: resolveWikilinkTargets(workspaceId) — full workspace re-scan
+        //      on every save. On a 100k-doc workspace this is a multi-second
+        //      hot loop that runs for every keystroke-triggered save.
+        //
+        // Now: resolve only THIS doc's outgoing + incoming links. The
+        //      backup workspace-wide pass below catches edge cases (deletes,
+        //      renames, name-collision reshuffles) by aggregating bursts of
+        //      saves into one scan after a 5s quiet window.
+        this.repository.resolveWikilinkTargetsForDocument(documentId)
       })
+      // Schedule the backup resolve outside the transaction — we don't want
+      // this to keep the per-file transaction open. Skipped writes (no
+      // content change) still trigger it because rename/incoming-resolve
+      // edge cases don't depend on whether the body changed.
+      this.scheduleWorkspaceLinkResolve(workspaceId)
       return { ok: true, documentId, skipped }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logSearch(`indexDocument failed path=${path} error=${message}`)
       return { ok: false, error: message }
     }
+  }
+
+  /**
+   * perf-rescue B8: schedule a debounced workspace-wide wikilink resolve.
+   *
+   * Coalesces rapid-fire single-file saves (e.g. autosave + watcher) into a
+   * single full resolve after a 5s quiet window. Each call resets the timer.
+   *
+   * The returned AbortSignal can be used by the caller to cancel a pending
+   * resolve (e.g. workspace close, app quit). When aborted, the scheduled
+   * pass will not run; in-flight passes are not interrupted (the SQL itself
+   * is fast enough that a single UPDATE is atomic from the caller's view).
+   *
+   * Idempotent: callable from any thread/context. Returning the controller's
+   * signal is mostly for tests and lifecycle hooks; routine callers can
+   * ignore the return value.
+   */
+  scheduleWorkspaceLinkResolve(workspaceId: number): AbortSignal {
+    const existing = this.workspaceResolveTimers.get(workspaceId)
+    if (existing) {
+      clearTimeout(existing.timer)
+      // Re-use the controller — if a caller is holding the signal from a
+      // prior call, "rescheduling" semantically continues the same logical
+      // intent. Aborting the prior signal here would surprise observers
+      // that just wanted "fire eventually".
+    }
+    const controller = existing?.controller ?? new AbortController()
+    const debounceMs = this.options.workspaceResolveDebounceMs
+      ?? SearchEngine.DEFAULT_WORKSPACE_RESOLVE_DEBOUNCE_MS
+    const timer = setTimeout(() => {
+      this.workspaceResolveTimers.delete(workspaceId)
+      if (controller.signal.aborted) return
+      try {
+        this.repository.transaction(() => {
+          this.repository.resolveWikilinkTargets(workspaceId)
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logSearch(`scheduledWorkspaceLinkResolve failed workspaceId=${workspaceId} error=${message}`)
+      }
+    }, debounceMs)
+    // Allow Node to exit even if a debounce timer is pending — we don't want
+    // to block process shutdown over a backup resolve. Test harnesses can
+    // still observe the timer via fake timers or by calling the method
+    // directly with a 0-ms override (currently constant; expose if needed).
+    if (typeof timer.unref === 'function') timer.unref()
+    this.workspaceResolveTimers.set(workspaceId, { timer, controller })
+    return controller.signal
+  }
+
+  /**
+   * Cancel any pending debounced workspace resolves. Called on workspace
+   * close / app quit to prevent a delayed pass from firing against a
+   * detached DB.
+   */
+  cancelPendingWorkspaceResolves(): number {
+    let cancelled = 0
+    for (const [, entry] of this.workspaceResolveTimers) {
+      clearTimeout(entry.timer)
+      entry.controller.abort()
+      cancelled += 1
+    }
+    this.workspaceResolveTimers.clear()
+    return cancelled
   }
 
   countDocuments(workspaceId: number): number {

@@ -8,6 +8,8 @@ import type {
   TaskType,
 } from './run-contracts'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
+import { logAgentMetric } from './metrics'
+import { matchesResumeIntent } from './resume-lexicon'
 import type { ScopeRunResumableAction, ScopeRunTaskContinuation } from './types'
 
 export interface ContinuationState {
@@ -33,11 +35,17 @@ export interface ContinuationIntent {
   stepId?: string
   blockedReason?: string
   responseText?: string
-  // B Phase 4: todo-anchored resumption. PR3 wires resumeRun /
-  // respondToInteraction handlers to look up the todo via
-  // `getSkillTaskTracker().findTodo(todoId)` when executionId is empty.
   todoId?: string
   todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 export interface ParsedContinuationControlText {
@@ -144,13 +152,46 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
   if (!value || typeof value !== 'object') return null
   const record = value as Partial<ScopeRunTaskContinuation>
   const executionId = String(record.executionId || '').trim()
-  if (!executionId) return null
+  const todoId = String(record.todoId || '').trim()
+  const detachedTaskId = String(record.detachedTaskId || '').trim()
+  const taskRunId = String(record.taskRunId || '').trim()
+  const jobId = String(record.jobId || '').trim()
+  const skillId = String(record.skillId || '').trim()
+  const action = String(record.action || '').trim()
+  const runStatePath = String(record.runStatePath || '').trim()
+  const outputDir = String(record.outputDir || '').trim()
+  const progressFingerprint = String(record.progressFingerprint || '').trim()
+  if (
+    !executionId &&
+    !todoId &&
+    !detachedTaskId &&
+    !taskRunId &&
+    !jobId &&
+    !skillId &&
+    !action &&
+    !runStatePath &&
+    !outputDir &&
+    !progressFingerprint
+  ) {
+    return null
+  }
   return {
     taskId: String(record.taskId || taskId || '').trim() || taskId,
-    executionId,
+    executionId: executionId || null,
     stepId: String(record.stepId || currentStepId || '').trim() || currentStepId || null,
     blockerType: typeof record.blockerType === 'string' ? record.blockerType : null,
     targetUrl: typeof record.targetUrl === 'string' ? record.targetUrl : null,
+    todoId: todoId || null,
+    todoTitle: typeof record.todoTitle === 'string' ? record.todoTitle : null,
+    pauseReason: typeof record.pauseReason === 'string' ? record.pauseReason : null,
+    detachedTaskId: detachedTaskId || null,
+    taskRunId: taskRunId || null,
+    jobId: jobId || null,
+    skillId: skillId || null,
+    action: action || null,
+    runStatePath: runStatePath || null,
+    outputDir: outputDir || null,
+    progressFingerprint: progressFingerprint || null,
   }
 }
 
@@ -163,21 +204,27 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
   if (!value) return null
   const taskId = String(value.taskId || '').trim()
   if (!taskId) return null
-  return {
-    taskId,
-    executionId: normalizeOptionalContinuationText(value.executionId),
-    stepId: normalizeOptionalContinuationText(value.stepId),
-    blockedReason: normalizeOptionalContinuationText(value.blockedReason),
-    responseText: normalizeOptionalContinuationText(value.responseText),
-    // B Phase 4 PR3: tracker-anchored fields. `todoId` is the id assigned by
-    // `SkillTaskTracker.startTodo()` (pattern `st-<8hex>`); `todoTitle` is
-    // the human-readable line the renderer task card rendered. Both travel
-    // through continuation state so `direct-chat.ts` can synthesize a
-    // "请继续执行 todo「…」" / "请重新执行 todo「…」" user message
-    // when no `executionId` is present.
-    todoId: normalizeOptionalContinuationText(value.todoId),
-    todoTitle: normalizeOptionalContinuationText(value.todoTitle),
+  const normalized: ContinuationIntent = { taskId }
+  const copy = (key: Exclude<keyof ContinuationIntent, 'taskId'>): void => {
+    const text = normalizeOptionalContinuationText(value[key])
+    if (text) normalized[key] = text
   }
+  copy('executionId')
+  copy('stepId')
+  copy('blockedReason')
+  copy('responseText')
+  copy('todoId')
+  copy('todoTitle')
+  copy('pauseReason')
+  copy('detachedTaskId')
+  copy('taskRunId')
+  copy('jobId')
+  copy('skillId')
+  copy('action')
+  copy('runStatePath')
+  copy('outputDir')
+  copy('progressFingerprint')
+  return normalized
 }
 
 export function applyContinuationIntentToState(
@@ -190,12 +237,33 @@ export function applyContinuationIntentToState(
   }
 
   const currentStepId = normalizedIntent.stepId || baseState.currentStepId || null
-  const continuationRef = (baseState.continuationRef || normalizedIntent.executionId)
+  const continuationRef = (
+    baseState.continuationRef
+    || normalizedIntent.executionId
+    || normalizedIntent.todoId
+    || normalizedIntent.detachedTaskId
+    || normalizedIntent.taskRunId
+    || normalizedIntent.jobId
+    || normalizedIntent.skillId
+    || normalizedIntent.runStatePath
+    || normalizedIntent.outputDir
+  )
     ? normalizeContinuationRef({
       ...(baseState.continuationRef || {}),
       taskId: baseState.taskId,
       executionId: normalizedIntent.executionId || baseState.continuationRef?.executionId,
       stepId: normalizedIntent.stepId || baseState.continuationRef?.stepId || currentStepId,
+      todoId: normalizedIntent.todoId || baseState.continuationRef?.todoId,
+      todoTitle: normalizedIntent.todoTitle || baseState.continuationRef?.todoTitle,
+      pauseReason: normalizedIntent.pauseReason || baseState.continuationRef?.pauseReason,
+      detachedTaskId: normalizedIntent.detachedTaskId || baseState.continuationRef?.detachedTaskId,
+      taskRunId: normalizedIntent.taskRunId || baseState.continuationRef?.taskRunId,
+      jobId: normalizedIntent.jobId || baseState.continuationRef?.jobId,
+      skillId: normalizedIntent.skillId || baseState.continuationRef?.skillId,
+      action: normalizedIntent.action || baseState.continuationRef?.action,
+      runStatePath: normalizedIntent.runStatePath || baseState.continuationRef?.runStatePath,
+      outputDir: normalizedIntent.outputDir || baseState.continuationRef?.outputDir,
+      progressFingerprint: normalizedIntent.progressFingerprint || baseState.continuationRef?.progressFingerprint,
     }, baseState.taskId, currentStepId)
     : null
 
@@ -267,7 +335,16 @@ export function parseContinuationControlText(raw: string): ParsedContinuationCon
     blockedReason,
     responseText,
     hasControlLines,
-    shouldResolveContinuation: Boolean(explicitTaskId) || /(继续|接着|恢复|上次|重试)/.test(sanitizedUserText),
+    // Phase 2.4 — `shouldResolveContinuation` is the gate that asks the
+    // continuation projection store "is the user trying to resume something?"
+    // Previously the inline regex `/(继续|接着|恢复|上次|重试)/` missed natural
+    // phrasings like "你需要从头跑一轮" / "重新跑一次" / "再跑一遍" — exactly
+    // the cases Codex flagged as silently dropped. The unified `anywhere`
+    // mode in resume-lexicon covers them and stays grep-able when adding new
+    // tokens. False positives are cheap here: the lookup returns null when
+    // no candidate exists, and `selectContinuationProjection` excludes
+    // terminal-status tasks (Phase 2.5).
+    shouldResolveContinuation: Boolean(explicitTaskId) || matchesResumeIntent(sanitizedUserText, 'anywhere'),
   }
 }
 
@@ -322,6 +399,37 @@ export function isContinuationProjectionCandidate(projection: TaskProjectionReco
   )
 }
 
+/**
+ * Screenshot-bug hotfix — Phase 2.5 originally filtered `done | failed |
+ * cancelled` as "implicitly non-resumable", but a real user case proved
+ * `failed` was the most natural resume target: "再从头重新跑一次" against
+ * a previously-failed VEA pipeline. Filtering it out forced the turn into
+ * fresh-task routing, the orchestrator never inlined the reference skill,
+ * and the model emitted `<tool_call>` XML as visible chat text.
+ *
+ * New policy:
+ *   - `cancelled` → stays excluded (user explicitly cancelled; auto-resume
+ *      would override their intent).
+ *   - `done` → stays excluded for IMPLICIT lookup (user typed "继续" without
+ *      a Task ID is far more often referring to a live task than a
+ *      finished one). Explicit Task ID still resolves done tasks.
+ *   - `failed` → no longer excluded. Retry semantics make this the most
+ *      common resume target; "再跑/重试/重新跑" all reasonably mean
+ *      "resume the failed one".
+ *
+ * Audit Phase 2 §B4 (the "理解需求 shadowing" risk) is still mitigated:
+ * the system's auto-classified "理解需求" task is created with status
+ * `done` once it lands its result, so the original shadowing remains
+ * blocked. Failed tasks were never the source of that bug.
+ */
+function isTerminalProjection(projection: TaskProjectionRecord | null | undefined): boolean {
+  if (!projection) return true
+  return (
+    projection.status === 'done'
+    || projection.status === 'cancelled'
+  )
+}
+
 export function selectContinuationProjection(params: {
   projections: TaskProjectionRecord[]
   userText: string
@@ -334,12 +442,36 @@ export function selectContinuationProjection(params: {
     .slice()
     .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
   if (explicitTaskId) {
+    // Explicit Task ID is a deliberate user/runtime override — honor even
+    // terminal status (the caller may want to inspect the closed task).
     return sortedProjections.find((item) => item.taskId === explicitTaskId) || null
   }
   if (params.allowImplicitContinuation === false || !parsed.shouldResolveContinuation) {
     return null
   }
-  return sortedProjections.find((item) => isContinuationProjectionCandidate(item)) || sortedProjections[0] || null
+  // Phase 2.5 — exclude terminal projections from BOTH the candidate find
+  // and the fallback. Old behavior: if no blocked/running task existed, the
+  // fallback `sortedProjections[0]` could return a recently-touched but
+  // already-finished `done` task, leading to "理解需求" turns shadowing real
+  // skill executions (audit Phase 2 §B4). New behavior: returning null when
+  // no live candidate exists lets the upstream gate fall back to "fresh
+  // task" routing instead of a stale resume.
+  const liveProjections = sortedProjections.filter((item) => !isTerminalProjection(item))
+  // Phase 5.4 — observability: count how often the terminal filter actually
+  // saved us from picking a closed task. Emitted only when the filter
+  // dropped at least one candidate so the metric stays signal-not-noise.
+  const droppedCount = sortedProjections.length - liveProjections.length
+  if (droppedCount > 0) {
+    logAgentMetric('continuation_projection_terminal_skipped', {
+      droppedCount,
+      liveCount: liveProjections.length,
+      droppedTaskIds: sortedProjections
+        .filter((item) => isTerminalProjection(item))
+        .slice(0, 5)
+        .map((item) => item.taskId),
+    })
+  }
+  return liveProjections.find((item) => isContinuationProjectionCandidate(item)) || liveProjections[0] || null
 }
 
 export function normalizeContinuationState(value: Partial<ContinuationState> | null | undefined): ContinuationState | null {
@@ -374,6 +506,7 @@ export function normalizeContinuationState(value: Partial<ContinuationState> | n
         restoredUsage: Boolean(value.restoreDiagnostics.restoredUsage),
         grantedIterationSafetyFloor: Boolean(value.restoreDiagnostics.grantedIterationSafetyFloor),
         grantedToolCallSafetyFloor: Boolean(value.restoreDiagnostics.grantedToolCallSafetyFloor),
+        grantedStepBudgetSafetyFloor: Boolean(value.restoreDiagnostics.grantedStepBudgetSafetyFloor),
       }
       : null,
   }
@@ -399,7 +532,7 @@ export function buildContinuationStateFromProjection(
   const continuationRef = normalizeContinuationRef({
     ...(projection.continuationRef || {}),
     taskId: projection.taskId,
-    executionId: overrides?.executionId || projection.continuationRef?.executionId || projection.runId,
+    executionId: overrides?.executionId || projection.continuationRef?.executionId,
     stepId: overrides?.stepId || projection.continuationRef?.stepId || currentStepId,
   }, projection.taskId, currentStepId)
 

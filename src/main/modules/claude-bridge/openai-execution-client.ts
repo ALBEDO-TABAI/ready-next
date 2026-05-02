@@ -10,6 +10,8 @@ import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-
 import type { ToolSnapshot } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
+import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
+import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { buildTextToolResultMessage, parseTextToolBridgeResponse } from './tool-bridge'
@@ -604,7 +606,7 @@ export class OpenAIExecutionClient {
     }
 
     const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
-    return {
+    const responsesNative: OpenAIExecutionResponse = {
       text: this.extractResponsesText(json),
       toolCalls: this.extractResponsesToolCalls(json),
       stopReason: String(json.status || 'completed'),
@@ -612,6 +614,8 @@ export class OpenAIExecutionClient {
       providerResponseId: typeof json.id === 'string' ? json.id : undefined,
       toolTransport: 'native',
     }
+    // Screenshot-bug ROOT FIX — recover XML tool_calls leaked into text.
+    return this.recoverXmlToolCallsFromNative(responsesNative, 'responses')
   }
 
   private async requestWithChatCompletionsTools(params: {
@@ -671,7 +675,71 @@ export class OpenAIExecutionClient {
       toolTransport: 'native',
     }
     this.deps.log(`OpenAI response: text=${nativeResponse.text.length}chars, toolCalls=${nativeResponse.toolCalls.length}, reasoning=${nativeResponse.reasoningContent !== undefined}, finish=${choice?.finish_reason}`)
-    return nativeResponse
+    // Screenshot-bug ROOT FIX — recover XML tool_calls leaked into text.
+    return this.recoverXmlToolCallsFromNative(nativeResponse, 'chat_completions')
+  }
+
+  /**
+   * Screenshot-bug ROOT FIX — recover XML-style `<tool_call><function=NAME>
+   * <parameter=KEY>VAL</parameter></function></tool_call>` calls that the
+   * model emitted in plain text under NATIVE function-calling transport.
+   *
+   * Background: some OpenAI-compatible providers (mimo / qwen / others)
+   * advertise native function calling, but the underlying model was trained
+   * on the XML format. The provider passes the model's text through verbatim
+   * and returns `tool_calls: []`. Without this recovery, turn-engine sees
+   * "no tool calls" and ends the turn, leaving the user with a chat bubble
+   * full of leaked XML and zero actual work done. Original Phase 3.2 fix
+   * stripped the XML for cosmetic cleanliness but didn't restore the
+   * model's intent — the user reported "直接就停止了这次".
+   *
+   * Returns the response unchanged when:
+   *   - native already had real tool_calls (prefer the structured path)
+   *   - text doesn't have the XML markers (fast path, no allocation)
+   *   - parser extracts 0 calls (malformed XML — TurnTranscript's strip
+   *     becomes the last-resort cleanup so the user at least sees clean
+   *     text instead of raw markup)
+   *
+   * When recovery succeeds the response is rewritten as if it were
+   * text-bridge: toolCalls populated with synthetic IDs, text replaced by
+   * the cleaned visibleText, toolTransport tagged 'text' so downstream
+   * consumers handle it consistently.
+   */
+  private recoverXmlToolCallsFromNative(
+    response: OpenAIExecutionResponse,
+    route: 'chat_completions' | 'responses',
+  ): OpenAIExecutionResponse {
+    if (response.toolCalls.length > 0) return response
+    if (!response.text) return response
+    // Reuse the same marker pattern as the renderer-side guard so a single
+    // regex change keeps both layers in sync.
+    if (!/<tool_call>|<function=|<parameter=|:::tool_call/i.test(response.text)) return response
+    const parsed = parseTextToolBridgeResponse(response.text)
+    if (parsed.toolCalls.length === 0) return response
+    logAgentMetric(TOOL_ERROR_METRICS.xmlToolCallsRecoveredFromNative, {
+      route,
+      originalCallsCount: 0,
+      recoveredCallsCount: parsed.toolCalls.length,
+      recoveredToolNames: parsed.toolCalls.map((call) => call.name).slice(0, 5),
+      originalTextLen: response.text.length,
+      cleanedTextLen: parsed.visibleText.length,
+    })
+    this.deps.log(
+      `[xml_recovery] ${route}: model emitted ${parsed.toolCalls.length} XML tool_call(s) under native transport; recovering as text-bridge so dispatch can proceed.`,
+    )
+    return {
+      ...response,
+      text: parsed.visibleText,
+      rawText: response.text,
+      toolCalls: parsed.toolCalls.map((call) => ({
+        id: `xmlrec_${randomUUID().replace(/-/g, '')}`,
+        name: call.name,
+        input: call.args,
+      })),
+      // Tag as text-bridge so downstream (history compression, retry logic,
+      // metrics) treats the recovered calls the same as canonical text-bridge.
+      toolTransport: 'text',
+    }
   }
 
   private toTextToolBridgeResponse(
@@ -814,33 +882,8 @@ export class OpenAIExecutionClient {
   }
 
   private repairOpenAIToolMessageHistory(messages: OpenAIChatMessage[]): Array<Record<string, unknown>> {
-    const rawMessages = messages.map((message) => ({ ...(message as unknown as Record<string, unknown>) }))
-    const openToolCallIds = new Set<string>()
-
-    for (const message of rawMessages) {
-      if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
-        for (const toolCall of message.tool_calls as Array<Record<string, unknown>>) {
-          if (typeof toolCall.id === 'string') {
-            openToolCallIds.add(toolCall.id)
-          }
-        }
-        continue
-      }
-      if (message.role === 'tool') {
-        const toolCallId = typeof message.tool_call_id === 'string' ? message.tool_call_id : null
-        if (toolCallId) {
-          openToolCallIds.delete(toolCallId)
-        }
-      }
-    }
-
-    if (openToolCallIds.size === 0) return rawMessages
-    return rawMessages.filter((message) => {
-      if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) return true
-      return (message.tool_calls as Array<Record<string, unknown>>).every((toolCall) => {
-        const id = typeof toolCall.id === 'string' ? toolCall.id : null
-        return !id || !openToolCallIds.has(id)
-      })
+    return sanitizeOpenAICompatibleMessageHistory(messages, {
+      validToolNames: resolveRegisteredToolNamesLazily(),
     })
   }
 

@@ -1,21 +1,22 @@
 /**
- * B Phase 2 — video-copy-analyzer migration e2e smoke.
+ * B Phase 2 / 3 — video-copy-analyzer hybrid reference + retained internal action.
  *
- * Asserts the mechanical properties of the migration without booting the full
- * runtime-manager or spawning any Python:
- *   1. The embedded manifest compiles to `executionMode: 'advisory'` with a
- *      reference `read_skill` action (i.e. it conforms to the Claude Skill
- *      protocol — markdown + frontmatter, no custom state-machine).
- *   2. `skill.workflow.json` no longer exists on disk.
- *   3. SKILL.md carries the `when-to-use` frontmatter field.
- *   4. `SkillContextOrchestrator` inline-injects the SKILL.md (no tool_use
- *      round-trip) and registers the reference-skill hint so primitives
- *      (`skill_run_shell` / `skill_write_artifact` / `skill_read_artifact`)
- *      get gated ON for the next turn.
+ * Hybrid migration parallel to lets-go-rss (Phase 3 PR2): the manifest is now
+ * `execution.mode: 'advisory'` with a `read_skill` reference action AND a
+ * retained `video_copy_analyze` python action kept at `visibility: 'internal'`
+ * because production code still calls it directly:
+ *   - `src/main/modules/rss-engine/item-analysis-manager.ts::runCopyFlow`
+ *     calls `runtime.runSkill({ skillId: 'video-copy-analyzer',
+ *     action: 'video_copy_analyze', params: { input, outputDir, model,
+ *     language } })` for every RSS item that looks like a video link.
  *
- * Per user steer: the test does NOT assert specific shell commands — how the
- * agent chooses to invoke bundled scripts is the model's decision, not
- * something to freeze in a contract here.
+ * Why `internal` (not `public`): the LLM should NEVER see / pick this action;
+ * it's a product-side dependency only. The reference path (read_skill) is the
+ * sole LLM-facing entry, identical to the pure-reference Phase 2 contract.
+ *
+ * Per user steer: the test does NOT assert specific shell commands inside
+ * SKILL.md — how the agent chooses to invoke bundled scripts is the model's
+ * decision, not something to freeze in a contract here.
  */
 
 import assert from 'node:assert/strict'
@@ -35,16 +36,56 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-copy-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-copy-analyzer')
 
-test('manifest compiles to reference/advisory with a single read_skill action', () => {
+test('manifest compiles to advisory with read_skill default + retained internal video_copy_analyze action', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
   assert.equal(def.executionMode, 'advisory', 'execution mode must be advisory post-migration')
   assert.equal(def.workflow, undefined, 'no workflow object should be compiled')
   assert.equal(def.defaultAction, 'read_skill', 'defaultAction points at the reference entry')
-  assert.equal(def.actions.length, 1, 'only read_skill remains')
-  const action = def.actions[0]
-  assert.equal(action.name, 'read_skill')
-  assert.equal(action.runtime, 'reference')
-  assert.equal(action.visibility, 'internal', 'LLM should not see a dynamic skill_<id>_read_skill tool')
+
+  // 1 reference + 1 retained internal python = 2 actions total
+  assert.equal(def.actions.length, 2, 'read_skill + video_copy_analyze (internal, for item-analysis-manager)')
+
+  const readSkill = def.actions.find((a) => a.name === 'read_skill')
+  assert.ok(readSkill, 'read_skill present')
+  assert.equal(readSkill!.runtime, 'reference')
+  assert.equal(readSkill!.visibility, 'internal', 'LLM should not see a dynamic skill_<id>_read_skill tool')
+
+  const copyAnalyze = def.actions.find((a) => a.name === 'video_copy_analyze')
+  assert.ok(copyAnalyze, 'video_copy_analyze action retained for production caller')
+  assert.equal(copyAnalyze!.runtime, 'python')
+  assert.equal(copyAnalyze!.visibility, 'internal', 'kept hidden from LLM; only product code dispatches it')
+  assert.equal(copyAnalyze!.inputMode, 'json', 'json payload mode (--payload-json)')
+  assert.equal(copyAnalyze!.entry, 'scripts/ready_extract_subtitle.py')
+})
+
+test('video_copy_analyze action contract matches item-analysis-manager call site', () => {
+  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
+  const action = def.actions.find((a) => a.name === 'video_copy_analyze')
+  assert.ok(action, 'video_copy_analyze present')
+
+  // The four params actually sent by item-analysis-manager.ts::runCopyFlow.
+  // If item-analysis-manager grows a new param, this test will surface the
+  // missing manifest declaration (or the unused manifest entry).
+  const callSiteParams = ['input', 'outputDir', 'model', 'language']
+  for (const name of callSiteParams) {
+    const param = action!.params.find((p) => p.name === name)
+    assert.ok(param, `param "${name}" declared (used by item-analysis-manager)`)
+  }
+
+  // input is the only required param — everything else has runtime defaults.
+  const inputParam = action!.params.find((p) => p.name === 'input')!
+  assert.equal(inputParam.required, true, 'input is required (URL or path)')
+  for (const name of ['outputDir', 'model', 'language']) {
+    const p = action!.params.find((x) => x.name === name)!
+    assert.equal(p.required, false, `${name} optional (manager passes a value but script has defaults)`)
+  }
+
+  // model values must include 'small' (the literal value at the call site).
+  const modelParam = action!.params.find((p) => p.name === 'model')!
+  assert.ok(modelParam.enum?.includes('small'), `model enum must include "small" (passed by item-analysis-manager)`)
+  // language values must include 'auto' (the literal value at the call site).
+  const langParam = action!.params.find((p) => p.name === 'language')!
+  assert.ok(langParam.enum?.includes('auto'), `language enum must include "auto" (passed by item-analysis-manager)`)
 })
 
 test('skill.workflow.json has been removed from disk', () => {
@@ -64,29 +105,31 @@ test('SKILL.md frontmatter declares when-to-use per Claude Skill protocol', () =
 
 test('orchestrator inline-injects SKILL.md and arms the primitive-gating hint', async () => {
   _resetLastReferenceSkillHintsForTests()
+
+  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
   const skillState: any = {
     id: 'video-copy-analyzer',
     name: 'Video Copy Analyzer',
-    description: 'Extract subtitles and generate transcript-oriented copy deliverables from a short video.',
-    defaultAction: 'read_skill',
-    executionMode: 'advisory',
+    description: def.description,
+    defaultAction: def.defaultAction,
+    executionMode: def.executionMode,
     managedPath: SKILL_DIR,
-    actions: [
-      {
-        name: 'read_skill',
-        visibility: 'internal',
-        runtime: 'reference',
-        params: [],
-      },
-    ],
+    actions: def.actions.map((a) => ({
+      name: a.name,
+      visibility: a.visibility,
+      runtime: a.runtime,
+      params: a.params || [],
+    })),
   }
 
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    resolveSkillToolByAction: () => ({
-      name: 'skill_video_copy_analyzer_read_skill',
-      action: 'read_skill',
+    resolveSkillToolByAction: (_skillId, actionName) => ({
+      name: actionName === 'read_skill'
+        ? 'skill_video_copy_analyzer_read_skill'
+        : `skill_video_copy_analyzer_${actionName}`,
+      action: actionName,
       params: [],
     }) as any,
   })

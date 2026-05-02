@@ -87,6 +87,42 @@ describe('document widget target context', () => {
     assert.match(String(composed), /```show-widget/)
   })
 
+  it('injects skill folder references without legacy slash commands', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const composed = await buildComposedAgentInput({
+      content: '使用@[Video Expert Analyzer (VNext)]分析视频',
+      attachments: [
+        {
+          id: 'skill-att-1',
+          name: 'Video Expert Analyzer (VNext)',
+          path: '/Users/user/Library/Application Support/ready/skill-runtime/skills/video-expert-analyzer',
+          type: 'text',
+          size: 0,
+          ext: '.skill',
+          source: 'skill-folder',
+          skillId: 'video-expert-analyzer',
+          skillFolderPath: '/Users/user/Library/Application Support/ready/skill-runtime/skills/video-expert-analyzer',
+        },
+      ],
+      filePool: [],
+    })
+
+    assert.equal(typeof composed, 'string')
+    assert.match(String(composed), /### 技能目录引用/)
+    assert.match(String(composed), /skillId: video-expert-analyzer/)
+    assert.doesNotMatch(String(composed), /\/skill video-expert-analyzer/)
+  })
+
   it('does not carry widget update context into unrelated plain questions', async () => {
     ;(globalThis as { window?: unknown }).window = {
       electronAPI: {

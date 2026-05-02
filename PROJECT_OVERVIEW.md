@@ -1,6 +1,6 @@
 # Ready 项目说明
 
-> 更新时间: 2026-04-13
+> 更新时间: 2026-04-28
 
 ## 1. 产品目标
 Ready 当前主线是一个桌面创作工作台，稳定承载以下能力：
@@ -16,7 +16,7 @@ Ready 当前主线是一个桌面创作工作台，稳定承载以下能力：
 - RSS：订阅、更新、分析、统计与子代理链路可用
 - 日程：日/周/月视图与事件 CRUD 可用
 - Agent：统一会话 scope、工具调用、技能运行时、远程 IM 基础链路已接入；聊天面板新增 `当前任务 / 后台任务` 任务区，长任务会持续投影为步骤、等待态、可继续动作与最近产物；跨会话回看第一版已落地，支持历史会话搜索、旧会话胶囊引用和本地向量召回
-- 技能中心：支持系统级 embedded skills 与用户导入 custom skills 并行管理，并新增 workflow execution 视图与 blocker 继续控制
+- 技能中心：支持系统级 embedded skills 与用户导入 custom skills 并行管理；长技能通过 SkillTaskTracker、`skill_task_runs`、task projections 与 detached/run_state 句柄呈现进度、后台运行、预算暂停和继续控制，不再依赖旧 workflow execution 状态机
 - 设置页：支持多供应商、多协议、多工具模式配置
 
 ## 3. AI / Agent 当前能力

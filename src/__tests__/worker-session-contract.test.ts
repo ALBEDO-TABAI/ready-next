@@ -88,6 +88,7 @@ test('RunCoordinator passes sessionIdOverride into the execution host while scop
     parentTaskId: 'parent-1',
     parentStepId: 'job-1',
     sessionIdOverride: 'worker-session-1',
+    coordinators: []
   })
 
   assert.equal(capturedRequest?.sessionId, 'scope-1')

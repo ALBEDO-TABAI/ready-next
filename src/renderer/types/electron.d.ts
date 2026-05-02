@@ -237,15 +237,21 @@ interface ScopeRunTaskStepData {
 
 interface ScopeRunTaskContinuationData {
   taskId?: string | null
-  executionId: string
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
-  // B Phase 4: tracker-driven continuation. Present on todo-sourced patches;
-  // main-process resume handlers treat a non-empty `todoId` as the anchor
-  // when `executionId` is empty.
   todoId?: string | null
   todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
 }
 
 interface ContinuationIntentData {
@@ -254,9 +260,17 @@ interface ContinuationIntentData {
   stepId?: string
   blockedReason?: string
   responseText?: string
-  // B Phase 4: todo-anchored resumption. Extended alongside ScopeRunTaskContinuationData.
   todoId?: string
   todoTitle?: string
+  pauseReason?: string
+  detachedTaskId?: string
+  taskRunId?: string
+  jobId?: string
+  skillId?: string
+  action?: string
+  runStatePath?: string
+  outputDir?: string
+  progressFingerprint?: string
 }
 
 interface ScopeRunMemoryCaptureItemData {
@@ -411,6 +425,7 @@ interface TaskProjectionRecordData {
   taskSummary?: string | null
   status: TaskProjectionStatusData
   interactionState: TaskInteractionStateData
+  waitingFor?: ScopeRunWaitingForData
   steps: TaskProjectionStepData[]
   currentStepId?: string | null
   budget?: TaskBudgetData | null
@@ -489,6 +504,43 @@ interface SessionRecallCapsuleData {
   latestTaskSummary?: string | null
   attachmentNames: string[]
   updatedAt: string
+}
+
+interface ReferenceSkillHintData {
+  id: string
+  name: string
+  at: number
+  expiresAt: number
+}
+
+interface DetachedSkillTaskData {
+  id: string
+  scopeId?: string | null
+  sessionId?: string | null
+  agent?: string | null
+  skillId: string
+  action: string
+  params: Record<string, unknown>
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+  outputDir?: string | null
+  runStatePath?: string | null
+  sceneScoresPath?: string | null
+  deliveryReportPath?: string | null
+  error?: string | null
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string | null
+}
+
+interface ActiveChildRunSummaryData {
+  childRunId: string
+  skillId: string
+  sessionId: string | null
+  scopeId: string | null
+  status: string
+  startedAt: string
+  outputDir: string
+  runStatePath: string
 }
 
 interface ScopeRunEventData {
@@ -621,6 +673,32 @@ interface ElectronAgentAPI {
   listAttachedSessionRecallContexts: (
     scopeId: string
   ) => Promise<IPCResponse<SessionRecallCapsuleData[]>>
+  getReferenceSkillHint: (
+    scopeId: string
+  ) => Promise<IPCResponse<ReferenceSkillHintData | null>>
+  startDetachedSkillAction: (payload: {
+    scopeId?: string
+    sessionId?: string
+    agent?: string
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }) => Promise<IPCResponse<DetachedSkillTaskData>>
+  inspectDetachedSkillTask: (
+    taskId: string,
+    scopeId: string
+  ) => Promise<IPCResponse<DetachedSkillTaskData>>
+  listDetachedSkillTasks: (
+    payload?: { scopeId?: string }
+  ) => Promise<IPCResponse<DetachedSkillTaskData[]>>
+  cancelDetachedSkillTask: (
+    taskId: string,
+    scopeId: string
+  ) => Promise<IPCResponse<DetachedSkillTaskData>>
+  listActiveChildRuns: () => Promise<IPCResponse<ActiveChildRunSummaryData[]>>
+  cancelChildRun: (
+    childRunId: string
+  ) => Promise<IPCResponse<unknown>>
   attachSessionRecallContext: (
     currentScopeId: string,
     conversationId: string
@@ -660,6 +738,7 @@ interface ElectronAgentAPI {
   sendScoped: (
     payload: {
       scopeId: string
+      agent?: string
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
       continuationIntent?: ContinuationIntentData | null
@@ -777,6 +856,9 @@ interface ElectronAgentAPI {
   }) => Promise<IPCResponse<{ acknowledged: boolean }>>
   onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
   onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
+  // Phase 5.3 — push-based reference-skill hint state changes. Renderer uses
+  // this to refresh the "上下文已启用" badge immediately on arm/clear/sweep.
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => () => void
 }
 
 // =============================================================================
@@ -1045,6 +1127,13 @@ interface DocumentReadBinaryData {
   extension: string
   /** Raw bytes are currently attached for PDF previews to avoid custom-protocol fetch issues. */
   bytes?: Uint8Array | ArrayBuffer | number[]
+  /** File byte size from a pre-read stat (added by the D2 perf size guard). */
+  size?: number
+  /**
+   * Set when the file is too large to inline — renderer should stream via `localUrl`
+   * (e.g. `<video src={localUrl}>`) instead of attempting a base64/byte fetch.
+   */
+  kind?: 'large_video_ref' | 'large_image_ref'
 }
 
 /** Read file response */
@@ -1055,6 +1144,10 @@ interface DocumentReadResponse {
   content?: string
   error?: string
   errorCode?: string
+  /** When refused due to a size guard, the configured max byte cap. */
+  max?: number
+  /** When refused due to a size guard, the actual byte size. */
+  actual?: number
   mock?: boolean
 }
 
@@ -1070,6 +1163,11 @@ interface DocumentSaveAsResponse {
   path?: string
   canceled?: boolean
   error?: string
+  errorCode?: string
+  /** When refused due to a size guard (D2 perf), the configured max byte cap. */
+  max?: number
+  /** When refused due to a size guard, the actual decoded byte length. */
+  actual?: number
   mock?: boolean
 }
 
@@ -1165,6 +1263,10 @@ interface DocumentOpenFolderResponse {
   success: boolean
   path?: string
   error?: string
+  /** Present when validateAsWorkspace failed; mirrors WorkspaceValidationReason. */
+  validationReason?: string
+  /** The path the user picked, even if validation rejected it. */
+  attemptedPath?: string
 }
 
 /** Get home directory response */
@@ -1201,7 +1303,7 @@ interface ElectronDocumentAPI {
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
-  openFolder: () => Promise<DocumentOpenFolderResponse>
+  openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
   getHome: () => Promise<DocumentHomeResponse>
   showInFolder: (path: string) => Promise<DocumentOperationResponse>
   openPath: (path: string) => Promise<DocumentOperationResponse>
@@ -1223,6 +1325,24 @@ interface ElectronDocumentAPI {
   listSources: () => Promise<DocumentListSourcesResponse>
   getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) => Promise<DocumentGraphResponse>
+  startWatcher: (payload: { workspaceRoot: string }) => Promise<DocumentStartWatcherResponse>
+  stopWatcher: (payload: { watcherId: string }) => Promise<DocumentStopWatcherResponse>
+}
+
+interface DocumentStartWatcherResponse {
+  success: boolean
+  data?: { watcherId: string; workspaceRoot: string }
+  error?: string
+  /** When success=false, surfaces why so the renderer can show the right toast. */
+  errorKind?: 'invalid_root' | 'enospc' | 'failed' | 'engine_unavailable'
+  /** Linux ENOSPC advisory string — `sudo sysctl fs.inotify.max_user_watches=…`. */
+  hint?: string
+}
+
+interface DocumentStopWatcherResponse {
+  success: boolean
+  data?: { stopped: boolean }
+  error?: string
 }
 
 interface DocumentBacklinkReference {
@@ -1660,11 +1780,9 @@ interface SkillState {
   sourcePath?: string
 }
 
-// B Phase 4 PR3: `SkillExecutionBlocker / SkillExecutionStepRecord /
-// SkillArtifactRecord / SkillExecutionDetail` renderer-side types are
-// retired alongside the `skill_executions` state machine. Task cards now
-// consume the tracker-sourced projection patch (see
-// `buildSkillTaskProjectionPatch` in `skills-tools.ts`).
+// Phase 4: SkillExecutionBlocker / SkillExecutionStepRecord /
+// SkillArtifactRecord / SkillExecutionDetail retired along with the
+// skill_executions state machine.
 
 interface SkillInstallResult {
   success: boolean
@@ -1683,9 +1801,19 @@ interface SkillRunResult {
   outputDir?: string
   command: string[]
   error?: string
-  // B Phase 4 PR3: `mode: 'workflow'` dropped; `execution` / `blocker`
-  // fields retired alongside the state machine.
+  // Phase 4: 'workflow' mode retired; only 'direct' (subprocess / in-process)
+  // and 'reference' (SKILL.md inline) survive.
   mode?: 'direct' | 'reference'
+  /**
+   * C6 — when stdout/stderr exceeded the in-memory cap, surplus bytes are
+   * appended to a per-action `.logs/` artifact under
+   * `<runtimeRoot>/outputs/<skillId>/`. `*Error` is set when the disk write
+   * itself failed; the command result is still returned in either case.
+   */
+  stdoutArtifactPath?: string
+  stderrArtifactPath?: string
+  stdoutArtifactError?: string
+  stderrArtifactError?: string
 }
 
 interface SkillJobRecord {
@@ -1727,6 +1855,16 @@ interface SkillsRuntimeInfo {
   venvRoot: string
 }
 
+interface SkillReferenceInlinedEvent {
+  sessionId: string | null
+  skillId: string
+  skillName: string
+  source: 'direct_read' | 'tool_fallback'
+  bytesInjected: number
+  truncated: boolean
+  at: number
+}
+
 interface ElectronSkillsAPI {
   list: () => Promise<IPCResponse<SkillState[]>>
   runtimeInfo: () => Promise<IPCResponse<SkillsRuntimeInfo>>
@@ -1746,17 +1884,14 @@ interface ElectronSkillsAPI {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    // B Phase 4 PR3: `'workflow'` is accepted for backward-compat but
-    // silently collapsed at the runtime boundary. Prefer omitting the
-    // flag; the manifest-declared runtime kind picks the path.
-    executionMode?: 'auto' | 'direct' | 'workflow'
+    executionMode?: 'auto' | 'workflow' | 'direct'
   }) => Promise<IPCResponse<SkillRunResult>>
   listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
-  // B Phase 4 PR3: `listExecutions / getExecution / submitInput /
-  // submitConfirmation / submitAgentResult / restartFromStep /
-  // cancelExecution` + their `skills:executions:*` IPC are retired.
-  // Renderer code that needs stepwise progress reads it off the task-card
-  // projection patch (sourced from `SkillTaskTracker`, PR1).
+  // Phase 4: skills:executions:* API surface retired along with the
+  // skill_executions state machine. Removed: listExecutions / getExecution /
+  // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
+  // cancelExecution. Progress now exposed via in-memory todo projection.
+  onSkillReferenceInlined?: (handler: (event: SkillReferenceInlinedEvent) => void) => () => void
   listSchedules: () => Promise<IPCResponse<SkillScheduleRecord[]>>
   createSchedule: (payload: {
     skillId: string
@@ -1819,6 +1954,22 @@ interface ElectronAppAPI {
   installUpdate: () => Promise<void>
   onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
   onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
+  // D1: cache stats + cleanup
+  getCacheStats: () => Promise<{
+    success: boolean
+    error?: string
+    data?: {
+      codeCacheBytes: number
+      cacheBytes: number
+      puppeteerCacheBytes: number
+      sharedCacheBytes: number
+    }
+  }>
+  clearCache: (opts?: { includePuppeteer?: boolean }) => Promise<{
+    success: boolean
+    error?: string
+    data?: { clearedBytes: number; errors: string[] }
+  }>
 }
 
 // =============================================================================
@@ -2200,5 +2351,8 @@ export type {
   MemoryLifecycleStatus,
   MemoryMaintenanceResult,
   TaskProjectionRecordData,
-  RecoveryRecordData
+  RecoveryRecordData,
+  ReferenceSkillHintData,
+  DetachedSkillTaskData,
+  ActiveChildRunSummaryData
 }

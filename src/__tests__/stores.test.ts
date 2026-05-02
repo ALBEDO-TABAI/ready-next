@@ -1044,6 +1044,10 @@ describe('useAgent Store', () => {
             sendScopedCalls.map((call) => call.scopeId),
             ['conv-local-retry', 'conv-local-retry'],
         )
+        assert.deepStrictEqual(
+            sendScopedCalls.map((call) => call.agent),
+            ['butler', 'butler'],
+        )
         assert.strictEqual(sendScopedCalls[0].message, 'hello again')
         assert.ok(typeof sendScopedCalls[0].requestId === 'string' && (sendScopedCalls[0].requestId as string).length > 0)
         assert.deepStrictEqual(createLocalScopeCalls, [
@@ -1295,26 +1299,56 @@ describe('useWorkspace Store', () => {
     })
 
     it('should set workspace root and update currentPath', () => {
-        useWorkspace.getState().setWorkspaceRoot('/Users/test/project')
+        // Use a 4+-segment safe root (validateWorkspaceRoot rejects shorter
+        // paths to prevent the bb529f1 home-directory index storm).
+        const safeRoot = '/Users/test/Documents/project'
+        const result = useWorkspace.getState().setWorkspaceRoot(safeRoot)
+        assert.strictEqual(result.ok, true, `setWorkspaceRoot rejected: ${result.message}`)
         const state = useWorkspace.getState()
-        assert.strictEqual(state.workspaceRoot, '/Users/test/project')
-        assert.strictEqual(state.currentPath, '/Users/test/project')
+        assert.strictEqual(state.workspaceRoot, safeRoot)
+        assert.strictEqual(state.currentPath, safeRoot)
         assert.strictEqual(state.selectedFile, null)
         // Should persist to localStorage
-        assert.strictEqual(storage.get('ready-workspace-root'), '/Users/test/project')
+        assert.strictEqual(storage.get('ready-workspace-root'), safeRoot)
     })
 
     it('should set workspace root and populate mock files', () => {
-        useWorkspace.getState().setWorkspaceRoot('/project')
+        useWorkspace.getState().setWorkspaceRoot('/Users/test/Documents/project')
         const state = useWorkspace.getState()
         // refreshFiles() mock mode populates 7 items
         assert.ok(state.files.length > 0)
     })
 
+    it('should reject dangerous workspace roots and not mutate state', () => {
+        // Reset to known state first
+        useWorkspace.getState().clearWorkspace()
+        const beforeRoot = useWorkspace.getState().workspaceRoot
+
+        const r1 = useWorkspace.getState().setWorkspaceRoot('/Users/alice')
+        assert.strictEqual(r1.ok, false)
+        assert.strictEqual(r1.reason, 'forbidden_user_root')
+        assert.strictEqual(useWorkspace.getState().workspaceRoot, beforeRoot)
+
+        const r2 = useWorkspace.getState().setWorkspaceRoot('/')
+        assert.strictEqual(r2.ok, false)
+        assert.strictEqual(r2.reason, 'forbidden_system_root')
+
+        const r3 = useWorkspace.getState().setWorkspaceRoot('/Users/alice/Documents')
+        assert.strictEqual(r3.ok, false)
+        assert.strictEqual(r3.reason, 'forbidden_personal_dir')
+
+        const r4 = useWorkspace.getState().setWorkspaceRoot('/a/b/c')
+        assert.strictEqual(r4.ok, false)
+        assert.strictEqual(r4.reason, 'too_short')
+
+        // localStorage was never written
+        assert.strictEqual(storage.get('ready-workspace-root'), undefined)
+    })
+
     it('should clear workspace completely', () => {
         useWorkspace.getState().addPinnedFolder('/folder')
-        useWorkspace.getState().setWorkspaceRoot('/project')
-        useWorkspace.getState().selectFile('/project/file.md')
+        useWorkspace.getState().setWorkspaceRoot('/Users/test/Documents/project')
+        useWorkspace.getState().selectFile('/Users/test/Documents/project/file.md')
 
         useWorkspace.getState().clearWorkspace()
         const state = useWorkspace.getState()
@@ -1366,11 +1400,27 @@ describe('useWorkspace Store', () => {
     })
 
     it('should load a saved workspace', () => {
-        useWorkspace.getState().loadSavedWorkspace(['/loaded-a', '/loaded-b'])
+        // Primary folder must pass validateWorkspaceRoot (4+ segments, non-personal-dir).
+        const safePrimary = '/Users/test/Documents/loaded-a'
+        useWorkspace.getState().loadSavedWorkspace([safePrimary, '/loaded-b'])
         const state = useWorkspace.getState()
-        assert.deepStrictEqual(state.pinnedFolders, ['/loaded-a', '/loaded-b'])
-        assert.strictEqual(state.workspaceRoot, '/loaded-a')
-        assert.strictEqual(state.currentPath, '/loaded-a')
+        assert.deepStrictEqual(state.pinnedFolders, [safePrimary, '/loaded-b'])
+        assert.strictEqual(state.workspaceRoot, safePrimary)
+        assert.strictEqual(state.currentPath, safePrimary)
+    })
+
+    it('should drop unsafe primary in saved workspace and leave workspaceRoot null', () => {
+        // Legacy saved workspaces from before validation should not auto-trigger
+        // a home-directory index storm.
+        useWorkspace.getState().clearWorkspace()
+        useWorkspace.getState().loadSavedWorkspace(['/Users/alice', '/another'])
+        const state = useWorkspace.getState()
+        // Pinned list still preserved
+        assert.deepStrictEqual(state.pinnedFolders, ['/Users/alice', '/another'])
+        // But workspaceRoot is null (and storage cleared)
+        assert.strictEqual(state.workspaceRoot, null)
+        assert.strictEqual(state.currentPath, '/')
+        assert.strictEqual(storage.get('ready-workspace-root'), undefined)
     })
 
     it('should delete a saved workspace', () => {

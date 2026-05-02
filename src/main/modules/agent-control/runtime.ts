@@ -23,12 +23,38 @@ import {
 import { ClaudeSdkOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
+import type { DomainAdapter } from './domain-adapter'
+import {
+  snapshotLastReferenceSkill,
+  restoreLastReferenceSkill,
+  rememberLastReferenceSkill,
+  getLastReferenceSkill,
+  peekLastReferenceSkill,
+  REFERENCE_SKILL_HINT_TTL_MS,
+  type PersistedReferenceSkillHint,
+} from './skill-reference-hints'
+import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
+import { findSkillToolByName } from '../tools/skills-tools'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
+import {
+  cancelSkillChildRun,
+  configureSkillChildRunner,
+  getSkillChildRunner,
+} from './skill-child-runner'
+// Importing the VEA driver triggers its module-load-time
+// `registerSkillChildDriver(...)` side-effect. The runner relies on the
+// registry being primed before any `startSkillChildRun` call.
+import './video-expert-child-driver'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
 import { forgetSession } from './session-continuity'
+import { isRetryOnlyTurn } from './skill-detection-inputs'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -43,6 +69,11 @@ import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../repositories/task-projection-repository'
+import {
+  DetachedSkillTaskTracker,
+  registerDetachedSkillTaskTracker,
+  type DetachedSkillTaskRecord,
+} from './detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -150,6 +181,8 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
+  private readonly detachedSkillTasks: DetachedSkillTaskTracker
   private readonly pendingInboundChannels = new Map<
     string,
     {
@@ -200,6 +233,33 @@ export class AgentControlRuntime extends EventEmitter {
       },
       toChannelKey: (scope) => this.toChannelKey(scope)
     })
+    this.detachedSkillTasks = new DetachedSkillTaskTracker({
+      storagePath: join(app.getPath('userData'), 'skill-runtime', 'detached-tasks.json'),
+      runSkill: (request) => getSkillsRuntimeManager().runSkill(request),
+      onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
+    })
+    registerDetachedSkillTaskTracker(this.detachedSkillTasks)
+
+    // Phase 5 — wire the skill child runner. The runner stays as a
+    // module-level singleton so `skills-tools.ts` (Team 6) can call
+    // `startSkillChildRun(...)` without crossing class boundaries. We
+    // configure it once at runtime construction so the SQLite-backed
+    // repository is ready and `getSkillsRuntimeManager()` is safe to
+    // call.
+    try {
+      configureSkillChildRunner({
+        runtimeManager: getSkillsRuntimeManager(),
+        repository: this.skillTaskRunRepository,
+      })
+    } catch (error) {
+      // Boot-time wiring failure is best-effort logged; the parent loop
+      // continues to function via legacy paths if the child runner
+      // can't be configured (e.g. DB unavailable in a test harness).
+      console.warn(
+        '[AgentControlRuntime] configureSkillChildRunner failed:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
@@ -214,8 +274,28 @@ export class AgentControlRuntime extends EventEmitter {
     return this.memoryLifecycle
   }
 
+  registerSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller: AbortController,
+  ): void {
+    this.skillTaskRunRepository.registerSessionAbortController(scopeId, sessionId, controller)
+  }
+
+  unregisterSessionAbortController(
+    scopeId: string | null,
+    sessionId: string | null,
+    controller?: AbortController,
+  ): void {
+    this.skillTaskRunRepository.unregisterSessionAbortController(scopeId, sessionId, controller)
+  }
+
   getPromptAssembly(): PromptAssemblyService {
     return this.promptAssembly
+  }
+
+  private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.orchestrator.getDomainAdapters()
   }
 
   getExternalMemoryProviderSlot(): ExternalMemoryProviderSlot {
@@ -224,6 +304,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
+    this.publishRestoredDetachedSkillTasks()
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
@@ -440,6 +521,111 @@ export class AgentControlRuntime extends EventEmitter {
     return this.sessionRecallService.listAttachedSessionRecallContexts(scopeId)
   }
 
+  getReferenceSkillHint(scopeId: string): { id: string; name: string; at: number; expiresAt: number } | null {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return null
+    const live = peekLastReferenceSkill(normalizedScopeId)
+    if (live) {
+      return {
+        id: live.id,
+        name: live.name,
+        at: live.at,
+        expiresAt: live.at + REFERENCE_SKILL_HINT_TTL_MS,
+      }
+    }
+
+    const scope = this.getConversationScope(normalizedScopeId)
+    const meta = this.parseScopeMeta(scope)
+    const persisted = meta['lastReferenceSkill']
+    if (!persisted || typeof persisted !== 'object') return null
+    const hint = persisted as PersistedReferenceSkillHint
+    if (typeof hint.id !== 'string' || typeof hint.name !== 'string' || typeof hint.at !== 'number') return null
+    if (!restoreLastReferenceSkill(normalizedScopeId, hint)) return null
+    const restored = peekLastReferenceSkill(normalizedScopeId)
+    if (!restored) return null
+    return {
+      id: restored.id,
+      name: restored.name,
+      at: restored.at,
+      expiresAt: restored.at + REFERENCE_SKILL_HINT_TTL_MS,
+    }
+  }
+
+  /**
+   * Phase 1.1 — Public hook the renderer's `chat:saveMessage` IPC calls after
+   * persisting a message, so a hint armed during the assistant's turn survives
+   * a Ready restart for LOCAL conversations too.
+   *
+   * Background: assistant messages saved via `chat:saveMessage` IPC go through
+   * `ChatRepository.saveMessage` (a thin wrapper over `db.addChatMessage`),
+   * which bypasses `runtime.createConversationMessage` — the only path that
+   * previously snapshot the in-memory hint into `meta_json.lastReferenceSkill`.
+   * Result before this hook: local sessions never persisted hints, so a Ready
+   * restart always re-armed `referenceSkillHintArmed=false` and the model lost
+   * VEA / other typed actions mid-flow.
+   *
+   * No-op for non-assistant roles. Safe to call after every message; the
+   * underlying `persistReferenceHintToScope` is idempotent (skips DB write
+   * when the persisted snapshot equals the in-memory one).
+   */
+  persistReferenceHintAfterAssistantMessage(scopeId: string, role: string): void {
+    if (role !== 'assistant') return
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return
+    this.persistReferenceHintToScope(normalizedScopeId)
+  }
+
+  startDetachedSkillAction(payload: {
+    scopeId?: string | null
+    sessionId?: string | null
+    agent?: string | null
+    parentTaskId?: string | null
+    parentStepId?: string | null
+    taskProjectionId?: string | null
+    skillId: string
+    action: string
+    params?: Record<string, unknown>
+  }): DetachedSkillTaskRecord {
+    return this.detachedSkillTasks.start(payload)
+  }
+
+  inspectDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
+    const task = this.detachedSkillTasks.inspect(taskId)
+    if (!task) return null
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
+    return task
+  }
+
+  listDetachedSkillTasks(payload?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
+    return this.detachedSkillTasks.list(payload)
+  }
+
+  cancelDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
+    const normalizedScopeId = String(scopeId || '').trim()
+    const task = this.detachedSkillTasks.inspect(taskId)
+    if (!task) return null
+    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
+    return this.detachedSkillTasks.cancel(taskId)
+  }
+
+  listActiveChildRuns(): Array<{
+    childRunId: string
+    skillId: string
+    sessionId: string | null
+    scopeId: string | null
+    status: string
+    startedAt: string
+    outputDir: string
+    runStatePath: string
+  }> {
+    return getSkillChildRunner()?.listActiveRuns() ?? []
+  }
+
+  async cancelChildRun(childRunId: string, options: { source: 'ui_button' }): Promise<unknown> {
+    return cancelSkillChildRun(childRunId, options)
+  }
+
   attachSessionRecallContext(
     currentScopeId: string,
     conversationId: string
@@ -621,6 +807,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async sendScoped(payload: {
     scopeId: string
+    agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
     taskId?: string
@@ -629,11 +816,28 @@ export class AgentControlRuntime extends EventEmitter {
     sessionIdOverride?: string
     continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string }> {
-    const scopeRow = this.db.getConversationScope(payload.scopeId)
+    let scopeRow = this.db.getConversationScope(payload.scopeId)
+    if (!scopeRow && payload.agent && payload.scopeId.startsWith('conv-')) {
+      const recoveredScope = this.createLocalScope(payload.agent, payload.scopeId)
+      scopeRow = this.db.getConversationScope(recoveredScope.id)
+      logAgentMetric('local_scope_lazy_created_on_send', {
+        scopeId: payload.scopeId,
+        agent: payload.agent,
+      })
+    }
     if (!scopeRow) {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }
     const scope = this.mapConversationRow(scopeRow)
+    // skill-resume A1: restore reference-skill hint from persisted conv meta
+    // before any skill detection runs, so resumed sessions don't lose context
+    // after Ready restart (in-memory Map alone wouldn't survive).
+    this.restoreReferenceHintFromScope(scope, payload.scopeId)
+    // skill-resume E1: when the user fires a bare retry/continue intent on a
+    // scope with no manually-attached recall context, auto-attach the top
+    // predecessors in the same lineage so prompt assembly has prior context
+    // when it runs.
+    this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
     const normalizedContinuationIntent = (() => {
       const intent = normalizeContinuationIntent(payload.continuationIntent || null)
       if (!intent) return null
@@ -657,6 +861,7 @@ export class AgentControlRuntime extends EventEmitter {
         parentStepId: payload.parentStepId,
         sessionIdOverride: payload.sessionIdOverride,
         continuationIntent: normalizedContinuationIntent,
+        coordinators: this.getDomainAdapters(),
       },
       {
         onSuccess: async (result) => {
@@ -1242,7 +1447,8 @@ export class AgentControlRuntime extends EventEmitter {
         message: promptPayload as
           | string
           | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId
+        requestId,
+        coordinators: this.getDomainAdapters()
       },
       {
         onFailure: async (errorText) => {
@@ -1391,6 +1597,13 @@ export class AgentControlRuntime extends EventEmitter {
       }
     })
     const scope = this.mapConversationRow(row)
+    // Phase 1.2 — recover any persisted lastReferenceSkill into the in-memory
+    // map before the inbound message hits the orchestrator. Without this, a
+    // Ready restart loses the hint until the user manually re-arms it; the
+    // first remote IM turn after restart goes out with `referenceSkillHintArmed=false`
+    // and the model loses access to typed skill actions. Idempotent: replay
+    // checks TTL and same-value short-circuits.
+    this.restoreReferenceHintFromScope(scope, scope.id)
     this.emitConversationEvent({
       type: existing ? 'scope_updated' : 'scope_created',
       scope
@@ -1422,7 +1635,267 @@ export class AgentControlRuntime extends EventEmitter {
       timestamp,
       payload.meta
     )
+    // skill-resume A1: snapshot reference-skill hint after each assistant
+    // message and persist it to the conversation's meta_json so a Ready
+    // restart can re-arm the in-memory hint on session resume.
+    if (payload.role === 'assistant') {
+      this.persistReferenceHintToScope(scopeId)
+    }
     return this.mapMessageRow(this.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
+  }
+
+  // ---------------------------------------------------------------------------
+  // skill-resume A1: reference-skill hint persistence helpers
+  // ---------------------------------------------------------------------------
+
+  private parseScopeMeta(scope: ConversationScope | null | undefined): Record<string, unknown> {
+    const raw = (scope?.meta as unknown as string | Record<string, unknown> | null | undefined)
+    if (!raw) return {}
+    if (typeof raw === 'object') return { ...raw } as Record<string, unknown>
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw) as unknown
+        if (parsed && typeof parsed === 'object') return { ...(parsed as Record<string, unknown>) }
+        // Phase 1.4 — JSON parsed but produced something that's not a record
+        // (string/array/number/null). Surface this so silent meta loss has a
+        // signal in the metrics log.
+        logAgentMetric(TOOL_ERROR_METRICS.metaParseCorrupted, {
+          scopeId: scope?.id || null,
+          reason: 'not_object',
+          sample: raw.slice(0, 80),
+        })
+      } catch (error) {
+        // Phase 1.4 — JSON.parse threw. Previously the catch swallowed the
+        // error and returned {}, so corruption silently nuked any
+        // `lastReferenceSkill` field at the next read. Emit a metric instead.
+        logAgentMetric(TOOL_ERROR_METRICS.metaParseCorrupted, {
+          scopeId: scope?.id || null,
+          reason: 'parse_error',
+          message: error instanceof Error ? error.message : String(error),
+          sample: raw.slice(0, 80),
+        })
+      }
+    }
+    return {}
+  }
+
+  private restoreReferenceHintFromScope(scope: ConversationScope, scopeId: string): void {
+    try {
+      const meta = this.parseScopeMeta(scope)
+      const hint = meta['lastReferenceSkill']
+      if (!hint || typeof hint !== 'object') return
+      const persisted = hint as PersistedReferenceSkillHint
+      if (typeof persisted.id !== 'string' || typeof persisted.name !== 'string' || typeof persisted.at !== 'number') return
+      restoreLastReferenceSkill(scopeId, persisted)
+    } catch (error) {
+      console.warn('[AgentControlRuntime] restoreReferenceHintFromScope failed', error)
+    }
+  }
+
+  private extractTextFromMessage(message: string | MultimodalBlock[]): string {
+    if (typeof message === 'string') return message
+    if (!Array.isArray(message)) return ''
+    return message
+      .map((block) => {
+        if (!block || typeof block !== 'object') return ''
+        if (typeof (block as { text?: unknown }).text === 'string') {
+          return (block as { text?: string }).text || ''
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  private maybeAutoAttachSessionRecallOnResume(
+    scopeId: string,
+    message: string | MultimodalBlock[],
+  ): void {
+    try {
+      const text = this.extractTextFromMessage(message)
+      if (!text || !isRetryOnlyTurn(text)) return
+      const result = this.sessionRecallService.autoAttachOnResume({
+        currentScopeId: scopeId,
+        intent: 'continue',
+        limit: 3,
+      })
+      if (result.attached.length > 0) {
+        logAgentMetric('session_recall_auto_attached', {
+          scopeId,
+          attachedCount: result.attached.length,
+          attachedConversationIds: result.attached.map((c) => c.conversationId),
+        })
+        // skill-resume G4 — last-recourse hint recovery for OLD conversations.
+        // If neither the meta_json restore nor the in-process lookback armed a
+        // hint, scan the just-attached capsule texts for canonical skill_*
+        // tool names. This is the only signal we have about prior skill usage
+        // when the conversation predates A1 persistence.
+        if (!getLastReferenceSkill(scopeId)) {
+          this.maybeArmReferenceHintFromCapsules(scopeId, result.attached)
+        }
+      }
+    } catch (error) {
+      console.warn('[AgentControlRuntime] maybeAutoAttachSessionRecallOnResume failed', error)
+    }
+  }
+
+  private maybeArmReferenceHintFromCapsules(
+    scopeId: string,
+    capsules: Array<{
+      summary?: string | null
+      latestTaskTitle?: string | null
+      latestTaskSummary?: string | null
+      title?: string | null
+      resumeTitle?: string | null
+    }>,
+  ): void {
+    try {
+      const texts: string[] = []
+      for (const capsule of capsules) {
+        if (typeof capsule.summary === 'string') texts.push(capsule.summary)
+        if (typeof capsule.latestTaskSummary === 'string') texts.push(capsule.latestTaskSummary)
+        if (typeof capsule.latestTaskTitle === 'string') texts.push(capsule.latestTaskTitle)
+        if (typeof capsule.title === 'string') texts.push(capsule.title)
+        if (typeof capsule.resumeTitle === 'string') texts.push(capsule.resumeTitle)
+      }
+      const recovered = findSkillHintInCapsuleTexts(texts, {
+        resolveToolByName: (name) => findSkillToolByName(name),
+        listSkills: () => getSkillsRuntimeManager().listSkills(),
+      })
+      if (!recovered) return
+      rememberLastReferenceSkill(scopeId, { id: recovered.skillId, name: recovered.skillName })
+      logAgentMetric('skill_reference_hint_recovered_from_capsule', {
+        scopeId,
+        skillId: recovered.skillId,
+        skillName: recovered.skillName,
+      })
+    } catch (error) {
+      console.warn('[AgentControlRuntime] maybeArmReferenceHintFromCapsules failed', error)
+    }
+  }
+
+  private persistReferenceHintToScope(scopeId: string): void {
+    try {
+      const hint = snapshotLastReferenceSkill(scopeId)
+      if (!hint) return
+      const scopeRow = this.db.getConversationScope(scopeId)
+      if (!scopeRow) return
+      const scope = this.mapConversationRow(scopeRow)
+      const meta = this.parseScopeMeta(scope)
+      const existing = meta['lastReferenceSkill'] as PersistedReferenceSkillHint | undefined
+      // Avoid noisy DB writes: skip if persisted hint is identical (same id+name+at).
+      if (
+        existing
+        && existing.id === hint.id
+        && existing.name === hint.name
+        && existing.at === hint.at
+      ) {
+        return
+      }
+      meta['lastReferenceSkill'] = hint
+      this.db.updateConversationScopeMeta(scopeId, meta)
+    } catch (error) {
+      console.warn('[AgentControlRuntime] persistReferenceHintToScope failed', error)
+    }
+  }
+
+  private publishRestoredDetachedSkillTasks(): void {
+    for (const record of this.detachedSkillTasks.list()) {
+      if (record.status === 'blocked' || record.status === 'running') {
+        this.publishDetachedSkillTaskUpdate(record)
+      }
+    }
+  }
+
+  private buildDetachedSkillArtifacts(record: DetachedSkillTaskRecord): NonNullable<ScopeRunEventPayload['artifactRefs']> {
+    const nowIso = record.updatedAt
+    const entries: Array<{ key: string; path?: string | null; label: string; kind: string }> = [
+      { key: 'outputDir', path: record.outputDir, label: '技能输出目录', kind: 'directory' },
+      { key: 'runStatePath', path: record.runStatePath, label: 'run_state.json', kind: 'artifact' },
+      { key: 'sceneScoresPath', path: record.sceneScoresPath, label: 'scene_scores.json', kind: 'artifact' },
+      { key: 'deliveryReportPath', path: record.deliveryReportPath, label: '交付报告', kind: 'artifact' },
+    ]
+    const seen = new Set<string>()
+    return entries
+      .filter((entry) => {
+        const path = String(entry.path || '').trim()
+        if (!path || seen.has(path)) return false
+        seen.add(path)
+        return true
+      })
+      .map((entry) => ({
+        id: `${record.id}:${entry.key}`,
+        module: 'skill',
+        kind: entry.kind,
+        label: entry.label,
+        path: entry.path || null,
+        createdAt: nowIso,
+        meta: {
+          detachedTaskId: record.id,
+          skillId: record.skillId,
+          action: record.action,
+          outputKey: entry.key,
+        },
+      }))
+  }
+
+  private publishDetachedSkillTaskUpdate(record: DetachedSkillTaskRecord): void {
+    const scopeId = record.scopeId || record.sessionId
+    if (!scopeId) return
+    const phase: ScopeRunEventPayload['phase'] =
+      record.status === 'running' ? 'tool_running'
+        : record.status === 'done' ? 'done'
+          : record.status === 'cancelled' ? 'cancelled'
+            : record.status === 'blocked' ? 'checkpoint'
+              : 'error'
+    const stepStatus =
+      record.status === 'running' ? 'running'
+        : record.status === 'done' ? 'done'
+          : record.status === 'blocked' ? 'blocked'
+            : 'error'
+    const artifacts = this.buildDetachedSkillArtifacts(record)
+    const taskId = `detached:${record.id}`
+    const summary =
+      record.status === 'running' ? '后台技能任务正在执行'
+        : record.status === 'done' ? '后台技能任务已完成'
+          : record.status === 'blocked' ? (record.error || '后台技能任务需要继续')
+            : record.status === 'cancelled' ? '后台技能任务已取消'
+              : (record.error || '后台技能任务失败')
+    this.publishScopeRunEvent({
+      type: record.status === 'running' ? 'started' : record.status === 'blocked' ? 'updated' : 'finished',
+      scopeId,
+      agent: record.agent || 'assistant',
+      runId: record.id,
+      taskId,
+      taskProjectionId: taskId,
+      phase,
+      module: 'skill',
+      executionKind: 'job',
+      jobId: record.id,
+      taskTitle: `后台技能任务 · ${record.skillId}`,
+      taskSummary: summary,
+      steps: [{
+        id: record.action,
+        title: record.action,
+        status: stepStatus,
+        detail: record.error || record.outputDir || null,
+        updatedAt: record.updatedAt,
+      }],
+      currentStepId: record.action,
+      waitingFor: record.status === 'running' || record.status === 'blocked' ? 'background' : 'none',
+      resumableActions: record.status === 'running'
+        ? ['cancel']
+        : record.status === 'blocked'
+          ? ['continue', 'cancel']
+          : artifacts.length > 0
+            ? ['open_artifact']
+            : ['none'],
+      recentArtifacts: artifacts,
+      artifactRefs: artifacts,
+      blockedReason: record.status === 'blocked' ? record.error || '后台任务需要继续' : null,
+      error: record.status === 'failed' ? record.error || '后台技能任务失败' : undefined,
+      timestamp: record.updatedAt,
+    })
   }
 
   private emitConversationEvent(payload: ConversationEventPayload): void {
@@ -1508,7 +1981,7 @@ export class AgentControlRuntime extends EventEmitter {
     const continuationRef = params.projection?.continuationRef || params.scopeRunSummary?.taskContinuation || null
     return normalizeContinuationIntent({
       taskId,
-      executionId: incoming?.executionId || continuationRef?.executionId,
+      executionId: incoming?.executionId || continuationRef?.executionId || undefined,
       stepId:
         incoming?.stepId
         || continuationRef?.stepId
@@ -1521,6 +1994,17 @@ export class AgentControlRuntime extends EventEmitter {
         || params.scopeRunSummary?.blockedReason
         || undefined,
       responseText: params.responseText || incoming?.responseText,
+      todoId: incoming?.todoId || continuationRef?.todoId || undefined,
+      todoTitle: incoming?.todoTitle || continuationRef?.todoTitle || undefined,
+      pauseReason: incoming?.pauseReason || continuationRef?.pauseReason || undefined,
+      detachedTaskId: incoming?.detachedTaskId || continuationRef?.detachedTaskId || undefined,
+      taskRunId: incoming?.taskRunId || continuationRef?.taskRunId || undefined,
+      jobId: incoming?.jobId || continuationRef?.jobId || undefined,
+      skillId: incoming?.skillId || continuationRef?.skillId || undefined,
+      action: incoming?.action || continuationRef?.action || undefined,
+      runStatePath: incoming?.runStatePath || continuationRef?.runStatePath || undefined,
+      outputDir: incoming?.outputDir || continuationRef?.outputDir || undefined,
+      progressFingerprint: incoming?.progressFingerprint || continuationRef?.progressFingerprint || undefined,
     })
   }
 

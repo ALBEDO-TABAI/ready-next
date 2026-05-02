@@ -44,7 +44,7 @@ export interface ToolGroupResolutionResult {
   groupResolutions: ToolGroupResolutionEntry[]
 }
 
-interface ToolGatewayOptions extends ToolRegistryOptions {}
+type ToolGatewayOptions = ToolRegistryOptions
 
 export class ToolGateway {
   private readonly capabilityGroupMeta = new Map<CapabilityGroupId, CapabilityGroupDefinition>(

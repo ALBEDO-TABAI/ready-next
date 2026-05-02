@@ -65,7 +65,15 @@ export default function GraphView({
     return () => { cancelled = true }
   }, [centerPath, workspaceRoot, depth])
 
-  const { nodes: layoutNodes, pin, release } = useForceLayout(graph.nodes, graph.edges, { width, height })
+  const [bypassCap, setBypassCap] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  // Reset the bypass when the underlying graph changes (e.g. user switched to
+  // focus mode on a smaller subgraph) so the cap re-engages on the next big set.
+  useEffect(() => { setBypassCap(false) }, [centerPath, workspaceRoot, depth])
+
+  const layoutResult = useForceLayout(graph.nodes, graph.edges, { width, height, bypassNodeCap: bypassCap })
+  const layoutNodes = layoutResult.status === 'ok' ? layoutResult.nodes : []
+  const { pin, release } = layoutResult
 
   const idToNode = useMemo(() => {
     const map = new Map<string, LayoutNode>()
@@ -236,6 +244,116 @@ export default function GraphView({
           }}
         >
           暂无图谱数据 — 先在搜索面板点「重建索引」
+        </div>
+      )}
+      {!loading && layoutResult.status === 'degraded' && (
+        <div
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            right: 8,
+            padding: '10px 12px',
+            borderRadius: 8,
+            background: 'rgba(245, 158, 11, 0.12)',
+            border: '1px solid rgba(245, 158, 11, 0.45)',
+            color: 'var(--text, #111)',
+            fontSize: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div>
+            {`图谱节点过多 (${layoutResult.nodeCount} > ${layoutResult.maxSupported})，已切换到聚焦模式。请选择一个节点查看其邻居关系。`}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(true)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid rgba(0,0,0,0.15)',
+                background: 'transparent',
+                color: 'inherit',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              仍要显示完整图谱
+            </button>
+          </div>
+        </div>
+      )}
+      {confirmOpen && layoutResult.status === 'degraded' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10,
+          }}
+          onClick={() => setConfirmOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 360,
+              padding: 16,
+              borderRadius: 10,
+              background: 'var(--bg, #fff)',
+              color: 'var(--text, #111)',
+              fontSize: 12,
+              boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600 }}>渲染完整图谱可能会卡死浏览器</div>
+            <div>
+              {`即将渲染 ${layoutResult.nodeCount} 个节点（O(N²) per tick），这很可能让渲染线程长时间无响应。仍要继续吗？`}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.15)',
+                  background: 'transparent',
+                  color: 'inherit',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBypassCap(true); setConfirmOpen(false) }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(220, 38, 38, 0.6)',
+                  background: 'rgba(220, 38, 38, 0.12)',
+                  color: 'var(--accent-red, #b91c1c)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                继续
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

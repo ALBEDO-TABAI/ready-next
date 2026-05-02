@@ -196,12 +196,12 @@ lets-go-rss/
 
 ```bash
 # Recommended stable commands
-cd /path/to/lets-go-rss && ./scripts/run_update_cron.sh
-cd /path/to/lets-go-rss && ./scripts/run_status_push.sh
+cd /path/to/lets-go-rss && bash scripts/run_update_cron.sh
+cd /path/to/lets-go-rss && bash scripts/run_status_push.sh
 
 # crontab -e — update at :55 every 2 hours, push at every even hour
-55 */2 * * * cd /path/to/lets-go-rss && ./scripts/run_update_cron.sh >> /tmp/rss_cron.log 2>&1
-0 */2 * * * cd /path/to/lets-go-rss && ./scripts/run_status_push.sh
+55 */2 * * * cd /path/to/lets-go-rss && bash scripts/run_update_cron.sh >> /tmp/rss_cron.log 2>&1
+0 */2 * * * cd /path/to/lets-go-rss && bash scripts/run_status_push.sh
 ```
 
 The engine now uses `assets/.update.lock` to prevent overlapping update jobs.

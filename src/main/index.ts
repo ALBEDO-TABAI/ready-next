@@ -14,15 +14,20 @@ import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
-import { setupSearchIPC } from './modules/search-engine/ipc-handler'
+import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
+import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
+import { reapOrphans } from './modules/process-cleanup/boot-reaper'
+import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
+import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { getDatabase } from './modules/database'
+import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
@@ -244,6 +249,7 @@ function setupGlobalIPC(): void {
   setupRSSIPC(RSS_USE_MOCK)
   setupCalendarIPC(CALENDAR_USE_MOCK)
   setupSettingsIPC()
+  setupAppCacheIPC()
   setupSkillsIPC()
   setupMemoryManagementIPC()
 
@@ -423,6 +429,23 @@ app.whenReady().then(() => {
   applyAppIcon()
   setupApplicationMenu()
 
+  // Reap any orphaned child processes from a previous Ready instance that was
+  // force-quit / crashed. Must run BEFORE rsshub / skill runtime spawns so we
+  // don't accidentally kill our own fresh children.
+  try {
+    const result = reapOrphans()
+    if (result.skipped) {
+      console.log(`[boot-reaper] skipped (${result.skipped})`)
+    } else {
+      console.log(`[boot-reaper] reaped=${result.reaped.length} errors=${result.errors.length}`)
+      for (const err of result.errors) {
+        console.warn(`[boot-reaper] ${err}`)
+      }
+    }
+  } catch (err) {
+    console.warn('[boot-reaper] failed:', err instanceof Error ? err.message : String(err))
+  }
+
   console.log('[Main] App ready, registering protocol handler...')
 
   // Register local-file:// protocol handler for serving local files to the renderer
@@ -578,10 +601,33 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Clean up before quit
-app.on('before-quit', () => {
-  void cleanupAgentRuntime()
-  getDatabase().close()
-  agentManager.cleanup()
-  rsshubManager.cleanup()
+// Clean up before quit. Previous version fired the runtime cleanup with `void`
+// and then synchronously closed the DB, so the process could exit mid-cleanup
+// and leave sidecar / chrome / rsshub orphans. We now defer the quit, await an
+// ordered shutdown (bounded by a 5s timeout so a stuck sidecar can't hang the
+// app), then re-trigger quit. The `isQuitting` guard prevents the second
+// `app.quit()` from re-entering this handler.
+let isQuitting = false
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  isQuitting = true
+  event.preventDefault()
+  void runBeforeQuitCleanup({
+    cleanupAgentRuntime,
+    cleanupAgentManager: () => agentManager.cleanup(),
+    cleanupRsshubManager: () => rsshubManager.cleanup(),
+    cleanupManagedBrowsers: async () => {
+      const result = await closeAllBrowsers()
+      if (result.errors.length > 0) {
+        console.warn('[before-quit] closeAllBrowsers errors', result.errors)
+      }
+    },
+    cleanupDbWorker: () => shutdownWorkerDbBridge(),
+    cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
+    closeDatabase: () => getDatabase().close(),
+  }).catch((err) => {
+    console.error('[before-quit] cleanup error', err)
+  }).finally(() => {
+    app.quit()
+  })
 })

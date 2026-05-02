@@ -24,6 +24,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: reference-skill output wording is a source-surface prompt contract
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -52,16 +53,15 @@ test('runtime-manager reference branch uses mode="reference" and empty command',
   )
 })
 
-test('SkillRunResult.mode type includes "reference"', () => {
-  // B Phase 4 PR3 dropped `'workflow'` from `SkillRunResult.mode`; the
-  // reference branch must still be there — it's the payload shape the
-  // model sees when it triggers a reference-advisory skill inline.
+test('SkillRunResult.mode type includes "reference" (Phase 4: workflow mode retired)', () => {
   const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
 
+  // Phase 4: 'workflow' mode retired along with the skill_executions state
+  // machine. The union is now just 'direct' | 'reference'.
   assert.match(
     source,
     /mode\?:\s*'direct'\s*\|\s*'reference'/,
-    'SkillRunResult must allow mode: "reference"',
+    'SkillRunResult must allow mode: "direct" | "reference"',
   )
 })
 
@@ -88,7 +88,7 @@ test('skills-tools formatRunResult has a dedicated reference-mode branch', () =>
   // "Command:" / "STDOUT:" prefixes may still exist (used by real subprocess
   // skills), but the reference branch must render its payload before those
   // prefixes are applied.
-  const refBranch = source.match(/if \(result\.mode === 'reference'\) \{[\s\S]*?\n  \}/)?.[0]
+  const refBranch = source.match(/if \(result\.mode === 'reference'\) \{[\s\S]*?\n {2}\}/)?.[0]
   assert.ok(refBranch, 'reference branch body must be parseable')
   assert.doesNotMatch(refBranch!, /Command:/, 'reference branch must not emit "Command:" prefix')
   assert.doesNotMatch(refBranch!, /STDOUT:/, 'reference branch must not emit "STDOUT:" prefix')
@@ -98,10 +98,6 @@ test('formatRunResult reference branch exercises cleanly at runtime', async () =
   // Behavioral check: the pure formatter runs without needing electron/DB.
   // Import the module dynamically so the top-level electron chain (via
   // session-continuity / tool-result-types) is triggered only in this test.
-  const mod = (await import('../main/modules/tools/skills-tools')) as unknown as {
-    // formatRunResult is not exported — only exercise via executeSkillTool is
-    // possible, which requires the runtime manager. Skip live invocation and
-    // stay at the source-pin level. The source-pin above is the contract.
-  }
+  const mod = await import('../main/modules/tools/skills-tools')
   assert.ok(mod, 'skills-tools module must load')
 })

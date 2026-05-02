@@ -3,7 +3,12 @@ import assert from 'node:assert'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { BrowserDomainAdapter } from '../main/modules/agent-control/browser-domain-adapter'
+import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
+import { DocumentDomainAdapter } from '../main/modules/agent-control/document-domain-adapter'
+import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
+import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapter'
 import type { ConversationScope } from '../main/modules/agent-control/types'
 import type { SessionRecallCapsule } from '../shared/session-recall'
 
@@ -37,6 +42,21 @@ function createChannelScope(): ConversationScope {
   }
 }
 
+function countTrigger(result: Awaited<ReturnType<PromptAssemblyService['buildForScopedRun']>>, id: string): number {
+  return result.triggerHits.filter((item) => item.id === id).length
+}
+
+function createDocumentAdapter(): DocumentDomainAdapter {
+  return new DocumentDomainAdapter({
+    orchestrator: {} as never,
+    toolLoopOrchestrator: {} as never,
+  })
+}
+
+function createBrowserAdapter(): BrowserDomainAdapter {
+  return new BrowserDomainAdapter({} as never)
+}
+
 describe('PromptAssemblyService', () => {
   it('builds l0/l1 context and keeps generic runs free of l2 trigger payloads', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-assembly-'))
@@ -55,7 +75,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '帮我整理一版内容提纲'
+      message: '帮我整理一版内容提纲',
+      coordinators: []
     })
 
     assert.match(result.systemPrompt, /L0 常驻上下文/)
@@ -84,11 +105,19 @@ describe('PromptAssemblyService', () => {
       now: () => new Date('2026-03-08T10:00:00.000Z')
     })
 
+    const feishuAdapter = new FeishuDomainAdapter()
+    const feishuFragments = feishuAdapter.contributePromptFragment() || []
+    assert.ok(feishuFragments.some((item) => item.id === 'feishu-doc'))
+    assert.ok(feishuFragments.some((item) => item.id === 'feishu-image'))
+
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '请创建飞书文档并插入一张图片'
+      message: '请创建飞书文档并插入一张图片',
+      coordinators: [feishuAdapter]
     })
 
+    assert.equal(countTrigger(result, 'feishu-doc'), 1)
+    assert.equal(countTrigger(result, 'feishu-image'), 1)
     assert.ok(result.triggerHits.some((item) => item.id === 'feishu-doc' && item.blocking))
     assert.ok(result.triggerHits.some((item) => item.id === 'feishu-image' && item.blocking))
     assert.ok(
@@ -97,6 +126,110 @@ describe('PromptAssemblyService', () => {
       )
     )
     assert.ok(result.bootstrapMessages.some((item) => item.includes('L2 按需规则')))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('loads coordinator-provided l2 refs from per-call coordinators', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-coordinator-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'coordinator-rules.md'), '# Coordinator\n按产品注入规则。', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请执行 coordinator-test',
+      coordinators: [
+        {
+          id: 'mock',
+          contributePromptFragment: () => [
+            {
+              id: 'mock-coordinator-fragment',
+              label: 'Mock Coordinator Fragment',
+              priority: 10,
+              matches: ({ userText }: { userText: string }) => userText.includes('coordinator-test'),
+              blocking: false,
+              refs: [
+                {
+                  path: 'docs/coordinator-rules.md',
+                  title: 'Coordinator Rules',
+                  summary: 'Coordinator supplied rule'
+                }
+              ]
+            }
+          ]
+        }
+      ] as never
+    })
+
+    assert.ok(result.triggerHits.some((item) => item.id === 'mock-coordinator-fragment'))
+    assert.ok(
+      result.memoryRefs.some(
+        (item) => item.sourceType === 'trigger_rule' && item.title === 'Coordinator Rules'
+      )
+    )
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('loads the browser-upload trigger from the browser coordinator', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-fallback-triggers-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'browser-rules.md'), '# Browser\nBrowser rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z')
+    })
+
+    const browserAdapter = createBrowserAdapter()
+    const browserFragments = browserAdapter.contributePromptFragment() || []
+    assert.ok(browserFragments.some((item) => item.id === 'browser-upload'))
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请在浏览器上传材料，然后提交网页',
+      coordinators: [browserAdapter]
+    })
+
+    assert.equal(countTrigger(result, 'browser-upload'), 1)
+    assert.equal(countTrigger(result, 'document-write'), 0)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('still loads the Document trigger from the document coordinator', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-document-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'document-rules.md'), '# Document\nDocument rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const documentAdapter = createDocumentAdapter()
+    const documentFragments = documentAdapter.contributePromptFragment() || []
+    assert.ok(documentFragments.some((item) => item.id === 'document-write'))
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请把这个文档改写并保存成指定格式',
+      coordinators: [documentAdapter]
+    })
+
+    assert.equal(countTrigger(result, 'document-write'), 1)
+    assert.ok(result.triggerHits.some((item) => item.id === 'document-write' && !item.blocking))
 
     rmSync(root, { recursive: true, force: true })
   })
@@ -124,7 +257,14 @@ describe('PromptAssemblyService', () => {
     const result = await service.buildForScopedRun({
       scope: createScope(),
       message:
-        '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程'
+        '请创建飞书文档并上传图片，然后在浏览器提交内容、保存文档、渲染视频、分析 RSS，并创建日程',
+      coordinators: [
+        new FeishuDomainAdapter(),
+        createBrowserAdapter(),
+        createDocumentAdapter(),
+        new RSSDomainAdapter(),
+        new CalendarDomainAdapter(),
+      ]
     })
 
     assert.ok(result.contextBudget.totalChars <= 16000)
@@ -187,7 +327,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '继续整理'
+      message: '继续整理',
+      coordinators: []
     })
 
     assert.equal(result.compression?.historyCompressed, true)
@@ -209,7 +350,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '帮我继续整理今天的设计思路'
+      message: '帮我继续整理今天的设计思路',
+      coordinators: []
     })
 
     assert.ok(
@@ -248,7 +390,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '新开会话，帮我写标题'
+      message: '新开会话，帮我写标题',
+      coordinators: []
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n')
@@ -276,7 +419,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createChannelScope(),
-      message: '继续处理渠道消息'
+      message: '继续处理渠道消息',
+      coordinators: []
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n')
@@ -321,7 +465,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '继续做品牌方案'
+      message: '继续做品牌方案',
+      coordinators: []
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n\n')
@@ -366,7 +511,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '继续做品牌方向和 logo 风格'
+      message: '继续做品牌方向和 logo 风格',
+      coordinators: []
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n\n')
@@ -377,6 +523,67 @@ describe('PromptAssemblyService', () => {
         (item) => item.sourceType === 'session_recall' && item.title === '品牌复盘'
       )
     )
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('does not inject ambient history when the current request has explicit resource refs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-current-resource-isolation-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(
+      join(root, 'memory', '2026-04-25.md'),
+      '## prior run\n- summary: 3E5P8DLjnOQ failed after Chrome cookies',
+      'utf8',
+    )
+
+    let autoRecallCalled = false
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      getAutoSessionRecallCapsules: async () => {
+        autoRecallCalled = true
+        return [
+          {
+            conversationId: 'conv-stale-video',
+            lineageRootId: 'conv-stale-video',
+            resumeTitle: '旧视频分析',
+            title: '旧视频分析',
+            sourceKind: 'local',
+            sourceId: 'app',
+            threadKey: 'conv-stale-video',
+            summary: '上次误用了 3E5P8DLjnOQ，并尝试 Chrome cookies。',
+            latestTaskTitle: '技能执行',
+            latestTaskSummary: '旧任务失败',
+            attachmentNames: [],
+            updatedAt: '2026-04-25T03:25:00.000Z',
+          },
+        ]
+      },
+      now: () => new Date('2026-04-25T12:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: [
+        '使用@[Video Expert Analyzer (VNext)]分析@[Inside Notion SF Office - YouTube]，输出到@[测试]',
+        '',
+        '### 浏览页面引用',
+        '- 标题: Inside Notion SF Office - YouTube',
+        '- 链接: https://www.youtube.com/watch?v=4qkyxm4jppc',
+        '',
+        '### 文件夹引用',
+        '- 名称: 测试',
+        '- 路径: /Users/user/Documents/实验田/测试',
+      ].join('\n'),
+      coordinators: []
+    })
+
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.equal(autoRecallCalled, false)
+    assert.doesNotMatch(joinedBootstrap, /自动跨会话回看/)
+    assert.doesNotMatch(joinedBootstrap, /3E5P8DLjnOQ/)
+    assert.doesNotMatch(joinedBootstrap, /Chrome cookies/i)
 
     rmSync(root, { recursive: true, force: true })
   })
@@ -413,11 +620,91 @@ describe('PromptAssemblyService', () => {
         '--- 文档摘要开始 ---',
         '正文里顺带提到了 RSS、飞书和日程，但这些只是文档内容。',
         '--- 文档摘要结束 ---',
-      ].join('\n')
+      ].join('\n'),
+      coordinators: [new RSSDomainAdapter()]
     })
 
     assert.equal(autoRecallQueries[0], '在文档里生成一张分析型信息卡')
     assert.ok(!result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('does not treat generic video analysis wording as an RSS trigger', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-video-skill-rss-guard-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), '# RSS\nRSS only.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '使用@[Video Expert Analyzer (VNext)]分析@[Inside Notion SF Office - YouTube]，输出到@[测试]',
+      coordinators: [new RSSDomainAdapter()]
+    })
+
+    assert.ok(!result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('still loads the RSS trigger when an RSS object is explicitly mentioned', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-rss-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'rss-rules.md'), '# RSS\nRSS rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const rssAdapter = new RSSDomainAdapter()
+    const rssFragments = rssAdapter.contributePromptFragment() || []
+    assert.ok(rssFragments.some((item) => item.id === 'rss-analysis'))
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '帮我抓取这个 RSS 订阅源的最近文章并生成分析报告',
+      coordinators: [rssAdapter]
+    })
+
+    assert.equal(countTrigger(result, 'rss-analysis'), 1)
+    assert.ok(result.triggerHits.some((item) => item.id === 'rss-analysis'))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('still loads the Calendar trigger when a calendar write is explicitly mentioned', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-calendar-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'calendar-rules.md'), '# Calendar\nCalendar rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const calendarAdapter = new CalendarDomainAdapter()
+    const calendarFragments = calendarAdapter.contributePromptFragment() || []
+    assert.ok(calendarFragments.some((item) => item.id === 'calendar-write'))
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请创建日程，明天下午三点提醒我开会',
+      coordinators: [calendarAdapter]
+    })
+
+    assert.equal(countTrigger(result, 'calendar-write'), 1)
+    assert.ok(result.triggerHits.some((item) => item.id === 'calendar-write' && item.blocking))
 
     rmSync(root, { recursive: true, force: true })
   })
@@ -451,7 +738,8 @@ describe('PromptAssemblyService', () => {
 
     const result = await service.buildForScopedRun({
       scope: createScope(),
-      message: '继续处理文档信息卡'
+      message: '继续处理文档信息卡',
+      coordinators: []
     })
 
     const joinedBootstrap = result.bootstrapMessages.join('\n\n')
@@ -459,6 +747,32 @@ describe('PromptAssemblyService', () => {
     assert.doesNotMatch(joinedBootstrap, /openclaw pairing approve feishu FNXQH9PN/)
     assert.doesNotMatch(joinedBootstrap, /system_run_openclaw/)
     assert.match(joinedBootstrap, /\[命令回显已隐藏\]/)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('redacts browser cookie details from persisted run summaries', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-cookie-redaction-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-25T12:00:00.000Z'),
+    })
+
+    service.recordRunOutcome({
+      scope: createScope(),
+      finalText: 'yt-dlp --cookies-from-browser chrome failed; Chrome cookies were unavailable.',
+      usedTools: ['skill_run_shell'],
+      success: false,
+    })
+
+    const content = readFileSync(join(root, 'memory', '2026-04-25.md'), 'utf8')
+    assert.doesNotMatch(content, /--cookies-from-browser/)
+    assert.doesNotMatch(content, /Chrome cookies/i)
+    assert.match(content, /浏览器凭据/)
 
     rmSync(root, { recursive: true, force: true })
   })

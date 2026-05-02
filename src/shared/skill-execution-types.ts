@@ -149,6 +149,13 @@ export interface SkillDefinition {
   executionMode: SkillExecutionMode
   workflow?: SkillWorkflow
   manifestValid: boolean
+  /**
+   * Optional Skill Host Contract requirements. Validated at manifest-load time
+   * by `SkillHostRequirementsSchema` (see `src/shared/skill-host-contract.ts`).
+   * Null/undefined when the manifest does not opt into the host contract.
+   * Imported as a structural type to avoid pulling the Zod schema into shared.
+   */
+  hostRequirements?: import('./skill-host-contract').SkillHostRequirements
 }
 
 export interface SkillArtifact {
@@ -174,13 +181,15 @@ export interface SkillActionResult {
   }
 }
 
-// B Phase 4 PR3: the retired state-machine types —
-// `SkillSourceMaterial / ExecutionFrame / ExecutionBlockerInputField /
-// ExecutionBlocker / SkillExecutionError / SkillExecutionStepRecord /
-// SkillExecutionState / SkillExecutionDetail` — have been deleted.
-// `SkillWorkflow` / `SkillStep*` / `SkillActionResult` / `SkillArtifact`
-// / `SkillGeneratedFileDefinition` / `SkillValueSourceRef` etc. still
-// surface through `skill-compiler.ts` manifest normalization and the
-// direct-run structured-result path in `runtime-manager.ts`, so those
-// remain. If a future refactor drops those consumers too, retire the
-// types together with the callers.
+export interface SkillSourceMaterial {
+  key: string
+  path: string
+  content: string
+}
+
+// Phase 4: ExecutionFrame / ExecutionBlocker / ExecutionBlockerInputField /
+// SkillExecutionError / SkillExecutionStepRecord / SkillExecutionState /
+// SkillExecutionDetail retired along with the skill_executions state machine.
+// The in-memory SkillTaskTracker (PR2) replaces the persistent projection
+// model; ephemeral ask_user state is tracked by EphemeralExecutionStore
+// instead of these types.

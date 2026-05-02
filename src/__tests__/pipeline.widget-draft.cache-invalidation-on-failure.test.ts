@@ -45,7 +45,7 @@ describe('widget-draft cache invalidation on failure contract (P3 T6 · Gap M)',
       /private deleteCachedWidgetDraft\(\s*sessionId: string,\s*question: string,\s*job: DocumentTaskJob,\s*snapshot: ActiveDocumentSnapshot,\s*reason: string,\s*\): void \{/,
     )
     const deleteBody = source.match(
-      /private deleteCachedWidgetDraft\([\s\S]*?\n  \}/,
+      /private deleteCachedWidgetDraft\([\s\S]*?\n {2}\}/,
     )
     assert.ok(deleteBody, 'deleteCachedWidgetDraft body not found')
     const body = deleteBody![0]

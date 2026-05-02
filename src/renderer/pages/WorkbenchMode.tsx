@@ -94,19 +94,23 @@ export default function WorkbenchMode() {
       }
 
       if (savedRoot) {
-        useWorkspace.getState().setWorkspaceRoot(savedRoot)
-        setWorkspaceInitError(null)
-        return
+        // Re-validate the persisted root on every launch — if it was set
+        // before the validation rules existed (e.g. legacy auto-home from
+        // bb529f1), drop it so the user is re-prompted.
+        const result = useWorkspace.getState().setWorkspaceRoot(savedRoot)
+        if (result.ok) {
+          setWorkspaceInitError(null)
+          return
+        }
+        // Saved root is no longer acceptable — clear and fall through to
+        // the first-time picker UX.
+        try { window.localStorage?.removeItem('ready-workspace-root') } catch { /* ignore */ }
+        console.warn('[workspace] Dropped persisted root:', result.reason, result.message)
       }
 
-      const homeResult = await window.electronAPI.document.getHome()
-      if (homeResult.success && homeResult.path) {
-        useWorkspace.getState().setWorkspaceRoot(homeResult.path)
-        setWorkspaceInitError(null)
-        return
-      }
-
-      setWorkspaceInitError('工作台初始化失败：未能获取默认工作目录。')
+      // No (valid) saved root → leave workspaceRoot null. NEVER auto-fallback
+      // to homedir; that triggers the bb529f1 681K-file index storm.
+      setWorkspaceInitError(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.warn('Workspace init failed:', message)

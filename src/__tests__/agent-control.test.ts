@@ -72,4 +72,33 @@ describe('createScopedRunCollector', () => {
         assert.deepStrictEqual(result.usedTools, ['browser_query_gemini'])
         assert.strictEqual(result.error, 'Gemini page did not produce a response')
     })
+
+    it('should resolve checkpoint status as a completed scoped request', async () => {
+        const collector = createScopedRunCollector({
+            agent: 'butler',
+            sessionId: 'scope-skill-1',
+            requestId: 'req-checkpoint',
+        })
+
+        collector.handleOutput({
+            agent: 'butler',
+            sessionId: 'scope-skill-1',
+            runId: 'req-checkpoint',
+            type: 'text',
+            chunk: '本轮预算已用完，任务可继续。',
+        })
+        collector.handleStatus({
+            agent: 'butler',
+            sessionId: 'scope-skill-1',
+            runId: 'req-checkpoint',
+            status: 'checkpoint',
+        })
+
+        const result = await collector.result
+        assert.strictEqual(result.success, true)
+        assert.strictEqual(result.cancelled, false)
+        assert.strictEqual(result.finalText, '本轮预算已用完，任务可继续。')
+        assert.deepStrictEqual(result.usedTools, [])
+        assert.strictEqual(result.error, undefined)
+    })
 })

@@ -25,12 +25,36 @@ export const TOOL_ERROR_METRICS = {
   inputValidation: 'tool_input_validation_failed',
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
-  // B Phase 4 PR2: `skillExecutionMissing` retired alongside the 6
-  // `skill_submit_*` / `skill_get_state` / restart / cancel tools.
-  // B Phase 4 PR3: `ttlSwept` retired — the `skill_executions` state
-  // machine + its TTL sweep are gone. The only periodic in-memory sweep
-  // that survives is reference-skill hints, and it emits via its own
-  // metric in `skill-reference-hints.ts` (not this registry).
+  /** D W1 — SystemReminderRegistry 组装时因 topic 冲突压制了另一条 reminder */
+  systemReminderSuppressedByConflict: 'system_reminder_suppressed_by_conflict',
+  /** D W4 — LayeredCompactor 连续 L2 失败后熔断，后续只走 L1 */
+  compactionCircuitBreak: 'compaction_circuit_break',
+  /** D W4 — LayeredCompactor L2 压缩失败并回退到 L1 */
+  compactionL2Failed: 'compaction_l2_failed',
+  /** D W4 — HookRegistry handler 抛错，已吞掉并继续执行后续 handler */
+  hookHandlerFailed: 'hook_handler_failed',
+  /** D W4 — HookRegistry handler 超时，已跳过并继续执行后续 handler */
+  hookHandlerTimeout: 'hook_handler_timeout',
+  /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
+  skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
+  /** E W2 — outputDir retained/legacy GC completed once. */
+  outputDirGc: 'output_dir_gc',
+  /** E W2 — outputDir sweep saw one or more deletion/read failures. */
+  outputDirSweepFailed: 'output_dir_sweep_failed',
+  /** E W2 — runtime-root child-run JSONL log GC completed once. */
+  childRunLogGc: 'child_run_log_gc',
+  /** E W2 — child-run outputDir lifecycle marker could not be written. */
+  childRunnerLifecycleWriteFailed: 'skill_child_runner_lifecycle_write_failed',
+  /** E W3 — child-run circuit breaker opened or blocked a launch. */
+  childRunCircuitBreak: 'child_run_circuit_break',
+  /**
+   * Skill child-runtime feature-flag observability. Emitted when the
+   * `READY_SKILL_CHILD_RESUME_ENABLED` rollback flag is set to `'0'` and
+   * the TurnEngine skips its automatic child-resume branch, falling
+   * through to the normal model turn instead of calling
+   * `resumeSkillChildRun`. The runner's resume API itself is unaffected.
+   */
+  childResumeDisabledByFlag: 'skill_child_resume_disabled_by_flag',
   /**
    * openai-execution-client 发现模型看到的 allowedToolNames 与上游 preparedRunCapabilities
    * 记录的 expectedAllowedToolNames 不一致（Round 2 R4）。出现该 metric 即说明
@@ -49,6 +73,73 @@ export const TOOL_ERROR_METRICS = {
    *   not_found | not_a_file
    */
   skillPrimitiveRejected: 'skill_primitive_rejected',
+  /**
+   * Domain adapter 的二段 prefix narrowing 实际丢弃了工具时打点（附 domain /
+   * droppedCount / droppedSample 维度）。pass-through（输入为空或全部保留）不发，
+   * 否则会淹没仪表盘。配合 `[domain_adapter_prefix_narrowing] ...` host.log 行使用。
+   */
+  domainToolNarrowingApplied: 'domain_tool_narrowing_applied',
+  /**
+   * Turn-engine 检测到模型在主工具循环里以相同参数连续调用同一个工具达到阈值
+   * （默认：最近 5 次里出现 ≥3 次）。emit 时附 `{ tool, repetitions, sessionId }`，
+   * 同时往 session.messages 注入一段系统提醒，引导模型改用 skill_ask_user 或换路径。
+   * 触发后 ring buffer 会被清空，避免每一轮都重复 emit / 重复注入提醒。
+   */
+  toolLoopRepetitionDetected: 'tool_loop_repetition_detected',
+  /**
+   * skill-resume E1 — runtime 在用户发起 bare retry intent（"继续 / 接着 ..."）且
+   * 当前 scope 没有手动附加的 sessionRecallContext 时，自动按 lineage_root 回挂
+   * top-N 历史 capsule。emit 时附 `{ scopeId, attachedCount, attachedConversationIds }`，
+   * 让用户在 UI 与日志里都能看到这次"自动回挂"动作。无候选 / 已有手动附加 → 不 emit。
+   */
+  sessionRecallAutoAttached: 'session_recall_auto_attached',
+  /**
+   * skill-resume G4 — last-recourse hint recovery for OLD conversations:
+   * meta_json 没有 `lastReferenceSkill`、session.messages 是空（重启后），
+   * 但 auto-attach 的 capsule 文本里出现了规范化的 `skill_<id>_<action>` tool
+   * 名。runtime 反向解析回 reference-like skill 并 arm hint 时打这条。emit 附
+   * `{ scopeId, skillId, skillName }`。无匹配 / 不是 reference-like → 不 emit。
+   */
+  skillReferenceHintRecoveredFromCapsule: 'skill_reference_hint_recovered_from_capsule',
+  /**
+   * Phase 1.4 — `parseScopeMeta` 发现 conversation_scope.meta_json 不是合法 JSON
+   * 时打这条。以前默默吞成 `{}`，会让 `lastReferenceSkill` 之类的字段无声丢失。
+   * emit 附 `{ scopeId, sample }`（sample 截前 80 字符防爆）。
+  */
+  metaParseCorrupted: 'meta_parse_corrupted',
+  /** H1 — secret decrypt failed; caller falls back to the stored raw value. */
+  secretDecryptFailed: 'secret_decrypt_failed',
+  /** H1 — direct reference-skill SKILL.md/README inline read failed before tool fallback. */
+  skillReferenceInlineFailed: 'skill_reference_inline_failed',
+  /** H1 — long-running skill projection could only partially inspect run_state/artifacts. */
+  skillProjectionPartial: 'skill_projection_partial',
+  /** H1 — run_state candidate traversal skipped an unreadable directory. */
+  runStateSelectionDirSkipped: 'run_state_selection_dir_skipped',
+  /**
+   * Phase 3.2 — turn-engine 在把模型 assistant 文本写入 session.messages
+   * 之前，检测到残留的 tool_call 标记（`<tool_call>` / `<function=` /
+   * `<parameter=` / `:::tool_call`）。命中后 helper 会用 parseTextToolBridge
+   * 重解析、剥离标记、emit 该 metric，避免污染 chat panel + chat_messages 表。
+   * 出现该 metric 即说明上游 tool-bridge 解析没拦住或 native transport 漏出了
+   * 模型自造的工具调用文本。emit 附 `{ sessionId, iteration, transport,
+   * extractedToolCalls, originalLen, cleanedLen }`。审计 Phase 3 §D2。
+   */
+  toolCallTextIntercepted: 'tool_call_text_intercepted',
+  /**
+   * Screenshot-bug ROOT FIX — openai-execution-client 在 native 路径检测到
+   * 模型 text 含 `<tool_call>` XML 但 provider 返回 toolCalls=[] 的协议
+   * mismatch（mimo / qwen 等 OpenAI 兼容方常见），用 parseTextToolBridgeResponse
+   * 解析 XML 把 calls 挂回 toolCalls 让 dispatch 链照常推进。出现该 metric
+   * 即说明本会话的 model+provider 组合在 tool-calling 协议上有偏差。emit 附
+   * `{ originalCallsCount, recoveredCallsCount, recoveredToolNames, route }`。
+   */
+  xmlToolCallsRecoveredFromNative: 'xml_tool_calls_recovered_from_native',
+  /**
+   * A1 SubAgent skeleton — lifecycle cleanup drain failed. The runner logs this
+   * but preserves the original terminal result because cleanup telemetry must
+   * not rewrite the SubAgent contract outcome.
+   */
+  subagentCleanupDrainFailed: 'subagent_cleanup_drain_failed',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

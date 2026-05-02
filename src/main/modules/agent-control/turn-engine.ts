@@ -1,10 +1,157 @@
+import { createHash, randomUUID } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
+
+/**
+ * skill-resume C1 — pure helper for tool-repetition detection.
+ * Exported for direct unit testing.
+ *
+ * Returns the count of identical (name, argsHash) entries matching the LAST
+ * entry in the ring buffer. Caller compares to a threshold to decide whether
+ * to fire the ask-user nudge.
+ *
+ * Used inline in the tool loop after each iteration's tool batch executes.
+ */
+export function countToolRepetitions(ring: ReadonlyArray<{ name: string; argsHash: string }>): number {
+  if (ring.length === 0) return 0
+  const last = ring[ring.length - 1]
+  return ring.filter(c => c.name === last.name && c.argsHash === last.argsHash).length
+}
+
+/**
+ * skill-resume C3 — pure helper computing the 70% iteration warning threshold.
+ * Returns the iteration count at which the once-per-run warning should fire.
+ *
+ * Floor + min-1 ensures even tiny budgets (e.g. direct_answer max=8) still
+ * have a single warning trigger.
+ */
+export function computeBudgetWarningThreshold(maxIterations: number): number {
+  return Math.max(1, Math.floor(Math.max(0, maxIterations) * 0.7))
+}
+
+export function shouldInjectBudgetWarning(params: {
+  warned: boolean
+  iteration: number
+  warningThreshold: number
+  lastLongTypedSkillActionIteration?: number | null
+}): boolean {
+  if (params.warned) return false
+  if (params.iteration < params.warningThreshold) return false
+  if (
+    typeof params.lastLongTypedSkillActionIteration === 'number'
+    && params.iteration - params.lastLongTypedSkillActionIteration <= 1
+  ) {
+    return false
+  }
+  return true
+}
+
+// Phase 3.2 + post-screenshot hotfix — TOOL_CALL_TEXT_PATTERN, sanitizeAssistantText,
+// pushAssistantTextSafely all live in `tool-call-text-guard.ts` so
+// `turn-transcript.ts` (the actual user-visible emit point) can import them
+// without creating a turn-engine ↔ turn-transcript circular dep. Re-exporting
+// the public surface here so the existing test imports from turn-engine
+// keep working.
+export {
+  TOOL_CALL_TEXT_PATTERN,
+  sanitizeAssistantText,
+  pushAssistantTextSafely,
+} from './tool-call-text-guard'
+export type {
+  SanitizeAssistantTextOptions,
+  SanitizeAssistantTextOptions as PushAssistantTextSafelyOptions,
+} from './tool-call-text-guard'
+import {
+  pushAssistantTextSafely,
+  sanitizeAssistantText,
+} from './tool-call-text-guard'
+
+/**
+ * Phase 3.3 — budget-warning copy that doesn't sabotage long skill flows.
+ *
+ * The previous 70%/90% nudges literally told the model to "总结当前进度并
+ * 询问用户是否继续" — a reverse instruction for staged pipelines like VEA
+ * which need to keep running without asking. Audit Phase 3 §D3/D4.
+ *
+ * `isLongSkillContext` is the gate: when the run is on the long-skill
+ * budget OR a typed skill action is in the preferred-tools list, we send
+ * a "keep going, prefer typed actions, only ask on real blockers" message
+ * instead of the convergence/summarize nudge. Returns plain string so the
+ * caller can wrap it in any role (currently `user` per the existing IPC
+ * shape).
+ */
+/**
+ * Stage 7 — pure helper for the `turn_frame_summary` metric's
+ * `allowedPreferredMismatch` flag. Returns true when at least one preferred
+ * tool name is not present in the allowed-tools surface for this turn —
+ * a useful diagnostic for "frame says steer toward X, but X isn't even on
+ * the model's tool surface" mismatches that previously took root-cause
+ * digging through scattered logs.
+ *
+ * Empty preferred list is never a mismatch (no preference == no mismatch).
+ */
+export function detectAllowedPreferredMismatch(
+  allowedToolNames: ReadonlyArray<string>,
+  preferredToolNames: ReadonlyArray<string>,
+): boolean {
+  if (preferredToolNames.length === 0) return false
+  const allowedSet = new Set(allowedToolNames)
+  return preferredToolNames.some((name) => !allowedSet.has(name))
+}
+
+export function buildBudgetWarningMessage(params: {
+  iterations: number
+  effectiveMaxIterations: number
+  level: 'converge' | 'warning'
+  isLongSkillContext: boolean
+}): string {
+  if (params.isLongSkillContext) {
+    if (params.level === 'converge') {
+      return `系统提醒：长任务接近预算上限（${params.iterations}/${params.effectiveMaxIterations}）。继续沿用当前 skill 流程推进剩余步骤；只有遇到真实 blocker（如等待用户确认）才用 skill_ask_user。不要在这一步停下来总结。`
+    }
+    return `系统提醒：长任务进度 ${params.iterations}/${params.effectiveMaxIterations}。继续推进当前 skill 流程，避免用 skill_run_shell 反复诊断；如果 run_state 表明在等某个文件，先用 skill_read_artifact 看清楚再推进，不需要在这一步问用户。`
+  }
+  if (params.level === 'converge') {
+    return '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。'
+  }
+  return `系统提醒：已用 ${params.iterations}/${params.effectiveMaxIterations} 次工具调用。请总结当前进度并询问用户是否继续，或在确认下一步方向后再继续调用工具。`
+}
+
 import { buildContinuationStateFromProjection } from './continuation-state'
+import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import {
+  rememberActiveSkillContext,
+  resolveActiveSkillContext,
+  summarizeActiveSkillContext,
+  type ActiveSkillContext,
+} from './active-skill-context'
+import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
+import { applySteeringToTurnFrame } from './turn-frame-steering'
+import {
+  applyTurnFramePatch,
+  mergeTurnFramePatches,
+  summarizeTurnFrame,
+  type TurnFrame,
+  type TurnFramePatch,
+  type TurnTerminalReason,
+} from './turn-frame'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
+import {
+  buildSkillDetectionInputs,
+  collectRecentAssistantSkillToolUses,
+  isConfigRepairTurn,
+  isRetryOnlyTurn,
+} from './skill-detection-inputs'
+import {
+  getLatestSkillRun,
+  resolveSkillRunForResume,
+  type SkillRunRecord,
+} from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
+import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tool-registry'
 import {
   selectDomainAdapter,
   type DomainAdapter,
@@ -12,18 +159,23 @@ import {
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
 import {
+  applyLongSkillTaskBudgetSeed,
   applyRunBudgetHint,
   consumeIterationBudget,
   consumeParallelGroupBudget,
   consumeToolCallBudget,
+  createContinuationRunBudgetSeed,
   createRunBudgetSeed,
   createStepBudgetState,
+  createTaskBudgetRuntime,
   getRemainingToolCallBudget,
-  refundIterationBudget,
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskType } from './task-type-resolver'
-import { buildToolRuntimeContext } from './tool-runtime-context-builder'
+import {
+  buildActiveFrameContextFromTurnFrame,
+  buildToolRuntimeContext,
+} from './tool-runtime-context-builder'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
@@ -33,6 +185,7 @@ import { buildToolDispatchDecision } from './execution-tool-policy'
 import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
+  parseTextToolBridgeResponse,
   shouldEnforceBrowserToolRetry,
 } from '../claude-bridge/tool-bridge'
 import { compressHistoryForPrompt } from './context-compression'
@@ -45,7 +198,6 @@ import {
 import { detectGenericInteractionState } from './interaction-state-detector'
 import { inspectDocumentToolCall } from '../claude-bridge/document-tool-flow'
 import { deriveAgentErrorContract } from '../claude-bridge/error-contract'
-import { getToolResourceTag } from './tool-parallelism-policy'
 import {
   normalizeToolExecutionOutput,
   serializeToolExecutionOutput,
@@ -53,8 +205,35 @@ import {
 } from './tool-result-types'
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
+import { createSystemReminderRegistry, type ReminderEntry } from './system-reminder-registry'
+import { createLayeredCompactor, type LayeredCompactorMetricName } from './layered-compactor'
+import type { HookRegistry } from './hook-registry'
+import { buildLongSkillRunningProjection } from './skill-running-projection'
+import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
+import { inspectLatestSkillTask } from './skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
+import {
+  createSkillBudgetLeaseState,
+  evaluateSkillBudgetLease,
+} from './skill-budget-lease-controller'
+import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
+import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
+import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
+import { shouldParentForceLongSkillTool } from './run-contracts'
+import {
+  cancelSkillChildRun,
+  getSkillChildRunCloseEvent,
+  resumeSkillChildRun,
+} from './skill-child-runner'
+import {
+  isTerminalChildCloseStatus,
+  type SkillChildCloseEvent,
+} from './skill-child-run-types'
 import type {
   RunBudgetHint,
+  SkillBudgetLeaseState,
+  SkillTaskLifecycleSignal,
   StepBudgetState,
   ToolSnapshot,
   TurnEngineRequest,
@@ -70,12 +249,219 @@ import type {
 } from './run-contracts'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
+const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000
+const LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS = 30 * 1000
+const LAYERED_COMPACTOR_METRIC_MAP: Record<LayeredCompactorMetricName, string> = {
+  compactionCircuitBreak: TOOL_ERROR_METRICS.compactionCircuitBreak,
+  compactionL2Failed: TOOL_ERROR_METRICS.compactionL2Failed,
+}
+const layeredCompactor = createLayeredCompactor({
+  metric: (name, payload) => {
+    try {
+      logAgentMetric(LAYERED_COMPACTOR_METRIC_MAP[name], { ...payload })
+    } catch {
+      // Metrics must never break a turn.
+    }
+  },
+})
+const NOOP_HOOK_REGISTRY: Pick<HookRegistry, 'fire'> = {
+  fire: async () => {},
+}
+
+export function isLongTypedSkillActionName(toolName: string): boolean {
+  if (!toolName.startsWith('skill_')) return false
+  const definition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
+  return definition?.domain === 'skill'
+    && typeof definition.executionTimeoutMs === 'number'
+    && definition.executionTimeoutMs >= LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS
+}
+
+function hasLongTypedSkillAction(toolNames: string[] | null | undefined): boolean {
+  return Boolean(toolNames?.some((toolName) => isLongTypedSkillActionName(toolName)))
+}
+
+/**
+ * Phase 6 (Wave 3 — T5) — child-loop continuation routing decision.
+ *
+ * The parent turn engine no longer synthesizes typed VEA tool_use for
+ * skills that the child runner owns. When a frame carries
+ * `runContract.childRunId` we route through the child runner's status:
+ *
+ *   - `terminal`        — close event with `status` in
+ *                         `{completed | failed | killed}`. The engine
+ *                         surfaces the close event onto the frame patch
+ *                         and stops the child short-circuit cleanly.
+ *
+ *   - `checkpoint_paused` — close event with `status` in
+ *                         `{recoverable_paused | budget_paused | blocked}`.
+ *                         Checkpoint without dispatching anything; the
+ *                         user picks whether to resume.
+ *
+ *   - `wait`            — no close event (child is still running).
+ *                         Engine emits `parentNextHint='wait_for_close_event'`
+ *                         on the frame patch and does NOT ask the model
+ *                         to choose a typed VEA action. Steering already
+ *                         excludes typed actions for child-owned frames
+ *                         (see `turn-frame-steering.isChildOwnedFrame`).
+ *
+ *   - `none`            — frame is not child-owned. Caller falls through
+ *                         to the legacy parent-force path.
+ *
+ * Pure helper: takes the frame and an injectable close-event lookup so
+ * tests can stub the child runner without configuring the singleton.
+ */
+export type ChildContinuationDecision =
+  | { kind: 'none' }
+  | { kind: 'wait'; childRunId: string }
+  | { kind: 'checkpoint_paused'; childRunId: string; closeEvent: SkillChildCloseEvent }
+  | { kind: 'terminal'; childRunId: string; closeEvent: SkillChildCloseEvent }
+
+export function computeChildContinuationDecision(
+  frame: TurnFrame | null,
+  getCloseEvent: (childRunId: string) => SkillChildCloseEvent | null,
+): ChildContinuationDecision {
+  const contract = frame?.skill?.runContract || null
+  // Single source of truth for child ownership — same predicate the
+  // engine uses elsewhere (`shouldParentForceLongSkillTool`).
+  if (shouldParentForceLongSkillTool(contract)) return { kind: 'none' }
+  const childRunId = (contract?.childRunId || '').trim()
+  if (!childRunId) return { kind: 'none' }
+  // Prefer the runner's durable lookup (T4 wave 2 added a persistence-backed
+  // fallback). Fall back to whatever was stamped on the contract — the
+  // loader copies the close event off the repository row if it exists.
+  const live = getCloseEvent(childRunId) ?? contract?.childCloseEvent ?? null
+  if (live && typeof live === 'object') {
+    if (isTerminalChildCloseStatus(live.status)) {
+      return { kind: 'terminal', childRunId, closeEvent: live }
+    }
+    return { kind: 'checkpoint_paused', childRunId, closeEvent: live }
+  }
+  return { kind: 'wait', childRunId }
+}
+
+function matchesChildCancelIntent(...texts: Array<string | null | undefined>): boolean {
+  return texts.some((text) => {
+    const normalized = String(text || '').trim()
+    if (!normalized) return false
+    return /^(?:取消|停止|中止|终止|别跑了|不要继续|cancel|stop|abort)$/i.test(normalized)
+      || /(?:取消|停止|中止|终止|cancel|stop|abort)(?:这个|当前|child|任务|运行|run)/i.test(normalized)
+  })
+}
+
+function isDirectlyResumableChildStatus(status: SkillChildCloseEvent['status']): boolean {
+  return status === 'recoverable_paused' || status === 'budget_paused'
+}
+
+/**
+ * D3 — shared renderer for the user-visible outcome of a child-run command
+ * (`cancel` / `resume`). Centralizes the message + terminalReason mapping
+ * so cancel and resume cannot drift; in particular ensures resume's
+ * synchronous failure path (`closeEvent.status === 'failed'`) surfaces a
+ * "恢复失败" message + `terminalReason: 'failed'` instead of the legacy
+ * "已继续" / `'done'` lie.
+ *
+ * Inputs:
+ *   - `command: 'cancel'` — close MUST be non-null (cancelSkillChildRun
+ *     always returns a close).
+ *   - `command: 'resume'` — close MAY be null (resume launched the child
+ *     and the next close will arrive asynchronously) or non-null (resume
+ *     produced an immediate close: running heartbeat, completed, killed,
+ *     failed, or — defensively — a still-paused state).
+ *
+ * Output is consumed by turn-engine's resume/cancel branches to:
+ *   - `transcript.emitOutput(message, 'text')`
+ *   - `pushAssistantTextSafely(session, message, ...)`
+ *   - `finish({ status, terminalReason, success: status !== 'error',
+ *       cancelled: status === 'cancelled' })`
+ */
+export type ChildCommandKind = 'cancel' | 'resume'
+
+/**
+ * `terminalReason` is constrained to `TurnTerminalReason` so callers can
+ * pass it straight to `finish({ terminalReason })` without coercion. Resume
+ * failure maps to `'resume_launch_failed'` (not the bare `'failed'` literal in the
+ * source plan, which isn't a valid `TurnTerminalReason` member).
+ */
+export interface ChildCommandOutcome {
+  message: string
+  terminalReason: 'done' | 'cancelled_user' | 'resume_launch_failed'
+  status: 'done' | 'cancelled' | 'error'
+}
+
+export function renderChildCommandOutcome(args: {
+  childRunId: string
+  command: ChildCommandKind
+  close: SkillChildCloseEvent | null
+}): ChildCommandOutcome {
+  const { childRunId, command, close } = args
+  if (command === 'cancel') {
+    return {
+      message: `已取消 child run ${childRunId}。`,
+      terminalReason: 'cancelled_user',
+      status: 'cancelled',
+    }
+  }
+  // command === 'resume'
+  if (!close) {
+    return {
+      message: `已继续同一个 child run ${childRunId}。`,
+      terminalReason: 'done',
+      status: 'done',
+    }
+  }
+  // Note: `SkillChildCloseEvent['status']` excludes 'queued' / 'running',
+  // so the "resume launched and is running" case is represented by a null
+  // close (handled above), not a non-null close with status='running'.
+  switch (close.status) {
+    case 'completed':
+      return {
+        message: `child run ${childRunId} 已完成。`,
+        terminalReason: 'done',
+        status: 'done',
+      }
+    case 'failed': {
+      const detail = close.error?.message || close.terminalReason
+      return {
+        message: `恢复 child run ${childRunId} 失败：${detail}`,
+        terminalReason: 'resume_launch_failed',
+        status: 'error',
+      }
+    }
+    case 'killed':
+      return {
+        message: `恢复 child run ${childRunId} 时被取消。`,
+        terminalReason: 'cancelled_user',
+        status: 'cancelled',
+      }
+    default:
+      // Defensive: resume returning a still-paused close (budget_paused /
+      // recoverable_paused / blocked) means resume didn't actually advance.
+      // Surface it as a failure so the user/model can react instead of
+      // claiming success.
+      return {
+        message: `恢复 child run ${childRunId} 时回到暂停状态：${close.terminalReason}`,
+        terminalReason: 'resume_launch_failed',
+        status: 'error',
+      }
+  }
+}
+
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
-  findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId: string }>
+  findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId?: string; id?: string; name?: string }>
+  hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
+  getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
+  rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
+  // skill-resume G2/G3 — reverse-resolve `skill_*` tool names from prior
+  // assistant tool_use blocks back to a reference-like skill and arm the
+  // hint, so a bare retry intent ("继续") can re-expose internal/primitive
+  // tools even when the user didn't name the skill.
+  rememberReferenceSkillFromPriorToolUses?: (
+    priorToolNames: string[],
+    sessionId?: string,
+  ) => { armed: boolean; skillId?: string; skillName?: string }
   maybeInjectExplicitSkillContext: (params: Record<string, unknown>) => Promise<void>
-  rememberDetectedReferenceSkills?: (sessionId: string | undefined, skills: unknown[]) => void
   listRegisteredSkillTokens?: () => string[]
 }
 
@@ -108,6 +494,27 @@ function cloneSession<TSession extends TurnEngineSession>(session: TSession): TS
   return {
     ...session,
     messages: session.messages.map((message) => ({ ...message })),
+  }
+}
+
+function buildModelInputSession<TSession extends TurnEngineSession>(session: TSession): TSession {
+  if (session.messages.some((message) => typeof message.content !== 'string')) {
+    return cloneSession(session)
+  }
+
+  const compactedMessages = layeredCompactor.maybeCompact(
+    session.messages.map((message) => ({
+      role: message.role,
+      content: message.content as string,
+    })),
+  )
+
+  return {
+    ...session,
+    messages: compactedMessages.map((message) => ({
+      role: message.role as TurnEngineSessionMessage['role'],
+      content: message.content,
+    })),
   }
 }
 
@@ -191,7 +598,134 @@ function appendSessionMessages<TSession extends TurnEngineSession>(
   session.messages.push(...messages)
 }
 
-function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
+function pushSystemReminderMessage<TSession extends TurnEngineSession>(
+  session: TSession,
+  entry: ReminderEntry,
+): void {
+  const content = composeSystemReminderText(entry)
+  if (!content) return
+  session.messages.push({ role: 'user', content })
+}
+
+function composeSystemReminderText(entry: ReminderEntry): string | null {
+  const registry = createSystemReminderRegistry()
+  registry.register(entry)
+  return registry.compose()
+}
+
+async function fireUserPromptSubmitHook(
+  registry: Pick<HookRegistry, 'fire'>,
+  payload: { userText: string; sessionId: string | null; timestamp: number },
+): Promise<void> {
+  try {
+    await registry.fire('user_prompt_submit', payload)
+  } catch (error) {
+    try {
+      logAgentMetric(TOOL_ERROR_METRICS.hookHandlerFailed, {
+        hookName: 'user_prompt_submit',
+        handlerName: 'hookRegistry.fire',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } catch {
+      // Metrics must never break a turn.
+    }
+  }
+}
+
+type RecentSkillRunForResume = SkillRunRecord
+const SUPERVISOR_SNAPSHOT_TOOL_NAME = '__skill_task_supervisor_snapshot__'
+
+function skillRunFromSupervisorSnapshot(
+  snapshot: SkillTaskSupervisorSnapshot | null | undefined,
+): SkillRunRecord | null {
+  if (!snapshot?.skillId) return null
+  const updatedAt = Number.isFinite(Date.parse(snapshot.observedAt))
+    ? Date.parse(snapshot.observedAt)
+    : Date.now()
+  const summary = [
+    snapshot.blockers[0],
+    snapshot.progress.currentStage ? `阶段：${snapshot.progress.currentStage}` : null,
+    snapshot.outputDir ? `输出目录：${snapshot.outputDir}` : null,
+  ].filter(Boolean).join(' · ') || snapshot.status
+  return {
+    toolName: snapshot.action || SUPERVISOR_SNAPSHOT_TOOL_NAME,
+    skillId: snapshot.skillId,
+    action: snapshot.action || '',
+    success: snapshot.closeAllowed && snapshot.status === 'completed',
+    status: snapshot.status,
+    runKind: snapshot.detachedTaskId ? 'detached' : 'typed_action',
+    taskRunId: snapshot.taskRunId || undefined,
+    detachedTaskId: snapshot.detachedTaskId || undefined,
+    outputDir: snapshot.outputDir || undefined,
+    runStatePath: snapshot.runStatePath || undefined,
+    pauseReason: snapshot.pauseReason || undefined,
+    resumePayload: snapshot.resumePayload || undefined,
+    summary,
+    updatedAt,
+  }
+}
+
+function skillRunFromActiveSkillContext(
+  context: ActiveSkillContext | null | undefined,
+): SkillRunRecord | null {
+  if (!context?.skillId) return null
+  const updatedAt = Number.isFinite(Date.parse(context.observedAt))
+    ? Date.parse(context.observedAt)
+    : Date.now()
+  const summary = [
+    context.staleBlockerReason,
+    context.outputDir ? `输出目录：${context.outputDir}` : null,
+    context.runStatePath ? `run_state：${context.runStatePath}` : null,
+  ].filter(Boolean).join(' · ') || context.status || context.skillId
+  return {
+    toolName: context.action || SUPERVISOR_SNAPSHOT_TOOL_NAME,
+    skillId: context.skillId,
+    action: context.action || '',
+    success: context.status === 'done',
+    status: context.status || undefined,
+    runKind: context.detachedTaskId ? 'detached' : 'typed_action',
+    taskRunId: context.taskRunId || undefined,
+    detachedTaskId: context.detachedTaskId || undefined,
+    outputDir: context.outputDir || undefined,
+    runStatePath: context.runStatePath || undefined,
+    pauseReason: context.staleBlockerReason || undefined,
+    summary,
+    updatedAt,
+  }
+}
+
+function isSameSkillRunForResume(left: SkillRunRecord | null | undefined, right: SkillRunRecord | null | undefined): boolean {
+  if (!left || !right) return false
+  if (left.taskRunId && right.taskRunId && left.taskRunId === right.taskRunId) return true
+  if (left.detachedTaskId && right.detachedTaskId && left.detachedTaskId === right.detachedTaskId) return true
+  if (left.jobId && right.jobId && left.jobId === right.jobId) return true
+  if (left.toolName === SUPERVISOR_SNAPSHOT_TOOL_NAME || right.toolName === SUPERVISOR_SNAPSHOT_TOOL_NAME) return false
+  return left.skillId === right.skillId
+    && left.action === right.action
+    && left.toolName === right.toolName
+    && Number(left.updatedAt || 0) === Number(right.updatedAt || 0)
+}
+
+function buildSkillResumeContextPrompt(params: {
+  skillName: string
+  skillId: string
+  action?: string | null
+  summary?: string | null
+  userText: string
+}): string {
+  return [
+    `系统补充：这是一次 skill 恢复请求。优先恢复 skill "${params.skillName}" (${params.skillId})。`,
+    params.action ? `上一轮技能动作：${params.action}` : '',
+    params.summary ? `上次摘要/目标、输出目录或 artifact、失败原因：${params.summary}` : '',
+    `用户本轮补充内容：${params.userText || '继续当前任务。'}`,
+    '请沿用上次目标继续，不要把这轮补充当成新的普通问答。',
+  ].filter(Boolean).join('\n')
+}
+
+function buildProjectionTruthSnapshot(
+  events: TurnTranscriptEvent[],
+  turnFrame?: TurnFrame | null,
+) {
   let projectionPatch: Record<string, unknown> | null = null
   for (const event of events) {
     if (event.kind !== 'structured_payload' || !event.projectionPatch) continue
@@ -200,9 +734,67 @@ function buildProjectionTruthSnapshot(events: TurnTranscriptEvent[]) {
       ...event.projectionPatch,
     }
   }
+  // Stage 6 wiring — surface the live TurnFrame skill slice so
+  // task-projection-sync's auto-clear-stale-blocker / supersede paths can read
+  // `frame.skill.staleBlockerReason` and identity. Inlined to the structural
+  // shape declared in run-contracts.ts (no TurnFrameSkillSlice import needed
+  // by the consumer).
+  //
+  // Stage F1 (Zeta) — additionally surface the durable `runContract` from
+  // `turnFrame.skill.runContract` so projection sync can prefer contract
+  // truth (status / liveness / progress / artifact paths / stable identity)
+  // over the older summary+artifact heuristics.
+  const skillSlice = turnFrame?.skill || null
+  const contract = skillSlice?.runContract || null
+  const frameSnapshot = turnFrame
+    ? {
+      skill: skillSlice
+        ? {
+          skillId: skillSlice.skillId,
+          skillName: skillSlice.skillName,
+          source: String(skillSlice.source || ''),
+          detachedTaskId: skillSlice.detachedTaskId,
+          runStatePath: skillSlice.runStatePath,
+          outputDir: skillSlice.outputDir,
+          action: skillSlice.action,
+          staleBlockerReason: skillSlice.staleBlockerReason,
+          runContract: contract
+            ? {
+              skillId: contract.skillId,
+              action: contract.action,
+              toolName: contract.toolName,
+              actionInput: contract.actionInput,
+              originalInput: contract.originalInput,
+              sourceUrl: contract.sourceUrl,
+              taskRunId: contract.taskRunId,
+              detachedTaskId: contract.detachedTaskId,
+              jobId: contract.jobId,
+              outputDir: contract.outputDir,
+              runStatePath: contract.runStatePath,
+              artifactPaths: { ...contract.artifactPaths },
+              status: contract.status,
+              liveness: contract.liveness,
+              progress: {
+                stage: contract.progress?.stage ?? null,
+                totalUnits: contract.progress?.totalUnits ?? null,
+                completedUnits: contract.progress?.completedUnits ?? null,
+                coverageRatio: contract.progress?.coverageRatio ?? null,
+              },
+              blocker: { ...contract.blocker },
+              projectionIdentity: {
+                stableKey: contract.projectionIdentity?.stableKey ?? null,
+              },
+            }
+            : null,
+        }
+        : null,
+      terminalReason: turnFrame.terminalReason,
+    }
+    : null
   return {
     projectionPatch,
     transcriptEvents: events.slice(),
+    frameSnapshot,
   }
 }
 
@@ -254,6 +846,13 @@ function buildHostToolSnapshot(params: {
     fallbackReason: null,
     toolCallsCount: null,
   }
+}
+
+function readPreparedBrowserDecisionMode(result: DomainAdapterPrepareResult | null | undefined): string | null {
+  const mode = (result?.domainState as {
+    preparedBrowserExecution?: { browserDecision?: { mode?: unknown } }
+  } | null | undefined)?.preparedBrowserExecution?.browserDecision?.mode
+  return typeof mode === 'string' && mode ? mode : null
 }
 
 function appendLoggedToolSnapshot(
@@ -366,7 +965,7 @@ function assertNoToolResolutionViolation(params: {
 export class TurnEngine {
   async execute<TSession extends TurnEngineSession>(request: TurnEngineRequest<TSession>) {
     const host = request.host
-    const transcript = new TurnTranscript(request.emitters)
+    const transcript = new TurnTranscript(request.emitters, { sessionId: request.sessionId })
     const state = new TurnState({
       taskId: request.taskId,
       taskBudgetRuntime: request.taskBudgetRuntime,
@@ -379,10 +978,12 @@ export class TurnEngine {
     const domainAdapters = Array.isArray(host.domainAdapters) ? host.domainAdapters as DomainAdapter[] : []
     const requestForAdapters = request as unknown as TurnEngineRequest
     const hostForAdapters = host as unknown as TurnEngineHost
+    const turnFeatureFlags = snapshotTurnFeatureFlags()
 
     const emitStructuredTaskPayload = (payload: unknown): void => {
       transcript.emitStructuredPayload(payload)
     }
+    let turnFrame: TurnFrame | null = null
 
     const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => buildToolRuntimeContext({
       browserController: host.browserController as any,
@@ -396,21 +997,83 @@ export class TurnEngine {
       requestModuleToolAction: host.requestModuleToolAction,
       abortSignal: request.abortSignal,
       sessionId: request.sessionId,
+      taskId: request.taskId,
+      parentTaskId: request.taskId,
+      parentStepId: request.parentStepId,
+      taskProjectionId: request.taskId,
+      frameSkillId: turnFrame?.skill?.skillId || null,
       registerRunCleanup: (cleanup) => {
         host.registerRunCleanup?.(cleanup)
       },
+      agentContext: buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
+        baseUrl: host.providerContext.baseUrl,
+      }),
+      turnFeatureFlags,
+      // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
+      // snapshot BEFORE any same-batch `contextModifier` runs. The first
+      // tool dispatched in this turn must already see the frame's durable
+      // active artifact roots and `runContract` (without needing an
+      // earlier tool to publish them via contextModifier first). Earlier
+      // same-batch tools' contextModifier patches still apply on TOP of
+      // this seed — `applyContextModifier` unions roots + last-write-wins
+      // the contract, so freshly-discovered state always wins on overlap.
+      activeFrame: buildActiveFrameContextFromTurnFrame(turnFrame),
     })
 
     const finish = (params: {
       success: boolean
       error?: string
       cancelled?: boolean
-      status?: 'done' | 'error' | 'cancelled'
+      status?: 'done' | 'error' | 'cancelled' | 'checkpoint'
       doneEventType?: 'done' | 'error'
+      skillTaskLifecycle?: SkillTaskLifecycleSignal | null
+      terminalReason?: TurnTerminalReason | null
     }) => {
-      const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents())
+      const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents(), turnFrame)
       transcript.emitOutput('', params.doneEventType || 'done')
-      transcript.emitStatus(params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error'))
+      const status = params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error')
+      const terminalReason = params.terminalReason
+        || (status === 'done'
+          ? 'done'
+          : status === 'checkpoint'
+            ? 'checkpoint_budget'
+            : status === 'cancelled'
+              ? 'cancelled_runtime'
+              : 'persistence_failed')
+      if (turnFrame) {
+        turnFrame.terminalReason = terminalReason
+      }
+      // Stage 7 — single per-turn diagnostic. Emit exactly once per turn at
+      // closure so logs carry one structured row that explains the whole
+      // turn (skill identity, liveness, allowed/preferred mismatch, terminal
+      // reason). Existing scattered metrics stay for telemetry; this is the
+      // diagnostic-friendly aggregate.
+      try {
+        const summaryAllowed = Array.isArray(turnSummaryAllowedToolNames)
+          ? turnSummaryAllowedToolNames
+          : []
+        const preferredFromFrame = turnFrame?.steering?.preferredToolNames || []
+        const allowedPreferredMismatch = detectAllowedPreferredMismatch(summaryAllowed, preferredFromFrame)
+        logAgentMetric('turn_frame_summary', {
+          sessionId: request.sessionId,
+          requestId: request.runId,
+          skillId: turnFrame?.skill?.skillId || null,
+          source: turnFrame?.skill?.source || null,
+          liveness: turnFrame?.liveness || 'unknown',
+          action: turnFrame?.skill?.action || null,
+          mode: turnFrame?.steering?.mode || 'ask_model',
+          allowedToolNames: summaryAllowed,
+          preferredToolNames: preferredFromFrame,
+          allowedPreferredMismatch,
+          terminalReason,
+          budgetExhausted: Boolean(turnFrame?.budget?.exhausted),
+          longSkillResume: Boolean(turnSummaryLongSkillResume),
+          iterations: turnSummaryIterations,
+        })
+      } catch {
+        // metrics must never break the control path
+      }
+      transcript.emitStatus(status)
       return {
         ...state.buildResult({
           success: params.success,
@@ -419,19 +1082,37 @@ export class TurnEngine {
           finalText: transcript.getFinalText(),
           usedTools: transcript.getUsedTools(),
         }),
+        status,
         projectionTruth,
+        skillTaskLifecycle: params.skillTaskLifecycle || null,
+        terminalReason,
       }
     }
+    // Stage 7 — captured at terminal closure for the `turn_frame_summary`
+    // metric. `turnSummaryAllowedToolNames` is rebound after the run-policy
+    // resolves `routedAllowedToolNames`. `turnSummaryIterations` is updated
+    // by the iteration loop. `turnSummaryLongSkillResume` snapshots whether
+    // this turn was on the long-skill resume budget.
+    let turnSummaryAllowedToolNames: string[] = []
+    let turnSummaryIterations = 0
+    let turnSummaryLongSkillResume = false
 
     try {
       const session = request.session
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
       const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
+      const hookRegistry = host.hookRegistry || NOOP_HOOK_REGISTRY
+      await fireUserPromptSubmitHook(hookRegistry, {
+        userText,
+        sessionId: request.sessionId ?? null,
+        timestamp: Date.now(),
+      })
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
+      const previousPureUserInputs = host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
-        previousInputs: host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40),
+        previousInputs: previousPureUserInputs,
         lastDocumentContextInput: session.lastDocumentContextInput,
         intentClassification: request.intentClassification || classifyIntent(requestEnvelope, {
           registeredSkillTokens,
@@ -444,6 +1125,11 @@ export class TurnEngine {
       })
       const contextualUserInput = executionIntentContext.contextualUserInput
       const pureUserInput = requestEnvelope.pureUserText
+      const currentTurnResumeText =
+        executionIntentContext.requestEnvelope.primaryInstruction
+        || executionIntentContext.requestEnvelope.pureUserText
+        || userText
+      const providedContinuationState = request.continuationState || null
       if (contextualUserInput !== pureUserInput) {
         host.log(`tool policy context reused previous user input: ${contextualUserInput.slice(0, 120)}`)
       }
@@ -459,21 +1145,324 @@ export class TurnEngine {
       // drops preferredSkillToolNames to null and the skill filter strips the
       // user's intended skill tools. primaryInstruction comes from the current
       // turn verbatim and is the correct primary signal.
-      const skillDetectionInputs = Array.from(new Set([
+      // skill-resume A2: scan recent assistant tool_use blocks for skill_*
+      // names so a bare retry ("继续") can re-discover the skill the agent was
+      // using before — even when the user's current text doesn't name it.
+      const previousAssistantSkillToolUses = collectRecentAssistantSkillToolUses(
+        session.messages.slice(0, -1) as Array<{ role?: string; content?: unknown }>,
+        5,
+      )
+      const skillDetectionInputs = buildSkillDetectionInputs({
         contextualUserInput,
+        primaryInstruction: requestEnvelope.primaryInstruction,
+        pureUserText: requestEnvelope.pureUserText,
+        previousPureUserInputs,
+        previousAssistantSkillToolUses,
+      })
+      // D3: detect a bare retry/continue intent so narrowing domain adapters
+      // (currently SkillDomainAdapter) can widen their prefix list to keep
+      // file_/document_ tools accessible. Probe the same input channels as
+      // skill detection so we don't miss a retry hidden under a widget
+      // context inheritance.
+      const isRetryOnlyTurnDetected = [
         requestEnvelope.primaryInstruction,
         requestEnvelope.pureUserText,
-      ].filter((value): value is string => Boolean(value))))
+        contextualUserInput,
+      ].some((text) => isRetryOnlyTurn(String(text || '')))
+      const isConfigRepairTurnDetected = [
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        contextualUserInput,
+      ].some((text) => isConfigRepairTurn(String(text || '')) || matchesConfigRepairIntent(String(text || '')))
+      const isSkillResumeTurnDetected = isRetryOnlyTurnDetected || isConfigRepairTurnDetected
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
-      const hasExplicitSkill = Boolean(firstSkillMatch)
-      const preferredSkillToolNames = hasExplicitSkill
+      let hasExplicitSkill = Boolean(firstSkillMatch)
+      const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
+      let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
+      let referenceSkillForMetrics: { id?: string; name?: string } | null = null
+      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | null = null
+      const hasStrongActiveSkillContext = (): boolean => {
+        try {
+          const supervisorSnapshot = host.skillTaskSupervisor?.inspectLatestSkillTask
+            ? host.skillTaskSupervisor.inspectLatestSkillTask({
+              sessionId: request.sessionId,
+              scopeId: request.sessionId,
+            })
+            : null
+          const context = resolveActiveSkillContext({
+            sessionId: request.sessionId,
+            supervisorSnapshot,
+            inspectSupervisor: supervisorSnapshot ? false : undefined,
+          })
+          return Boolean(context && context.source !== 'reference_hint')
+        } catch {
+          return false
+        }
+      }
+      // skill-resume G2/G3 — when the user fired a bare retry intent and the
+      // substring-based skill match failed but the assistant recently used a
+      // skill_* tool_use, reverse-resolve the tool name back to its skill and
+      // re-arm the reference-skill hint. We then synthesize a context text so
+      // the rest of the turn (preferredSkillToolNames, maybeInjectExplicitSkillContext)
+      // flows naturally as if the user had named the skill.
+      let lookbackRearmedSkill: { skillId?: string; skillName?: string } | null = null
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && !isConfigRepairTurnDetected && previousAssistantSkillToolUses.length > 0 && !hasStrongActiveSkillContext()) {
+        const rearmed = skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
+          previousAssistantSkillToolUses,
+          request.sessionId,
+        )
+        if (rearmed?.armed && rearmed.skillName) {
+          lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
+          referenceSkillForMetrics = { id: rearmed.skillId, name: rearmed.skillName }
+          referenceSkillHintVia = 'lookback'
+          skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
+          )
+        }
+      }
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && !isConfigRepairTurnDetected && !hasStrongActiveSkillContext()) {
+        const armedHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
+        if (armedHint) {
+          lookbackRearmedSkill = { skillId: armedHint.id, skillName: armedHint.name }
+          referenceSkillForMetrics = { id: armedHint.id, name: armedHint.name }
+          referenceSkillHintVia = 'current'
+          skillContextInjectionText = `用户希望继续使用 skill "${armedHint.name}"`
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${armedHint.id} skillName=${armedHint.name}`,
+          )
+        }
+      }
+      const inspectLatestSkillTaskForHost = (params: {
+        sessionId?: string | null
+        scopeId?: string | null
+        skillId?: string | null
+      }): SkillTaskSupervisorSnapshot => {
+        if (host.skillTaskSupervisor?.inspectLatestSkillTask) {
+          return host.skillTaskSupervisor.inspectLatestSkillTask(params)
+        }
+        return inspectLatestSkillTask(params)
+      }
+
+      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
+        const continuitySkillRun = getLatestSkillRun(request.sessionId)
+        const supervisorSnapshot = inspectLatestSkillTaskForHost({
+          sessionId: request.sessionId,
+          scopeId: request.sessionId,
+        })
+        const supervisorSkillRun = skillRunFromSupervisorSnapshot(supervisorSnapshot)
+        const activeSkillContext = resolveActiveSkillContext({
+          sessionId: request.sessionId,
+          supervisorSnapshot,
+          inspectSupervisor: false,
+        })
+        const activeContextSkillRun = skillRunFromActiveSkillContext(activeSkillContext)
+        const projectionSkillRun = host.resolveRecentSkillRun?.(request.sessionId) || null
+        const taskRunSkillRun = (host as unknown as {
+          resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
+        }).resolveRecentSkillTaskRun?.(request.sessionId) || null
+        const latestSkillRun = resolveSkillRunForResume({
+          sessionId: request.sessionId,
+          expectedTaskId: extractTaskIdFromText(currentTurnResumeText || contextualUserInput),
+          candidates: [
+            supervisorSkillRun,
+            activeContextSkillRun,
+            taskRunSkillRun,
+            projectionSkillRun as RecentSkillRunForResume | null,
+            continuitySkillRun,
+          ],
+        })
+        const latestSkillRunSource = isSameSkillRunForResume(supervisorSkillRun, latestSkillRun)
+          ? 'supervisor'
+          : isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)
+          ? activeSkillContext?.source || 'active_context'
+          : isSameSkillRunForResume(continuitySkillRun, latestSkillRun)
+          ? 'session_continuity'
+          : isSameSkillRunForResume(taskRunSkillRun, latestSkillRun)
+            ? 'skill_task_run'
+            : isSameSkillRunForResume(projectionSkillRun as RecentSkillRunForResume | null, latestSkillRun)
+              ? 'task_projection'
+              : 'none'
+        if (latestSkillRun?.skillId) {
+          const recoveredSkill = skillContextOrchestrator
+            .findExplicitlyRequestedSkills(`skill ${latestSkillRun.skillId}`)
+            .find((skill) => skill.id === latestSkillRun.skillId)
+          const skillName = recoveredSkill?.name || latestSkillRun.skillId
+          lookbackRearmedSkill = { skillId: latestSkillRun.skillId, skillName }
+          referenceSkillForMetrics = { id: latestSkillRun.skillId, name: skillName }
+          referenceSkillHintVia = 'history'
+          skillContextInjectionText = buildSkillResumeContextPrompt({
+            skillName,
+            skillId: latestSkillRun.skillId,
+            action: latestSkillRun.action,
+            summary: latestSkillRun.summary,
+            userText: currentTurnResumeText || contextualUserInput,
+          })
+          hasExplicitSkill = true
+          if (activeSkillContext && isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)) {
+            rememberActiveSkillContext(request.sessionId, activeSkillContext)
+          }
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_skill_history source=${latestSkillRunSource} skillId=${latestSkillRun.skillId} skillName=${skillName}`,
+          )
+        } else if (isConfigRepairTurnDetected) {
+          const rearmed = previousAssistantSkillToolUses.length > 0
+            ? skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
+              previousAssistantSkillToolUses,
+              request.sessionId,
+            )
+            : null
+          if (rearmed?.armed && rearmed.skillName) {
+            lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
+            referenceSkillForMetrics = { id: rearmed.skillId, name: rearmed.skillName }
+            referenceSkillHintVia = 'lookback'
+            skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
+            hasExplicitSkill = true
+            host.log(
+              `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
+            )
+          } else {
+            const armedHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
+            if (armedHint) {
+              lookbackRearmedSkill = { skillId: armedHint.id, skillName: armedHint.name }
+              referenceSkillForMetrics = { id: armedHint.id, name: armedHint.name }
+              referenceSkillHintVia = 'current'
+              skillContextInjectionText = `用户希望继续使用 skill "${armedHint.name}"`
+              hasExplicitSkill = true
+              host.log(
+                `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${armedHint.id} skillName=${armedHint.name}`,
+              )
+            } else {
+              const clarification = '我看到了你更新配置，但这里没有可恢复的 skill 任务。请告诉我要继续哪一个技能任务。'
+              host.log('[skill_detection] No recent skill task is available to resume after config repair turn')
+              transcript.emitOutput(clarification, 'text')
+              pushAssistantTextSafely(session, clarification, { sessionId: request.sessionId })
+              return finish({ success: true, status: 'done' })
+            }
+          }
+        }
+      }
+      const referenceSkillHintArmed = hasExplicitSkill
+        ? Boolean(skillContextOrchestrator.rememberExplicitReferenceSkillHint?.(
+          skillContextInjectionText,
+          request.sessionId,
+        )) || Boolean(lookbackRearmedSkill)
+        : false
+      if (referenceSkillHintArmed && !referenceSkillForMetrics) {
+        const currentHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
+        referenceSkillForMetrics = currentHint
+          ? { id: currentHint.id, name: currentHint.name }
+          : firstSkillMatch?.skills[0]
+            ? { id: firstSkillMatch.skills[0].skillId, name: firstSkillMatch.skills[0].skillId }
+            : null
+        referenceSkillHintVia = 'explicit'
+      }
+      const legacyPreferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
-          firstSkillMatch ? firstSkillMatch.text : contextualUserInput,
+          skillContextInjectionText,
           request.sessionId,
         )
         : null
+      let preferredSkillToolNames = legacyPreferredSkillToolNames
+      let isLongSkillResumeTurn =
+        isRetryOnlyTurnDetected
+        && referenceSkillHintArmed
+        && hasLongTypedSkillAction(preferredSkillToolNames)
+      let activeSkillContextForTurn: ActiveSkillContext | null = null
+      let currentReferenceHintForContext: { id: string; name: string; at?: number } | null = null
+      try {
+        currentReferenceHintForContext = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId) || null
+        activeSkillContextForTurn = resolveActiveSkillContext({
+          sessionId: request.sessionId,
+          referenceHint: currentReferenceHintForContext
+            ? { ...currentReferenceHintForContext, at: Date.now() }
+            : null,
+        })
+      } catch {
+        activeSkillContextForTurn = null
+      }
+      if (activeSkillContextForTurn && activeSkillContextForTurn.source !== 'reference_hint') {
+        rememberActiveSkillContext(request.sessionId, activeSkillContextForTurn)
+        if (!referenceSkillForMetrics) {
+          referenceSkillForMetrics = {
+            id: activeSkillContextForTurn.skillId,
+            name: activeSkillContextForTurn.skillName || activeSkillContextForTurn.skillId,
+          }
+        }
+      }
+      // Stage E — fetch supervisor snapshot so the resolver can hand it to
+      // `loadSkillRunContract`. Without this the contract's `actionInput` /
+      // `originalInput` (read from snapshot.resumePayload) stay null and
+      // forced-action input synthesis can't dispatch with valid input.
+      let supervisorSnapshotForFrame: SkillTaskSupervisorSnapshot | null = null
+      try {
+        supervisorSnapshotForFrame = inspectLatestSkillTaskForHost({
+          sessionId: request.sessionId,
+          scopeId: request.sessionId,
+        })
+      } catch {
+        supervisorSnapshotForFrame = null
+      }
+      turnFrame = resolveTurnFrame({
+        sessionId: request.sessionId,
+        requestId: request.runId,
+        userIntent: isConfigRepairTurnDetected
+          ? 'repair_config'
+          : isRetryOnlyTurnDetected
+            ? 'continue'
+            : 'unknown',
+        activeContext: activeSkillContextForTurn,
+        supervisorSnapshot: supervisorSnapshotForFrame,
+        referenceHint: currentReferenceHintForContext
+          ? { ...currentReferenceHintForContext, at: Date.now() }
+          : null,
+      })
+      if (turnFrame.skill && !referenceSkillForMetrics) {
+        referenceSkillForMetrics = {
+          id: turnFrame.skill.skillId,
+          name: turnFrame.skill.skillName || turnFrame.skill.skillId,
+        }
+      }
+      if (turnFrame.steering.preferredToolNames.length > 0) {
+        preferredSkillToolNames = turnFrame.steering.preferredToolNames
+      }
+      isLongSkillResumeTurn = (
+        turnFrame.mode === 'skill_resume'
+        && hasLongTypedSkillAction(preferredSkillToolNames)
+      ) || isLongSkillResumeTurn
+      if (referenceSkillHintArmed) {
+        logAgentMetric('skill_reference_hint_armed', {
+          via: referenceSkillHintVia || 'explicit',
+          sessionId: request.sessionId,
+          skillId: referenceSkillForMetrics?.id || null,
+          skillName: referenceSkillForMetrics?.name || null,
+          retryOnly: isRetryOnlyTurnDetected,
+        })
+      }
+      host.log(`[active_skill_context] ${JSON.stringify(summarizeActiveSkillContext(activeSkillContextForTurn))}`)
+      host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
+      logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
+      if (turnFrame.skill && !referenceSkillForMetrics?.id) {
+        logAgentMetric('turn_frame_resolution_mismatch', {
+          sessionId: request.sessionId,
+          skillId: turnFrame.skill.skillId,
+          source: turnFrame.skill.source,
+        })
+      }
+      if (preferredSkillToolNames?.length) {
+        logAgentMetric('preferred_skill_tools', {
+          sessionId: request.sessionId,
+          count: preferredSkillToolNames.length,
+          tools: preferredSkillToolNames,
+          referenceSkillHintArmed,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          longSkillResume: isLongSkillResumeTurn,
+        })
+      }
       host.log(
         `[skill_detection] primaryMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.primaryInstruction)?.skills.length
@@ -484,21 +1473,128 @@ export class TurnEngine {
         } pureMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.pureUserText)?.skills.length
             ? 'true' : 'false'
-        } preferredSkillToolCount=${preferredSkillToolNames?.length || 0}`,
+        } activeExecution=${hasActiveSkill} referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
       )
-
-      // Register reference-skill hints BEFORE prepareInitialRun builds the
-      // tool snapshot. `filterSkillPrimitivesBySession` gates primitives on
-      // `hasReferenceSkillHint(sessionId)`, so if we wait for
-      // `maybeInjectExplicitSkillContext` (which runs after tool prep) to
-      // register the hint, the first turn's LLM sees a tool surface with no
-      // `skill_run_shell` / `skill_ask_user` / `skill_write_artifact` /
-      // `skill_read_artifact` and reports "当前上下文没有 skill_run_shell 工具".
-      if (firstSkillMatch && skillContextOrchestrator.rememberDetectedReferenceSkills) {
-        skillContextOrchestrator.rememberDetectedReferenceSkills(
-          request.sessionId,
-          firstSkillMatch.skills as unknown[],
-        )
+      const childCommand = computeChildContinuationDecision(
+        turnFrame,
+        getSkillChildRunCloseEvent,
+      )
+      if (turnFrame?.skill?.runContract && childCommand.kind !== 'none') {
+        const contract = turnFrame.skill.runContract
+        if (childCommand.kind === 'terminal' || childCommand.kind === 'checkpoint_paused') {
+          contract.childCloseEvent = childCommand.closeEvent
+          contract.childStatus = childCommand.closeEvent.status
+          contract.parentNextHint = 'continue_other_work'
+        } else if (childCommand.kind === 'wait') {
+          contract.parentNextHint = 'wait_for_close_event'
+        }
+      }
+      const childRunIdForCommand = childCommand.kind === 'none' ? null : childCommand.childRunId
+      const isChildCancelTurn = Boolean(childRunIdForCommand) && matchesChildCancelIntent(
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        requestEnvelope.rawUserText,
+      )
+      if (isChildCancelTurn && childRunIdForCommand) {
+        const cancelChild = (host as unknown as {
+          cancelSkillChildRun?: typeof cancelSkillChildRun
+        }).cancelSkillChildRun || cancelSkillChildRun
+        const close = await cancelChild(childRunIdForCommand, { reason: 'cancelled_user', source: 'nlp' })
+        if (turnFrame?.skill?.runContract) {
+          turnFrame.skill.runContract.childCloseEvent = close
+          turnFrame.skill.runContract.childStatus = close.status
+          turnFrame.skill.runContract.parentNextHint = 'continue_other_work'
+        }
+        if (turnFrame) turnFrame.terminalReason = 'cancelled_user'
+        const outcome = renderChildCommandOutcome({
+          childRunId: childRunIdForCommand,
+          command: 'cancel',
+          close,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
+        logAgentMetric('turn_child_run_user_cancelled', {
+          sessionId: request.sessionId,
+          childRunId: childRunIdForCommand,
+          childStatus: close.status,
+          terminalReason: close.terminalReason,
+        })
+        return finish({
+          success: true,
+          cancelled: outcome.status === 'cancelled',
+          status: outcome.status,
+          terminalReason: outcome.terminalReason,
+        })
+      }
+      if (
+        childCommand.kind === 'checkpoint_paused'
+        && isSkillResumeTurnDetected
+        && !isConfigRepairTurnDetected
+      ) {
+        if (!turnFeatureFlags.childResumeEnabled) {
+          // Production rollback path: when the operator sets
+          // READY_SKILL_CHILD_RESUME_ENABLED='0' we emit observability and
+          // fall through to the normal model turn so the assistant can
+          // describe the paused state without invoking the resume command.
+          // The runner's `resumeSkillChildRun` API itself is unaffected —
+          // only the parent loop's automatic resume branch is gated.
+          logAgentMetric(TOOL_ERROR_METRICS.childResumeDisabledByFlag, {
+            sessionId: request.sessionId,
+            childRunId: childCommand.childRunId,
+            childStatus: childCommand.closeEvent.status,
+            terminalReason: childCommand.closeEvent.terminalReason,
+          })
+          // Intentional fallthrough — do NOT call finish() here.
+        } else {
+          const childStatus = childCommand.closeEvent.status
+          if (!isDirectlyResumableChildStatus(childStatus)) {
+            const detail = childCommand.closeEvent.error?.message
+              || childCommand.closeEvent.terminalReason
+              || 'child run blocked'
+            const message = `当前 child run ${childCommand.childRunId} 处于 blocked，不能直接继续；需要先处理阻塞原因：${detail}。`
+            transcript.emitOutput(message, 'text')
+            pushAssistantTextSafely(session, message, { sessionId: request.sessionId })
+            logAgentMetric('turn_child_run_resume_rejected', {
+              sessionId: request.sessionId,
+              childRunId: childCommand.childRunId,
+              childStatus,
+              terminalReason: childCommand.closeEvent.terminalReason,
+            })
+            return finish({
+              success: true,
+              status: 'done',
+              terminalReason: 'done',
+            })
+          }
+          const resumeChild = (host as unknown as {
+            resumeSkillChildRun?: typeof resumeSkillChildRun
+          }).resumeSkillChildRun || resumeSkillChildRun
+          const resumed = await resumeChild(childCommand.childRunId)
+          if (turnFrame?.skill?.runContract && resumed.freshContractFields) {
+            Object.assign(turnFrame.skill.runContract, resumed.freshContractFields)
+          }
+          const outcome = renderChildCommandOutcome({
+            childRunId: resumed.childRunId,
+            command: 'resume',
+            close: resumed.closeEvent,
+          })
+          transcript.emitOutput(outcome.message, 'text')
+          pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
+          logAgentMetric('turn_child_run_resumed', {
+            sessionId: request.sessionId,
+            childRunId: resumed.childRunId,
+            childStatus: resumed.status,
+            previousStatus: childStatus,
+            outcomeStatus: outcome.status,
+            outcomeTerminalReason: outcome.terminalReason,
+          })
+          return finish({
+            success: outcome.status !== 'error',
+            cancelled: outcome.status === 'cancelled',
+            status: outcome.status,
+            terminalReason: outcome.terminalReason,
+          })
+        }
       }
       const runtimeAvailability = {
         browserHostAvailable: Boolean(host.browserController),
@@ -556,72 +1652,9 @@ export class TurnEngine {
         allowedToolNames: preparedRunCapabilities.allowedToolNames,
       })
       let toolPolicy = preparedRunCapabilities.toolPolicy
-      const shouldPersistDocumentContext =
-        Boolean((toolPolicy as any).forceDocumentTool)
-        || executionIntentContext.hasWidgetTargetContext
-      if (shouldPersistDocumentContext) {
-        session.lastDocumentContextInput = contextualUserInput
-      }
-
-      const continuationHintText =
-        executionIntentContext.requestEnvelope.primaryInstruction
-        || executionIntentContext.requestEnvelope.pureUserText
-        || userText
-      const continuationLookupText =
-        requestEnvelope.rawUserText
-        || requestEnvelope.pureUserText
-        || userText
-      const providedContinuationState = request.continuationState || null
-      const explicitTaskId = providedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
-      const shouldResolveContinuation =
-        Boolean(providedContinuationState)
-        || Boolean(explicitTaskId)
-        || /(继续|接着|恢复|上次|重试)/.test(continuationHintText)
-      const continuationProjection = providedContinuationState
-        ? null
-        : host.resolveContinuationProjection(request.sessionId, continuationLookupText, {
-          explicitTaskId,
-          allowImplicitContinuation: shouldResolveContinuation,
-        })
-      const continuationState = providedContinuationState
-        || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
-      const continuationTaskId = continuationState?.taskId || continuationProjection?.taskId || null
-      const initialTaskTypeResolution = resolveTaskType({
-        intent: executionIntentContext.intentClassification as IntentClassification,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
-      })
-      const initialTaskExecutionRoute = resolveTaskExecutionRoute({
-        taskId: request.taskId,
-        resolution: initialTaskTypeResolution,
-        envelope: executionIntentContext.requestEnvelope,
-        capabilities: preparedRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId
-          ? {
-            continuationTaskId,
-            continuationProjection,
-            continuationState,
-          }
-          : null,
-      })
-
-      if (hasTools) {
-        const preparedToolContext = buildHostToolContext(preparedRunCapabilities.allowedToolNames)
-        await skillContextOrchestrator.maybeInjectExplicitSkillContext({
-          userText,
-          session,
-          sessionId: request.sessionId,
-          emitOutput: (chunk: string, type: string) => transcript.emitOutput(chunk, type),
-          emitToolAction: (tool: string, args: Record<string, unknown>) => transcript.emitToolAction(tool, args),
-          executeTool: async (tool: string, args: Record<string, unknown>) => host.executeToolCall(tool, args, preparedToolContext),
-        })
-      }
-
-      const browserDomainAdapter = domainAdapters.find((adapter) => adapter.id === 'browser') || null
-      const browserPrepareResult = browserDomainAdapter
-        ? await browserDomainAdapter.prepare({
-          route: initialTaskExecutionRoute,
+      const initialCoordinatorArbitrations = domainAdapters
+        .map((adapter) => adapter.arbitrateRunCapabilities?.({
+          route: null,
           request: requestForAdapters,
           host: hostForAdapters,
           session,
@@ -632,14 +1665,65 @@ export class TurnEngine {
           hasTools,
           toolPolicy,
           allowedToolNames: preparedRunCapabilities.allowedToolNames,
-        })
-        : null
-      browserDecision = {
-        mode: String((browserPrepareResult?.domainState as { preparedBrowserExecution?: { browserDecision?: { mode?: string } } } | undefined)
-          ?.preparedBrowserExecution?.browserDecision?.mode || 'free_tool_loop'),
-        reason: 'domain_adapter',
+          turnFrameSteering: turnFrame?.steering || null,
+        }))
+        .filter((arbitration): arbitration is NonNullable<typeof arbitration> => Boolean(arbitration))
+      const shouldPersistDocumentContext =
+        initialCoordinatorArbitrations.some((arbitration) => arbitration.forceTool === 'document')
+        || executionIntentContext.hasWidgetTargetContext
+      if (shouldPersistDocumentContext) {
+        session.lastDocumentContextInput = contextualUserInput
       }
-      const reconciledRunCapabilities = reconcileAfterBrowserDecision({
+
+      const continuationHintText =
+        currentTurnResumeText
+      const continuationLookupText =
+        requestEnvelope.rawUserText
+        || requestEnvelope.pureUserText
+        || userText
+      const effectiveProvidedContinuationState = hasExplicitSkill ? null : providedContinuationState
+      const explicitTaskId = effectiveProvidedContinuationState?.taskId || extractTaskIdFromText(continuationLookupText)
+      const shouldSuppressImplicitContinuation = hasExplicitSkill
+        && !effectiveProvidedContinuationState
+        && !explicitTaskId
+        && !(isConfigRepairTurnDetected && referenceSkillHintVia === 'history')
+      const shouldResolveContinuation =
+        Boolean(effectiveProvidedContinuationState)
+        || Boolean(explicitTaskId)
+        // Phase 2.4 — use the unified resume lexicon's `anywhere` mode so
+        // phrasings like "你需要从头跑一轮" / "重新跑一次" / "再跑一遍" are
+        // recognized. Audit Phase 2 §B1/B2 — the previous inline regex
+        // dropped these phrases on the floor, falling through to plain-
+        // answer where the model could leak `<tool_call>` text into chat.
+        || (!shouldSuppressImplicitContinuation && (
+          matchesResumeIntent(continuationHintText, 'anywhere')
+          || isConfigRepairTurnDetected
+        ))
+      if (shouldSuppressImplicitContinuation) {
+        host.log('[skill_detection] suppressed implicit continuation because an explicit skill request was resolved')
+      }
+      const continuationProjection = effectiveProvidedContinuationState
+        ? null
+        : host.resolveContinuationProjection(request.sessionId, continuationLookupText, {
+          explicitTaskId,
+          allowImplicitContinuation: shouldResolveContinuation,
+        })
+      const continuationState = effectiveProvidedContinuationState
+        || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
+      const continuationTaskId = continuationState?.taskId || continuationProjection?.taskId || null
+      if (hasTools) {
+        const preparedToolContext = buildHostToolContext(preparedRunCapabilities.allowedToolNames)
+        await skillContextOrchestrator.maybeInjectExplicitSkillContext({
+          userText: skillContextInjectionText,
+          session,
+          sessionId: request.sessionId,
+          emitOutput: (chunk: string, type: string) => transcript.emitOutput(chunk, type),
+          emitToolAction: (tool: string, args: Record<string, unknown>) => transcript.emitToolAction(tool, args),
+          executeTool: async (tool: string, args: Record<string, unknown>) => host.executeToolCall(tool, args, preparedToolContext),
+        })
+      }
+
+      let reconciledRunCapabilities = reconcileAfterBrowserDecision({
         prepared: preparedRunCapabilities,
         browserDecisionMode: browserDecision.mode as any,
       })
@@ -676,13 +1760,47 @@ export class TurnEngine {
         visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
         allowedToolNames: reconciledRunCapabilities.allowedToolNames,
       })
+      if (
+        activeSkillContextForTurn
+        && !(reconciledRunCapabilities.allowedToolNames || []).some((name) =>
+          name === 'skill_run_shell' || name === 'skill_patch_config')
+      ) {
+        logAgentMetric('skill_context_tool_mismatch', {
+          sessionId: request.sessionId,
+          skillId: activeSkillContextForTurn.skillId,
+          source: activeSkillContextForTurn.source,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+        })
+        host.log(`[skill_context_tool_mismatch] ${JSON.stringify(summarizeActiveSkillContext(activeSkillContextForTurn))}`)
+      }
 
-      const taskTypeResolution = resolveTaskType({
+      const resolvedTaskTypeForEffectiveRun = resolveTaskType({
         intent: executionIntentContext.intentClassification as IntentClassification,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
         currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
       })
+      // Phase 4.1 — long-skill resume budget no longer requires `!continuationTaskId`.
+      // Audit Phase 4 §C1: an explicit continuation that's still on a typed
+      // long-skill action (e.g. resuming VEA pipeline at step 3 of 7) was
+      // previously denied the 80-iter ceiling because the gate was AND'd with
+      // "no continuationTaskId". Now: any turn where (a) it's a retry-only
+      // intent OR (b) we have an explicit continuation pointing at a typed
+      // long-skill action gets the upgrade. preferredSkillToolNames only
+      // populates when the skill is in the active set, so this can't false-
+      // positive on continuations to non-skill tasks.
+      const shouldUseLongSkillResumeBudget =
+        isLongSkillResumeTurn
+        || (Boolean(continuationTaskId) && hasLongTypedSkillAction(preferredSkillToolNames))
+      const taskTypeResolution = shouldUseLongSkillResumeBudget && resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
+        ? {
+          ...resolvedTaskTypeForEffectiveRun,
+          taskType: 'multi_step_task' as const,
+          executionChain: 'domain_executor' as const,
+          requiresPlanner: false,
+          preferredExecutor: 'skill' as const,
+        }
+        : resolvedTaskTypeForEffectiveRun
       const taskExecutionRoute = resolveTaskExecutionRoute({
         taskId: request.taskId,
         resolution: taskTypeResolution,
@@ -703,32 +1821,70 @@ export class TurnEngine {
         hasTools,
         executionIntentContext,
       })
-      const selectedDomainPrepareResult: DomainAdapterPrepareResult | null =
-        selectedDomainAdapter?.id === 'browser'
-          ? browserPrepareResult
-          : selectedDomainAdapter
-            ? await selectedDomainAdapter.prepare({
-              route: taskExecutionRoute,
-              request: requestForAdapters,
-              host: hostForAdapters,
-              session,
-              userText,
-              pureUserInput,
-              requestEnvelope,
-              executionIntentContext,
-              hasTools,
-              toolPolicy,
-              allowedToolNames: reconciledRunCapabilities.allowedToolNames,
-            })
-            : null
-      const shouldHideBrowserProcessText =
-        selectedDomainAdapter?.id === 'browser'
-        && taskExecutionRoute.chain !== 'direct'
-        && (
-          taskExecutionRoute.executor === 'browser'
-          || Boolean((selectedDomainPrepareResult?.domainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
-            ?.browserToolLoopState?.isBrowserTask)
-        )
+      const selectedDomainPrepareResult: DomainAdapterPrepareResult | null = selectedDomainAdapter
+        ? await selectedDomainAdapter.prepare({
+          route: taskExecutionRoute,
+          request: requestForAdapters,
+          host: hostForAdapters,
+          session,
+          userText,
+          pureUserInput,
+          requestEnvelope,
+          executionIntentContext,
+          hasTools,
+          toolPolicy,
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+          isRetryOnlyTurn: isRetryOnlyTurnDetected,
+          turnFrameSteering: turnFrame?.steering || null,
+        })
+        : null
+      const preparedBrowserDecisionMode = readPreparedBrowserDecisionMode(selectedDomainPrepareResult)
+      if (preparedBrowserDecisionMode && preparedBrowserDecisionMode !== browserDecision.mode) {
+        browserDecision = {
+          mode: preparedBrowserDecisionMode,
+          reason: 'domain_adapter',
+        }
+        reconciledRunCapabilities = reconcileAfterBrowserDecision({
+          prepared: preparedRunCapabilities,
+          browserDecisionMode: browserDecision.mode as any,
+        })
+        toolPolicy = reconciledRunCapabilities.toolPolicy
+        appendLoggedToolResolution({
+          state,
+          host,
+          stage: 'host_effective_after_domain_prepare',
+          resolution: reconciledRunCapabilities.toolResolution,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+          allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        })
+        assertNoToolResolutionViolation({
+          state,
+          host,
+          stage: 'host_effective_after_domain_prepare',
+          resolution: reconciledRunCapabilities.toolResolution,
+          allowBrowserTools: reconciledRunCapabilities.toolPolicy.allowBrowserTools,
+          visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+          allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        })
+      }
+      const selectedCoordinatorArbitration = selectedDomainAdapter?.arbitrateRunCapabilities?.({
+        route: taskExecutionRoute,
+        request: requestForAdapters,
+        host: hostForAdapters,
+        session,
+        userText,
+        pureUserInput,
+        requestEnvelope,
+        executionIntentContext,
+        hasTools,
+        toolPolicy,
+        allowedToolNames: reconciledRunCapabilities.allowedToolNames,
+        isRetryOnlyTurn: isRetryOnlyTurnDetected,
+        turnFrameSteering: turnFrame?.steering || null,
+        domainState: selectedDomainPrepareResult?.domainState,
+      } as Parameters<DomainAdapter['arbitrateRunCapabilities']>[0] & { domainState?: unknown }) || null
+      const shouldHideBrowserProcessText = Boolean(selectedCoordinatorArbitration?.hideAssistantProcessText)
 
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation?.budgetRuntime) {
         state.taskBudgetRuntime = {
@@ -746,10 +1902,81 @@ export class TurnEngine {
           : null
       }
       state.adoptResolvedTaskTypeBudget(taskExecutionRoute.taskType)
-      const alignedRunBudget = state.effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
+      // Phase 4.2 — continuation inherits the budget seed from the original
+      // task type instead of collapsing to the 24-iter `continuation` preset.
+      // Audit Phase 4 §C4: a multi_step or media task resumed across processes
+      // / after a Ready restart would otherwise hit the 70% warning at iter
+      // 16, well before the original task's natural ceiling.
+      //
+      // RE-AUDIT FIX 4.2 — applies to BOTH fresh and restored continuations
+      // (original Phase 4.2 only covered fresh; restored runtimes that lost
+      // the long-skill budget cross-process were stuck at the saved value).
+      //
+      // SCREENSHOT-BUG follow-up — gate the override on the ORIGINAL task
+      // type being long (multi_step / media). Don't override for short
+      // task types because the saved budget there was likely a deliberate
+      // small value (e.g. a turn-engine-route test saving 12 iter for a
+      // short_task continuation that should remain 12, not get bumped to
+      // the standard 24 just because that's the continuation preset).
+      // Audit Phase 4 §C4 was specifically about long-task throttling,
+      // not about uniformly forcing every continuation to the standard
+      // preset.
+      if (
+        taskExecutionRoute.chain === 'continuation'
+        && (
+          continuationProjection?.taskType === 'multi_step_task'
+          || continuationProjection?.taskType === 'media_task'
+        )
+      ) {
+        const inheritedSeed = createContinuationRunBudgetSeed(continuationProjection.taskType)
+        const previousMaxIterations = state.effectiveRunBudget?.maxIterations ?? null
+        if (inheritedSeed.maxIterations > (previousMaxIterations ?? 0)) {
+          state.effectiveRunBudget = { ...inheritedSeed }
+          if (state.taskBudgetRuntime) {
+            state.taskBudgetRuntime = {
+              ...state.taskBudgetRuntime,
+              budget: { ...inheritedSeed },
+            }
+          }
+          logAgentMetric('continuation_budget_inherited', {
+            sessionId: request.sessionId,
+            originalTaskType: continuationProjection.taskType,
+            previousMaxIterations,
+            inheritedMaxIterations: inheritedSeed.maxIterations,
+            hadRestoredRuntime: Boolean(taskExecutionRoute.continuation?.budgetRuntime),
+          })
+        }
+      }
+      let alignedRunBudget = state.effectiveRunBudget || createRunBudgetSeed(taskExecutionRoute.taskType)
+      if (shouldUseLongSkillResumeBudget) {
+        alignedRunBudget = applyLongSkillTaskBudgetSeed(alignedRunBudget)
+        logAgentMetric('long_skill_task_budget_applied', {
+          sessionId: request.sessionId,
+          taskType: taskExecutionRoute.taskType,
+          maxIterations: alignedRunBudget.maxIterations,
+          maxToolCalls: alignedRunBudget.maxToolCalls,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          preferredSkillTools: preferredSkillToolNames || [],
+        })
+      }
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
       const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      // Stage 7 — capture the allowed-tool surface and long-skill flag once so
+      // `finish()` can include them in the per-turn `turn_frame_summary` log.
+      turnSummaryAllowedToolNames = Array.isArray(routedAllowedToolNames)
+        ? [...routedAllowedToolNames]
+        : []
+      turnSummaryLongSkillResume = Boolean(shouldUseLongSkillResumeBudget)
+      logAgentMetric('turn_frame_tool_policy', {
+        sessionId: request.sessionId,
+        mode: turnFrame?.mode || null,
+        skillId: turnFrame?.skill?.skillId || referenceSkillForMetrics?.id || null,
+        liveness: turnFrame?.liveness || null,
+        preferredToolNames: preferredSkillToolNames || [],
+        allowedToolNames: routedAllowedToolNames,
+        terminalReason: turnFrame?.terminalReason || null,
+      })
       appendSessionMessages(session, selectedDomainPrepareResult?.sessionMessages)
       if (taskExecutionRoute.chain === 'continuation' && taskExecutionRoute.continuation) {
         state.interactionState = 'resuming'
@@ -880,7 +2107,7 @@ export class TurnEngine {
         if (hostShortcutResult.outputText) {
           transcript.emitOutput(hostShortcutResult.outputText.slice(0, 300), 'tool_result')
           transcript.emitOutput(hostShortcutResult.outputText, 'text')
-          session.messages.push({ role: 'assistant', content: hostShortcutResult.outputText })
+          pushAssistantTextSafely(session, hostShortcutResult.outputText, { sessionId: request.sessionId })
         }
         return finish({ success: true, status: 'done' })
       }
@@ -911,7 +2138,7 @@ export class TurnEngine {
         }
         if (domainDispatchResult.finalText) {
           transcript.emitOutput(domainDispatchResult.finalText, 'text')
-          session.messages.push({ role: 'assistant', content: domainDispatchResult.finalText })
+          pushAssistantTextSafely(session, domainDispatchResult.finalText, { sessionId: request.sessionId })
         }
         if (domainDispatchResult.finish) {
           return finish({
@@ -932,8 +2159,9 @@ export class TurnEngine {
 
       if (!shouldUseToolLoop) {
         const hasMediaInputs = host.sessionHasMediaInputs(session.messages)
+        const modelSession = buildModelInputSession(session)
         const simpleResponse = await host.requestSimpleText({
-          session,
+          session: modelSession,
           signal: request.abortSignal,
           providerContext: host.providerContext,
           enableKimiWebSearch: !hasMediaInputs,
@@ -947,7 +2175,7 @@ export class TurnEngine {
             advancePlannerStep(simpleResponse.text)
           }
           transcript.emitOutput(simpleResponse.text, 'text')
-          session.messages.push({ role: 'assistant', content: simpleResponse.text })
+          pushAssistantTextSafely(session, simpleResponse.text, { sessionId: request.sessionId })
         }
         return finish({ success: true, status: 'done' })
       }
@@ -973,7 +2201,7 @@ export class TurnEngine {
         ? { ...state.taskBudgetRuntime.stepBudget }
         : null
       state.budgetWarningLevel = state.taskBudgetRuntime.warningLevel
-      const effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
+      let effectiveMaxToolIterations = state.effectiveRunBudget.maxIterations > 0
         ? state.effectiveRunBudget.maxIterations
         : host.maxToolIterations
       let iterations = 0
@@ -982,6 +2210,29 @@ export class TurnEngine {
       let budgetLimitedBeforeCompletion = false
       let convergencePromptInjected = false
       let preferTextToolBridgeOnce = false
+      let lastLongTypedSkillActionIteration: number | null = null
+      const longTypedSkillActionStartTimes = new Map<string, number>()
+      // skill-resume C1: ring buffer of recent tool calls for repetition detection.
+      // When the same tool is called with the same args ≥3 times in the last 5
+      // iterations, we inject an ask-user nudge to break the loop.
+      const recentToolCalls: Array<{ name: string; argsHash: string }> = []
+      const RECENT_TOOL_CALLS_RING_SIZE = 5
+      const REPETITION_THRESHOLD = 3
+      // Stage 7 — force-tool dispatch tracking. When the steering layer marks
+      // the frame as `mode='force_tool'`, the next iteration synthesizes a
+      // tool batch directly instead of calling the model. We:
+      //   1. cap force_tool dispatches to 1 per turn (no chaining; if the
+      //      user wants chained resume they can do it via model in the next
+      //      turn);
+      //   2. set `recentForceToolDispatched=true` after a force_tool fires so
+      //      the steering layer's next evaluation falls back to ask_model and
+      //      we cannot loop on the same forced tool.
+      let forceToolDispatchedThisTurn = false
+      let recentForceToolDispatched = false
+      // skill-resume C3: prepend a system warning when 70% of the iteration
+      // budget is consumed, reminding the LLM to summarize and consult the user.
+      let warned70Pct = false
+      let warningThreshold = computeBudgetWarningThreshold(effectiveMaxToolIterations)
       const toolGuidance = buildToolGuidance(toolPolicy as any)
       const toolLoopSession = toolGuidance
         ? {
@@ -989,12 +2240,190 @@ export class TurnEngine {
           systemPrompt: `${session.systemPrompt}\n\n${toolGuidance}`,
         }
         : session
+      let skillBudgetLeaseState: SkillBudgetLeaseState | null = state.taskBudgetRuntime?.lease || null
+      let previousLeaseSnapshot: SkillTaskSupervisorSnapshot | null = null
+      let lastLeaseSnapshot: SkillTaskSupervisorSnapshot | null = null
+      let lastLeaseProgress: SkillProgressScore = {
+        score: 0,
+        reasons: [],
+        fingerprint: skillBudgetLeaseState?.lastFingerprint || null,
+        fingerprintChanged: false,
+        milestoneChanged: false,
+      }
+      let lastLeaseWaste: SkillWasteScore = {
+        score: 0,
+        reasons: [],
+        repeatedUnchangedObservation: false,
+        repeatedRecoverableError: false,
+        repeatedToolCallStreak: 0,
+        recoverableErrorKind: null,
+        recoverableErrorCount: 0,
+      }
+      let leaseLifecycleReason: 'budget_exhausted' | 'background_running' | null = null
+      const hasPlannedLeaseTrigger =
+        shouldUseLongSkillResumeBudget
+        || hasLongTypedSkillAction(preferredSkillToolNames)
+      const sampleSkillLeaseSnapshot = (force = false): SkillTaskSupervisorSnapshot | null => {
+        if (!force && !hasPlannedLeaseTrigger && !skillBudgetLeaseState) return null
+        try {
+          return inspectLatestSkillTaskForHost({
+            sessionId: request.sessionId,
+            scopeId: request.sessionId,
+            skillId: referenceSkillForMetrics?.id || null,
+          })
+        } catch {
+          return null
+        }
+      }
+      const hasRecoverableSkillLeaseSnapshot = (snapshot: SkillTaskSupervisorSnapshot | null): boolean => {
+        if (!snapshot) return false
+        if (snapshot.closeAllowed && snapshot.status === 'completed') return false
+        return Boolean(
+          snapshot.hasLiveWork
+            || snapshot.hasRecentProgress
+            || snapshot.runStatePath
+            || snapshot.outputDir
+            || snapshot.detachedTaskId
+            || snapshot.taskRunId
+            || snapshot.resumePayload,
+        )
+      }
+      const observedLeaseSnapshot = hasPlannedLeaseTrigger || skillBudgetLeaseState
+        ? null
+        : sampleSkillLeaseSnapshot(true)
+      const hasLeaseTrigger = hasPlannedLeaseTrigger || hasRecoverableSkillLeaseSnapshot(observedLeaseSnapshot)
+      const publishSkillBudgetLease = (): void => {
+        if (!skillBudgetLeaseState) return
+        if (!state.effectiveRunBudget) state.effectiveRunBudget = createRunBudgetSeed('multi_step_task')
+        const leaseEndIteration = Math.min(
+          skillBudgetLeaseState.currentLeaseEndIteration,
+          skillBudgetLeaseState.hardCapIteration,
+        )
+        const leaseIterationLimit = Math.max(iterations + 1, leaseEndIteration)
+        state.effectiveRunBudget = {
+          ...state.effectiveRunBudget,
+          maxIterations: leaseIterationLimit,
+          maxToolCalls: leaseIterationLimit,
+        }
+        effectiveMaxToolIterations = leaseIterationLimit
+        warningThreshold = computeBudgetWarningThreshold(skillBudgetLeaseState.currentLeaseEndIteration)
+        state.taskBudgetRuntime = {
+          ...(state.syncTaskBudgetRuntime() || createTaskBudgetRuntime('multi_step_task', {
+            budget: state.effectiveRunBudget,
+            usage: state.runBudgetState,
+            stepBudget: state.stepBudgetState,
+          })),
+          lease: skillBudgetLeaseState,
+        }
+        state.syncBudgetWarning()
+      }
+      const ensureSkillBudgetLease = (reason: 'planned' | 'observed_long_skill_action' | 'observed_supervisor_snapshot'): void => {
+        if (skillBudgetLeaseState) return
+        skillBudgetLeaseState = createSkillBudgetLeaseState({ iteration: iterations })
+        logAgentMetric('skill_budget_lease_created', {
+          sessionId: request.sessionId,
+          leaseId: skillBudgetLeaseState.leaseId,
+          leaseEndIteration: skillBudgetLeaseState.currentLeaseEndIteration,
+          hardCapIteration: skillBudgetLeaseState.hardCapIteration,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          reason,
+        })
+      }
+      if (hasLeaseTrigger) {
+        if (observedLeaseSnapshot) {
+          const observedActiveSkillContext = resolveActiveSkillContext({
+            sessionId: request.sessionId,
+            supervisorSnapshot: observedLeaseSnapshot,
+            inspectSupervisor: false,
+          })
+          if (observedActiveSkillContext) {
+            activeSkillContextForTurn = observedActiveSkillContext
+            rememberActiveSkillContext(request.sessionId, observedActiveSkillContext)
+            if (!referenceSkillForMetrics?.id) {
+              referenceSkillForMetrics = {
+                id: observedActiveSkillContext.skillId,
+                name: observedActiveSkillContext.skillName || observedActiveSkillContext.skillId,
+              }
+            }
+            host.log(`[active_skill_context] ${JSON.stringify(summarizeActiveSkillContext(observedActiveSkillContext))}`)
+            if (turnFrame) {
+              turnFrame = applySupervisorRuntimeToTurnFrame(turnFrame, observedLeaseSnapshot)
+            }
+            host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
+            logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
+          }
+        } else if (turnFrame?.skill) {
+          // Stage 7 — when `hasPlannedLeaseTrigger` is true the engine has
+          // already committed to long-skill resume (preferredSkillToolNames
+          // contains the typed action OR shouldUseLongSkillResumeBudget is
+          // set), but `observedLeaseSnapshot` is null so the frame's
+          // liveness has never been reconciled against the supervisor.
+          // Sample once now so the steering layer can decide between
+          // force_tool and ask_model with a real liveness signal instead
+          // of `unknown`. If the sample fails (no DB / no live task) the
+          // frame stays as `unknown` and steering falls back to ask_model.
+          try {
+            const plannedSnapshot = sampleSkillLeaseSnapshot(true)
+            if (plannedSnapshot && plannedSnapshot.skillId === turnFrame.skill.skillId) {
+              turnFrame = applySupervisorRuntimeToTurnFrame(turnFrame, plannedSnapshot)
+              previousLeaseSnapshot = plannedSnapshot
+              lastLeaseSnapshot = plannedSnapshot
+              host.log(`[turn_frame] ${JSON.stringify(summarizeTurnFrame(turnFrame))}`)
+              logAgentMetric('turn_frame_resolved', summarizeTurnFrame(turnFrame) || {})
+            }
+          } catch {
+            // sampling errors must never break the turn
+          }
+        }
+        ensureSkillBudgetLease(observedLeaseSnapshot ? 'observed_supervisor_snapshot' : 'planned')
+        if (observedLeaseSnapshot) {
+          previousLeaseSnapshot = observedLeaseSnapshot
+          lastLeaseSnapshot = observedLeaseSnapshot
+        }
+      }
+      publishSkillBudgetLease()
 
       while (iterations < effectiveMaxToolIterations) {
         request.ensureNotAborted()
         if (state.syncTaskBudgetRuntime()?.frozen) {
           state.interactionState = 'suspended'
           break
+        }
+        const leaseEvaluationIteration = skillBudgetLeaseState
+          ? Math.max(0, skillBudgetLeaseState.currentLeaseEndIteration - 2)
+          : Number.POSITIVE_INFINITY
+        if (skillBudgetLeaseState && iterations >= leaseEvaluationIteration) {
+          const evaluation = evaluateSkillBudgetLease({
+            state: skillBudgetLeaseState,
+            iteration: iterations,
+            progress: lastLeaseProgress,
+            waste: lastLeaseWaste,
+            snapshot: lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
+          })
+          skillBudgetLeaseState = evaluation.state
+          publishSkillBudgetLease()
+          logAgentMetric('skill_budget_lease_decision', {
+            sessionId: request.sessionId,
+            leaseId: skillBudgetLeaseState.leaseId,
+            decision: evaluation.decision,
+            reason: evaluation.reason,
+            iteration: iterations,
+            renewalsUsed: skillBudgetLeaseState.renewalsUsed,
+            progressScore: skillBudgetLeaseState.progressScore,
+            wasteScore: skillBudgetLeaseState.wasteScore,
+          })
+          if (evaluation.decision === 'renew' || evaluation.decision === 'active') {
+            // Keep moving under the refreshed lease gate.
+          } else if (evaluation.decision === 'close') {
+            finishedBeforeLimit = true
+            break
+          } else {
+            leaseLifecycleReason = evaluation.decision === 'handoff_background'
+              ? 'background_running'
+              : 'budget_exhausted'
+            budgetLimitedBeforeCompletion = true
+            break
+          }
         }
         if (taskExecutionRoute.chain === 'planner' && (state.stepBudgetState?.remainingIterations || 0) <= 0) {
           const advanced = advancePlannerStep('当前步骤预算已耗尽，已切换到下一步继续推进。')
@@ -1008,13 +2437,26 @@ export class TurnEngine {
           break
         }
         if (state.budgetWarningLevel === 'converge' && !convergencePromptInjected) {
-          session.messages.push({
-            role: 'user',
-            content: '系统提醒：当前预算已接近上限，请在剩余轮次内收敛并优先给出可交付结果。',
+          // Phase 3.3 — skill-aware nudge. For long skill flows, "summarize
+          // and ask user" is a reverse instruction; we send "keep going,
+          // prefer typed actions" instead. Audit Phase 3 §D4.
+          pushSystemReminderMessage(session, {
+            topic: 'budget',
+            priority: 80,
+            text: buildBudgetWarningMessage({
+              iterations,
+              effectiveMaxIterations: effectiveMaxToolIterations,
+              level: 'converge',
+              isLongSkillContext: shouldUseLongSkillResumeBudget || (preferredSkillToolNames?.length || 0) > 0,
+            }),
           })
           convergencePromptInjected = true
         }
         iterations += 1
+        // Stage 7 — keep the per-turn diagnostic snapshot in sync so the
+        // terminal `turn_frame_summary` metric reports the actual iteration
+        // count regardless of which closure path fires.
+        turnSummaryIterations = iterations
         Object.assign(state.runBudgetState, consumeIterationBudget(state.runBudgetState))
         if (state.stepBudgetState) {
           state.stepBudgetState = {
@@ -1024,6 +2466,112 @@ export class TurnEngine {
         }
         state.syncBudgetWarning()
 
+        // Phase 6 (T5 wave 3) — child-loop continuation routing.
+        //
+        // When the active frame's runContract carries a childRunId, the
+        // child runner owns "what runs next". Before any model invocation
+        // or force-tool decision, ask the child runner for its current
+        // close event (durable lookup, post-T4) and route accordingly:
+        //
+        //   - terminal       — completed/failed/killed: stamp the close
+        //                      onto the contract, set the matching turn
+        //                      terminal reason, finish the turn.
+        //   - checkpoint_paused — recoverable_paused/budget_paused/blocked:
+        //                      stamp the close, set the turn to
+        //                      checkpoint_user_input so the parent waits
+        //                      for the user (or background runner) to
+        //                      resume; never re-derive a typed action.
+        //   - wait           — child still running: stamp parentNextHint
+        //                      so steering / contract summary stay in
+        //                      sync; fall through to the model so it can
+        //                      talk to the user about the in-flight work.
+        //   - none           — frame isn't child-owned; existing flow.
+        const childContinuation = computeChildContinuationDecision(
+          turnFrame,
+          getSkillChildRunCloseEvent,
+        )
+        if (turnFrame?.skill?.runContract && childContinuation.kind !== 'none') {
+          const contract = turnFrame.skill.runContract
+          if (childContinuation.kind === 'terminal'
+              || childContinuation.kind === 'checkpoint_paused') {
+            contract.childCloseEvent = childContinuation.closeEvent
+            contract.childStatus = childContinuation.closeEvent.status
+            contract.parentNextHint = 'continue_other_work'
+          } else if (childContinuation.kind === 'wait') {
+            contract.parentNextHint = 'wait_for_close_event'
+          }
+        }
+        if (childContinuation.kind === 'terminal') {
+          // Map child-close status to the parent turn's terminal vocabulary.
+          // Child 'completed' is the only "natural done"; failed/killed
+          // surface as the same parent reasons the supervisor uses.
+          const childStatus = childContinuation.closeEvent.status
+          const turnTerminalReason: TurnTerminalReason =
+            childStatus === 'completed' ? 'done'
+            : childStatus === 'failed'
+              ? childContinuation.closeEvent.terminalReason === 'failed_skill'
+                ? 'failed_skill'
+                : 'persistence_failed'
+            : childStatus === 'killed' ? 'cancelled_user'
+            : 'done'
+          if (turnFrame) {
+            turnFrame.terminalReason = turnTerminalReason
+          }
+          finishedBeforeLimit = true
+          logAgentMetric('turn_child_run_terminal_routed', {
+            sessionId: request.sessionId,
+            childRunId: childContinuation.childRunId,
+            childStatus,
+            turnTerminalReason,
+            iteration: iterations,
+          })
+          break
+        }
+        if (childContinuation.kind === 'checkpoint_paused') {
+          if (turnFrame) {
+            turnFrame.terminalReason = 'checkpoint_user_input'
+          }
+          budgetLimitedBeforeCompletion = true
+          logAgentMetric('turn_child_run_checkpoint_routed', {
+            sessionId: request.sessionId,
+            childRunId: childContinuation.childRunId,
+            childStatus: childContinuation.closeEvent.status,
+            iteration: iterations,
+          })
+          break
+        }
+
+        // skill-resume C3: 70% iteration warning — fire ONCE per run.
+        if (shouldInjectBudgetWarning({
+          warned: warned70Pct,
+          iteration: iterations,
+          warningThreshold,
+          lastLongTypedSkillActionIteration,
+        })) {
+          warned70Pct = true
+          logAgentMetric('turn_budget_warning', {
+            sessionId: request.sessionId,
+            taskType: state.resolvedTaskType || null,
+            iteration: iterations,
+            maxIterations: effectiveMaxToolIterations,
+            warningThreshold,
+            referenceSkillId: referenceSkillForMetrics?.id || null,
+            referenceSkillName: referenceSkillForMetrics?.name || null,
+            preferredSkillTools: preferredSkillToolNames || [],
+            longSkillResume: shouldUseLongSkillResumeBudget,
+          })
+          // Phase 3.3 — skill-aware 70% nudge. Audit Phase 3 §D3.
+          pushSystemReminderMessage(session, {
+            topic: 'budget',
+            priority: 80,
+            text: buildBudgetWarningMessage({
+              iterations,
+              effectiveMaxIterations: effectiveMaxToolIterations,
+              level: 'warning',
+              isLongSkillContext: shouldUseLongSkillResumeBudget || (preferredSkillToolNames?.length || 0) > 0,
+            }),
+          })
+        }
         const scope = request.sessionId ? host.runtime?.getConversationScope?.(request.sessionId) : undefined
         const toolContext = buildHostToolContext(routedAllowedToolNames, scope)
         const toolLoopRequestSnapshot = buildHostToolSnapshot({
@@ -1040,39 +2588,315 @@ export class TurnEngine {
           preferTextToolBridge: preferTextToolBridgeOnce,
         })
         appendLoggedToolSnapshot(state, host, toolLoopRequestSnapshot)
+        // Stage 7 — deterministic typed-action dispatch. When the steering
+        // layer flagged the frame as `mode='force_tool'` AND we haven't
+        // already force-dispatched this turn AND the typed tool is in the
+        // allowed set, skip the model call and synthesize a tool batch
+        // directly. The synthesized response flows through the existing
+        // post-batch pipeline (consumeExecutedToolBatch) so framePatch +
+        // projection commits + lease evaluation all run as usual. We cap at
+        // one force_tool dispatch per turn — chaining a second resume must
+        // come from the model in the next user turn.
+        //
+        // TODO(skill-child-loop): the force-tool dispatch + force-loop guard
+        // here is the parent loop pretending to be the child runner. When the
+        // child-loop runner lands, the parent will instead call
+        // `launchChildRun(contract, action.input)` and wait for one structured
+        // close event; the synthesized `tool_use`, the per-turn cap, and the
+        // cross-turn `forceLoopGuard` all move into the child. See
+        // docs/architecture/skill-child-loop-boundary.md §5.1.
+        // Stage E — force-tool dispatch decision. The steering layer publishes
+        // an explicit `FrameAction` carrying tool name, validated input, and
+        // an `inputDigest` keyed for cross-turn dedup. We never dispatch
+        // `{}`: missing required fields surface in `action.missingInputs[]`
+        // and route to a checkpoint instead.
+        const steeringAction = turnFrame?.steering?.action || null
+        // Phase 6 — child-loop short-circuit. When the durable
+        // `runContract.childRunId` is set, the child runner now owns the
+        // long-skill execution. The parent MUST NOT synthesize a typed
+        // `tool_use` for it (e.g. `skill_video_expert_pipeline` with `{}`),
+        // and the cross-turn `forceLoopGuard` is fenced for the same reason.
+        // The single source of truth for "is this skill child-owned?" is
+        // `shouldParentForceLongSkillTool(contract)` — keeps the engine
+        // free of skill-id string matching.
+        const childOwnedSkill = !shouldParentForceLongSkillTool(turnFrame?.skill?.runContract || null)
+        const forceToolName = (
+          !childOwnedSkill
+            && turnFrame
+            && turnFrame.steering?.mode === 'force_tool'
+            && !forceToolDispatchedThisTurn
+            && typeof turnFrame.steering.requiredToolName === 'string'
+            && turnFrame.steering.requiredToolName
+            && Array.isArray(routedAllowedToolNames)
+            && routedAllowedToolNames.includes(turnFrame.steering.requiredToolName)
+        ) ? turnFrame.steering.requiredToolName : null
+        // Cross-turn force-loop guard: when `runContract.forceLoopGuard`
+        // recorded the same `(toolName, inputDigest)` from a prior turn AND
+        // we are about to dispatch the same `(toolName, inputDigest)` again,
+        // checkpoint instead of forcing to break the loop deterministically.
+        // Phase 6 — `forceLoopGuard` is migration-only; child-owned skills
+        // bypass it because the child runner has its own per-run budget +
+        // launch-stuck guard, and a child's parentNextHint='wait_for_close_event'
+        // is not a "force same tool again" signal.
+        const priorGuard = childOwnedSkill
+          ? null
+          : (turnFrame?.skill?.runContract?.forceLoopGuard || null)
+        const wouldRepeat = Boolean(
+          forceToolName
+            && steeringAction
+            && steeringAction.mode === 'force_tool'
+            && steeringAction.toolName === forceToolName
+            && priorGuard
+            && priorGuard.lastForceToolName === forceToolName
+            && priorGuard.lastForceInputDigest != null
+            && priorGuard.lastForceInputDigest === steeringAction.inputDigest
+            && (priorGuard.consecutiveForceCount || 0) >= 1,
+        )
+        // Schema preflight: same registry + Zod path tool-executor uses.
+        // When the FrameAction's mode is already 'checkpoint' (steering
+        // surfaced missing inputs at frame-build time), skip preflight; we
+        // already know we cannot dispatch.
+        let preflightFailureReason: string | null = null
+        let preflightMissingInputs: string[] = []
+        if (forceToolName && steeringAction && steeringAction.mode === 'force_tool') {
+          const definition = defaultToolRegistry.getToolDefinitionForExecution(forceToolName)
+          if (!definition) {
+            preflightFailureReason = 'tool_not_registered'
+          } else {
+            const schema = resolveToolInputSchemaForExecution(forceToolName)
+            if (schema) {
+              const parsed = schema.safeParse(steeringAction.input || {})
+              if (!parsed.success) {
+                preflightMissingInputs = Array.from(new Set(
+                  parsed.error.issues.map((issue) => Array.isArray(issue.path) && issue.path.length > 0
+                    ? issue.path.map((segment) => String(segment)).join('.')
+                    : '(root)'),
+                ))
+                preflightFailureReason = preflightMissingInputs.length > 0
+                  ? `missing_${preflightMissingInputs[0]}`
+                  : 'input_validation_failed'
+              }
+            }
+          }
+        }
+        const shouldCheckpointInsteadOfForce = Boolean(
+          forceToolName
+            && (
+              wouldRepeat
+              || (steeringAction && steeringAction.mode === 'checkpoint')
+              || (steeringAction && steeringAction.missingInputs.length > 0)
+              || preflightFailureReason
+            ),
+        )
         let response: TurnModelResponse
-        try {
-          response = await host.requestToolLoopResponse({
-            session: toolLoopSession,
-            signal: request.abortSignal,
-            toolPolicy,
-            allowedToolNames: routedAllowedToolNames,
-            hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
-            allowBrowserTools: toolPolicy.allowBrowserTools,
-            providerContext: host.providerContext,
-            hasVideoInputs,
-            browserDecisionMode: browserDecision.mode,
-            runtimeSnapshot: {
-              browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
-              groups: reconciledRunCapabilities.runtimeSnapshot.groups,
-            },
-            visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
-            suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
-            capabilityLogLine: reconciledRunCapabilities.capabilityLogLine,
+        if (forceToolName && shouldCheckpointInsteadOfForce) {
+          // Tag the per-turn flag so the next iteration's steering re-eval
+          // doesn't immediately try to force again, then break to the
+          // post-iteration checkpoint path. We do NOT increment
+          // `forceToolDispatchedThisTurn` because no dispatch occurred.
+          recentForceToolDispatched = true
+          const checkpointReason = wouldRepeat
+            ? 'force_loop_guard'
+            : preflightFailureReason
+              || (steeringAction?.reason || 'missing_input')
+          const reminderTokens: string[] = [
+            `系统补充：本轮 force_tool 已挡板（reason=${checkpointReason}）。`,
+          ]
+          if (preflightMissingInputs.length > 0 || (steeringAction?.missingInputs.length || 0) > 0) {
+            const missing = preflightMissingInputs.length > 0
+              ? preflightMissingInputs
+              : (steeringAction?.missingInputs || [])
+            reminderTokens.push(`缺少必需输入：${missing.join(', ')}。`)
+          }
+          if (wouldRepeat) {
+            reminderTokens.push('上一轮已用相同输入强制调用过同一工具，避免死循环，请变更输入或换工具。')
+          }
+          reminderTokens.push('请补齐参数或换路径，再继续。')
+          pushSystemReminderMessage(session, {
+            topic: 'missing-input',
+            priority: 90,
+            text: reminderTokens.join('\n'),
+          })
+          logAgentMetric('turn_force_tool_checkpoint', {
+            sessionId: request.sessionId,
+            skillId: turnFrame?.skill?.skillId || null,
+            toolName: forceToolName,
+            reason: checkpointReason,
+            missingInputs: preflightMissingInputs.length > 0
+              ? preflightMissingInputs
+              : (steeringAction?.missingInputs || []),
             iteration: iterations,
-            requestedTransport: toolLoopRequestSnapshot.requestedTransport,
-            supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
-            preferTextToolBridgeOnce,
-            compressContext: () => compressSessionMessagesForRetry(session),
-          }) as TurnModelResponse
-        } finally {
+          })
+          host.log(
+            `[turn_force_tool_checkpoint] tool=${forceToolName} reason=${checkpointReason} iteration=${iterations}`,
+          )
+          // Mid-iteration checkpoint: surface the standard budget-limited
+          // termination path so the existing post-loop machinery (lifecycle,
+          // task projection, transcript) closes the turn with one structured
+          // event. Counts as a single close — never an unresolved tool_use.
+          budgetLimitedBeforeCompletion = true
+          if (turnFrame) {
+            turnFrame.terminalReason = 'checkpoint_user_input'
+          }
+          break
+        } else if (forceToolName) {
+          forceToolDispatchedThisTurn = true
+          recentForceToolDispatched = true
+          // FrameAction.input is guaranteed non-null/object here because
+          // steering only emits mode='force_tool' when validateForcedActionInput
+          // returned ok. Belt: if action somehow missing, fall back to {}.
+          const forcedInput: Record<string, unknown> = (steeringAction && steeringAction.input)
+            ? { ...steeringAction.input }
+            : {}
+          const forcedToolCall: TurnToolCall = {
+            id: `force_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+            name: forceToolName,
+            input: forcedInput,
+          }
+          response = {
+            text: '',
+            toolCalls: [forcedToolCall],
+            stopReason: 'tool_calls',
+            toolTransport: 'native',
+          } as TurnModelResponse
+          // Stage E — write back the cross-turn force-loop guard so the next
+          // turn's contract knows what (toolName, inputDigest) was just
+          // dispatched. We materialise this on the active turn frame as a
+          // synthetic framePatch.runContract; consumeExecutedToolBatch will
+          // merge this with whatever framePatch the typed action returns,
+          // and `applyTurnFramePatch` persists it on `frame.skill.runContract`.
+          if (turnFrame && turnFrame.skill) {
+            const dispatchedAt = new Date().toISOString()
+            const newDigest = steeringAction?.inputDigest || null
+            const sameAsPrior = Boolean(
+              priorGuard
+                && priorGuard.lastForceToolName === forceToolName
+                && priorGuard.lastForceInputDigest === newDigest,
+            )
+            const guardPatch: TurnFramePatch = {
+              runContract: {
+                ...(turnFrame.skill.runContract ? {
+                  // Preserve the contract anchor when we already have one so
+                  // mergeRunContractPartials can update without re-creating.
+                  skillId: turnFrame.skill.runContract.skillId,
+                } : {}),
+                forceLoopGuard: {
+                  lastForceToolName: forceToolName,
+                  lastForceInputDigest: newDigest,
+                  lastForceToolDispatchedAt: dispatchedAt,
+                  consecutiveForceCount: sameAsPrior
+                    ? (priorGuard?.consecutiveForceCount || 0) + 1
+                    : 1,
+                },
+              },
+            }
+            turnFrame = applyTurnFramePatch(turnFrame, guardPatch)
+          }
+          logAgentMetric('turn_force_tool_dispatched', {
+            sessionId: request.sessionId,
+            skillId: turnFrame?.skill?.skillId || null,
+            toolName: forceToolName,
+            iteration: iterations,
+            inputDigest: steeringAction?.inputDigest || null,
+            consecutiveForceCount: turnFrame?.skill?.runContract?.forceLoopGuard?.consecutiveForceCount || 1,
+          })
+          host.log(`[turn_force_tool_dispatched] tool=${forceToolName} iteration=${iterations} digest=${steeringAction?.inputDigest || 'null'}`)
           preferTextToolBridgeOnce = false
+        } else {
+          try {
+            const modelSession = buildModelInputSession(toolLoopSession as TSession)
+            response = await host.requestToolLoopResponse({
+              session: modelSession,
+              signal: request.abortSignal,
+              toolPolicy,
+              allowedToolNames: routedAllowedToolNames,
+              hasTools: reconciledRunCapabilities.visibilityPlan.hasTools,
+              allowBrowserTools: toolPolicy.allowBrowserTools,
+              providerContext: host.providerContext,
+              hasVideoInputs,
+              browserDecisionMode: browserDecision.mode,
+              runtimeSnapshot: {
+                browserHostAvailable: reconciledRunCapabilities.runtimeSnapshot.environment.browserHostAvailable,
+                groups: reconciledRunCapabilities.runtimeSnapshot.groups,
+              },
+              visibleCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.visibleCapabilityGroupIds || [],
+              suppressedCapabilityGroupIds: reconciledRunCapabilities.visibilityPlan.suppressedCapabilityGroupIds || [],
+              capabilityLogLine: reconciledRunCapabilities.capabilityLogLine,
+              iteration: iterations,
+              requestedTransport: toolLoopRequestSnapshot.requestedTransport,
+              supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
+              preferTextToolBridgeOnce,
+              compressContext: () => compressSessionMessagesForRetry(session),
+            }) as TurnModelResponse
+          } finally {
+            preferTextToolBridgeOnce = false
+          }
         }
         if (response.fallback) {
           state.latestFallback = response.fallback
         }
         state.appendToolSnapshots(response.toolSnapshots)
         state.appendRecoveryHistory(response.recoveryHistory)
+
+        if (response.toolCalls.length === 0) {
+          const responseTextForRecovery = response.rawText || response.text || ''
+          if (/<tool_call>|<function=|<parameter=|:::tool_call/i.test(responseTextForRecovery)) {
+            const parsed = parseTextToolBridgeResponse(responseTextForRecovery)
+            if (parsed.toolCalls.length > 0) {
+              const allowedToolNameSet = new Set(routedAllowedToolNames)
+              const disallowedToolNames = Array.from(new Set(
+                parsed.toolCalls
+                  .map((call) => call.name)
+                  .filter((name) => !allowedToolNameSet.has(name)),
+              ))
+              if (disallowedToolNames.length === 0) {
+                logAgentMetric(TOOL_ERROR_METRICS.xmlToolCallsRecoveredFromNative, {
+                  route: 'turn_engine_tool_loop',
+                  originalCallsCount: 0,
+                  recoveredCallsCount: parsed.toolCalls.length,
+                  recoveredToolNames: parsed.toolCalls.map((call) => call.name).slice(0, 5),
+                  originalTextLen: responseTextForRecovery.length,
+                  cleanedTextLen: parsed.visibleText.length,
+                })
+                host.log(
+                  `[xml_recovery] turn_engine_tool_loop: recovered ${parsed.toolCalls.length} text tool_call(s) from provider text response.`,
+                )
+                response = {
+                  ...response,
+                  text: parsed.visibleText,
+                  rawText: responseTextForRecovery,
+                  toolCalls: parsed.toolCalls.map((call) => ({
+                    id: `xmlrec_${randomUUID().replace(/-/g, '')}`,
+                    name: call.name,
+                    input: call.args,
+                  })),
+                  toolTransport: 'text',
+                }
+              } else if (textToolBridgeNudges < 2) {
+                textToolBridgeNudges += 1
+                if (responseTextForRecovery) {
+                  pushAssistantTextSafely(session, responseTextForRecovery, {
+                    sessionId: request.sessionId,
+                    iteration: iterations,
+                    toolTransport: response.toolTransport,
+                  })
+                }
+                preferTextToolBridgeOnce = true
+                const reminderText = composeSystemReminderText({
+                  topic: 'checkpoint',
+                  priority: 80,
+                  text: `系统补充：你刚才输出了未允许的工具 ${disallowedToolNames.join(', ')}。请只调用当前 allowed tools 中的工具；如果没有合适工具，说明缺口而不要把 tool_call 当普通文本结束。`,
+                })
+                const correctionText = [
+                  buildTextToolBridgeCorrectionMessage(toolPolicy as any),
+                  reminderText,
+                ].filter(Boolean).join('\n')
+                session.messages.push({ role: 'user', content: correctionText })
+                continue
+              }
+            }
+          }
+        }
 
         if (response.toolCalls.length === 0) {
           const activeBrowserToolLoopState = (activeDomainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
@@ -1087,20 +2911,23 @@ export class TurnEngine {
             textToolBridgeNudges += 1
             const assistantHistoryText = response.rawText || response.text
             if (assistantHistoryText) {
-              session.messages.push({ role: 'assistant', content: assistantHistoryText })
+              pushAssistantTextSafely(session, assistantHistoryText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             }
             preferTextToolBridgeOnce = true
-            session.messages.push({
-              role: 'user',
-              content: [
-                buildTextToolBridgeCorrectionMessage(toolPolicy as any),
-                '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。',
-              ].join('\n'),
+            const reminderText = composeSystemReminderText({
+              topic: 'checkpoint',
+              priority: 80,
+              text: '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。',
             })
+            const correctionText = [
+              buildTextToolBridgeCorrectionMessage(toolPolicy as any),
+              reminderText,
+            ].filter(Boolean).join('\n')
+            session.messages.push({ role: 'user', content: correctionText })
             continue
           }
           if (response.toolTransport === 'text' && response.rawText) {
-            session.messages.push({ role: 'assistant', content: response.rawText })
+            pushAssistantTextSafely(session, response.rawText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             if (looksLikeMissingNativeToolsReply(response.text || response.rawText) && textToolBridgeNudges < 2) {
               textToolBridgeNudges += 1
               preferTextToolBridgeOnce = true
@@ -1142,7 +2969,7 @@ export class TurnEngine {
             }
             if (domainApplyResult.nextUserMessage) {
               if (domainApplyResult.preserveAssistantText && response.text && response.toolTransport !== 'text') {
-                session.messages.push({ role: 'assistant', content: response.text })
+                pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               }
               session.messages.push({
                 role: 'user',
@@ -1152,7 +2979,7 @@ export class TurnEngine {
             }
             if (domainApplyResult.finalText) {
               transcript.emitOutput(domainApplyResult.finalText, 'text')
-              session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+              pushAssistantTextSafely(session, domainApplyResult.finalText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               advancePlannerStep(domainApplyResult.finalText)
               finishedBeforeLimit = true
               break
@@ -1166,21 +2993,22 @@ export class TurnEngine {
             if (plannerStepCompleted) {
               const advanced = advancePlannerStep(response.text)
               if (advanced) {
-                session.messages.push({
-                  role: 'user',
-                  content: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
+                pushSystemReminderMessage(session, {
+                  topic: 'checkpoint',
+                  priority: 60,
+                  text: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
                 })
                 continue
               }
             }
             if (genericInteractionDetected) {
-              session.messages.push({ role: 'assistant', content: response.text })
+              pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
               finishedBeforeLimit = true
               break
             }
           }
           if (response.text && response.toolTransport !== 'text' && !shouldHideBrowserProcessText) {
-            session.messages.push({ role: 'assistant', content: response.text })
+            pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
           }
           finishedBeforeLimit = true
           break
@@ -1206,6 +3034,33 @@ export class TurnEngine {
         }
         const toolCallsForIteration = designToolFilter.toolCalls
           .map((toolCall) => designToolLoopOrchestrator.applySourceInput(toolCall, toolPolicy))
+        const recentToolCallsBeforeIteration = [...recentToolCalls]
+        const recordRecentToolCallsForIteration = (): void => {
+          for (const toolCall of toolCallsForIteration) {
+            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
+            recentToolCalls.push({ name: toolCall.name, argsHash })
+            if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
+          }
+          const last = recentToolCalls[recentToolCalls.length - 1]
+          if (!last) return
+          const matchCount = countToolRepetitions(recentToolCalls)
+          if (matchCount < REPETITION_THRESHOLD) return
+          logAgentMetric(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, {
+            tool: last.name,
+            repetitions: matchCount,
+            sessionId: request.sessionId,
+          })
+          pushSystemReminderMessage(session, {
+            topic: 'checkpoint',
+            priority: 85,
+            text: `系统提醒：你已经连续 ${matchCount} 次以相同参数调用 ${last.name}。请改用 skill_ask_user 询问用户下一步该怎么做，或换一种方法（不同参数 / 不同工具）。`,
+          })
+          recentToolCalls.length = 0
+        }
+        if (toolCallsForIteration.some((toolCall) => isLongTypedSkillActionName(toolCall.name))) {
+          ensureSkillBudgetLease('observed_long_skill_action')
+          publishSkillBudgetLease()
+        }
         const remainingToolCallBudget = getRemainingToolCallBudget(state.effectiveRunBudget, state.runBudgetState)
         if (remainingToolCallBudget < toolCallsForIteration.length) {
           budgetLimitedBeforeCompletion = true
@@ -1228,31 +3083,92 @@ export class TurnEngine {
           result: ToolExecutionOutput
         }> = []
 
-        const executeBatch = async () => normalizeToolBatchResult(await host.executeToolBatch({
-          toolCalls: toolCallsForIteration,
-          context: toolContext,
-          budget: state.effectiveRunBudget || undefined,
-          budgetState: state.runBudgetState,
-          signal: request.abortSignal,
-          hooks: {
-            onToolStart: ({ toolCall }) => {
-              transcript.emitToolUse(toolCall.name, toolCall.input)
-            },
-            onToolRecovered: ({ toolCall, recoveryHistory }) => {
-              const lastRecovery = recoveryHistory[recoveryHistory.length - 1]
-              if (!lastRecovery) return
-              host.log(`tool recover: ${toolCall.name}, kind=${lastRecovery.kind}, recovered=${lastRecovery.recovered}`)
-            },
-            onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
-              host.log(`tool batch interrupted: started=${startedToolCallIds.join('|') || 'none'}, skipped=${skippedToolCalls.map((toolCall) => toolCall.name).join('|') || 'none'}`)
-            },
-          },
-          onGroupStart: (group) => {
-            if (group.mode === 'parallel') {
-              Object.assign(state.runBudgetState, consumeParallelGroupBudget(state.runBudgetState))
-            }
-          },
-        }))
+        const longTypedSkillActionHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
+        const emitLongTypedSkillRunningProjection = (toolCall: TurnToolCall, startedAt: number): void => {
+          transcript.emitStructuredPayload(buildLongSkillRunningProjection({
+            sessionId: request.sessionId,
+            toolName: toolCall.name,
+            toolInput: toolCall.input,
+            startedAt,
+            now: Date.now(),
+          }))
+        }
+        const clearLongTypedSkillHeartbeat = (toolCallId: string): void => {
+          const timer = longTypedSkillActionHeartbeatTimers.get(toolCallId)
+          if (timer) clearInterval(timer)
+          longTypedSkillActionHeartbeatTimers.delete(toolCallId)
+        }
+        const clearAllLongTypedSkillHeartbeats = (): void => {
+          for (const timer of longTypedSkillActionHeartbeatTimers.values()) {
+            clearInterval(timer)
+          }
+          longTypedSkillActionHeartbeatTimers.clear()
+        }
+
+        // TODO(skill-child-loop): the long-typed-skill heartbeat + duration
+        // bookkeeping below is the parent loop watching the child's progress
+        // through the keyhole of one tool batch. When the child-loop runner
+        // lands, heartbeat + duration are the child's internal concern; the
+        // parent only observes one structured close event and applies its
+        // framePatch. See docs/architecture/skill-child-loop-boundary.md §5.1.
+        const executeBatch = async () => {
+          try {
+            return normalizeToolBatchResult(await host.executeToolBatch({
+              toolCalls: toolCallsForIteration,
+              context: toolContext,
+              budget: state.effectiveRunBudget || undefined,
+              budgetState: state.runBudgetState,
+              signal: request.abortSignal,
+              hooks: {
+                onToolStart: ({ toolCall }) => {
+                  transcript.emitToolUse(toolCall.name, toolCall.input)
+                  if (isLongTypedSkillActionName(toolCall.name)) {
+                    const startedAt = Date.now()
+                    longTypedSkillActionStartTimes.set(toolCall.id, startedAt)
+                    emitLongTypedSkillRunningProjection(toolCall, startedAt)
+                    longTypedSkillActionHeartbeatTimers.set(
+                      toolCall.id,
+                      setInterval(() => {
+                        emitLongTypedSkillRunningProjection(toolCall, startedAt)
+                      }, LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS),
+                    )
+                  }
+                },
+                onToolResult: ({ toolCall }) => {
+                  if (!isLongTypedSkillActionName(toolCall.name)) return
+                  clearLongTypedSkillHeartbeat(toolCall.id)
+                  const startedAt = longTypedSkillActionStartTimes.get(toolCall.id)
+                  if (typeof startedAt !== 'number') return
+                  longTypedSkillActionStartTimes.delete(toolCall.id)
+                  logAgentMetric('skill_typed_action_duration_ms', {
+                    sessionId: request.sessionId,
+                    toolName: toolCall.name,
+                    iteration: iterations,
+                    durationMs: Math.max(0, Date.now() - startedAt),
+                    referenceSkillId: referenceSkillForMetrics?.id || null,
+                    referenceSkillName: referenceSkillForMetrics?.name || null,
+                  })
+                },
+                onToolRecovered: ({ toolCall, recoveryHistory }) => {
+                  const lastRecovery = recoveryHistory[recoveryHistory.length - 1]
+                  if (!lastRecovery) return
+                  host.log(`tool recover: ${toolCall.name}, kind=${lastRecovery.kind}, recovered=${lastRecovery.recovered}`)
+                },
+                onBatchInterrupted: ({ startedToolCallIds, skippedToolCalls }) => {
+                  clearAllLongTypedSkillHeartbeats()
+                  host.log(`tool batch interrupted: started=${startedToolCallIds.join('|') || 'none'}, skipped=${skippedToolCalls.map((toolCall) => toolCall.name).join('|') || 'none'}`)
+                },
+              },
+              onGroupStart: (group) => {
+                if (group.mode === 'parallel') {
+                  Object.assign(state.runBudgetState, consumeParallelGroupBudget(state.runBudgetState))
+                }
+              },
+            }))
+          } finally {
+            clearAllLongTypedSkillHeartbeats()
+          }
+        }
 
         const consumeExecutedToolBatch = (executedToolBatch: Awaited<ReturnType<typeof executeBatch>>, params: {
           onResult: (payload: {
@@ -1262,6 +3178,9 @@ export class TurnEngine {
         }) => {
           state.appendRecoveryHistory(executedToolBatch.recoveryHistory)
           Object.assign(state.runBudgetState, consumeToolCallBudget(state.runBudgetState, executedToolBatch.results.length))
+          const batchHasLongTypedSkillAction = executedToolBatch.results.some((executedTool) =>
+            isLongTypedSkillActionName(executedTool.name),
+          )
           if (executedToolBatch.budgetLimited || getRemainingToolCallBudget(state.effectiveRunBudget || alignedRunBudget, state.runBudgetState) <= 0) {
             budgetLimitedBeforeCompletion = true
           }
@@ -1271,6 +3190,9 @@ export class TurnEngine {
             const resultText = result.text
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
+            if (isLongTypedSkillActionName(toolName)) {
+              lastLongTypedSkillActionIteration = iterations
+            }
             executedToolsThisIteration.push({
               id: executedTool.id,
               name: executedTool.name,
@@ -1319,6 +3241,123 @@ export class TurnEngine {
               serializedResult,
             })
           }
+          // Stage 5 — collect any structured `framePatch` payloads returned
+          // by tools in this batch and apply them to the live TurnFrame so
+          // the next iteration's steering / dispatch sees the updated skill
+          // slice (newly-discovered task handles, validated config, liveness
+          // upgrades). Patches do NOT cross turns — each new user turn
+          // rebuilds the frame from the resolver.
+          const framePatches: TurnFramePatch[] = []
+          for (const executedTool of executedToolBatch.results) {
+            const result = executedTool.result as ToolExecutionOutput
+            if (result && result.framePatch) {
+              framePatches.push(result.framePatch)
+            }
+          }
+          if (framePatches.length > 0 && turnFrame) {
+            const merged = mergeTurnFramePatches(framePatches)
+            turnFrame = applyTurnFramePatch(turnFrame, merged)
+            const patchKeys = Object.keys(merged).filter((key) => {
+              const value = (merged as Record<string, unknown>)[key]
+              if (value == null) return false
+              if (Array.isArray(value)) return value.length > 0
+              if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0
+              return true
+            })
+            if (patchKeys.length > 0) {
+              try {
+                logAgentMetric('turn_frame_patch_applied', {
+                  sessionId: request.sessionId,
+                  iteration: iterations,
+                  patchKeys,
+                  skillId: turnFrame?.skill?.skillId || null,
+                  liveness: turnFrame?.liveness || null,
+                })
+              } catch {
+                // metrics must never break the turn
+              }
+            }
+          }
+          // Stage 7 — after each batch the next iteration's steering decision
+          // must see the freshly-patched frame AND the recent-force flag so
+          // we cannot infinite-loop on the same forced typed action. Re-runs
+          // `applySteeringToTurnFrame` (idempotent) with the updated extras.
+          if (turnFrame) {
+            turnFrame = applySteeringToTurnFrame(turnFrame, {
+              recentForceToolDispatched,
+            })
+          }
+          // The recent-force flag only suppresses the IMMEDIATELY-following
+          // iteration's force_tool re-issue; once we've consumed it for one
+          // steering re-evaluation, clear it so a later iteration that
+          // legitimately needs force_tool again (different liveness path)
+          // can use it. Combined with `forceToolDispatchedThisTurn`, the
+          // overall cap is still 1 force_tool dispatch per turn.
+          recentForceToolDispatched = false
+          if (skillBudgetLeaseState) {
+            const currentSnapshot = sampleSkillLeaseSnapshot()
+            const currentFingerprint = currentSnapshot?.progressFingerprint || skillBudgetLeaseState.lastFingerprint
+            lastLeaseProgress = scoreSkillProgress({
+              previousFingerprint: skillBudgetLeaseState.lastFingerprint,
+              previousSnapshot: previousLeaseSnapshot,
+              currentSnapshot,
+              executedTools: executedToolBatch.results.map((executedTool) => ({
+                name: executedTool.name,
+                result: executedTool.result as ToolExecutionOutput,
+              })),
+            })
+            lastLeaseWaste = scoreSkillWaste({
+              toolCalls: toolCallsForIteration,
+              recentToolCalls: recentToolCallsBeforeIteration,
+              executedTools: executedToolBatch.results.map((executedTool) => ({
+                name: executedTool.name,
+                input: executedTool.input,
+                result: executedTool.result as ToolExecutionOutput,
+              })),
+              recoveryHistory: executedToolBatch.recoveryHistory,
+              previousFingerprint: skillBudgetLeaseState.lastFingerprint,
+              currentFingerprint,
+              preferredTypedSkillToolName: preferredSkillToolNames?.find((name) => isLongTypedSkillActionName(name)) || null,
+            })
+            previousLeaseSnapshot = currentSnapshot || previousLeaseSnapshot
+            lastLeaseSnapshot = currentSnapshot || lastLeaseSnapshot
+            skillBudgetLeaseState.progressScore = lastLeaseProgress.score
+            skillBudgetLeaseState.wasteScore = lastLeaseWaste.score
+            if (lastLeaseProgress.fingerprint) {
+              skillBudgetLeaseState.lastFingerprint = lastLeaseProgress.fingerprint
+            }
+            publishSkillBudgetLease()
+            if (lastLeaseWaste.repeatedToolCallStreak >= REPETITION_THRESHOLD || lastLeaseWaste.repeatedRecoverableError) {
+              const evaluation = evaluateSkillBudgetLease({
+                state: skillBudgetLeaseState,
+                iteration: iterations,
+                progress: lastLeaseProgress,
+                waste: lastLeaseWaste,
+                snapshot: currentSnapshot || lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
+              })
+              skillBudgetLeaseState = evaluation.state
+              publishSkillBudgetLease()
+              logAgentMetric('skill_budget_lease_decision', {
+                sessionId: request.sessionId,
+                leaseId: skillBudgetLeaseState.leaseId,
+                decision: evaluation.decision,
+                reason: evaluation.reason,
+                iteration: iterations,
+                renewalsUsed: skillBudgetLeaseState.renewalsUsed,
+                progressScore: skillBudgetLeaseState.progressScore,
+                wasteScore: skillBudgetLeaseState.wasteScore,
+              })
+              if (evaluation.decision === 'pause' || evaluation.decision === 'handoff_background') {
+                leaseLifecycleReason = evaluation.decision === 'handoff_background'
+                  ? 'background_running'
+                  : 'budget_exhausted'
+                budgetLimitedBeforeCompletion = true
+              } else if (evaluation.decision === 'close') {
+                finishedBeforeLimit = true
+              }
+            }
+          }
+          recordRecentToolCallsForIteration()
         }
 
         if (host.providerContext.useAnthropicProtocol) {
@@ -1327,7 +3366,18 @@ export class TurnEngine {
             if (!shouldHideBrowserProcessText) {
               transcript.emitOutput(response.text, 'text')
             }
-            assistantContent.push({ type: 'text', text: response.text })
+            // Phase 3.2 — Anthropic protocol path uses a multimodal content
+            // array, so we can't reuse pushAssistantTextSafely directly.
+            // Sanitize the text block here and only emit it when non-empty
+            // so a fully-leaked turn doesn't pollute the assistant message.
+            const cleanedText = sanitizeAssistantText(response.text, {
+              sessionId: request.sessionId,
+              iteration: iterations,
+              toolTransport: response.toolTransport,
+            })
+            if (cleanedText) {
+              assistantContent.push({ type: 'text', text: cleanedText })
+            }
           }
           for (const toolCall of toolCallsForIteration) {
             assistantContent.push({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: toolCall.input })
@@ -1340,30 +3390,11 @@ export class TurnEngine {
               toolResults.push({ type: 'tool_result', tool_use_id: executedTool.id, content: serializedResult })
             },
           })
-          if (toolCallsForIteration.length > 0 && toolCallsForIteration.every((toolCall) => getToolResourceTag(toolCall.name).accessMode === 'read')) {
-            if (state.stepBudgetState) {
-              state.stepBudgetState = refundIterationBudget({
-                taskType: state.resolvedTaskType || 'short_task',
-                budget: state.effectiveRunBudget,
-                usage: state.runBudgetState,
-                stepBudget: {
-                  stepId: state.stepBudgetState.stepId || null,
-                  maxIterations: Number(state.stepBudgetState.maxIterations || 0),
-                  remainingIterations: Number(state.stepBudgetState.remainingIterations || 0),
-                },
-                warningLevel: state.budgetWarningLevel,
-                frozen: false,
-                bootstrapBudget: false,
-              }).stepBudget
-            }
-            state.runBudgetState.iterationsUsed = Math.max(0, state.runBudgetState.iterationsUsed - 1)
-            state.syncBudgetWarning()
-          }
           session.messages.push({ role: 'user', content: toolResults })
         } else if (response.toolTransport === 'text') {
           const historyText = response.rawText || response.text
           if (historyText) {
-            session.messages.push({ role: 'assistant', content: historyText })
+            pushAssistantTextSafely(session, historyText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
           }
           if (response.text) {
             if (!shouldHideBrowserProcessText) {
@@ -1424,15 +3455,16 @@ export class TurnEngine {
           if (plannerStepCompleted) {
             const advanced = advancePlannerStep(response.text)
             if (advanced) {
-              session.messages.push({
-                role: 'user',
-                content: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
+              pushSystemReminderMessage(session, {
+                topic: 'checkpoint',
+                priority: 60,
+                text: `系统提醒：已进入下一步 ${state.runtimeCurrentStepId || ''}，请继续执行。`,
               })
               continue
             }
           }
           if (syncInteractionStateFromAssistantText(response.text)) {
-            session.messages.push({ role: 'assistant', content: response.text })
+            pushAssistantTextSafely(session, response.text, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             finishedBeforeLimit = true
             break
           }
@@ -1485,7 +3517,7 @@ export class TurnEngine {
           }
           if (domainApplyResult.finalText) {
             transcript.emitOutput(domainApplyResult.finalText, 'text')
-            session.messages.push({ role: 'assistant', content: domainApplyResult.finalText })
+            pushAssistantTextSafely(session, domainApplyResult.finalText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             advancePlannerStep(domainApplyResult.finalText)
             finishedBeforeLimit = true
             break
@@ -1502,7 +3534,7 @@ export class TurnEngine {
               phase: 'done',
             }))
             transcript.emitOutput(completionText, 'text')
-            session.messages.push({ role: 'assistant', content: completionText })
+            pushAssistantTextSafely(session, completionText, { sessionId: request.sessionId, iteration: iterations })
             advancePlannerStep(completionText)
           }
           finishedBeforeLimit = true
@@ -1519,6 +3551,17 @@ export class TurnEngine {
       }
 
       if (!finishedBeforeLimit && (iterations >= effectiveMaxToolIterations || budgetLimitedBeforeCompletion)) {
+        logAgentMetric('turn_budget_exhausted', {
+          sessionId: request.sessionId,
+          taskType: state.resolvedTaskType || null,
+          iterations,
+          maxIterations: effectiveMaxToolIterations,
+          budgetLimitedBeforeCompletion,
+          referenceSkillId: referenceSkillForMetrics?.id || null,
+          referenceSkillName: referenceSkillForMetrics?.name || null,
+          preferredSkillTools: preferredSkillToolNames || [],
+          longSkillResume: shouldUseLongSkillResumeBudget,
+        })
         if (selectedDomainAdapter) {
           const limitResult = await selectedDomainAdapter.applyResult({
                 route: taskExecutionRoute,
@@ -1541,12 +3584,135 @@ export class TurnEngine {
             : limitResult.domainState
           appendSessionMessages(session, limitResult.sessionMessages)
         }
+        const skillTaskSnapshot = sampleSkillLeaseSnapshot(true)
+        const budgetTerminalReason: TurnTerminalReason =
+          skillTaskSnapshot && (
+            skillTaskSnapshot.hasLiveWork
+            || skillTaskSnapshot.liveness === 'background'
+            || skillTaskSnapshot.status === 'running'
+          )
+            ? 'checkpoint_background'
+            : 'checkpoint_budget'
+        if (turnFrame) {
+          turnFrame.budget = {
+            ...turnFrame.budget,
+            exhausted: true,
+          }
+          turnFrame.terminalReason = budgetTerminalReason
+        }
+        logAgentMetric('turn_terminal_reason', {
+          sessionId: request.sessionId,
+          reason: budgetTerminalReason,
+          skillId: turnFrame?.skill?.skillId || referenceSkillForMetrics?.id || null,
+        })
+        host.log(`[turn_terminal_reason] ${budgetTerminalReason}`)
+        const skillTaskLifecycle = buildSkillTaskLifecycleSignal({
+          snapshot: skillTaskSnapshot,
+          reason: leaseLifecycleReason || 'budget_exhausted',
+        })
+        if (skillTaskLifecycle && skillTaskSnapshot) {
+          state.interactionState = skillTaskLifecycle.interactionState
+          state.syncBudgetWarning()
+          const lifecycleSummary =
+            skillTaskLifecycle.blockedReason || '本轮预算已用完，技能任务已暂停，可继续执行'
+          const lifecycleStepId =
+            skillTaskLifecycle.taskContinuation?.stepId
+            || state.runtimeCurrentStepId
+            || 'skill_lifecycle'
+          const lifecycleSteps = state.runtimeTaskSteps.length > 0
+            ? state.runtimeTaskSteps.map((step) => ({
+              id: step.id,
+              title: step.title || step.description,
+              status: step.id === lifecycleStepId ? 'blocked' : step.status || 'pending',
+              detail: step.detail || null,
+              updatedAt: step.updatedAt || new Date().toISOString(),
+            }))
+            : [{
+              id: lifecycleStepId,
+              title: '技能任务状态',
+              status: 'blocked' as const,
+              detail: lifecycleSummary,
+              updatedAt: new Date().toISOString(),
+            }]
+          emitStructuredTaskPayload({
+            module: 'skill',
+            phase: skillTaskLifecycle.phase,
+            taskTitle: referenceSkillForMetrics?.name
+              ? `技能执行 · ${referenceSkillForMetrics.name}`
+              : '技能任务',
+            taskSummary: lifecycleSummary,
+            steps: lifecycleSteps,
+            currentStepId: lifecycleStepId,
+            waitingFor: skillTaskLifecycle.waitingFor,
+            resumableActions: skillTaskLifecycle.resumableActions,
+            blockedReason: skillTaskLifecycle.blockedReason,
+            taskContinuation: skillTaskLifecycle.taskContinuation,
+          })
+          if (skillTaskSnapshot.skillId) {
+            recordSkillParentTaskLifecycleEvent({
+              scopeId: request.sessionId,
+              sessionId: request.sessionId,
+              runId: request.runId,
+              agent: request.agentName,
+              skillId: skillTaskSnapshot.skillId,
+              skillName: referenceSkillForMetrics?.name || skillTaskSnapshot.skillId,
+              action: skillTaskSnapshot.action || undefined,
+              state: skillTaskLifecycle.state,
+              reason: skillTaskLifecycle.reason,
+              message: lifecycleSummary,
+              outputDir: skillTaskSnapshot.outputDir,
+              runStatePath: skillTaskSnapshot.runStatePath,
+              sceneScoresPath: skillTaskSnapshot.sceneScoresPath,
+              deliveryReportPath: skillTaskSnapshot.deliveryReportPath,
+              detachedTaskId: skillTaskSnapshot.detachedTaskId,
+              taskRunId: skillTaskSnapshot.taskRunId,
+              progressFingerprint: skillTaskSnapshot.progressFingerprint,
+              resumePayload: skillTaskLifecycle.taskContinuation ? { ...skillTaskLifecycle.taskContinuation } : undefined,
+            })
+          }
+          return finish({
+            success: true,
+            status: skillTaskLifecycle.phase === 'done' ? 'done' : 'checkpoint',
+            skillTaskLifecycle,
+            terminalReason: budgetTerminalReason,
+          })
+        }
+        if (
+          hasLeaseTrigger
+          || shouldUseLongSkillResumeBudget
+          || Boolean(referenceSkillForMetrics)
+          || (preferredSkillToolNames?.length || 0) > 0
+        ) {
+          state.interactionState = 'suspended'
+          state.syncBudgetWarning()
+          emitStructuredTaskPayload({
+            module: 'skill',
+            phase: 'checkpoint',
+            taskTitle: referenceSkillForMetrics?.name
+              ? `技能执行 · ${referenceSkillForMetrics.name}`
+              : '技能任务',
+            taskSummary: '本轮预算已用完，技能任务状态需要重新检查',
+            waitingFor: 'background',
+            resumableActions: ['retry', 'cancel'],
+            blockedReason: '本轮预算已用完，技能任务状态检查失败或暂时不可用',
+          })
+          return finish({
+            success: true,
+            status: 'checkpoint',
+            terminalReason: budgetTerminalReason,
+          })
+        }
         transcript.emitOutput(
           budgetLimitedBeforeCompletion
             ? '\n[已达到本轮工具预算上限，请总结当前进度并建议下一步重试方式]'
             : '\n[已达到最大工具调用次数，请尝试让助手使用 browser_run_workflow 或 browser_download_urls 批量执行后重试]',
           'text',
         )
+        return finish({
+          success: true,
+          status: 'checkpoint',
+          terminalReason: 'checkpoint_budget',
+        })
       }
 
       return finish({ success: true, status: 'done' })

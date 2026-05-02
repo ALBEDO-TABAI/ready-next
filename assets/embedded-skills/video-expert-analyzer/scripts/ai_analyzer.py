@@ -106,10 +106,10 @@ except ImportError:
     )
 
 try:
-    from run_state import load_run_state, mark_stage
+    from run_state import load_run_state, mark_stage, touch_run_state
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from run_state import load_run_state, mark_stage
+    from run_state import load_run_state, mark_stage, touch_run_state
 
 try:
     from logger import get_logger
@@ -557,8 +557,6 @@ def auto_fill_pending_batches(
     *,
     max_workers: int,
 ) -> Dict[str, Any]:
-    del scores_path  # 当前自动评分只依赖 host_batches 协议文件
-
     try:
         from openclaw_batch_probe import analyze_scenes
     except ImportError:
@@ -600,6 +598,25 @@ def auto_fill_pending_batches(
         failure_map_by_batch[batch_id] = {}
         _write_json_if_changed(Path(context["output_path"]), output_payload)
 
+    def heartbeat() -> None:
+        all_scenes = [
+            scene
+            for context in batch_context.values()
+            for scene in (context.get("output_payload") or {}).get("scenes", [])
+        ]
+        total_scenes = len(all_scenes)
+        completed_scenes = sum(1 for scene in all_scenes if _is_scene_complete(scene))
+        coverage_ratio = completed_scenes / max(total_scenes, 1) if total_scenes else 0.0
+        touch_run_state(
+            run_state_path_for(scores_path),
+            stage="score_batches",
+            status="running",
+            total_scenes=total_scenes,
+            completed_scenes=completed_scenes,
+            coverage_ratio=coverage_ratio,
+            active_output_dir=str(video_dir),
+        )
+
     def flush_result(payload: Dict[str, Any]) -> None:
         run_item = payload.get("run_item") or {}
         batch_id = str(run_item.get("batch_id", "") or "")
@@ -640,6 +657,7 @@ def auto_fill_pending_batches(
             )
             context["output_payload"] = output_payload
             _write_json_if_changed(Path(context["output_path"]), output_payload)
+            heartbeat()
 
     run_items, successful_results, failed_results = analyze_scenes(
         scene_packets,
@@ -1284,6 +1302,7 @@ def auto_score_scenes(
             can_finalize=not readiness_problems,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
+            active_output_dir=str(video_analysis_dir),
             last_error="; ".join(readiness_problems) if readiness_problems else "",
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1385,6 +1404,7 @@ def auto_score_scenes(
             can_finalize=can_finalize,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
+            active_output_dir=str(video_analysis_dir),
             last_error=last_error,
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1644,6 +1664,7 @@ def mark_blocked_state(
         can_finalize=False,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
+        active_output_dir=str(video_dir),
         last_error="; ".join(problems),
         verification=build_verification_payload(
             video_dir,
@@ -1675,6 +1696,7 @@ def mark_completed_state(
         can_finalize=True,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
+        active_output_dir=str(video_dir),
         last_error="",
         verification=build_verification_payload(
             video_dir,
@@ -1772,6 +1794,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     status="blocked",
                     scores_path=str(scores_path_local),
                     video_dir=str(scores_path_local.parent),
+                    active_output_dir=str(scores_path_local.parent),
                     last_error=message,
                 )
         except Exception as save_exc:

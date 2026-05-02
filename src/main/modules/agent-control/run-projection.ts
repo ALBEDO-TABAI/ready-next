@@ -47,6 +47,14 @@ export class RunProjection {
     )
     const truthPatch = readProjectionTruthPatch(projectionTruth)
     const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
+    const activePhase =
+      payload.phase === 'queued'
+      || payload.phase === 'planning'
+      || payload.phase === 'tool_running'
+      || payload.phase === 'checkpoint'
+      || payload.phase === 'takeover'
+      || payload.phase === 'resuming'
+      || payload.phase === 'responding'
     const summary: ScopeRunSummary = {
       scopeId: payload.scopeId,
       agent: payload.agent,
@@ -105,6 +113,7 @@ export class RunProjection {
         ?? null,
       blockedReason: payload.blockedReason ?? truthPatch.blockedReason ?? previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
+      terminalReason: payload.terminalReason ?? (activePhase ? null : previous?.terminalReason ?? null),
       updatedAt: payload.timestamp,
     }
     if (previous?.taskTitle === '正在理解需求' && summary.taskTitle && summary.taskTitle !== previous.taskTitle) {

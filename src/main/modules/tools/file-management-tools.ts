@@ -2,6 +2,7 @@ import { readFile, rename, stat } from 'fs/promises'
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import type { SearchEngine } from '../search-engine/indexer'
 import { getSearchEngine } from '../search-engine/ipc-handler'
+import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 
 export {
@@ -75,7 +76,16 @@ async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine
   const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(200, args.limit)) : 20
   const sources = Array.isArray(args.sources) ? args.sources.filter((s): s is string => typeof s === 'string') : undefined
   const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : undefined
-  const result = await engine.search(query, { limit, sources, workspaceRoot })
+
+  // perf-rescue B1: FTS scan over an 80GB index used to lock the main thread.
+  // Offload to worker; on worker failure fall back to the in-process engine so
+  // we never break this tool path.
+  let result: Awaited<ReturnType<SearchEngine['search']>>
+  try {
+    result = await getWorkerDbBridge().searchDocuments({ query, limit, sources, workspaceRoot })
+  } catch {
+    result = await engine.search(query, { limit, sources, workspaceRoot })
+  }
   return toJsonString({
     returned: result.stats.returned,
     degraded: result.degraded,
@@ -100,10 +110,16 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
     .getConnection()
     .prepare('SELECT id, source_type FROM documents WHERE path = ? LIMIT 1')
     .get<{ id: number; source_type: string }>(path)
-  if (!row) return toJsonString({ ok: false, error: 'path not in index' })
+  let sourceType = row?.source_type || 'document'
+  if (!row) {
+    const guard = assertInsideWorkspace(path, engine)
+    if (!guard.ok) return toJsonString({ ok: false, error: 'path not in index', detail: guard.error })
+    await engine.indexDocument(guard.root, path)
+    sourceType = 'document'
+  }
 
-  if (row.source_type !== 'document') {
-    return toJsonString({ ok: true, path, sourceType: row.source_type, note: 'non-filesystem source; open via host UI' })
+  if (sourceType !== 'document') {
+    return toJsonString({ ok: true, path, sourceType, note: 'non-filesystem source; open via host UI' })
   }
 
   try {
@@ -157,98 +173,28 @@ async function runFileGetBacklinks(args: Record<string, unknown>, engine: Search
   return toJsonString({ ok: true, path, references: rows })
 }
 
-async function runFileGetGraph(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileGetGraph(args: Record<string, unknown>, _engine: SearchEngine): Promise<string> {
   const depth = typeof args.depth === 'number' ? Math.max(1, Math.min(6, args.depth)) : 2
-  const centerPath = typeof args.centerPath === 'string' ? args.centerPath : null
-  const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : null
-  const db = engine.getRepository().getConnection()
+  const centerPath = typeof args.centerPath === 'string' ? args.centerPath : undefined
+  const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : undefined
 
-  let documents: Array<{ id: number; path: string; name: string; sourceType: string }> = []
-  const baseQuery = `SELECT id, path, name, source_type AS sourceType FROM documents`
-  if (workspaceRoot) {
-    documents = db
-      .prepare(`${baseQuery} WHERE workspace_id = (SELECT id FROM workspaces WHERE root = ?)`)
-      .all(workspaceRoot)
-  } else {
-    documents = db.prepare(baseQuery).all()
-  }
-
-  // BFS filter if centerPath provided
-  let includedIds: Set<number> | null = null
-  if (centerPath) {
-    const center = documents.find((d) => d.path === centerPath)
-    if (!center) return toJsonString({ nodes: [], edges: [], note: 'centerPath not in index' })
-    includedIds = new Set([center.id])
-    let frontier = new Set([center.id])
-    for (let level = 0; level < depth; level += 1) {
-      if (frontier.size === 0) break
-      const placeholders = Array.from(frontier).map(() => '?').join(',')
-      const neighbors = db
-        .prepare(
-          `SELECT src_doc_id AS a, target_doc_id AS b FROM doc_links WHERE target_doc_id IS NOT NULL AND (src_doc_id IN (${placeholders}) OR target_doc_id IN (${placeholders}))`,
-        )
-        .all<{ a: number; b: number }>(...Array.from(frontier), ...Array.from(frontier))
-      const next = new Set<number>()
-      for (const edge of neighbors) {
-        if (edge.a && !includedIds.has(edge.a)) { includedIds.add(edge.a); next.add(edge.a) }
-        if (edge.b && !includedIds.has(edge.b)) { includedIds.add(edge.b); next.add(edge.b) }
-      }
-      frontier = next
+  // perf-rescue B1: graph queries can scan 681K rows + N BFS round-trips.
+  // Offload to the worker_thread so the main thread stays responsive.
+  // Falls back to an error JSON if the worker is unavailable, matching the
+  // contract for the original implementation (always returns a JSON string).
+  try {
+    const result = await getWorkerDbBridge().getDocumentGraph({ depth, centerPath, workspaceRoot })
+    if (result.note === 'centerPath not in index') {
+      return toJsonString({ nodes: [], edges: [], note: result.note })
     }
+    return toJsonString({ nodes: result.nodes, edges: result.edges })
+  } catch (error) {
+    return toJsonString({
+      nodes: [],
+      edges: [],
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
-
-  const allowedDocs = includedIds
-    ? documents.filter((d) => includedIds!.has(d.id))
-    : documents
-  const allowedIdSet = new Set(allowedDocs.map((d) => d.id))
-
-  const nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }> = []
-  for (const doc of allowedDocs) {
-    nodes.push({ id: `doc:${doc.id}`, type: 'doc', label: doc.name, sourceType: doc.sourceType })
-  }
-
-  const idList = Array.from(allowedIdSet)
-  if (idList.length === 0) {
-    return toJsonString({ nodes, edges: [] })
-  }
-  const placeholders = idList.map(() => '?').join(',')
-
-  const linkRows = db
-    .prepare(
-      `SELECT src_doc_id AS src, target_doc_id AS tgt, kind, target_text AS label FROM doc_links WHERE src_doc_id IN (${placeholders})`,
-    )
-    .all<{ src: number; tgt: number | null; kind: string; label: string }>(...idList)
-  const tagRows = db
-    .prepare(`SELECT doc_id AS src, tag FROM tags WHERE doc_id IN (${placeholders})`)
-    .all<{ src: number; tag: string }>(...idList)
-
-  const edges: Array<{ source: string; target: string; kind: string }> = []
-  const tagIds = new Set<string>()
-  const ghostIds = new Map<string, string>()
-
-  for (const link of linkRows) {
-    if (link.tgt && allowedIdSet.has(link.tgt)) {
-      edges.push({ source: `doc:${link.src}`, target: `doc:${link.tgt}`, kind: link.kind })
-    } else if (!link.tgt && link.kind === 'wikilink') {
-      const ghostId = `ghost:${link.label}`
-      if (!ghostIds.has(ghostId)) ghostIds.set(ghostId, link.label)
-      edges.push({ source: `doc:${link.src}`, target: ghostId, kind: 'wikilink' })
-    }
-  }
-  for (const row of tagRows) {
-    const tagId = `tag:${row.tag.toLowerCase()}`
-    tagIds.add(`${tagId}|${row.tag}`)
-    edges.push({ source: `doc:${row.src}`, target: tagId, kind: 'tag-of' })
-  }
-  for (const entry of tagIds) {
-    const [id, label] = entry.split('|')
-    nodes.push({ id, type: 'tag', label })
-  }
-  for (const [id, label] of ghostIds.entries()) {
-    nodes.push({ id, type: 'ghost', label })
-  }
-
-  return toJsonString({ nodes, edges })
 }
 
 async function runFileClassify(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {

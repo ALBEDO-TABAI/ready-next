@@ -60,9 +60,12 @@ export interface SidePanelSlots {
 
 const IMPORTED_SKILL_KEY = 'ready-imported-skill-folders'
 
+// Reference/advisory skills (video-expert-analyzer, video-copy-analyzer) expose
+// only `internal` actions to the LLM tool surface; their typed actions are
+// invoked by product code (e.g. RSS item-analysis-manager) and must not be
+// surfaced as user-typed slash defaults. Only public-action skills like
+// lets-go-rss keep an explicit default command here.
 const DEFAULT_SYSTEM_COMMANDS: Record<string, string> = {
-  'video-expert-analyzer': '/skill video-expert-analyzer video_expert_pipeline {"url":""}',
-  'video-copy-analyzer': '/skill video-copy-analyzer video_copy_analyze {"input":""}',
   'lets-go-rss': '/skill lets-go-rss rss_update {"digest":true,"noLlm":true}',
 }
 
@@ -134,10 +137,7 @@ function putSkillDragData(
   })
   e.dataTransfer.setData('application/x-ready-drag', data)
   e.dataTransfer.setData('application/x-ready-skill', data)
-  // `text/plain` is the fallback for drop targets that don't understand the
-  // ready-specific payloads (external editors, etc.). Match what ChatPanel
-  // inserts on drop — the `@[Name]` mention — so copy/paste-style flows
-  // stay consistent with the in-app drop behavior.
+  // Keep the external drag fallback identical to ChatPanel's in-app drop text.
   e.dataTransfer.setData('text/plain', `@[${payload.name}]`)
   e.dataTransfer.effectAllowed = 'copy'
 }

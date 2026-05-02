@@ -1,17 +1,23 @@
 /**
- * Pure types + LLM-schema converters for skill tool definitions.
+ * Shared LLM-facing tool shape for all skill_* tools (skill_action +
+ * primitives). Originally lived in `skill-execution-tool-defs.ts` alongside
+ * the 6 execution-control defs; that file is retired in B-plan Phase 4
+ * because the skill_executions state machine is gone, but the tool-def shape
+ * + the Anthropic/OpenAI renderers are still needed by:
  *
- * Extracted from the retired `skill-execution-tool-defs.ts` (B Phase 4 PR2)
- * so that the 6 execution-control tools can be deleted without dragging
- * the type surface every skill-action and primitive tool still needs.
+ *   - `skills-tools.ts`              (builds skill_action defs)
+ *   - `skill-primitives/tool-defs.ts` (primitive defs)
  *
- * No electron imports, no side effects — callers that need the actual tool
- * definitions import from the primitive / skill-action modules.
+ * The renderers are pure — no electron / runtime-manager imports — so this
+ * file stays safe to pull in from isolated unit tests.
  */
 
 import type { SkillParamDefinition } from '../../../shared/skill-execution-types'
 
-export type SkillToolKind = 'skill_action' | 'primitive'
+// `execution_control` stays in the union only so that old tests (which only
+// check the absence of the 6 retired tool names) still type-check. No def
+// currently carries that kind after Phase 4.
+export type SkillToolKind = 'skill_action' | 'execution_control' | 'primitive'
 
 export type ToolParam = SkillParamDefinition
 
@@ -21,6 +27,7 @@ export interface SkillToolDef {
   kind: SkillToolKind
   skillId?: string
   action?: string
+  visibility?: string
   timeoutMs?: number
   params: ToolParam[]
 }

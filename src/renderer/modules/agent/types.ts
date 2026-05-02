@@ -182,15 +182,24 @@ export interface ScopeRunTaskStep {
 
 export interface ScopeRunTaskContinuation {
   taskId?: string | null
-  executionId: string
+  // Phase 4: executionId is optional — the skill_executions state machine is
+  // retired, so skill-sourced continuations no longer carry an executionId.
+  // Kept optional for backward compatibility with other continuation sources.
+  executionId?: string | null
   stepId?: string | null
   blockerType?: string | null
   targetUrl?: string | null
-  // B Phase 4: tracker-driven continuation. Present on todo-sourced patches
-  // (from `buildSkillTaskProjectionPatch`); main-process resume handlers
-  // treat a non-empty `todoId` as the anchor when `executionId` is empty.
   todoId?: string | null
   todoTitle?: string | null
+  pauseReason?: string | null
+  detachedTaskId?: string | null
+  taskRunId?: string | null
+  jobId?: string | null
+  skillId?: string | null
+  action?: string | null
+  runStatePath?: string | null
+  outputDir?: string | null
+  progressFingerprint?: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -230,6 +239,16 @@ export interface ScopeRunExecutionDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  budgetLease?: {
+    leaseId: string
+    decision: 'active' | 'renew' | 'pause' | 'handoff_background' | 'close'
+    reason: string | null
+    renewalsUsed: number
+    progressScore: number
+    wasteScore: number
+    lastFingerprint: string | null
+    currentLeaseEndIteration: number
+  } | null
   recoveryHistory?: Array<{
     kind: string
     source: string
@@ -262,6 +281,22 @@ export interface ScopeRunStepMetrics {
   lastToolAt: string | null
 }
 
+export type ScopeRunTerminalReason =
+  | 'done'
+  | 'checkpoint_budget'
+  | 'checkpoint_background'
+  | 'checkpoint_user_input'
+  | 'blocked_config'
+  | 'blocked_tool_error'
+  | 'failed_skill'
+  | 'resume_launch_failed'
+  | 'persistence_failed'
+  | 'cancelled_user'
+  | 'cancelled_runtime'
+  // Legacy persisted events are normalized on read, but renderer keeps
+  // this for older scope-run payloads still in memory.
+  | 'infra_error'
+
 /**
  * Phase 3 — soft-failure capsule payload carried on ScopeRunState.softError.
  *
@@ -293,6 +328,7 @@ export interface ScopeRunState {
     | 'done'
     | 'error'
     | 'cancelled'
+  terminalReason?: ScopeRunTerminalReason | null
   toolTrace: ToolTraceEvent[]
   startedAt: string | null
   updatedAt: string | null

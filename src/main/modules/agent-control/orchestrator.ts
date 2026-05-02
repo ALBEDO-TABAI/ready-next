@@ -11,6 +11,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
+import type { DomainAdapter } from './domain-adapter'
 
 interface SessionDescriptor {
   agent: string
@@ -130,6 +131,10 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     return this.engine.hasBrowserController()
   }
 
+  getDomainAdapters(): ReadonlyArray<DomainAdapter> {
+    return this.engine.getDomainAdapters()
+  }
+
   setSidecarManager(manager: SidecarManager): void {
     this.engine.setSidecarManager(manager)
   }
@@ -180,6 +185,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     taskProjectionId?: ExecutionHostResult['taskProjectionId']
     executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
     projectionTruth?: ExecutionHostResult['projectionTruth']
+    terminalReason?: ExecutionHostResult['terminalReason']
   }> {
     const effectiveRequestId = requestId || randomUUID()
     const effectiveSessionId = sessionIdOverride || sessionId
@@ -247,6 +253,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     let interactionState: ExecutionHostResult['interactionState']
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
     let projectionTruth: ExecutionHostResult['projectionTruth']
+    let terminalReason: ExecutionHostResult['terminalReason']
     void this.send(
       agent,
       message,
@@ -269,6 +276,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       interactionState = result.interactionState
       taskProjectionId = result.taskProjectionId
       projectionTruth = result.projectionTruth
+      terminalReason = result.terminalReason
       if (!result.success) {
         collector.handleError({
           agent,
@@ -295,6 +303,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
         taskProjectionId,
         executionDiagnostics,
         projectionTruth,
+        terminalReason,
       }
     } finally {
       while (cleanupFns.length > 0) {
@@ -334,6 +343,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       taskProjectionId: result.taskProjectionId,
       executionDiagnostics: result.executionDiagnostics || null,
       projectionTruth: result.projectionTruth || null,
+      terminalReason: result.terminalReason || null,
     }
   }
 

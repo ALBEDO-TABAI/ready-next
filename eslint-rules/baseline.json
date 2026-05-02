@@ -1,0 +1,1155 @@
+{
+  "version": 2,
+  "identity": "file + rule + snippetHash; line is display-only",
+  "areaPolicy": {
+    "a1-gate": "Must clear before A1 admission",
+    "ui-history": "Frozen; count never grows but cleanup not blocking",
+    "other-a0": "Non-source-grep A0 baseline entries; outside A0.5 cleanup scope"
+  },
+  "entries": [
+    {
+      "file": "src/__tests__/anthropic-execution-client-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e62f356688439e45",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/anthropic-execution-client-kimi-retry-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "61c4c3b3c40705b2",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/before-quit-cleanup.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "3a49335516f0e849",
+      "line": 156,
+      "snippet": "const src = readFileSync(resolve(process.cwd(), 'src/main/index.ts'), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-active-tab-edit-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "78d51cb882a0070b",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-active-tab-visibility-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d32b5950db1b2d41",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-address-editing-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "92c3a2bca6ab0984",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-empty-state-bootstrap-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "78668c8f61dc7ea0",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-mode-startup-resync-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "151141acca2d87d5",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-mode-switch-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "866551fb6462ca44",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-runtime-hydration-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9ffaebda281d4b32",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-startup-theme-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "486f70a0c4e7ab9d",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-state-restore-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "21a630afb8f1aafd",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-sync-visible-host-three-step-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "52786714659dc10d",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-actions-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e8aee0d924d01a28",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-count-resync-guard-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "126c8d9ab101e110",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-drag-reference-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "a37aefcc52c5ba36",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-rail-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "b5269511cda0477b",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-rail-newtab-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "cf718d0841435e64",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-rail-scroll-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c062949f239513f6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-rail-structure-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c84a2baa12d7f835",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-reorder-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "dd4e26c3bc610bba",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-tab-switch-visibility-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e148bd8403abe275",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-unified-header-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e392a8b980b212c1",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-view-visibility-consolidation-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "cfd1f9be7d7b05b0",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/browser-window-rebind-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "25efd366cf8173ee",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/calendar-event-sync-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "deb39757336c07be",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/capture-stable-frame-token-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "86e0018e43726196",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-header-menu-style-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "6be75a838115be24",
+      "line": 40,
+      "snippet": "const chatHeader = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatHeader.tsx'), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-history-menu-overflow-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9eeff8e8010697d7",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-input-ime-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c6aec58aee998fec",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-model-switcher-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "20624337abc6c4ac",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-panel-collapsed-rail-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "57ca6c12eb92bfae",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-panel-waterfall-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e596e225fed6c496",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-session-switcher-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "b3507c157c5d9f3e",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/chat-user-message-alignment-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "da280bedc0dd1253",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/database.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c97336fe7b7eedc7",
+      "line": 152,
+      "snippet": "const databaseModule = readFileSync(resolve(process.cwd(), 'src/main/modules/database.ts'), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-attachment-async-io.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "a090066c2adf03e9",
+      "line": 18,
+      "snippet": "const source = readFileSync(sourcePath, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-editor-background-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "4e018acce5e51785",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-engine-async-handlers.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9cf0c073faf2e139",
+      "line": 8,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-engine-async-read.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "dcac375baf3c8da5",
+      "line": 8,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-insight-cache-host-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "be55f5a26010ad45",
+      "line": 33,
+      "snippet": "const executor = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-insight-cache-host-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "54b3c238a0ff91b4",
+      "line": 48,
+      "snippet": "const executor = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-insight-widget-window.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2551cf439501486e",
+      "line": 111,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-insight-widget-window.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ad11b77664e12c59",
+      "line": 119,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-list-widgets-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "3b766d788c3283a5",
+      "line": 12,
+      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-list-widgets-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c83ed1f243725559",
+      "line": 17,
+      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-list-widgets-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9792d2623f1a8603",
+      "line": 33,
+      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-list-widgets-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "11f9098f205e9f2b",
+      "line": 47,
+      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-mode-switch-pointer-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "cfc6b92e1ac4ce30",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-mode-toggle-glass-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "34646c601a892a89",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-reveal-highlight-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "b55b36af9cf7f1d1",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-source-preview-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "da1d75509a8c00e9",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-tab-rail-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "85a1a8bd979d8ed9",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-update-widget-patch.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "1fb36300f9dba4cb",
+      "line": 95,
+      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-update-widget-patch.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "77076e9bc836331b",
+      "line": 101,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-update-widget-patch.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "caa5fe00b956ef6c",
+      "line": 107,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-update-widget-patch.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "8e2ad887861b9a24",
+      "line": 112,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-update-widget-patch.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "142bce4a70e3ce17",
+      "line": 118,
+      "snippet": "const source = readFileSync(ACTIONS_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-export-snapshot.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ae782e36c1e1a6ce",
+      "line": 57,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-export-snapshot.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "a38236f1659f370b",
+      "line": 67,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-export-snapshot.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ed56ea2850bcf7b7",
+      "line": 78,
+      "snippet": "const preloadSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-export-snapshot.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "994f0d10767cd49d",
+      "line": 82,
+      "snippet": "const mainSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-openui.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "75e0d7670a60c60f",
+      "line": 16,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-patch-target-resolution.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "1245bcd9633e3b98",
+      "line": 94,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "690df9eb6c8e13d8",
+      "line": 173,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "1009d2a62db22f3e",
+      "line": 192,
+      "snippet": "const rendererSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "842325f0345a4cf6",
+      "line": 208,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "8e3ec3faab6c63f7",
+      "line": 217,
+      "snippet": "const directChatSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "30e6137bbf072737",
+      "line": 225,
+      "snippet": "const documentToolsSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "698d27aff44dfa46",
+      "line": 229,
+      "snippet": "const documentSchemasSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "cc58a4abc6152b6e",
+      "line": 241,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "20a89673e27d4713",
+      "line": 252,
+      "snippet": "const rendererHtml = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "7a81332e4718279c",
+      "line": 270,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "b28f176092b64db5",
+      "line": 279,
+      "snippet": "const rendererSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "977bf5d3b38c6b41",
+      "line": 283,
+      "snippet": "const receiverSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c01e3cf7618cc717",
+      "line": 296,
+      "snippet": "const blockCardSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c4f08f175a031681",
+      "line": 300,
+      "snippet": "const shellSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "00f345c3d9414f69",
+      "line": 304,
+      "snippet": "const notePreviewSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-system.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "8739c07b4265ac90",
+      "line": 308,
+      "snippet": "const markdownEditorSource = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-target-context.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "0e588b18eb882737",
+      "line": 193,
+      "snippet": "const source = readFileSync(",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-target-controlled-selection.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9ffdc28a2a1d4379",
+      "line": 58,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-target-controlled-selection.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d602fb71d6b59900",
+      "line": 67,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/document-widget-target-controlled-selection.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "f498d2137785adc4",
+      "line": 74,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/draggable-mode-tabs-state-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "f8b9b3e5e3492f5d",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/executor-routes-list-and-remove-intents.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "92edcbf937f77a5d",
+      "line": 17,
+      "snippet": "const executor = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/executor.routes-list-and-remove-intents.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d844837a801c49d5",
+      "line": 14,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/file-management-locate-index-gap-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "dc53e4e7f0c317d6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/file-tree-browser-tab-drop-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d7387f42e92ff63a",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/floating-submenu-style-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2ac28cab3755c064",
+      "line": 9,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/glass-unified-sheet-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "782cad284cfea881",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/icon-rail-resting-thumb-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "7f3301d56a2f8e40",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/input-slot-inset-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "52cbbeee8dab60b4",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/kimi-coding-client-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2a6e78e725bf6df2",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/legacy-design-video-removal-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "6d74885040dcc189",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/mode-slider-logo-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "5f246bcfe6b496a8",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/morph-icon-rail-no-timer-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "4427d1fa1c346d33",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/openai-execution-client-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d08bbf84539cd629",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/panel-fusion-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "030a9777a5a6dcd7",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/panel-resize-reason-click-toggle-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "28fd04ca51001342",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e8a6c7fb8c863148",
+      "line": 16,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "63deb69dae93dcfe",
+      "line": 21,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "3bb925e59885f0a0",
+      "line": 34,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "cf3b53b16c1169e4",
+      "line": 52,
+      "snippet": "const source = readFileSync(MODULE_EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/pipeline-locate-skips-arbitrate.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "dded15da36ad88ca",
+      "line": 17,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/pipeline-locate-skips-arbitrate.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "eb5c25c50ea0db91",
+      "line": 26,
+      "snippet": "const source = readFileSync(SKELETON_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/pipeline.update.includes-existing-widget-in-prompt.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "62ec5840a2f7de83",
+      "line": 12,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/pipeline.widget-draft.cache-invalidation-on-failure.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "a70867bdd006cc6f",
+      "line": 12,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/pipeline.widget-draft.reprompts-on-schema-error.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "18dec4f0cecdf540",
+      "line": 12,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ritual-overlay-lifecycle-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "4cea1e575197c518",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/rss-draft-store-ui-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "60b649ef6ab45629",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/rss-list-row-style-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ebfde5ac80cefce9",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/settings-ai-layout-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d4267527f5e2ac67",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/settings-liquid-glass-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "78e7bf9cc4f07fe1",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/settings-shell-visual-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "04bfc5a172fa4405",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/side-panel-waterfall-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "0988804cbae5e1b4",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/simple-execution-fallbacks.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ac5cb4a426f1f525",
+      "line": 9,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/theme-ritual-orchestration-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "55eadccbf2f74a45",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/theme-system-change-silent-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "53024a529a6a17ce",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/topbar-chatheader-right-align-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ca7abeca22bd7927",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-adjustment-guide-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "4b8dde5c130d6ca2",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-browser-hook-split-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "f4ff028fcdbe49b3",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-fail-fast-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2db99d85a93b440c",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-mode-split-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "4d49c9149b707862",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-partial-failure-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "69d60bdbf7bc320a",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-structure-cleanup-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c72f45d25c4117d6",
+      "line": 11,
+      "snippet": "return readFileSync(workspacePath(path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/video-fallback-service-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "9813e157999e8582",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/widget-catalog.recommended-widget-superset.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "36d811425c0b4fd2",
+      "line": 68,
+      "snippet": "const executorSource = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-click-toggle-resize-signal-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "0ec05368c80491f9",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-first-row-font-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2653afda7b79fad2",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-hot-path-transition-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "b91f28956be930c4",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-icon-alignment-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ee6c9840327aaba6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-keep-alive-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "032683f5e0155fa6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-liquid-shell-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "fb6ccb6352fd72de",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-mode-and-rail-slider-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "35c356a211dd7d66",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-mode-switch-ritual-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2ac56d8cc9238cf0",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-mode-switch-transform-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "c9d191ee8d08c3b4",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-panel-shortcuts-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "e3431cd75679e720",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-panel-width-transition-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ca3e8394772a8089",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-resize-drag-raf-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "d856bf6ffabc1637",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-shell-alignment-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "6bf104fc37e4d6c8",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-slider-motion-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "55cea58f21edfe60",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/workbench-window-resize-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "dcdc14e1429b0deb",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/main/modules/agent-control/skill-child-run-types.ts",
+      "rule": "ready/no-legacy-backdoor",
+      "snippetHash": "37d79b230c69107f",
+      "line": 134,
+      "snippet": "legacy: {",
+      "area": "other-a0"
+    }
+  ]
+}

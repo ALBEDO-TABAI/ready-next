@@ -16,11 +16,13 @@ export type ToolDomain =
 export type ToolKind = 'read' | 'write' | 'interactive' | 'job'
 export type ToolConcurrency = 'parallel_read_safe' | 'serialized'
 export type ToolInterruptBehavior = 'abort_signal' | 'host_managed'
+export type ToolExecutionVisibility = 'model' | 'internal'
 export type ToolTimeoutProfile =
   | 'default'
   | 'browser_interactive'
   | 'document_write'
   | 'skill'
+  | 'skill_long'
   | 'feishu'
 
 export interface ToolProjectionHint {
@@ -52,5 +54,17 @@ export interface ToolDefinition {
   projectionHint: ToolProjectionHint | null
   description: string
   schema: ToolDefinitionSchema | null
+  executionTimeoutMs?: number
+  executionVisibility: ToolExecutionVisibility
+  requiresExplicitAllowlist?: boolean
   resultShape: ToolResultShape
+}
+
+export function isChildInternalStrictAdmissionEnabled(
+  env: { [key: string]: string | undefined } = process.env as { [key: string]: string | undefined },
+): boolean {
+  const raw = env.READY_SKILL_CHILD_INTERNAL_STRICT_ADMISSION
+  if (typeof raw !== 'string') return true
+  const normalized = raw.trim().toLowerCase()
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'off'
 }

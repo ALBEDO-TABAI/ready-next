@@ -1,0 +1,52 @@
+{
+  "id": "test-host-contract",
+  "name": "Test Host Contract Fixture",
+  "description": "Architectural smoke fixture exercising the full Skill Host Contract surface.",
+  "version": "1.0.0",
+  "runtime": "python",
+  "defaultAction": "echo",
+  "actions": [
+    {
+      "name": "echo",
+      "description": "Run the tiny echo script that prints a JSON status line.",
+      "runtime": "python",
+      "entry": "scripts/echo.py",
+      "visibility": "public",
+      "inputMode": "json",
+      "params": [
+        { "name": "message", "type": "string", "description": "Text echoed back", "required": false }
+      ]
+    }
+  ],
+  "host_requirements": {
+    "manifest_version": 1,
+    "spawn_context": {
+      "config_file": {
+        "path": "${spawn.tmp_dir}/config/skill-config.json",
+        "format": "json",
+        "fields": {
+          "/runtime/preferred_model": "${agent.model_id}",
+          "/runtime/provider": "${agent.provider}"
+        },
+        "preserve_existing": true
+      },
+      "secondary_files": [
+        {
+          "path": "${spawn.tmp_dir}/extras/job-info.txt",
+          "content_template": "skill=${skill.id} job=${spawn.job_id} model=${agent.model_id} api=${agent.api_kind}"
+        }
+      ]
+    },
+    "shell_allowlist_extensions": ["pandoc"],
+    "default_action_timeout_ms": 600000,
+    "status_detection": {
+      "method": "sentinel_file",
+      "file_path": "${output_dir}/state.json",
+      "json_field": "state",
+      "blocked_values": ["needs_review"]
+    },
+    "lifecycle": {
+      "on_uninstall_remove": ["${env.HOME}/.config/test-host-contract"]
+    }
+  }
+}

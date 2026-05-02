@@ -72,6 +72,14 @@ test('SKILL.md frontmatter declares name / description / when-to-use per Claude 
   assert.ok(/\bwhen-to-use:/.test(frontmatter), 'when-to-use field required for Claude Skill protocol')
 })
 
+test('SKILL.md uses allowlisted shell wrapper form instead of direct ./scripts invocation', () => {
+  const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
+
+  assert.doesNotMatch(skillMd, /(^|\s)\.\/scripts\//)
+  assert.match(skillMd, /bash scripts\/run_update_cron\.sh/)
+  assert.match(skillMd, /bash scripts\/run_status_push\.sh/)
+})
+
 test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skill_executions row', async () => {
   _resetLastReferenceSkillHintsForTests()
 
@@ -90,8 +98,6 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
       params: a.params || [],
     })),
   }
-
-  const executionLog: Array<unknown> = []
 
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
@@ -134,5 +140,6 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const hint = getLastReferenceSkill('test-session-letsgorss')
   assert.equal(hint?.id, 'lets-go-rss', 'hint arms primitive gating for next turn')
 
-  assert.equal(executionLog.length, 0, 'no skill_executions row on the reference path')
+  // Phase 4: the orchestrator no longer has a listExecutions dep; no execution
+  // row is created on the reference path because that code path is gone.
 })

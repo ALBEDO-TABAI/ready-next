@@ -44,6 +44,9 @@ test('ToolRuntime converts runtime-recoverable tool failures into structured out
       { id: '1', name: 'skill_video_expert_ai_analyze', input: {} },
       { id: '2', name: 'memory_search', input: {} },
     ],
+    context: {
+      allowedToolNames: new Set(['skill_video_expert_ai_analyze', 'memory_search']),
+    },
     executeTool: async (toolCall) => {
       if (toolCall.id === '1') {
         throw new Error('Tool execution timed out after 120000ms (skill_video_expert_ai_analyze)')

@@ -1,15 +1,71 @@
 # Ready V5 - 更新日志
 
-## [Unreleased] - 2026-04-24
+## [Unreleased] - 2026-04-28
 
-### Skill Runtime B — `codex/skill-runtime-b-plan` 合并到 main（Phase 0–3 完整落地）
+### Skill Runtime E — W2 outputDir lifecycle + child-run log GC
 
-- 将 `codex/skill-runtime-b-plan` 分支（Phase 0 止血 + Phase 1 PR1/PR2 原语 + Phase 2 video-copy 迁移 + Phase 3 video-expert vnext swap / lets-go-rss 混合）合并到 main
-- 合并前 main 上的 `4069e4a feat(skill): implement PR2 ephemeral skill system + primitive tools` 是一次 spec-out 的简化实现（无 path sandbox、无 PATH 白名单、无 ask_user IPC / 渲染端 UI、无 inline 注入、无 embedded skill 迁移），在合并冲突处统一采纳 worktree 的 Phase 1 完整实现；恢复锚点 tag：`backup/main-before-b-merge-20260424`
-- 计划文档随分支一并入 main：`docs/superpowers/plans/2026-04-23-skill-agent-runtime-b-then-c-roadmap.md` + `docs/superpowers/plans/2026-04-23-skill-runtime-b-plan-phases.md`；`plans/2026-04-23-skill-runtime-bootstrap-rootcause.md` 之前已在
-- Phase 4（`skill_executions` 状态机退役 + todo-based projection）与 Phase 5（C 启动 brief）仍为待办
+- **outputDir 生命周期 sidecar**：新增 `.lifecycle.json`，终态 `completed / failed / killed / blocked` 写入 `retained` 状态，`budget_paused / recoverable_paused` 不写保留态，避免仍需续跑的目录被后台清扫。
+- **child-run JSONL 新位置**：新启动的 child run 日志写入 `<runtimeRoot>/.ready/child-runs/<childRunId>.jsonl`；恢复读取优先使用持久化路径，缺失时按 runtime-root 新路径、legacy outputDir 旧路径回退。
+- **后台清扫**：`SkillsRuntimeManager` 启动 outputDir 与 child-run log 清扫定时器；默认 outputDir 保留 7 天，legacy 无 lifecycle 目录宽限 30 天，child-run log 保留 30 天，均支持 `READY_*_RETENTION_DAYS` 环境变量覆盖。
+- **防陈旧日志误恢复**：runner 的 legacy fallback 只把不早于记录创建时间的非空日志当作可恢复句柄，避免测试或旧残留文件把无 `eventLogPath` 的 active 行误判成可直接恢复。
 
-## [Unreleased] - 2026-04-23
+### Skill Runtime E — 防爆 + 减脆收口
+
+- **原子写入硬门**：状态类 JSON 写入集中到 `atomicWriteJson`，文本/config 写入集中到 `atomicWriteText`；新增检查脚本阻止 `agent-control/` 与 `skills-runtime/` 下新增 JSON 直写。
+- **retry / circuit breaker**：17 个 child-run 终态原因全部有明确重试策略；同一目标连续失败会进入短 cooldown，可用 `READY_CHILD_RUN_CIRCUIT_BREAKER_ENABLED=0` 紧急关闭，重启 Electron 会清掉当前 cooldown。
+- **gateway admission 收口**：child runner 执行动作走 tool gateway，不再直接绕到 runtime `runSkill`；VEA happy-path child-run 链路和 child-internal admission 由回归测试锁住。
+- **E 验证门**：新增 `npm run verify:e`，固定内嵌 `verify:d`，并覆盖 atomic write、outputDir/log lifecycle、legacy resume fallback、retry policy、circuit breaker 与 gateway admission 相关测试。
+
+### Skill Runtime B — Phase 7 long-task supervisor 收口
+
+- **Phase 3 lifecycle separation 补齐回审缺口**：新增四源冲突 supervisor fixture，覆盖 `skill_task_runs` 已 done、detached 仍 running、`run_state.json` 仍 running、projection 显示 done 的组合；监督器保持 `background_running`、禁止 close，并保留恢复句柄。
+- **Phase 4 dynamic budget lease 收口**：TurnEngine 现在在 `currentLeaseEndIteration - 2` 开始采样评估 lease；补真实长循环测试（100+ 次工具循环、进度推进、多次 renew、最终只在 supervisor close 后结束）和 stalled loop 测试（重复读取不变 run_state 后进入 `budget_paused`，不续到硬上限）。
+- **Phase 5 continuation state 收口**：ChatPanel 的“继续后台任务”改为写入结构化 continuation intent，优先携带 projection / task run 中的 `taskRunId / detachedTaskId / runStatePath / outputDir / skillId / action / pauseReason`，不再只塞一段纯文本。
+- **Phase 6 acceptance gates 加固**：补 TaskPanel projection action 合同，覆盖 continue / retry / cancel / artifact；acceptance fixture 继续验证 `skill_task_runs`、task projections、detached JSON、`run_state.json` 与任务卡 view-model 的同一 task identity。
+- **Phase 0-2 回审补洞**：显式 `runStatePath` 中 legacy blank `task_id` 允许作为恢复锚点；`ready_compat.py` 在无身份多候选输出目录时返回 `blocked + ambiguous` 结构化结果；VEA `SKILL.md` 把查看进度的首选工具改为 `skill_inspect_run_state`。
+- **收口边界**：`background_running / budget_paused` 仍是 view-model 派生状态，不新增 DB status enum；budget lease 不跨重启持久化，重启只恢复 durable continuation handles。
+- **验收状态**：Phase 7 focused group 55/55 通过；仍观察到 `better-sqlite3` Node ABI mismatch 日志，真实 app DB-backed 闭环与 ready 日志关联仍不能声明已证明。
+
+### Skill Runtime B — Phase 0 补洞 + Phase 1 VEA Progress Contract
+
+- **VEA `run_state.json` 公共契约落地**：`run_state.py` 写入 `schema_version / task_id / pid / started_at / active_output_dir`，并保留 `status / current_stage / completed_stages / total_scenes / completed_scenes / coverage_ratio / updated_at`；`READY_SKILL_TASK_ID` 作为本阶段唯一强身份通道，缺失时不再用输出目录名冒充任务身份
+- **实时进度更早、更稳**：`pipeline_enhanced.py` 在 `video_output_dir` 确定后立即写 `active_output_dir`；`ai_analyzer.py` 在 batch/scene 回写中 touch 顶层 `updated_at` 并同步场景覆盖率；`ready_compat.py` 把 `active_output_dir` 纳入输出目录事实来源，但不把 `delivery_report.json` 当实时进度真值
+- **Ready 读取侧不再静默选最新文件**：`skill_inspect_run_state` 新增 `expectedTaskId`，输出 `schemaVersion/taskId/pid/startedAt/activeOutputDir/currentStage/...` summary 字段；多候选且无身份时返回 `ambiguous: true`、`runStatePath: null` 和候选列表，而不是按 mtime 猜任务
+- **detached 恢复与投影最小修正**：重启恢复优先匹配 `run_state.task_id`，无身份多候选时进入 blocked/ambiguous；长技能运行投影读取 VEA `current_stage` 和场景覆盖率，只改摘要文案，不引入新 UI 状态
+- **Phase 0 补洞测试同步**：补住 running stdout 不得映射 done、primitive monitor 不得关闭 typed parent、recoverable 查询优先 live task、`["none"]` 背景阻塞归一、任务卡不显示“已完成但无法继续”等回归
+- **验证记录**：Phase 1 合并验收 17/17 通过；补洞支撑套件含 `turn-engine-route` 60/60 通过；`run-coordinator-budget` 仍有 2 条预算耗尽红测留给后续 Phase；本机测试仍打印已知 `better-sqlite3` Node ABI 警告
+
+### Skill Runtime B — Phase 4 PR2（工具曝光与任务卡收口）
+
+- **显式点名 skill 的工具清单收口**：`SkillContextOrchestrator.buildPreferredSkillToolNames` 不再把 `skill_get_state / skill_submit_* / skill_restart_* / skill_cancel_execution` 放回偏好列表；显式点名 reference skill 时同轮保留 `skill_ask_user / skill_run_shell / skill_write_artifact / skill_read_artifact` 四个 primitive，避免“读了 skill 但下一轮仍拿不到原语”
+- **旧 custom `read_skill` 兼容修正**：`skill-compiler.ts` 与 `custom-skill-registry.ts` 在加载期把所有 `runtime:'reference' + name:'read_skill'` action 统一归一为 `visibility:'internal'`，包括历史 manifest 显式写成 public 的本地技能；非 reference typed public action 不受影响
+- **会话生命周期与上下文工具桥接补齐**：`agent:newSession` / `agent:kill` / runtime cleanup 同步清 `reference-skill hint`、pending `skill_ask_user` 和 skill 任务投影；`executeSkillTool` 透传 AbortSignal 给 `skill_ask_user` / `skill_run_shell`；DirectChat host runtime 补 `getMemoryRepository()` / `getPromptAssembly()`，让 `memory_search` 不再因为 runtime 包装缺方法而失败
+- **最小任务卡进度层落地**：新增 `SkillTaskTracker`，`skills-tools.ts` 在 skill action 与四个 primitive 后记录步骤、等待用户、错误和最近产物，并通过 `projectionPatch` 回到前端；先解决“完全没有进度”的可读性缺口，不复活旧 workflow state machine
+- **shell 边界收紧**：`SHELL_ALLOWLIST` 移除 `rm / cp / mv`；LLM-facing schema/description、`AGENTS.md` / `CLAUDE.md`、`lets-go-rss` SKILL/README 同步改为 `bash scripts/x.sh` 或 `python scripts/x.py` 调用脚本，不再鼓励直接 `./scripts/x.sh`
+- **Kimi 普通请求历史清洗**：修复“上一轮 Anthropic 工具调用历史被带进下一轮 Kimi Chat 请求”导致的 `invalid part type: tool_use` 400；Kimi Coding 与通用 OpenAI 请求都会先移除旧工具块并保留可读工具结果文本
+- **重试轮 skill 识别补洞**：当用户只说“继续 / 再重试一次”时，运行时会把最近真实用户目标纳入 skill 识别；命中 `Video Expert Analyzer` 等 reference skill 后，用匹配到的历史目标注入 SKILL.md，并只偏好四个 skill primitive，不再把旧的 `system_run_embedded_python` 当入口
+- **RSS 误触发收口**：`rss-analysis` trigger 不再匹配裸“分析”，必须出现 RSS/feed/订阅源等对象词或显式 `skill_rss_ / lets-go-rss`；新增 migration 030 修正已存在数据库里的旧 `(rss|订阅|抓取|分析)` 规则，避免 Video Expert 这类分析任务被标成 RSS 卡片
+- **embedded skill managed 副本同步**：`SkillsRuntimeManager.listSkills()` 在返回 embedded skill 前会同步 app 管理目录里的 skill 文件，并用 `.ready-embedded-sync-state.json` 记录版本；源版本变化时会清掉旧 managed 目录再复制，防止旧 `skill.workflow.json` / 旧 SKILL.md 残留导致 inline 读到过期说明
+- **显式 skill 意图优先续跑状态**：即使 prompt assembly 先给了 generic intent，执行层发现 registered skill token 后会把 primary domain 升级为 skill；“再重试一次”会优先复用最近点名的 skill 目标，不再被上一次 widget/RSS/document continuation 抢走
+- **新增/改写回归**：补 `skill-session-cleanup-contract.test.ts`、`skill-task-tracker.test.ts`、`openai-history-sanitization.test.ts`、`skill-detection-inputs.test.ts`，并扩展 explicit skill 工具偏好、custom read_skill visibility、run-shell、lets-go-rss、DirectChat recall/memory 桥接等测试
+- **验证**：`npm run typecheck` 通过；本轮关键目标测试 42/42 通过；`npm run test` 1514 case / 1478 pass / 36 fail，失败数与既有基线持平（新增测试均通过）
+
+### Skill Runtime B — Phase 4 PR1（退役 `skill_executions` 状态机）
+
+- **彻底删除 6 个 LLM-facing execution-control 工具**：`skill_get_state / skill_submit_input / skill_submit_confirmation / skill_submit_agent_result / skill_restart_from_step / skill_cancel_execution` 不再出现在工具清单；P1-pre-a 先把 4 个 primitive 的 `kind` 从 `'execution_control'` 切到独立 `'primitive'` 避免级联误伤，然后删掉 execution_control switch、`runSkillCoordinator`、`findExecutionForSession`、`formatExecutionDetail`、`createSkillExecutionOutput` 等函数
+- **7 个 `SkillsRuntimeManager` execution API + coordinator/store 级联删除**：`listExecutions / getExecution / submitExecutionInput / submitExecutionConfirmation / submitExecutionAgentResult / restartExecutionFromStep / cancelExecution` 全部移除；`ExecutionStateStore` / `ExecutionCoordinator` / `NextActionResolver` / `toWorkflowRunResult` / `executeWorkflowRuntimeAction` 整体删除；`SkillRunResult.mode` 从 `'direct'|'workflow'|'reference'` 收窄为 `'direct'|'reference'`；`SkillRunResult.execution` + `.blocker` 字段退役
+- **IPC / preload / renderer 类型面一次性收口**：7 条 `skills:executions:*` IPC handler（`ipc-handler.ts:106–210`）+ 7 个 preload 方法（`preload/index.ts:418–433`）+ `SkillExecutionBlocker / SkillExecutionStepRecord / SkillArtifactRecord / SkillExecutionDetail` 渲染端接口 + `SkillRunResult.execution/.blocker` 字段全部删除；`ChatPanel.handleRetryTask` 的 `restartFromStep` 分支退役，`applySkillExecutionDetailToScope` / `createTaskPatchFromSkillExecutionDetail` 孤儿函数一并清理；`ScopeRunTaskContinuation.executionId` 改为 optional（`parseTaskContinuation` 不再硬 return null）
+- **sweep 拆迁**：原 `startTtlSweep` 同时清 `skill_executions` 终态行 + reference-hint；Phase 4 SQLite 清理没意义了，改为 `startReferenceHintSweep` 独立 setTimeout(30s) + setInterval(1h)，只跑 `sweepExpiredReferenceSkillHints()`；对应 metric 从 `ttlSwept = 'skill_executions_ttl_swept'` 重命名为 `skillReferenceHintTtlSwept = 'skill_reference_hint_ttl_swept'`，`skill-reference-hints.ts` 里直接 emit 并带 `removed / ttlMs / cutoffAt` payload
+- **工具注册侧瘦身**：`skill-tool-session-gate.ts` 删除 `filterExecutionControlToolsBySession / shouldExposeExecutionControlTool / SESSION_GATED_EXECUTION_CONTROL_TOOL_NAMES`，只保留 primitive gating；`skills-tools-static.ts` 拆掉 `EXECUTION_CONTROL_GATED_TOOL_NAMES / EXECUTION_CONTROL_READ_ONLY_TOOL_NAMES`，`STATIC_SKILL_TOOL_NAMES_BOOT_SAFE` 等同于 `STATIC_SKILL_TOOL_NAMES`；Phase 1 沉淀下来的 `SkillToolDef / toAnthropicTool / toOpenAITool / toSchemaParam / ToolParam` 迁到新文件 `src/main/modules/tools/skill-tool-types.ts`
+- **6 个源文件 + 1 个 prompt builder 整体删除**：`execution-coordinator.ts` / `execution-state-store.ts` / `next-action-resolver.ts` / `skill-execution-tool-defs.ts` / `skill-execution-missing.ts` / `schemas/skill-control-schemas.ts` + 孤儿 `skill-prompt-builder.ts`；`schemas/index.ts` 相应删 SKILL_CONTROL_SCHEMAS export；`shared/skill-execution-types.ts` 删除 `ExecutionFrame / ExecutionBlocker / ExecutionBlockerInputField / SkillExecutionError / SkillExecutionStepRecord / SkillExecutionState / SkillExecutionDetail` 7 个类型（保留 `SkillExecutionMode`、`SkillActionResult` 等其他消费者在用的类型）
+- **DB migration 029 `drop_skill_execution_tables`**：按子→父表顺序 DROP `skill_execution_artifacts` / `skill_execution_steps` / `skill_executions` + 所有相关索引；所有语句 `IF EXISTS`，幂等；Phase 3 末已无新数据写入，残留行为历史痕迹，不可恢复；release note 需提示用户
+- **tool-executor 的 `if (kind === 'skill_execution_missing')` 分支 + metric 同步下线**：`buildSkillExecutionMissingOutput` 删除后该 errorKind 不会再出现，`TOOL_ERROR_METRICS.skillExecutionMissing` 从 registry 里摘掉
+- **测试改动（净 -11 case）**：
+  - 删 10 份退役测试文件：`skill-execution-id-contract` / `skill-execution-id-generator` / `execution-state-store-ttl` / `skill-resolver-smoke` / `execution-tool-filter-skill-preservation` / `skill-control-schemas` / `skill-execution-missing-output` / `skill-execution-missing-reference-hint` / `skill-zod-golden-snapshot` / `skill-task-projection-contract` / `scope-run-state-clarification-mapping`
+  - 改写 2 份：`skill-zod-param-derivation.test.ts` 只留通用 `describe()` 守卫用例；`paramList-to-zod.test.ts` 改用 `SKILL_PRIMITIVE_SCHEMAS` 做 round-trip；`skill-tool-gating-by-session.test.ts` 只覆盖 primitive gating；`tool-input-schemas-registry.test.ts` 只覆盖 primitive schemas；`tool-error-metrics-registry.test.ts` / `tool-error-metrics-contract.test.ts` 对齐新 metric 集；`skill-reference-output-contract.test.ts` 的 `mode?` 联合去掉 `'workflow'`；`run-resource-reaper.test.ts` 删 `manager.cancelExecution` 正则断言
+  - 新增 3 份：`skill-execution-tools-removed.test.ts`（负向契约：6 个退役工具名不再出现在静态 registry / primitive defs / skills-tools 的 manager 调用）、`skill-reference-hint-sweep-independent.test.ts`（sweep 拆迁后源码契约 + emit metric）、`migrations-drop-skill-executions.test.ts`（3 case：fresh / idempotent / never-built）
+- **全量验证**：`npm run typecheck` 双 project 无错；`npm run test` 1491 case / 1454 pass / 36 fail（与 main 基线 36 红持平）
+- **未做 / 推迟到 PR2**：任务卡 todo projection（`skill-task-tracker` + `buildSkillProjectionPatch` 重写）；ask_user pending → `waitingFor='clarification'` 投影；3 个 embedded skill 集成回归的"任务卡 projection 非空"断言
 
 ### Skill Runtime B — Phase 3（video-expert vnext swap + lets-go-rss 混合迁移 + 跨技能回归）
 

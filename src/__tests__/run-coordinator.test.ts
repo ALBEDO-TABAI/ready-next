@@ -23,6 +23,53 @@ function createScope(): ConversationScope {
   }
 }
 
+test('RunCoordinator forwards per-call coordinators into prompt assembly', async () => {
+  const scopedCoordinators = [{ id: 'scoped' }] as never
+  const inboundCoordinators = [{ id: 'inbound' }] as never
+  const received: unknown[] = []
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async ({ coordinators }) => {
+        received.push(coordinators)
+        return {
+          systemPrompt: 'system prompt',
+          bootstrapMessages: [],
+          memoryRefs: [],
+          triggerHits: [],
+          contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+        }
+      },
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: 'done',
+      cancelled: false,
+      usedTools: [],
+    }),
+    emitScopeRunEvent: () => {},
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  await coordinator.runScoped({
+    scope: createScope(),
+    message: 'hello',
+    requestId: 'req-coordinators-scoped',
+    coordinators: scopedCoordinators,
+  })
+  await coordinator.runInboundChannel({
+    scope: createScope(),
+    message: 'hello',
+    requestId: 'req-coordinators-inbound',
+    coordinators: inboundCoordinators,
+  })
+
+  assert.equal(received[0], scopedCoordinators)
+  assert.equal(received[1], inboundCoordinators)
+})
+
 test('RunCoordinator assembles prompt, executes host, and emits planning metadata', async () => {
   const events: ScopeRunEventPayload[] = []
   let recordedOutcome: { success: boolean; finalText: string; usedTools: string[] } | null = null
@@ -131,7 +178,8 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   const result = await coordinator.runScoped({
     scope: createScope(),
     message: 'hello',
-    requestId: 'req-1'
+    requestId: 'req-1',
+    coordinators: []
   })
 
   assert.deepEqual(result, { success: true })
@@ -209,6 +257,7 @@ test('RunCoordinator forwards task metadata from execution results into the fina
     scope: createScope(),
     message: 'hello',
     requestId: 'req-2',
+    coordinators: []
   })
 
   assert.deepEqual(result, { success: true })
@@ -254,6 +303,7 @@ test('RunCoordinator creates a stable task id when execution host does not provi
     scope: createScope(),
     message: 'hello',
     requestId: 'req-3',
+    coordinators: []
   })
 
   assert.deepEqual(result, { success: true })

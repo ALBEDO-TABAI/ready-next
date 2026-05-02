@@ -15,20 +15,40 @@ import test from 'node:test'
 
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
-test('registry exposes the 7 documented keys post-Phase 4 PR3', () => {
-  // B Phase 4 PR2 retired `skillExecutionMissing` alongside the 6 LLM-facing
-  // execution-control tools. B Phase 4 PR3 retired `ttlSwept` alongside
-  // the `skill_executions` state machine; the reference-hint sweep now
-  // emits via `skill-reference-hints.ts`'s own metric outside this registry.
+test('registry exposes documented tool-error metric keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
+    'childResumeDisabledByFlag',
+    'childRunCircuitBreak',
+    'childRunLogGc',
+    'childRunnerLifecycleWriteFailed',
+    'compactionCircuitBreak',
+    'compactionL2Failed',
+    'domainToolNarrowingApplied',
+    'hookHandlerFailed',
+    'hookHandlerTimeout',
     'inputValidation',
+    'metaParseCorrupted',
+    'outputDirGc',
+    'outputDirSweepFailed',
     'resolutionViolation',
+    'runStateSelectionDirSkipped',
+    'secretDecryptFailed',
+    'sessionRecallAutoAttached',
     'skillPrimitiveRejected',
     'skillPrimitiveUsed',
+    'skillProjectionPartial',
+    'skillReferenceHintRecoveredFromCapsule',
+    'skillReferenceHintTtlSwept',
+    'skillReferenceInlineFailed',
+    'subagentCleanupDrainFailed',
     'surfaced',
+    'systemReminderSuppressedByConflict',
+    'toolCallTextIntercepted',
+    'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
+    'xmlToolCallsRecoveredFromNative',
   ])
 })
 
@@ -51,8 +71,26 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.unknownSurfaced, 'tool_error_unknown_surfaced')
   assert.equal(TOOL_ERROR_METRICS.inputValidation, 'tool_input_validation_failed')
   assert.equal(TOOL_ERROR_METRICS.resolutionViolation, 'tool_resolution_violation_post_arbitration')
+  // Phase 4: skillExecutionMissing + ttlSwept retired alongside the
+  // skill_executions state machine. Reference-hint sweep gets its own metric.
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceHintTtlSwept, 'skill_reference_hint_ttl_swept')
   assert.equal(TOOL_ERROR_METRICS.toolSnapshotMismatch, 'tool_snapshot_mismatch')
   // B Phase 1 — skill primitives
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveUsed, 'skill_primitive_used')
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveRejected, 'skill_primitive_rejected')
+  // Domain adapter prefix narrowing (post-Phase 4 telemetry)
+  assert.equal(TOOL_ERROR_METRICS.domainToolNarrowingApplied, 'domain_tool_narrowing_applied')
+  // Tool-loop repetition guardrail (skill-resume work)
+  assert.equal(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, 'tool_loop_repetition_detected')
+  // skill-resume E1 — auto-attach historical recall capsules on retry intent
+  assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
+  // skill-resume G4 — last-recourse hint recovery from auto-attached capsule text
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
+  // A1 SubAgent skeleton — lifecycle cleanup drain failure observability
+  assert.equal(TOOL_ERROR_METRICS.subagentCleanupDrainFailed, 'subagent_cleanup_drain_failed')
+  // H1 — previously silent fallback paths now emit observability.
+  assert.equal(TOOL_ERROR_METRICS.secretDecryptFailed, 'secret_decrypt_failed')
+  assert.equal(TOOL_ERROR_METRICS.skillReferenceInlineFailed, 'skill_reference_inline_failed')
+  assert.equal(TOOL_ERROR_METRICS.skillProjectionPartial, 'skill_projection_partial')
+  assert.equal(TOOL_ERROR_METRICS.runStateSelectionDirSkipped, 'run_state_selection_dir_skipped')
 })

@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react'
 import { Copy, Check, ChevronRight, Wrench, CheckCircle2, CircleDashed } from 'lucide-react'
 import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
+import { formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 
 interface ChatMessagesProps {
   messages: AgentMessage[]
@@ -68,6 +69,7 @@ export default function ChatMessages({
   }, [messages.length])
 
   const latestToolEvent = toolTrace.length > 0 ? toolTrace[toolTrace.length - 1] : null
+  const latestToolPreview = formatToolTracePreview(latestToolEvent?.text)
   const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule && Object.keys(messageToolTraceSnapshots).length === 0 && !pendingToolTrace
 
   return (
@@ -409,7 +411,7 @@ export default function ChatMessages({
                     marginTop: 1,
                   }}
                 >
-                  {latestToolEvent?.text || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
+                  {latestToolPreview || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
                 </div>
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>

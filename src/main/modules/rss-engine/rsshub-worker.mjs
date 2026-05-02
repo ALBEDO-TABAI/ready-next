@@ -9,6 +9,28 @@ import { init } from 'rsshub'
 const PORT = Number.parseInt(process.env.RSSHUB_PORT || '1200', 10)
 const HOST = '127.0.0.1'
 
+const PARENT_PID = process.ppid
+const WATCHDOG_INTERVAL_MS = 30_000
+
+function startParentWatchdog() {
+  if (process.platform === 'win32') return // TODO: Windows
+  const timer = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0) // signal 0 = existence check
+    } catch (err) {
+      console.log(`[rsshub-worker] parent PID ${PARENT_PID} gone, exiting`)
+      clearInterval(timer)
+      process.exit(0)
+    }
+  }, WATCHDOG_INTERVAL_MS)
+  // Don't keep the event loop alive solely for this watchdog — but worker
+  // shouldn't be exiting anyway while it has work; .unref() so it can shut
+  // down naturally too.
+  if (typeof timer.unref === 'function') timer.unref()
+}
+
+startParentWatchdog()
+
 function reportWorkerError(error, context = 'rsshub-worker') {
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error ? error.stack : undefined

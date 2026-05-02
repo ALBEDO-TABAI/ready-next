@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getSkillsRuntimeManager } from './runtime-manager'
-import type { SkillInputValue } from '../../../shared/skill-execution-types'
 
 interface SkillsIPCResponse<T = unknown> {
   success: boolean
@@ -73,26 +72,18 @@ export function setupSkillsIPC(): void {
     params?: Record<string, unknown>
     timeoutMs?: number
     sessionId?: string
-    // B Phase 4 PR3: `'workflow'` option retired. Accept the legacy
-    // string so existing renderer callers don't error; silently collapse
-    // to `undefined` (manifest-declared default) at the runtime-manager
-    // boundary.
-    executionMode?: 'auto' | 'direct' | 'workflow'
+    executionMode?: 'auto' | 'workflow' | 'direct'
   }): Promise<SkillsIPCResponse> => {
     try {
       const skillId = payload?.skillId
       if (!skillId) return { success: false, error: 'Missing skillId' }
-      const normalizedExecutionMode: 'auto' | 'direct' | undefined =
-        payload.executionMode === 'auto' || payload.executionMode === 'direct'
-          ? payload.executionMode
-          : undefined
       const result = await manager.runSkill({
         skillId,
         action: payload.action,
         params: payload.params,
         timeoutMs: payload.timeoutMs,
         sessionId: payload.sessionId,
-        executionMode: normalizedExecutionMode,
+        executionMode: payload.executionMode || 'workflow',
       })
       return result.success
         ? { success: true, data: result }
@@ -111,12 +102,10 @@ export function setupSkillsIPC(): void {
     }
   })
 
-  // B Phase 4 PR3: the 7 `skills:executions:*` IPC handlers are retired
-  // alongside SkillsRuntimeManager's state machine. No renderer surfaces
-  // invoked `electronAPI.skills.executions.*`, so this cut is
-  // non-breaking. Tracker-driven resumption (PR1 projection shape +
-  // `continuationIntent.todoId`) rides the generic
-  // `agent.resumeRun / respondToInteraction` channel instead.
+  // Phase 4: skills:executions:* IPC channels retired along with the
+  // skill_executions state machine. The 7 removed handlers were:
+  //   skills:executions:list / :get / :submitInput / :submitConfirmation
+  //   :submitAgentResult / :restartFromStep / :cancel
 
   ipcMain.handle('skills:schedules:list', (): SkillsIPCResponse => {
     try {

@@ -9,7 +9,7 @@
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
-interface MigrationDatabase {
+export interface MigrationDatabase {
   exec(sql: string): void
   prepare(sql: string): {
     run(...params: unknown[]): unknown
@@ -665,7 +665,7 @@ const migrations: Migration[] = [
           ('browser-upload', '浏览器上传流程', 'browser', '(上传|发送|提交|浏览器|网页)', 0, 0),
           ('document-write', '文档改写操作', 'document', '(文档|文件).*(写|改|保存|格式)', 0, 0),
           ('video-render', '视频渲染操作', 'video', '(视频|剪辑|渲染|导出)', 0, 0),
-          ('rss-analysis', 'RSS 分析操作', 'rss', '(rss|订阅|抓取|分析)', 0, 0),
+          ('rss-analysis', 'RSS 分析操作', 'rss', '(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)', 0, 0),
           ('calendar-write', '日程写入操作', 'calendar', '(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程', 1, 0)
         ON CONFLICT(id) DO NOTHING
       `)
@@ -1198,6 +1198,7 @@ const migrations: Migration[] = [
           task_summary TEXT,
           status TEXT NOT NULL,
           interaction_state TEXT NOT NULL,
+          waiting_for TEXT,
           steps_json TEXT NOT NULL,
           current_step_id TEXT,
           budget_json TEXT,
@@ -1385,32 +1386,114 @@ const migrations: Migration[] = [
     }
   },
 
-  // ------------------------------------------------------------------ 029
+  // Phase 4 — retire the skill_executions state machine. The 3 tables +
+  // their indexes are dropped together. Order matters: child tables first,
+  // then parent, because PRAGMA foreign_keys is NOT enabled on this DB
+  // (see CLAUDE.md §6.11) so CASCADE does not fire. All DROPs are IF EXISTS
+  // so the migration is idempotent on fresh DBs that never built the tables.
   //
-  // B Phase 4 PR4 — retire the `skill_executions` state machine tables.
-  // PR3 already deleted the state-machine runtime, the 6 LLM-facing
-  // execution-control tools, the `skills:executions:*` IPC, and the
-  // renderer shim. This migration drops the three DB tables + the TTL
-  // index added in 028.
-  //
-  // `PRAGMA foreign_keys` is NOT enabled on this DB (§6.11), so
-  // `ON DELETE CASCADE` never actually fired. Drop order must be
-  // child → parent to avoid dangling rows on partial failure —
-  // `artifacts` → `steps` → parent `skill_executions`. `IF EXISTS` is
-  // defensive so a re-run on an already-migrated DB is a no-op.
-  //
-  // Irreversible by design: the `skill_executions` rows had no product
-  // value after Phase 2/3 (every embedded skill moved to advisory/reference)
-  // so no archival export is attempted. Recovery anchor:
-  // `backup/main-before-b-merge-20260424` preserves the pre-B-merge tree;
-  // pair it with a DB restore from user backup if a rollback is ever needed.
+  // Release note: legacy rows (historical workflow state) are permanently
+  // lost on migration. Phase 3 finished migrating every embedded skill to
+  // reference/direct modes, so the surviving rows have no runtime meaning.
   {
     name: '029_drop_skill_execution_tables',
     up: (db) => {
-      db.exec('DROP INDEX IF EXISTS idx_skill_executions_status_finished_at')
-      db.exec('DROP TABLE IF EXISTS skill_execution_artifacts')
-      db.exec('DROP TABLE IF EXISTS skill_execution_steps')
-      db.exec('DROP TABLE IF EXISTS skill_executions')
+      db.exec(`
+        DROP INDEX IF EXISTS idx_skill_execution_artifacts_artifact_id;
+        DROP INDEX IF EXISTS idx_skill_execution_artifacts_execution_step;
+        DROP INDEX IF EXISTS idx_skill_execution_steps_execution_step;
+        DROP INDEX IF EXISTS idx_skill_executions_status_finished_at;
+        DROP INDEX IF EXISTS idx_skill_executions_session_status;
+        DROP INDEX IF EXISTS idx_skill_executions_updated_at;
+        DROP TABLE IF EXISTS skill_execution_artifacts;
+        DROP TABLE IF EXISTS skill_execution_steps;
+        DROP TABLE IF EXISTS skill_executions;
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 030
+  // The original RSS trigger matched the generic action word "分析", which
+  // mislabeled explicit non-RSS skill requests (for example Video Expert
+  // analysis) as RSS tasks. Keep RSS routing object-bound on upgrade.
+  {
+    name: '030_tighten_rss_analysis_trigger',
+    up: (db) => {
+      db.prepare(`
+        UPDATE agent_triggers
+        SET pattern = ?,
+            pattern_flags = 'i',
+            updated_at = unixepoch()
+        WHERE id = 'rss-analysis'
+          AND pattern = '(rss|订阅|抓取|分析)'
+      `).run(
+        '(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\\b(?:rss|feed|rsshub)\\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)'
+      )
+    }
+  },
+
+  // ------------------------------------------------------------------ 031
+  // Lightweight skill task archive. This intentionally does not restore the
+  // retired skill_executions state machine; it only stores enough durable task
+  // memory for resume/retry/restart and UI projection recovery.
+  {
+    name: '031_create_skill_task_runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS skill_task_runs (
+          id TEXT PRIMARY KEY,
+          scope_id TEXT,
+          session_id TEXT,
+          agent TEXT,
+          run_id TEXT,
+          skill_id TEXT NOT NULL,
+          skill_name TEXT,
+          action TEXT NOT NULL,
+          tool_name TEXT,
+          run_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          interaction_state TEXT NOT NULL,
+          goal_text TEXT,
+          resource_refs_json TEXT,
+          params_json TEXT,
+          steps_json TEXT NOT NULL DEFAULT '[]',
+          current_step_id TEXT,
+          artifacts_json TEXT NOT NULL DEFAULT '[]',
+          output_dir TEXT,
+          run_state_path TEXT,
+          scene_scores_path TEXT,
+          delivery_report_path TEXT,
+          failure_kind TEXT,
+          failure_detail TEXT,
+          job_id TEXT,
+          detached_task_id TEXT,
+          resume_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_scope_updated
+          ON skill_task_runs(scope_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_session_status_updated
+          ON skill_task_runs(session_id, status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_skill_updated
+          ON skill_task_runs(skill_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_job_id
+          ON skill_task_runs(job_id);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_detached_task_id
+          ON skill_task_runs(detached_task_id);
+      `)
+    }
+  },
+  {
+    name: '032_extend_task_projection_store_for_waiting_for',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE task_projections ADD COLUMN waiting_for TEXT')
+      } catch {
+        // column already exists
+      }
     }
   }
 ]

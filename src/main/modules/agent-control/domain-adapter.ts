@@ -1,6 +1,9 @@
 import type { RequestEnvelope } from './request-envelope'
+import type { TurnFrame } from './turn-frame'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { normalizeToolExecutionOutput, type ToolExecutionOutput } from './tool-result-types'
 import type {
   RunBudgetHint,
@@ -12,8 +15,35 @@ import type {
   TurnEngineSessionMessage,
 } from './run-contracts'
 
+/**
+ * === Coordinator role (v3 stage C) ===
+ *
+ * Each DomainAdapter is one Coordinator role instance. It owns one product
+ * surface end to end: mode selection, prompt fragments, tool filtering,
+ * capability arbitration, user-text decoration, execution, and projection.
+ * turn-engine.ts should schedule these adapters, not hard-code product
+ * identities.
+ */
+
 export type DomainAdapterProjectionPhase = 'blocked' | 'done'
 export type DomainAdapterApplyPhase = 'no_tool_call' | 'tool_batch' | 'budget_limit'
+
+export interface CoordinatorPromptFragment {
+  id: string
+  label: string
+  priority: number
+  matches: (context: { userText: string; route: TaskExecutionRoute | null }) => boolean
+  refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
+  blocking: boolean
+}
+
+export interface CoordinatorCapabilityArbitration {
+  forceTool?: 'document' | 'browser' | 'skill' | null
+  hideAssistantProcessText?: boolean
+  budgetMultiplier?: number
+}
+
+export type CoordinatorTextDecorationPhase = 'pre_dispatch' | 'post_dispatch'
 
 export interface DomainAdapterProjection {
   phase: DomainAdapterProjectionPhase
@@ -92,6 +122,15 @@ export interface DomainAdapterPrepareParams<TSession extends TurnEngineSession =
   hasTools: boolean
   toolPolicy: ToolPolicy
   allowedToolNames: string[] | null
+  /**
+   * D3: Indicates the current turn is a bare retry/continue intent (e.g.
+   * "继续", "重试", "try again"). When true, narrowing domain adapters may
+   * widen their prefix list to keep file_/document_ tools accessible so the
+   * agent can re-discover prior context before re-attempting the action.
+   * Computed by skill-detection-inputs.isRetryOnlyTurn.
+   */
+  isRetryOnlyTurn?: boolean
+  turnFrameSteering?: TurnFrame['steering'] | null
 }
 
 export interface DomainAdapterPrepareResult {
@@ -151,6 +190,14 @@ export interface DomainAdapterProjectionParams<TSession extends TurnEngineSessio
 export interface DomainAdapter {
   id: string
   shouldHandle: (params: DomainAdapterSelectionContext) => boolean
+  contributePromptFragment: () => CoordinatorPromptFragment[] | null
+  arbitrateRunCapabilities: (
+    params: DomainAdapterPrepareParams<TurnEngineSession>
+  ) => CoordinatorCapabilityArbitration | null
+  decorateUserText: (
+    text: string,
+    params: { phase: CoordinatorTextDecorationPhase }
+  ) => string
   prepare: (
     params: DomainAdapterPrepareParams<TurnEngineSession>
   ) => DomainAdapterPrepareResult | Promise<DomainAdapterPrepareResult>
@@ -194,16 +241,24 @@ export function logPrefixNarrowing(
   const outputDescription = narrowedAllowedToolNames === null
     ? 'unrestricted_passthrough'
     : `${narrowedCount}`
-  const droppedSample = inputAllowedToolNames
-    ? inputAllowedToolNames
-      .filter((name) => !prefixes.some((prefix) => name.startsWith(prefix)))
-      .slice(0, 3)
+  const droppedAll = inputAllowedToolNames
+    ? inputAllowedToolNames.filter((name) => !prefixes.some((prefix) => name.startsWith(prefix)))
     : []
+  const droppedSample = droppedAll.slice(0, 3)
   log(
     `[domain_adapter_prefix_narrowing] domain=${domainId} inputCount=${inputCount} `
     + `outputCount=${outputDescription} prefixes=${prefixes.join('|')} `
     + `droppedSample=${droppedSample.join(',') || 'none'}`,
   )
+  // Observability: only emit when narrowing actually dropped tools. A pass-through
+  // narrowing (no input or every tool kept) is uninteresting noise for dashboards.
+  if (droppedAll.length > 0) {
+    logAgentMetric(TOOL_ERROR_METRICS.domainToolNarrowingApplied, {
+      domain: domainId,
+      droppedCount: droppedAll.length,
+      droppedSample,
+    })
+  }
 }
 
 export function selectDomainAdapter(
