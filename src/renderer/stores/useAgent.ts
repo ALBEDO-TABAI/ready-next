@@ -1007,6 +1007,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           window.electronAPI.agent.sendScoped
             ? window.electronAPI.agent.sendScoped({
               scopeId: activeScopeId,
+              agent: activeScope.agent,
               message: finalMessage,
               requestId,
               continuationIntent: pendingContinuationIntent || undefined,

@@ -738,6 +738,7 @@ interface ElectronAgentAPI {
   sendScoped: (
     payload: {
       scopeId: string
+      agent?: string
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
       continuationIntent?: ContinuationIntentData | null

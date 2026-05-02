@@ -807,6 +807,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async sendScoped(payload: {
     scopeId: string
+    agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
     taskId?: string
@@ -815,7 +816,15 @@ export class AgentControlRuntime extends EventEmitter {
     sessionIdOverride?: string
     continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string }> {
-    const scopeRow = this.db.getConversationScope(payload.scopeId)
+    let scopeRow = this.db.getConversationScope(payload.scopeId)
+    if (!scopeRow && payload.agent && payload.scopeId.startsWith('conv-')) {
+      const recoveredScope = this.createLocalScope(payload.agent, payload.scopeId)
+      scopeRow = this.db.getConversationScope(recoveredScope.id)
+      logAgentMetric('local_scope_lazy_created_on_send', {
+        scopeId: payload.scopeId,
+        agent: payload.agent,
+      })
+    }
     if (!scopeRow) {
       return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
     }

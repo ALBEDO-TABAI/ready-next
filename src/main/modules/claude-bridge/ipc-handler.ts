@@ -660,6 +660,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:sendScoped', async (_, payload: {
     scopeId: string
+    agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
     continuationIntent?: {

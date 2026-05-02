@@ -187,6 +187,38 @@ PR 开工前先答：
 
 ---
 
+## 原则 6：跨边界状态一致性显式建模
+
+### 含义
+
+任何跨 renderer / main / DB / 文件系统 / 子进程 / 子任务的状态，只要存在"一边先生成，另一边后确认"，就必须明确选一种一致性策略。常见可选项只有几类：temp-id 后替换、持久化确认门、最终一致、或服务端 lazy create。没有选型的 fire-and-forget 不是架构，是隐形 race。
+
+### 反例
+
+- renderer 先生成 `conv-local-*` 并允许用户立即发送，但 main 的 `sendScoped` 必须先查到 DB 行；创建 IPC 失败或尚未完成时，只把 raw "scope not found" 甩给用户。
+- 父任务写内存态、子任务写文件态，双方都假设对方一定已经落盘，没有确认门或恢复路径。
+- 一个 IPC 返回 `{ success: false }`，调用端只 `.catch(() => undefined)`，不检查返回值，后续继续使用本该已确认的 id。
+
+### 正例
+
+- 本地会话发送时，renderer 把 `scopeId + agent` 一起传给 main；main 如果发现 `conv-*` 本地 scope 缺失，可以按同一 id 幂等补建，再进入 run。
+- 文件系统状态采用 atomic write + read-after-write 校验；下游只消费已确认路径。
+- 子任务运行态以 durable `taskId / childRunId` 为边界，父任务只读取已发布的投影，不猜测子任务内部阶段。
+
+### 自检问题
+
+1. 这个 id / 文件 / projection / task state 的权威方是谁？
+2. 消费方在权威方确认前能不能行动？如果能，选的是哪种一致性策略？
+3. IPC / 文件写入 / DB 写入返回失败时，调用方会停住、补建、还是继续裸跑？
+
+### 复发签名
+
+- `void window.electronAPI.*` 紧跟着立即使用同一个 id。
+- `.catch(() => undefined)` 或 `{ success: false }` 被吞掉后继续走 happy path。
+- 报错文案是 "not found: <client-generated-id>"，但 UI 刚刚显示这个对象已经存在。
+
+---
+
 ## 反模式速查表
 
 如果在某个 PR / 讨论 / commit 里看到下面这些信号，**该 PR 大概率违反了某条原则**：
@@ -202,18 +234,20 @@ PR 开工前先答：
 | "参考 X 项目实现" 但没解释形态对应 | 原则 4（形态意识） |
 | commit message 描述"我做了什么" 而不说"如何验证成功" | 原则 1（先合同） |
 | 同一文件 3 个月内被 hotfix ≥ 3 次 | 原则 2 |
+| `void electronAPI.*` 后马上使用同一个 client id | 原则 6（跨边界状态一致性） |
 | "我下次注意" / "团队习惯改一下" | 原则 5 |
 
 ---
 
 ## 与本仓既有规则的关系
 
-CLAUDE.md / AGENTS.md 里的具体规则（§6.1-§6.13、§10、§12 等）是这 5 条原则在不同子系统下的具体展开：
+CLAUDE.md / AGENTS.md 里的具体规则（§6.1-§6.14、§10、§12 等）是这 6 条原则在不同子系统下的具体展开：
 
 - §6.7（技能中心原则）→ 多处对应原则 2（统一 skill_* 工具走单一出口）+ 原则 3（B Phase 4 的 skill_executions 状态机退役）。
 - §6.10（Agent 工具策略裁决）→ 原则 2（`run-capability-controller.resolveRunCapabilities` 是策略冲突的唯一裁决点，禁止双重挡板）。
 - §6.11（工具错误契约）→ 原则 1（错误形状是合同）+ 原则 5（CI 验证 errorKind/recoverable 字段）。
 - §6.13（Skill 长任务状态与续跑）→ 原则 2（任务身份验证以 task id 为第一身份）+ 原则 5（real DB 验收前先 rebuild:native）。
+- §7（新功能开发最小闭环）→ 原则 6（跨进程状态必须同步 main / preload / renderer 类型 / UI / 文档）。
 - §12（CLAUDE.md / AGENTS.md 同步）→ 原则 5（同步机制本身要 CI 检查，不靠人审）。
 
 任何新增的具体规则都应该映射到至少一条原则；映射不上 = 大概率不该加这条规则。

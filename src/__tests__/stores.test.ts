@@ -1044,6 +1044,10 @@ describe('useAgent Store', () => {
             sendScopedCalls.map((call) => call.scopeId),
             ['conv-local-retry', 'conv-local-retry'],
         )
+        assert.deepStrictEqual(
+            sendScopedCalls.map((call) => call.agent),
+            ['butler', 'butler'],
+        )
         assert.strictEqual(sendScopedCalls[0].message, 'hello again')
         assert.ok(typeof sendScopedCalls[0].requestId === 'string' && (sendScopedCalls[0].requestId as string).length > 0)
         assert.deepStrictEqual(createLocalScopeCalls, [
