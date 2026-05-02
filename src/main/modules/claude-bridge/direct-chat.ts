@@ -800,6 +800,7 @@ export class DirectChatEngine extends EventEmitter {
       if (!isCurrentRun()) return
       this.emit('output', {
         agent: name,
+        sessionId,
         runId,
         taskId,
         chunk,
@@ -809,7 +810,7 @@ export class DirectChatEngine extends EventEmitter {
     }
     const emitStatus = (status: string): void => {
       if (!isCurrentRun()) return
-      this.emit('status', { agent: name, runId, status, isMock: false })
+      this.emit('status', { agent: name, sessionId, runId, status, isMock: false })
     }
     const emitRuntimeError = (error: unknown, options?: { toolName?: string }): void => {
       if (!isCurrentRun()) return
@@ -817,6 +818,7 @@ export class DirectChatEngine extends EventEmitter {
       const message = error instanceof Error ? error.message : String(error)
       this.emit('error', {
         agent: name,
+        sessionId,
         runId,
         error: message,
         type: 'runtime',
@@ -825,7 +827,7 @@ export class DirectChatEngine extends EventEmitter {
     }
     const emitToolAction = (tool: string, args: Record<string, unknown>): void => {
       if (!isCurrentRun()) return
-      this.emit('toolAction', { agent: name, runId, tool, args })
+      this.emit('toolAction', { agent: name, sessionId, runId, tool, args })
     }
 
     const config = this.getAIConfig()

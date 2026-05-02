@@ -1587,11 +1587,22 @@ export class DatabaseManager {
     if (!this.db) throw new Error('Database not available')
     const metaJson = JSON.stringify(meta || {})
     this.db.prepare(
-      'INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json) VALUES (?, ?, ?, ?, ?, ?)'
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         conversation_id = excluded.conversation_id,
+         role = excluded.role,
+         content = excluded.content,
+         timestamp = excluded.timestamp,
+         meta_json = excluded.meta_json`
     ).run(id, conversationId, role, content, timestamp, metaJson)
+    this.db.prepare('DELETE FROM chat_messages_fts WHERE message_id = ?').run(id)
     this.db.prepare(
       'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
     ).run(id, conversationId, content || '')
+    this.db.prepare(
+      'DELETE FROM session_recall_attachment_index WHERE conversation_id = ? AND source_message_id = ?'
+    ).run(conversationId, id)
     this.syncConversationRecallAttachments(conversationId, id, timestamp, meta)
     this.syncConversationRecallMetadata(conversationId, {
       previewText: content,

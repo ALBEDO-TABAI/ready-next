@@ -116,6 +116,38 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     })
   }
 
+  function finalizeScopeRunAfterStreamDone(scopeId: string, fallbackRunState: ScopeRunState | null): void {
+    store.setState((state: any) => {
+      const previous = state.scopeRunStates[scopeId] || fallbackRunState || null
+      const nextScopeRunStates = previous
+        ? {
+          ...state.scopeRunStates,
+          [scopeId]: {
+            ...previous,
+            scopeId,
+            phase: 'done',
+            terminalReason: previous.terminalReason || 'done',
+            updatedAt: new Date().toISOString(),
+          },
+        }
+        : state.scopeRunStates
+
+      return {
+        scopeRunStates: nextScopeRunStates,
+        ...(state.currentScopeId === scopeId
+          ? {
+            streamingMessageId: null,
+            streamingRequestId: null,
+          }
+          : {}),
+        ...syncActiveScopeRunAliases({
+          currentScopeId: state.currentScopeId,
+          scopeRunStates: nextScopeRunStates,
+        }),
+      }
+    })
+  }
+
   function resolveScopeIdForRunPayload(payload: RunPayloadLike): string | null {
     if (typeof payload.scopeId === 'string' && payload.scopeId.trim()) {
       return payload.scopeId.trim()
@@ -245,17 +277,23 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (data.type === 'done') {
         const runState = store.getState().scopeRunStates[scopeId] || null
         void (async () => {
-          await maybeAutoExecuteAssistantSkillCommand(scopeId, runState)
-          await persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
-          if (store.getState().currentScopeId === scopeId) {
-            store.setState({
-              streamingMessageId: null,
-              streamingRequestId: null,
-              ...syncActiveScopeRunAliases({
-                currentScopeId: scopeId,
-                scopeRunStates: store.getState().scopeRunStates,
-              }),
+          let finalized = false
+          const finalize = () => {
+            finalizeScopeRunAfterStreamDone(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+            finalized = true
+          }
+          try {
+            await maybeAutoExecuteAssistantSkillCommand(scopeId, runState)
+            finalize()
+            await persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+          } catch (error) {
+            emitRendererAgentMetric('renderer_assistant_done_finalize_failed', {
+              scopeId,
+              responseMessageId: runState?.responseMessageId || null,
+              error: error instanceof Error ? error.message : String(error),
             })
+          } finally {
+            if (!finalized) finalize()
           }
         })()
         return

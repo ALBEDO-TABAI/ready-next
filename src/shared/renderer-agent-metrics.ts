@@ -3,6 +3,7 @@ export const RENDERER_AGENT_METRICS = [
   'renderer_attachment_input_failed',
   'renderer_friendly_error_surfaced',
   'renderer_assistant_persistence_failed',
+  'renderer_assistant_done_finalize_failed',
 ] as const
 
 export type RendererAgentMetricName = typeof RENDERER_AGENT_METRICS[number]
