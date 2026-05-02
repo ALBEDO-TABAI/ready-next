@@ -176,6 +176,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - reminder registry 是 per-turn / per-call 的一次性对象，不是全局 singleton；相同 topic 后注册覆盖先注册，输出按 priority 降序、topic 升序稳定排列。默认冲突表必须继续覆盖 child-owned 压制 typed-action-preferred / force-tool 系列提示，避免父循环和 child-loop 同时给模型相反指令。
 - `createLayeredCompactor()` 提供 L1（字符串消息的 cheap 截断/摘要，幂等）+ L2（token-threshold gated，D 阶段 stub）。默认 L2 threshold 为 0，生产路径只启用 L1；连续 3 次 L2 失败后熔断并 emit `compaction_circuit_break`，单次 L2 失败 emit `compaction_l2_failed`。模型输入可使用压缩后的 session 副本，但不得把压缩结果写回持久会话消息。
 - `HookRegistry` 固定 4 个 lifecycle 名：`pre_tool_use / post_tool_use / user_prompt_submit / stop`。`register` 返回 unregister，`fire` 串行 await；handler throw 或 timeout 只 emit `hook_handler_failed` / `hook_handler_timeout` 并继续后续 handler，不得中断 turn 主流程。
+- Hook handler 的注册由具体 telemetry / observability / audit 需求驱动，没有 default handler 是合规设计。引入新 handler 的标准：(a) 该 handler 解决的需求当前用 metric / log 无法满足；(b) handler 必须 idempotent（fire 失败不能让 turn 挂掉）；(c) handler 必须有独立测试 + 在 PR 描述里写明"为什么 metric/log 不够"。禁止把 hook 当 logging 替代品。
+- L2 实装的触发条件：(a) 生产中观察到 L1 后 messages 仍超 model context window 的实例 ≥ N 次/周（N 由当时观察决定，先不预设）；(b) 有用户报告"模型说"我已经忘了上文""的样本。触发后 land 必须配 e2e 测试覆盖 L2 in-loop 正确性，circuit-break 行为不变。
 - `npm run verify:d` 必须内嵌 `npm run verify:c`，并覆盖 reminder registry、layered compactor、hook registry、turn-frame steering 与 turn-engine route 相关测试。
 
 ### 6.16 防爆 + 减脆（E 阶段）

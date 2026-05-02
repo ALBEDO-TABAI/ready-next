@@ -47,7 +47,10 @@
     "verify:f": "npm run verify:e && node scripts/check-eslint-baseline.cjs --area no-source-grep-test --max 142 && node scripts/check-testing-conventions-doc.cjs && npm run test:f:gates && npm run test:f:focus",
     "test:g:gates": "node --test scripts/__tests__/check-child-status-vocabulary.test.cjs scripts/__tests__/check-child-control-ipc.test.cjs scripts/__tests__/check-turn-feature-flags.test.cjs",
     "test:g:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/resume-fresh-contract-fields.test.ts src/__tests__/close-event-immutability.test.ts src/__tests__/turn-feature-flags.test.ts src/__tests__/active-child-run-ipc.test.ts src/__tests__/skill-child-runner-resume-lifecycle.test.ts src/__tests__/turn-engine-route.test.ts",
-    "verify:g": "npm run verify:f && node scripts/check-child-status-vocabulary.cjs && node scripts/check-child-control-ipc.cjs && node scripts/check-turn-feature-flags.cjs && npm run test:g:gates && npm run test:g:focus"
+    "verify:g": "npm run verify:f && node scripts/check-child-status-vocabulary.cjs && node scripts/check-child-control-ipc.cjs && node scripts/check-turn-feature-flags.cjs && npm run test:g:gates && npm run test:g:focus",
+    "test:h:gates": "node --test scripts/__tests__/check-claude-md-claims.test.cjs scripts/__tests__/check-silent-catch.test.cjs",
+    "test:h:focus": "node scripts/check-claude-md-claims.cjs && node scripts/check-silent-catch.cjs",
+    "verify:h": "npm run verify:g && npm run test:h:gates && npm run test:h:focus"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
