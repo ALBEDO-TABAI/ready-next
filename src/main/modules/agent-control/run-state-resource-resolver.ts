@@ -1,7 +1,7 @@
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 
-import type { RequestEnvelopeResource } from './request-envelope'
+import type { RequestEnvelopeResource, RequestEnvelopeResourceRef } from './request-envelope'
 
 const RUN_STATE_FILE = 'run_state.json'
 const MAX_RUN_STATE_BYTES = 64 * 1024
@@ -27,12 +27,22 @@ export type ExplicitRunStateResourceResolution =
   | { status: 'invalid'; reason: string; path?: string }
   | { status: 'ambiguous'; reason: string; candidateCount: number; paths: string[] }
 
-function isExplicitFileResource(resource: RequestEnvelopeResource): boolean {
+function isTrustedRunStateFileResource(resource: RequestEnvelopeResource): boolean {
   if (!resource.canRead || typeof resource.path !== 'string' || !resource.path.trim()) return false
   if (basename(resource.path.trim()) !== RUN_STATE_FILE) return false
   return resource.source === 'user_attachment'
     || resource.source === 'explicit_reference'
+    || resource.source === 'current_document'
+    || resource.source === 'document_quote'
     || resource.kind === 'attachment'
+    || resource.kind === 'document_context'
+    || resource.kind === 'document_quote'
+}
+
+function isRunStatePathRef(ref: RequestEnvelopeResourceRef): boolean {
+  if (ref.kind !== 'path') return false
+  const value = ref.value.trim()
+  return Boolean(value) && basename(value) === RUN_STATE_FILE
 }
 
 function pickString(rec: Record<string, unknown>, keys: string[]): string | null {
@@ -138,12 +148,18 @@ function buildVeaCandidate(runStatePath: string, rec: Record<string, unknown>): 
 
 export function resolveExplicitRunStateResource(
   resources: ReadonlyArray<RequestEnvelopeResource>,
+  referencedResources: ReadonlyArray<RequestEnvelopeResourceRef> = [],
 ): ExplicitRunStateResourceResolution {
   const paths = Array.from(new Set(
-    resources
-      .filter(isExplicitFileResource)
-      .map((resource) => resource.path?.trim())
-      .filter((path): path is string => Boolean(path)),
+    [
+      ...resources
+        .filter(isTrustedRunStateFileResource)
+        .map((resource) => resource.path?.trim())
+        .filter((path): path is string => Boolean(path)),
+      ...referencedResources
+        .filter(isRunStatePathRef)
+        .map((ref) => ref.value.trim()),
+    ],
   ))
 
   if (paths.length === 0) return { status: 'none' }

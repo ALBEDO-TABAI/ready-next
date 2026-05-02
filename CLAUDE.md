@@ -152,7 +152,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 
 ### 6.13 Skill 长任务状态与续跑
 - `run_state` / VEA 输出目录选择必须以 expected task id 为第一身份；恢复路径、tracker fallback、root `run_state.json` 只有在 task id 匹配或被标记为可信显式路径时才能算命中
-- 用户通过附件 / `@[file]` 显式带入的 `run_state.json` 是可信续跑句柄，必须进入 TurnFrame 并武装对应 reference-skill hint；但它只证明身份与恢复入口，VEA 真实进度仍以 `scene_scores.json` / `host_batches` 等产物核验为准
+- 用户通过附件 / `@[file]` / 当前文档 / 显式路径带入的 `run_state.json` 是可信续跑句柄，必须进入 TurnFrame 并武装对应 reference-skill hint；但它只证明身份与恢复入口，VEA 真实进度仍以 `scene_scores.json` / `host_batches` 等产物核验为准
 - 长任务预算模型固定为 `220` 硬上限 + 前台 lease 可续租窗口；UI 与任务投影不得把预算暂停或后台存活误判为完成
 - continuation 全链路必须保留 durable skill handle：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint`；即使没有 `executionId / todoId`，只要有这些 handle，也必须能构造继续入口
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行

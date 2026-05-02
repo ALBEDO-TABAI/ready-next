@@ -1192,7 +1192,10 @@ export class TurnEngine {
       let referenceSkillForMetrics: { id?: string; name?: string } | null = null
       let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | 'resource' | null = null
       const firstExplicitSkillId = firstSkillMatch?.skills[0]?.id || firstSkillMatch?.skills[0]?.skillId || null
-      const runStateResourceResolution = resolveExplicitRunStateResource(requestEnvelope.resources)
+      const runStateResourceResolution = resolveExplicitRunStateResource(
+        requestEnvelope.resources,
+        requestEnvelope.referencedResources,
+      )
       let explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null =
         runStateResourceResolution.status === 'resolved' ? runStateResourceResolution.candidate : null
       if (
@@ -1862,7 +1865,12 @@ export class TurnEngine {
       const shouldUseLongSkillResumeBudget =
         isLongSkillResumeTurn
         || (Boolean(continuationTaskId) && hasLongTypedSkillAction(preferredSkillToolNames))
-      const taskTypeResolution = shouldUseLongSkillResumeBudget && resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
+      const shouldForceRunStateSkillResume =
+        Boolean(explicitRunStateResourceForTurn) && shouldUseLongSkillResumeBudget
+      const taskTypeResolution = shouldUseLongSkillResumeBudget && (
+        resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
+        || shouldForceRunStateSkillResume
+      )
         ? {
           ...resolvedTaskTypeForEffectiveRun,
           taskType: 'multi_step_task' as const,

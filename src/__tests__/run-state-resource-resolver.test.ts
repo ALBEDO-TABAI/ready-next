@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import type { RequestEnvelopeResource } from '../main/modules/agent-control/request-envelope'
+import type {
+  RequestEnvelopeResource,
+  RequestEnvelopeResourceRef,
+} from '../main/modules/agent-control/request-envelope'
 import { resolveExplicitRunStateResource } from '../main/modules/agent-control/run-state-resource-resolver'
 
 function makeResource(path: string, order = 0): RequestEnvelopeResource {
@@ -19,6 +22,21 @@ function makeResource(path: string, order = 0): RequestEnvelopeResource {
     order,
     canRead: true,
     canWrite: false,
+  }
+}
+
+function makeCurrentDocumentResource(path: string, order = 0): RequestEnvelopeResource {
+  return {
+    id: `document-${order}`,
+    kind: 'document_context',
+    source: 'current_document',
+    name: 'run_state.json',
+    path,
+    text: '',
+    summary: null,
+    order,
+    canRead: true,
+    canWrite: true,
   }
 }
 
@@ -54,6 +72,53 @@ test('resolveExplicitRunStateResource recognizes a single VEA run_state and deri
   assert.equal(resolved.candidate?.sceneScoresPath, sceneScoresPath)
   assert.equal(resolved.candidate?.currentStage, 'score_batches')
   assert.equal(resolved.candidate?.explicitAction, 'video_expert_ai_analyze')
+})
+
+test('resolveExplicitRunStateResource recognizes current document run_state as a trusted handle', () => {
+  const outputDir = makeOutputDir()
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'score_batches',
+      scene_scores_path: sceneScoresPath,
+      video_dir: outputDir,
+    }),
+    'utf8',
+  )
+
+  const resolved = resolveExplicitRunStateResource([makeCurrentDocumentResource(runStatePath)])
+
+  assert.equal(resolved.status, 'resolved')
+  assert.equal(resolved.candidate?.runStatePath, runStatePath)
+  assert.equal(resolved.candidate?.sceneScoresPath, sceneScoresPath)
+  assert.equal(resolved.candidate?.explicitAction, 'video_expert_ai_analyze')
+})
+
+test('resolveExplicitRunStateResource recognizes an explicit run_state path reference', () => {
+  const outputDir = makeOutputDir()
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'ingest',
+      video_dir: outputDir,
+    }),
+    'utf8',
+  )
+  const refs: RequestEnvelopeResourceRef[] = [{ kind: 'path', value: runStatePath }]
+
+  const resolved = resolveExplicitRunStateResource([], refs)
+
+  assert.equal(resolved.status, 'resolved')
+  assert.equal(resolved.candidate?.runStatePath, runStatePath)
+  assert.equal(resolved.candidate?.outputDir, outputDir)
 })
 
 test('resolveExplicitRunStateResource does not classify unknown run_state JSON as VEA', () => {
