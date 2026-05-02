@@ -40,6 +40,7 @@ test('isRetryOnlyTurn — strict short forms (historical contract)', () => {
   assert.equal(isRetryOnlyTurn('继续上次'), true)
   assert.equal(isRetryOnlyTurn('继续任务'), true)
   assert.equal(isRetryOnlyTurn('再试一次'), true)
+  assert.equal(isRetryOnlyTurn('你再试一次'), true)
   assert.equal(isRetryOnlyTurn('重新开始'), true)
   assert.equal(isRetryOnlyTurn('接着做'), true)
   assert.equal(isRetryOnlyTurn('恢复上次'), true)

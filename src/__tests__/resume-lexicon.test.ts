@@ -27,6 +27,7 @@ test('matchesResumeIntent — strict mode catches bare resume commands the audit
   assert.equal(matchesResumeIntent('继续上次', 'strict'), true)
   assert.equal(matchesResumeIntent('继续任务', 'strict'), true)
   assert.equal(matchesResumeIntent('再试一次', 'strict'), true)
+  assert.equal(matchesResumeIntent('你再试一次', 'strict'), true)
   assert.equal(matchesResumeIntent('重新开始', 'strict'), true)
   assert.equal(matchesResumeIntent('接着做', 'strict'), true)
   assert.equal(matchesResumeIntent('恢复上次', 'strict'), true)
@@ -104,6 +105,7 @@ test('matchesResumeIntent — anywhere mode is permissive and catches the user-a
   assert.equal(matchesResumeIntent('我之前的任务继续做', 'anywhere'), true)
   assert.equal(matchesResumeIntent('刚才的任务再跑一遍', 'anywhere'), true, '再跑 substring matches')
   assert.equal(matchesResumeIntent('能不能重新跑刚才那个', 'anywhere'), true, '重新 substring matches')
+  assert.equal(matchesResumeIntent('你再试一次', 'anywhere'), true, '再试 substring matches')
 
   // Anywhere mode rejects text with no continuation tokens at all.
   assert.equal(matchesResumeIntent('帮我看看今天的天气', 'anywhere'), false)
@@ -118,6 +120,7 @@ test('matchesResumeIntent — strict ⊆ anywhere (lexicon self-consistency)', (
   const strictSamples = [
     '继续', '重新跑', '从头跑', '再跑一次', '重做', '继续完成',
     '接着做', '恢复上次', '重试', 'continue', 'resume',
+    '再试一次', '你再试一次',
   ]
   for (const sample of strictSamples) {
     assert.equal(matchesResumeIntent(sample, 'strict'), true, `strict matches ${sample}`)

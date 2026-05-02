@@ -8,7 +8,10 @@ import type {
   RequestEnvelopeResource,
   RequestEnvelopeResourceRef,
 } from '../main/modules/agent-control/request-envelope'
-import { resolveExplicitRunStateResource } from '../main/modules/agent-control/run-state-resource-resolver'
+import {
+  resolveExplicitRunStateResource,
+  resolveRunStateResourceFromSessionText,
+} from '../main/modules/agent-control/run-state-resource-resolver'
 
 function makeResource(path: string, order = 0): RequestEnvelopeResource {
   return {
@@ -119,6 +122,32 @@ test('resolveExplicitRunStateResource recognizes an explicit run_state path refe
   assert.equal(resolved.status, 'resolved')
   assert.equal(resolved.candidate?.runStatePath, runStatePath)
   assert.equal(resolved.candidate?.outputDir, outputDir)
+})
+
+test('resolveRunStateResourceFromSessionText recognizes a prior opened run_state path', () => {
+  const outputDir = makeOutputDir()
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'score_batches',
+      scene_scores_path: 'scene_scores.json',
+      video_dir: outputDir,
+    }),
+    'utf8',
+  )
+
+  const resolved = resolveRunStateResourceFromSessionText([
+    `tool execute: document_open_tab, result=已打开并载入文档：${runStatePath}（1207 字）`,
+  ])
+
+  assert.equal(resolved.status, 'resolved')
+  assert.equal(resolved.candidate?.runStatePath, runStatePath)
+  assert.equal(resolved.candidate?.explicitAction, 'video_expert_ai_analyze')
 })
 
 test('resolveExplicitRunStateResource does not classify unknown run_state JSON as VEA', () => {

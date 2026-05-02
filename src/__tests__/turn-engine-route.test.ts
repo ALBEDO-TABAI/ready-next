@@ -1820,6 +1820,110 @@ test('TurnEngine arms VEA continuation when the active document is run_state.jso
   }
 })
 
+test('TurnEngine arms VEA continuation from prior run_state path when user says try again', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let toolLoopRequests = 0
+  let capturedAllowedToolNames: string[] = []
+  let armedHint: { id: string; name: string } | null = null
+
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-turn-run-state-history-'))
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'score_batches',
+      scene_scores_path: 'scene_scores.json',
+      video_dir: outputDir,
+      total_scenes: 97,
+      completed_scenes: 0,
+    }),
+    'utf8',
+  )
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+  try {
+    const { request } = createRequest({
+      userText: '你再试一次',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => armedHint,
+          rememberReferenceSkillFromRunStateResource: (skillId: string) => {
+            if (skillId !== 'video-expert-analyzer') return { armed: false }
+            armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
+            rememberLastReferenceSkill('scope-test', armedHint)
+            return { armed: true, skillId: armedHint.id, skillName: armedHint.name }
+          },
+          rememberExplicitReferenceSkillHint: () => Boolean(armedHint),
+          buildPreferredSkillToolNames: () => armedHint?.id === 'video-expert-analyzer'
+            ? ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze']
+            : [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          toolLoopRequests += 1
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '恢复完成',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+    request.session.messages = [
+      { role: 'user', content: '@[4qkyxm4jppc] 这个目录下有之前未完成的任务，看看能不能找回任务进度然后继续推进' },
+      { role: 'assistant', content: `tool execute: document_open_tab, result=已打开并载入文档：${runStatePath}（1207 字）` },
+      { role: 'assistant', content: '好，让我先确认当前状态，然后尝试继续执行。' },
+      { role: 'user', content: '你再试一次' },
+    ]
+
+    const result = await engine.execute(request)
+
+    assert.equal(toolLoopRequests, 1)
+    assert.equal(result.taskType, 'multi_step_task')
+    assert.ok(capturedAllowedToolNames.includes('skill_video_expert_ai_analyze'))
+    assert.ok(metrics.some((event) => event.metric === 'skill_reference_hint_armed' && event.via === 'resource_history'))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_resume'
+      && event.skillId === 'video-expert-analyzer'
+      && event.hasRunState === true
+      && event.hasOutputDir === true,
+    ))
+  } finally {
+    restoreAiAnalyzeToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('RunCoordinator drives TurnEngine budget lifecycle through scope event and task projection sync', async () => {
   const engine = new TurnEngine()
   const scope: ConversationScope = {

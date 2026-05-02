@@ -147,6 +147,7 @@ import {
 } from './skill-detection-inputs'
 import {
   resolveExplicitRunStateResource,
+  resolveRunStateResourceFromSessionText,
   type ExplicitRunStateResourceCandidate,
 } from './run-state-resource-resolver'
 import {
@@ -1190,12 +1191,27 @@ export class TurnEngine {
       const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
       let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
       let referenceSkillForMetrics: { id?: string; name?: string } | null = null
-      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | 'resource' | null = null
+      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | 'resource' | 'resource_history' | null = null
       const firstExplicitSkillId = firstSkillMatch?.skills[0]?.id || firstSkillMatch?.skills[0]?.skillId || null
-      const runStateResourceResolution = resolveExplicitRunStateResource(
+      const currentRunStateResourceResolution = resolveExplicitRunStateResource(
         requestEnvelope.resources,
         requestEnvelope.referencedResources,
       )
+      const historicalRunStateResourceResolution = currentRunStateResourceResolution.status === 'none' && isSkillResumeTurnDetected
+        ? resolveRunStateResourceFromSessionText(
+          session.messages
+            .slice(-12, -1)
+            .map((message) => extractIncomingText(message.content as string | Array<Record<string, unknown>>)),
+        )
+        : { status: 'none' as const }
+      const runStateResourceResolution = currentRunStateResourceResolution.status !== 'none'
+        ? currentRunStateResourceResolution
+        : historicalRunStateResourceResolution
+      const runStateResourceVia = currentRunStateResourceResolution.status !== 'none'
+        ? 'resource'
+        : historicalRunStateResourceResolution.status !== 'none'
+          ? 'resource_history'
+          : null
       let explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null =
         runStateResourceResolution.status === 'resolved' ? runStateResourceResolution.candidate : null
       if (
@@ -1215,6 +1231,7 @@ export class TurnEngine {
         host.log(`[run_state_resource] ${JSON.stringify({
           status: runStateResourceResolution.status,
           reason: 'reason' in runStateResourceResolution ? runStateResourceResolution.reason : null,
+          via: runStateResourceVia,
           skillId: explicitRunStateResourceForTurn?.skillId || null,
           hasSceneScores: Boolean(explicitRunStateResourceForTurn?.sceneScoresPath),
           explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
@@ -1223,6 +1240,7 @@ export class TurnEngine {
           sessionId: request.sessionId,
           status: runStateResourceResolution.status,
           reason: 'reason' in runStateResourceResolution ? runStateResourceResolution.reason : null,
+          via: runStateResourceVia,
           skillId: explicitRunStateResourceForTurn?.skillId || null,
           hasSceneScores: Boolean(explicitRunStateResourceForTurn?.sceneScoresPath),
           explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
@@ -1267,7 +1285,7 @@ export class TurnEngine {
           const skillName = rearmed.skillName || explicitRunStateResourceForTurn.skillName
           lookbackRearmedSkill = { skillId: rearmed.skillId, skillName }
           referenceSkillForMetrics = { id: rearmed.skillId, name: skillName }
-          referenceSkillHintVia = 'resource'
+          referenceSkillHintVia = runStateResourceVia === 'resource_history' ? 'resource_history' : 'resource'
           skillContextInjectionText = `用户希望继续使用 skill "${skillName}"`
           hasExplicitSkill = true
           host.log(

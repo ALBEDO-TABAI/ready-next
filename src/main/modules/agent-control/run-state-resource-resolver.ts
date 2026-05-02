@@ -45,6 +45,20 @@ function isRunStatePathRef(ref: RequestEnvelopeResourceRef): boolean {
   return Boolean(value) && basename(value) === RUN_STATE_FILE
 }
 
+function collectRunStatePathsFromText(text: string): string[] {
+  const paths = new Set<string>()
+  const raw = String(text || '')
+  for (const match of raw.matchAll(/["'`]([^"'`\n\r<>]*\/run_state\.json)["'`]/g)) {
+    const value = match[1]?.trim()
+    if (value) paths.add(value)
+  }
+  for (const match of raw.matchAll(/(?:^|[\s:：([{])((?:\/[^\s"'`<>,，)）(（]+)+\/run_state\.json)(?=$|[\s"'`,，)）(（<>])/g)) {
+    const value = match[1]?.trim()
+    if (value) paths.add(value)
+  }
+  return Array.from(paths)
+}
+
 function pickString(rec: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = rec[key]
@@ -150,17 +164,32 @@ export function resolveExplicitRunStateResource(
   resources: ReadonlyArray<RequestEnvelopeResource>,
   referencedResources: ReadonlyArray<RequestEnvelopeResourceRef> = [],
 ): ExplicitRunStateResourceResolution {
-  const paths = Array.from(new Set(
-    [
-      ...resources
-        .filter(isTrustedRunStateFileResource)
-        .map((resource) => resource.path?.trim())
-        .filter((path): path is string => Boolean(path)),
-      ...referencedResources
-        .filter(isRunStatePathRef)
-        .map((ref) => ref.value.trim()),
-    ],
-  ))
+  const paths = [
+    ...resources
+      .filter(isTrustedRunStateFileResource)
+      .map((resource) => resource.path?.trim())
+      .filter((path): path is string => Boolean(path)),
+    ...referencedResources
+      .filter(isRunStatePathRef)
+      .map((ref) => ref.value.trim()),
+  ]
+
+  return resolveRunStatePaths(paths)
+}
+
+export function resolveRunStateResourceFromSessionText(
+  texts: ReadonlyArray<string>,
+): ExplicitRunStateResourceResolution {
+  for (let index = texts.length - 1; index >= 0; index -= 1) {
+    const paths = collectRunStatePathsFromText(texts[index] || '')
+    if (paths.length === 0) continue
+    return resolveRunStatePaths(paths)
+  }
+  return { status: 'none' }
+}
+
+function resolveRunStatePaths(inputPaths: ReadonlyArray<string>): ExplicitRunStateResourceResolution {
+  const paths = Array.from(new Set(inputPaths.map((path) => path.trim()).filter(Boolean)))
 
   if (paths.length === 0) return { status: 'none' }
   if (paths.length > 1) {
