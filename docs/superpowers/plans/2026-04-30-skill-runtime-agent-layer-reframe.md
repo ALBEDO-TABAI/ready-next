@@ -189,8 +189,10 @@ v2 (CC 对照):  A + AbortController 树 + CleanupRegistry / B / C + Permission 
 | **F — 测试规约 + e2e 链路** | 根因 3 + O5 | [x] completed 2026-05-01 | v2 阶段 B + E 合并；`verify:f` 内嵌 `verify:e`，e2e 通过 `READY_E2E=1 npm run verify:f:e2e` 单独触发 |
 | **G — 提质（剩余的 N1-N4 + O7）** | Layer 1 次生债收尾 + 用户控制面 | [x] completed 2026-05-01 | v2 阶段 D；`verify:g` 内嵌 `verify:f` |
 | **H — v3 路线尾巴清扫** | 文档声明校验、silent catch baseline、timer/idempotency 与测试反模式残余收口 | [x] completed 2026-05-02 | 不是 v4 起点；`verify:h` 内嵌 `verify:g`，补齐 v3 尾部 hard gate |
+| **I — 跨边界确认 + renderer 观测面** | renderer ↔ main 发送确认、友好错误、renderer metric、silent catch baseline 扩扫 | [x] completed 2026-05-02 | v3 audit scope 第一次扩展；`verify:i` 内嵌 `verify:h` |
+| **J — 主进程稳定性 + 日志生命周期** | main ↔ Electron runtime handler + 9 类 `ready-*.log` rotation | [x] completed 2026-05-02 | v3 audit scope 第二次扩展，不是 v4 起点；`verify:j` 内嵌 `verify:i` |
 
-> **v3 路线交付完成（2026-05-02）**：A0 / A0.5 / A1 / B / C / D / E / F / G / H 全部完成；H 阶段最终 gate 为 `npm run verify:h`。
+> **v3 路线交付完成并扩展至运行边界（2026-05-02）**：A0 / A0.5 / A1 / B / C / D / E / F / G / H / I / J 全部完成；J 阶段最终 gate 为 `npm run verify:j`。
 
 **G 准入**：F 的 7 条 hard contract 全绿；`docs/superpowers/testing-conventions.md`、CLAUDE.md / AGENTS.md §6.17 同步完成；`npm run verify:f` 退出码 0。
 

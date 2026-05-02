@@ -205,6 +205,13 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - child-run 调试控制面通过 `agent:listActiveChildRuns` / `agent:cancelChildRun` 暴露；取消来源必须区分 `source: 'nlp' | 'ui_button'`，并进入 `skill_child_run_cancel_requested` metric。
 - `npm run verify:g` 内嵌 `verify:f`，并额外覆盖 status vocabulary、fresh contract、close immutability、turn flag snapshot、child-run IPC/control surface。
 
+### 6.19 主进程稳定性与日志生命周期（J 阶段）
+- 主进程必须在 `app.whenReady()` 前注册 `unhandledRejection` / `uncaughtException` / `render-process-gone` / `child-process-gone` 四类 handler。fatal 类错误必须尝试 bounded cleanup 后 `app.exit(1)`；Electron runtime-gone 类事件只记录和打点，不强制退出。
+- 所有 `ready-*.log` 写入必须走 `createRotatingLogger`；禁止在 `src/main/` 新增绕过 helper 的 `appendFileSync` / `appendFile` `.log` 直写。`ready-design-run-captures.ndjson` 是本轮白名单，不按 `.log` 处理。
+- process / log metric 保持在本地常量（`src/main/utils/process-metrics.ts`），不进入 `TOOL_ERROR_METRICS`；`scripts/check-process-handlers.cjs` 会阻止这类污染。
+- `READY_LOG_MAX_BYTES` / `READY_LOG_MAX_FILES` 是支持的日志轮转阈值；默认 50MB、保留 5 个历史文件。`scripts/check-log-rotation.cjs` 必须阻止新增未轮转的 `ready-*.log` 写入。
+- `npm run verify:j` 必须内嵌 `verify:i`，并覆盖 process handler gate、log rotation gate、J gates/focus。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler
