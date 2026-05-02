@@ -1,7 +1,7 @@
 ---
 name: H — v3 路线尾巴清扫（文档失真 / silent failure / timer idempotency / 测试反模式残留）
 description: v3 路线全 9 阶段（A0-G）交付后的剩余尾巴清扫。10 项小颗粒度债，按 5 类根因聚类。不引入新抽象层，全部走"加 metric / 修文档 / 加 idempotency guard / 改 1 个测试"形态。这是 counter-proposal 文档，描述要修什么、修到什么程度算成功；具体实施计划由 codex 据此另开一份 implementation.md 文件。
-status: draft
+status: completed
 enforce: true
 counter_proposal: 2026-04-30-skill-runtime-agent-layer-reframe.md
 ---
@@ -500,3 +500,19 @@ codex 写实施计划时必须明确决策的事项（不要再问，自己决�
 > 1. W0 audit 发现 §1 任一证据数字与文档严重偏离（>30% 差异）→ 修文档不修代码。
 > 2. B5 silent-catch baseline N0 > 50 → 拆 H1 / H2 两阶段，不强行单 PR 落地。
 > 3. A3 check-claude-md-claims.cjs 假阳性率 > 30% → 降级为 soft warning 或推迟到独立 follow-up PR。
+
+---
+
+## Final Record — 2026-05-02
+
+H 已按 H1 / H2 两段落地，未引入 v4 新抽象，未修改 A0-G 既有合同。
+
+- Verification HEAD: `e0916f3bd3658c79d35b3b9365ef191cfcdd380f`
+- Final gate: `npm run verify:h` exited 0.
+- `verify:h` chain: `verify:g` -> `test:h:gates` -> `test:h:focus`.
+- Final focused counts observed in `verify:h`: G focus 54 tests passed / 0 failed; H gates 9 tests passed / 0 failed.
+- Doc claim gate: `CLAUDE.md claims: ok`; fake-claim regression is covered by `check-claude-md-claims.test.cjs`.
+- Silent catch gate: `silent catch: ok (198 baseline entries)`; bare-catch regression is covered by `check-silent-catch.test.cjs`.
+- Baseline: W0 broad silent-catch candidate range was 204-248; W4 AST gate froze `N0 = 198`, `N_FINAL = 198` with `{ file, line, snippetHash }` entries.
+- H1 / H2 split: H1 landed documentation truth, B1-B4 metrics, timer idempotency, and active-child-run behavior test cleanup; H2 landed doc-claim and silent-catch gates plus final docs.
+- H post-follow-up: the local `errorKind(error: unknown): string` helper remains duplicated in four H1-touched files by design, to avoid adding a shared abstraction inside H. A later non-H cleanup PR may extract it.

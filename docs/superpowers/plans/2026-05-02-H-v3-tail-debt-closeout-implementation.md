@@ -237,3 +237,16 @@ Verify:
 - No A0-G gate is weakened or rewritten.
 - No new registry/coordinator/context-builder abstraction is introduced.
 - UI key-damage notification for B1 is out of scope; H only adds observability.
+
+## H2 Final Record
+
+- H2 landed after H1 review using the fixed order `W2 -> W4 -> W6b`.
+- Verification HEAD: `e0916f3bd3658c79d35b3b9365ef191cfcdd380f`.
+- `npm run verify:h` exited 0.
+- The final `verify:h` run chained `verify:g`, `test:h:gates`, and `test:h:focus`.
+- Final focused counts observed in `verify:h`: G focus 54 tests passed / 0 failed; H gates 9 tests passed / 0 failed.
+- `test:h:focus` output: `CLAUDE.md claims: ok`; `silent catch: ok (198 baseline entries)`.
+- Baseline: W0 broad silent-catch candidate range was 204-248; W4 AST gate froze `N0 = 198`, `N_FINAL = 198`.
+- Break coverage: fake doc claim is covered by `check-claude-md-claims.test.cjs`; a new bare catch without log/metric/throw/comment/baseline is covered by `check-silent-catch.test.cjs`; `verify:h` invokes both gates.
+- H final docs: the H counter-proposal status is `completed`; §6.15 now includes the Hook handler and L2 compactor trigger standards; the roadmap marks H as the v3 tail closeout, not v4.
+- Post-H follow-up: the duplicated local `errorKind(error: unknown): string` helper should be extracted later if desired. H intentionally leaves it duplicated to avoid adding a shared abstraction inside the closeout scope.

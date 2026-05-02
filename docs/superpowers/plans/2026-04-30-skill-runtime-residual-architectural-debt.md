@@ -437,6 +437,14 @@ review 过 internal admission（B3），但没审 sandbox 链路：
 
 留到最后，因为 e2e 测试在前面阶段不存在的情况下也能跑（fake-based unit 测试已经够用），等真实链路稳定了再投入是更高 ROI。
 
+### 无 owner 留存项 — 先 ADR，后代码
+
+H 阶段确认以下项仍不属于 v3 尾巴清扫，未来任何 PR 触发它们时必须先开独立 ADR，不能直接塞进功能修补：
+
+- **根因 4（产物可复用合同）**：`findReusableRunByKey` / RSS timeout 后复用既有产物的产品语义未定。
+- **O2（跨 device single-flight）**：跨设备续跑长任务涉及 UX 和同步语义，不能只靠本地 runtime 改动决定。
+- **O3（parent × child budget 联动）**：需要先有生产量级和 token 估算证据，再决定是否进入 runtime 合同。
+
 ---
 
 ## 7. 反模式警告：禁止做的事
