@@ -146,6 +146,10 @@ import {
   isRetryOnlyTurn,
 } from './skill-detection-inputs'
 import {
+  resolveExplicitRunStateResource,
+  type ExplicitRunStateResourceCandidate,
+} from './run-state-resource-resolver'
+import {
   getLatestSkillRun,
   resolveSkillRunForResume,
   type SkillRunRecord,
@@ -453,6 +457,10 @@ interface SkillContextOrchestratorLike {
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
+  rememberReferenceSkillFromRunStateResource?: (
+    skillId: string,
+    sessionId?: string,
+  ) => { armed: boolean; skillId?: string; skillName?: string }
   // skill-resume G2/G3 — reverse-resolve `skill_*` tool names from prior
   // assistant tool_use blocks back to a reference-like skill and arm the
   // hint, so a bare retry intent ("继续") can re-expose internal/primitive
@@ -1182,7 +1190,42 @@ export class TurnEngine {
       const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
       let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
       let referenceSkillForMetrics: { id?: string; name?: string } | null = null
-      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | null = null
+      let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | 'resource' | null = null
+      const firstExplicitSkillId = firstSkillMatch?.skills[0]?.id || firstSkillMatch?.skills[0]?.skillId || null
+      const runStateResourceResolution = resolveExplicitRunStateResource(requestEnvelope.resources)
+      let explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null =
+        runStateResourceResolution.status === 'resolved' ? runStateResourceResolution.candidate : null
+      if (
+        explicitRunStateResourceForTurn
+        && firstExplicitSkillId
+        && firstExplicitSkillId !== explicitRunStateResourceForTurn.skillId
+      ) {
+        host.log(`[run_state_resource] ignored skill mismatch explicitSkillId=${firstExplicitSkillId} resourceSkillId=${explicitRunStateResourceForTurn.skillId}`)
+        logAgentMetric('run_state_resource_resolution', {
+          sessionId: request.sessionId,
+          status: 'ignored_skill_mismatch',
+          explicitSkillId: firstExplicitSkillId,
+          resourceSkillId: explicitRunStateResourceForTurn.skillId,
+        })
+        explicitRunStateResourceForTurn = null
+      } else if (runStateResourceResolution.status !== 'none' && isSkillResumeTurnDetected) {
+        host.log(`[run_state_resource] ${JSON.stringify({
+          status: runStateResourceResolution.status,
+          reason: 'reason' in runStateResourceResolution ? runStateResourceResolution.reason : null,
+          skillId: explicitRunStateResourceForTurn?.skillId || null,
+          hasSceneScores: Boolean(explicitRunStateResourceForTurn?.sceneScoresPath),
+          explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
+        })}`)
+        logAgentMetric('run_state_resource_resolution', {
+          sessionId: request.sessionId,
+          status: runStateResourceResolution.status,
+          reason: 'reason' in runStateResourceResolution ? runStateResourceResolution.reason : null,
+          skillId: explicitRunStateResourceForTurn?.skillId || null,
+          hasSceneScores: Boolean(explicitRunStateResourceForTurn?.sceneScoresPath),
+          explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
+          candidateCount: 'candidateCount' in runStateResourceResolution ? runStateResourceResolution.candidateCount : null,
+        })
+      }
       const hasStrongActiveSkillContext = (): boolean => {
         try {
           const supervisorSnapshot = host.skillTaskSupervisor?.inspectLatestSkillTask
@@ -1208,6 +1251,27 @@ export class TurnEngine {
       // the rest of the turn (preferredSkillToolNames, maybeInjectExplicitSkillContext)
       // flows naturally as if the user had named the skill.
       let lookbackRearmedSkill: { skillId?: string; skillName?: string } | null = null
+      if (explicitRunStateResourceForTurn && !providedContinuationState && isSkillResumeTurnDetected) {
+        const shouldArmFromResource = !hasExplicitSkill
+          || firstExplicitSkillId === explicitRunStateResourceForTurn.skillId
+        const rearmed = shouldArmFromResource
+          ? skillContextOrchestrator.rememberReferenceSkillFromRunStateResource?.(
+            explicitRunStateResourceForTurn.skillId,
+            request.sessionId,
+          )
+          : null
+        if (rearmed?.armed) {
+          const skillName = rearmed.skillName || explicitRunStateResourceForTurn.skillName
+          lookbackRearmedSkill = { skillId: rearmed.skillId, skillName }
+          referenceSkillForMetrics = { id: rearmed.skillId, name: skillName }
+          referenceSkillHintVia = 'resource'
+          skillContextInjectionText = `用户希望继续使用 skill "${skillName}"`
+          hasExplicitSkill = true
+          host.log(
+            `[skill_detection] reference_skill_rearmed_from_run_state_resource skillId=${rearmed.skillId || ''} skillName=${skillName}`,
+          )
+        }
+      }
       if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && !isConfigRepairTurnDetected && previousAssistantSkillToolUses.length > 0 && !hasStrongActiveSkillContext()) {
         const rearmed = skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
           previousAssistantSkillToolUses,
@@ -1415,6 +1479,12 @@ export class TurnEngine {
           : isRetryOnlyTurnDetected
             ? 'continue'
             : 'unknown',
+        explicitSkillId: explicitRunStateResourceForTurn?.skillId || null,
+        explicitSkillName: explicitRunStateResourceForTurn?.skillName || null,
+        explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
+        explicitOutputDir: explicitRunStateResourceForTurn?.outputDir || null,
+        explicitRunStatePath: explicitRunStateResourceForTurn?.runStatePath || null,
+        explicitSceneScoresPath: explicitRunStateResourceForTurn?.sceneScoresPath || null,
         activeContext: activeSkillContextForTurn,
         supervisorSnapshot: supervisorSnapshotForFrame,
         referenceHint: currentReferenceHintForContext

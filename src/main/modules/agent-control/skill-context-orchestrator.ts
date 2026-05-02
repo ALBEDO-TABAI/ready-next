@@ -202,6 +202,17 @@ export class SkillContextOrchestrator {
     return hint ? { id: hint.id, name: hint.name } : null
   }
 
+  rememberReferenceSkillFromRunStateResource(
+    skillId: string,
+    sessionId?: string,
+  ): { armed: boolean; skillId?: string; skillName?: string } {
+    if (!sessionId || !skillId) return { armed: false }
+    const skill = this.deps.listSkills().find((candidate) => candidate.id === skillId)
+    if (!skill || !this.isReferenceLikeSkill(skill)) return { armed: false }
+    rememberLastReferenceSkill(sessionId, { id: skill.id, name: skill.name })
+    return { armed: true, skillId: skill.id, skillName: skill.name }
+  }
+
   rememberExplicitReferenceSkillHint(userText: string, sessionId?: string): boolean {
     if (!sessionId) return false
     const skill = this.findExplicitlyRequestedSkills(userText)
