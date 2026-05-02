@@ -55,6 +55,12 @@ import { forgetSession } from './session-continuity'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import {
+  classifySendScopedError,
+  runConfirmedSendScoped,
+  type SendScopedResponse,
+  type SendScopedUserMessage,
+} from './send-scoped-confirmation'
 import { SessionRecallService } from './session-recall-service'
 import { SidecarManager } from './sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
@@ -810,75 +816,99 @@ export class AgentControlRuntime extends EventEmitter {
     agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
+    userMessage?: SendScopedUserMessage
     taskId?: string
     parentTaskId?: string
     parentStepId?: string
     sessionIdOverride?: string
     continuationIntent?: ContinuationIntent | null
-  }): Promise<{ success: boolean; error?: string }> {
-    let scopeRow = this.db.getConversationScope(payload.scopeId)
-    if (!scopeRow && payload.agent && payload.scopeId.startsWith('conv-')) {
-      const recoveredScope = this.createLocalScope(payload.agent, payload.scopeId)
-      scopeRow = this.db.getConversationScope(recoveredScope.id)
-      logAgentMetric('local_scope_lazy_created_on_send', {
-        scopeId: payload.scopeId,
-        agent: payload.agent,
-      })
-    }
-    if (!scopeRow) {
-      return { success: false, error: `Conversation scope not found: ${payload.scopeId}` }
-    }
-    const scope = this.mapConversationRow(scopeRow)
-    // skill-resume A1: restore reference-skill hint from persisted conv meta
-    // before any skill detection runs, so resumed sessions don't lose context
-    // after Ready restart (in-memory Map alone wouldn't survive).
-    this.restoreReferenceHintFromScope(scope, payload.scopeId)
-    // skill-resume E1: when the user fires a bare retry/continue intent on a
-    // scope with no manually-attached recall context, auto-attach the top
-    // predecessors in the same lineage so prompt assembly has prior context
-    // when it runs.
-    this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
-    const normalizedContinuationIntent = (() => {
-      const intent = normalizeContinuationIntent(payload.continuationIntent || null)
-      if (!intent) return null
-      const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
-      if (!target) return null
-      return this.buildContinuationIntent({
-        projection: target.projection,
-        scopeRunSummary: target.scopeRunSummary,
-        incoming: intent,
-      })
-    })()
-    return this.runCoordinator.runScoped(
-      {
-        scope,
-        message: payload.message as
-          | string
-          | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-        requestId: payload.requestId,
-        taskId: payload.taskId,
-        parentTaskId: payload.parentTaskId,
-        parentStepId: payload.parentStepId,
-        sessionIdOverride: payload.sessionIdOverride,
-        continuationIntent: normalizedContinuationIntent,
-        coordinators: this.getDomainAdapters(),
-      },
-      {
-        onSuccess: async (result) => {
-          if (scope.sourceKind !== 'channel') return
-          const outboundText =
-            result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-          const sendOk = await this.sendLongTextToChannel(
-            scope.sourceId,
-            scope.threadKey,
-            outboundText
-          )
-          if (!sendOk.success) {
-            throw new Error(sendOk.error || 'Failed to send channel reply')
-          }
+  }): Promise<SendScopedResponse> {
+    return runConfirmedSendScoped({
+      scopeId: payload.scopeId,
+      agent: payload.agent,
+      userMessage: payload.userMessage,
+      getScope: (scopeId) => this.db.getConversationScope(scopeId),
+      createLocalScope: (agent, scopeId) => {
+        const recoveredScope = this.createLocalScope(agent, scopeId)
+        const recoveredRow = this.db.getConversationScope(recoveredScope.id)
+        if (!recoveredRow) {
+          throw new Error(`Conversation scope not found after create: ${scopeId}`)
         }
-      }
-    )
+        return recoveredRow
+      },
+      persistUserMessage: (scopeRow, userMessage) => {
+        const scope = this.mapConversationRow(scopeRow)
+        this.db.addChatMessage(
+          userMessage.id,
+          scope.id,
+          'user',
+          userMessage.content,
+          userMessage.timestamp || new Date().toISOString(),
+          userMessage.meta,
+        )
+      },
+      onLazyCreate: (scopeId, agent) => {
+        logAgentMetric('local_scope_lazy_created_on_send', { scopeId, agent })
+      },
+      runConfirmed: async (scopeRow, persistence) => {
+        const scope = this.mapConversationRow(scopeRow)
+        // skill-resume A1: restore reference-skill hint from persisted conv meta
+        // before any skill detection runs, so resumed sessions don't lose context
+        // after Ready restart (in-memory Map alone wouldn't survive).
+        this.restoreReferenceHintFromScope(scope, payload.scopeId)
+        // skill-resume E1: when the user fires a bare retry/continue intent on a
+        // scope with no manually-attached recall context, auto-attach the top
+        // predecessors in the same lineage so prompt assembly has prior context
+        // when it runs.
+        this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
+        const normalizedContinuationIntent = (() => {
+          const intent = normalizeContinuationIntent(payload.continuationIntent || null)
+          if (!intent) return null
+          const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
+          if (!target) return null
+          return this.buildContinuationIntent({
+            projection: target.projection,
+            scopeRunSummary: target.scopeRunSummary,
+            incoming: intent,
+          })
+        })()
+        const result = await this.runCoordinator.runScoped(
+          {
+            scope,
+            message: payload.message as
+              | string
+              | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+            requestId: payload.requestId,
+            taskId: payload.taskId,
+            parentTaskId: payload.parentTaskId,
+            parentStepId: payload.parentStepId,
+            sessionIdOverride: payload.sessionIdOverride,
+            continuationIntent: normalizedContinuationIntent,
+            coordinators: this.getDomainAdapters(),
+          },
+          {
+            onSuccess: async (result) => {
+              if (scope.sourceKind !== 'channel') return
+              const outboundText =
+                result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+              const sendOk = await this.sendLongTextToChannel(
+                scope.sourceId,
+                scope.threadKey,
+                outboundText
+              )
+              if (!sendOk.success) {
+                throw new Error(sendOk.error || 'Failed to send channel reply')
+              }
+            }
+          }
+        )
+        return {
+          ...result,
+          errorKind: result.success ? undefined : classifySendScopedError(result.error, 'run'),
+          persistence,
+        }
+      },
+    })
   }
 
   async suspendRun(payload: {

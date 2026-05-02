@@ -2,6 +2,7 @@ import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserBoundsSyncMode } from '../../shared/browser-view-layout'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
+import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type {
   RSSBenchmarkResultData,
   RSSDiagnosticsData,
@@ -24,6 +25,19 @@ interface IPCResponse<T = void> {
   data?: T
   error?: string
   mock?: boolean
+  errorKind?: string
+}
+
+interface SendScopedResponse {
+  success: boolean
+  error?: string | null
+  errorKind?: string | null
+  persistence?: {
+    scope: 'pre-existing' | 'lazy-created' | 'failed'
+    message: 'persisted' | 'failed' | 'skipped'
+    attachments: 'metadata_persisted' | 'metadata_partial' | 'metadata_failed' | 'none'
+    inputAttachments: 'included' | 'partial' | 'failed' | 'none'
+  }
 }
 
 // =============================================================================
@@ -735,15 +749,31 @@ interface ElectronAgentAPI {
   getRemoteAttachmentCacheStats: (
     channelId?: string
   ) => Promise<IPCResponse<RemoteAttachmentCacheStatsData>>
-  sendScoped: (
-    payload: {
-      scopeId: string
-      agent?: string
-      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
-      requestId?: string
-      continuationIntent?: ContinuationIntentData | null
-    }
-  ) => Promise<{ success: boolean; error?: string | null }>
+	  sendScoped: (
+	    payload: {
+	      scopeId: string
+	      agent?: string
+	      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
+	      requestId?: string
+	      userMessage?: {
+	        id: string
+	        content: string
+	        timestamp?: string
+	        meta?: Record<string, unknown>
+	        attachmentConfirmation?: {
+	          selectedCount: number
+	          metadataCount: number
+	          inputIncludedCount: number
+	          inputFailedCount: number
+	        }
+	      }
+	      continuationIntent?: ContinuationIntentData | null
+	    }
+	  ) => Promise<SendScopedResponse>
+	  emitRendererMetric: (
+	    name: RendererAgentMetricName,
+	    payload?: Record<string, unknown>
+	  ) => Promise<IPCResponse>
   suspendRun: (payload: {
     scopeId: string
     taskId?: string

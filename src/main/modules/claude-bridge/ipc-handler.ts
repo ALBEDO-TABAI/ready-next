@@ -22,6 +22,9 @@ import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
+import { logAgentMetric } from '../agent-control/metrics'
+import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
+import type { SendScopedUserMessage } from '../agent-control/send-scoped-confirmation'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -79,6 +82,8 @@ export interface IPCResponse<T = unknown> {
   data?: T
   error?: string
   mock?: boolean
+  errorKind?: string
+  persistence?: unknown
 }
 
 let runtime: AgentControlRuntime | null = null
@@ -669,6 +674,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     agent?: string
     message: string | MultimodalBlock[]
     requestId?: string
+    userMessage?: SendScopedUserMessage
     continuationIntent?: {
       taskId: string
       executionId?: string
@@ -683,11 +689,35 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'}`)
       const result = await runtime!.sendScoped(payload)
       log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} success=${result.success} error=${result.error || 'none'}`)
-      return { success: result.success, error: result.error }
+      return {
+        success: result.success,
+        error: result.error,
+        errorKind: result.errorKind,
+        persistence: result.persistence,
+      }
     } catch (error) {
       log(`[ipc] agent:sendScoped failed scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} error=${error instanceof Error ? error.message : String(error)}`)
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        errorKind: 'unknown',
+      }
     }
+  })
+
+  ipcMain.handle('agent:emitRendererMetric', (_, payload: {
+    name?: unknown
+    payload?: Record<string, unknown>
+  }): IPCResponse => {
+    const name = payload?.name
+    if (!isRendererAgentMetricName(name)) {
+      return { success: false, error: 'Unknown renderer metric name' }
+    }
+    logAgentMetric(name, {
+      source: 'renderer',
+      ...(payload.payload && typeof payload.payload === 'object' ? payload.payload : {}),
+    })
+    return { success: true }
   })
 
   ipcMain.handle('agent:suspendRun', async (_, payload: {

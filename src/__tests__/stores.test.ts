@@ -1056,6 +1056,175 @@ describe('useAgent Store', () => {
         ])
     })
 
+    it('should show a friendly message when sendScoped reports user message persistence failure', async () => {
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-persist-failed',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-persist-failed',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return {
+                        success: false,
+                        error: 'SQLITE constraint failed: chat_messages.id',
+                        errorKind: 'message_persist_failed',
+                        persistence: {
+                            scope: 'pre-existing',
+                            message: 'failed',
+                            attachments: 'none',
+                            inputAttachments: 'none',
+                        },
+                    }
+                },
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-persist-failed',
+            currentScope: {
+                id: 'conv-local-persist-failed',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-persist-failed',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('hello')
+
+        assert.equal(sendScopedCalls.length, 1)
+        assert.equal(result.success, false)
+        assert.equal(result.preserveInput, true)
+        assert.equal(result.shouldClearInput, false)
+        assert.ok(sendScopedCalls[0].userMessage, 'sendScoped payload should carry the user message persistence bundle')
+        const errorMessage = useAgent.getState().messages.find((message) => message.type === 'system')
+        assert.ok(errorMessage)
+        assert.match(errorMessage!.content, /消息保存失败，请重试/)
+        assert.doesNotMatch(errorMessage!.content, /SQLITE/i)
+        assert.equal(useAgent.getState().isStreaming, false)
+    })
+
+    it('should stop sending and keep attachments when attachment input cannot be read', async () => {
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+        const originalAttachment = {
+            id: 'attach-failed',
+            name: 'missing.txt',
+            path: '/tmp/missing.txt',
+            type: 'text' as const,
+            size: 10,
+            ext: '.txt',
+            source: 'file' as const,
+        }
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-attachment-failed',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-attachment-failed',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return { success: true }
+                },
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                readFileForAI: async () => ({ success: false, error: 'ENOENT /tmp/missing.txt' }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-attachment-failed',
+            currentScope: {
+                id: 'conv-local-attachment-failed',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-attachment-failed',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [originalAttachment],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('please read it')
+
+        assert.equal(sendScopedCalls.length, 0)
+        assert.equal(result.success, false)
+        assert.equal(result.preserveInput, true)
+        assert.equal(result.shouldClearInput, false)
+        assert.deepStrictEqual(useAgent.getState().attachments, [originalAttachment])
+        const errorMessage = useAgent.getState().messages.find((message) => message.type === 'system')
+        assert.ok(errorMessage)
+        assert.match(errorMessage!.content, /附件读取失败，请重新选择文件/)
+        assert.doesNotMatch(errorMessage!.content, /ENOENT/)
+        assert.equal(useAgent.getState().isStreaming, false)
+    })
+
     it('should keep streaming chunks keyed by runId and scopeId even after switching active scope', async () => {
         const listeners: {
             onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void

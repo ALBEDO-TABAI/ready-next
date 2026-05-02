@@ -141,6 +141,7 @@ function createHost(overrides?: Record<string, unknown>) {
     sessionHasVideoInputs: () => false,
     domainAdapters: [] as DomainAdapter[],
     skillContextOrchestrator: {
+      hasActiveSkillExecution: () => false,
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
       buildPreferredSkillToolNames: () => null,

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
+import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 
 type ContinuationIntentPayload = {
   taskId: string
@@ -108,9 +109,25 @@ const agentAPI = {
       agent?: string
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
+      userMessage?: {
+        id: string
+        content: string
+        timestamp?: string
+        meta?: Record<string, unknown>
+        attachmentConfirmation?: {
+          selectedCount: number
+          metadataCount: number
+          inputIncludedCount: number
+          inputFailedCount: number
+        }
+      }
       continuationIntent?: ContinuationIntentPayload | null
     }
   ) => ipcRenderer.invoke('agent:sendScoped', payload),
+  emitRendererMetric: (
+    name: RendererAgentMetricName,
+    payload: Record<string, unknown> = {},
+  ) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload }),
   suspendRun: (payload: { scopeId: string; taskId?: string }) =>
     ipcRenderer.invoke('agent:suspendRun', payload),
   resumeRun: (payload: {

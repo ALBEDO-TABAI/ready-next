@@ -9,12 +9,14 @@ import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskC
 import { runDocCommand as executeDocCommand } from '../modules/agent/documentActions'
 import { runSkillCommand as executeSkillCommand } from '../modules/agent/commandHandlers'
 import {
-  buildComposedAgentInput,
+  buildComposedAgentInputWithDiagnostics,
   filterAttachmentsForComposedAgentInput,
   extractAttachmentsFromMeta as extractPersistedAttachments,
   persistMessage as persistChatMessage,
   serializePersistedAttachments as serializeAttachments,
 } from '../modules/agent/messageComposer'
+import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
+import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import type {
   Agent,
@@ -58,6 +60,24 @@ export interface PendingContinuationIntent {
   progressFingerprint?: string
 }
 
+interface AgentSendResult {
+  success: boolean
+  error?: string | null
+  errorKind?: string | null
+  persistence?: {
+    scope?: string | null
+    message?: string | null
+    attachments?: string | null
+  } | null
+}
+
+export interface SendMessageResult {
+  success: boolean
+  shouldClearInput: boolean
+  preserveInput: boolean
+  errorKind?: string | null
+}
+
 interface AgentState {
   agents: Agent[]
   messages: AgentMessage[]
@@ -94,7 +114,7 @@ interface AgentState {
   setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
   clearPendingContinuationIntent: () => void
   setIsStreaming: (streaming: boolean) => void
-  sendMessage: (content: string) => Promise<void>
+  sendMessage: (content: string) => Promise<SendMessageResult>
   stopStreaming: () => void
   undoLastMessage: () => void
   newSession: () => void
@@ -736,7 +756,9 @@ export const useAgent = create<AgentState>((set, get) => ({
   sendMessage: async (content: string) => {
     const normalizedContent = content.trim()
     const { attachments: pendingAttachments } = get()
-    if (!normalizedContent && pendingAttachments.length === 0) return
+    if (!normalizedContent && pendingAttachments.length === 0) {
+      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'empty_input' }
+    }
 
     const stateBeforeSend = get()
     const shouldCoalesce =
@@ -780,7 +802,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         pendingSendCount: pendingSendBuffer.parts.length,
         pendingSendFlushAt: flushAt,
       })
-      return
+      return { success: true, shouldClearInput: true, preserveInput: false }
     }
 
     bypassCoalescingOnce = false
@@ -865,7 +887,9 @@ export const useAgent = create<AgentState>((set, get) => ({
         })
       }
     }
-    if (!scope || !scopeId) return
+    if (!scope || !scopeId) {
+      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'scope_missing' }
+    }
     let activeScope = scope
     let activeScopeId = scopeId
     await persistLocalConversationScope(activeScope)
@@ -891,8 +915,44 @@ export const useAgent = create<AgentState>((set, get) => ({
       }
     }
 
-    // Capture attachments before clearing
+    // Capture and validate attachments before clearing visible composer state.
     const currentAttachments = filterAttachmentsForComposedAgentInput(content, [...attachments])
+    const { filePool } = get()
+    const composedInput = await buildComposedAgentInputWithDiagnostics({
+      content,
+      attachments: currentAttachments,
+      filePool,
+    })
+    if (composedInput.diagnostics.inputFailedCount > 0) {
+      const firstFailure = composedInput.diagnostics.inputFailures[0]
+      const friendly = mapBackendErrorToFriendly({
+        error: firstFailure?.reason || 'attachment input failed',
+        errorKind: 'attachment_unavailable',
+      })
+      emitRendererAgentMetric('renderer_attachment_input_failed', {
+        scopeId: activeScopeId,
+        agent: currentAgent,
+        failedCount: composedInput.diagnostics.inputFailedCount,
+      })
+      emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+        scopeId: activeScopeId,
+        agent: currentAgent,
+        errorKind: 'attachment_unavailable',
+      })
+      addMessage({
+        id: `error-${Date.now()}`,
+        agent: currentAgent,
+        content: friendly.friendlyMessage,
+        type: 'system',
+        timestamp: new Date(),
+      })
+      return {
+        success: false,
+        shouldClearInput: false,
+        preserveInput: true,
+        errorKind: 'attachment_unavailable',
+      }
+    }
     set((state) => ({
       attachments: [],
       filePool: state.filePool.filter((attachment) => attachment.source !== 'document-quote'),
@@ -900,24 +960,24 @@ export const useAgent = create<AgentState>((set, get) => ({
 
     // Build display content (include @[filename] references)
     const userMsgId = generateId('msg')
+    const userTimestamp = new Date()
     addMessage({
       id: userMsgId,
       agent: currentAgent,
       content,
       type: 'user',
-      timestamp: new Date(),
+      timestamp: userTimestamp,
       attachments: currentAttachments.length > 0 ? [...currentAttachments] : undefined
     })
 
-    // Persist user message
     const persistedAttachments = serializeAttachments(currentAttachments)
-    await persistChatMessage(activeScopeId, userMsgId, 'user', content, {
+    const userMessageMeta = {
       sourceKind: activeScope.sourceKind,
       sourceId: activeScope.sourceId,
       threadKey: activeScope.threadKey,
       direction: 'local-input',
       attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
-    })
+    }
 
     if ((activeScope.title === '新对话' || activeScope.title === '未命名会话') && typeof window !== 'undefined' && window.electronAPI?.chat) {
       const firstAttachmentName = currentAttachments[0]?.name
@@ -943,6 +1003,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         : await executeDocCommand(trimmedInput)
 
       if (commandResult.handled) {
+        await persistChatMessage(activeScopeId, userMsgId, 'user', content, userMessageMeta)
         const responseId = generateId('response')
         addMessage({
           id: responseId,
@@ -952,7 +1013,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           timestamp: new Date(),
         })
         persistChatMessage(scopeId, responseId, 'assistant', commandResult.text)
-        return
+        return { success: true, shouldClearInput: true, preserveInput: false }
       }
     }
 
@@ -995,21 +1056,27 @@ export const useAgent = create<AgentState>((set, get) => ({
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
-        // W5: Build multimodal content — read files and build enhanced message
-        const { filePool } = get()
-        const finalMessage = await buildComposedAgentInput({
-          content,
-          attachments: currentAttachments,
-          filePool,
-        })
+        const finalMessage = composedInput.message
 
-        const sendWithCurrentScope = async () => (
+        const sendWithCurrentScope = async (): Promise<AgentSendResult> => (
           window.electronAPI.agent.sendScoped
             ? window.electronAPI.agent.sendScoped({
               scopeId: activeScopeId,
               agent: activeScope.agent,
               message: finalMessage,
               requestId,
+              userMessage: {
+                id: userMsgId,
+                content,
+                timestamp: userTimestamp.toISOString(),
+                meta: userMessageMeta,
+                attachmentConfirmation: {
+                  selectedCount: currentAttachments.length,
+                  metadataCount: persistedAttachments.length,
+                  inputIncludedCount: composedInput.diagnostics.inputIncludedCount,
+                  inputFailedCount: composedInput.diagnostics.inputFailedCount,
+                },
+              },
               continuationIntent: pendingContinuationIntent || undefined,
             })
             : window.electronAPI.agent.send(currentAgent, finalMessage, activeScopeId, requestId)
@@ -1043,14 +1110,31 @@ export const useAgent = create<AgentState>((set, get) => ({
 
         if (!result.success) {
           if (get().streamingRequestId !== requestId) {
-            return
+            return { success: false, shouldClearInput: false, preserveInput: true, errorKind: result.errorKind || 'stale_request' }
           }
+          const friendly = mapBackendErrorToFriendly({
+            error: result.error || '发送失败',
+            errorKind: result.errorKind || undefined,
+          })
+          emitRendererAgentMetric('renderer_send_persistence_failed', {
+            scopeId: activeScopeId,
+            agent: currentAgent,
+            errorKind: result.errorKind || 'unknown',
+            messageStatus: result.persistence?.message || null,
+            attachmentStatus: result.persistence?.attachments || null,
+          })
+          emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+            scopeId: activeScopeId,
+            agent: currentAgent,
+            errorKind: result.errorKind || 'unknown',
+          })
           set((state) => ({
             messages: state.messages.map(m =>
               m.id === responseId
-                ? { ...m, content: `${result.error || '发送失败'}`, type: 'system' as const }
+                ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
                 : m
             ),
+            attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
             isStreaming: false,
             streamingMessageId: null,
             streamingRequestId: null,
@@ -1067,15 +1151,23 @@ export const useAgent = create<AgentState>((set, get) => ({
                 requestId,
                 phase: 'error',
                 updatedAt: new Date().toISOString(),
-                error: result.error || '发送失败',
+                error: friendly.friendlyMessage,
               },
             },
             toolTraceStatus: 'error',
           }))
+          const preserveInput = result.persistence?.message !== 'persisted'
+          return {
+            success: false,
+            shouldClearInput: !preserveInput,
+            preserveInput,
+            errorKind: result.errorKind || 'unknown',
+          }
         }
         set({ pendingContinuationIntent: null })
         // Stream data arrives via onStream listener
         // Persistence of assistant message happens in onStream 'done' handler
+        return { success: true, shouldClearInput: true, preserveInput: false }
       } else {
         // Mock response for browser-only development
         const mockResponses = [
@@ -1098,13 +1190,23 @@ export const useAgent = create<AgentState>((set, get) => ({
             }
           }
         }, 30)
+        return { success: true, shouldClearInput: true, preserveInput: false }
       }
     } catch (error) {
-      if (get().streamingRequestId !== requestId) return
+      if (get().streamingRequestId !== requestId) {
+        return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'stale_request' }
+      }
+      const rawError = error instanceof Error ? error.message : String(error)
+      const friendly = mapBackendErrorToFriendly({ error: rawError })
+      emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+        scopeId: activeScopeId,
+        agent: currentAgent,
+        errorKind: 'unknown',
+      })
       set((state) => ({
         messages: state.messages.map(m =>
           m.id === responseId
-            ? { ...m, content: `错误: ${error instanceof Error ? error.message : String(error)}`, type: 'system' as const }
+            ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
             : m
         ),
         isStreaming: false,
@@ -1123,11 +1225,12 @@ export const useAgent = create<AgentState>((set, get) => ({
             requestId,
             phase: 'error',
             updatedAt: new Date().toISOString(),
-            error: error instanceof Error ? error.message : String(error),
+            error: friendly.friendlyMessage,
           },
         },
         toolTraceStatus: 'error',
       }))
+      return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'unknown' }
     }
   }
   ,

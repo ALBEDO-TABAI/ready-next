@@ -1,4 +1,5 @@
 import type { SoftErrorInfo } from '../../modules/agent/types'
+import { mapBackendErrorToFriendly } from '../../modules/agent/error-message-mapping'
 
 /**
  * Phase 3 — soft-failure capsule.
@@ -15,6 +16,15 @@ interface Props {
 }
 
 export function SoftFailureCapsule({ softError, onDismiss }: Props) {
+  const friendly = softError.friendlyMessage
+    ? {
+        friendlyMessage: softError.friendlyMessage,
+        technicalDetails: softError.technicalDetails || softError.message,
+      }
+    : mapBackendErrorToFriendly({
+        error: softError.message,
+        errorKind: softError.errorKind,
+      })
   const title = softError.toolName
     ? `工具 ${softError.toolName} 暂时失败`
     : '任务暂时失败'
@@ -25,7 +35,9 @@ export function SoftFailureCapsule({ softError, onDismiss }: Props) {
       className="mx-4 my-2 flex items-center gap-2 rounded-lg border border-amber-200/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
     >
       <span className="font-medium">{title}</span>
-      <span className="flex-1 truncate opacity-80">{softError.message}</span>
+      <span className="flex-1 truncate opacity-80" title={friendly.technicalDetails || undefined}>
+        {friendly.friendlyMessage}
+      </span>
       <span className="rounded bg-amber-200/60 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-amber-900/80 dark:bg-amber-500/20 dark:text-amber-200/80">
         {softError.errorKind}
       </span>

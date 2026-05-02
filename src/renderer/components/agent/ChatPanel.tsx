@@ -2407,7 +2407,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     setInputValue('', { preserveContinuationIntent: true })
     chatInputRef.current?.resetHeight()
     try {
-      await sendMessage(content)
+      const result = await sendMessage(content)
+      if (result.preserveInput) {
+        setInputValue(content, { preserveContinuationIntent: true })
+      }
     } finally {
       sendingRef.current = false
     }

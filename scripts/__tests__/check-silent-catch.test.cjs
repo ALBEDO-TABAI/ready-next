@@ -52,6 +52,25 @@ test('rejects a new bare silent catch', () => {
   )
 })
 
+test('rejects a new renderer silent catch', () => {
+  withFixture(
+    {
+      'src/renderer/example.tsx': [
+        'try { work() } catch (error) {',
+        '  cleanup = true',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = checkSilentCatch({ root, baselinePath: null })
+      assert.equal(result.ok, false)
+      assert.equal(result.violations.length, 1)
+      assert.equal(result.violations[0].file, 'src/renderer/example.tsx')
+    },
+  )
+})
+
 test('accepts a silent catch pinned by baseline snippetHash', () => {
   withFixture(
     {

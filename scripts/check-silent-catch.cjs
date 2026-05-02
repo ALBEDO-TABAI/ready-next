@@ -10,6 +10,7 @@ const DEFAULT_SCAN_ROOTS = [
   'src/main/modules/agent-control',
   'src/main/modules/skills-runtime',
   'src/main/modules/tools',
+  'src/renderer',
 ]
 const DEFAULT_BASELINE = 'scripts/snapshots/silent-catch-baseline.json'
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx'])

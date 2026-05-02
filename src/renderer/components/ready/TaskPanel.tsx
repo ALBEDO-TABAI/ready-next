@@ -397,8 +397,12 @@ export default function TaskPanel() {
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return
-    await sendMessage(inputValue)
+    const content = inputValue
     setInputValue('')
+    const result = await sendMessage(content)
+    if (result.preserveInput) {
+      setInputValue(content)
+    }
   }
 
   const handleResumeProjection = useCallback(async () => {

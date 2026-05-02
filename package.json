@@ -50,7 +50,13 @@
     "verify:g": "npm run verify:f && node scripts/check-child-status-vocabulary.cjs && node scripts/check-child-control-ipc.cjs && node scripts/check-turn-feature-flags.cjs && npm run test:g:gates && npm run test:g:focus",
     "test:h:gates": "node --test scripts/__tests__/check-claude-md-claims.test.cjs scripts/__tests__/check-silent-catch.test.cjs",
     "test:h:focus": "node scripts/check-claude-md-claims.cjs && node scripts/check-silent-catch.cjs",
-    "verify:h": "npm run verify:g && npm run test:h:gates && npm run test:h:focus"
+    "verify:h": "npm run verify:g && npm run test:h:gates && npm run test:h:focus",
+    "test:i1:gates": "node --test scripts/__tests__/check-renderer-metric-channel.test.cjs scripts/__tests__/check-renderer-error-friendliness.test.cjs",
+    "test:i1:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/send-scoped-confirmation.test.ts src/__tests__/renderer-error-mapping.test.ts src/__tests__/stores.test.ts src/__tests__/agent-error-ipc-contract.test.ts",
+    "verify:i1": "npm run verify:h && node scripts/check-renderer-metric-channel.cjs && node scripts/check-renderer-error-friendliness.cjs && npm run test:i1:gates && npm run test:i1:focus",
+    "test:i:gates": "npm run test:i1:gates && node --test scripts/__tests__/check-silent-catch.test.cjs",
+    "test:i:focus": "node scripts/check-silent-catch.cjs",
+    "verify:i": "npm run verify:i1 && npm run test:i:gates && npm run test:i:focus"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

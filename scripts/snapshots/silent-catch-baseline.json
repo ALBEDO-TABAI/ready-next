@@ -164,27 +164,27 @@
     },
     {
       "file": "src/main/modules/agent-control/runtime.ts",
-      "line": 1062,
+      "line": 1125,
       "snippetHash": "227e0adea33c54c9"
     },
     {
       "file": "src/main/modules/agent-control/runtime.ts",
-      "line": 1083,
+      "line": 1146,
       "snippetHash": "227e0adea33c54c9"
     },
     {
       "file": "src/main/modules/agent-control/runtime.ts",
-      "line": 1237,
+      "line": 1300,
       "snippetHash": "fa4339e2ed1b1e86"
     },
     {
       "file": "src/main/modules/agent-control/runtime.ts",
-      "line": 2206,
+      "line": 2269,
       "snippetHash": "62252d7035aaa50f"
     },
     {
       "file": "src/main/modules/agent-control/runtime.ts",
-      "line": 2242,
+      "line": 2305,
       "snippetHash": "ea3630b38f92a868"
     },
     {
@@ -991,6 +991,411 @@
       "file": "src/main/modules/tools/zod-param-derivation.ts",
       "line": 154,
       "snippetHash": "bed6b460b72600f6"
+    },
+    {
+      "file": "src/renderer/components/agent/ChatPanel.tsx",
+      "line": 1269,
+      "snippetHash": "462f6a69fd111f32"
+    },
+    {
+      "file": "src/renderer/components/agent/ChatPanel.tsx",
+      "line": 2253,
+      "snippetHash": "d70ca7a798c4587f"
+    },
+    {
+      "file": "src/renderer/components/agent/ChatPanel.tsx",
+      "line": 3001,
+      "snippetHash": "60cc8f51213c7a5a"
+    },
+    {
+      "file": "src/renderer/components/agent/ChatPanel.tsx",
+      "line": 3125,
+      "snippetHash": "1738fbee900f05d7"
+    },
+    {
+      "file": "src/renderer/components/calendar/SXMonthGridEvent.tsx",
+      "line": 49,
+      "snippetHash": "87b6fd545fab17ce"
+    },
+    {
+      "file": "src/renderer/components/calendar/SXTimeGridEvent.tsx",
+      "line": 50,
+      "snippetHash": "87b6fd545fab17ce"
+    },
+    {
+      "file": "src/renderer/components/calendar/schedule-x-utils.ts",
+      "line": 178,
+      "snippetHash": "80c8005f6fff95d3"
+    },
+    {
+      "file": "src/renderer/components/document/DocumentWidgetCardShell.tsx",
+      "line": 75,
+      "snippetHash": "529a5faf20101c5c"
+    },
+    {
+      "file": "src/renderer/components/document/EditorContextMenu.tsx",
+      "line": 72,
+      "snippetHash": "2b1b93fb27c6d18a"
+    },
+    {
+      "file": "src/renderer/components/document/MarkdownEditor.tsx",
+      "line": 310,
+      "snippetHash": "30322e6424cc8860"
+    },
+    {
+      "file": "src/renderer/components/document/NotePreview.tsx",
+      "line": 317,
+      "snippetHash": "b624cfab804892db"
+    },
+    {
+      "file": "src/renderer/components/document/WidgetEditDrawer.tsx",
+      "line": 94,
+      "snippetHash": "7b867bc9a4a5afeb"
+    },
+    {
+      "file": "src/renderer/components/document/WidgetEditDrawer.tsx",
+      "line": 541,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/renderer/components/document/note-preview-parser.ts",
+      "line": 184,
+      "snippetHash": "1701827bc210d1e0"
+    },
+    {
+      "file": "src/renderer/components/document/widget-sanitizer.ts",
+      "line": 16,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/components/layout/FileTree.tsx",
+      "line": 186,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/renderer/components/layout/FileTree.tsx",
+      "line": 199,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/renderer/components/layout/GlobalSearchPanel.tsx",
+      "line": 294,
+      "snippetHash": "d87a6ad6bb058989"
+    },
+    {
+      "file": "src/renderer/components/layout/GlobalSearchPanel.tsx",
+      "line": 499,
+      "snippetHash": "dde5c1799514e018"
+    },
+    {
+      "file": "src/renderer/components/layout/GlobalSearchPanel.tsx",
+      "line": 555,
+      "snippetHash": "4506f5ade6fbbe3b"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 105,
+      "snippetHash": "bc9ae827a6d90367"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 208,
+      "snippetHash": "5f6183c78b1f8d41"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 280,
+      "snippetHash": "6cd3f335bf14113b"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 306,
+      "snippetHash": "ce667f86ad218f33"
+    },
+    {
+      "file": "src/renderer/components/layout/WorkbenchModeOutlet.tsx",
+      "line": 50,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/components/layout/fileTreeBrowserTabDrop.ts",
+      "line": 70,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/renderer/components/memory/MemoryCreator.tsx",
+      "line": 56,
+      "snippetHash": "3aa34c22b2727b13"
+    },
+    {
+      "file": "src/renderer/components/memory/MemoryListPanel.tsx",
+      "line": 47,
+      "snippetHash": "2fc83ee9fdc2ecfd"
+    },
+    {
+      "file": "src/renderer/components/memory/MemoryStatsCard.tsx",
+      "line": 27,
+      "snippetHash": "0beefa40cdbc7513"
+    },
+    {
+      "file": "src/renderer/components/memory/TriggerManager.tsx",
+      "line": 16,
+      "snippetHash": "3a960f01328b7e02"
+    },
+    {
+      "file": "src/renderer/components/ready/MeetingChat.tsx",
+      "line": 88,
+      "snippetHash": "199eaeccfa9dd0af"
+    },
+    {
+      "file": "src/renderer/components/ready/TaskPanel.tsx",
+      "line": 108,
+      "snippetHash": "1c40726f2e551f03"
+    },
+    {
+      "file": "src/renderer/components/settings/RemoteIMSettingsPanel.tsx",
+      "line": 107,
+      "snippetHash": "9a181a863b51623d"
+    },
+    {
+      "file": "src/renderer/modules/agent/commandHandlers.ts",
+      "line": 215,
+      "snippetHash": "db9b37ba01f2bc38"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 130,
+      "snippetHash": "6f2c2a3d84d09093"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 231,
+      "snippetHash": "966a011736baef1f"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 978,
+      "snippetHash": "bcae4c6e6e586e36"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 1094,
+      "snippetHash": "ecd63ddbbaaf6ff0"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 1163,
+      "snippetHash": "cbb8fd6864566873"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 1285,
+      "snippetHash": "f96a3c9b5db9969c"
+    },
+    {
+      "file": "src/renderer/modules/agent/documentActions.ts",
+      "line": 1315,
+      "snippetHash": "a6b5bfe635de111d"
+    },
+    {
+      "file": "src/renderer/modules/agent/messageComposer.ts",
+      "line": 71,
+      "snippetHash": "989ace113dbe863e"
+    },
+    {
+      "file": "src/renderer/modules/agent/messageComposer.ts",
+      "line": 280,
+      "snippetHash": "dc9c115406c3e9d3"
+    },
+    {
+      "file": "src/renderer/modules/agent/messageComposer.ts",
+      "line": 522,
+      "snippetHash": "902b8fa5ff4f1eec"
+    },
+    {
+      "file": "src/renderer/modules/agent/messageComposer.ts",
+      "line": 629,
+      "snippetHash": "20a204d52ae45c86"
+    },
+    {
+      "file": "src/renderer/modules/agent/runtimeDriver.ts",
+      "line": 593,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/modules/agent/runtimeDriver.ts",
+      "line": 787,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/modules/agent/scopeRunState.ts",
+      "line": 38,
+      "snippetHash": "7975c1a0953421a8"
+    },
+    {
+      "file": "src/renderer/modules/browser/url-utils.ts",
+      "line": 18,
+      "snippetHash": "b500c2470cf18eb9"
+    },
+    {
+      "file": "src/renderer/modules/calendar/useScheduleXCalendar.ts",
+      "line": 148,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/renderer/modules/calendar/useScheduleXCalendar.ts",
+      "line": 222,
+      "snippetHash": "a4d87d0a2b05d3b5"
+    },
+    {
+      "file": "src/renderer/modules/overlay/useRitualOverlay.ts",
+      "line": 83,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/modules/overlay/useRitualOverlay.ts",
+      "line": 95,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/modules/overlay/useRitualOverlay.ts",
+      "line": 159,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/modules/rss/useRSSRuntimeDiagnostics.ts",
+      "line": 34,
+      "snippetHash": "7606599d468c4bbc"
+    },
+    {
+      "file": "src/renderer/modules/rss/useRSSRuntimeDiagnostics.ts",
+      "line": 72,
+      "snippetHash": "44d3e75a1ccdea52"
+    },
+    {
+      "file": "src/renderer/modules/rss/useRSSRuntimeDiagnostics.ts",
+      "line": 98,
+      "snippetHash": "a382e069724d2638"
+    },
+    {
+      "file": "src/renderer/pages/Settings.tsx",
+      "line": 396,
+      "snippetHash": "62426a2dfa778325"
+    },
+    {
+      "file": "src/renderer/pages/Settings.tsx",
+      "line": 1615,
+      "snippetHash": "3dcadc0202090355"
+    },
+    {
+      "file": "src/renderer/pages/Settings.tsx",
+      "line": 1869,
+      "snippetHash": "ee8949a829f55a1d"
+    },
+    {
+      "file": "src/renderer/pages/Settings.tsx",
+      "line": 1890,
+      "snippetHash": "ee8949a829f55a1d"
+    },
+    {
+      "file": "src/renderer/pages/WorkbenchMode.tsx",
+      "line": 107,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/pages/modes/CalendarMode.tsx",
+      "line": 83,
+      "snippetHash": "de3ba40ba4b3dd13"
+    },
+    {
+      "file": "src/renderer/pages/modes/RSSMode.tsx",
+      "line": 277,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/pages/modes/RSSMode.tsx",
+      "line": 302,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/pages/modes/RSSMode.tsx",
+      "line": 500,
+      "snippetHash": "927715d4624d3768"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 173,
+      "snippetHash": "f842d9aded4b7386"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 322,
+      "snippetHash": "2b3928c547333ef5"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 601,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 659,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 690,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/stores/useAgent.ts",
+      "line": 735,
+      "snippetHash": "c898cf8e6cb74ab3"
+    },
+    {
+      "file": "src/renderer/stores/useSettings.ts",
+      "line": 593,
+      "snippetHash": "9ae463d90d028e86"
+    },
+    {
+      "file": "src/renderer/stores/useWorkspace.ts",
+      "line": 295,
+      "snippetHash": "62252d7035aaa50f"
+    },
+    {
+      "file": "src/renderer/stores/useWorkspace.ts",
+      "line": 497,
+      "snippetHash": "57569c112d9a6b31"
+    },
+    {
+      "file": "src/renderer/utils/dragDrop.ts",
+      "line": 60,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/renderer/utils/storage.ts",
+      "line": 11,
+      "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/renderer/utils/storage.ts",
+      "line": 21,
+      "snippetHash": "41f26cbba1ee993f"
+    },
+    {
+      "file": "src/renderer/utils/storage.ts",
+      "line": 31,
+      "snippetHash": "41f26cbba1ee993f"
+    },
+    {
+      "file": "src/renderer/utils/storage.ts",
+      "line": 41,
+      "snippetHash": "62252d7035aaa50f"
+    },
+    {
+      "file": "src/renderer/utils/storage.ts",
+      "line": 49,
+      "snippetHash": "997d469a02b63559"
     }
   ]
 }

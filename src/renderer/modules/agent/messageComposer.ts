@@ -5,6 +5,24 @@ import { refreshDocumentWidgetTargetSnapshot } from './widget-target-attachment'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
+export interface AttachmentInputFailure {
+  id: string
+  name: string
+  path: string
+  reason: string
+}
+
+export interface ComposedAgentInputDiagnostics {
+  inputIncludedCount: number
+  inputFailedCount: number
+  inputFailures: AttachmentInputFailure[]
+}
+
+export interface ComposedAgentInputResult {
+  message: string | MultimodalBlock[]
+  diagnostics: ComposedAgentInputDiagnostics
+}
+
 function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: ChatAttachment): { kept: boolean; reason: string } {
   const normalized = content.trim()
   if (!normalized) return { kept: false, reason: 'empty_content' }
@@ -242,10 +260,12 @@ export async function persistMessage(
   role: string,
   content: string,
   meta?: Record<string, unknown>,
-) {
-  if (typeof window === 'undefined' || !window.electronAPI?.chat) return
+): Promise<{ success: boolean; error?: string }> {
+  if (typeof window === 'undefined' || !window.electronAPI?.chat) {
+    return { success: false, error: 'chat ipc unavailable' }
+  }
   try {
-    await window.electronAPI.chat.saveMessage({
+    const result = await window.electronAPI.chat.saveMessage({
       id,
       conversationId,
       role,
@@ -253,8 +273,12 @@ export async function persistMessage(
       timestamp: new Date().toISOString(),
       meta,
     })
+    if (!result?.success) {
+      return { success: false, error: result?.error || 'message persist failed' }
+    }
+    return { success: true }
   } catch {
-    /* ignore persistence errors */
+    return { success: false, error: 'message persist failed' }
   }
 }
 
@@ -296,9 +320,9 @@ export async function persistAssistantMessage(
   content: string,
   scope: ConversationScope | null,
   extraMeta?: Record<string, unknown>,
-): Promise<void> {
-  if (!content.trim()) return
-  await persistMessage(scopeId, responseMessageId, 'assistant', content, {
+): Promise<{ success: boolean; error?: string }> {
+  if (!content.trim()) return { success: true }
+  return persistMessage(scopeId, responseMessageId, 'assistant', content, {
     sourceKind: scope?.sourceKind || 'local',
     sourceId: scope?.sourceId || 'app',
     threadKey: scope?.threadKey || scopeId,
@@ -318,8 +342,33 @@ export async function buildComposedAgentInput(params: {
   attachments: ChatAttachment[]
   filePool: ChatAttachment[]
 }): Promise<string | MultimodalBlock[]> {
+  return (await buildComposedAgentInputWithDiagnostics(params)).message
+}
+
+export async function buildComposedAgentInputWithDiagnostics(params: {
+  content: string
+  attachments: ChatAttachment[]
+  filePool: ChatAttachment[]
+}): Promise<ComposedAgentInputResult> {
   const { content, attachments, filePool } = params
   const effectiveAttachments = filterAttachmentsForComposedAgentInput(content, attachments)
+  const diagnostics: ComposedAgentInputDiagnostics = {
+    inputIncludedCount: 0,
+    inputFailedCount: 0,
+    inputFailures: [],
+  }
+  const markIncluded = () => {
+    diagnostics.inputIncludedCount += 1
+  }
+  const markFailed = (att: ChatAttachment, reason: string) => {
+    diagnostics.inputFailedCount += 1
+    diagnostics.inputFailures.push({
+      id: att.id,
+      name: att.name,
+      path: att.path,
+      reason,
+    })
+  }
   const activeDocContext = buildActiveDocumentContext()
   const environmentContext = buildEnvironmentContext()
   const activeWorkbenchContext = activeDocContext || environmentContext
@@ -327,10 +376,12 @@ export async function buildComposedAgentInput(params: {
   let finalMessage: string | MultimodalBlock[] = baseUserMessage
 
   if (typeof window === 'undefined' || !window.electronAPI) {
-    return finalMessage
+    return { message: finalMessage, diagnostics }
   }
 
-  const aiConfigRes = await window.electronAPI.settings.getAIConfig().catch(() => ({ success: false } as const))
+  const aiConfigRes = window.electronAPI.settings?.getAIConfig
+    ? await window.electronAPI.settings.getAIConfig().catch(() => ({ success: false } as const))
+    : ({ success: false } as const)
   const aiConfig = aiConfigRes.success ? aiConfigRes.data : null
   const normalizedBaseUrl = aiConfig?.baseUrl?.replace(/\/+$/, '') || ''
   const isKimiCoding = !!aiConfig && normalizedBaseUrl.includes('api.kimi.com/coding')
@@ -351,6 +402,7 @@ export async function buildComposedAgentInput(params: {
             '如果需要执行这个 skill，请优先直接调用当前工具列表里真实存在的 `skill_*` 工具，不要把 `/skill ...` 当作普通文本回复。',
           ].filter(Boolean)
           blocks.push({ type: 'text', text: `\n\n${skillLines.join('\n')}` })
+          markIncluded()
           continue
         }
 
@@ -367,6 +419,7 @@ export async function buildComposedAgentInput(params: {
               selection: att.selection,
             })}`,
           })
+          markIncluded()
           continue
         }
 
@@ -384,6 +437,7 @@ export async function buildComposedAgentInput(params: {
               widgetMode: att.widgetMode,
             })}`,
           })
+          markIncluded()
           continue
         }
 
@@ -395,6 +449,7 @@ export async function buildComposedAgentInput(params: {
               path: att.path,
             })}`,
           })
+          markIncluded()
           continue
         }
 
@@ -431,6 +486,7 @@ export async function buildComposedAgentInput(params: {
               excerpt: snapshot.excerpt,
             })}`,
           })
+          markIncluded()
           continue
         }
 
@@ -439,6 +495,7 @@ export async function buildComposedAgentInput(params: {
             type: 'text',
             text: `\n\n--- 附件: ${att.name} ---\n[当前模型接口暂不支持原生视频输入，已自动降级为文件描述]\n本地视频路径: ${att.path}`,
           })
+          markIncluded()
           continue
         }
 
@@ -446,17 +503,24 @@ export async function buildComposedAgentInput(params: {
         if (fileResult.success && fileResult.data) {
           if (fileResult.data.type === 'image' && fileResult.data.base64) {
             blocks.push({ type: 'image', base64: fileResult.data.base64, mimeType: fileResult.data.mimeType || 'image/png' })
+            markIncluded()
           } else if (fileResult.data.type === 'video' && fileResult.data.base64) {
             blocks.push({ type: 'video', base64: fileResult.data.base64, mimeType: fileResult.data.mimeType || 'video/mp4' })
+            markIncluded()
           } else if (fileResult.data.type === 'text') {
             blocks.push({
               type: 'text',
               text: `\n\n--- 附件: ${att.name} ---\n- 路径: ${att.path}\n${fileResult.data.content?.slice(0, 10000) || ''}`,
             })
+            markIncluded()
+          } else {
+            markFailed(att, 'unsupported_file_result')
           }
+        } else {
+          markFailed(att, fileResult.error || 'read_file_failed')
         }
-      } catch {
-        /* skip failed files */
+      } catch (error) {
+        markFailed(att, error instanceof Error ? error.message : String(error))
       }
     }
 
@@ -568,5 +632,5 @@ export async function buildComposedAgentInput(params: {
     }
   }
 
-  return finalMessage
+  return { message: finalMessage, diagnostics }
 }

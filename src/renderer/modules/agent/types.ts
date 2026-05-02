@@ -308,6 +308,8 @@ export interface SoftErrorInfo {
   message: string
   errorKind: string
   toolName: string | null
+  friendlyMessage?: string
+  technicalDetails?: string | null
   receivedAt: string
 }
 

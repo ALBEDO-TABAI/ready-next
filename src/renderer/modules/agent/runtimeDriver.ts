@@ -5,6 +5,8 @@ import { cancelAllPendingWidgetWrites } from './documentActions'
 import type { Agent, AgentMessage, ConversationScope, ScopeRunState } from './types'
 import { useMode } from '../../stores/useMode'
 import { extractSkillCommandFromText, runSkillCommand } from './commandHandlers'
+import { mapBackendErrorToFriendly } from './error-message-mapping'
+import { emitRendererAgentMetric } from './rendererMetrics'
 
 interface AgentStoreLike {
   getState: () => any
@@ -153,7 +155,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         ),
       }))
     }
-    await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
+    const result = await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
+    if (!result.success) {
+      emitRendererAgentMetric('renderer_assistant_persistence_failed', {
+        scopeId,
+        responseMessageId: runState.responseMessageId,
+        error: result.error || 'assistant persist failed',
+      })
+    }
   }
 
   function sealResponseSegment(scopeId: string, runState: ScopeRunState | null): void {
@@ -174,6 +183,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       }))
     }
     void persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, segmentMeta)
+      .then((result) => {
+        if (result.success) return
+        emitRendererAgentMetric('renderer_assistant_persistence_failed', {
+          scopeId,
+          responseMessageId: runState.responseMessageId,
+          error: result.error || 'assistant persist failed',
+        })
+      })
   }
 
   async function maybeAutoExecuteAssistantSkillCommand(scopeId: string, runState: ScopeRunState | null): Promise<void> {
@@ -354,6 +371,15 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const runState = state.scopeRunStates[scopeId] || null
 
       if (recoverable) {
+        const friendly = mapBackendErrorToFriendly({
+          error: data.error,
+          errorKind: data.errorKind || 'unknown',
+        })
+        emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+          scopeId,
+          agent: data.agent,
+          errorKind: data.errorKind || 'unknown',
+        })
         // Only mutate the softError slot — do NOT touch phase, error,
         // blockedReason, toolTraceStatus, and do NOT persist an assistant
         // message. The turn continues; the capsule is purely a renderer hint.
@@ -402,6 +428,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             message: data.error,
             errorKind: data.errorKind || 'unknown',
             toolName: data.toolName || null,
+            friendlyMessage: friendly.friendlyMessage,
+            technicalDetails: friendly.technicalDetails || null,
             receivedAt: new Date().toISOString(),
           },
         }))
@@ -410,11 +438,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
       // Terminal path — unchanged behavior, plus clear softError so a stale
       // capsule does not linger behind a newer system-message error.
+      const friendly = mapBackendErrorToFriendly({
+        error: data.error,
+        errorKind: data.errorKind || 'unknown',
+      })
+      emitRendererAgentMetric('renderer_friendly_error_surfaced', {
+        scopeId,
+        agent: data.agent,
+        errorKind: data.errorKind || 'unknown',
+      })
       if (state.currentScopeId === scopeId) {
         state.addMessage({
           id: `error-${Date.now()}`,
           agent: data.agent,
-          content: `Agent 错误: ${data.error}`,
+          content: friendly.friendlyMessage,
           type: 'system',
           timestamp: new Date(),
         })
@@ -429,7 +466,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         toolTrace: previous?.toolTrace || [],
         startedAt: previous?.startedAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        latestText: previous?.latestText || data.error,
+        latestText: previous?.latestText || friendly.friendlyMessage,
         module: previous?.module || null,
         intent: previous?.intent || null,
         executionKind: previous?.executionKind || null,
@@ -440,7 +477,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         contextBudget: previous?.contextBudget || null,
         ownerResourceId: previous?.ownerResourceId || null,
         lastEvidenceAt: previous?.lastEvidenceAt || null,
-        blockedReason: data.error,
+        blockedReason: friendly.friendlyMessage,
         controllerId: previous?.controllerId || null,
         ownerTabId: previous?.ownerTabId || null,
         checkpointExpiresAt: null,
@@ -461,7 +498,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         recentArtifacts: previous?.recentArtifacts || [],
         taskContinuation: previous?.taskContinuation || null,
         memoryCapture: previous?.memoryCapture || null,
-        error: data.error,
+        error: friendly.friendlyMessage,
         softError: null,
       }))
       void persistAssistantMessageForRun(scopeId, runState)
