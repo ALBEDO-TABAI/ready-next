@@ -600,6 +600,99 @@ test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action
   }
 })
 
+test('blocked VEA score-batch resume dispatches ai_analyze before model can burn budget', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let modelCalls = 0
+  let executedBatches = 0
+  let dispatchedToolNames: string[] = []
+  let dispatchedInput: Record<string, unknown> | null = null
+  const sceneScoresPath = '/tmp/vea-force/output/scene_scores.json'
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
+  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+
+  try {
+    const blockedSnapshot: SkillTaskSupervisorSnapshot = {
+      ...makeRecoverableSnapshot(),
+      action: 'video_expert_ai_analyze',
+      status: 'blocked',
+      hasLiveWork: false,
+      hasRecentProgress: false,
+      sceneScoresPath,
+      pauseReason: 'budget_exhausted',
+      resumePayload: {
+        taskRunId: 'str-vea-force',
+        detachedTaskId: 'dst-vea-force',
+        outputDir: '/tmp/vea-force/output',
+        runStatePath: '/tmp/vea-force/output/run_state.json',
+        actionInput: { sceneScoresPath, outputDir: '/tmp/vea-force/output' },
+        originalInput: { sceneScoresPath, outputDir: '/tmp/vea-force/output' },
+      },
+    }
+    const { request } = createRequest({
+      userText: '继续评分',
+      host: {
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => blockedSnapshot,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'VEA'],
+        },
+        requestToolLoopResponse: async () => {
+          modelCalls += 1
+          return {
+            text: 'model should only be reached after forced ai_analyze dispatch',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+        executeToolBatch: async (params: { toolCalls: Array<{ name: string; input?: Record<string, unknown> }> }) => {
+          executedBatches += 1
+          dispatchedToolNames = params.toolCalls.map((toolCall) => toolCall.name)
+          dispatchedInput = params.toolCalls[0]?.input || null
+          return {
+            results: params.toolCalls.map((toolCall) => ({
+              id: 'force-ai-result-1',
+              name: toolCall.name,
+              input: toolCall.input || {},
+              result: { text: 'forced ai_analyze ran' },
+            })),
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    await engine.execute(request)
+
+    assert.equal(executedBatches >= 1, true, 'expected executeToolBatch to run at least once')
+    assert.ok(
+      dispatchedToolNames.includes('skill_video_expert_ai_analyze'),
+      `expected synthesized batch to include skill_video_expert_ai_analyze, got: ${dispatchedToolNames.join(',')}`,
+    )
+    assert.equal(dispatchedInput?.sceneScoresPath, sceneScoresPath)
+    assert.equal(modelCalls <= 1, true, `expected at most one model call after forced dispatch, got ${modelCalls}`)
+    const forceDispatched = metrics.filter((event) => event.metric === 'turn_force_tool_dispatched')
+    assert.equal(forceDispatched.length, 1, `expected exactly one force-tool dispatch metric, got ${forceDispatched.length}`)
+    assert.equal(forceDispatched[0].toolName, 'skill_video_expert_ai_analyze')
+  } finally {
+    restoreAiAnalyzeToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no chain-resume in same turn)', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []

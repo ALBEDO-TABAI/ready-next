@@ -345,6 +345,7 @@ const FORCE_TOOL_LIVENESS_MODES: ReadonlyArray<TurnFrameMode> = [
 const FORCE_TOOL_LIVENESS_STATES: ReadonlyArray<TurnFrameLiveness> = [
   'recoverable_paused',
   'ready_to_resume',
+  'blocked',
 ]
 
 /**
@@ -352,9 +353,11 @@ const FORCE_TOOL_LIVENESS_STATES: ReadonlyArray<TurnFrameLiveness> = [
  *
  * `force_tool` — frame is a skill resume/repair/start with a recoverable
  *   typed action that we want the next iteration to invoke deterministically
- *   instead of letting the model decide. `recent_progress` and `blocked`
- *   are intentionally excluded: the former may already be making progress
- *   in the loop, the latter often needs user input first.
+ *   instead of letting the model decide. `recent_progress` is intentionally
+ *   excluded because work may already be progressing in the loop. `blocked`
+ *   is forceable only after the normal FrameAction preflight proves the
+ *   typed action has enough durable input; missing input downgrades to
+ *   checkpoint before dispatch.
  *
  * `checkpoint` — budget exhausted with a still-live background worker, OR
  *   skill terminal `failed`. Both cases mean "stop, return to user."

@@ -174,9 +174,48 @@ test('selectSteeringMode: failed liveness with skill present → checkpoint', ()
   assert.equal(selectSteeringMode(frame), 'checkpoint')
 })
 
-test('selectSteeringMode: blocked liveness → ask_model (user input may be needed)', () => {
-  const frame = makeFrame({ liveness: 'blocked' })
-  assert.equal(selectSteeringMode(frame), 'ask_model')
+test('selectSteeringMode: blocked liveness + complete typed resume input → force_tool', () => {
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    toolName: 'skill_video_expert_ai_analyze',
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    liveness: 'blocked',
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      runContract: contract,
+    },
+  })
+  assert.equal(selectSteeringMode(frame), 'force_tool')
+})
+
+test('buildTurnFrameSteering: blocked VEA score-batch resume force-dispatches ai_analyze', () => {
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    toolName: 'skill_video_expert_ai_analyze',
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    liveness: 'blocked',
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      runContract: contract,
+    },
+  })
+
+  const steering = buildTurnFrameSteering(frame)
+
+  assert.equal(steering.mode, 'force_tool')
+  assert.equal(steering.requiredToolName, 'skill_video_expert_ai_analyze')
+  assert.equal(steering.action?.mode, 'force_tool')
+  assert.equal(steering.action?.toolName, 'skill_video_expert_ai_analyze')
+  assert.equal(
+    (steering.action?.input as Record<string, unknown>)?.sceneScoresPath,
+    '/tmp/vea-output/scene_scores.json',
+  )
 })
 
 test('selectSteeringMode: recent_progress liveness → ask_model (work may already be progressing)', () => {
@@ -296,7 +335,6 @@ test('selectSteeringMode: failed liveness short-circuits even with typed action 
 
 const NON_FORCE_LIVENESS_STATES: TurnFrameLiveness[] = [
   'unknown',
-  'blocked',
   'recent_progress',
   'running_process',
   'done',
