@@ -362,6 +362,7 @@ test('budget_paused child resumes through TurnEngine', async () => {
   const engine = new TurnEngine()
   let resumeChildRunId: string | null = null
   let modelCalls = 0
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
   const childRunId = 'vbudget01'
   const { request, events } = createRequest({
     userText: '继续',
@@ -384,6 +385,10 @@ test('budget_paused child resumes through TurnEngine', async () => {
           runStatePath: '/tmp/vea-force/output/run_state.json',
         }
       },
+      waitForSkillChildCloseEvent: async (id: string, timeoutMs: number) => {
+        waits.push({ childRunId: id, timeoutMs })
+        return null
+      },
       requestToolLoopResponse: async () => {
         modelCalls += 1
         return { text: 'should not call model', toolCalls: [], stopReason: 'stop' }
@@ -395,13 +400,16 @@ test('budget_paused child resumes through TurnEngine', async () => {
 
   assert.equal(resumeChildRunId, childRunId)
   assert.equal(modelCalls, 0)
-  assert.equal(result.status, 'done')
+  assert.deepEqual(waits, [{ childRunId, timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
   assert.equal(events.some((event) => event.kind === 'output' && String(event.chunk).includes(childRunId)), true)
 })
 
 test('recoverable_paused child resumes through TurnEngine', async () => {
   const engine = new TurnEngine()
   let resumeChildRunId: string | null = null
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
   const childRunId = 'vrecover1'
   const { request } = createRequest({
     userText: '继续',
@@ -424,13 +432,19 @@ test('recoverable_paused child resumes through TurnEngine', async () => {
           runStatePath: '/tmp/vea-force/output/run_state.json',
         }
       },
+      waitForSkillChildCloseEvent: async (id: string, timeoutMs: number) => {
+        waits.push({ childRunId: id, timeoutMs })
+        return null
+      },
     },
   })
 
   const result = await engine.execute(request)
 
   assert.equal(resumeChildRunId, childRunId)
-  assert.equal(result.status, 'done')
+  assert.deepEqual(waits, [{ childRunId, timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
 })
 
 test('blocked child is not directly resumable through TurnEngine', async () => {
@@ -457,7 +471,8 @@ test('blocked child is not directly resumable through TurnEngine', async () => {
   const result = await engine.execute(request)
 
   assert.equal(resumeCalls, 0)
-  assert.equal(result.status, 'done')
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'blocked_external')
   assert.equal(events.some((event) =>
     event.kind === 'output' && String(event.chunk).includes('不能直接继续')), true)
 })
@@ -1148,6 +1163,7 @@ describe('child-owned VEA must not be parent-forced', () => {
           skillTaskSupervisor: {
             inspectLatestSkillTask: () => childOwnedSnapshot,
           },
+          waitForSkillChildCloseEvent: async () => null,
           requestToolLoopResponse: async () => {
             modelCalls += 1
             return {

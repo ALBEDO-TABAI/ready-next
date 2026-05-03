@@ -98,6 +98,48 @@ export function detectAllowedPreferredMismatch(
   return preferredToolNames.some((name) => !allowedSet.has(name))
 }
 
+function areStringArraysEqual(
+  left: ReadonlyArray<string> | null | undefined,
+  right: ReadonlyArray<string> | null | undefined,
+): boolean {
+  const a = left || []
+  const b = right || []
+  if (a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
+
+function isSkillSurfaceToolName(name: string): boolean {
+  return name.startsWith('skill_') || name === 'system_run_embedded_python'
+}
+
+function reconcileAllowedToolNamesWithPreferredSkillTools(
+  baseAllowedToolNames: ReadonlyArray<string>,
+  preferredSkillToolNames: ReadonlyArray<string>,
+): string[] {
+  const preferred = Array.from(new Set(preferredSkillToolNames))
+  const preferredSet = new Set(preferred)
+  const out: string[] = []
+  const seen = new Set<string>()
+  const append = (name: string) => {
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    out.push(name)
+  }
+  for (const name of baseAllowedToolNames) {
+    if (isSkillSurfaceToolName(name) && !preferredSet.has(name)) continue
+    append(name)
+  }
+  for (const name of preferred) {
+    append(name)
+  }
+  return out
+}
+
+function shouldAdoptTurnFramePreferredSkillTools(frame: TurnFrame | null): boolean {
+  if (!frame?.skill) return false
+  return frame.steering.preferredToolNames.length > 0 || frame.skill.source !== 'reference_hint'
+}
+
 function matchesSkillProgressFollowupIntent(text: string): boolean {
   const normalized = String(text || '').trim()
   if (!normalized) return false
@@ -190,6 +232,7 @@ import {
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
+  collectAllowedToolNames,
   type ToolPolicy,
 } from './execution-tool-config'
 import { buildToolDispatchDecision } from './execution-tool-policy'
@@ -1604,8 +1647,8 @@ export class TurnEngine {
           name: turnFrame.skill.skillName || turnFrame.skill.skillId,
         }
       }
-      if (turnFrame.steering.preferredToolNames.length > 0) {
-        preferredSkillToolNames = turnFrame.steering.preferredToolNames
+      if (shouldAdoptTurnFramePreferredSkillTools(turnFrame)) {
+        preferredSkillToolNames = [...turnFrame.steering.preferredToolNames]
       }
       isLongSkillResumeTurn = (
         turnFrame.mode === 'skill_resume'
@@ -2193,8 +2236,52 @@ export class TurnEngine {
       }
       state.effectiveRunBudget = alignedRunBudget
       state.degradationReason = taskExecutionRoute.degradationReason || null
-      const routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
-      // Stage 7 — capture the allowed-tool surface and long-skill flag once so
+      let routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
+      const refreshToolPolicyFromTurnFrame = (reason: string) => {
+        if (!turnFrame?.skill) return
+        const nextPreferredSkillToolNames = shouldAdoptTurnFramePreferredSkillTools(turnFrame)
+          ? [...turnFrame.steering.preferredToolNames]
+          : [...(preferredSkillToolNames || [])]
+        const nextToolPolicy: ToolPolicy = {
+          ...toolPolicy,
+          preferredSkillToolNames: nextPreferredSkillToolNames,
+        }
+        const policyAllowedToolNames = reconcileAllowedToolNamesWithPreferredSkillTools(
+          collectAllowedToolNames(nextToolPolicy),
+          nextPreferredSkillToolNames,
+        )
+        const domainAllowedToolNames = Array.isArray(selectedDomainPrepareResult?.allowedToolNames)
+          ? selectedDomainPrepareResult.allowedToolNames
+          : null
+        const nextAllowedToolNames = domainAllowedToolNames
+          ? reconcileAllowedToolNamesWithPreferredSkillTools(domainAllowedToolNames, nextPreferredSkillToolNames)
+          : policyAllowedToolNames
+        const preferredChanged = !areStringArraysEqual(preferredSkillToolNames, nextPreferredSkillToolNames)
+        const allowedChanged = !areStringArraysEqual(routedAllowedToolNames, nextAllowedToolNames)
+        if (!preferredChanged && !allowedChanged) return
+        preferredSkillToolNames = nextPreferredSkillToolNames
+        toolPolicy = nextToolPolicy
+        reconciledRunCapabilities = {
+          ...reconciledRunCapabilities,
+          toolPolicy,
+          allowedToolNames: nextAllowedToolNames,
+        }
+        routedAllowedToolNames = nextAllowedToolNames
+        turnSummaryAllowedToolNames = [...routedAllowedToolNames]
+        logAgentMetric('turn_frame_tool_policy_refreshed', {
+          sessionId: request.sessionId,
+          reason,
+          mode: turnFrame.mode,
+          skillId: turnFrame.skill.skillId,
+          liveness: turnFrame.liveness,
+          preferredToolNames: preferredSkillToolNames,
+          allowedToolNames: routedAllowedToolNames,
+          steeringMode: turnFrame.steering.mode,
+          requiredToolName: turnFrame.steering.requiredToolName,
+        })
+      }
+      refreshToolPolicyFromTurnFrame('initial')
+      // Stage 7 — capture the allowed-tool surface and long-skill flag so
       // `finish()` can include them in the per-turn `turn_frame_summary` log.
       turnSummaryAllowedToolNames = Array.isArray(routedAllowedToolNames)
         ? [...routedAllowedToolNames]
@@ -3521,6 +3608,7 @@ export class TurnEngine {
             turnFrame = applySteeringToTurnFrame(turnFrame, {
               recentForceToolDispatched,
             })
+            refreshToolPolicyFromTurnFrame('frame_patch')
           }
           // The recent-force flag only suppresses the IMMEDIATELY-following
           // iteration's force_tool re-issue; once we've consumed it for one

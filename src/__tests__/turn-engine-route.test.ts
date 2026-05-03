@@ -2003,6 +2003,188 @@ test('TurnEngine arms VEA continuation from prior run_state path when user says 
   }
 })
 
+test('TurnEngine refreshes skill tool policy after run_state patch changes VEA stage into ai_analyze action', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  const outputDir = '/tmp/ready/output'
+  const runStatePath = `${outputDir}/run_state.json`
+  const sceneScoresPath = `${outputDir}/scene_scores.json`
+  const requestedModelAllowedToolNames: string[][] = []
+  const executedToolNames: string[] = []
+  let toolLoopRequests = 0
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  const restorePipelineToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_pipeline')
+  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+  try {
+    const { request } = createRequest({
+      userText: '继续',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
+          rememberExplicitReferenceSkillHint: () => true,
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer'],
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            status: 'blocked',
+            liveness: 'blocked',
+            hasLiveWork: false,
+            hasRecentProgress: false,
+            closeAllowed: false,
+            action: 'video_expert_pipeline',
+            outputDir,
+            runStatePath,
+            sceneScoresPath,
+            deliveryReportPath: null,
+            progress: {
+              currentStage: 'score_batches',
+              totalScenes: 97,
+              completedScenes: 0,
+              coverageRatio: 0,
+              updatedAt: '2026-05-03T07:24:17.000Z',
+            },
+            resumePayload: {
+              taskRunId: 'str-loop',
+              detachedTaskId: 'dst-loop',
+              outputDir,
+              runStatePath,
+            },
+          }),
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          toolLoopRequests += 1
+          requestedModelAllowedToolNames.push([...(params.allowedToolNames || [])])
+          if (toolLoopRequests === 1) {
+            return {
+              text: '先检查 run_state',
+              toolCalls: [{
+                id: 'inspect-1',
+                name: 'skill_inspect_run_state',
+                input: { runStatePath },
+              }],
+              stopReason: 'tool_calls',
+            }
+          }
+          return {
+            text: '恢复完成',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+        executeToolBatch: async ({ toolCalls }: { toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }) => {
+          executedToolNames.push(...toolCalls.map((call) => call.name))
+          if (toolCalls.some((call) => call.name === 'skill_inspect_run_state')) {
+            return {
+              results: toolCalls.map((call) => ({
+                id: call.id,
+                name: call.name,
+                input: call.input,
+                result: {
+                  text: 'score_batches: 0/97',
+                  framePatch: {
+                    activeArtifactRoots: [outputDir],
+                    livenessHint: 'blocked',
+                    skillStatusUpdates: {
+                      status: 'blocked',
+                      action: 'score_batches',
+                      outputDir,
+                      runStatePath,
+                      artifactPaths: {
+                        sceneScoresPath,
+                        deliveryReportPath: null,
+                      },
+                      staleBlockerReason: null,
+                    },
+                    runContract: {
+                      skillId: 'video-expert-analyzer',
+                      action: 'score_batches',
+                      outputDir,
+                      runStatePath,
+                      artifactPaths: {
+                        sceneScoresPath,
+                        deliveryReportPath: null,
+                      },
+                      status: 'blocked',
+                      liveness: 'blocked',
+                      progress: {
+                        stage: 'score_batches',
+                        totalUnits: 97,
+                        completedUnits: 0,
+                        coverageRatio: 0,
+                        fingerprint: 'score_batches:0/97',
+                      },
+                    },
+                  },
+                },
+              })),
+              budgetLimited: false,
+              recoveryHistory: [],
+            }
+          }
+          return {
+            results: toolCalls.map((call) => ({
+              id: call.id,
+              name: call.name,
+              input: call.input,
+              result: { text: 'done' },
+            })),
+            budgetLimited: false,
+            recoveryHistory: [],
+          }
+        },
+      },
+    })
+
+    await engine.execute(request)
+
+    assert.ok(
+      executedToolNames.includes('skill_video_expert_ai_analyze'),
+      `expected refreshed TurnFrame to force ai_analyze after inspect, executed: ${executedToolNames.join(',')}; model allowed snapshots: ${JSON.stringify(requestedModelAllowedToolNames)}`,
+    )
+    assert.equal(
+      executedToolNames.includes('skill_video_expert_pipeline'),
+      false,
+      `pipeline must not remain executable after score_batches maps to ai_analyze; executed: ${executedToolNames.join(',')}`,
+    )
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_tool_policy_refreshed'
+      && Array.isArray(event.preferredToolNames)
+      && event.preferredToolNames.includes('skill_video_expert_ai_analyze')
+      && Array.isArray(event.allowedToolNames)
+      && event.allowedToolNames.includes('skill_video_expert_ai_analyze')
+      && !event.allowedToolNames.includes('skill_video_expert_pipeline'),
+    ))
+  } finally {
+    restoreAiAnalyzeToolDefinition()
+    restorePipelineToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('TurnEngine routes active skill progress-followup turns through the skill loop', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
