@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { registerHooks } from 'node:module'
+import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skill-agent-handoff'
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -77,10 +79,31 @@ interface ChildRunSummary {
   launchStatus: string
   waitKind: string
   eventLogPath: string
+  outputDir: string | null
+  runStatePath: string | null
+  sceneScoresPath: string | null
   closeStatus: string | null
   terminalReason: string | null
   errorMessage: string | null
-  handoffsFulfilled?: string[]
+  pendingHandoffs?: string[]
+  handoffCompletions?: HandoffCompletionSummary[]
+}
+
+interface HandoffTask {
+  name: string
+  taskPath: string
+  outputPath: string
+  receiptPath: string
+  validationErrorsPath?: string
+}
+
+interface HandoffCompletionSummary {
+  name: string
+  taskPath: string
+  outputPath: string
+  bytesWritten: number
+  model: string
+  repairedValidation?: boolean
 }
 
 interface ArtifactSummary {
@@ -141,7 +164,7 @@ function parseArgs(argv: string[]): Options {
     preferredModel: stringValue(autoScoring?.preferred_model) || 'xiaomi/mimo-v2.5',
     json: false,
     cleanBeforeFresh: false,
-    maxRounds: 3,
+    maxRounds: 8,
     waitMs: 45 * 60_000,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -412,238 +435,374 @@ function inspectHostBatches(outputDir: string): ArtifactSummary['hostBatches'] {
   return { total: batches.length, completed, blocked, pending, inProgress }
 }
 
-function sceneNumber(scene: unknown): number {
-  return numberValue((objectValue(scene) || {}).scene_number) || 0
-}
-
-function sceneLabel(scene: unknown): string {
-  return `Scene ${String(sceneNumber(scene)).padStart(3, '0')}`
-}
-
-function sceneText(scene: unknown): string {
-  const rec = objectValue(scene) || {}
-  const storyboard = objectValue(rec.storyboard) || {}
-  return [
-    sceneLabel(scene),
-    stringValue(rec.timestamp_range || storyboard.timestamp),
-    stringValue(rec.description || rec.visual_summary || storyboard.visual_description),
-    stringValue(storyboard.voiceover),
-    stringValue(storyboard.onscreen_text),
-  ].filter(Boolean).join('；')
-}
-
-function pickScenes(scenes: unknown[], start: number, count = 4): unknown[] {
-  if (scenes.length === 0) return []
-  const out: unknown[] = []
-  const step = Math.max(1, Math.floor(scenes.length / Math.max(count, 1)))
-  for (let index = 0; index < count; index += 1) {
-    out.push(scenes[(start + index * step) % scenes.length])
-  }
-  return out
-}
-
-function evidenceSentence(scenes: unknown[], focus: string): string {
-  const labels = scenes.map(sceneLabel).join('、')
-  const details = scenes.map(sceneText).join(' / ')
-  return `${focus}的证据集中在 ${labels}：${details}。`
-}
-
-function longSubsection(title: string, focus: string, scenes: unknown[], moduleClaim: string): string {
-  return [
-    `${evidenceSentence(scenes, focus)}这些镜头不是单纯的素材堆叠，而是在把办公空间、人物发言、设计物件和品牌标识连接成一条可感知的说服链。${moduleClaim}`,
-    `从修辞功能看，${title}承担的是把“Notion 是一个工具”转译成“Notion 背后有一套工作方式和组织气质”。${scenes.map(sceneLabel).join('、')}分别提供空间、人物和物件三种证据：空间让品牌承诺有落点，人物让承诺显得可信，物件则把抽象价值压缩成可被记住的符号。`,
-    `因此这一层的判断不能只停在“画面好看”。它更像一次持续的意义搬运：观众先看到可居住、可协作、可被设计细节照顾的办公室，再把这种秩序感和温度感回填到品牌印象里。${scenes.map(sceneLabel).slice(0, 3).join('、')}共同说明，本片的商业目标不是硬推功能，而是把品牌放进一种值得向往的工作生活方式中。`,
-  ].join('\n\n')
-}
-
-function moduleBlock(title: string, subsections: Array<{ title: string; focus: string }>, scenes: unknown[], claim: string): string {
-  const lines = [`## ${title}`, '', `${evidenceSentence(pickScenes(scenes, 0, 3), title)}${claim}本模块把这些证据连成“数据 → 模式 → 修辞功能 → 品牌推导”的链条，避免只复述分镜。`]
-  if (subsections.length === 0) {
-    lines.push(
-      '',
-      longSubsection(title, '视觉、旁白、字幕、节奏多轨关系', pickScenes(scenes, 2, 4), claim),
-      '',
-      longSubsection(title, '人物访谈与环境空镜的交替', pickScenes(scenes, 9, 4), claim),
-      '',
-      longSubsection(title, '品牌信息释放与情绪落点', pickScenes(scenes, 16, 4), claim),
-    )
-    return lines.join('\n')
-  }
-  subsections.forEach((sub, index) => {
-    lines.push('', `### ${sub.title}`, '', longSubsection(sub.title, sub.focus, pickScenes(scenes, index * 7 + 1, 4), claim))
-  })
-  return lines.join('\n')
-}
-
-function generateAudiovisualBody(outputDir: string): string {
-  const scores = readJson(join(outputDir, 'scene_scores.json'))
-  const allScenes = Array.isArray(scores?.scenes) ? scores.scenes : []
-  const scenes = allScenes.length > 0 ? allScenes : [{ scene_number: 1, description: '场景数据缺失，按任务上下文保守分析。' }]
-  const modules = [
-    {
-      title: '视觉修辞语法',
-      claim: '景别、色调、运镜和剪辑在这里共同服务于“办公室即产品价值外化”的品牌论证。',
-      subs: [
-        { title: '景别分布与说服功能', focus: '景别如何在人物可信度和空间向往感之间分配注意力' },
-        { title: '色调系统与情绪建筑', focus: '暖色办公光线如何把技术品牌转译成可亲近的生活氛围' },
-        { title: '运镜模式与观看邀请', focus: '跟拍、平移和静物特写如何邀请观众进入品牌世界' },
-        { title: '剪辑节奏与注意力管理', focus: '段落节奏如何从空间建立推进到品牌收束' },
-      ],
-    },
-    {
-      title: '意义转移系统：参照世界拆解',
-      claim: '影片借办公建筑、设计家具、书籍、玩偶和团队互动作为参照系统，把文化资本和协作温度转移给品牌。',
-      subs: [
-        { title: '参照系统清单', focus: '被调用的外部文化与生活方式参照系统' },
-        { title: '转移机制分析', focus: '空间并置、叙事融合和物件隐喻如何完成意义转移' },
-        { title: '转移效果评估', focus: '这些参照是否形成统一的品牌意义方向' },
-      ],
-    },
-    {
-      title: '说服弧线与品牌叙事结构',
-      claim: '全片不是直接功能演示，而是一条从进入办公室、理解建造、认识团队到品牌尾声的叙事传输弧线。',
-      subs: [
-        { title: '说服弧线识别', focus: '从开场空间到尾声品牌揭示的说服路径' },
-        { title: '品牌角色定位', focus: 'Notion 在叙事中如何从工具转成工作文化的组织者' },
-        { title: '品牌揭示时刻', focus: '标题卡、Logo 和结尾合作信息如何承担落点' },
-      ],
-    },
-    {
-      title: '多轨交织分析',
-      claim: '旁白、屏幕文字、环境空镜、人物访谈和设计物件互相补位，使信息不是靠单一口播完成，而是在多条轨道上同步积累。',
-      subs: [],
-    },
-    {
-      title: '品牌符号学与意识形态分析',
-      claim: '影片把“好办公室”自然化为“好产品文化”的外在证据，符号系统持续强调审美、谦逊、协作与创造力。',
-      subs: [
-        { title: '符号元素清单', focus: 'Logo、书籍、家具、玩偶、白板和建筑细节的符号功能' },
-        { title: '主体位置建构', focus: '观众被放置成参观者、潜在加入者和品牌文化见证者' },
-        { title: '意识形态"自然化"评估', focus: '设计化办公生活如何被处理成理所当然的组织理想' },
-      ],
-    },
-    {
-      title: '品牌战略解码',
-      claim: '本片服务的是品牌权益的上层资产：文化联想、组织可信度和长期记忆，而不是短期转化。',
-      subs: [
-        { title: '品牌权益层级定位', focus: '品牌从功能认知上升到文化与身份联想' },
-        { title: '文化品牌战略评估', focus: '片中设计品味和团队状态如何累积文化资本' },
-        { title: '说服三诉求资源分配', focus: 'ethos、pathos、logos 在片中的比例与作用' },
-      ],
-    },
-    {
-      title: '开钩与收钩：注意力经济的首尾博弈',
-      claim: '开头以空间和创始人建立进入理由，结尾以合作品牌和感谢语完成轻量收束，商业意图不突兀但有明确落点。',
-      subs: [
-        { title: '开钩分析', focus: '开场空间、标题和人物身份如何让观众愿意继续看' },
-        { title: '收钩分析', focus: '尾声城市、Logo 与感谢语如何完成品牌记忆' },
-        { title: '首尾对照', focus: '开头的进入办公室与结尾的品牌合作信息如何互相扣合' },
-      ],
-    },
-    {
-      title: '媒介语境与 Campaign 生态位分析',
-      claim: '它更像品牌内容系列中的一集，用办公室参观包装创始人文化，而不是独立硬广。',
-      subs: [
-        { title: '平台适配性评估', focus: 'YouTube 长视频语境中叙事密度与观看耐心的匹配' },
-        { title: 'Campaign 矩阵定位', focus: '它在系列内容中承担品牌亲近感和文化解释的角色' },
-      ],
-    },
-  ]
-  const body = modules.map((mod, index) => moduleBlock(mod.title, mod.subs, pickScenes(scenes, index * 5, Math.min(12, scenes.length)), mod.claim)).join('\n\n')
-  const dims = [
-    '- 冲击力：Scene 001 先给出清晰品牌空间，Scene 097 再收束到合作标识，冲击力温和但落点明确。',
-    '- 美学：Scene 015、Scene 039、Scene 065 的暖光静物和设计海报，让品牌审美有连续证据。',
-    '- 记忆度：Scene 072 的 A Place for People 与 Scene 092 的玩偶细节，形成比口播更易记的符号。',
-    '- 趣味性：Scene 078 的 bathroom DJ 白板与 Scene 089 的玩偶，给办公室文化加入轻松的人味。',
-    '- 可信度：Scene 028、Scene 037、Scene 084 的多人物访谈，让空间叙事不只是布景展示。',
-    '- 信息效率：Scene 026 章节标题、Scene 072 中段标语、Scene 097 尾声合作信息承担清晰导航。',
-  ].join('\n')
-  return `${body}\n\n## 维度速评\n${dims}\n`
-}
-
-function simpleDiagramSvg(): string {
-  return [
-    '<svg xmlns="http://www.w3.org/2000/svg" role="img" width="100%" viewBox="0 0 680 520">',
-    '<title>Notion 办公室品牌短片意义转移结构图</title>',
-    '<desc>参照世界、说服弧线与品牌着陆的三栏结构图。</desc>',
-    '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>',
-    '<text class="ts" x="124" y="28" text-anchor="middle" style="font-weight:500">参照世界（意义源）</text>',
-    '<text class="ts" x="340" y="28" text-anchor="middle" style="font-weight:500">说服弧线（修辞功能）</text>',
-    '<text class="ts" x="556" y="28" text-anchor="middle" style="font-weight:500">品牌着陆（意义终点）</text>',
-    '<line x1="40" y1="35" x2="640" y2="35" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>',
-    '<g class="node c-coral"><rect x="40" y="50" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="124" y="69" text-anchor="middle" dominant-baseline="central">办公入口</text><text class="ts" x="124" y="89" text-anchor="middle" dominant-baseline="central">空间·欢迎·身份</text></g>',
-    '<g class="node c-coral"><rect x="256" y="50" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="340" y="69" text-anchor="middle" dominant-baseline="central">世界入口</text><text class="ts" x="340" y="89" text-anchor="middle" dominant-baseline="central">00:00 – 00:24</text></g>',
-    '<g class="node c-coral"><rect x="472" y="50" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="556" y="69" text-anchor="middle" dominant-baseline="central">品牌可进入</text><text class="ts" x="556" y="89" text-anchor="middle" dominant-baseline="central">认知层·ethos</text></g>',
-    '<line x1="208" y1="78" x2="254" y2="78" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="424" y1="78" x2="470" y2="78" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<g class="node c-teal"><rect x="40" y="140" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="124" y="159" text-anchor="middle" dominant-baseline="central">设计建造</text><text class="ts" x="124" y="179" text-anchor="middle" dominant-baseline="central">建筑·家具·书籍</text></g>',
-    '<g class="node c-teal"><rect x="256" y="140" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="340" y="159" text-anchor="middle" dominant-baseline="central">意义充能</text><text class="ts" x="340" y="179" text-anchor="middle" dominant-baseline="central">00:24 – 02:55</text></g>',
-    '<g class="node c-teal"><rect x="472" y="140" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="556" y="159" text-anchor="middle" dominant-baseline="central">品牌有品味</text><text class="ts" x="556" y="179" text-anchor="middle" dominant-baseline="central">含义层·文化资本</text></g>',
-    '<line x1="208" y1="168" x2="254" y2="168" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="424" y1="168" x2="470" y2="168" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<g class="node c-pink"><rect x="40" y="230" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="124" y="249" text-anchor="middle" dominant-baseline="central">团队日常</text><text class="ts" x="124" y="269" text-anchor="middle" dominant-baseline="central">协作·玩笑·温度</text></g>',
-    '<g class="node c-pink"><rect x="256" y="230" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="340" y="249" text-anchor="middle" dominant-baseline="central">情感卷入</text><text class="ts" x="340" y="269" text-anchor="middle" dominant-baseline="central">02:55 – 04:35</text></g>',
-    '<g class="node c-pink"><rect x="472" y="230" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="556" y="249" text-anchor="middle" dominant-baseline="central">品牌有人味</text><text class="ts" x="556" y="269" text-anchor="middle" dominant-baseline="central">回应层·pathos</text></g>',
-    '<line x1="208" y1="258" x2="254" y2="258" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="424" y1="258" x2="470" y2="258" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<g class="node c-green"><rect x="40" y="320" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="124" y="339" text-anchor="middle" dominant-baseline="central">合作尾声</text><text class="ts" x="124" y="359" text-anchor="middle" dominant-baseline="central">城市·Logo·感谢</text></g>',
-    '<g class="node c-green"><rect x="256" y="320" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="340" y="339" text-anchor="middle" dominant-baseline="central">意义着陆</text><text class="ts" x="340" y="359" text-anchor="middle" dominant-baseline="central">04:35 – 04:45</text></g>',
-    '<g class="node c-green"><rect x="472" y="320" width="168" height="56" rx="8" stroke-width="0.5"/><text class="th" x="556" y="339" text-anchor="middle" dominant-baseline="central">品牌可相信</text><text class="ts" x="556" y="359" text-anchor="middle" dominant-baseline="central">共鸣层·ethos</text></g>',
-    '<line x1="208" y1="348" x2="254" y2="348" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="424" y1="348" x2="470" y2="348" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<line x1="124" y1="108" x2="124" y2="138" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="340" y1="108" x2="340" y2="138" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="556" y1="108" x2="556" y2="138" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<line x1="124" y1="198" x2="124" y2="228" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="340" y1="198" x2="340" y2="228" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="556" y1="198" x2="556" y2="228" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<line x1="124" y1="288" x2="124" y2="318" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="340" y1="288" x2="340" y2="318" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/><line x1="556" y1="288" x2="556" y2="318" class="arr" marker-end="url(#arrow)" stroke="var(--color-border-secondary)"/>',
-    '<text class="ts" x="340" y="450" text-anchor="middle">意义转移：办公空间与团队文化 → 产品可信度与品牌亲近感</text>',
-    '</svg>',
-  ].join('')
-}
-
-function extractMarkdownPayload(taskText: string, outputDir: string): string {
-  const fenced = [...taskText.matchAll(/```(?:markdown|md)?\n([\s\S]*?)```/gi)]
-    .map((match) => match[1])
-    .filter((text) => text.includes('# 视听剖析报告') || text.includes('## 视觉修辞语法'))
-  if (fenced.length > 0) return fenced[fenced.length - 1].trim() + '\n'
-  const body = join(outputDir, 'audiovisual_handoff', 'body', 'output.md')
-  if (existsSync(body)) return readFileSync(body, 'utf8')
-  return generateAudiovisualBody(outputDir)
-}
-
-function fulfillPendingAudiovisualHandoffs(outputDir: string): string[] {
+function inspectPendingAudiovisualHandoffs(outputDir: string): string[] {
   const receiptPath = join(outputDir, 'audiovisual_handoff', 'receipt.json')
   const receipt = readJson(receiptPath)
   const tasks = objectValue(receipt?.tasks)
   if (!tasks) return []
-  const fulfilled: string[] = []
+  const pending: string[] = []
   for (const [name, rawTask] of Object.entries(tasks)) {
     const task = objectValue(rawTask)
     if (stringValue(task?.status) !== 'pending') continue
-    const outputRel = stringValue(task?.output)
-    const taskRel = stringValue(task?.task)
-    if (!outputRel) continue
-    const target = join(outputDir, 'audiovisual_handoff', outputRel)
-    mkdirSync(dirname(target), { recursive: true })
-    const taskText = taskRel ? readFileSync(join(outputDir, taskRel), 'utf8') : ''
-    if (name === 'body') {
-      writeFileSync(target, generateAudiovisualBody(outputDir), 'utf8')
-      fulfilled.push('body')
-    } else if (name === 'diagram') {
-      writeFileSync(target, simpleDiagramSvg(), 'utf8')
-      fulfilled.push('diagram')
-    } else if (name === 'overview') {
-      writeFileSync(target, JSON.stringify({
-        title: 'Notion 办公室品牌短片内容架构',
-        summary: '空间进入、设计建造、团队文化和品牌收束四段推进。',
-        acts: [
-          { label: '空间进入', scenes: ['Scene 001', 'Scene 013'] },
-          { label: '设计建造', scenes: ['Scene 026', 'Scene 070'] },
-          { label: '团队文化', scenes: ['Scene 072', 'Scene 096'] },
-          { label: '品牌收束', scenes: ['Scene 097'] },
-        ],
-      }, null, 2), 'utf8')
-      fulfilled.push('overview')
-    } else if (name === 'illustrate') {
-      writeFileSync(target, extractMarkdownPayload(taskText, outputDir), 'utf8')
-      fulfilled.push('illustrate')
+    pending.push(name)
+  }
+  return pending
+}
+
+function isSafeRelativePath(path: string): boolean {
+  if (!path || isAbsolute(path)) return false
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.length > 0 && parts.every((part) => part !== '.' && part !== '..')
+}
+
+function listPendingHandoffTasks(outputDir: string): HandoffTask[] {
+  const handoffDir = join(outputDir, 'audiovisual_handoff')
+  const receipt = readJson(join(handoffDir, 'receipt.json'))
+  const tasks = objectValue(receipt?.tasks)
+  if (!tasks) return []
+  const pending: HandoffTask[] = []
+  for (const [name, rawTask] of Object.entries(tasks)) {
+    const task = objectValue(rawTask)
+    if (stringValue(task?.status).toLowerCase() !== 'pending') continue
+    const taskRel = stringValue(task?.task) || `audiovisual_handoff/${name}/task.md`
+    const outputRelRaw = stringValue(task?.output)
+    if (!isSafeRelativePath(taskRel) || !isSafeRelativePath(outputRelRaw)) continue
+    const outputRel = outputRelRaw.startsWith('audiovisual_handoff/')
+      ? outputRelRaw
+      : `audiovisual_handoff/${outputRelRaw}`
+    pending.push({
+      name,
+      taskPath: join(outputDir, taskRel),
+      outputPath: join(outputDir, outputRel),
+      receiptPath: join(handoffDir, 'receipt.json'),
+    })
+  }
+  return pending
+}
+
+function listHandoffValidationRepairTasks(outputDir: string): HandoffTask[] {
+  const receipt = readJson(join(outputDir, 'audiovisual_handoff', 'receipt.json'))
+  const tasks = objectValue(receipt?.tasks)
+  if (!tasks) return []
+  const repairs: HandoffTask[] = []
+  for (const [name, rawTask] of Object.entries(tasks)) {
+    const task = objectValue(rawTask)
+    const taskRel = stringValue(task?.task) || `audiovisual_handoff/${name}/task.md`
+    const outputRelRaw = stringValue(task?.output)
+    if (!isSafeRelativePath(taskRel) || !isSafeRelativePath(outputRelRaw)) continue
+    const outputRel = outputRelRaw.startsWith('audiovisual_handoff/')
+      ? outputRelRaw
+      : `audiovisual_handoff/${outputRelRaw}`
+    const validationErrorsPath = join(outputDir, 'audiovisual_handoff', name, 'validation_errors.json')
+    const outputPath = join(outputDir, outputRel)
+    if (!existsSync(validationErrorsPath) || !existsSync(outputPath)) continue
+    try {
+      const validationMtime = statSync(validationErrorsPath).mtimeMs
+      const outputMtime = statSync(outputPath).mtimeMs
+      if (validationMtime <= outputMtime) continue
+    } catch {
+      continue
+    }
+    repairs.push({
+      name,
+      taskPath: join(outputDir, taskRel),
+      outputPath,
+      receiptPath: join(outputDir, 'audiovisual_handoff', 'receipt.json'),
+      validationErrorsPath,
+    })
+  }
+  return repairs
+}
+
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim()
+  const match = trimmed.match(/^```(?:[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```$/)
+  return match ? match[1].trim() : trimmed
+}
+
+function normalizeHeadingText(value: string): string {
+  return value
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function stripTrailingParenthetical(value: string): string {
+  return value.replace(/\s*[（(][^）)]*[）)]\s*$/u, '').trim()
+}
+
+function headingKey(value: string): string {
+  return stripTrailingParenthetical(normalizeHeadingText(value))
+}
+
+function extractValidationHeadingLiterals(validationErrorsText: string): string[] {
+  const headings: string[] = []
+  const parsed = validationErrorsText.trim() ? readJsonText(validationErrorsText) : null
+  const requiredSections = Array.isArray(parsed?.required_sections) ? parsed.required_sections : []
+  for (const section of requiredSections) {
+    const text = stringValue(section)
+    if (text.startsWith('## ')) headings.push(text)
+  }
+  const error = stringValue(parsed?.error)
+  const missingChildPattern = /缺子条目\s+(#{2,6}\s+[^；;\n]+)/gu
+  let match: RegExpExecArray | null
+  while ((match = missingChildPattern.exec(error)) !== null) {
+    const raw = stringValue(match[1])
+    for (const heading of raw.split(/[、,，]/u).map((item) => item.trim()).filter(Boolean)) {
+      if (heading.startsWith('#')) headings.push(heading)
     }
   }
-  return fulfilled
+  return Array.from(new Set(headings))
+}
+
+function readJsonText(text: string): Record<string, unknown> | null {
+  try {
+    return objectValue(JSON.parse(text) as unknown)
+  } catch {
+    return null
+  }
+}
+
+function applyValidationHeadingLiterals(output: string, validationErrorsText: string): string {
+  const expectedHeadings = extractValidationHeadingLiterals(validationErrorsText)
+  if (expectedHeadings.length === 0) return output
+  const lines = output.split(/\r?\n/)
+  for (const expected of expectedHeadings) {
+    const expectedMatch = expected.match(/^(#{2,6})\s+(.+)$/u)
+    if (!expectedMatch) continue
+    const expectedLevel = expectedMatch[1]
+    const expectedTitle = expectedMatch[2]
+    const expectedKey = headingKey(expectedTitle)
+    if (lines.some((line) => line.trim() === expected)) continue
+    const index = lines.findIndex((line) => {
+      const match = line.trim().match(/^(#{2,6})\s+(.+)$/u)
+      if (!match || match[1] !== expectedLevel) return false
+      return headingKey(match[2]) === expectedKey
+    })
+    if (index >= 0) lines[index] = expected
+  }
+  return lines.join('\n')
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function extractOpenAIChatText(payload: unknown): string {
+  const rec = objectValue(payload)
+  const choices = Array.isArray(rec?.choices) ? rec.choices : []
+  for (const choice of choices) {
+    const message = objectValue(objectValue(choice)?.message)
+    const content = message?.content
+    if (typeof content === 'string' && content.trim()) return content
+    if (Array.isArray(content)) {
+      const text = content.map((part) => stringValue(objectValue(part)?.text)).filter(Boolean).join('\n')
+      if (text.trim()) return text
+    }
+  }
+  return ''
+}
+
+function extractResponsesText(payload: unknown): string {
+  const rec = objectValue(payload)
+  const direct = stringValue(rec?.output_text)
+  if (direct) return direct
+  const output = Array.isArray(rec?.output) ? rec.output : []
+  const parts: string[] = []
+  for (const item of output) {
+    const content = Array.isArray(objectValue(item)?.content) ? objectValue(item)?.content as unknown[] : []
+    for (const part of content) {
+      const text = stringValue(objectValue(part)?.text)
+      if (text) parts.push(text)
+    }
+  }
+  return parts.join('\n')
+}
+
+function extractAnthropicText(payload: unknown): string {
+  const rec = objectValue(payload)
+  const content = Array.isArray(rec?.content) ? rec.content : []
+  return content.map((part) => stringValue(objectValue(part)?.text)).filter(Boolean).join('\n')
+}
+
+async function requestHandoffCompletion(agentContext: AgentSpawnContextLike, taskText: string, taskName: string): Promise<string> {
+  const system = [
+    'You are the hosting Ready agent completing a skill handoff task packet.',
+    'Read the task packet exactly and return only the requested output file content.',
+    'Do not wrap the answer in code fences. Do not add explanations outside the requested artifact.',
+  ].join('\n')
+  const user = [
+    `Pending handoff task: ${taskName}`,
+    '',
+    taskText,
+  ].join('\n')
+  const baseUrl = agentContext.base_url.replace(/\/+$/, '')
+  const headers = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${agentContext.api_key}`,
+  }
+  if (agentContext.api_kind === 'openai-responses') {
+    const resp = await fetchWithTimeout(`${baseUrl}/responses`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: agentContext.model_id,
+        input: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        max_output_tokens: 16000,
+      }),
+    }, 240_000)
+    const raw = await resp.text()
+    if (!resp.ok) throw new Error(`handoff model failed (${resp.status}): ${raw.slice(0, 500)}`)
+    const text = extractResponsesText(JSON.parse(raw))
+    if (!text.trim()) throw new Error('handoff model returned empty output')
+    return stripCodeFence(text)
+  }
+  if (agentContext.api_kind === 'anthropic-messages') {
+    const resp = await fetchWithTimeout(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: agentContext.model_id,
+        system,
+        messages: [{ role: 'user', content: user }],
+        max_tokens: 16000,
+      }),
+    }, 240_000)
+    const raw = await resp.text()
+    if (!resp.ok) throw new Error(`handoff model failed (${resp.status}): ${raw.slice(0, 500)}`)
+    const text = extractAnthropicText(JSON.parse(raw))
+    if (!text.trim()) throw new Error('handoff model returned empty output')
+    return stripCodeFence(text)
+  }
+  const resp = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: agentContext.model_id,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.2,
+      max_tokens: 16000,
+    }),
+  }, 240_000)
+  const raw = await resp.text()
+  if (!resp.ok) throw new Error(`handoff model failed (${resp.status}): ${raw.slice(0, 500)}`)
+  const text = extractOpenAIChatText(JSON.parse(raw))
+  if (!text.trim()) throw new Error('handoff model returned empty output')
+  return stripCodeFence(text)
+}
+
+async function requestHandoffRepair(agentContext: AgentSpawnContextLike, task: HandoffTask): Promise<string> {
+  const taskText = readFileSync(task.taskPath, 'utf8')
+  const currentOutput = readFileSync(task.outputPath, 'utf8')
+  const validationErrors = task.validationErrorsPath ? readFileSync(task.validationErrorsPath, 'utf8') : ''
+  return requestHandoffCompletion(
+    agentContext,
+    [
+      taskText,
+      '',
+      '--- Current output that failed validation ---',
+      currentOutput,
+      '',
+      '--- validation_errors.json ---',
+      validationErrors,
+      '',
+      'Repair instructions:',
+      '- Return the complete corrected output file, not a patch.',
+      '- Preserve useful existing analysis, but satisfy every validation error exactly.',
+      '- Headings named in validation errors must appear literally, without parenthetical suffixes, typographic quote variants, or renamed wording.',
+    ].join('\n'),
+    `${task.name}:validation_repair`,
+  )
+}
+
+async function completePendingHandoffs(outputDir: string, agentContext: AgentSpawnContextLike): Promise<HandoffCompletionSummary[]> {
+  const tasks = listPendingHandoffTasks(outputDir)
+  const completed: HandoffCompletionSummary[] = []
+  for (const task of tasks) {
+    console.error(`[vea-live] completing handoff ${task.name}`)
+    const taskText = readFileSync(task.taskPath, 'utf8')
+    const output = await requestHandoffCompletion(agentContext, taskText, task.name)
+    mkdirSync(dirname(task.outputPath), { recursive: true })
+    await writeFile(task.outputPath, output, 'utf8')
+    markSkillHandoffOutputCompleted({
+      receiptPath: task.receiptPath,
+      taskName: task.name,
+      outputPath: task.outputPath,
+    })
+    completed.push({
+      name: task.name,
+      taskPath: task.taskPath,
+      outputPath: task.outputPath,
+      bytesWritten: Buffer.byteLength(output, 'utf8'),
+      model: `${agentContext.provider}/${agentContext.model_id}`,
+    })
+  }
+  return completed
+}
+
+async function repairHandoffValidationErrors(outputDir: string, agentContext: AgentSpawnContextLike): Promise<HandoffCompletionSummary[]> {
+  const tasks = listHandoffValidationRepairTasks(outputDir)
+  const repaired: HandoffCompletionSummary[] = []
+  for (const task of tasks) {
+    const validationErrors = task.validationErrorsPath ? readFileSync(task.validationErrorsPath, 'utf8') : ''
+    const currentOutput = readFileSync(task.outputPath, 'utf8')
+    const literalFixed = applyValidationHeadingLiterals(currentOutput, validationErrors)
+    const output = literalFixed !== currentOutput
+      ? literalFixed
+      : applyValidationHeadingLiterals(
+        await requestHandoffRepair(agentContext, task),
+        validationErrors,
+      )
+    console.error(`[vea-live] repaired handoff ${task.name}${literalFixed !== currentOutput ? ' via heading literals' : ' via model'}`)
+    await writeFile(task.outputPath, output, 'utf8')
+    markSkillHandoffOutputCompleted({
+      receiptPath: task.receiptPath,
+      taskName: task.name,
+      outputPath: task.outputPath,
+    })
+    repaired.push({
+      name: task.name,
+      taskPath: task.taskPath,
+      outputPath: task.outputPath,
+      bytesWritten: Buffer.byteLength(output, 'utf8'),
+      model: `${agentContext.provider}/${agentContext.model_id}`,
+      repairedValidation: true,
+    })
+  }
+  return repaired
+}
+
+function findUniqueNestedRunStateDir(outputDir: string): string | null {
+  try {
+    const candidates = readdirSync(outputDir)
+      .map((name) => join(outputDir, name))
+      .filter((path) => statSync(path).isDirectory())
+      .filter((path) => existsSync(join(path, 'run_state.json')))
+    return candidates.length === 1 ? candidates[0] : null
+  } catch {
+    return null
+  }
+}
+
+function resolveEffectiveOutputDir(outputDir: string): string {
+  if (existsSync(join(outputDir, 'run_state.json'))) return outputDir
+  return findUniqueNestedRunStateDir(outputDir) || outputDir
 }
 
 function mapChildStatusToRowStatus(status: string): string {
@@ -742,7 +901,7 @@ class MemoryChildRunRepository {
   }
 
   findLatestChildRunByKey(singleFlightKey: string): Record<string, unknown> | null {
-    const active = ['queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked']
+    const active = ['queued', 'running', 'recoverable_paused', 'budget_paused']
     return [...this.records.values()]
       .filter((record) => {
         const child = objectValue(objectValue(record.resumePayload)?.childRun)
@@ -811,6 +970,9 @@ async function runOneChildAction(args: {
     launchStatus: launch.status,
     waitKind: wait.kind,
     eventLogPath: launch.eventLogPath,
+    outputDir: close ? stringValue(close.outputDir) : stringValue(launch.outputDir),
+    runStatePath: close ? stringValue(close.runStatePath) : stringValue(launch.runStatePath),
+    sceneScoresPath: close ? stringValue(close.sceneScoresPath) : stringValue(launch.sceneScoresPath),
     closeStatus: close ? stringValue(close.status) : null,
     terminalReason: close ? stringValue(close.terminalReason) : null,
     errorMessage: close ? stringValue(objectValue(close.error)?.message) : null,
@@ -825,9 +987,10 @@ async function runPhase(args: {
 }): Promise<{ phase: string; success: boolean; runs: ChildRunSummary[]; artifacts: ArtifactSummary }> {
   const runs: ChildRunSummary[] = []
   for (let round = 1; round <= args.opts.maxRounds; round += 1) {
-    const before = inspectArtifacts(args.opts.outputDir)
+    const beforeOutputDir = resolveEffectiveOutputDir(args.opts.outputDir)
+    const before = inspectArtifacts(beforeOutputDir)
     if (before.complete) return { phase: args.phase, success: true, runs, artifacts: before }
-    const sceneScoresPath = join(args.opts.outputDir, 'scene_scores.json')
+    const sceneScoresPath = join(beforeOutputDir, 'scene_scores.json')
     const action = args.phase === 'fresh' && round === 1 && !existsSync(sceneScoresPath)
       ? 'video_expert_pipeline'
       : 'video_expert_ai_analyze'
@@ -842,12 +1005,18 @@ async function runPhase(args: {
       action,
       input,
     })
-    const handoffsFulfilled = fulfillPendingAudiovisualHandoffs(args.opts.outputDir)
-    if (handoffsFulfilled.length > 0) run.handoffsFulfilled = handoffsFulfilled
+    const afterOutputDir = run.outputDir || resolveEffectiveOutputDir(args.opts.outputDir)
+    const pendingHandoffs = inspectPendingAudiovisualHandoffs(afterOutputDir)
+    if (pendingHandoffs.length > 0) run.pendingHandoffs = pendingHandoffs
+    const handoffCompletions: HandoffCompletionSummary[] = []
+    if (pendingHandoffs.length > 0) {
+      handoffCompletions.push(...await completePendingHandoffs(afterOutputDir, args.agentContext))
+    }
+    handoffCompletions.push(...await repairHandoffValidationErrors(afterOutputDir, args.agentContext))
+    if (handoffCompletions.length > 0) run.handoffCompletions = handoffCompletions
     runs.push(run)
-    const after = inspectArtifacts(args.opts.outputDir)
+    const after = inspectArtifacts(afterOutputDir)
     if (after.complete) return { phase: args.phase, success: true, runs, artifacts: after }
-    if (handoffsFulfilled.length > 0) continue
     if (run.waitKind !== 'closed') return { phase: args.phase, success: false, runs, artifacts: after }
     if (run.closeStatus === 'completed' && before.completeScenes === after.completeScenes && round > 1) {
       return { phase: args.phase, success: false, runs, artifacts: after }
@@ -857,7 +1026,7 @@ async function runPhase(args: {
     phase: args.phase,
     success: false,
     runs,
-    artifacts: inspectArtifacts(args.opts.outputDir),
+    artifacts: inspectArtifacts(resolveEffectiveOutputDir(args.opts.outputDir)),
   }
 }
 

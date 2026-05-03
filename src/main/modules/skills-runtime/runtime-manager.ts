@@ -24,6 +24,7 @@ import { EMBEDDED_SKILLS, EMBEDDED_SKILL_IDS, type EmbeddedSkillId, type Embedde
 import type {
   SkillActionDefinition,
   SkillActionResult,
+  SkillChildLoopDefinition,
   SkillDefinition,
   SkillExecutionMode,
   SkillInputValue,
@@ -170,6 +171,7 @@ export interface SkillState {
    * to compute the effective shell allowlist for skill_run_shell.
    */
   hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements
+  childLoop?: SkillChildLoopDefinition
 }
 
 export interface SkillsRuntimeInfo {
@@ -573,6 +575,7 @@ export class SkillsRuntimeManager {
       managedPath: definition.source === 'embedded' ? skillPath : definition.managedPath,
       sourcePath: definition.sourcePath,
       hostRequirements: definition.hostRequirements,
+      childLoop: definition.childLoop,
     }
   }
 

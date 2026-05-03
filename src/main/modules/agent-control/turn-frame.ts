@@ -568,6 +568,12 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
             lastForceToolDispatchedAt: null,
             consecutiveForceCount: 0,
           },
+          childRunId: merged.childRunId,
+          childStatus: merged.childStatus,
+          parentNextHint: merged.parentNextHint,
+          childCloseEvent: merged.childCloseEvent,
+          legacyAdoptableHandles: merged.legacyAdoptableHandles,
+          blockerReason: merged.blockerReason,
           updatedAt: merged.updatedAt ?? new Date().toISOString(),
         }
       }

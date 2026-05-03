@@ -204,6 +204,7 @@ import {
   summarizeActiveSkillContext,
   type ActiveSkillContext,
 } from './active-skill-context'
+import { clearLastReferenceSkill } from './skill-reference-hints'
 import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import {
@@ -412,7 +413,7 @@ function statusFromTerminalReason(
 function decisionFromChildClose(
   childRunId: string,
   close: SkillChildCloseEvent,
-): ChildContinuationDecision {
+): Extract<ChildContinuationDecision, { kind: 'terminal' | 'checkpoint_paused' }> {
   if (isTerminalChildCloseStatus(close.status)) {
     return { kind: 'terminal', childRunId, closeEvent: close }
   }
@@ -1612,7 +1613,26 @@ export class TurnEngine {
             : null
         referenceSkillHintVia = 'explicit'
       }
-      const legacyPreferredSkillToolNames = (hasExplicitSkill || hasActiveSkill)
+      const shouldBindSkillContextForTurn = Boolean(
+        hasExplicitSkill
+        || explicitFreshSkillStart
+        || explicitRunStateResourceForTurn
+        || isSkillResumeTurnDetected
+        || isSkillProgressFollowupTurnDetected
+        || matchesChildCancelIntent(
+          requestEnvelope.primaryInstruction,
+          requestEnvelope.pureUserText,
+          requestEnvelope.rawUserText,
+        )
+      )
+      if (!shouldBindSkillContextForTurn && request.sessionId) {
+        clearLastReferenceSkill(request.sessionId)
+        logAgentMetric('skill_reference_hint_cleared_for_unrelated_turn', {
+          sessionId: request.sessionId,
+          primaryDomain: executionIntentContext.intentClassification.primaryDomain,
+        })
+      }
+      const legacyPreferredSkillToolNames = (shouldBindSkillContextForTurn && (hasExplicitSkill || hasActiveSkill))
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
           skillContextInjectionText,
           request.sessionId,
@@ -1625,16 +1645,18 @@ export class TurnEngine {
         && hasLongTypedSkillAction(preferredSkillToolNames)
       let activeSkillContextForTurn: ActiveSkillContext | null = null
       let currentReferenceHintForContext: { id: string; name: string; at?: number } | null = null
-      try {
-        currentReferenceHintForContext = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId) || null
-        activeSkillContextForTurn = resolveActiveSkillContext({
-          sessionId: request.sessionId,
-          referenceHint: currentReferenceHintForContext
-            ? { ...currentReferenceHintForContext, at: Date.now() }
-            : null,
-        })
-      } catch {
-        activeSkillContextForTurn = null
+      if (shouldBindSkillContextForTurn) {
+        try {
+          currentReferenceHintForContext = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId) || null
+          activeSkillContextForTurn = resolveActiveSkillContext({
+            sessionId: request.sessionId,
+            referenceHint: currentReferenceHintForContext
+              ? { ...currentReferenceHintForContext, at: Date.now() }
+              : null,
+          })
+        } catch {
+          activeSkillContextForTurn = null
+        }
       }
       if (activeSkillContextForTurn && activeSkillContextForTurn.source !== 'reference_hint') {
         if (!explicitFreshSkillStart) {
@@ -1652,13 +1674,15 @@ export class TurnEngine {
       // `originalInput` (read from snapshot.resumePayload) stay null and
       // forced-action input synthesis can't dispatch with valid input.
       let supervisorSnapshotForFrame: SkillTaskSupervisorSnapshot | null = null
-      try {
-        supervisorSnapshotForFrame = inspectLatestSkillTaskForHost({
-          sessionId: request.sessionId,
-          scopeId: request.sessionId,
-        })
-      } catch {
-        supervisorSnapshotForFrame = null
+      if (shouldBindSkillContextForTurn) {
+        try {
+          supervisorSnapshotForFrame = inspectLatestSkillTaskForHost({
+            sessionId: request.sessionId,
+            scopeId: request.sessionId,
+          })
+        } catch {
+          supervisorSnapshotForFrame = null
+        }
       }
       const hasNonHintSkillContextForTurn = Boolean(
         explicitRunStateResourceForTurn
@@ -1806,7 +1830,7 @@ export class TurnEngine {
       }
       if (
         childCommand.kind === 'terminal'
-        && isSkillResumeTurnDetected
+        && (isSkillResumeTurnDetected || isSkillProgressFollowupTurnDetected)
         && !isConfigRepairTurnDetected
       ) {
         const outcome = renderChildCommandOutcome({
@@ -1825,7 +1849,7 @@ export class TurnEngine {
       }
       if (
         childCommand.kind === 'wait'
-        && isSkillResumeTurnDetected
+        && (isSkillResumeTurnDetected || isSkillProgressFollowupTurnDetected)
         && !isConfigRepairTurnDetected
       ) {
         const outcome = renderChildCommandOutcome({
@@ -1838,6 +1862,26 @@ export class TurnEngine {
         return finish({
           success: true,
           status: 'checkpoint',
+          terminalReason: outcome.terminalReason,
+        })
+      }
+      if (
+        childCommand.kind === 'checkpoint_paused'
+        && isSkillProgressFollowupTurnDetected
+        && !isSkillResumeTurnDetected
+        && !isConfigRepairTurnDetected
+      ) {
+        const outcome = renderChildCommandOutcome({
+          childRunId: childCommand.childRunId,
+          command: 'resume',
+          close: childCommand.closeEvent,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
+        return finish({
+          success: outcome.status !== 'error',
+          cancelled: outcome.status === 'cancelled',
+          status: outcome.status,
           terminalReason: outcome.terminalReason,
         })
       }
@@ -2635,6 +2679,7 @@ export class TurnEngine {
         shouldUseLongSkillResumeBudget
         || hasLongTypedSkillAction(preferredSkillToolNames)
       const sampleSkillLeaseSnapshot = (force = false): SkillTaskSupervisorSnapshot | null => {
+        if (!shouldBindSkillContextForTurn) return null
         if (!force && !hasPlannedLeaseTrigger && !skillBudgetLeaseState) return null
         try {
           return inspectLatestSkillTaskForHost({
@@ -2661,7 +2706,9 @@ export class TurnEngine {
       }
       const observedLeaseSnapshot = hasPlannedLeaseTrigger || skillBudgetLeaseState
         ? null
-        : sampleSkillLeaseSnapshot(true)
+        : shouldBindSkillContextForTurn
+          ? sampleSkillLeaseSnapshot(true)
+          : null
       const hasLeaseTrigger = hasPlannedLeaseTrigger || hasRecoverableSkillLeaseSnapshot(observedLeaseSnapshot)
       const publishSkillBudgetLease = (): void => {
         if (!skillBudgetLeaseState) return
@@ -2912,6 +2959,45 @@ export class TurnEngine {
             success: true,
             status: 'checkpoint',
             terminalReason: turnTerminalReason,
+          })
+        }
+        if (childContinuation.kind === 'wait') {
+          const close = await waitForChildCloseEvent(childContinuation.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
+          if (turnFrame?.skill?.runContract) {
+            const contract = turnFrame.skill.runContract
+            if (close) {
+              contract.childCloseEvent = close
+              contract.childStatus = close.status
+              contract.parentNextHint = 'continue_other_work'
+            } else {
+              contract.parentNextHint = 'wait_for_close_event'
+            }
+          }
+          const outcome = renderChildCommandOutcome({
+            childRunId: childContinuation.childRunId,
+            command: 'resume',
+            close,
+          })
+          if (turnFrame) {
+            turnFrame.terminalReason = outcome.terminalReason
+          }
+          transcript.emitOutput(outcome.message, 'text')
+          pushAssistantTextSafely(session, outcome.message, {
+            sessionId: request.sessionId,
+            iteration: iterations,
+          })
+          logAgentMetric('turn_child_run_wait_routed', {
+            sessionId: request.sessionId,
+            childRunId: childContinuation.childRunId,
+            childStatus: close?.status || 'running',
+            terminalReason: outcome.terminalReason,
+            iteration: iterations,
+          })
+          return finish({
+            success: outcome.status !== 'error',
+            cancelled: outcome.status === 'cancelled',
+            status: outcome.status,
+            terminalReason: outcome.terminalReason,
           })
         }
 
@@ -3735,6 +3821,64 @@ export class TurnEngine {
           recordRecentToolCallsForIteration()
         }
 
+        const routePatchedChildRunAfterBatch = async (): Promise<ReturnType<typeof finish> | null> => {
+          const initialDecision = computeChildContinuationDecision(
+            turnFrame,
+            getSkillChildRunCloseEvent,
+          )
+          if (initialDecision.kind === 'none') return null
+
+          let childDecision = initialDecision
+          if (childDecision.kind === 'wait') {
+            const close = await waitForChildCloseEvent(childDecision.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
+            if (close) {
+              childDecision = decisionFromChildClose(childDecision.childRunId, close)
+            }
+          }
+
+          if (turnFrame?.skill?.runContract) {
+            const contract = turnFrame.skill.runContract
+            if (childDecision.kind === 'terminal' || childDecision.kind === 'checkpoint_paused') {
+              contract.childCloseEvent = childDecision.closeEvent
+              contract.childStatus = childDecision.closeEvent.status
+              contract.parentNextHint = 'continue_other_work'
+            } else if (childDecision.kind === 'wait') {
+              contract.parentNextHint = 'wait_for_close_event'
+            }
+          }
+
+          const close = childDecision.kind === 'terminal' || childDecision.kind === 'checkpoint_paused'
+            ? childDecision.closeEvent
+            : null
+          const outcome = renderChildCommandOutcome({
+            childRunId: childDecision.childRunId,
+            command: 'resume',
+            close,
+          })
+          if (turnFrame) {
+            turnFrame.terminalReason = outcome.terminalReason
+          }
+          transcript.emitOutput(outcome.message, 'text')
+          pushAssistantTextSafely(session, outcome.message, {
+            sessionId: request.sessionId,
+            iteration: iterations,
+          })
+          logAgentMetric('turn_child_run_post_batch_routed', {
+            sessionId: request.sessionId,
+            childRunId: childDecision.childRunId,
+            childDecision: childDecision.kind,
+            childStatus: close?.status || null,
+            terminalReason: outcome.terminalReason,
+            iteration: iterations,
+          })
+          return finish({
+            success: outcome.status !== 'error',
+            cancelled: outcome.status === 'cancelled',
+            status: outcome.status,
+            terminalReason: outcome.terminalReason,
+          })
+        }
+
         if (host.providerContext.useAnthropicProtocol) {
           const assistantContent: Array<Record<string, unknown>> = []
           if (response.text) {
@@ -3765,6 +3909,8 @@ export class TurnEngine {
               toolResults.push({ type: 'tool_result', tool_use_id: executedTool.id, content: serializedResult })
             },
           })
+          const childRouteResult = await routePatchedChildRunAfterBatch()
+          if (childRouteResult) return childRouteResult
           session.messages.push({ role: 'user', content: toolResults })
         } else if (response.toolTransport === 'text') {
           const historyText = response.rawText || response.text
@@ -3783,6 +3929,8 @@ export class TurnEngine {
               textBridgeResults.push({ id: executedTool.id, name: executedTool.name, result: executedTool.result as ToolExecutionOutput })
             },
           })
+          const childRouteResult = await routePatchedChildRunAfterBatch()
+          if (childRouteResult) return childRouteResult
           if (textBridgeResults.length > 0) {
             session.messages.push({ role: 'user', content: buildTextToolResultMessage(textBridgeResults as any) })
           }
@@ -3819,6 +3967,8 @@ export class TurnEngine {
               } as any)
             },
           })
+          const childRouteResult = await routePatchedChildRunAfterBatch()
+          if (childRouteResult) return childRouteResult
           state.syncBudgetWarning()
         }
 

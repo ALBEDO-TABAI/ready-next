@@ -337,6 +337,14 @@ function buildLifecycleResumePayload(
   }
 }
 
+function isChildRunRecord(record: SkillTaskRunRecord | null | undefined): boolean {
+  if (!record) return false
+  const payload = record.resumePayload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+  const childRun = (payload as Record<string, unknown>).childRun
+  return record.runKind === 'child_run' || Boolean(childRun && typeof childRun === 'object' && !Array.isArray(childRun))
+}
+
 function createRunFromEvent(event: SkillTaskEvent, step: SkillTaskRunStep, nowIso: string): SkillTaskRunRecord | null {
   if (!event.skillId) return null
   const paths = inferOutputPaths(event)
@@ -422,14 +430,15 @@ function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTas
   const sessionId = event.sessionId || event.scopeId
   if (!sessionId || !event.skillId) return null
   const active = repository.listActiveBySession(sessionId, 20)
-    .find((run) => run.skillId === event.skillId)
+    .find((run) => run.skillId === event.skillId && !isChildRunRecord(run))
   if (active) return active
   if (event.runKind === 'typed_action' && event.status === 'running') return null
-  return repository.findLatestRecoverable({
+  const latest = repository.findLatestRecoverable({
     sessionId,
     skillId: event.skillId,
     includeDone: true,
   })
+  return isChildRunRecord(latest) ? null : latest
 }
 
 function findTaskRunForLifecycleEvent(
@@ -438,22 +447,23 @@ function findTaskRunForLifecycleEvent(
 ): SkillTaskRunRecord | null {
   if (event.taskRunId) {
     const exact = repository.get(event.taskRunId)
-    if (exact) return exact
+    if (exact && !isChildRunRecord(exact)) return exact
   }
   if (event.detachedTaskId) {
     const detached = repository.findByDetachedTaskId(event.detachedTaskId)
-    if (detached) return detached
+    if (detached && !isChildRunRecord(detached)) return detached
   }
   const sessionId = event.sessionId || event.scopeId
   if (!sessionId || !event.skillId) return null
   const active = repository.listActiveBySession(sessionId, 20)
-    .find((run) => run.skillId === event.skillId)
+    .find((run) => run.skillId === event.skillId && !isChildRunRecord(run))
   if (active) return active
-  return repository.findLatestRecoverable({
+  const latest = repository.findLatestRecoverable({
     sessionId,
     skillId: event.skillId,
     includeDone: true,
   })
+  return isChildRunRecord(latest) ? null : latest
 }
 
 function buildRunArtifacts(event: SkillTaskEvent, stepId: string, nowIso: string): SkillTaskRunArtifact[] {

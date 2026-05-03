@@ -59,7 +59,12 @@ function loadSqlite(): SqliteCtor | null {
 function setupRepository(): { repo: SkillTaskRunRepository; closeDb: () => void } | null {
   const Sqlite = loadSqlite()
   if (!Sqlite) return null
-  const rawDb = new Sqlite(':memory:')
+  let rawDb: InstanceType<SqliteCtor>
+  try {
+    rawDb = new Sqlite(':memory:')
+  } catch {
+    return null
+  }
   runMigrations(rawDb as unknown as MigrationDatabase)
   const repo = new SkillTaskRunRepository({
     // SkillTaskRunRepository only needs `getRawDb()` returning a sqlite-shaped
@@ -152,6 +157,10 @@ test('Phase 4: updateChildRun patches the payload through status transitions', (
     // Lookup by single-flight key still returns the row while paused.
     const stillActive = setup.repo.findLatestChildRunByKey(input.singleFlightKey)
     assert.ok(stillActive, 'recoverable_paused must still count as active')
+
+    setup.repo.updateChildRun(input.childRunId, { status: 'blocked' })
+    const afterBlocked = setup.repo.findLatestChildRunByKey(input.singleFlightKey)
+    assert.equal(afterBlocked, null, 'blocked rows must not hijack a later single-flight launch')
 
     setup.repo.updateChildRun(input.childRunId, { status: 'completed' })
     row = setup.repo.get(input.childRunId)
@@ -332,7 +341,7 @@ function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoSt
       existing.updatedAt = new Date().toISOString()
     },
     findLatestChildRunByKey: (key: string): SkillTaskRunRecord | null => {
-      const ACTIVE = new Set(['queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked'])
+      const ACTIVE = new Set(['queued', 'running', 'recoverable_paused', 'budget_paused'])
       for (const row of state.rows.values()) {
         const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
         if (!child) continue
@@ -619,6 +628,50 @@ test('VEA ai_analyze child run derives outputDir from real scene_scores path ins
   assert.equal(close.outputDir, outputDir)
   assert.equal(close.runStatePath, join(outputDir, 'run_state.json'))
   assert.equal(runtime.calls[0].params?.outputDir, outputDir)
+})
+
+test('blocked child run does not single-flight hijack a later continuation action', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-vea-blocked-single-flight-'))
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  const repo = makeFakeRepository()
+  const { runtime } = setupRunner({ repo })
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      makeTerminalClose('video-expert-analyzer', 'blocked', 'blocked_external'),
+    ],
+  })
+
+  const blocked = await startSkillChildRun({
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { url: 'https://example.com/old', outputDir },
+  })
+  const blockedClose = await pollUntil(() => getSkillChildRunCloseEvent(blocked.childRunId))
+  assert.equal(blockedClose.status, 'blocked')
+
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      { action: 'video_expert_ai_analyze', input: { sceneScoresPath } },
+      makeTerminalClose('video-expert-analyzer', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRun({
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    requestedInput: { sceneScoresPath },
+  })
+
+  assert.equal(result.status, 'running')
+  assert.notEqual(result.childRunId, blocked.childRunId)
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  assert.equal(close.status, 'completed')
+  assert.equal(runtime.calls[0].action, 'video_expert_ai_analyze')
 })
 
 test('Phase 5: cancellation produces status=killed terminalReason=cancelled_user (NEVER failed)', async () => {

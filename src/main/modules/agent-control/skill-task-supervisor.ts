@@ -14,6 +14,7 @@ import {
 } from '../repositories/skill-task-run-repository'
 import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from './run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
+import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1
@@ -350,6 +351,23 @@ function isTerminalPublic(status: SkillTaskSupervisorStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'killed'
 }
 
+function hasChildRunPayload(taskRun: SkillTaskRunRecord | null | undefined): boolean {
+  const payload = taskRun?.resumePayload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+  const childRun = (payload as Record<string, unknown>).childRun
+  return Boolean(childRun && typeof childRun === 'object' && !Array.isArray(childRun))
+}
+
+function isOrphanedChildLoopLauncher(taskRun: SkillTaskRunRecord | null | undefined): boolean {
+  if (!taskRun) return false
+  if (taskRun.status !== 'running') return false
+  if (taskRun.runKind !== 'typed_action') return false
+  if (!isConfiguredChildLoopSkillAction(taskRun.skillId, taskRun.action)) return false
+  if (hasChildRunPayload(taskRun)) return false
+  if (nonEmpty(taskRun.detachedTaskId) || nonEmpty(taskRun.jobId)) return false
+  return true
+}
+
 function snapshotHasDurableHandle(snapshot: SkillTaskSupervisorSnapshot): boolean {
   return Boolean(
     snapshot.resumePayload
@@ -430,19 +448,29 @@ export class SkillTaskSupervisor {
     } catch (error) {
       observations.push({ source: 'task_run', message: error instanceof Error ? error.message : String(error) })
     }
+    const orphanedChildLoopLauncher = isOrphanedChildLoopLauncher(taskRun)
+    if (orphanedChildLoopLauncher) {
+      observations.push({
+        source: 'task_run',
+        status: taskRun?.status || null,
+        message: 'ignored child-loop launcher row without child payload',
+        live: false,
+      })
+    }
+    const lifecycleTaskRun = orphanedChildLoopLauncher ? null : taskRun
 
-    const skillId = params.skillId || detached?.skillId || taskRun?.skillId || null
+    const skillId = params.skillId || detached?.skillId || lifecycleTaskRun?.skillId || taskRun?.skillId || null
     const expectedTaskId = nonEmpty(params.expectedTaskId)
       || detached?.id
-      || nonEmpty(taskRun?.detachedTaskId)
-      || nonEmpty(taskRun?.jobId)
-      || nonEmpty(taskRun?.runId)
-      || nonEmpty((taskRun?.params as Record<string, unknown> | null | undefined)?.taskId)
-      || nonEmpty((taskRun?.params as Record<string, unknown> | null | undefined)?.task_id)
-    const explicitRunStatePath = params.runStatePath || detached?.runStatePath || taskRun?.runStatePath || null
+      || nonEmpty(lifecycleTaskRun?.detachedTaskId)
+      || nonEmpty(lifecycleTaskRun?.jobId)
+      || nonEmpty(lifecycleTaskRun?.runId)
+      || nonEmpty((lifecycleTaskRun?.params as Record<string, unknown> | null | undefined)?.taskId)
+      || nonEmpty((lifecycleTaskRun?.params as Record<string, unknown> | null | undefined)?.task_id)
+    const explicitRunStatePath = params.runStatePath || detached?.runStatePath || lifecycleTaskRun?.runStatePath || null
     const outputDir = params.outputDir
       || detached?.outputDir
-      || taskRun?.outputDir
+      || lifecycleTaskRun?.outputDir
       || (explicitRunStatePath ? dirname(explicitRunStatePath) : null)
     const selection = selectRunStateFile({
       outputDir,
@@ -483,7 +511,7 @@ export class SkillTaskSupervisor {
     const resolvedOutputDir = runState?.activeOutputDir || outputDir || (resolvedRunStatePath ? dirname(resolvedRunStatePath) : null)
     const artifactProgress = inspectSkillProgressArtifacts({
       outputDir: resolvedOutputDir,
-      sceneScoresPath: detached?.sceneScoresPath || taskRun?.sceneScoresPath || (resolvedOutputDir ? join(resolvedOutputDir, 'scene_scores.json') : null),
+      sceneScoresPath: detached?.sceneScoresPath || lifecycleTaskRun?.sceneScoresPath || (resolvedOutputDir ? join(resolvedOutputDir, 'scene_scores.json') : null),
     })
     if (artifactProgress.hasEvidence) {
       observations.push({
@@ -499,7 +527,7 @@ export class SkillTaskSupervisor {
     }
 
     const detachedStatus = statusFromDetached(detached?.status)
-    const taskRunStatus = statusFromTaskRun(taskRun?.status)
+    const taskRunStatus = statusFromTaskRun(lifecycleTaskRun?.status)
     // TODO(skill-child-loop): this reconciliation is the parent's
     // out-of-band probe to answer "is something running and how far has it
     // got?" without reading the child's transcript. When the child-loop
@@ -517,8 +545,8 @@ export class SkillTaskSupervisor {
     const terminalConflict = new Set(terminalStatuses).size > 1
     const terminalLifecycleConflict = terminalSeen && normalizedStatuses.some((candidateStatus) => !isTerminalInternal(candidateStatus))
     const liveByDetached = detached?.status === 'running'
-    const liveByTaskRun = taskRun?.status === 'running'
-    const blockedByTaskRun = taskRun?.status === 'blocked'
+    const liveByTaskRun = lifecycleTaskRun?.status === 'running'
+    const blockedByTaskRun = lifecycleTaskRun?.status === 'blocked'
     const liveByRunState = runStateStatus === 'background_running' && heartbeatFresh
     const recoverableByRunState = Boolean(
       runStateStatus === 'background_running'
@@ -550,7 +578,7 @@ export class SkillTaskSupervisor {
       coverageRatio: artifactProgress.coverageRatio ?? runState?.coverageRatio ?? null,
       updatedAt: runState?.updatedAt || null,
     }
-    const resumePayload = taskRun?.resumePayload
+    const resumePayload = lifecycleTaskRun?.resumePayload
       || (detached
         ? {
           detachedTaskId: detached.id,
@@ -565,9 +593,9 @@ export class SkillTaskSupervisor {
       resolvedRunStatePath
         || resolvedOutputDir
         || resumePayload
-        || taskRun?.resumePayload
+        || lifecycleTaskRun?.resumePayload
         || detached?.id
-        || taskRun?.detachedTaskId,
+        || lifecycleTaskRun?.detachedTaskId,
     )
     const terminalOnlyByStore = Boolean(
       isTerminalInternal(internalStatus)
@@ -604,12 +632,12 @@ export class SkillTaskSupervisor {
     })()
 
     return {
-      taskRunId: taskRun?.id || null,
-      detachedTaskId: detached?.id || taskRun?.detachedTaskId || detachedTaskId || null,
+      taskRunId: lifecycleTaskRun?.id || null,
+      detachedTaskId: detached?.id || lifecycleTaskRun?.detachedTaskId || detachedTaskId || null,
       skillId,
-      scopeId: params.scopeId || detached?.scopeId || taskRun?.scopeId || null,
-      sessionId: params.sessionId || detached?.sessionId || taskRun?.sessionId || null,
-      action: params.action || detached?.action || taskRun?.action || null,
+      scopeId: params.scopeId || detached?.scopeId || lifecycleTaskRun?.scopeId || null,
+      sessionId: params.sessionId || detached?.sessionId || lifecycleTaskRun?.sessionId || null,
+      action: params.action || detached?.action || lifecycleTaskRun?.action || null,
       status,
       liveness,
       hasLiveWork,
@@ -619,10 +647,10 @@ export class SkillTaskSupervisor {
       stale,
       outputDir: resolvedOutputDir,
       runStatePath: resolvedRunStatePath,
-      sceneScoresPath: detached?.sceneScoresPath || taskRun?.sceneScoresPath || (resolvedOutputDir ? join(resolvedOutputDir, 'scene_scores.json') : null),
-      deliveryReportPath: detached?.deliveryReportPath || taskRun?.deliveryReportPath || (resolvedOutputDir ? join(resolvedOutputDir, 'delivery_report.json') : null),
+      sceneScoresPath: detached?.sceneScoresPath || lifecycleTaskRun?.sceneScoresPath || (resolvedOutputDir ? join(resolvedOutputDir, 'scene_scores.json') : null),
+      deliveryReportPath: detached?.deliveryReportPath || lifecycleTaskRun?.deliveryReportPath || (resolvedOutputDir ? join(resolvedOutputDir, 'delivery_report.json') : null),
       progress,
-      blockers: uniqueStrings([runState?.lastError, detached?.error, taskRun?.failureDetail]),
+      blockers: uniqueStrings([runState?.lastError, detached?.error, lifecycleTaskRun?.failureDetail]),
       pauseReason: status === 'budget_paused' ? 'budget_exhausted' : null,
       resumePayload: resumePayload as Record<string, unknown> | null,
       sourceObservations: observations,

@@ -217,6 +217,34 @@ test('applyTurnFramePatch: blocked run_state evidence overrides stale running li
   assert.equal(next.liveness, 'blocked')
 })
 
+test('applyTurnFramePatch: new runContract preserves child-run ownership fields', () => {
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      runContract: null,
+    },
+  })
+
+  const next = applyTurnFramePatch(frame, {
+    livenessHint: 'running_process',
+    runContract: {
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      outputDir: '/tmp/video-output',
+      runStatePath: '/tmp/video-output/run_state.json',
+      status: 'running',
+      liveness: 'running_process',
+      childRunId: 'vchild123',
+      childStatus: 'running',
+      parentNextHint: 'wait_for_close_event',
+    },
+  })
+
+  assert.equal(next.skill?.runContract?.childRunId, 'vchild123')
+  assert.equal(next.skill?.runContract?.childStatus, 'running')
+  assert.equal(next.skill?.runContract?.parentNextHint, 'wait_for_close_event')
+})
+
 test('applyTurnFramePatch: livenessHint cannot downgrade from terminal done', () => {
   const frame = makeFrame({ liveness: 'done' })
   const next = applyTurnFramePatch(frame, { livenessHint: 'running_process' })

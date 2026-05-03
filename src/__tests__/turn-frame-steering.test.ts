@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
@@ -327,6 +330,54 @@ test('T5: child-owned frame (childRunId set, no close) steers ask_model with pri
   assert.ok(/status/.test(steering.systemReminder))
   assert.ok(/resume/.test(steering.systemReminder))
   assert.ok(/cancel/.test(steering.systemReminder))
+})
+
+test('T5: child-owned frame with pending handoff exposes write_artifact but not typed actions', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-turn-frame-handoff-'))
+  try {
+    mkdirSync(join(root, 'audiovisual_handoff', 'body'), { recursive: true })
+    writeFileSync(join(root, 'audiovisual_handoff', 'receipt.json'), JSON.stringify({
+      tasks: {
+        body: {
+          status: 'pending',
+          task: 'audiovisual_handoff/body/task.md',
+          output: 'body/output.md',
+        },
+      },
+    }), 'utf8')
+    const frame = _resolveTurnFrame({
+      sessionId: 'scope-vea-child',
+      requestId: 'req-child-handoff',
+      userIntent: 'continue',
+      supervisorSnapshot: snapshot({
+        status: 'blocked',
+        hasLiveWork: false,
+        hasRecentProgress: false,
+        outputDir: root,
+        runStatePath: join(root, 'run_state.json'),
+      }),
+    })
+    if (frame.skill) {
+      (frame.skill as any).runContract = {
+        childRunId: 'vt5handoff',
+        childStatus: 'blocked',
+        parentNextHint: 'wait_for_close_event',
+        childCloseEvent: null,
+      }
+    }
+    frame.activeArtifactRoots = [root]
+
+    const steering = buildTurnFrameSteering(frame)
+
+    assert.equal(steering.mode, 'ask_model')
+    assert.ok(!steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+    assert.ok(!steering.preferredToolNames.includes('skill_video_expert_ai_analyze'))
+    assert.ok(steering.preferredToolNames.includes('skill_read_artifact'))
+    assert.ok(steering.preferredToolNames.includes('skill_write_artifact'))
+    assert.ok(steering.systemReminder?.includes('skill_write_artifact'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('T5: child-owned frame with terminal close (status=completed) releases parent steering', () => {

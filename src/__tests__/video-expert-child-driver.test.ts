@@ -343,6 +343,45 @@ test('VEA driver adopts the actual pipeline output directory returned by runtime
   assert.equal((after as any).runStatePath, path.join(actualOutputDir, 'run_state.json'))
 })
 
+test('VEA driver adopts actual ai_analyze output directory before closing completed', async () => {
+  const outputRoot = await makeTempOutputDir()
+  const actualOutputDir = path.join(outputRoot, 'video-title')
+  await fs.mkdir(actualOutputDir)
+  const sceneScoresPath = await writeCompleteSceneArtifacts(actualOutputDir)
+  await fs.writeFile(path.join(actualOutputDir, 'run_state.json'), JSON.stringify({
+    status: 'completed',
+    current_stage: 'completed',
+    scores_path: 'scene_scores.json',
+  }), 'utf8')
+
+  const state = await videoExpertChildDriver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { sceneScoresPath, outputDir: outputRoot },
+    parentNextHint: 'wait_for_close_event',
+    outputDir: outputRoot,
+  })
+
+  const after = await videoExpertChildDriver.observeAfterAction(state, {
+    success: true,
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    stdout: '',
+    stderr: '',
+    outputDir: actualOutputDir,
+    command: [],
+  } as any)
+  const next = await videoExpertChildDriver.planNextAction(after)
+  const close = asClose(next)
+
+  assert.equal((after as any).outputDir, actualOutputDir)
+  assert.equal((after as any).runStatePath, path.join(actualOutputDir, 'run_state.json'))
+  assert.equal(close.status, 'completed')
+  assert.equal(close.outputDir, actualOutputDir)
+})
+
 test('Worker E: stale VEA config and delivery_report do not override current text-only model', async () => {
   const outputDir = await makeTempOutputDir()
   const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 3)

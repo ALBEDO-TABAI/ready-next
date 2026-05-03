@@ -35,6 +35,11 @@ export interface SkillActionDefinition {
   visibility?: SkillActionVisibility
 }
 
+export interface SkillChildLoopDefinition {
+  version: number
+  actions: string[]
+}
+
 export interface SkillInputDefinition {
   key: string
   label?: string
@@ -156,6 +161,12 @@ export interface SkillDefinition {
    * Imported as a structural type to avoid pulling the Zod schema into shared.
    */
   hostRequirements?: import('./skill-host-contract').SkillHostRequirements
+  /**
+   * Declarative child-loop ownership contract. Skills that launch durable
+   * child runs declare the typed actions here; Ready core must consult this
+   * contract instead of carrying per-skill action tables.
+   */
+  childLoop?: SkillChildLoopDefinition
 }
 
 export interface SkillArtifact {

@@ -276,6 +276,114 @@ test('SkillTaskTracker archives goal, resources, job and agent for recovery', ()
   registerSkillTaskRunRepository(null)
 })
 
+test('SkillTaskTracker does not overwrite child-run ownership rows with parent launcher events', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-child-launcher')
+
+  const child = makeStoredRun({
+    id: 'vchild-owned',
+    scopeId: 'scope-child-launcher',
+    sessionId: 'scope-child-launcher',
+    runKind: 'child_run',
+    status: 'running',
+    toolName: null,
+    outputDir: '/tmp/vea-child',
+    runStatePath: '/tmp/vea-child/run_state.json',
+    resumePayload: {
+      childRun: {
+        childRunId: 'vchild-owned',
+        status: 'running',
+        skillId: 'video-expert-analyzer',
+        requestedAction: 'video_expert_pipeline',
+      },
+    },
+  })
+  rows.set(child.id, child)
+
+  recordSkillTaskEvent({
+    scopeId: 'scope-child-launcher',
+    sessionId: 'scope-child-launcher',
+    skillId: 'video-expert-analyzer',
+    skillName: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    action: 'video_expert_pipeline',
+    runKind: 'typed_action',
+    status: 'done',
+    message: 'child run child_launched (id=vchild-owned)',
+  })
+
+  const storedChild = rows.get('vchild-owned')
+  const childPayload = (storedChild?.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+  assert.equal(storedChild?.status, 'running')
+  assert.equal(storedChild?.runKind, 'child_run')
+  assert.equal(childPayload?.childRunId, 'vchild-owned')
+  assert.equal(childPayload?.status, 'running')
+
+  const parentLauncher = Array.from(rows.values()).find((row) => row.id !== 'vchild-owned')
+  assert.ok(parentLauncher, 'expected parent launcher event to create a separate row')
+  assert.equal(parentLauncher?.status, 'done')
+  assert.equal(parentLauncher?.runKind, 'typed_action')
+
+  registerSkillTaskRunRepository(null)
+})
+
+test('SkillTaskTracker does not overwrite child-run ownership rows with parent lifecycle events', () => {
+  const { repository, rows } = createTaskRunRepositoryHarness()
+  registerSkillTaskRunRepository(repository)
+  clearSkillTaskProjection('scope-child-lifecycle')
+
+  const child = makeStoredRun({
+    id: 'vchild-lifecycle',
+    scopeId: 'scope-child-lifecycle',
+    sessionId: 'scope-child-lifecycle',
+    runKind: 'child_run',
+    status: 'running',
+    toolName: null,
+    outputDir: '/tmp/vea-child-lifecycle',
+    runStatePath: '/tmp/vea-child-lifecycle/run_state.json',
+    resumePayload: {
+      childRun: {
+        childRunId: 'vchild-lifecycle',
+        status: 'running',
+        skillId: 'video-expert-analyzer',
+        requestedAction: 'video_expert_pipeline',
+      },
+    },
+  })
+  rows.set(child.id, child)
+
+  recordSkillParentTaskLifecycleEvent({
+    scopeId: 'scope-child-lifecycle',
+    sessionId: 'scope-child-lifecycle',
+    skillId: 'video-expert-analyzer',
+    skillName: 'Video Expert Analyzer',
+    action: 'video_expert_pipeline',
+    state: 'background_running',
+    reason: 'budget_exhausted',
+    message: 'child is still running in background',
+    taskRunId: 'vchild-lifecycle',
+    outputDir: '/tmp/vea-child-lifecycle',
+    runStatePath: '/tmp/vea-child-lifecycle/run_state.json',
+    resumePayload: { blockerType: 'budget_exhausted', taskRunId: 'vchild-lifecycle' },
+  })
+
+  const storedChild = rows.get('vchild-lifecycle')
+  const childPayload = (storedChild?.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
+  assert.equal(storedChild?.status, 'running')
+  assert.equal(storedChild?.runKind, 'child_run')
+  assert.equal(childPayload?.childRunId, 'vchild-lifecycle')
+  assert.equal(childPayload?.status, 'running')
+
+  const parentLifecycle = Array.from(rows.values()).find((row) => row.id !== 'vchild-lifecycle')
+  assert.ok(parentLifecycle, 'expected parent lifecycle event to create a separate row')
+  assert.equal(parentLifecycle?.status, 'running')
+  assert.equal(parentLifecycle?.runKind, 'typed_action')
+  assert.equal(parentLifecycle?.resumePayload?.blockerType, 'budget_exhausted')
+
+  registerSkillTaskRunRepository(null)
+})
+
 test('SkillTaskTracker updates ask_user blocked step to done in the same task run', () => {
   const { repository, rows } = createTaskRunRepositoryHarness()
   registerSkillTaskRunRepository(repository)

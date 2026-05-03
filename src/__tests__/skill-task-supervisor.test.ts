@@ -168,6 +168,14 @@ test('SkillTaskSupervisor prefers an active parent over primitive monitor succes
     id: 'str-active',
     status: 'running',
     runKind: 'typed_action',
+    resumePayload: {
+      childRun: {
+        childRunId: 'vactive-parent',
+        status: 'running',
+        skillId: 'video-expert-analyzer',
+        requestedAction: 'video_expert_pipeline',
+      },
+    },
     steps: [
       { id: 'skill_video_expert_pipeline#1', title: '视频分析', status: 'running', updatedAt: '2026-04-28T01:58:00.000Z' },
       { id: 'skill_run_shell#1', title: '监控 run_state', status: 'done', updatedAt: '2026-04-28T01:59:00.000Z' },
@@ -189,6 +197,46 @@ test('SkillTaskSupervisor prefers an active parent over primitive monitor succes
   assert.equal(snapshot.status, 'running')
   assert.equal(snapshot.taskRunId, 'str-active')
   assert.equal(snapshot.closeAllowed, false)
+})
+
+test('SkillTaskSupervisor ignores orphaned child-loop launcher rows as live work', () => {
+  const root = tempRoot()
+  try {
+    const runStatePath = writeRunState(root, {
+      task_id: 'stale-launcher',
+      status: 'running',
+      current_stage: 'ai_analyze',
+      updated_at: '2026-04-28T01:40:00.000Z',
+    }, '2026-04-28T01:40:00.000Z')
+    markTreeMtime(root, '2026-04-28T01:40:00.000Z')
+    const orphanLauncher = makeRun({
+      id: 'str-orphan-launcher',
+      runKind: 'typed_action',
+      action: 'video_expert_pipeline',
+      toolName: 'skill_video_expert_pipeline',
+      status: 'running',
+      outputDir: root,
+      runStatePath,
+      resumePayload: null,
+      detachedTaskId: null,
+      jobId: null,
+      updatedAt: '2026-04-28T01:41:00.000Z',
+    })
+
+    const snapshot = makeSupervisor({
+      listActiveTaskRuns: () => [orphanLauncher],
+      pidExists: () => false,
+    }).inspectLatestSkillTask({ sessionId: 'scope-supervisor' })
+
+    assert.equal(snapshot.status, 'unknown')
+    assert.equal(snapshot.hasLiveWork, false)
+    assert.equal(snapshot.runStatePath, null)
+    assert.equal(snapshot.sourceObservations.some((item) =>
+      item.source === 'task_run' && item.message === 'ignored child-loop launcher row without child payload',
+    ), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('SkillTaskSupervisor treats live pid with stale run_state as background running', () => {

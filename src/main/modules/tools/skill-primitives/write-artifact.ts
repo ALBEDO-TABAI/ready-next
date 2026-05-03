@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
+import { markSkillHandoffOutputCompleted } from '../../agent-control/skill-agent-handoff'
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
@@ -37,6 +38,46 @@ export interface WriteArtifactArgs {
 export interface WriteArtifactHandlerDeps {
   skillId: string
   lookupSkillRoots?: LookupSkillRoots
+  additionalAllowedWriteTargets?: Array<{
+    root: string
+    relativePath: string
+    receiptPath?: string
+    taskName?: string
+  }>
+}
+
+function firstPathSegment(relativePath: string): string | null {
+  const clean = relativePath.replace(/\\/g, '/').trim()
+  const first = clean.split('/').find(Boolean)
+  return first || null
+}
+
+function resolveAdditionalWriteTarget(
+  relativePath: string,
+  targets: WriteArtifactHandlerDeps['additionalAllowedWriteTargets'],
+): { absolutePath: string; target: NonNullable<WriteArtifactHandlerDeps['additionalAllowedWriteTargets']>[number] } | null {
+  if (!Array.isArray(targets) || targets.length === 0) return null
+  const requestedNamespace = firstPathSegment(relativePath)
+  const targetNamespaces = new Set<string>()
+  for (const target of targets) {
+    const targetNamespace = firstPathSegment(target?.relativePath || '')
+    if (targetNamespace) targetNamespaces.add(targetNamespace)
+    try {
+      const requested = resolveWithinRoot(target.root, relativePath)
+      const allowed = resolveWithinRoot(target.root, target.relativePath)
+      if (requested === allowed) return { absolutePath: requested, target }
+    } catch (error) {
+      if (error instanceof PathSandboxError && error.reason === 'path_escape') continue
+      throw error
+    }
+  }
+  if (requestedNamespace && targetNamespaces.has(requestedNamespace)) {
+    throw new PathSandboxError(
+      'no_root_match',
+      `Path ${relativePath} is not inside any writable skill artifact target`,
+    )
+  }
+  return null
 }
 
 export async function executeWriteArtifact(
@@ -59,8 +100,11 @@ export async function executeWriteArtifact(
   }
 
   let absPath: string
+  let handoffTarget: NonNullable<WriteArtifactHandlerDeps['additionalAllowedWriteTargets']>[number] | null = null
   try {
-    absPath = resolveWithinRoot(roots.artifactRoot, args.relativePath)
+    const additionalTarget = resolveAdditionalWriteTarget(args.relativePath, deps.additionalAllowedWriteTargets)
+    absPath = additionalTarget?.absolutePath || resolveWithinRoot(roots.artifactRoot, args.relativePath)
+    handoffTarget = additionalTarget?.target || null
     assertNotReservedPath(absPath)
   } catch (error) {
     if (error instanceof PathSandboxError) {
@@ -102,6 +146,13 @@ export async function executeWriteArtifact(
 
   mkdirSync(dirname(absPath), { recursive: true })
   writeFileSync(absPath, buffer)
+  if (handoffTarget?.receiptPath && handoffTarget.taskName) {
+    markSkillHandoffOutputCompleted({
+      receiptPath: handoffTarget.receiptPath,
+      taskName: handoffTarget.taskName,
+      outputPath: absPath,
+    })
+  }
 
   logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveUsed, {
     primitive: 'skill_write_artifact',

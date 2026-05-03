@@ -22,7 +22,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import type { AIModelConfig } from '../../../shared/ai-providers'
+import { resolveAIConfigCapabilities, type AIModelConfig } from '../../../shared/ai-providers'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 import { logAgentMetric } from './metrics'
@@ -138,6 +138,10 @@ function isKnownVisionModel(provider: string, model: string): boolean {
   return false
 }
 
+function hasExplicitAgentProtocol(config: AIModelConfig): boolean {
+  return config.agentProtocol === 'anthropic' || config.agentProtocol === 'openai'
+}
+
 function findCurrentModelVisionIssue(config: AIModelConfig): string | null {
   const provider = trim(config.provider)
   const model = trim(config.model)
@@ -145,11 +149,15 @@ function findCurrentModelVisionIssue(config: AIModelConfig): string | null {
   const ref = modelRef(provider, model)
   if (config.visionMode === 'off') return `current model ${ref} has vision disabled.`
   if (config.visionMode === 'on') return null
+  if (isKnownTextOnlyModel(provider, model)) return `current model ${ref} is text-only.`
+  if (isKnownVisionModel(provider, model)) return null
+  const capabilities = resolveAIConfigCapabilities(config)
+  if (capabilities?.supportsVision && (!isCustomProvider(provider) || hasExplicitAgentProtocol(config))) {
+    return null
+  }
   if (isCustomProvider(provider)) {
     return `current custom provider ${ref} is unverified for image input; set visionMode=on after verifying it can read images.`
   }
-  if (isKnownTextOnlyModel(provider, model)) return `current model ${ref} is text-only.`
-  if (isKnownVisionModel(provider, model)) return null
   return `current model ${ref} is not verified image-capable.`
 }
 
@@ -628,7 +636,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     if (
       typeof result.outputDir === 'string'
       && result.outputDir.trim()
-      && (!state.outputDir || state.requestedAction === PIPELINE_ACTION)
+      && result.outputDir.trim() !== state.outputDir
     ) {
       state.outputDir = result.outputDir.trim()
       state.runStatePath = join(state.outputDir, 'run_state.json')

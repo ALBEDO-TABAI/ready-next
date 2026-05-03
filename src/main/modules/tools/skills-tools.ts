@@ -15,7 +15,6 @@ import {
   type SkillRunContract,
 } from '../agent-control/run-contracts'
 import {
-  isChildOwnedSkill,
   startSkillChildRun,
 } from '../agent-control/skill-child-runner'
 import type {
@@ -38,6 +37,8 @@ import type {
 } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
+import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skill-agent-handoff'
+import { isChildLoopSkillAction } from './child-loop-skill-actions'
 import { choosePrimitiveSkillId, filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
@@ -61,6 +62,7 @@ import { paramListToZodObject } from './paramList-to-zod'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
+export { isChildLoopSkillAction } from './child-loop-skill-actions'
 
 interface SkillToolRuntimeContext {
   scopeId?: string
@@ -95,35 +97,6 @@ const STATIC_TOOL_NAMES: Record<string, string> = {
   'lets-go-rss:rss_list': 'skill_rss_list',
   'lets-go-rss:rss_stats': 'skill_rss_stats',
 }
-
-/**
- * Phase 6 — child-loop owned skill actions. A typed action listed here is
- * routed to the SkillChildRunner instead of being awaited inline through
- * `runSkill`. The parent tool batch returns immediately with a
- * `child_launched` / `child_reused` / `child_paused` envelope; the actual
- * run lives in the child runtime and surfaces a structured close event on
- * its own channel.
- *
- * Keep keyed by `skillId` so adding a new child-loop skill is a one-line
- * edit. Returns `true` only when both the skill is registered with a child
- * driver AND the action name is on the per-skill allowlist.
- */
-const CHILD_LOOP_SKILL_ACTIONS: Record<string, ReadonlySet<string>> = {
-  'video-expert-analyzer': new Set([
-    'video_expert_pipeline',
-    'video_expert_ai_analyze',
-  ]),
-}
-
-export function isChildLoopSkillAction(skillId: string, action: string): boolean {
-  if (typeof skillId !== 'string' || !skillId) return false
-  if (typeof action !== 'string' || !action) return false
-  if (!isChildOwnedSkill(skillId)) return false
-  const allow = CHILD_LOOP_SKILL_ACTIONS[skillId]
-  if (!allow) return false
-  return allow.has(action)
-}
-
 
 function sanitizeToolToken(value: string): string {
   return value
@@ -1539,7 +1512,12 @@ export async function executeSkillTool(
             content: typeof args.content === 'string' ? args.content : '',
             encoding: args.encoding === 'base64' ? 'base64' : 'utf-8',
           },
-          { skillId },
+          {
+            skillId,
+            additionalAllowedWriteTargets: resolvePendingSkillHandoffWriteTargets(
+              runtimeContext?.activeFrame?.activeArtifactRoots || [],
+            ),
+          },
         )
         recordPrimitiveOutcome({
           scopeId: runtimeContext?.scopeId,
@@ -2057,14 +2035,15 @@ async function dispatchChildLoopSkillAction(params: {
     return 'child_launched'
   })()
 
-  // Record the launch as still-running for the legacy task-tracker so the
-  // projection layer surfaces the child as live work. Failures emitted on
-  // launch (no driver, repo create failure) record as `error`.
+  // Record only the parent launcher operation here. Durable liveness belongs
+  // to the child-run row created by `startSkillChildRun`; keeping the launcher
+  // `running` leaves stale parent rows that can poison unrelated later turns.
   const trackerStatus: SkillTaskEventStatus = (() => {
-    if (envelopeStatus === 'child_terminal' && result.status === 'failed') return 'error'
+    if (envelopeStatus === 'child_terminal' && (result.status === 'failed' || result.status === 'killed')) return 'error'
     if (envelopeStatus === 'child_paused') return 'blocked'
-    return 'running'
+    return 'done'
   })()
+  const shouldAttachLauncherPaths = envelopeStatus === 'child_paused' || envelopeStatus === 'child_terminal'
 
   recordSkillTaskEvent({
     scopeId: runtimeContext?.scopeId,
@@ -2081,10 +2060,10 @@ async function dispatchChildLoopSkillAction(params: {
     message: envelopeStatus === 'child_terminal'
       ? (result.closeEvent?.error?.message || 'child run completed on launch')
       : `child run ${envelopeStatus} (id=${result.childRunId})`,
-    artifactPath: result.outputDir || undefined,
-    artifactLabel: result.outputDir ? '技能输出目录' : undefined,
-    outputDir: result.outputDir || null,
-    runStatePath: result.runStatePath || null,
+    artifactPath: shouldAttachLauncherPaths ? result.outputDir || undefined : undefined,
+    artifactLabel: shouldAttachLauncherPaths && result.outputDir ? '技能输出目录' : undefined,
+    outputDir: shouldAttachLauncherPaths ? result.outputDir || null : null,
+    runStatePath: shouldAttachLauncherPaths ? result.runStatePath || null : null,
     detachedTaskId: undefined,
   })
 

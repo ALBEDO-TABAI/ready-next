@@ -22,7 +22,7 @@
  */
 
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import type { AIModelConfig } from '../../../shared/ai-providers'
+import { resolveAIConfigCapabilities, type AIModelConfig } from '../../../shared/ai-providers'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export interface AgentContextSourceOptions {
@@ -105,6 +105,10 @@ function isKnownVisionModel(provider: string, model: string): boolean {
   return false
 }
 
+function hasExplicitAgentProtocol(config: AIModelConfig): boolean {
+  return config.agentProtocol === 'anthropic' || config.agentProtocol === 'openai'
+}
+
 function deriveInputModes(
   config: AIModelConfig,
   provider: string,
@@ -112,9 +116,12 @@ function deriveInputModes(
 ): AgentSpawnContext['input_modes'] {
   if (config.visionMode === 'on') return ['text', 'image']
   if (config.visionMode === 'off') return ['text']
-  if (isCustomProvider(provider)) return ['text']
   if (isKnownTextOnlyModel(provider, model)) return ['text']
   if (isKnownVisionModel(provider, model)) return ['text', 'image']
+  const capabilities = resolveAIConfigCapabilities(config)
+  if (capabilities?.supportsVision && (!isCustomProvider(provider) || hasExplicitAgentProtocol(config))) {
+    return ['text', 'image']
+  }
   return ['text']
 }
 

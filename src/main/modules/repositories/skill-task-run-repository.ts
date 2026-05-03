@@ -201,6 +201,13 @@ const CHILD_RUN_ACTIVE_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
   'blocked',
 ]
 
+const CHILD_RUN_SINGLE_FLIGHT_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
+  'queued',
+  'running',
+  'recoverable_paused',
+  'budget_paused',
+]
+
 const CHILD_RUN_TERMINAL_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
   'completed',
   'failed',
@@ -532,21 +539,23 @@ export class SkillTaskRunRepository {
   }
 
   /**
-   * Phase 4 — find the most recently updated ACTIVE row whose
-   * `resumePayload.childRun.singleFlightKey` matches. Active = canonical
-   * child status in `(queued|running|recoverable_paused|budget_paused|blocked)`.
+   * Phase 4 — find the most recently updated in-flight row whose
+   * `resumePayload.childRun.singleFlightKey` matches. Blocked rows remain
+   * visible to task recovery, but they are not single-flight candidates:
+   * after the blocker is repaired a later action must not be forced back
+   * through the stale blocked lifecycle.
    */
   findLatestChildRunByKey(singleFlightKey: string): SkillTaskRunRecord | null {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
-    const placeholders = CHILD_RUN_ACTIVE_STATUSES.map(() => '?').join(', ')
+    const placeholders = CHILD_RUN_SINGLE_FLIGHT_STATUSES.map(() => '?').join(', ')
     const row = db.prepare(`
       SELECT * FROM skill_task_runs
       WHERE json_extract(resume_payload_json, '$.childRun.singleFlightKey') = ?
         AND json_extract(resume_payload_json, '$.childRun.status') IN (${placeholders})
       ORDER BY updated_at DESC
       LIMIT 1
-    `).get<SkillTaskRunRow>(singleFlightKey, ...CHILD_RUN_ACTIVE_STATUSES)
+    `).get<SkillTaskRunRow>(singleFlightKey, ...CHILD_RUN_SINGLE_FLIGHT_STATUSES)
     return row ? this.mapRow(row) : null
   }
 

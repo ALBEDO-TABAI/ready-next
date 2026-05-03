@@ -5,6 +5,7 @@ import { resolveToolInputSchemaForExecution } from './tool-registry'
 import { createSystemReminderRegistry } from './system-reminder-registry'
 import { logAgentMetric } from './metrics'
 import { resolveCanonicalChildRunHandle } from './child-run-handle-resolver'
+import { resolvePendingSkillHandoffWriteTargets } from './skill-agent-handoff'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
 import { isTerminalChildCloseStatus } from './skill-child-run-types'
@@ -443,17 +444,23 @@ export function buildTurnFrameSteering(
   if (isChildOwnedFrame(frame)) {
     const childRunId = frame.skill?.runContract?.childRunId || ''
     const childStatus = frame.skill?.runContract?.childStatus || null
+    const hasPendingHandoffWrite = resolvePendingSkillHandoffWriteTargets(frame.activeArtifactRoots).length > 0
     const reminderTokens = [
       `系统补充：本轮 skill 已由 child-loop runner 接管（childRunId=${childRunId}${childStatus ? `, status=${childStatus}` : ''}）。父循环只处理 status / resume / cancel，并等待 child close event。`,
-      '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。',
+      hasPendingHandoffWrite
+        ? '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；如果当前输出目录里有待 agent 完成的 handoff 任务，可用 skill_write_artifact 写入该任务声明的输出文件；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。'
+        : '如需观察状态，只使用 skill_inspect_run_state / skill_read_artifact；需要用户选择时再用 skill_ask_user。不要重新发起该 skill 的动作工具。',
     ]
     const reminderText = reminderTokens.join('\n')
     const registry = createSystemReminderRegistry()
     registry.register({ topic: 'child-owned', priority: 85, text: reminderText })
+    const preferredToolNames = hasPendingHandoffWrite
+      ? [...CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES, 'skill_write_artifact']
+      : [...CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES]
     return {
       mode: 'ask_model',
       requiredToolName: null,
-      preferredToolNames: [...CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES],
+      preferredToolNames,
       systemReminder: registry.compose(),
       action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: null }),
     }

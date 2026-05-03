@@ -74,6 +74,20 @@ test('buildAgentSpawnContextFromAIConfig honors anthropic protocol for OpenAI-co
   assert.deepEqual(ctx!.input_modes, ['text', 'image'])
 })
 
+test('buildAgentSpawnContextFromAIConfig uses shared runtime vision truth for explicit custom protocols', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    model: 'mimo-v2.5',
+    agentProtocol: 'anthropic',
+    visionMode: 'auto',
+  }))
+
+  assert.ok(ctx)
+  assert.equal(ctx!.api_kind, 'anthropic-messages')
+  assert.deepEqual(ctx!.input_modes, ['text', 'image'])
+})
+
 test('buildAgentSpawnContextFromAIConfig treats unverified custom vision auto as text-only', () => {
   const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
     provider: 'openai-compatible',

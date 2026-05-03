@@ -514,6 +514,174 @@ test('running child self-await uses injectable wait and preserves blocked termin
   )
 })
 
+test('running child checkpoints background instead of asking model when self-await times out', async () => {
+  const engine = new TurnEngine()
+  let modelCalls = 0
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
+  const activeSnapshot = makeChildOwnedSnapshot({ status: 'running', closeEvent: null })
+  const { request } = createRequest({
+    userText: '看看进度',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => activeSnapshot,
+      },
+      requestToolLoopResponse: async () => {
+        modelCalls += 1
+        return {
+          text: 'model should not be asked while child run is still active',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      waitForSkillChildCloseEvent: async (childRunId: string, timeoutMs: number) => {
+        waits.push({ childRunId, timeoutMs })
+        return null
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(modelCalls, 0)
+  assert.deepEqual(waits, [{ childRunId: 'vchild001', timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
+  assert.match(result.finalText, /后台仍在运行/)
+})
+
+test('TurnEngine self-awaits a same-turn launched child before asking the model again', async () => {
+  const engine = new TurnEngine()
+  let modelCalls = 0
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
+  const close = {
+    ...makeChildCloseEvent('blocked', 'blocked_config'),
+    childRunId: 'vchild-launch',
+    error: { kind: 'blocked_config', message: 'provider vision preflight blocked' },
+  } as SkillChildCloseEvent
+  const veaSkill = {
+    id: 'video-expert-analyzer',
+    name: 'Video Expert Analyzer (VNext)',
+    actions: [{
+      name: 'video_expert_pipeline',
+      visibility: 'internal',
+      params: [{ name: 'url', required: true }],
+    }],
+    hostRequirements: {
+      expose_when_hint_armed: ['video_expert_pipeline'],
+    },
+  }
+
+  _resetLastReferenceSkillHintsForTests()
+  const restorePipelineToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_pipeline')
+  try {
+    const { request } = createRequest({
+      userText: '使用 Video Expert Analyzer 分析 https://example.com/video.mp4，输出到测试目录',
+      intentClassification: createIntent({ primaryDomain: 'skill', confidence: 'high' }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => true,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /video[-_\s]?expert|Video Expert Analyzer/i.test(text) ? [veaSkill] : [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }),
+          rememberExplicitReferenceSkillHint: () => {
+            rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' })
+            return true
+          },
+          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestToolLoopResponse: async () => {
+          modelCalls += 1
+          if (modelCalls === 1) {
+            return {
+              text: '准备启动 pipeline',
+              toolCalls: [{
+                id: 'tool-vea',
+                name: 'skill_video_expert_pipeline',
+                input: { url: 'https://example.com/video.mp4', outputDir: '/tmp/ready/output' },
+              }],
+              stopReason: 'tool_calls',
+              toolTransport: 'native',
+            }
+          }
+          return {
+            text: 'model should not be asked again after child launch',
+            toolCalls: [],
+            stopReason: 'stop',
+            toolTransport: 'native',
+          }
+        },
+        executeToolBatch: async () => ({
+          results: [{
+            id: 'tool-vea',
+            name: 'skill_video_expert_pipeline',
+            input: { url: 'https://example.com/video.mp4', outputDir: '/tmp/ready/output' },
+            result: {
+              text: '{"status":"child_launched","childRunId":"vchild-launch"}',
+              framePatch: {
+                activeArtifactRoots: ['/tmp/ready/output'],
+                livenessHint: 'running_process',
+                runContract: {
+                  skillId: 'video-expert-analyzer',
+                  skillName: 'Video Expert Analyzer (VNext)',
+                  toolName: 'skill_video_expert_pipeline',
+                  action: 'video_expert_pipeline',
+                  actionInput: { url: 'https://example.com/video.mp4', outputDir: '/tmp/ready/output' },
+                  originalInput: { url: 'https://example.com/video.mp4', outputDir: '/tmp/ready/output' },
+                  sourceUrl: 'https://example.com/video.mp4',
+                  outputDir: '/tmp/ready/output',
+                  runStatePath: '/tmp/ready/output/run_state.json',
+                  artifactRoots: ['/tmp/ready/output'],
+                  artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+                  status: 'running',
+                  liveness: 'running_process',
+                  childRunId: 'vchild-launch',
+                  childStatus: 'running',
+                  parentNextHint: 'wait_for_close_event',
+                },
+              },
+            },
+          }],
+          budgetLimited: false,
+          recoveryHistory: [],
+        }),
+        waitForSkillChildCloseEvent: async (childRunId: string, timeoutMs: number) => {
+          waits.push({ childRunId, timeoutMs })
+          return close
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(modelCalls, 1)
+    assert.deepEqual(waits, [{ childRunId: 'vchild-launch', timeoutMs: 1_500 }])
+    assert.equal(result.status, 'checkpoint')
+    assert.equal(result.terminalReason, 'blocked_config')
+  } finally {
+    restorePipelineToolDefinition()
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
   const engine = new TurnEngine()
   const cancelReasons: string[] = []
@@ -974,6 +1142,102 @@ test('TurnEngine keeps browser process narration out of final text when the brow
       .map((event) => event.chunk),
     ['广州明天雷阵雨转多云，28/24℃。'],
   )
+})
+
+test('TurnEngine does not carry stale skill context into unrelated browser turns', async () => {
+  const engine = new TurnEngine()
+  let capturedAllowedToolNames: string[] = []
+  let supervisorInspections = 0
+  const browserAdapter: DomainAdapter = {
+    id: 'browser',
+    shouldHandle: ({ route }) => route.executor === 'browser',
+    prepare: () => ({
+      allowedToolNames: ['browser_search', 'browser_read_page'],
+      sessionMessages: [],
+      domainState: {},
+    }),
+    dispatch: async ({ domainState }) => ({ domainState }),
+    applyResult: ({ phase, domainState }) => {
+      if (phase === 'no_tool_call') {
+        return { domainState, finalText: '天气查询已完成' }
+      }
+      return { domainState }
+    },
+    buildProjectionPatch: () => null,
+  }
+
+  _resetLastReferenceSkillHintsForTests()
+  rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' })
+  const { request } = createRequest({
+    userText: '广州未来两天天气怎么样',
+    intentClassification: createIntent({
+      primaryDomain: 'browser',
+      mentionedDomains: ['browser'],
+      objectSignals: ['weather'],
+      actionSignals: ['query'],
+      confidence: 'high',
+    }),
+    host: {
+      browserController: {},
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      domainAdapters: [browserAdapter],
+      skillContextOrchestrator: {
+        shouldKeepToolsWithVideo: () => false,
+        findExplicitlyRequestedSkills: () => [],
+        hasActiveSkillExecution: () => false,
+        getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }),
+        rememberExplicitReferenceSkillHint: () => false,
+        buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
+        maybeInjectExplicitSkillContext: async () => {},
+        listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+      },
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => {
+          supervisorInspections += 1
+          return makeSkillSnapshot({
+            status: 'blocked',
+            liveness: 'blocked',
+            hasLiveWork: false,
+            hasRecentProgress: false,
+          })
+        },
+      },
+      requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+        capturedAllowedToolNames = params.allowedToolNames || []
+        return {
+          text: '我已经查询到天气。',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(result.finalText, '天气查询已完成')
+  assert.equal(supervisorInspections, 0, 'unrelated browser turns should not bind supervisor skill context')
+  assert.deepEqual(
+    capturedAllowedToolNames.filter((name) => name.startsWith('skill_')),
+    [],
+    `browser turn must not expose stale skill tools: ${capturedAllowedToolNames.join(',')}`,
+  )
+  _resetLastReferenceSkillHintsForTests()
 })
 
 test('TurnEngine recovers leaked text tool calls in the generic tool loop before treating the turn as no-tool', async () => {

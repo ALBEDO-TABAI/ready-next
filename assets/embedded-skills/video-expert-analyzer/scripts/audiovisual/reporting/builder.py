@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence, Set
 
 from audiovisual.reporting import markdown as _markdown
 from audiovisual.reporting import raw_prompt_adapter as _raw_prompt_adapter
@@ -419,6 +419,59 @@ def _is_existing_caption_line(line: str) -> bool:
     return line.lstrip().startswith(_CAPTION_PREFIX)
 
 
+def _remove_nearby_duplicate_inserted_images(illustrated: str, original: str) -> str:
+    """Remove agent-inserted screenshots that repeat within the validator window.
+
+    The handoff task asks the host agent to avoid using the same image in a
+    nearby paragraph window, but long reports can still produce a local repeat.
+    Validation should keep enforcing the rule; this sanitizer removes only the
+    later duplicate image block (and its generated caption), while preserving
+    the surrounding analysis text and any pre-existing report images.
+    """
+    pre_existing = set(_extract_image_paths(original))
+    blocks = illustrated.split("\n\n")
+    out: List[str] = []
+    window: List[str] = []
+    skip_next_generated_caption = False
+
+    for block in blocks:
+        stripped_block = block.strip()
+        if skip_next_generated_caption and _is_existing_caption_line(stripped_block):
+            skip_next_generated_caption = False
+            continue
+        skip_next_generated_caption = False
+
+        duplicate_paths: Set[str] = set()
+        kept_paths: List[str] = []
+        for path in [path for path in _extract_image_paths(block) if path not in pre_existing]:
+            if path in window:
+                duplicate_paths.add(path)
+            else:
+                kept_paths.append(path)
+
+        if duplicate_paths:
+            kept_lines: List[str] = []
+            removed_only_images = True
+            for line in block.split("\n"):
+                match = _IMAGE_LINK_RE.search(line.strip())
+                if match and match.group(1).strip() in duplicate_paths:
+                    continue
+                if line.strip():
+                    removed_only_images = False
+                kept_lines.append(line)
+            block = "\n".join(kept_lines).strip()
+            if not block:
+                skip_next_generated_caption = removed_only_images
+                continue
+
+        out.append(block)
+        window.extend(kept_paths)
+        if len(window) > 3:
+            window = window[-3:]
+
+    return "\n\n".join(out)
+
+
 def _annotate_image_captions(
     illustrated: str,
     original: str,
@@ -472,6 +525,7 @@ def _maybe_illustrate_markdown(
     user_message = _build_illustrate_user_message(markdown_text, catalog)
     illustrated = coordinator.request_illustrate(_ILLUSTRATE_SYSTEM_PROMPT, user_message)
     illustrated = _strip_trailing_orphan_images(illustrated, markdown_text)
+    illustrated = _remove_nearby_duplicate_inserted_images(illustrated, markdown_text)
     _validate_illustrated_markdown(illustrated, markdown_text, catalog)
     return _annotate_image_captions(illustrated, markdown_text, catalog)
 

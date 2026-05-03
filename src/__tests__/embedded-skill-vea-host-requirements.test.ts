@@ -50,8 +50,8 @@ test('VEA manifest declares wc allowlist extension and 30-min default timeout', 
   )
   assert.equal(
     hr!.default_action_timeout_ms,
-    1_800_000,
-    'VEA pipeline routinely runs >5 min; needs the 30-min default cap',
+    3_600_000,
+    'VEA pipeline can span long child-run phases; host contract currently allows the 1h cap',
   )
 })
 
@@ -90,4 +90,13 @@ test('VEA manifest declares spawned model input modes from Ready agent truth', (
     /"input":\["text","image"\]/,
     'hard-coded text+image support would bypass provider vision preflight truth',
   )
+})
+
+test('VEA manifest declares child-loop ownership instead of relying on core hard-coded action tables', () => {
+  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
+
+  assert.deepEqual(def.childLoop?.actions, [
+    'video_expert_pipeline',
+    'video_expert_ai_analyze',
+  ])
 })

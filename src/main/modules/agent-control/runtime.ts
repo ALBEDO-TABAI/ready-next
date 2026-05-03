@@ -34,6 +34,7 @@ import {
   type PersistedReferenceSkillHint,
 } from './skill-reference-hints'
 import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
+import { shouldDisplayReferenceSkillHintForLatestUserText } from './reference-skill-hint-display'
 import { findSkillToolByName } from '../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
@@ -531,29 +532,37 @@ export class AgentControlRuntime extends EventEmitter {
     const normalizedScopeId = String(scopeId || '').trim()
     if (!normalizedScopeId) return null
     const live = peekLastReferenceSkill(normalizedScopeId)
-    if (live) {
-      return {
-        id: live.id,
-        name: live.name,
-        at: live.at,
-        expiresAt: live.at + REFERENCE_SKILL_HINT_TTL_MS,
+    // This IPC is a renderer read for the small "skill context enabled"
+    // badge. It must not re-arm persisted hints by itself; otherwise merely
+    // opening Ready can light up a stale VEA context before the next user
+    // turn proves it is relevant. Turn execution still restores persisted
+    // hints in `sendScoped(...)`, where intent gating can immediately clear
+    // unrelated turns.
+    if (!live) return null
+    const latestUserText = (() => {
+      try {
+        const messages = this.db.getChatMessages(normalizedScopeId)
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+          const message = messages[index]
+          if (message.role === 'user') return message.content || ''
+        }
+      } catch {
+        return ''
       }
+      return ''
+    })()
+    if (!shouldDisplayReferenceSkillHintForLatestUserText({
+      latestUserText,
+      skillId: live.id,
+      skillName: live.name,
+    })) {
+      return null
     }
-
-    const scope = this.getConversationScope(normalizedScopeId)
-    const meta = this.parseScopeMeta(scope)
-    const persisted = meta['lastReferenceSkill']
-    if (!persisted || typeof persisted !== 'object') return null
-    const hint = persisted as PersistedReferenceSkillHint
-    if (typeof hint.id !== 'string' || typeof hint.name !== 'string' || typeof hint.at !== 'number') return null
-    if (!restoreLastReferenceSkill(normalizedScopeId, hint)) return null
-    const restored = peekLastReferenceSkill(normalizedScopeId)
-    if (!restored) return null
     return {
-      id: restored.id,
-      name: restored.name,
-      at: restored.at,
-      expiresAt: restored.at + REFERENCE_SKILL_HINT_TTL_MS,
+      id: live.id,
+      name: live.name,
+      at: live.at,
+      expiresAt: live.at + REFERENCE_SKILL_HINT_TTL_MS,
     }
   }
 
@@ -1807,11 +1816,17 @@ export class AgentControlRuntime extends EventEmitter {
   private persistReferenceHintToScope(scopeId: string): void {
     try {
       const hint = snapshotLastReferenceSkill(scopeId)
-      if (!hint) return
       const scopeRow = this.db.getConversationScope(scopeId)
       if (!scopeRow) return
       const scope = this.mapConversationRow(scopeRow)
       const meta = this.parseScopeMeta(scope)
+      if (!hint) {
+        if ('lastReferenceSkill' in meta) {
+          delete meta['lastReferenceSkill']
+          this.db.updateConversationScopeMeta(scopeId, meta)
+        }
+        return
+      }
       const existing = meta['lastReferenceSkill'] as PersistedReferenceSkillHint | undefined
       // Avoid noisy DB writes: skip if persisted hint is identical (same id+name+at).
       if (

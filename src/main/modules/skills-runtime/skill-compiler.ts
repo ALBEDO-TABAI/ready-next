@@ -3,6 +3,7 @@ import { basename, join } from 'path'
 import type {
   SkillActionDefinition,
   SkillActionVisibility,
+  SkillChildLoopDefinition,
   SkillDefinition,
   SkillExecutionMode,
   SkillGeneratedFileDefinition,
@@ -101,6 +102,23 @@ function coerceExecutionMode(value: unknown): Exclude<SkillExecutionMode, 'direc
   const raw = asString(value)?.toLowerCase()
   if (raw === 'advisory' || raw === 'workflow') return raw
   return undefined
+}
+
+function normalizeChildLoop(raw: unknown, actions: SkillActionDefinition[], skillId: string): SkillChildLoopDefinition | undefined {
+  const obj = asObject(raw)
+  if (!obj) return undefined
+  const declaredActions = asStringArray(obj.actions)
+  if (declaredActions.length === 0) return undefined
+  const knownActions = new Set(actions.map((action) => action.name))
+  const unknown = declaredActions.filter((action) => !knownActions.has(action))
+  if (unknown.length > 0) {
+    throw new Error(`Skill ${skillId} child_loop.actions 包含未知 action: ${unknown.join(', ')}`)
+  }
+  const version = Number(obj.version)
+  return {
+    version: Number.isFinite(version) && version > 0 ? version : 1,
+    actions: Array.from(new Set(declaredActions)),
+  }
 }
 
 function normalizeParams(raw: unknown): SkillParamDefinition[] {
@@ -442,6 +460,7 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     }
     hostRequirements = parsed.data
   }
+  const childLoop = normalizeChildLoop(manifest?.child_loop ?? manifest?.childLoop, actions, id)
 
   return {
     id,
@@ -464,5 +483,6 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     workflow,
     manifestValid: true,
     hostRequirements,
+    childLoop,
   }
 }
