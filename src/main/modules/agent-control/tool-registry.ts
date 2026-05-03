@@ -68,6 +68,7 @@ import type {
   SkillRunResult,
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
@@ -957,6 +958,7 @@ export interface ChildGatewayParams {
   outputDir: string | null
   runStatePath: string | null
   childInternal: true
+  agentContext?: AgentSpawnContext | null
   /** Optional propagation of the child runner's per-run abort controller. */
   signal?: AbortSignal
   /**
@@ -1023,6 +1025,7 @@ export async function executeSkillActionViaToolGateway(
     const output = await executeToolCall(toolName, rawArgs, {
       allowedToolNames: new Set([toolName]),
       abortSignal: signal,
+      agentContext: params.agentContext ?? null,
       sessionId: sessionId ?? undefined,
       scopeId: scopeId ?? undefined,
       invoker: 'child_runner',

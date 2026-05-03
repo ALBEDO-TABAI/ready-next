@@ -63,7 +63,7 @@ def _build_pipeline_cmd(payload: dict) -> list[str]:
     cmd: list[str] = [sys.executable, str(ORCHESTRATOR), source]
     output_dir = payload.get("outputDir")
     if output_dir:
-        cmd += ["-o", str(output_dir)]
+        cmd += ["-o", str(output_dir), "--exact-output-dir"]
     if payload.get("sceneThreshold") is not None:
         cmd += ["--scene-threshold", str(payload["sceneThreshold"])]
     if payload.get("bestThreshold") is not None:

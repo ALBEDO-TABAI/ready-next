@@ -83,6 +83,79 @@ async function writeIncompleteSceneArtifacts(outputDir: string, totalScenes: num
   return sceneScoresPath
 }
 
+async function writeCompleteSceneArtifacts(outputDir: string): Promise<string> {
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({
+    total_scenes: 1,
+    scenes: [{
+      scene_number: 1,
+      scores: {
+        aesthetic_beauty: 7,
+        credibility: 8,
+        impact: 6,
+        memorability: 6,
+        fun_interest: 5,
+      },
+      weighted_score: 6.6,
+      type_classification: 'TYPE-C Aesthetic',
+      description: '完整场景描述',
+      selection: '[USABLE]',
+      selection_reasoning: '完整选择理由',
+      edit_suggestion: '完整剪辑建议',
+      storyboard: {
+        shot_size: '中景',
+        lighting: '自然光',
+        camera_movement: '轻微移动',
+        visual_style: '纪实',
+        technique: '环境铺垫',
+      },
+    }],
+  }), 'utf8')
+  const hostDir = path.join(outputDir, 'host_batches')
+  await fs.mkdir(hostDir)
+  await fs.writeFile(path.join(hostDir, 'index.json'), JSON.stringify({
+    total_scenes: 1,
+    batches: [{
+      batch_id: 'batch-001',
+      scene_numbers: [1],
+      output: 'batch-001-output.json',
+      status: 'completed',
+    }],
+  }), 'utf8')
+  await fs.writeFile(path.join(hostDir, 'batch-001-output.json'), JSON.stringify({
+    batch_id: 'batch-001',
+    receipt: {
+      status: 'completed',
+      has_todo: false,
+      needs_review: [],
+    },
+    scenes: [{
+      scene_number: 1,
+      scores: {
+        aesthetic_beauty: 7,
+        credibility: 8,
+        impact: 6,
+        memorability: 6,
+        fun_interest: 5,
+      },
+      weighted_score: 6.6,
+      type_classification: 'TYPE-C Aesthetic',
+      description: '完整场景描述',
+      selection: '[USABLE]',
+      selection_reasoning: '完整选择理由',
+      edit_suggestion: '完整剪辑建议',
+      storyboard: {
+        shot_size: '中景',
+        lighting: '自然光',
+        camera_movement: '轻微移动',
+        visual_style: '纪实',
+        technique: '环境铺垫',
+      },
+    }],
+  }), 'utf8')
+  return sceneScoresPath
+}
+
 function isClose(value: unknown): value is SkillChildCloseEvent {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
@@ -555,6 +628,120 @@ test('Phase 5: blocked run_state closes terminalReason=blocked_external', async 
   const close = asClose(next)
   assert.equal(close.status, 'blocked')
   assert.equal(close.terminalReason, 'blocked_external')
+})
+
+test('VEA driver resumes blocked score_batches when artifacts prove scoring is incomplete', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 97)
+  await fs.writeFile(
+    path.join(outputDir, 'run_state.json'),
+    JSON.stringify({
+      status: 'blocked',
+      current_stage: 'score_batches',
+      scores_path: 'scene_scores.json',
+      total_scenes: 97,
+      completed_scenes: 0,
+      coverage_ratio: 0,
+      last_error: '自动并行评分仍有 97 个场景失败，请检查 host_batches 输出',
+    }),
+    'utf8',
+  )
+
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
+  assert.equal(action.input.outputDir, outputDir)
+})
+
+test('VEA driver resumes blocked finalize when scoring is complete but delivery outputs are missing', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = await writeCompleteSceneArtifacts(outputDir)
+  await fs.writeFile(
+    path.join(outputDir, 'run_state.json'),
+    JSON.stringify({
+      status: 'blocked',
+      current_stage: 'finalize',
+      scores_path: 'scene_scores.json',
+      total_scenes: 1,
+      completed_scenes: 1,
+      coverage_ratio: 1,
+      last_error: '抽样校验发现需复核场景：Scene 001',
+    }),
+    'utf8',
+  )
+
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
+  assert.equal(action.input.outputDir, outputDir)
+})
+
+test('VEA driver preflights from launch agentContext before reading settings DB', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 3)
+  await fs.writeFile(
+    path.join(outputDir, 'run_state.json'),
+    JSON.stringify({
+      status: 'blocked',
+      current_stage: 'score_batches',
+      scores_path: 'scene_scores.json',
+      total_scenes: 3,
+      completed_scenes: 0,
+    }),
+    'utf8',
+  )
+  __setVeaProviderPreflightConfigReaderForTests(() => {
+    throw new Error('settings DB should not be read when launch agentContext is available')
+  })
+
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+    agentContext: {
+      provider: 'xiaomi',
+      model_id: 'mimo-v2.5',
+      base_url: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+      api_key: 'test-key',
+      api_kind: 'anthropic-messages',
+      fallback_chain: [],
+      input_modes: ['text', 'image'],
+    },
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
 })
 
 test('Phase 5: blocked + config_repair blocker uses terminalReason=blocked_config', async () => {

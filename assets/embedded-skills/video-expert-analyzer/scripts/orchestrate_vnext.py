@@ -89,6 +89,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=0)
     parser.add_argument("--storyboard-formats", default="md,pdf")
     parser.add_argument("--payload-style", choices=["compact", "full"], default="compact")
+    parser.add_argument("--exact-output-dir", action="store_true", help="URL 模式下把 -o 当作视频任务目录本身，不再按标题创建子目录")
     parser.add_argument("--openclaw-mode", action="store_true", help="启用 OpenClaw 接力模式（默认关闭，使用 --dispatch-json 时自动启用）")
     parser.add_argument("--no-openclaw-mode", action="store_true", help="明确关闭 OpenClaw 接力模式")
     parser.add_argument("--dispatch-json", action="store_true", help="输出当前阶段派单信息，减少额外脚本调用（自动启用 openclaw-mode）")
@@ -138,6 +139,7 @@ def _run_pipeline_flow(args: argparse.Namespace, *, suppress_output: bool = Fals
             scene_threshold=args.scene_threshold,
             best_threshold=args.best_threshold,
             openclaw_mode=_effective_openclaw_mode(args),
+            exact_output_dir=bool(args.exact_output_dir),
         )
         pipeline.run()
     return pipeline

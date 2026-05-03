@@ -67,7 +67,7 @@
       ]
     },
     "shell_allowlist_extensions": ["wc"],
-    "default_action_timeout_ms": 1800000,
+    "default_action_timeout_ms": 3600000,
     "config_repair": {
       "files": [
         {

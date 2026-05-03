@@ -244,6 +244,7 @@ export interface SkillChildLaunchParams {
   sessionId: string | null
   requestedInput: Record<string, unknown>
   parentNextHint: SkillChildRunParentNextHint
+  agentContext?: import('../../../shared/skill-host-contract').AgentSpawnContext | null
   /** Optional pre-existing output dir for legacy resume. */
   outputDir?: string
 }

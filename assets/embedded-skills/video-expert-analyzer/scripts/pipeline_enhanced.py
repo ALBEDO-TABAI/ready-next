@@ -941,7 +941,8 @@ class VideoAnalysisPipeline:
                  extract_scenes: bool = True,
                  auto_select_best: bool = True,
                  best_threshold: float = 7.5,
-                 openclaw_mode: bool = False):
+                 openclaw_mode: bool = False,
+                 exact_output_dir: bool = False):
         self.url = url
         self.output_dir = Path(output_dir).resolve()
         self.scene_threshold = scene_threshold
@@ -984,8 +985,9 @@ class VideoAnalysisPipeline:
             self.folder_name = self.video_id
             self.video_info = {"title": self.video_id, "uploader": ""}
 
-        # 创建视频专属子目录（使用标题命名）
-        self.video_output_dir = self.output_dir / self.folder_name
+        # 产品侧 typed action 传入的是 durable handle 目录，必须精确使用；
+        # 交互式 CLI 默认仍保留按标题创建子目录的旧体验。
+        self.video_output_dir = self.output_dir if exact_output_dir else self.output_dir / self.folder_name
         self.video_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Define output paths

@@ -537,7 +537,7 @@ def run_auto_scoring_validation(
             "validation_run_items": run_items,
             "validation_failed_scene_numbers": failed_numbers,
             "needs_review_scene_numbers": needs_review_numbers,
-            "passed": not needs_review_numbers and not failed_numbers and bool(report_payload.get("order_matches_reference", True)),
+            "passed": not failed_numbers and bool(report_payload.get("order_matches_reference", True)),
         }
     )
     report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")

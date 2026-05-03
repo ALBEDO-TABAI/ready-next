@@ -1373,7 +1373,11 @@ export class SkillsRuntimeManager {
   }
 
   private getRawDatabase(): DatabaseConnection | null {
-    return getDatabase().getDatabase() as DatabaseConnection | null
+    try {
+      return getDatabase().getDatabase() as DatabaseConnection | null
+    } catch {
+      return null
+    }
   }
 
   private mapJobRow(row: SkillJobRow): SkillJobRecord {
@@ -1813,7 +1817,12 @@ export class SkillsRuntimeManager {
   }
 
   private async findPythonExecutable(): Promise<string> {
-    const configured = getDatabase().getSetting('skills_python_path')
+    let configured: string | undefined
+    try {
+      configured = getDatabase().getSetting('skills_python_path')
+    } catch {
+      configured = undefined
+    }
     const candidates = buildReadyPythonCandidates(configured, process.env)
     for (const candidate of candidates) {
       try {

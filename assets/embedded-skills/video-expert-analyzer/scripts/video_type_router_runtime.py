@@ -519,6 +519,24 @@ def load_classification_result(video_dir: Path) -> Optional[Dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _cached_classification_result_for_summary(
+    video_dir: Path,
+    summary_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    cached = load_classification_result(video_dir)
+    if not isinstance(cached, dict):
+        return None
+    summary_source = cached.get("summary_source") or {}
+    if not isinstance(summary_source, dict):
+        return None
+    cached_hash = _safe_text(summary_source.get("summary_hash"))
+    if not cached_hash:
+        return None
+    if cached_hash != classification_summary_hash(summary_payload):
+        return None
+    return cached
+
+
 def generate_classification_result(
     data: Dict[str, Any],
     video_dir: Path,
@@ -527,6 +545,9 @@ def generate_classification_result(
     classifier_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     summary_payload = build_classification_summary_payload(data)
+    cached = _cached_classification_result_for_summary(video_dir, summary_payload)
+    if cached is not None:
+        return cached
     classifier = classifier_fn or classify_summary_with_model
     raw_result = classifier(summary_payload, runtime_config or {})
     final_result = build_classification_result_payload(summary_payload, raw_result)

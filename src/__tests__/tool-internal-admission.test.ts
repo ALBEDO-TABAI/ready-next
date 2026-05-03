@@ -112,6 +112,37 @@ test('child internal action dispatches through executeToolCall', async () => {
   assert.equal(result.data?.ok, true)
 })
 
+test('child internal action forwards current agent context to the skill runtime', async () => {
+  let request: SkillRunRequest | null = null
+  const agentContext = {
+    provider: 'xiaomi',
+    model_id: 'mimo-v2.5',
+    base_url: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    api_key: 'test-key',
+    api_kind: 'anthropic-messages',
+    fallback_chain: [],
+    input_modes: ['text', 'image'],
+  } as const
+
+  const result = await executeSkillActionViaToolGateway({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    input: { url: 'https://example.test/video' },
+    childRunId: 'child-agent-context',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    outputDir: '/tmp/child-output',
+    runStatePath: '/tmp/child-output/run_state.json',
+    childInternal: true,
+    agentContext,
+    runtimeManager: makeRuntimeManager((next) => { request = next }),
+  } as Parameters<typeof executeSkillActionViaToolGateway>[0])
+
+  assert.equal(result.skillRunResult?.success, true)
+  assert.ok(request, 'expected child runtime dispatch')
+  assert.deepEqual(request.agentContext, agentContext)
+})
+
 test('child internal action requires runSkillFromChildRunner and never falls back to runSkill', async () => {
   let directRuntimeCalls = 0
   const runtimeManager = {

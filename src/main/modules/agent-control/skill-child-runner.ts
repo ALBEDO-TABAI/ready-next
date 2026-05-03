@@ -35,6 +35,7 @@ import type {
   SkillsRuntimeManager,
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
@@ -117,6 +118,7 @@ export interface StartSkillChildRunParams {
   requestedInput: Record<string, unknown>
   triggerType?: 'tool' | 'product' | 'agent'
   parentNextHint?: SkillChildRunParentNextHint
+  agentContext?: AgentSpawnContext | null
   /** Set true ONLY when a registered driver is calling its own internal
    *  action through the runtime. Lets `startSkillChildRun` short-circuit
    *  the nested-child guard. Drivers should prefer the runtime's
@@ -192,6 +194,7 @@ interface ActiveRun {
   eventLogPath: string
   parentNextHint: SkillChildRunParentNextHint
   singleFlightKey: string
+  agentContext: AgentSpawnContext | null
 }
 
 class SkillChildRunner {
@@ -423,6 +426,7 @@ class SkillChildRunner {
       sessionId: params.sessionId,
       requestedInput,
       parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
+      agentContext: params.agentContext ?? null,
       outputDir,
     }
 
@@ -739,6 +743,7 @@ class SkillChildRunner {
         sessionId: payload.parentSessionId ?? params.sessionId,
         requestedInput: payload.requestedInput,
         parentNextHint: payload.parentNextHint,
+        agentContext: params.agentContext ?? null,
         outputDir: payload.outputDir,
       }
       const resumeStartParams: StartSkillChildRunParams = {
@@ -748,6 +753,7 @@ class SkillChildRunner {
         action: payload.requestedAction,
         requestedInput: payload.requestedInput,
         parentNextHint: payload.parentNextHint,
+        agentContext: params.agentContext ?? null,
       }
       try {
         this.prepareResumeLifecycle(existing.id)
@@ -907,6 +913,7 @@ class SkillChildRunner {
       eventLogPath,
       parentNextHint: launchParams.parentNextHint,
       singleFlightKey: params.singleFlightKey,
+      agentContext: params.params.agentContext ?? null,
     }
     this.active.set(childRunId, active)
 
@@ -1038,6 +1045,7 @@ class SkillChildRunner {
             outputDir: active.outputDir || null,
             runStatePath: active.runStatePath || null,
             childInternal: true,
+            agentContext: active.agentContext,
             signal: parentAbortLink.childSignal,
             runtimeManager: this.config.runtimeManager,
           })

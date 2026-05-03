@@ -1743,6 +1743,7 @@ export async function executeSkillTool(
       sessionId,
       scopeId: runtimeContext?.scopeId || sessionId || null,
       stepId: started.stepId,
+      agentContext,
       runtimeContext,
     })
   }
@@ -1995,9 +1996,10 @@ async function dispatchChildLoopSkillAction(params: {
   sessionId?: string
   scopeId: string | null
   stepId: string
+  agentContext?: AgentSpawnContext | null
   runtimeContext?: SkillToolRuntimeContext
 }): Promise<ToolExecutionOutput> {
-  const { toolName, skillId, action, args, sessionId, scopeId, stepId, runtimeContext } = params
+  const { toolName, skillId, action, args, sessionId, scopeId, stepId, agentContext, runtimeContext } = params
 
   let result: Awaited<ReturnType<typeof startSkillChildRun>>
   try {
@@ -2009,6 +2011,7 @@ async function dispatchChildLoopSkillAction(params: {
       requestedInput: args,
       parentNextHint: 'wait_for_close_event',
       triggerType: 'tool',
+      agentContext: agentContext ?? null,
     })
   } catch (error) {
     // The runner is supposed to surface refusals as `recoverable_paused` /

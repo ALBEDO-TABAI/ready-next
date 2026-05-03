@@ -18,11 +18,12 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import type { AIModelConfig } from '../../../shared/ai-providers'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 import { logAgentMetric } from './metrics'
 import type { SkillRunContract } from './run-contracts'
@@ -50,6 +51,7 @@ interface VeaDriverState extends SkillChildDriverState {
   runStatePath: string | null
   requestedInput: Record<string, unknown>
   parsedRunState: ParsedVeaRunState | null
+  agentContext: AgentSpawnContext | null
   /** Tracks how many internal actions the driver has already planned —
    *  the runner itself enforces budget, but the driver uses this to make
    *  the second plan idempotent (e.g. don't re-plan pipeline after the
@@ -151,6 +153,16 @@ function findCurrentModelVisionIssue(config: AIModelConfig): string | null {
   return `current model ${ref} is not verified image-capable.`
 }
 
+function findAgentContextVisionIssue(agent: AgentSpawnContext): string | null {
+  const provider = trim(agent.provider)
+  const model = trim(agent.model_id)
+  if (!provider || !model) return 'active agent context is missing provider or model.'
+  const ref = modelRef(provider, model)
+  const inputModes = Array.isArray(agent.input_modes) ? agent.input_modes.map((item) => String(item).toLowerCase()) : []
+  if (!inputModes.includes('image')) return `current model ${ref} is not declared image-capable by the active agent context.`
+  return null
+}
+
 function pickString(rec: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const v = trim(rec[key])
@@ -187,7 +199,7 @@ function readRunState(runStatePath: string | null): ParsedVeaRunState | null {
   }
   const status = trimLower(rec.status)
   const currentStage = pickString(rec, ['current_stage', 'currentStage', 'current_step', 'currentStep'])
-  const sceneScoresPath = pickString(rec, ['scene_scores_path', 'sceneScoresPath'])
+  const sceneScoresPath = pickString(rec, ['scene_scores_path', 'sceneScoresPath', 'scores_path'])
   const totalScenes = pickNumber(rec, ['total_scenes', 'totalScenes'])
   const completedScenes = pickNumber(rec, ['completed_scenes', 'completedScenes'])
   const coverageRatio = pickNumber(rec, ['coverage_ratio', 'coverageRatio'])
@@ -218,8 +230,11 @@ function readJson(path: string): Record<string, unknown> | null {
 
 function inferSceneScoresPath(parsed: ParsedVeaRunState | null, outputDir: string | null): string | null {
   if (parsed?.sceneScoresPath) {
-    if (existsSync(parsed.sceneScoresPath)) return parsed.sceneScoresPath
-    return parsed.sceneScoresPath
+    const candidate = isAbsolute(parsed.sceneScoresPath) || !outputDir
+      ? parsed.sceneScoresPath
+      : join(outputDir, parsed.sceneScoresPath)
+    if (existsSync(candidate)) return candidate
+    return candidate
   }
   if (!outputDir) return null
   const guessed = join(outputDir, 'scene_scores.json')
@@ -309,7 +324,8 @@ function shouldPreflightFirstVeaAction(state: VeaDriverState): boolean {
   return state.actionsPlanned === 0
 }
 
-function findVeaProviderPreflightIssue(): string | null {
+function findVeaProviderPreflightIssue(agentContext: AgentSpawnContext | null): string | null {
+  if (agentContext) return findAgentContextVisionIssue(agentContext)
   const currentConfig = readCurrentAIConfigForPreflight()
   if (currentConfig) return findCurrentModelVisionIssue(currentConfig)
   return findPreferredModelConfigIssue()
@@ -348,7 +364,7 @@ function isClose(value: unknown): value is SkillChildCloseEvent {
 
 function maybeBlockVeaProviderPreflight(state: VeaDriverState, parsed: ParsedVeaRunState | null, artifactProgress: SkillProgressArtifacts): SkillChildCloseEvent | null {
   if (!shouldPreflightFirstVeaAction(state)) return null
-  const issue = findVeaProviderPreflightIssue()
+  const issue = findVeaProviderPreflightIssue(state.agentContext)
   if (!issue) return null
   return {
     ...makeBaseClose(state, parsed, artifactProgress),
@@ -414,6 +430,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
       runStatePath,
       requestedInput,
       parsedRunState,
+      agentContext: params.agentContext ?? null,
       actionsPlanned: 0,
     }
     return state
@@ -431,11 +448,14 @@ class VideoExpertChildDriver implements SkillChildDriver {
       outputDir: state.outputDir,
       sceneScoresPath: trim(state.requestedInput.sceneScoresPath),
     })
-
     const explicitSceneScoresPath = trim(state.requestedInput.sceneScoresPath)
     const sceneScoresPath = explicitSceneScoresPath
       ?? artifactProgress.sceneScoresPath
       ?? inferSceneScoresPath(parsed, state.outputDir)
+    const stagePostScore = parsed?.currentStage
+      ? POST_SCORE_STAGES.has(parsed.currentStage)
+      : false
+    const readyToFinalize = parsed?.status ? READY_TO_FINALIZE_STATUSES.has(parsed.status) : false
 
     if (parsed?.status && COMPLETED_STATUSES.has(parsed.status) && hasUnfinishedArtifactProgress(artifactProgress)) {
       if (sceneScoresPath) {
@@ -464,6 +484,45 @@ class VideoExpertChildDriver implements SkillChildDriver {
         terminalReason: 'completed',
         error: null,
       }
+    }
+
+    // A blocked score_batches run can be a stale provider/batch failure, not a
+    // terminal human blocker. If durable artifacts prove work is incomplete,
+    // try the AI scoring action again; its provider preflight will still stop
+    // real config problems before any host batches launch.
+    if (
+      parsed?.status
+      && BLOCKED_STATUSES.has(parsed.status)
+      && !parsed.configIssue
+      && parsed.currentStage === 'score_batches'
+      && sceneScoresPath
+      && hasUnfinishedArtifactProgress(artifactProgress)
+    ) {
+      const input: Record<string, unknown> = { sceneScoresPath }
+      const mode = trim(state.requestedInput.mode)
+      if (mode) input.mode = mode
+      if (state.outputDir) input.outputDir = state.outputDir
+      return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
+    }
+
+    // A blocked finalize can be stale after the underlying VEA script is fixed
+    // or after scoring artifacts complete asynchronously. If scoring evidence
+    // is complete but delivery outputs are still missing, give the typed action
+    // a chance to run the finalize path instead of freezing the parent task.
+    if (
+      parsed?.status
+      && BLOCKED_STATUSES.has(parsed.status)
+      && !parsed.configIssue
+      && parsed.currentStage === 'finalize'
+      && sceneScoresPath
+      && artifactProgress.hasEvidence
+      && !hasUnfinishedArtifactProgress(artifactProgress)
+    ) {
+      const input: Record<string, unknown> = { sceneScoresPath }
+      const mode = trim(state.requestedInput.mode)
+      if (mode) input.mode = mode
+      if (state.outputDir) input.outputDir = state.outputDir
+      return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
     }
 
     // Terminal: blocked / awaiting input.
@@ -496,10 +555,6 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // inference from run_state / outputDir. This is what unlocks the AI
     // scoring cold-start path where the caller already produced
     // scene_scores.json out-of-band (e.g. RSS visual flow's second stage).
-    const stagePostScore = parsed?.currentStage
-      ? POST_SCORE_STAGES.has(parsed.currentStage)
-      : false
-    const readyToFinalize = parsed?.status ? READY_TO_FINALIZE_STATUSES.has(parsed.status) : false
     if (sceneScoresPath && (stagePostScore || readyToFinalize)) {
       const input: Record<string, unknown> = { sceneScoresPath }
       const mode = trim(state.requestedInput.mode)

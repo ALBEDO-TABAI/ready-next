@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -12,8 +13,18 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+_GENERATED_TIME_RE = re.compile(r"\*生成时间：[^*\n]+\*")
+
+
+def _normalize_prompt_for_hash(text: str) -> str:
+    normalized = _GENERATED_TIME_RE.sub("*生成时间：<normalized>*", text)
+    return normalized.strip()
+
+
 def _hash_prompt(system_prompt: str, user_message: str) -> str:
-    return _hash_text(f"{system_prompt}\n---\n{user_message}")
+    return _hash_text(
+        f"{_normalize_prompt_for_hash(system_prompt)}\n---\n{_normalize_prompt_for_hash(user_message)}"
+    )
 
 
 HANDOFF_DIRNAME = "audiovisual_handoff"
