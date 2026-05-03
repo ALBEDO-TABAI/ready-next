@@ -310,6 +310,39 @@ test('Worker E: text-only current model blocks cold pipeline before dispatching 
   await assert.rejects(() => fs.stat(path.join(outputDir, 'host_batches')))
 })
 
+test('VEA driver adopts the actual pipeline output directory returned by runtime', async () => {
+  const outputRoot = await makeTempOutputDir()
+  const actualOutputDir = path.join(outputRoot, 'p4ahGSFTY-c')
+  await fs.mkdir(actualOutputDir)
+  await fs.writeFile(path.join(actualOutputDir, 'run_state.json'), JSON.stringify({
+    status: 'running',
+    current_stage: 'prepare',
+  }), 'utf8')
+
+  const state = await videoExpertChildDriver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { url: 'https://www.youtube.com/watch?v=p4ahGSFTY-c', outputDir: outputRoot },
+    parentNextHint: 'wait_for_close_event',
+    outputDir: outputRoot,
+  })
+
+  const after = await videoExpertChildDriver.observeAfterAction(state, {
+    success: true,
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    stdout: '',
+    stderr: '',
+    outputDir: actualOutputDir,
+    command: [],
+  } as any)
+
+  assert.equal((after as any).outputDir, actualOutputDir)
+  assert.equal((after as any).runStatePath, path.join(actualOutputDir, 'run_state.json'))
+})
+
 test('Worker E: stale VEA config and delivery_report do not override current text-only model', async () => {
   const outputDir = await makeTempOutputDir()
   const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 3)

@@ -832,7 +832,7 @@ async function runPhase(args: {
       ? 'video_expert_pipeline'
       : 'video_expert_ai_analyze'
     const input = action === 'video_expert_pipeline'
-      ? { url: args.opts.url, outputDir: args.opts.outputDir }
+      ? { url: args.opts.url, outputDir: args.opts.outputDir, exactOutputDir: true }
       : { sceneScoresPath, outputDir: args.opts.outputDir }
     const run = await runOneChildAction({
       runnerApi: args.runnerApi,

@@ -149,6 +149,31 @@ function matchesSkillProgressFollowupIntent(text: string): boolean {
   return /(?:跟进|追踪|进度|状态|汇报|持续|一直|直到(?:跑|做|执行|完成|结束)|跑完整个任务|monitor|progress|status|watch)/i.test(normalized)
 }
 
+function hasUrlSourceSignal(text: string): boolean {
+  return /\bhttps?:\/\/[^\s"'`<>,，。)）]+/i.test(String(text || ''))
+}
+
+function inferExplicitSkillStartAction(
+  skill: (Partial<SkillState> & { skillId?: string; id?: string; name?: string }) | null | undefined,
+  texts: ReadonlyArray<string | null | undefined>,
+): string | null {
+  if (!skill || !texts.some((text) => hasUrlSourceSignal(String(text || '')))) return null
+  const actions = Array.isArray(skill.actions) ? skill.actions : []
+  const urlActions = actions.filter((action) => {
+    const params = Array.isArray(action.params) ? action.params : []
+    return params.some((param) => {
+      const name = typeof param?.name === 'string' ? param.name.toLowerCase() : ''
+      return (name === 'url' || name === 'source') && param.required === true
+    })
+  })
+  if (urlActions.length === 0) return null
+  const preferred = urlActions.find((action) => /pipeline|analy[sz]e|分析/i.test(action.name))
+    || urlActions[0]
+  return typeof preferred?.name === 'string' && preferred.name.trim()
+    ? preferred.name.trim()
+    : null
+}
+
 export function buildBudgetWarningMessage(params: {
   iterations: number
   effectiveMaxIterations: number
@@ -277,6 +302,7 @@ import {
 import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
+import type { SkillState } from '../skills-runtime/runtime-manager'
 import { shouldParentForceLongSkillTool } from './run-contracts'
 import {
   cancelSkillChildRun,
@@ -567,7 +593,7 @@ export function renderChildCommandOutcome(args: {
 
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
-  findExplicitlyRequestedSkills: (userText: string) => Array<{ skillId?: string; id?: string; name?: string }>
+  findExplicitlyRequestedSkills: (userText: string) => Array<Partial<SkillState> & { skillId?: string; id?: string; name?: string }>
   hasActiveSkillExecution: (sessionId?: string) => boolean
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
@@ -1368,6 +1394,25 @@ export class TurnEngine {
           candidateCount: 'candidateCount' in runStateResourceResolution ? runStateResourceResolution.candidateCount : null,
         })
       }
+      const explicitSkillForFreshStart = firstSkillMatch?.skills[0] || null
+      const explicitFreshSkillStart = Boolean(
+        hasExplicitSkill
+        && explicitSkillForFreshStart
+        && !providedContinuationState
+        && !isSkillResumeTurnDetected
+        && !explicitRunStateResourceForTurn
+        && skillDetectionInputs.some((text) => hasUrlSourceSignal(text)),
+      )
+      const explicitFreshStartAction = explicitFreshSkillStart
+        ? inferExplicitSkillStartAction(explicitSkillForFreshStart, skillDetectionInputs)
+        : null
+      if (explicitFreshSkillStart) {
+        logAgentMetric('explicit_skill_fresh_start_detected', {
+          sessionId: request.sessionId,
+          skillId: firstExplicitSkillId,
+          action: explicitFreshStartAction,
+        })
+      }
       const hasStrongActiveSkillContext = (): boolean => {
         try {
           const supervisorSnapshot = host.skillTaskSupervisor?.inspectLatestSkillTask
@@ -1592,8 +1637,10 @@ export class TurnEngine {
         activeSkillContextForTurn = null
       }
       if (activeSkillContextForTurn && activeSkillContextForTurn.source !== 'reference_hint') {
-        rememberActiveSkillContext(request.sessionId, activeSkillContextForTurn)
-        if (!referenceSkillForMetrics) {
+        if (!explicitFreshSkillStart) {
+          rememberActiveSkillContext(request.sessionId, activeSkillContextForTurn)
+        }
+        if (!referenceSkillForMetrics && !explicitFreshSkillStart) {
           referenceSkillForMetrics = {
             id: activeSkillContextForTurn.skillId,
             name: activeSkillContextForTurn.skillName || activeSkillContextForTurn.skillId,
@@ -1624,7 +1671,9 @@ export class TurnEngine {
       turnFrame = resolveTurnFrame({
         sessionId: request.sessionId,
         requestId: request.runId,
-        userIntent: isConfigRepairTurnDetected
+        userIntent: explicitFreshSkillStart
+          ? 'start'
+          : isConfigRepairTurnDetected
           ? 'repair_config'
           : isRetryOnlyTurnDetected || (
             isSkillProgressFollowupTurnDetected
@@ -1632,9 +1681,9 @@ export class TurnEngine {
           )
             ? 'continue'
             : 'unknown',
-        explicitSkillId: explicitRunStateResourceForTurn?.skillId || null,
-        explicitSkillName: explicitRunStateResourceForTurn?.skillName || null,
-        explicitAction: explicitRunStateResourceForTurn?.explicitAction || null,
+        explicitSkillId: explicitRunStateResourceForTurn?.skillId || (explicitFreshSkillStart ? firstExplicitSkillId : null),
+        explicitSkillName: explicitRunStateResourceForTurn?.skillName || (explicitFreshSkillStart ? (firstSkillMatch?.skills[0]?.name || firstExplicitSkillId) : null),
+        explicitAction: explicitRunStateResourceForTurn?.explicitAction || (explicitFreshSkillStart ? explicitFreshStartAction : null),
         explicitOutputDir: explicitRunStateResourceForTurn?.outputDir || null,
         explicitRunStatePath: explicitRunStateResourceForTurn?.runStatePath || null,
         explicitSceneScoresPath: explicitRunStateResourceForTurn?.sceneScoresPath || null,

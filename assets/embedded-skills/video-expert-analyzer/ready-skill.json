@@ -28,6 +28,7 @@
       "params": [
         { "name": "url", "type": "string", "description": "视频 URL", "required": true },
         { "name": "outputDir", "type": "string", "description": "输出目录", "required": false },
+        { "name": "exactOutputDir", "type": "boolean", "description": "测试/产品代码专用：true 时把 outputDir 当作精确任务目录；默认把 outputDir 当输出根目录并由 pipeline 建立视频子目录。", "required": false },
         { "name": "sceneThreshold", "type": "number", "description": "分镜阈值", "required": false },
         { "name": "bestThreshold", "type": "number", "description": "精选阈值", "required": false }
       ]

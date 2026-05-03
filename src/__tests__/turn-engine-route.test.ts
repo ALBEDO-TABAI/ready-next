@@ -2003,6 +2003,128 @@ test('TurnEngine arms VEA continuation from prior run_state path when user says 
   }
 })
 
+test('TurnEngine treats an explicit skill URL request as a fresh start instead of resuming stale supervisor context', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let toolLoopRequests = 0
+  let capturedAllowedToolNames: string[] = []
+  let armedHint: { id: string; name: string } | null = null
+  let resumeCalls = 0
+  const veaSkill = {
+    id: 'video-expert-analyzer',
+    name: 'Video Expert Analyzer (VNext)',
+    actions: [
+      {
+        name: 'video_expert_pipeline',
+        visibility: 'internal',
+        params: [{ name: 'url', required: true }],
+      },
+      {
+        name: 'video_expert_ai_analyze',
+        visibility: 'internal',
+        params: [{ name: 'sceneScoresPath', required: true }],
+      },
+    ],
+    hostRequirements: {
+      expose_when_hint_armed: ['video_expert_pipeline', 'video_expert_ai_analyze'],
+    },
+  }
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  const restorePipelineToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_pipeline')
+  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+  try {
+    const { request } = createRequest({
+      userText: '使用 @[Video Expert Analyzer (VNext)] 分析 https://www.youtube.com/watch?v=p4ahGSFTY-c，输出到 @[测试]，并一直跟进直到完成',
+      intentClassification: createIntent({ primaryDomain: 'skill', confidence: 'high' }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            outputDir: '/tmp/ready/old-4qkyxm4jppc',
+            runStatePath: '/tmp/ready/old-4qkyxm4jppc/run_state.json',
+            sceneScoresPath: '/tmp/ready/old-4qkyxm4jppc/scene_scores.json',
+            hasLiveWork: false,
+            hasRecentProgress: true,
+          }),
+        },
+        resumeSkillChildRun: async () => {
+          resumeCalls += 1
+          throw new Error('fresh URL requests must not resume the old child')
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => true,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /video[-_\s]?expert|Video Expert Analyzer/i.test(text)
+              ? [veaSkill]
+              : [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => armedHint,
+          rememberExplicitReferenceSkillHint: () => {
+            armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
+            rememberLastReferenceSkill('scope-test', armedHint)
+            return true
+          },
+          buildPreferredSkillToolNames: () => armedHint?.id === 'video-expert-analyzer'
+            ? ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze']
+            : [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          toolLoopRequests += 1
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '准备开始新任务',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(resumeCalls, 0)
+    assert.equal(toolLoopRequests, 1)
+    assert.equal(result.taskType, 'multi_step_task')
+    assert.ok(capturedAllowedToolNames.includes('skill_video_expert_pipeline'))
+    assert.ok(!capturedAllowedToolNames.includes('skill_video_expert_ai_analyze'))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_start'
+      && event.source === 'explicit'
+      && event.skillId === 'video-expert-analyzer',
+    ))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'explicit_skill_fresh_start_detected'
+      && event.skillId === 'video-expert-analyzer'
+      && event.action === 'video_expert_pipeline',
+    ))
+  } finally {
+    restorePipelineToolDefinition()
+    restoreAiAnalyzeToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('TurnEngine refreshes skill tool policy after run_state patch changes VEA stage into ai_analyze action', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []

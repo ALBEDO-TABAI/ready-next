@@ -43,3 +43,27 @@ print(pipeline.scores_path)
     rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('VEA ready compat treats outputDir as an output root unless exactOutputDir is explicit', () => {
+  const python = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+import ready_compat
+
+root_payload = {"url": "https://www.youtube.com/watch?v=p4ahGSFTY-c", "outputDir": "/tmp/ready-output-root"}
+exact_payload = {**root_payload, "exactOutputDir": True}
+print(json.dumps(ready_compat._build_pipeline_cmd(root_payload), ensure_ascii=False))
+print(json.dumps(ready_compat._build_pipeline_cmd(exact_payload), ensure_ascii=False))
+`
+  const [rootCmdRaw, exactCmdRaw] = execFileSync('python3', ['-c', python], {
+    encoding: 'utf8',
+  }).trim().split('\n').slice(-2)
+  const rootCmd = JSON.parse(rootCmdRaw)
+  const exactCmd = JSON.parse(exactCmdRaw)
+
+  assert.ok(rootCmd.includes('-o'))
+  assert.ok(!rootCmd.includes('--exact-output-dir'))
+  assert.ok(exactCmd.includes('--exact-output-dir'))
+})

@@ -625,7 +625,11 @@ class VideoExpertChildDriver implements SkillChildDriver {
   ): Promise<SkillChildDriverState> {
     const state = rawState as VeaDriverState
     // Honor the runtime's view of where outputs landed.
-    if (!state.outputDir && typeof result.outputDir === 'string' && result.outputDir.trim()) {
+    if (
+      typeof result.outputDir === 'string'
+      && result.outputDir.trim()
+      && (!state.outputDir || state.requestedAction === PIPELINE_ACTION)
+    ) {
       state.outputDir = result.outputDir.trim()
       state.runStatePath = join(state.outputDir, 'run_state.json')
     }
