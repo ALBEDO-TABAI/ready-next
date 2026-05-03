@@ -246,6 +246,14 @@ function isTerminalLiveness(value: TurnFrameLiveness): boolean {
   return value === 'done' || value === 'failed'
 }
 
+function shouldApplyLivenessHint(current: TurnFrameLiveness, hint: TurnFrameLiveness): boolean {
+  if (isTerminalLiveness(current)) return false
+  if (hint === 'blocked') return true
+  const currentRank = TURN_FRAME_LIVENESS_RANK[current] ?? 0
+  const hintRank = TURN_FRAME_LIVENESS_RANK[hint] ?? 0
+  return hintRank >= currentRank
+}
+
 function dedupePreservingOrder(values: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -575,9 +583,7 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
 
   let nextLiveness: TurnFrameLiveness = frame.liveness
   if (typeof patch.livenessHint === 'string' && !isTerminalLiveness(frame.liveness)) {
-    const currentRank = TURN_FRAME_LIVENESS_RANK[frame.liveness] ?? 0
-    const hintRank = TURN_FRAME_LIVENESS_RANK[patch.livenessHint] ?? 0
-    if (hintRank >= currentRank) {
+    if (shouldApplyLivenessHint(frame.liveness, patch.livenessHint)) {
       nextLiveness = patch.livenessHint
     }
   }

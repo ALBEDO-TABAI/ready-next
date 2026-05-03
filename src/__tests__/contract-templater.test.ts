@@ -33,7 +33,9 @@ function makeCtx(overrides: Partial<TemplateContext> = {}): TemplateContext {
       provider: 'kimi',
       api_key: 'sk-test-do-not-leak',
       base_url: 'https://api.example.com/v1',
+      api_kind: 'anthropic-messages',
       fallback_chain: ['kimi/k2', 'anthropic/opus'],
+      input_modes: ['text', 'image'],
     },
     spawn: { job_id: 'abcd1234', tmp_dir: '/tmp/spawn-1', timestamp: '2026-04-25T00:00:00.000Z' },
     output_dir: '/tmp/out',
@@ -61,6 +63,7 @@ test('resolveVariable resolves every whitelisted scalar', () => {
 test('resolveVariable JSON-stringifies array values', () => {
   const ctx = makeCtx()
   assert.equal(resolveVariable('agent.fallback_chain', ctx), '["kimi/k2","anthropic/opus"]')
+  assert.equal(resolveVariable('agent.input_modes', ctx), '["text","image"]')
 })
 
 test('resolveVariable allows env.HOME and env.XDG_CONFIG_HOME', () => {
@@ -212,11 +215,14 @@ test('makeTemplateContext defensively copies fallback_chain', () => {
       provider: 'p',
       api_key: 'k',
       base_url: 'http://b',
+      api_kind: 'openai-completions',
       fallback_chain: chain,
+      input_modes: ['text'],
     },
   })
   chain.push('c')
   assert.deepEqual(ctx.agent.fallback_chain, ['a', 'b'])
+  assert.deepEqual(ctx.agent.input_modes, ['text'])
 })
 
 // --- applyJsonPointer --------------------------------------------------------

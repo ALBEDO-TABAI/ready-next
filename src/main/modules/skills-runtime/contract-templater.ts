@@ -179,7 +179,11 @@ export function makeTemplateContext(input: {
   const timestamp = new Date().toISOString()
   return {
     skill: { ...input.skill },
-    agent: { ...input.agent, fallback_chain: [...input.agent.fallback_chain] },
+    agent: {
+      ...input.agent,
+      fallback_chain: [...input.agent.fallback_chain],
+      input_modes: [...(input.agent.input_modes ?? ['text'])],
+    },
     spawn: { job_id, tmp_dir, timestamp },
     output_dir: input.output_dir,
   }

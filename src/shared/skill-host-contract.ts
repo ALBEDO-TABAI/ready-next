@@ -131,6 +131,7 @@ export interface AgentSpawnContext {
   // Possible values: 'anthropic-messages' | 'openai-responses' | 'openai-completions'.
   api_kind: 'anthropic-messages' | 'openai-responses' | 'openai-completions'
   fallback_chain: ReadonlyArray<string> // ordered list of "${provider}/${model_id}" entries
+  input_modes?: ReadonlyArray<'text' | 'image'> // model input modes Ready is willing to advertise to skills
 }
 
 export const RESERVED_TEMPLATE_VARIABLES = [
@@ -143,6 +144,7 @@ export const RESERVED_TEMPLATE_VARIABLES = [
   'agent.api_key',
   'agent.api_kind',
   'agent.fallback_chain',
+  'agent.input_modes',
   'spawn.job_id',
   'spawn.tmp_dir',
   'spawn.timestamp',

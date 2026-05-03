@@ -191,6 +191,32 @@ test('applyTurnFramePatch: livenessHint upgrades from unknown', () => {
   assert.equal(next.liveness, 'running_process')
 })
 
+test('applyTurnFramePatch: blocked run_state evidence overrides stale running liveness', () => {
+  const frame = makeFrame({
+    liveness: 'running_process',
+    skill: {
+      ...makeFrame().skill!,
+      status: 'running',
+      runStatePath: '/tmp/video-output/run_state.json',
+      outputDir: '/tmp/video-output',
+    },
+  })
+  const next = applyTurnFramePatch(frame, {
+    skillStatusUpdates: { status: 'blocked' },
+    livenessHint: 'blocked',
+    runContract: {
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/video-output',
+      runStatePath: '/tmp/video-output/run_state.json',
+      status: 'blocked',
+      liveness: 'blocked',
+    },
+  })
+
+  assert.equal(next.skill?.status, 'blocked')
+  assert.equal(next.liveness, 'blocked')
+})
+
 test('applyTurnFramePatch: livenessHint cannot downgrade from terminal done', () => {
   const frame = makeFrame({ liveness: 'done' })
   const next = applyTurnFramePatch(frame, { livenessHint: 'running_process' })

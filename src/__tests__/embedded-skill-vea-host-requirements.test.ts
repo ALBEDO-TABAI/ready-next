@@ -75,3 +75,19 @@ test('VEA manifest registers config dir for uninstall lifecycle cleanup', () => 
   assert.ok(lifecycle, 'lifecycle must be present so uninstall removes spawned config dir')
   assert.deepEqual(lifecycle!.on_uninstall_remove, ['~/.config/video-expert-analyzer-vnext'])
 })
+
+test('VEA manifest declares spawned model input modes from Ready agent truth', () => {
+  const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
+  const secondary = def.hostRequirements!.spawn_context?.secondary_files?.[0]
+  assert.ok(secondary, 'spawn_context.secondary_files[0] must create the VEA model catalog')
+  assert.match(
+    secondary!.content_template,
+    /"input":\$\{agent\.input_modes\}/,
+    'spawned VEA model catalog must not hard-code image input support',
+  )
+  assert.doesNotMatch(
+    secondary!.content_template,
+    /"input":\["text","image"\]/,
+    'hard-coded text+image support would bypass provider vision preflight truth',
+  )
+})

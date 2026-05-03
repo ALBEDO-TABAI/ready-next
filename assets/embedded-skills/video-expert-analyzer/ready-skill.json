@@ -62,7 +62,7 @@
       "secondary_files": [
         {
           "path": "${spawn.tmp_dir}/vea-models-${spawn.job_id}.json",
-          "content_template": "{\"providers\":{\"${agent.provider}\":{\"baseUrl\":\"${agent.base_url}\",\"apiKey\":\"${agent.api_key}\",\"api\":\"${agent.api_kind}\",\"authHeader\":true,\"models\":[{\"id\":\"${agent.model_id}\",\"name\":\"${agent.model_id}\",\"api\":\"${agent.api_kind}\",\"reasoning\":true,\"input\":[\"text\",\"image\"],\"contextWindow\":256000,\"maxTokens\":32000}]}}}"
+          "content_template": "{\"providers\":{\"${agent.provider}\":{\"baseUrl\":\"${agent.base_url}\",\"apiKey\":\"${agent.api_key}\",\"api\":\"${agent.api_kind}\",\"authHeader\":true,\"models\":[{\"id\":\"${agent.model_id}\",\"name\":\"${agent.model_id}\",\"api\":\"${agent.api_kind}\",\"reasoning\":true,\"input\":${agent.input_modes},\"contextWindow\":256000,\"maxTokens\":32000}]}}}"
         }
       ]
     },

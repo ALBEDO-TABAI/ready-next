@@ -66,6 +66,58 @@ function deriveApiKind(provider: string): AgentSpawnContext['api_kind'] {
   return PROVIDER_API_KIND[provider] ?? 'openai-completions'
 }
 
+function deriveApiKindFromConfig(
+  config: AIModelConfig,
+  provider: string,
+): AgentSpawnContext['api_kind'] {
+  if (config.agentProtocol === 'anthropic') return 'anthropic-messages'
+  if (config.agentProtocol === 'openai') {
+    if (config.wireApi === 'responses') return 'openai-responses'
+    if (config.wireApi === 'chat/completions') return 'openai-completions'
+  }
+  return deriveApiKind(provider)
+}
+
+function isCustomProvider(provider: string): boolean {
+  return provider === 'openai-compatible'
+}
+
+function isKnownTextOnlyModel(provider: string, model: string): boolean {
+  const p = provider.toLowerCase()
+  const m = model.toLowerCase()
+  if (p === 'moonshot') return true
+  if (m.includes('codex')) return true
+  if (m.includes('kimi-for-coding')) return true
+  if (m.startsWith('moonshot-v1')) return true
+  if (m === 'o3-mini') return true
+  if (m.startsWith('doubao-')) return true
+  if (m.startsWith('seedream-') || m.startsWith('seedance-')) return true
+  return false
+}
+
+function isKnownVisionModel(provider: string, model: string): boolean {
+  const p = provider.toLowerCase()
+  const m = model.toLowerCase()
+  if (p === 'anthropic' && (m.startsWith('claude-3') || m.startsWith('claude-opus-4') || m.startsWith('claude-sonnet-4'))) return true
+  if (p === 'gemini' && m.startsWith('gemini-')) return true
+  if ((p === 'openai' || p === 'fox') && (m.startsWith('gpt-4o') || m.startsWith('gpt-4.1') || m.startsWith('gpt-5.4'))) return true
+  if (m.includes('glm-5v') || m.includes('glm-4v') || m.includes('qwen-vl') || m.includes('mimo-v2-omni')) return true
+  return false
+}
+
+function deriveInputModes(
+  config: AIModelConfig,
+  provider: string,
+  model: string,
+): AgentSpawnContext['input_modes'] {
+  if (config.visionMode === 'on') return ['text', 'image']
+  if (config.visionMode === 'off') return ['text']
+  if (isCustomProvider(provider)) return ['text']
+  if (isKnownTextOnlyModel(provider, model)) return ['text']
+  if (isKnownVisionModel(provider, model)) return ['text', 'image']
+  return ['text']
+}
+
 export function buildAgentSpawnContextFromAIConfig(
   config: AIModelConfig,
   options: { baseUrl?: string } = {},
@@ -82,8 +134,9 @@ export function buildAgentSpawnContextFromAIConfig(
     model_id: modelId,
     base_url: baseUrl,
     api_key: apiKey,
-    api_kind: deriveApiKind(provider),
+    api_kind: deriveApiKindFromConfig(config, provider),
     fallback_chain: [],
+    input_modes: deriveInputModes(config, provider, modelId),
   }
 }
 

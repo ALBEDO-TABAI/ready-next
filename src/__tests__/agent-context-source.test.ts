@@ -58,6 +58,34 @@ test('buildAgentSpawnContextFromAIConfig can use the run-time normalized base UR
   assert.equal(ctx!.api_kind, 'openai-responses')
 })
 
+test('buildAgentSpawnContextFromAIConfig honors anthropic protocol for OpenAI-compatible profiles', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    model: 'mimo-v2.5',
+    agentProtocol: 'anthropic',
+    visionMode: 'on',
+  }))
+
+  assert.ok(ctx)
+  assert.equal(ctx!.provider, 'openai-compatible')
+  assert.equal(ctx!.model_id, 'mimo-v2.5')
+  assert.equal(ctx!.api_kind, 'anthropic-messages')
+  assert.deepEqual(ctx!.input_modes, ['text', 'image'])
+})
+
+test('buildAgentSpawnContextFromAIConfig treats unverified custom vision auto as text-only', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'https://custom.example.test/v1',
+    model: 'custom-vision-name',
+    visionMode: 'auto',
+  }))
+
+  assert.ok(ctx)
+  assert.deepEqual(ctx!.input_modes, ['text'])
+})
+
 test('returns null with a warning when no AI config is configured', async () => {
   const warnings: string[] = []
   const ctx = await getCurrentAgentContext({
