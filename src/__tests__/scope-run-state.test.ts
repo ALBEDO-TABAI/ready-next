@@ -181,6 +181,30 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.waitingFor, 'background')
   })
 
+  it('preserves blocked external terminal reason from structured scope events', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'tool_running',
+        module: 'skill',
+        terminalReason: 'blocked_external',
+        timestamp: '2026-05-03T00:00:00.000Z',
+      } as any,
+      null,
+    )
+
+    assert.strictEqual((patch as any).terminalReason, 'blocked_external')
+    assert.strictEqual(isStreamingScopeRunState({
+      scopeId: 'scope-blocked-external',
+      agent: 'assistant',
+      requestId: 'run-blocked-external',
+      phase: patch.phase!,
+      terminalReason: (patch as any).terminalReason,
+      toolTrace: [],
+      startedAt: '2026-05-03T00:00:00.000Z',
+      updatedAt: '2026-05-03T00:00:01.000Z',
+    }), false)
+  })
+
   it('does not clear a terminal reason when a later same-run event omits it', () => {
     const patch = deriveScopeRunStatePatch(
       {

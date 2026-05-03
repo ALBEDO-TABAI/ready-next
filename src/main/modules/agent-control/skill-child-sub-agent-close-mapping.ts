@@ -45,6 +45,10 @@ export function mapSubAgentCloseToChildClose(
       ...preserved,
       childRunId: runtimeContext.childRunId,
       skillId: runtimeContext.skillId,
+      outputDir: preserved.outputDir ?? runtimeContext.outputDir,
+      runStatePath: preserved.runStatePath ?? runtimeContext.runStatePath,
+      sceneScoresPath: preserved.sceneScoresPath ?? runtimeContext.sceneScoresPath ?? null,
+      deliveryReportPath: preserved.deliveryReportPath ?? runtimeContext.deliveryReportPath ?? null,
     } as MutableSkillChildCloseEvent)
   }
 

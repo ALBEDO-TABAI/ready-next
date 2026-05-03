@@ -33,9 +33,10 @@ ORCHESTRATOR = HERE / "orchestrate_vnext.py"
 
 
 class CompatError(Exception):
-    def __init__(self, message: str, exit_code: int = 2) -> None:
+    def __init__(self, message: str, exit_code: int = 2, status: str = "failed") -> None:
         super().__init__(message)
         self.exit_code = exit_code
+        self.status = status
 
 
 def _parse_args(argv: list[str]) -> tuple[str, dict]:
@@ -77,6 +78,66 @@ def _build_ai_analyze_cmd(payload: dict) -> list[str]:
     # vnext orchestrator auto-detects scene_scores.json source and
     # picks `--mode auto` internally; legacy `mode` payload is ignored.
     return [sys.executable, str(ORCHESTRATOR), scores]
+
+
+def _configured_auto_scoring_issue() -> str:
+    config_path = Path.home() / ".config" / "video-expert-analyzer-vnext" / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(config, dict):
+        return ""
+    auto_scoring = config.get("auto_scoring")
+    if not isinstance(auto_scoring, dict):
+        return ""
+    models_json_path = str(auto_scoring.get("models_json_path", "") or "").strip()
+    preferred_model = str(auto_scoring.get("preferred_model", "") or "").strip()
+    fallback_models = auto_scoring.get("fallback_models", [])
+    model_refs = [preferred_model]
+    if isinstance(fallback_models, list):
+        model_refs.extend(str(item).strip() for item in fallback_models)
+    model_refs = [item for item in model_refs if item and "/" in item]
+    if not models_json_path or not model_refs:
+        return ""
+
+    try:
+        catalog = json.loads(Path(models_json_path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    providers = catalog.get("providers") if isinstance(catalog, dict) else None
+    if not isinstance(providers, dict):
+        return ""
+
+    saw_configured_model = False
+    checked_refs: list[str] = []
+    for model_ref in model_refs:
+        provider_name, model_id = model_ref.split("/", 1)
+        provider = providers.get(provider_name)
+        if not isinstance(provider, dict):
+            continue
+        models = provider.get("models")
+        if not isinstance(models, list):
+            continue
+        for model in models:
+            if not isinstance(model, dict) or str(model.get("id", "")) != model_id:
+                continue
+            saw_configured_model = True
+            checked_refs.append(model_ref)
+            inputs = model.get("input")
+            declared_inputs = [str(item).lower() for item in inputs] if isinstance(inputs, list) else []
+            if "image" in declared_inputs:
+                return ""
+
+    if not saw_configured_model:
+        return ""
+    return f"auto-scoring model is not image-capable: {', '.join(checked_refs)}"
+
+
+def _preflight_auto_scoring_provider() -> None:
+    issue = _configured_auto_scoring_issue()
+    if issue:
+        raise CompatError(f"ready_compat: blocked_config: {issue}", exit_code=3, status="blocked")
 
 
 def _empty_outputs() -> dict[str, str]:
@@ -368,6 +429,7 @@ def main() -> int:
                 "expected video_expert_pipeline | video_expert_ai_analyze"
             )
 
+        _preflight_auto_scoring_provider()
         started_at = time.time()
         completed = subprocess.run(
             cmd,
@@ -403,7 +465,7 @@ def main() -> int:
         stderr = f"{exc}\n"
         _write_structured_result(
             ok=False,
-            status="failed",
+            status=exc.status,
             outputs=outputs,
             error_message=str(exc),
             stdout=stdout,

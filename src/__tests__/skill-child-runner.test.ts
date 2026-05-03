@@ -17,7 +17,10 @@
  */
 
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
@@ -587,6 +590,35 @@ test('W4: child runner action goes through gateway admission before runtime disp
   assert.equal(close.status, 'failed')
   assert.equal(close.terminalReason, 'input_validation')
   assert.equal(close.error?.kind, 'input_validation')
+})
+
+test('VEA ai_analyze child run derives outputDir from real scene_scores path instead of fabricating runtime output', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-vea-runner-'))
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  const { runtime } = setupRunner()
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      { action: 'video_expert_ai_analyze', input: { sceneScoresPath } },
+      makeTerminalClose('video-expert-analyzer', 'completed', 'completed'),
+    ],
+  })
+
+  const result = await startSkillChildRun({
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    requestedInput: { sceneScoresPath },
+  })
+
+  assert.equal(result.status, 'running')
+  assert.equal(result.outputDir, outputDir)
+  assert.equal(result.runStatePath, join(outputDir, 'run_state.json'))
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+  assert.equal(close.outputDir, outputDir)
+  assert.equal(close.runStatePath, join(outputDir, 'run_state.json'))
+  assert.equal(runtime.calls[0].params?.outputDir, outputDir)
 })
 
 test('Phase 5: cancellation produces status=killed terminalReason=cancelled_user (NEVER failed)', async () => {

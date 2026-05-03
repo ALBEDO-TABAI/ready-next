@@ -21,6 +21,8 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import type { AIModelConfig } from '../../../shared/ai-providers'
 
 import { logAgentMetric } from './metrics'
 import type { SkillRunContract } from './run-contracts'
@@ -39,6 +41,7 @@ import type {
 const VEA_SKILL_ID = 'video-expert-analyzer'
 const PIPELINE_ACTION = 'video_expert_pipeline'
 const AI_ANALYZE_ACTION = 'video_expert_ai_analyze'
+const BUILTIN_PROVIDER_IDS = new Set(['openai', 'anthropic', 'gemini', 'fox', 'moonshot', 'volcengine'])
 
 interface VeaDriverState extends SkillChildDriverState {
   skillId: string
@@ -64,6 +67,11 @@ interface ParsedVeaRunState {
   configIssue: boolean
 }
 
+type VeaProviderPreflightConfigReader = () => AIModelConfig | null
+
+let providerPreflightConfigReaderForTests: VeaProviderPreflightConfigReader | null = null
+let settingsRepository: AppSettingsRepository | null = null
+
 const COMPLETED_STATUSES = new Set(['completed', 'success', 'done', 'succeeded', 'complete'])
 const READY_TO_FINALIZE_STATUSES = new Set(['ready_to_resume', 'ready_to_finalize'])
 const BLOCKED_STATUSES = new Set([
@@ -83,6 +91,64 @@ function trim(value: unknown): string | null {
 
 function trimLower(value: unknown): string | null {
   return trim(value)?.toLowerCase() ?? null
+}
+
+function readCurrentAIConfigForPreflight(): AIModelConfig | null {
+  if (providerPreflightConfigReaderForTests) {
+    return providerPreflightConfigReaderForTests()
+  }
+  try {
+    settingsRepository ??= new AppSettingsRepository()
+    return settingsRepository.getAIConfig()
+  } catch {
+    return null
+  }
+}
+
+function modelRef(provider: string, model: string): string {
+  return `${provider}/${model}`
+}
+
+function isCustomProvider(provider: string): boolean {
+  return provider === 'openai-compatible' || !BUILTIN_PROVIDER_IDS.has(provider)
+}
+
+function isKnownTextOnlyModel(provider: string, model: string): boolean {
+  const p = provider.toLowerCase()
+  const m = model.toLowerCase()
+  if (p === 'moonshot') return true
+  if (m.includes('codex')) return true
+  if (m.includes('kimi-for-coding')) return true
+  if (m.startsWith('moonshot-v1')) return true
+  if (m === 'o3-mini') return true
+  if (m.startsWith('doubao-')) return true
+  if (m.startsWith('seedream-') || m.startsWith('seedance-')) return true
+  return false
+}
+
+function isKnownVisionModel(provider: string, model: string): boolean {
+  const p = provider.toLowerCase()
+  const m = model.toLowerCase()
+  if (p === 'anthropic' && (m.startsWith('claude-3') || m.startsWith('claude-opus-4') || m.startsWith('claude-sonnet-4'))) return true
+  if (p === 'gemini' && m.startsWith('gemini-')) return true
+  if ((p === 'openai' || p === 'fox') && (m.startsWith('gpt-4o') || m.startsWith('gpt-4.1') || m.startsWith('gpt-5.4'))) return true
+  if (m.includes('glm-5v') || m.includes('glm-4v') || m.includes('qwen-vl') || m.includes('mimo-v2-omni')) return true
+  return false
+}
+
+function findCurrentModelVisionIssue(config: AIModelConfig): string | null {
+  const provider = trim(config.provider)
+  const model = trim(config.model)
+  if (!provider || !model) return 'active AI config is missing provider or model.'
+  const ref = modelRef(provider, model)
+  if (config.visionMode === 'off') return `current model ${ref} has vision disabled.`
+  if (config.visionMode === 'on') return null
+  if (isCustomProvider(provider)) {
+    return `current custom provider ${ref} is unverified for image input; set visionMode=on after verifying it can read images.`
+  }
+  if (isKnownTextOnlyModel(provider, model)) return `current model ${ref} is text-only.`
+  if (isKnownVisionModel(provider, model)) return null
+  return `current model ${ref} is not verified image-capable.`
 }
 
 function pickString(rec: Record<string, unknown>, keys: string[]): string | null {
@@ -211,8 +277,10 @@ function findPreferredModelConfigIssue(): string | null {
   const provider = getObject(providers[providerName])
   if (!provider) return `preferred model ${preferredModel} references missing provider ${providerName}.`
   const models = Array.isArray(provider.models) ? provider.models : []
-  const exists = models.some((model) => getObject(model)?.id === modelId)
-  return exists ? null : `preferred model ${preferredModel} is not in provider ${providerName} catalog.`
+  const modelEntry = models.map(getObject).find((model) => model?.id === modelId)
+  if (!modelEntry) return `preferred model ${preferredModel} is not in provider ${providerName} catalog.`
+  const input = Array.isArray(modelEntry.input) ? modelEntry.input.map((item) => String(item).toLowerCase()) : []
+  return input.includes('image') ? null : `preferred model ${preferredModel} is not declared image-capable.`
 }
 
 function findDefaultOpenClawModelsJson(): string | null {
@@ -237,8 +305,14 @@ function findDefaultOpenClawModelsJson(): string | null {
   }
 }
 
-function shouldPreflightFreshAiAnalyze(state: VeaDriverState): boolean {
+function shouldPreflightFirstVeaAction(state: VeaDriverState): boolean {
   return state.actionsPlanned === 0
+}
+
+function findVeaProviderPreflightIssue(): string | null {
+  const currentConfig = readCurrentAIConfigForPreflight()
+  if (currentConfig) return findCurrentModelVisionIssue(currentConfig)
+  return findPreferredModelConfigIssue()
 }
 
 function makeBaseClose(
@@ -272,9 +346,9 @@ function isClose(value: unknown): value is SkillChildCloseEvent {
     && 'terminalReason' in (value as Record<string, unknown>)
 }
 
-function maybeBlockFreshAiAnalyze(state: VeaDriverState, parsed: ParsedVeaRunState | null, artifactProgress: SkillProgressArtifacts): SkillChildCloseEvent | null {
-  if (!shouldPreflightFreshAiAnalyze(state)) return null
-  const issue = findPreferredModelConfigIssue()
+function maybeBlockVeaProviderPreflight(state: VeaDriverState, parsed: ParsedVeaRunState | null, artifactProgress: SkillProgressArtifacts): SkillChildCloseEvent | null {
+  if (!shouldPreflightFirstVeaAction(state)) return null
+  const issue = findVeaProviderPreflightIssue()
   if (!issue) return null
   return {
     ...makeBaseClose(state, parsed, artifactProgress),
@@ -293,7 +367,7 @@ function makeAiAnalyzePlan(
   artifactProgress: SkillProgressArtifacts,
   input: Record<string, unknown>,
 ): SkillChildDriverAction | SkillChildCloseEvent {
-  const blocked = maybeBlockFreshAiAnalyze(state, parsed, artifactProgress)
+  const blocked = maybeBlockVeaProviderPreflight(state, parsed, artifactProgress)
   if (blocked) return blocked
   state.actionsPlanned += 1
   return { action: AI_ANALYZE_ACTION, input }
@@ -465,6 +539,8 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // Default: kick off the full pipeline. This is the cold-start path.
     const url = trim(state.requestedInput.url)
     if (url) {
+      const blocked = maybeBlockVeaProviderPreflight(state, parsed, artifactProgress)
+      if (blocked) return blocked
       const input: Record<string, unknown> = { url }
       if (state.outputDir) input.outputDir = state.outputDir
       const sceneThreshold = state.requestedInput.sceneThreshold
@@ -506,6 +582,10 @@ class VideoExpertChildDriver implements SkillChildDriver {
 const veaDriver = new VideoExpertChildDriver()
 registerSkillChildDriver(veaDriver)
 
+function __setVeaProviderPreflightConfigReaderForTests(reader: VeaProviderPreflightConfigReader | null): void {
+  providerPreflightConfigReaderForTests = reader
+}
+
 export { veaDriver as videoExpertChildDriver }
 export { getSkillChildDriver } from './skill-child-drivers'
 export type { SkillChildDriver } from './skill-child-drivers'
@@ -518,3 +598,4 @@ try {
 }
 
 export { isClose as __isCloseForTests }
+export { __setVeaProviderPreflightConfigReaderForTests }

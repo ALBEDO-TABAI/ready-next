@@ -282,6 +282,27 @@ test('task card runtime state distinguishes background running, budget paused, d
   })
 })
 
+test('blocked terminal reasons show waiting instead of completed', () => {
+  for (const terminalReason of ['blocked_config', 'blocked_external'] as const) {
+    const state = deriveTaskCardRuntimeState({
+      scopeId: `scope-${terminalReason}`,
+      phase: 'done',
+      status: 'done',
+      title: '视频分析',
+      terminalReason,
+      waitingFor: 'none',
+      resumableActions: ['continue', 'cancel'],
+      updatedAt: '2026-05-03T00:00:00.000Z',
+    } as any)
+
+    assert.deepEqual(state, {
+      visualState: 'waiting',
+      statusLabel: '等待补充',
+      actionSet: ['continue', 'cancel'],
+    })
+  }
+})
+
 test('budget exhausted pause uses the same terminal checkpoint truth for task card and typing state', () => {
   const run = {
     scopeId: 'scope-budget-truth',

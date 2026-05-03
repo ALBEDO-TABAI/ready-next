@@ -83,6 +83,10 @@ import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'
 import { runSubAgent } from './sub-agent/sub-agent-runner'
 import { disposeTimeout } from './timer-disposal'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import {
+  isResumeOnlySkillAction,
+  resolveCanonicalChildRunHandle,
+} from './child-run-handle-resolver'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
@@ -279,13 +283,36 @@ class SkillChildRunner {
       })
     }
 
+    const runtimeInfo = this.config.runtimeManager.getRuntimeInfo()
+    const canonicalHandle = resolveCanonicalChildRunHandle({
+      skillId: params.skillId,
+      action: params.action,
+      requestedInput: params.requestedInput,
+      runtimeOutputsRoot: runtimeInfo.outputsRoot,
+    })
+    if (!canonicalHandle.ok && isResumeOnlySkillAction(params.skillId, params.action)) {
+      return makePausedOnLaunchResult({
+        skillId: params.skillId,
+        terminalReason: 'blocked_external',
+        status: 'blocked',
+        errorKind: canonicalHandle.reason,
+        message: `Cannot launch resume-only skill action without a trusted continuation handle (${canonicalHandle.reason})`,
+        parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
+      })
+    }
+    const requestedInput = canonicalHandle.ok ? canonicalHandle.input : params.requestedInput
+
     // Single-flight collapse.
-    const requestedOutputDir = trim(params.requestedInput.outputDir as unknown)
-    const runStatePathHint = requestedOutputDir ? join(requestedOutputDir, 'run_state.json') : null
+    const requestedOutputDir = canonicalHandle.ok
+      ? trim(canonicalHandle.outputDir)
+      : trim(requestedInput.outputDir as unknown)
+    const runStatePathHint = canonicalHandle.ok && canonicalHandle.runStatePath
+      ? canonicalHandle.runStatePath
+      : requestedOutputDir ? join(requestedOutputDir, 'run_state.json') : null
     const targetDigest = computeTargetDigest({
       runStatePath: runStatePathHint,
       outputDir: requestedOutputDir,
-      requestedInput: params.requestedInput,
+      requestedInput,
     })
     const singleFlightKey = `${params.scopeId ?? '∅'}|${params.sessionId ?? '∅'}|${params.skillId}|${targetDigest}`
 
@@ -347,10 +374,10 @@ class SkillChildRunner {
     // Mint identity + paths.
     const childRunId = createSkillChildRunId(isVeaKind ? 'vea' : 'skill')
     const outputDir = requestedOutputDir
-      || join(this.config.runtimeManager.getRuntimeInfo().outputsRoot, params.skillId, childRunId)
-    const runStatePath = join(outputDir, 'run_state.json')
+      || join(runtimeInfo.outputsRoot, params.skillId, childRunId)
+    const runStatePath = runStatePathHint || join(outputDir, 'run_state.json')
     const eventLogPath = deriveRuntimeChildRunLogPath(
-      this.config.runtimeManager.getRuntimeInfo().runtimeRoot,
+      runtimeInfo.runtimeRoot,
       childRunId,
     )
 
@@ -370,7 +397,7 @@ class SkillChildRunner {
         skillId: params.skillId,
         skillName: null,
         action: params.action,
-        requestedInput: params.requestedInput,
+        requestedInput,
         singleFlightKey,
         parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
         outputDir,
@@ -394,7 +421,7 @@ class SkillChildRunner {
       action: params.action,
       scopeId: params.scopeId,
       sessionId: params.sessionId,
-      requestedInput: params.requestedInput,
+      requestedInput,
       parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
       outputDir,
     }
@@ -990,10 +1017,21 @@ class SkillChildRunner {
       initialState: state,
       executeAction: async (action) => {
         try {
+          const actionHandle = resolveCanonicalChildRunHandle({
+            skillId: active.skillId,
+            action: action.action,
+            requestedInput: action.input,
+            runtimeOutputsRoot: this.config.runtimeManager.getRuntimeInfo().outputsRoot,
+            durableHandles: {
+              outputDir: active.outputDir,
+              runStatePath: active.runStatePath,
+            },
+          })
+          const actionInput = actionHandle.ok ? actionHandle.input : action.input
           const gatewayResult = await executeSkillActionViaToolGateway({
             skillId: active.skillId,
             action: action.action,
-            input: action.input,
+            input: actionInput,
             childRunId: active.childRunId,
             scopeId: active.scopeId,
             sessionId: active.sessionId,

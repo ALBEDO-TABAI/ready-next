@@ -156,7 +156,11 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 用户通过附件 / `@[file]` / 当前文档 / 显式路径带入的 `run_state.json`，以及同一会话上一轮已打开或工具返回过的唯一 `run_state.json`，都是可信续跑句柄，必须进入 TurnFrame 并武装对应 reference-skill hint；但它只证明身份与恢复入口，VEA 真实进度仍以 `scene_scores.json` / `host_batches` 等产物核验为准
 - 长任务预算模型固定为 `220` 硬上限 + 前台 lease 可续租窗口；UI 与任务投影不得把预算暂停或后台存活误判为完成
 - continuation 全链路必须保留 durable skill handle：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint`；即使没有 `executionId / todoId`，只要有这些 handle，也必须能构造继续入口
+- skill 的 stage/progress 与 manifest action 是两个命名空间；runtime 不得把 `score_batches / merge_validate / finalize` 这类进度阶段拼成 LLM-facing 工具名，也不得为了续跑把 stage 注册成 action
+- resume-only typed action 必须先解析 canonical child-run handle；缺少可信 `outputDir / runStatePath / sceneScoresPath` 时只能 blocked/checkpoint，不能用 `<runtimeRoot>/outputs/<skillId>/<childRunId>` 伪造新目录。`scripts/check-child-run-output-dir-fallback.cjs` 是硬门
+- VEA scoring 前必须做 provider vision preflight；当前 agent/provider/model 不能被 stale `delivery_report.json` 或旧 VEA config 覆盖。未证明支持 image input 的 custom/openai-compatible provider 必须 blocked_config，不允许先启动 host batches 消耗预算
 - checkpoint / done / cancelled / error 都是 terminal IPC 状态；跨 main -> renderer 的 `emitStatus` / scope-run event 必须保留 `terminalReason`，不能只传 terminal status。只有 `working` 允许裸 status；`scripts/check-terminal-reason-propagation.cjs` 是硬门，新增明确字面量 terminal status 时必须同步传 reason
+- `doneEventType` 兼容参数已退役；错误结束的 output event type 必须由真实 status 推导，禁止 `status !== success` 却向 renderer 发送 done 形态。`scripts/check-emit-output-done-event-type.cjs` 是硬门
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
 - SQLite-backed 验收前必须先跑 `npm run verify:native`；该命令会在 rebuild 后用 Electron runtime 真实打开 `better-sqlite3` 并执行 smoke query。若 Electron ABI 下 native check 不通过，只能标记为 DB 路径未证明，不能算验收通过

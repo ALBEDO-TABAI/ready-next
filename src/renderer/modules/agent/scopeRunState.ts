@@ -91,6 +91,7 @@ function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null 
     normalized === 'checkpoint_background' ||
     normalized === 'checkpoint_user_input' ||
     normalized === 'blocked_config' ||
+    normalized === 'blocked_external' ||
     normalized === 'blocked_tool_error' ||
     normalized === 'failed_skill' ||
     normalized === 'resume_launch_failed' ||

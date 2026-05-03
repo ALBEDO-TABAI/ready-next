@@ -42,6 +42,7 @@
       "baseArgs": ["--action", "video_expert_ai_analyze"],
       "params": [
         { "name": "sceneScoresPath", "type": "string", "description": "scene_scores.json 路径", "required": true },
+        { "name": "outputDir", "type": "string", "description": "续跑输出目录；必须与 sceneScoresPath 属于同一任务", "required": false },
         { "name": "mode", "type": "string", "description": "评分模式（兼容字段，vnext 自动选择）", "required": false }
       ]
     }

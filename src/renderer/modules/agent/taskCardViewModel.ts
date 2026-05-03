@@ -14,6 +14,7 @@ export interface TaskCardRunLike {
   scopeId: string
   taskId?: string | null
   phase: ScopeRunState['phase']
+  terminalReason?: ScopeRunState['terminalReason']
   status?: TaskProjectionRecordData['status']
   title: string
   taskTitle?: string | null
@@ -182,6 +183,7 @@ function hasRecentArtifact(run: TaskCardRunLike): boolean {
 
 function hasBackgroundSignal(run: TaskCardRunLike): boolean {
   return run.waitingFor === 'background'
+    || run.terminalReason === 'checkpoint_background'
     || run.taskContinuation?.blockerType === 'background_running'
     || hasActiveChildTask(run)
 }
@@ -189,7 +191,13 @@ function hasBackgroundSignal(run: TaskCardRunLike): boolean {
 function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
   return run.taskContinuation?.pauseReason === 'budget_exhausted'
     || run.taskContinuation?.blockerType === 'budget_paused'
+    || run.terminalReason === 'checkpoint_budget'
     || run.degradationReason === 'budget_exhausted'
+}
+
+function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
+  return run.terminalReason === 'blocked_config'
+    || run.terminalReason === 'blocked_external'
 }
 
 export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
@@ -207,6 +215,8 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
   }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
+    || hasBlockedTerminalReason(run)
+    || run.terminalReason === 'checkpoint_user_input'
     || run.status === 'blocked'
     || run.interactionState === 'awaiting_clarification'
     || run.interactionState === 'awaiting_confirmation'

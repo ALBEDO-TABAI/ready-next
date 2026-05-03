@@ -369,9 +369,10 @@ function createRequest(params: {
   return { request, events: events.events }
 }
 
-test('budget_paused child resumes through TurnEngine', async () => {
+test('budget_paused child resumes through TurnEngine without presenting the running child as done', async () => {
   const engine = new TurnEngine()
   const calls: string[] = []
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
   const close = makeChildCloseEvent('budget_paused', 'checkpoint_budget')
   const { request } = createRequest({
     userText: '继续',
@@ -391,19 +392,26 @@ test('budget_paused child resumes through TurnEngine', async () => {
           closeEvent: null,
         }
       },
+      waitForSkillChildCloseEvent: async (childRunId: string, timeoutMs: number) => {
+        waits.push({ childRunId, timeoutMs })
+        return null
+      },
     },
   })
 
   const result = await engine.execute(request)
 
   assert.deepEqual(calls, ['vchild001'])
-  assert.equal(result.status, 'done')
+  assert.deepEqual(waits, [{ childRunId: 'vchild001', timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
   assert.match(result.finalText, /已继续/)
 })
 
-test('recoverable_paused child resumes through TurnEngine', async () => {
+test('recoverable_paused child resumes through TurnEngine without sleeping in tests', async () => {
   const engine = new TurnEngine()
   const calls: string[] = []
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
   const close = makeChildCloseEvent('recoverable_paused', 'checkpoint_background')
   const { request } = createRequest({
     userText: '继续',
@@ -423,13 +431,19 @@ test('recoverable_paused child resumes through TurnEngine', async () => {
           closeEvent: null,
         }
       },
+      waitForSkillChildCloseEvent: async (childRunId: string, timeoutMs: number) => {
+        waits.push({ childRunId, timeoutMs })
+        return null
+      },
     },
   })
 
   const result = await engine.execute(request)
 
   assert.deepEqual(calls, ['vchild001'])
-  assert.equal(result.status, 'done')
+  assert.deepEqual(waits, [{ childRunId: 'vchild001', timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'checkpoint_background')
   assert.match(result.finalText, /同一个 child run/)
 })
 
@@ -453,9 +467,51 @@ test('blocked child is not directly resumable', async () => {
   const result = await engine.execute(request)
 
   assert.equal(resumeCalls, 0)
-  assert.equal(result.status, 'done')
+  assert.equal(result.status, 'checkpoint')
   assert.match(result.finalText, /不能直接继续/)
-  assert.equal(result.terminalReason, 'done')
+  assert.equal(result.terminalReason, 'blocked_external')
+})
+
+test('running child self-await uses injectable wait and preserves blocked terminal reason', async () => {
+  const engine = new TurnEngine()
+  let modelCalls = 0
+  const waits: Array<{ childRunId: string; timeoutMs: number }> = []
+  const activeSnapshot = makeChildOwnedSnapshot({ status: 'running', closeEvent: null })
+  const close = makeChildCloseEvent('blocked', 'blocked_config')
+  const { request, events } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => activeSnapshot,
+      },
+      requestToolLoopResponse: async () => {
+        modelCalls += 1
+        return {
+          text: 'model should not run',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      waitForSkillChildCloseEvent: async (childRunId: string, timeoutMs: number) => {
+        waits.push({ childRunId, timeoutMs })
+        return close
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(modelCalls, 0)
+  assert.deepEqual(waits, [{ childRunId: 'vchild001', timeoutMs: 1_500 }])
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'blocked_config')
+  assert.deepEqual(
+    events
+      .filter((event) => event.kind === 'status')
+      .map((event) => ({ status: event.status, terminalReason: event.terminalReason }))
+      .at(-1),
+    { status: 'checkpoint', terminalReason: 'blocked_config' },
+  )
 })
 
 test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
@@ -473,6 +529,7 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
         cancelReasons.push(`${options?.reason || ''}:${options?.source || ''}`)
         return makeChildCloseEvent('killed', 'cancelled_user')
       },
+      waitForSkillChildCloseEvent: async () => null,
     },
   })
   await engine.execute(continueRequest)
@@ -495,6 +552,27 @@ test('child cancel from TurnEngine writes cancelled_user only for explicit user 
   assert.deepEqual(cancelReasons, ['vchild001:cancelled_user:nlp'])
   assert.equal(result.status, 'cancelled')
   assert.equal(result.terminalReason, 'cancelled_user')
+})
+
+test('terminal runtime errors do not emit a done output event', async () => {
+  const engine = new TurnEngine()
+  const { request, events } = createRequest({
+    userText: '触发失败',
+    host: {
+      requestSimpleText: async () => {
+        throw new Error('model transport failed')
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+  const outputTypes = events
+    .filter((event) => event.kind === 'output')
+    .map((event) => event.type)
+
+  assert.equal(result.status, 'error')
+  assert.equal(outputTypes.at(-1), 'error')
+  assert.ok(!outputTypes.includes('done'), `error path must not emit done, got ${outputTypes.join(',')}`)
 })
 
 test('budget warning does not mention typed skill action', () => {

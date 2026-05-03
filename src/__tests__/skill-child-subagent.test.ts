@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { createSkillChildSubAgentFromPersisted } from '../main/modules/agent-control/skill-child-sub-agent-factory'
@@ -244,6 +247,119 @@ test('SkillChildSubAgent.run maps driver throw to failed_skill without losing ch
   assert.equal(closeEvent.state, 'failed')
   assert.equal(childClose?.terminalReason, 'failed_skill')
   assert.equal(childClose?.error?.kind, 'driver_plan_failed')
+})
+
+test('SkillChildSubAgent.run preserves blocked close and handles from blocked action result', async () => {
+  const outputDir = '/tmp/ready-child-blocked-action'
+  const runStatePath = '/tmp/ready-child-blocked-action/run_state.json'
+  const sceneScoresPath = '/tmp/ready-child-blocked-action/scene_scores.json'
+  const subagent = makeSubAgent({
+    driver: makeDriver({
+      plans: [
+        { action: 'step_one', input: {} },
+        makeClose(),
+      ],
+    }),
+    executeAction: async () => makeResult({
+      success: false,
+      status: 'blocked',
+      error: 'waiting on external review',
+      outputDir,
+      outputs: {
+        outputDir,
+        runStatePath,
+        sceneScoresPath,
+      },
+    }),
+  })
+
+  const { closeEvent } = await collectRun(runSubAgent(subagent, {
+    abortSignal: new AbortController().signal,
+    cleanup: makeCleanup(),
+  }))
+
+  const childClose = getSkillChildCloseEventFromSubAgentClose(closeEvent)
+  assert.equal(closeEvent.state, 'blocked')
+  assert.equal(closeEvent.terminalReason, 'blocked_external')
+  assert.equal(childClose?.status, 'blocked')
+  assert.equal(childClose?.terminalReason, 'blocked_external')
+  assert.equal(childClose?.outputDir, outputDir)
+  assert.equal(childClose?.runStatePath, runStatePath)
+  assert.equal(childClose?.sceneScoresPath, sceneScoresPath)
+  assert.equal(childClose?.error?.kind, 'blocked_external')
+})
+
+test('SkillChildSubAgent.run preserves disk blocked run_state during failed action normalization', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'ready-child-blocked-run-state-'))
+  const runStatePath = join(outputDir, 'run_state.json')
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  await writeFile(
+    runStatePath,
+    JSON.stringify({
+      status: 'blocked',
+      current_stage: 'merge_validate',
+      scene_scores_path: sceneScoresPath,
+    }),
+    'utf8',
+  )
+  await writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  const subagent = makeSubAgent({
+    driver: makeDriver({
+      plans: [
+        { action: 'step_one', input: {} },
+        makeClose(),
+      ],
+    }),
+    executeAction: async () => makeResult({
+      success: false,
+      error: 'script exited while waiting for review',
+      outputDir,
+      outputs: {
+        outputDir,
+        runStatePath,
+        sceneScoresPath,
+      },
+    }),
+  })
+
+  const { closeEvent } = await collectRun(runSubAgent(subagent, {
+    abortSignal: new AbortController().signal,
+    cleanup: makeCleanup(),
+  }))
+
+  const childClose = getSkillChildCloseEventFromSubAgentClose(closeEvent)
+  assert.equal(closeEvent.state, 'blocked')
+  assert.equal(childClose?.status, 'blocked')
+  assert.equal(childClose?.terminalReason, 'blocked_external')
+  assert.notEqual(childClose?.terminalReason, 'failed_skill')
+  assert.equal(childClose?.runStatePath, runStatePath)
+  assert.equal(childClose?.sceneScoresPath, sceneScoresPath)
+})
+
+test('SkillChildSubAgent.run keeps true failed action results as failed_skill', async () => {
+  const subagent = makeSubAgent({
+    driver: makeDriver({
+      plans: [
+        { action: 'step_one', input: {} },
+        makeClose(),
+      ],
+    }),
+    executeAction: async () => makeResult({
+      success: false,
+      status: 'error',
+      error: 'runtime crashed',
+    }),
+  })
+
+  const { closeEvent } = await collectRun(runSubAgent(subagent, {
+    abortSignal: new AbortController().signal,
+    cleanup: makeCleanup(),
+  }))
+
+  const childClose = getSkillChildCloseEventFromSubAgentClose(closeEvent)
+  assert.equal(closeEvent.state, 'failed')
+  assert.equal(childClose?.status, 'failed')
+  assert.equal(childClose?.terminalReason, 'failed_skill')
 })
 
 test('createSkillChildSubAgentFromPersisted reconstructs from durable payload', async () => {

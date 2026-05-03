@@ -238,6 +238,9 @@ import {
   resumeSkillChildRun,
 } from './skill-child-runner'
 import {
+  isCompletedChildCloseStatus,
+  isFailedChildCloseStatus,
+  isKilledChildCloseStatus,
   isTerminalChildCloseStatus,
   type SkillChildCloseEvent,
 } from './skill-child-run-types'
@@ -262,6 +265,7 @@ import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
 const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000
 const LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS = 30 * 1000
+const CHILD_SELF_AWAIT_TIMEOUT_MS = 1_500
 const LAYERED_COMPACTOR_METRIC_MAP: Record<LayeredCompactorMetricName, string> = {
   compactionCircuitBreak: TOOL_ERROR_METRICS.compactionCircuitBreak,
   compactionL2Failed: TOOL_ERROR_METRICS.compactionL2Failed,
@@ -289,6 +293,66 @@ export function isLongTypedSkillActionName(toolName: string): boolean {
 
 function hasLongTypedSkillAction(toolNames: string[] | null | undefined): boolean {
   return Boolean(toolNames?.some((toolName) => isLongTypedSkillActionName(toolName)))
+}
+
+type ChildCloseWaiter = (childRunId: string, timeoutMs: number) => Promise<SkillChildCloseEvent | null>
+
+function isTurnTerminalReason(value: unknown): value is TurnTerminalReason {
+  return value === 'done'
+    || value === 'checkpoint_budget'
+    || value === 'checkpoint_background'
+    || value === 'checkpoint_user_input'
+    || value === 'blocked_config'
+    || value === 'blocked_external'
+    || value === 'blocked_tool_error'
+    || value === 'failed_skill'
+    || value === 'resume_launch_failed'
+    || value === 'persistence_failed'
+    || value === 'cancelled_user'
+    || value === 'cancelled_runtime'
+}
+
+function mapChildCloseToTurnTerminalReason(close: SkillChildCloseEvent): TurnTerminalReason {
+  if (isCompletedChildCloseStatus(close.status)) return 'done'
+  if (isKilledChildCloseStatus(close.status)) return 'cancelled_user'
+  if (isTurnTerminalReason(close.terminalReason)) {
+    return close.terminalReason
+  }
+  if (isFailedChildCloseStatus(close.status)) return 'persistence_failed'
+  return 'checkpoint_user_input'
+}
+
+function statusFromTerminalReason(
+  reason: TurnTerminalReason,
+): 'done' | 'error' | 'cancelled' | 'checkpoint' {
+  if (reason === 'done') return 'done'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'cancelled'
+  if (
+    reason === 'failed_skill'
+    || reason === 'resume_launch_failed'
+    || reason === 'persistence_failed'
+  ) {
+    return 'error'
+  }
+  return 'checkpoint'
+}
+
+function decisionFromChildClose(
+  childRunId: string,
+  close: SkillChildCloseEvent,
+): ChildContinuationDecision {
+  if (isTerminalChildCloseStatus(close.status)) {
+    return { kind: 'terminal', childRunId, closeEvent: close }
+  }
+  return { kind: 'checkpoint_paused', childRunId, closeEvent: close }
+}
+
+async function defaultWaitForChildCloseEvent(
+  childRunId: string,
+  timeoutMs: number,
+): Promise<SkillChildCloseEvent | null> {
+  await new Promise((resolve) => setTimeout(resolve, timeoutMs))
+  return getSkillChildRunCloseEvent(childRunId)
 }
 
 /**
@@ -395,8 +459,8 @@ export type ChildCommandKind = 'cancel' | 'resume'
  */
 export interface ChildCommandOutcome {
   message: string
-  terminalReason: 'done' | 'cancelled_user' | 'resume_launch_failed'
-  status: 'done' | 'cancelled' | 'error'
+  terminalReason: TurnTerminalReason
+  status: 'done' | 'cancelled' | 'error' | 'checkpoint'
 }
 
 export function renderChildCommandOutcome(args: {
@@ -415,9 +479,9 @@ export function renderChildCommandOutcome(args: {
   // command === 'resume'
   if (!close) {
     return {
-      message: `已继续同一个 child run ${childRunId}。`,
-      terminalReason: 'done',
-      status: 'done',
+      message: `已继续同一个 child run ${childRunId}，后台仍在运行。`,
+      terminalReason: 'checkpoint_background',
+      status: 'checkpoint',
     }
   }
   // Note: `SkillChildCloseEvent['status']` excludes 'queued' / 'running',
@@ -434,7 +498,7 @@ export function renderChildCommandOutcome(args: {
       const detail = close.error?.message || close.terminalReason
       return {
         message: `恢复 child run ${childRunId} 失败：${detail}`,
-        terminalReason: 'resume_launch_failed',
+        terminalReason: mapChildCloseToTurnTerminalReason(close),
         status: 'error',
       }
     }
@@ -444,16 +508,14 @@ export function renderChildCommandOutcome(args: {
         terminalReason: 'cancelled_user',
         status: 'cancelled',
       }
-    default:
-      // Defensive: resume returning a still-paused close (budget_paused /
-      // recoverable_paused / blocked) means resume didn't actually advance.
-      // Surface it as a failure so the user/model can react instead of
-      // claiming success.
+    default: {
+      const terminalReason = mapChildCloseToTurnTerminalReason(close)
       return {
-        message: `恢复 child run ${childRunId} 时回到暂停状态：${close.terminalReason}`,
-        terminalReason: 'resume_launch_failed',
-        status: 'error',
+        message: `child run ${childRunId} 仍在等待：${close.terminalReason}`,
+        terminalReason,
+        status: statusFromTerminalReason(terminalReason),
       }
+    }
   }
 }
 
@@ -981,6 +1043,9 @@ export class TurnEngine {
   async execute<TSession extends TurnEngineSession>(request: TurnEngineRequest<TSession>) {
     const host = request.host
     const transcript = new TurnTranscript(request.emitters, { sessionId: request.sessionId })
+    const waitForChildCloseEvent: ChildCloseWaiter =
+      (host as unknown as { waitForSkillChildCloseEvent?: ChildCloseWaiter }).waitForSkillChildCloseEvent
+      || defaultWaitForChildCloseEvent
     const state = new TurnState({
       taskId: request.taskId,
       taskBudgetRuntime: request.taskBudgetRuntime,
@@ -1040,13 +1105,12 @@ export class TurnEngine {
       error?: string
       cancelled?: boolean
       status?: 'done' | 'error' | 'cancelled' | 'checkpoint'
-      doneEventType?: 'done' | 'error'
       skillTaskLifecycle?: SkillTaskLifecycleSignal | null
       terminalReason?: TurnTerminalReason | null
     }) => {
       const projectionTruth = buildProjectionTruthSnapshot(transcript.listEvents(), turnFrame)
-      transcript.emitOutput('', params.doneEventType || 'done')
       const status = params.status || (params.cancelled ? 'cancelled' : params.success ? 'done' : 'error')
+      transcript.emitOutput('', status === 'error' ? 'error' : 'done')
       const terminalReason = params.terminalReason
         || (status === 'done'
           ? 'done'
@@ -1588,10 +1652,22 @@ export class TurnEngine {
             ? 'true' : 'false'
         } activeExecution=${hasActiveSkill} referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
       )
-      const childCommand = computeChildContinuationDecision(
+      let childCommand = computeChildContinuationDecision(
         turnFrame,
         getSkillChildRunCloseEvent,
       )
+      const childRunIdForCommand = childCommand.kind === 'none' ? null : childCommand.childRunId
+      const isChildCancelTurn = Boolean(childRunIdForCommand) && matchesChildCancelIntent(
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        requestEnvelope.rawUserText,
+      )
+      if (childCommand.kind === 'wait' && !isChildCancelTurn) {
+        const close = await waitForChildCloseEvent(childCommand.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
+        if (close) {
+          childCommand = decisionFromChildClose(childCommand.childRunId, close)
+        }
+      }
       if (turnFrame?.skill?.runContract && childCommand.kind !== 'none') {
         const contract = turnFrame.skill.runContract
         if (childCommand.kind === 'terminal' || childCommand.kind === 'checkpoint_paused') {
@@ -1602,12 +1678,6 @@ export class TurnEngine {
           contract.parentNextHint = 'wait_for_close_event'
         }
       }
-      const childRunIdForCommand = childCommand.kind === 'none' ? null : childCommand.childRunId
-      const isChildCancelTurn = Boolean(childRunIdForCommand) && matchesChildCancelIntent(
-        requestEnvelope.primaryInstruction,
-        requestEnvelope.pureUserText,
-        requestEnvelope.rawUserText,
-      )
       if (isChildCancelTurn && childRunIdForCommand) {
         const cancelChild = (host as unknown as {
           cancelSkillChildRun?: typeof cancelSkillChildRun
@@ -1636,6 +1706,43 @@ export class TurnEngine {
           success: true,
           cancelled: outcome.status === 'cancelled',
           status: outcome.status,
+          terminalReason: outcome.terminalReason,
+        })
+      }
+      if (
+        childCommand.kind === 'terminal'
+        && isSkillResumeTurnDetected
+        && !isConfigRepairTurnDetected
+      ) {
+        const outcome = renderChildCommandOutcome({
+          childRunId: childCommand.childRunId,
+          command: 'resume',
+          close: childCommand.closeEvent,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
+        return finish({
+          success: outcome.status !== 'error',
+          cancelled: outcome.status === 'cancelled',
+          status: outcome.status,
+          terminalReason: outcome.terminalReason,
+        })
+      }
+      if (
+        childCommand.kind === 'wait'
+        && isSkillResumeTurnDetected
+        && !isConfigRepairTurnDetected
+      ) {
+        const outcome = renderChildCommandOutcome({
+          childRunId: childCommand.childRunId,
+          command: 'resume',
+          close: null,
+        })
+        transcript.emitOutput(outcome.message, 'text')
+        pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
+        return finish({
+          success: true,
+          status: 'checkpoint',
           terminalReason: outcome.terminalReason,
         })
       }
@@ -1673,10 +1780,11 @@ export class TurnEngine {
               childStatus,
               terminalReason: childCommand.closeEvent.terminalReason,
             })
+            const terminalReason = mapChildCloseToTurnTerminalReason(childCommand.closeEvent)
             return finish({
               success: true,
-              status: 'done',
-              terminalReason: 'done',
+              status: statusFromTerminalReason(terminalReason),
+              terminalReason,
             })
           }
           const resumeChild = (host as unknown as {
@@ -1686,10 +1794,12 @@ export class TurnEngine {
           if (turnFrame?.skill?.runContract && resumed.freshContractFields) {
             Object.assign(turnFrame.skill.runContract, resumed.freshContractFields)
           }
+          const resumedClose = resumed.closeEvent
+            || await waitForChildCloseEvent(resumed.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
           const outcome = renderChildCommandOutcome({
             childRunId: resumed.childRunId,
             command: 'resume',
-            close: resumed.closeEvent,
+            close: resumedClose,
           })
           transcript.emitOutput(outcome.message, 'text')
           pushAssistantTextSafely(session, outcome.message, { sessionId: request.sessionId })
@@ -2628,18 +2738,11 @@ export class TurnEngine {
           // Child 'completed' is the only "natural done"; failed/killed
           // surface as the same parent reasons the supervisor uses.
           const childStatus = childContinuation.closeEvent.status
-          const turnTerminalReason: TurnTerminalReason =
-            childStatus === 'completed' ? 'done'
-            : childStatus === 'failed'
-              ? childContinuation.closeEvent.terminalReason === 'failed_skill'
-                ? 'failed_skill'
-                : 'persistence_failed'
-            : childStatus === 'killed' ? 'cancelled_user'
-            : 'done'
+          const turnTerminalReason = mapChildCloseToTurnTerminalReason(childContinuation.closeEvent)
+          const status = statusFromTerminalReason(turnTerminalReason)
           if (turnFrame) {
             turnFrame.terminalReason = turnTerminalReason
           }
-          finishedBeforeLimit = true
           logAgentMetric('turn_child_run_terminal_routed', {
             sessionId: request.sessionId,
             childRunId: childContinuation.childRunId,
@@ -2647,20 +2750,30 @@ export class TurnEngine {
             turnTerminalReason,
             iteration: iterations,
           })
-          break
+          return finish({
+            success: status !== 'error',
+            cancelled: status === 'cancelled',
+            status,
+            terminalReason: turnTerminalReason,
+          })
         }
         if (childContinuation.kind === 'checkpoint_paused') {
+          const turnTerminalReason = mapChildCloseToTurnTerminalReason(childContinuation.closeEvent)
           if (turnFrame) {
-            turnFrame.terminalReason = 'checkpoint_user_input'
+            turnFrame.terminalReason = turnTerminalReason
           }
-          budgetLimitedBeforeCompletion = true
           logAgentMetric('turn_child_run_checkpoint_routed', {
             sessionId: request.sessionId,
             childRunId: childContinuation.childRunId,
             childStatus: childContinuation.closeEvent.status,
+            turnTerminalReason,
             iteration: iterations,
           })
-          break
+          return finish({
+            success: true,
+            status: 'checkpoint',
+            terminalReason: turnTerminalReason,
+          })
         }
 
         // skill-resume C3: 70% iteration warning — fire ONCE per run.
@@ -3855,7 +3968,7 @@ export class TurnEngine {
         transcript.emitOutput(`API 请求失败: ${message}`, 'error')
       }
       transcript.emitRuntimeError(error)
-      return finish({ success: false, error: message, status: 'error', doneEventType: 'done' })
+      return finish({ success: false, error: message, status: 'error' })
     }
   }
 }

@@ -107,10 +107,22 @@ export function isTerminalChildCloseStatus(
   return TERMINAL_CHILD_CLOSE_STATUSES.has(status)
 }
 
+export function isCompletedChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): status is 'completed' {
+  return status === 'completed'
+}
+
 export function isFailedChildCloseStatus(
   status: SkillChildCloseEvent['status'],
 ): status is 'failed' {
   return status === 'failed'
+}
+
+export function isKilledChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): status is 'killed' {
+  return status === 'killed'
 }
 
 export function isRetainedLifecycleChildCloseStatus(

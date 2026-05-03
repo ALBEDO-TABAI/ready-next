@@ -14,6 +14,9 @@
  */
 
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -216,6 +219,71 @@ test('buildTurnFrameSteering: blocked VEA score-batch resume force-dispatches ai
     (steering.action?.input as Record<string, unknown>)?.sceneScoresPath,
     '/tmp/vea-output/scene_scores.json',
   )
+})
+
+test('buildTurnFrameSteering: VEA ai_analyze derives outputDir only from a real trusted scene_scores path', () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-vea-steering-'))
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    toolName: 'skill_video_expert_ai_analyze',
+    sourceUrl: null,
+    outputDir: null,
+    runStatePath: null,
+    artifactRoots: [],
+    artifactPaths: { sceneScoresPath, deliveryReportPath: null },
+  })
+  const frame = makeFrame({
+    liveness: 'blocked',
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      outputDir: null,
+      runStatePath: null,
+      artifactPaths: { sceneScoresPath, deliveryReportPath: null },
+      runContract: contract,
+    },
+  })
+
+  const steering = buildTurnFrameSteering(frame)
+
+  assert.equal(steering.mode, 'force_tool')
+  assert.equal(steering.action?.mode, 'force_tool')
+  assert.equal(steering.action?.toolName, 'skill_video_expert_ai_analyze')
+  assert.equal((steering.action?.input as Record<string, unknown>)?.sceneScoresPath, sceneScoresPath)
+  assert.equal((steering.action?.input as Record<string, unknown>)?.outputDir, outputDir)
+})
+
+test('buildTurnFrameSteering: VEA ai_analyze checkpoints when scene_scores path has no trusted output handle', () => {
+  const sceneScoresPath = '/etc/ready-cowork-malicious/scene_scores.json'
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    toolName: 'skill_video_expert_ai_analyze',
+    sourceUrl: null,
+    outputDir: null,
+    runStatePath: null,
+    artifactRoots: [],
+    artifactPaths: { sceneScoresPath, deliveryReportPath: null },
+  })
+  const frame = makeFrame({
+    liveness: 'blocked',
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      outputDir: null,
+      runStatePath: null,
+      artifactPaths: { sceneScoresPath, deliveryReportPath: null },
+      runContract: contract,
+    },
+  })
+
+  const steering = buildTurnFrameSteering(frame)
+
+  assert.equal(steering.mode, 'checkpoint')
+  assert.equal(steering.requiredToolName, null)
+  assert.equal(steering.action?.mode, 'checkpoint')
+  assert.equal(steering.action?.reason, 'missing_continuation_handle')
 })
 
 test('selectSteeringMode: recent_progress liveness → ask_model (work may already be progressing)', () => {

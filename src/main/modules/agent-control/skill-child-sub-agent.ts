@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 
 import type { SkillChildDriver } from './skill-child-drivers'
@@ -129,13 +131,7 @@ export function createSkillChildSubAgent(params: SkillChildSubAgentParams): SubA
         }
 
         if (!result.success) {
-          return toSubAgentResult(makeCloseEvent({
-            params,
-            status: 'failed',
-            terminalReason: 'failed_skill',
-            errorKind: 'failed_skill',
-            message: result.error || 'skill action returned success=false',
-          }))
+          return toSubAgentResult(makeActionFailureClose(params, result))
         }
 
         try {
@@ -249,6 +245,12 @@ function makeCloseEvent(args: {
   terminalReason: SkillChildRunTerminalReason
   errorKind: string | null
   message: string | null
+  handles?: {
+    outputDir?: string | null
+    runStatePath?: string | null
+    sceneScoresPath?: string | null
+    deliveryReportPath?: string | null
+  }
 }): SkillChildCloseEvent {
   const status = args.status === 'queued' || args.status === 'running'
     ? 'recoverable_paused'
@@ -258,10 +260,10 @@ function makeCloseEvent(args: {
     skillId: args.params.driver.skillId,
     status,
     terminalReason: args.terminalReason,
-    outputDir: args.params.outputDir,
-    runStatePath: args.params.runStatePath,
-    sceneScoresPath: null,
-    deliveryReportPath: null,
+    outputDir: args.handles?.outputDir ?? args.params.outputDir,
+    runStatePath: args.handles?.runStatePath ?? args.params.runStatePath,
+    sceneScoresPath: args.handles?.sceneScoresPath ?? null,
+    deliveryReportPath: args.handles?.deliveryReportPath ?? null,
     progress: {
       stage: null,
       totalUnits: null,
@@ -275,6 +277,83 @@ function makeCloseEvent(args: {
       ? { kind: args.errorKind, message: args.message }
       : null,
   })
+}
+
+function makeActionFailureClose(
+  params: SkillChildSubAgentParams,
+  result: SkillRunResult,
+): SkillChildCloseEvent {
+  const handles = actionResultHandles(params, result)
+  if (result.status === 'blocked' || readRunStateStatus(handles.runStatePath) === 'blocked') {
+    return makeCloseEvent({
+      params,
+      status: 'blocked',
+      terminalReason: 'blocked_external',
+      errorKind: 'blocked_external',
+      message: result.error || 'skill action returned blocked result',
+      handles,
+    })
+  }
+
+  return makeCloseEvent({
+    params,
+    status: 'failed',
+    terminalReason: 'failed_skill',
+    errorKind: 'failed_skill',
+    message: result.error || 'skill action returned success=false',
+  })
+}
+
+function actionResultHandles(
+  params: SkillChildSubAgentParams,
+  result: SkillRunResult,
+): {
+  outputDir: string | null
+  runStatePath: string | null
+  sceneScoresPath: string | null
+  deliveryReportPath: string | null
+} {
+  const resultRecord = result as unknown as Record<string, unknown>
+  const outputs = result.outputs ?? {}
+  const outputDir = pickString(result.outputDir)
+    ?? pickRecordString(outputs, ['outputDir', 'output_dir'])
+    ?? pickRecordString(resultRecord, ['outputDir', 'output_dir'])
+    ?? params.outputDir
+  return {
+    outputDir,
+    runStatePath: pickRecordString(outputs, ['runStatePath', 'run_state_path'])
+      ?? pickRecordString(resultRecord, ['runStatePath', 'run_state_path'])
+      ?? params.runStatePath,
+    sceneScoresPath: pickRecordString(outputs, ['sceneScoresPath', 'scene_scores_path'])
+      ?? pickRecordString(resultRecord, ['sceneScoresPath', 'scene_scores_path']),
+    deliveryReportPath: pickRecordString(outputs, ['deliveryReportPath', 'delivery_report_path'])
+      ?? pickRecordString(resultRecord, ['deliveryReportPath', 'delivery_report_path']),
+  }
+}
+
+function readRunStateStatus(runStatePath: string | null): string | null {
+  if (!runStatePath) return null
+  try {
+    const parsed = JSON.parse(readFileSync(runStatePath, 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return pickString((parsed as Record<string, unknown>).status)?.toLowerCase() ?? null
+  } catch {
+    return null
+  }
+}
+
+function pickRecordString(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = pickString(record[key])
+    if (value) return value
+  }
+  return null
+}
+
+function pickString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed || null
 }
 
 function isSkillChildCloseEvent(value: unknown): value is SkillChildCloseEvent {

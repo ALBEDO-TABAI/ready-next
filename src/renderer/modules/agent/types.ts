@@ -287,6 +287,7 @@ export type ScopeRunTerminalReason =
   | 'checkpoint_background'
   | 'checkpoint_user_input'
   | 'blocked_config'
+  | 'blocked_external'
   | 'blocked_tool_error'
   | 'failed_skill'
   | 'resume_launch_failed'

@@ -266,6 +266,74 @@ test('VEA ready_compat ai_analyze ignores stale delivery_report errors after fre
   }
 })
 
+test('VEA ready_compat blocks text-only auto scoring config before launching orchestrator', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vea-compat-text-only-provider-'))
+  try {
+    const home = join(root, 'home')
+    const configDir = join(home, '.config', 'video-expert-analyzer-vnext')
+    const outputDir = join(root, 'output')
+    const sceneScoresPath = join(outputDir, 'scene_scores.json')
+    const modelsPath = join(configDir, 'models.multi.json')
+    const fakeOrchestrator = join(root, 'fake_orchestrator.py')
+    const markerPath = join(root, 'orchestrator-called.txt')
+    const resultPath = join(root, 'result.json')
+    const harness = join(root, 'harness.py')
+
+    mkdirSync(configDir, { recursive: true })
+    mkdirSync(outputDir, { recursive: true })
+    writeFileSync(sceneScoresPath, '{"scenes":[]}', 'utf8')
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      auto_scoring: {
+        preferred_model: 'text-provider/text-model',
+        models_json_path: modelsPath,
+      },
+    }), 'utf8')
+    writeFileSync(modelsPath, JSON.stringify({
+      providers: {
+        'text-provider': {
+          models: [{ id: 'text-model', input: ['text'] }],
+        },
+      },
+    }), 'utf8')
+    writeFileSync(fakeOrchestrator, [
+      'from pathlib import Path',
+      `Path(${JSON.stringify(markerPath)}).write_text("called", encoding="utf-8")`,
+      'raise SystemExit(0)',
+      '',
+    ].join('\n'), 'utf8')
+
+    writeFileSync(harness, [
+      'import importlib.util, os, sys',
+      'from pathlib import Path',
+      `os.environ["HOME"] = ${JSON.stringify(home)}`,
+      `spec = importlib.util.spec_from_file_location("ready_compat", ${JSON.stringify(READY_COMPAT)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      `module.ORCHESTRATOR = Path(${JSON.stringify(fakeOrchestrator)})`,
+      `os.environ["READY_SKILL_RESULT_PATH"] = ${JSON.stringify(resultPath)}`,
+      `sys.argv = ["ready_compat.py", "--action", "video_expert_ai_analyze", "--payload-json", ${JSON.stringify(JSON.stringify({ sceneScoresPath }))}]`,
+      'raise SystemExit(module.main())',
+      '',
+    ].join('\n'), 'utf8')
+
+    assert.throws(() => execFileSync('python3', [harness], { encoding: 'utf8' }))
+
+    const payload = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      ok: boolean
+      status: string
+      error?: { message?: string }
+    }
+    assert.equal(payload.ok, false)
+    assert.equal(payload.status, 'blocked')
+    assert.match(payload.error?.message || '', /text-provider\/text-model/)
+    assert.match(payload.error?.message || '', /image-capable/)
+    assert.throws(() => readFileSync(markerPath, 'utf8'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('VEA ready_compat prefers output dir matching READY_SKILL_TASK_ID over newest mtime', () => {
   const root = mkdtempSync(join(tmpdir(), 'vea-compat-task-id-'))
   try {

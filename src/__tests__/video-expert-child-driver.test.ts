@@ -18,18 +18,41 @@ import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import test from 'node:test'
+import test, { afterEach, beforeEach } from 'node:test'
 
-import { videoExpertChildDriver } from '../main/modules/agent-control/video-expert-child-driver'
+import {
+  __setVeaProviderPreflightConfigReaderForTests,
+  videoExpertChildDriver,
+} from '../main/modules/agent-control/video-expert-child-driver'
 import { getSkillChildDriver } from '../main/modules/agent-control/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
 } from '../main/modules/agent-control/skill-child-run-types'
+import type { AIModelConfig } from '../shared/ai-providers'
 
 async function makeTempOutputDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ready-vea-child-driver-'))
 }
+
+function makeAIConfig(overrides: Partial<AIModelConfig> = {}): AIModelConfig {
+  return {
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: 'sk-test',
+    model: 'gpt-4o',
+    visionMode: 'on',
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  __setVeaProviderPreflightConfigReaderForTests(() => null)
+})
+
+afterEach(() => {
+  __setVeaProviderPreflightConfigReaderForTests(null)
+})
 
 async function writeIncompleteSceneArtifacts(outputDir: string, totalScenes: number): Promise<string> {
   const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
@@ -186,6 +209,132 @@ test('Worker F: stale completed run_state with 0/97 scored scenes resumes ai_ana
   assert.equal(action.input.sceneScoresPath, sceneScoresPath)
 })
 
+test('Worker E: text-only current model blocks cold pipeline before dispatching host batches', async () => {
+  const outputDir = await makeTempOutputDir()
+  __setVeaProviderPreflightConfigReaderForTests(() => makeAIConfig({
+    provider: 'moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-for-coding',
+    visionMode: 'off',
+  }))
+
+  const state = await videoExpertChildDriver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { url: 'https://example.com/video.mp4', outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await videoExpertChildDriver.planNextAction(state)
+  const close = asClose(next)
+  assert.equal(close.status, 'blocked')
+  assert.equal(close.terminalReason, 'blocked_config')
+  assert.equal(close.error?.kind, 'blocked_config')
+  assert.match(close.error?.message || '', /moonshot\/kimi-for-coding/)
+  await assert.rejects(() => fs.stat(path.join(outputDir, 'host_batches')))
+})
+
+test('Worker E: stale VEA config and delivery_report do not override current text-only model', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 3)
+  await fs.writeFile(path.join(outputDir, 'run_state.json'), JSON.stringify({
+    status: 'running',
+    current_stage: 'score_batches',
+    scene_scores_path: sceneScoresPath,
+  }), 'utf8')
+  await fs.writeFile(path.join(outputDir, 'delivery_report.json'), JSON.stringify({
+    status: 'completed',
+    missing_outputs: [],
+    missing_screenshot_scenes: [],
+    missing_sample_scenes: [],
+    blocked_batches: [],
+    incomplete_scene_numbers: [],
+    required_outputs: {},
+  }), 'utf8')
+
+  const home = await makeTempOutputDir()
+  const configDir = path.join(home, '.config', 'video-expert-analyzer-vnext')
+  const modelsPath = path.join(configDir, 'models.multi.json')
+  await fs.mkdir(configDir, { recursive: true })
+  await fs.writeFile(path.join(configDir, 'config.json'), JSON.stringify({
+    auto_scoring: {
+      preferred_model: 'vision-provider/gpt-vision',
+      models_json_path: modelsPath,
+    },
+  }), 'utf8')
+  await fs.writeFile(modelsPath, JSON.stringify({
+    providers: {
+      'vision-provider': {
+        models: [{ id: 'gpt-vision', input: ['text', 'image'] }],
+      },
+    },
+  }), 'utf8')
+  __setVeaProviderPreflightConfigReaderForTests(() => makeAIConfig({
+    provider: 'moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-for-coding',
+    visionMode: 'off',
+  }))
+
+  const previousHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const state = await videoExpertChildDriver.createInitialState({
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      scopeId: 'scope-1',
+      sessionId: 'session-1',
+      requestedInput: { outputDir },
+      parentNextHint: 'wait_for_close_event',
+      outputDir,
+    })
+
+    const next = await videoExpertChildDriver.planNextAction(state)
+    const close = asClose(next)
+    assert.equal(close.status, 'blocked')
+    assert.equal(close.terminalReason, 'blocked_config')
+    assert.match(close.error?.message || '', /moonshot\/kimi-for-coding/)
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+  }
+})
+
+test('Worker E: unverified custom OpenAI-compatible provider blocks even when protocol inference says vision', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  __setVeaProviderPreflightConfigReaderForTests(() => makeAIConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'https://custom.example.test/v1',
+    model: 'gpt-4o',
+    visionMode: 'auto',
+  }))
+
+  const state = await videoExpertChildDriver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { sceneScoresPath, outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await videoExpertChildDriver.planNextAction(state)
+  const close = asClose(next)
+  assert.equal(close.status, 'blocked')
+  assert.equal(close.terminalReason, 'blocked_config')
+  assert.match(close.error?.message || '', /openai-compatible\/gpt-4o/)
+  assert.match(close.error?.message || '', /unverified/i)
+})
+
 test('Worker F: fresh ai_analyze blocks when preferred provider is missing from models catalog', async () => {
   const outputDir = await makeTempOutputDir()
   const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
@@ -310,7 +459,7 @@ test('Worker F: missing configured models path can fall back to OpenClaw main ca
     providers: {
       kcode: {
         baseUrl: 'https://example.invalid',
-        models: [{ id: 'K2.6-code-preview' }],
+        models: [{ id: 'K2.6-code-preview', input: ['text', 'image'] }],
       },
     },
   }), 'utf8')

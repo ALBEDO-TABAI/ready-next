@@ -4,6 +4,7 @@ import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
 import { resolveToolInputSchemaForExecution } from './tool-registry'
 import { createSystemReminderRegistry } from './system-reminder-registry'
 import { logAgentMetric } from './metrics'
+import { resolveCanonicalChildRunHandle } from './child-run-handle-resolver'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
 import { isTerminalChildCloseStatus } from './skill-child-run-types'
@@ -232,7 +233,26 @@ export function buildFrameAction(params: {
   }
   const contract = frame.skill?.runContract || null
   const candidateInput = deriveForcedActionInput({ toolName, contract, frame })
-  const validated = validateForcedActionInput(toolName, candidateInput)
+  const actionName = nonEmpty(contract?.action) || nonEmpty(frame.skill?.action)
+  const handle = resolveCanonicalChildRunHandle({
+    skillId: frame.skill?.skillId,
+    action: actionName,
+    requestedInput: candidateInput,
+    contract,
+    frame,
+  })
+  if (!handle.ok) {
+    return {
+      mode: 'checkpoint',
+      toolName,
+      input: handle.input,
+      inputDigest: computeForceInputDigest(handle.input),
+      reason: handle.reason,
+      missingInputs: [handle.reason],
+    }
+  }
+  const dispatchInput = handle.input
+  const validated = validateForcedActionInput(toolName, dispatchInput)
   if (!validated.ok) {
     // Required fields missing → caller will checkpoint instead of dispatch.
     const reason = validated.missingInputs.length > 0
@@ -241,8 +261,8 @@ export function buildFrameAction(params: {
     return {
       mode: 'checkpoint',
       toolName,
-      input: candidateInput,
-      inputDigest: computeForceInputDigest(candidateInput),
+      input: dispatchInput,
+      inputDigest: computeForceInputDigest(dispatchInput),
       reason,
       missingInputs: validated.missingInputs,
     }
