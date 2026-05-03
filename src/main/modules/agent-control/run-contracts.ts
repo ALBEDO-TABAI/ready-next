@@ -5,6 +5,7 @@ import type {
   ScopeRunEventPayload,
   ScopeRunMemoryCapture,
   ScopeRunResumableAction,
+  ScopeRunSkillProgress,
   ScopeRunTaskContinuation,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
@@ -336,6 +337,7 @@ export interface TaskProjectionRecord {
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableAction[]
   continuationRef?: ScopeRunTaskContinuation | null
+  progress?: ScopeRunSkillProgress | null
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
   createdAt: string
   updatedAt: string
@@ -882,6 +884,7 @@ export interface RunProjectionPatch {
   resumableActions?: ScopeRunResumableAction[]
   taskContinuation?: ScopeRunTaskContinuation | null
   blockedReason?: string | null
+  progress?: ScopeRunSkillProgress | null
 }
 
 export type PreparedRunPayload = PromptAssemblyResult

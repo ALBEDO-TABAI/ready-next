@@ -192,6 +192,7 @@ export interface ScopeRunTaskContinuation {
   todoId?: string | null
   todoTitle?: string | null
   pauseReason?: string | null
+  childRunId?: string | null
   detachedTaskId?: string | null
   taskRunId?: string | null
   jobId?: string | null
@@ -200,6 +201,16 @@ export interface ScopeRunTaskContinuation {
   runStatePath?: string | null
   outputDir?: string | null
   progressFingerprint?: string | null
+}
+
+export interface ScopeRunSkillProgress {
+  stage: string | null
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  fingerprint: string | null
+  updatedAt: string | null
+  lastError: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {
@@ -380,6 +391,7 @@ export interface ScopeRunState {
   resumableActions?: ScopeRunResumableAction[]
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunTaskContinuation | null
+  progress?: ScopeRunSkillProgress | null
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
 }

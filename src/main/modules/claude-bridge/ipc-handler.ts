@@ -1302,6 +1302,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as any : undefined,
             blockedReason: typeof structured?.blockedReason === 'string' ? structured.blockedReason : undefined,
             taskContinuation: structured?.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as any : undefined,
+            progress: structured?.progress && typeof structured.progress === 'object' ? structured.progress as any : undefined,
             recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             toolEvent: {
               id: `${data.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

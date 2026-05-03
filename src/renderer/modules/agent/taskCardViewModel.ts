@@ -25,6 +25,7 @@ export interface TaskCardRunLike {
   resumableActions?: ScopeRunState['resumableActions']
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunState['taskContinuation']
+  progress?: ScopeRunState['progress']
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunState['executionDiagnostics']
   taskType?: TaskProjectionRecordData['taskType']

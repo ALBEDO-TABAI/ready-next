@@ -296,7 +296,7 @@ test('Worker E: text-only current model blocks cold pipeline before dispatching 
     action: 'video_expert_pipeline',
     scopeId: 'scope-1',
     sessionId: 'session-1',
-    requestedInput: { url: 'https://example.com/video.mp4', outputDir },
+    requestedInput: { url: 'https://example.com/video.mp4', outputDir, exactOutputDir: true },
     parentNextHint: 'wait_for_close_event',
     outputDir,
   })
@@ -855,7 +855,7 @@ test('Phase 5: cold start with url plans video_expert_pipeline', async () => {
     action: 'video_expert_pipeline',
     scopeId: 'scope-1',
     sessionId: 'session-1',
-    requestedInput: { url: 'https://example.com/video.mp4', outputDir },
+    requestedInput: { url: 'https://example.com/video.mp4', outputDir, exactOutputDir: true },
     parentNextHint: 'wait_for_close_event',
     outputDir,
   })
@@ -865,6 +865,7 @@ test('Phase 5: cold start with url plans video_expert_pipeline', async () => {
   assert.equal(action.action, 'video_expert_pipeline')
   assert.equal(action.input.url, 'https://example.com/video.mp4')
   assert.equal(action.input.outputDir, outputDir)
+  assert.equal(action.input.exactOutputDir, true)
 })
 
 test('T3: cold start with explicit sceneScoresPath (no url, no run_state) plans video_expert_ai_analyze', async () => {

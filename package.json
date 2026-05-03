@@ -27,6 +27,7 @@
     "test": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/*.test.ts",
     "agent:probe:vea-resume": "npx tsx@^4.19.2 scripts/agent-vea-resume-probe.ts",
     "agent:acceptance:vea-live": "npx tsx@^4.19.2 scripts/agent-vea-live-acceptance.ts",
+    "agent:acceptance:vea-artifacts": "node scripts/vea-assert-artifacts.cjs",
     "verify:f:e2e": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/e2e/*.e2e.ts",
     "test:watch": "npx tsx@^4.19.2 --test --watch src/__tests__/*.test.ts",
     "test:skill": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/skill-*.test.ts src/__tests__/contract-*.test.ts src/__tests__/agent-context-*.test.ts src/__tests__/embedded-skill-*.test.ts src/__tests__/db-worker*.test.ts src/__tests__/spawn-*.test.ts src/__tests__/before-quit*.test.ts src/__tests__/boot-reaper*.test.ts",

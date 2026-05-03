@@ -235,9 +235,15 @@ import {
   cancelSkillChildRun,
   resumeSkillChildRun,
   getSkillChildRunCloseEvent,
+  getSkillChildRunner,
   waitForSkillChildRunClose,
   MAX_ACTIONS_PER_CHILD_RUN,
 } from '../main/modules/agent-control/skill-child-runner'
+import {
+  clearSkillTaskProjection,
+  readSkillTaskProjection,
+  recordSkillTaskEvent,
+} from '../main/modules/agent-control/skill-task-tracker'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
@@ -538,6 +544,7 @@ function setupRunner(opts: {
   installTestSkillToolDefinitions()
   __resetSkillChildRunnerForTests()
   __resetSkillChildDriversForTests()
+  clearSkillTaskProjection()
   const runtime = opts.runtime ?? makeFakeRuntime()
   const repo = opts.repo ?? makeFakeRepository()
   configureSkillChildRunner({
@@ -548,6 +555,10 @@ function setupRunner(opts: {
     maxActiveVeaRuns: opts.maxActiveVeaRuns,
   })
   return { runtime, repo }
+}
+
+function currentProjectionStep(projection: NonNullable<ReturnType<typeof readSkillTaskProjection>>) {
+  return projection.steps.find((step) => step.id === projection.currentStepId) ?? null
 }
 
 // ------------------- Tests -------------------
@@ -575,6 +586,261 @@ test('Phase 5: lifecycle — start → action → close', async () => {
   assert.equal(close.terminalReason, 'completed')
   assert.equal(runtime.calls.length, 1)
   assert.equal(runtime.calls[0].action, 'do_thing')
+})
+
+test('Worker B: child launch immediately creates a background task projection', async () => {
+  const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+  let resolveStall!: () => void
+  const stall = new Promise<void>((resolve) => { resolveStall = resolve })
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    await stall
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-projection-launch', {
+    plans: [
+      { action: 'do_thing', input: {} },
+      makeTerminalClose('test-skill-projection-launch', 'completed', 'completed'),
+    ],
+  })
+
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-projection-launch',
+    sessionId: 'session-projection-launch',
+    skillId: 'test-skill-projection-launch',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/projection-launch' },
+  })
+
+  const projection = readSkillTaskProjection({
+    sessionId: 'session-projection-launch',
+    skillId: 'test-skill-projection-launch',
+  })
+  assert.ok(projection, 'launch must create a task projection immediately')
+  assert.equal((projection as unknown as { status?: string }).status, 'running')
+  assert.equal(projection.waitingFor, 'background')
+  assert.deepEqual(projection.resumableActions, ['continue', 'cancel'])
+  const continuation = projection.taskContinuation as Record<string, unknown>
+  assert.equal(continuation.childRunId, launch.childRunId)
+  assert.equal(continuation.skillId, 'test-skill-projection-launch')
+  assert.equal(continuation.action, 'do_thing')
+  assert.equal(continuation.runStatePath, launch.runStatePath)
+  assert.equal(continuation.outputDir, launch.outputDir)
+  assert.equal(currentProjectionStep(projection)?.status, 'running')
+
+  recordSkillTaskEvent({
+    scopeId: 'scope-projection-launch',
+    sessionId: 'session-projection-launch',
+    skillId: 'test-skill-projection-launch',
+    toolName: 'skill_test_projection_launch',
+    action: 'do_thing',
+    runKind: 'typed_action',
+    status: 'done',
+    stepId: 'launcher#1',
+  })
+  const afterLauncherDone = readSkillTaskProjection({
+    sessionId: 'session-projection-launch',
+    skillId: 'test-skill-projection-launch',
+  })
+  assert.equal((afterLauncherDone as unknown as { status?: string }).status, 'running')
+  assert.equal(afterLauncherDone?.waitingFor, 'background')
+  assert.equal(
+    (afterLauncherDone?.taskContinuation as Record<string, unknown>).childRunId,
+    launch.childRunId,
+    'parent launcher completion must not erase the child continuation handle',
+  )
+
+  resolveStall()
+  await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
+})
+
+test('Worker B: state_observed reads run_state/artifact progress into projection and active summary', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-child-progress-'))
+  const runStatePath = join(outputDir, 'run_state.json')
+  const updatedAt = '2026-05-02T03:04:05.000Z'
+  const { runtime } = setupRunner()
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    writeFileSync(runStatePath, JSON.stringify({
+      current_stage: 'score_batches',
+      total_scenes: 10,
+      completed_scenes: 3,
+      coverage_ratio: 0.3,
+      updated_at: updatedAt,
+      last_error: 'provider retrying',
+    }), 'utf8')
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  let planCount = 0
+  let releaseTerminal!: () => void
+  const terminalHold = new Promise<void>((resolve) => { releaseTerminal = resolve })
+  registerSkillChildDriver({
+    skillId: 'test-skill-projection-progress',
+    canStart: () => true,
+    canResume: () => true,
+    createInitialState: async (params) => ({
+      skillId: 'test-skill-projection-progress',
+      requestedInput: params.requestedInput,
+    }),
+    planNextAction: async () => {
+      planCount += 1
+      if (planCount === 1) return { action: 'do_thing', input: {} }
+      await terminalHold
+      return makeTerminalClose('test-skill-projection-progress', 'completed', 'completed')
+    },
+    observeAfterAction: async (state) => state,
+  })
+
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-projection-progress',
+    sessionId: 'session-projection-progress',
+    skillId: 'test-skill-projection-progress',
+    action: 'do_thing',
+    requestedInput: { outputDir },
+  })
+
+  const projection = await pollUntil(() => {
+    const current = readSkillTaskProjection({
+      sessionId: 'session-projection-progress',
+      skillId: 'test-skill-projection-progress',
+    })
+    const progress = (current as unknown as { progress?: { stage?: string | null } } | null)?.progress
+    return progress?.stage === 'score_batches' ? current : null
+  })
+  assert.deepEqual((projection as unknown as { progress: Record<string, unknown> }).progress, {
+    stage: 'score_batches',
+    completed: 3,
+    total: 10,
+    coverage: 0.3,
+    fingerprint: null,
+    updatedAt,
+    lastError: 'provider retrying',
+  })
+
+  const active = getSkillChildRunner()?.listActiveRuns()
+    .find((item) => item.childRunId === launch.childRunId)
+  assert.equal(active?.progress.stage, 'score_batches')
+  assert.equal(active?.progress.completed, 3)
+  assert.equal(active?.progress.total, 10)
+  assert.equal(active?.progress.coverage, 0.3)
+  assert.equal(active?.progress.updatedAt, updatedAt)
+
+  releaseTerminal()
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
+  assert.equal(close.progress.stage, 'score_batches')
+  assert.equal(close.progress.completedUnits, 3)
+  assert.equal(close.progress.totalUnits, 10)
+  assert.equal(close.progress.coverageRatio, 0.3)
+})
+
+test('Worker B: child close maps completed/blocked/failed/cancelled projections without flattening blockers to done', async () => {
+  const cases: Array<{
+    name: string
+    close: SkillChildCloseEvent
+    expectedStatus: string
+    expectedStepStatus: string
+    expectedWaitingFor: string
+    cancel?: boolean
+  }> = [
+    {
+      name: 'completed',
+      close: makeTerminalClose('test-skill-projection-completed', 'completed', 'completed'),
+      expectedStatus: 'done',
+      expectedStepStatus: 'done',
+      expectedWaitingFor: 'none',
+    },
+    {
+      name: 'blocked',
+      close: makeTerminalClose('test-skill-projection-blocked', 'blocked', 'blocked_external'),
+      expectedStatus: 'blocked',
+      expectedStepStatus: 'blocked',
+      expectedWaitingFor: 'input',
+    },
+    {
+      name: 'failed',
+      close: makeTerminalClose('test-skill-projection-failed', 'failed', 'failed_skill'),
+      expectedStatus: 'failed',
+      expectedStepStatus: 'error',
+      expectedWaitingFor: 'none',
+    },
+    {
+      name: 'cancelled',
+      close: makeTerminalClose('test-skill-projection-cancelled', 'completed', 'completed'),
+      expectedStatus: 'cancelled',
+      expectedStepStatus: 'done',
+      expectedWaitingFor: 'none',
+      cancel: true,
+    },
+  ]
+
+  for (const item of cases) {
+    const skillId = `test-skill-projection-${item.name}`
+    const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+    if (item.cancel) {
+      let resolveStall!: () => void
+      const stall = new Promise<void>((resolve) => { resolveStall = resolve })
+      runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+        await stall
+        return {
+          success: true,
+          skillId: request.skillId,
+          action: request.action,
+          stdout: '',
+          stderr: '',
+          command: [],
+        }
+      }) as never
+      registerStubDriver(skillId, {
+        plans: [{ action: 'do_thing', input: {} }, item.close],
+      })
+      const launch = await startSkillChildRun({
+        scopeId: `scope-${item.name}`,
+        sessionId: `session-${item.name}`,
+        skillId,
+        action: 'do_thing',
+        requestedInput: { url: `https://example.com/${item.name}` },
+      })
+      await sleep(20)
+      const closePromise = cancelSkillChildRun(launch.childRunId, 'user_cancelled_projection_case')
+      resolveStall()
+      await closePromise
+    } else {
+      registerStubDriver(skillId, { plans: [item.close] })
+      const launch = await startSkillChildRun({
+        scopeId: `scope-${item.name}`,
+        sessionId: `session-${item.name}`,
+        skillId,
+        action: 'do_thing',
+        requestedInput: { url: `https://example.com/${item.name}` },
+      })
+      await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
+    }
+
+    const projection = readSkillTaskProjection({
+      sessionId: `session-${item.name}`,
+      skillId,
+    })
+    assert.ok(projection, `${item.name} projection should exist`)
+    assert.equal((projection as unknown as { status?: string }).status, item.expectedStatus)
+    assert.equal(currentProjectionStep(projection!)?.status, item.expectedStepStatus)
+    assert.equal(projection!.waitingFor, item.expectedWaitingFor)
+    if (item.name === 'blocked') {
+      assert.notEqual((projection as unknown as { status?: string }).status, 'done')
+      assert.ok(projection!.taskContinuation)
+    }
+  }
 })
 
 test('W4: child runner action goes through gateway admission before runtime dispatch', async () => {

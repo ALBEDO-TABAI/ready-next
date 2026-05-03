@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   createEmptyScopeRunState,
   getActiveScopeRunState,
+  isForegroundBusyScopeRunState,
   isStreamingScopeRunState,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
@@ -85,6 +86,8 @@ interface AgentState {
   inputValue: string
   pendingContinuationIntent: PendingContinuationIntent | null
   isStreaming: boolean
+  foregroundBusy: boolean
+  composerLocked: boolean
   streamingMessageId: string | null
   streamingRequestId: string | null
   sessionId: string
@@ -266,6 +269,8 @@ export const useAgent = create<AgentState>((set, get) => ({
   inputValue: '',
   pendingContinuationIntent: null,
   isStreaming: false,
+  foregroundBusy: false,
+  composerLocked: false,
   streamingMessageId: null,
   streamingRequestId: null,
   sessionId: generateSessionId(),
@@ -320,7 +325,11 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   clearPendingContinuationIntent: () => set({ pendingContinuationIntent: null }),
 
-  setIsStreaming: (streaming) => set({ isStreaming: streaming }),
+  setIsStreaming: (streaming) => set({
+    isStreaming: streaming,
+    foregroundBusy: streaming,
+    composerLocked: streaming,
+  }),
 
   setActiveAttachmentPreview: (preview) => set({ activeAttachmentPreview: preview }),
 
@@ -420,7 +429,20 @@ export const useAgent = create<AgentState>((set, get) => ({
   }),
 
   stopStreaming: () => {
-    const { currentAgent, currentScopeId } = get()
+    const { currentAgent, currentScopeId, isStreaming } = get()
+    const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScopeId)
+    const shouldStopForegroundRun = activeRunState
+      ? isForegroundBusyScopeRunState(activeRunState)
+      : isStreaming
+    if (!shouldStopForegroundRun) {
+      set((state) => ({
+        ...syncActiveScopeRunAliases({
+          currentScopeId: state.currentScopeId,
+          scopeRunStates: state.scopeRunStates,
+        }),
+      }))
+      return
+    }
     if (currentScopeId) {
       set((state) => {
         const previous = state.scopeRunStates[currentScopeId] || createEmptyScopeRunState({
@@ -459,6 +481,8 @@ export const useAgent = create<AgentState>((set, get) => ({
     } else {
       set({
         isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
         streamingMessageId: null,
         streamingRequestId: null,
         toolTraceStatus: 'cancelled',
@@ -494,6 +518,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       inputValue: undoneContent,
       pendingContinuationIntent: null,
       isStreaming: false,
+      foregroundBusy: false,
+      composerLocked: false,
       streamingMessageId: null,
       streamingRequestId: null,
       toolTrace: [],
@@ -530,6 +556,8 @@ export const useAgent = create<AgentState>((set, get) => ({
         }
       ],
       isStreaming: false,
+      foregroundBusy: false,
+      composerLocked: false,
       streamingMessageId: null,
       streamingRequestId: null,
       sessionId: generateSessionId(),
@@ -761,9 +789,16 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
 
     const stateBeforeSend = get()
+    const runBeforeSend = getActiveScopeRunState(
+      stateBeforeSend.scopeRunStates,
+      stateBeforeSend.currentScopeId,
+    )
+    const foregroundBusyBeforeSend = runBeforeSend
+      ? isForegroundBusyScopeRunState(runBeforeSend)
+      : stateBeforeSend.isStreaming
     const shouldCoalesce =
       !bypassCoalescingOnce &&
-      !stateBeforeSend.isStreaming &&
+      !foregroundBusyBeforeSend &&
       !stateBeforeSend.pendingContinuationIntent &&
       stateBeforeSend.sendCoalescingEnabled &&
       normalizedContent.length > 0 &&
@@ -1017,7 +1052,11 @@ export const useAgent = create<AgentState>((set, get) => ({
       }
     }
 
-    if (typeof window !== 'undefined' && window.electronAPI && get().isStreaming) {
+    const activeRunBeforeNewSend = getActiveScopeRunState(get().scopeRunStates, activeScopeId)
+    const shouldKillForegroundRun = activeRunBeforeNewSend
+      ? isForegroundBusyScopeRunState(activeRunBeforeNewSend)
+      : get().isStreaming
+    if (typeof window !== 'undefined' && window.electronAPI && shouldKillForegroundRun) {
       await window.electronAPI.agent.kill(currentAgent, activeScopeId).catch(console.error)
     }
 
@@ -1136,6 +1175,8 @@ export const useAgent = create<AgentState>((set, get) => ({
             ),
             attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
             isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
             streamingMessageId: null,
             streamingRequestId: null,
             scopeRunStates: {
@@ -1186,7 +1227,13 @@ export const useAgent = create<AgentState>((set, get) => ({
           } else {
             clearInterval(typeInterval)
             if (get().streamingRequestId === requestId) {
-              set({ isStreaming: false, streamingMessageId: null, streamingRequestId: null })
+              set({
+                isStreaming: false,
+                foregroundBusy: false,
+                composerLocked: false,
+                streamingMessageId: null,
+                streamingRequestId: null,
+              })
             }
           }
         }, 30)
@@ -1210,6 +1257,8 @@ export const useAgent = create<AgentState>((set, get) => ({
             : m
         ),
         isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
         streamingMessageId: null,
         streamingRequestId: null,
         scopeRunStates: {

@@ -14,11 +14,40 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function normalizeActiveChildRun(row: unknown): unknown {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row
+  const record = row as Record<string, unknown>
+  const progress = record.progress && typeof record.progress === 'object' && !Array.isArray(record.progress)
+    ? record.progress as Record<string, unknown>
+    : {}
+  return {
+    ...record,
+    progress: {
+      stage: progress.stage ?? null,
+      completed: progress.completed ?? null,
+      total: progress.total ?? null,
+      coverage: progress.coverage ?? null,
+      fingerprint: progress.fingerprint ?? null,
+      updatedAt: progress.updatedAt ?? null,
+      lastError: progress.lastError ?? null,
+    },
+    blockedReason: record.blockedReason ?? null,
+    liveness: Object.prototype.hasOwnProperty.call(record, 'liveness') ? record.liveness : 'background',
+    closeStatus: record.closeStatus ?? null,
+  }
+}
+
 export function listActiveChildRunsForIpc(
   runtime: Pick<ActiveChildRunRuntimeLike, 'listActiveChildRuns'> | null,
 ): ChildRunIpcResponse {
   try {
-    return { success: true, data: runtime!.listActiveChildRuns() }
+    const data = runtime!.listActiveChildRuns()
+    return {
+      success: true,
+      data: Array.isArray(data)
+        ? data.map(normalizeActiveChildRun)
+        : data ?? [],
+    }
   } catch (error) {
     return { success: false, error: errorMessage(error) }
   }

@@ -606,6 +606,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
       if (blocked) return blocked
       const input: Record<string, unknown> = { url }
       if (state.outputDir) input.outputDir = state.outputDir
+      if (state.requestedInput.exactOutputDir === true) input.exactOutputDir = true
       const sceneThreshold = state.requestedInput.sceneThreshold
       if (sceneThreshold !== undefined && sceneThreshold !== null) input.sceneThreshold = sceneThreshold
       const bestThreshold = state.requestedInput.bestThreshold

@@ -46,6 +46,7 @@ function buildTaskContinuation(
   const taskId = taskRunId || detachedTaskId || readResumeString(snapshot, 'taskId')
 
   setStringField(continuation, 'taskId', taskId)
+  setStringField(continuation, 'childRunId', readResumeString(snapshot, 'childRunId'))
   setStringField(continuation, 'taskRunId', taskRunId)
   setStringField(continuation, 'detachedTaskId', detachedTaskId)
   setStringField(continuation, 'jobId', readResumeString(snapshot, 'jobId'))

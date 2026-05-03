@@ -258,6 +258,7 @@ interface ScopeRunTaskContinuationData {
   todoId?: string | null
   todoTitle?: string | null
   pauseReason?: string | null
+  childRunId?: string | null
   detachedTaskId?: string | null
   taskRunId?: string | null
   jobId?: string | null
@@ -266,6 +267,16 @@ interface ScopeRunTaskContinuationData {
   runStatePath?: string | null
   outputDir?: string | null
   progressFingerprint?: string | null
+}
+
+interface ScopeRunSkillProgressData {
+  stage: string | null
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  fingerprint: string | null
+  updatedAt: string | null
+  lastError: string | null
 }
 
 interface ContinuationIntentData {
@@ -277,6 +288,7 @@ interface ContinuationIntentData {
   todoId?: string
   todoTitle?: string
   pauseReason?: string
+  childRunId?: string
   detachedTaskId?: string
   taskRunId?: string
   jobId?: string
@@ -450,6 +462,7 @@ interface TaskProjectionRecordData {
   blockedReason?: string | null
   resumableActions?: ScopeRunResumableActionData[]
   continuationRef?: ScopeRunTaskContinuationData | null
+  progress?: ScopeRunSkillProgressData | null
   recentArtifacts?: ScopeRunEventData['artifactRefs']
   createdAt: string
   updatedAt: string
@@ -556,6 +569,10 @@ interface ActiveChildRunSummaryData {
   startedAt: string
   outputDir: string
   runStatePath: string
+  progress: ScopeRunSkillProgressData
+  blockedReason: string | null
+  liveness: 'foreground' | 'background' | null
+  closeStatus: string | null
 }
 
 type ScopeRunTerminalReasonData =

@@ -66,6 +66,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const dropdownRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
+  const composerLocked = isStreaming
 
   const resizeTextarea = useCallback(() => {
     if (!textareaRef.current) return
@@ -187,7 +188,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         boxShadow: 'none',
       }}
     >
-      {pendingSendCount > 0 && !isStreaming && (
+      {pendingSendCount > 0 && !composerLocked && (
         <div
           className="flex items-center justify-between"
           style={{
@@ -228,7 +229,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             onCompositionEnd={() => {
               composingRef.current = false
             }}
-            disabled={isStreaming}
+            disabled={composerLocked}
             placeholder="Hi～今天有什么可以帮到你"
             className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none resize-none"
             style={{
@@ -238,7 +239,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               lineHeight: '1.5',
               minHeight: 20,
               maxHeight: 120,
-              opacity: isStreaming ? 0.7 : 1,
+              opacity: composerLocked ? 0.7 : 1,
             }}
             rows={1}
           />
@@ -419,7 +420,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
         {/* Right: undo + @ + stop/send */}
         <div className="flex items-center" style={{ gap: 6 }}>
-          {!isStreaming && hasUserMessages && (
+          {!composerLocked && hasUserMessages && (
             <IconButton
               icon={<Undo2 style={{ width: 15, height: 15 }} strokeWidth={2} />}
               onClick={onUndo}
@@ -438,7 +439,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             disabled={filePoolCount === 0}
           />
 
-          {isStreaming ? (
+          {composerLocked ? (
             <button
               onClick={onStop}
               title="停止生成"

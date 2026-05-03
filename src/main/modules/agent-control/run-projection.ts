@@ -77,6 +77,7 @@ export class RunProjection {
       resumableActions: payload.resumableActions ?? truthPatch.resumableActions ?? previous?.resumableActions ?? [],
       recentArtifacts,
       taskContinuation: payload.taskContinuation ?? truthPatch.taskContinuation ?? previous?.taskContinuation ?? null,
+      progress: payload.progress ?? truthPatch.progress ?? previous?.progress ?? null,
       memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
       executionDiagnostics: payload.executionDiagnostics ?? previous?.executionDiagnostics ?? null,
       budgetUsagePercent:

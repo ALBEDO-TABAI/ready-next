@@ -608,6 +608,9 @@ export function buildTaskProjectionRecord(
     recentArtifacts: Array.isArray(truthPatch?.recentArtifacts)
       ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
       : summary.recentArtifacts,
+    progress: truthPatch?.progress && typeof truthPatch.progress === 'object'
+      ? truthPatch.progress as ScopeRunSummary['progress']
+      : summary.progress,
   }
 
   const status = resolveStatus(effectiveSummary)
@@ -654,6 +657,7 @@ export function buildTaskProjectionRecord(
     blockedReason,
     resumableActions: resolveResumableActions(effectiveSummary, status, previous),
     continuationRef: resolveContinuationRef(effectiveSummary, status, previous),
+    progress: effectiveSummary.progress ?? previous?.progress ?? null,
     recentArtifacts: effectiveSummary.recentArtifacts || previous?.recentArtifacts || [],
     createdAt: previous?.createdAt || payload.timestamp,
     updatedAt: effectiveSummary.updatedAt,

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
+  ScopeRunSkillProgress,
   ScopeRunResumableAction,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
@@ -26,6 +27,7 @@ export type SkillParentTaskLifecycleState =
   | 'failed'
   | 'cancelled'
 export type SkillParentTaskLifecycleReason = SkillTaskLifecycleReason
+export type SkillTaskProjectionStatus = 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
 
 export interface SkillTaskEvent {
   scopeId?: string
@@ -86,8 +88,10 @@ export interface SkillParentTaskLifecycleEvent {
   jobId?: string | null
   detachedTaskId?: string | null
   taskRunId?: string | null
+  childRunId?: string | null
   progressFingerprint?: string | null
   resumePayload?: Record<string, unknown> | null
+  progress?: ScopeRunSkillProgress | null
 }
 
 interface SkillTaskContinuationState {
@@ -105,11 +109,13 @@ interface SkillTaskContinuationState {
   action?: string | null
   runStatePath?: string | null
   outputDir?: string | null
+  childRunId?: string | null
   progressFingerprint?: string | null
 }
 
 interface SkillTaskProjectionState {
   module: 'skill'
+  status: SkillTaskProjectionStatus
   taskId: string
   taskTitle: string
   taskSummary: string
@@ -119,6 +125,7 @@ interface SkillTaskProjectionState {
   resumableActions: ScopeRunResumableAction[]
   blockedReason: string | null
   taskContinuation: SkillTaskContinuationState | null
+  progress: ScopeRunSkillProgress | null
   recentArtifacts: Array<{
     id: string
     module: string
@@ -197,6 +204,7 @@ function getOrCreateProjection(event: SkillTaskEvent): SkillTaskProjectionState 
     const skillName = event.skillName || event.skillId || 'skill'
     projection = {
       module: 'skill',
+      status: 'running',
       taskId,
       taskTitle: `技能执行 · ${skillName}`,
       taskSummary: '技能任务进行中',
@@ -206,6 +214,7 @@ function getOrCreateProjection(event: SkillTaskEvent): SkillTaskProjectionState 
       resumableActions: ['none'],
       blockedReason: null,
       taskContinuation: null,
+      progress: null,
       recentArtifacts: [],
     }
     bySkill.set(skKey, projection)
@@ -270,6 +279,21 @@ function lifecycleInteractionState(state: SkillParentTaskLifecycleState): SkillT
   return 'running'
 }
 
+function lifecycleProjectionStatus(state: SkillParentTaskLifecycleState): SkillTaskProjectionStatus {
+  if (state === 'background_running' || state === 'budget_paused') return 'running'
+  if (state === 'blocked') return 'blocked'
+  if (state === 'failed') return 'failed'
+  if (state === 'cancelled') return 'cancelled'
+  return 'done'
+}
+
+function eventProjectionStatus(status: SkillTaskEventStatus): SkillTaskProjectionStatus {
+  if (status === 'blocked') return 'blocked'
+  if (status === 'error') return 'failed'
+  if (status === 'done') return 'done'
+  return 'running'
+}
+
 function inferOutputPaths(event: SkillTaskEvent): Pick<
   SkillTaskRunRecord,
   'outputDir' | 'runStatePath' | 'sceneScoresPath' | 'deliveryReportPath'
@@ -325,6 +349,7 @@ function buildLifecycleResumePayload(
     todoId: stepId,
     todoTitle: '技能任务状态',
     pauseReason: event.reason || null,
+    childRunId: event.childRunId ?? null,
     detachedTaskId: event.detachedTaskId ?? null,
     taskRunId: event.taskRunId ?? null,
     jobId: event.jobId ?? null,
@@ -491,6 +516,13 @@ function buildRunArtifacts(event: SkillTaskEvent, stepId: string, nowIso: string
 }
 
 function shouldPreserveParentProjection(projection: SkillTaskProjectionState, event: SkillTaskEvent): boolean {
+  if (
+    projection.taskContinuation?.childRunId
+    && event.runKind === 'typed_action'
+    && (event.status === 'done' || event.status === 'running')
+  ) {
+    return true
+  }
   if (event.runKind !== 'primitive' || (event.status !== 'done' && event.status !== 'running')) return false
   if (projection.waitingFor !== 'none' || projection.blockedReason || projection.taskContinuation) return true
   const currentStep = projection.currentStepId
@@ -689,6 +721,7 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
   }
 
   if (!preserveParentProjection) {
+    projection.status = eventProjectionStatus(event.status)
     projection.currentStepId = stepId
     projection.taskSummary = event.message || titleForTool(event.toolName)
     projection.blockedReason = event.status === 'blocked' || event.status === 'error'
@@ -783,6 +816,7 @@ export function recordSkillParentTaskLifecycleEvent(event: SkillParentTaskLifecy
 
   const waitingFor = lifecycleWaitingFor(event.state)
   const resumableActions = lifecycleResumableActions(event.state)
+  projection.status = lifecycleProjectionStatus(event.state)
   projection.currentStepId = stepId
   projection.taskSummary = event.message || '技能任务状态已更新'
   projection.waitingFor = waitingFor
@@ -791,6 +825,7 @@ export function recordSkillParentTaskLifecycleEvent(event: SkillParentTaskLifecy
     ? event.message || (event.state === 'failed' ? '技能执行失败' : '技能任务等待继续')
     : null
   projection.taskContinuation = buildLifecycleResumePayload(event, stepId, projection.taskId) as SkillTaskContinuationState | null
+  if (event.progress) projection.progress = { ...event.progress }
 
   recordLifecycleTaskRunEvent(event, step, updatedAt, projection.taskId)
   return { stepId }
@@ -810,6 +845,7 @@ export function readSkillTaskProjection(params: {
     steps: projection.steps.map((step) => ({ ...step })),
     recentArtifacts: projection.recentArtifacts.map((artifact) => ({ ...artifact })),
     taskContinuation: projection.taskContinuation ? { ...projection.taskContinuation } : null,
+    progress: projection.progress ? { ...projection.progress } : null,
   }
 }
 

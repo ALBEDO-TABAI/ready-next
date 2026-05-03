@@ -6,7 +6,7 @@ import {
   listActiveChildRunsForIpc,
 } from '../main/modules/claude-bridge/active-child-run-ipc'
 
-test('listActiveChildRunsForIpc returns active child run summaries from runtime', () => {
+test('listActiveChildRunsForIpc returns active child run summaries with projection fields', () => {
   const rows = [{
     childRunId: 'vcr_1',
     status: 'running',
@@ -18,7 +18,26 @@ test('listActiveChildRunsForIpc returns active child run summaries from runtime'
 
   const response = listActiveChildRunsForIpc(runtime)
 
-  assert.deepEqual(response, { success: true, data: rows })
+  assert.deepEqual(response, {
+    success: true,
+    data: [{
+      childRunId: 'vcr_1',
+      status: 'running',
+      startedAt: '2026-05-02T00:00:00.000Z',
+      progress: {
+        stage: null,
+        completed: null,
+        total: null,
+        coverage: null,
+        fingerprint: null,
+        updatedAt: null,
+        lastError: null,
+      },
+      blockedReason: null,
+      liveness: 'background',
+      closeStatus: null,
+    }],
+  })
 })
 
 test('cancelChildRunForIpc validates childRunId and records ui_button source', async () => {

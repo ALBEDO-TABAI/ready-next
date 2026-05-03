@@ -3,6 +3,7 @@ import assert from 'node:assert'
 
 import {
   deriveScopeRunStatePatch,
+  isForegroundBusyScopeRunState,
   isActiveScopePhase,
   isStreamingScopeRunState,
   mergeArtifacts,
@@ -147,6 +148,68 @@ describe('scope run state helpers', () => {
       updatedAt: '2026-04-29T00:00:01.000Z',
     }
     assert.strictEqual(isStreamingScopeRunState(run as any), false)
+  })
+
+  it('releases the foreground lock for background and budget handoff states', () => {
+    const base = {
+      scopeId: 'scope-foreground-release',
+      agent: 'assistant',
+      requestId: 'run-foreground-release',
+      phase: 'tool_running' as const,
+      module: 'skill' as const,
+      toolTrace: [],
+      startedAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:01.000Z',
+    }
+
+    const releasedRuns = [
+      {
+        ...base,
+        phase: 'checkpoint' as const,
+        terminalReason: 'checkpoint_background' as const,
+      },
+      {
+        ...base,
+        phase: 'checkpoint' as const,
+        terminalReason: 'checkpoint_budget' as const,
+      },
+      {
+        ...base,
+        waitingFor: 'background' as const,
+      },
+      {
+        ...base,
+        taskContinuation: { taskId: 'task-bg', blockerType: 'background_running' },
+      },
+      {
+        ...base,
+        taskContinuation: { taskId: 'task-budget', blockerType: 'budget_paused' },
+      },
+      {
+        ...base,
+        taskId: 'detached:dst-foreground-release',
+        executionKind: 'job' as const,
+      },
+    ]
+
+    for (const run of releasedRuns) {
+      assert.strictEqual(isForegroundBusyScopeRunState(run), false)
+      assert.strictEqual(isStreamingScopeRunState(run), false)
+    }
+  })
+
+  it('keeps the foreground lock for active responding and tool-running turns', () => {
+    for (const phase of ['responding', 'tool_running'] as const) {
+      assert.strictEqual(isForegroundBusyScopeRunState({
+        scopeId: `scope-${phase}`,
+        agent: 'assistant',
+        requestId: `run-${phase}`,
+        phase,
+        toolTrace: [],
+        startedAt: '2026-05-04T00:00:00.000Z',
+        updatedAt: '2026-05-04T00:00:01.000Z',
+      }), true)
+    }
   })
 
   it('treats any active phase with a terminal reason as non-streaming', () => {

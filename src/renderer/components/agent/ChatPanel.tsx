@@ -20,6 +20,7 @@ import {
 import {
   useAgent,
   initAgentListeners,
+  AgentArtifact,
   ChatAttachment,
   ConversationScope,
   ScopeRunState
@@ -51,7 +52,12 @@ import {
 } from '../../modules/agent/taskCardViewModel'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
-import type { RecoveryRecordData, ReferenceSkillHintData, TaskProjectionRecordData } from '../../types/electron'
+import type {
+  ActiveChildRunSummaryData,
+  RecoveryRecordData,
+  ReferenceSkillHintData,
+  TaskProjectionRecordData,
+} from '../../types/electron'
 import ChatHeader from './ChatHeader'
 import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
@@ -89,6 +95,7 @@ interface PersistedScopeRunSummary {
   resumableActions?: ScopeRunState['resumableActions']
   recentArtifacts?: ScopeRunState['recentArtifacts']
   taskContinuation?: ScopeRunState['taskContinuation']
+  progress?: ScopeRunState['progress']
   memoryCapture?: ScopeRunState['memoryCapture']
   blockedReason?: string | null
   error?: string | null
@@ -116,6 +123,7 @@ interface SerializedTaskSnapshot {
   resumableActions?: ScopeRunState['resumableActions']
   recentArtifacts?: ScopeRunState['recentArtifacts']
   taskContinuation?: ScopeRunState['taskContinuation']
+  progress?: ScopeRunState['progress']
   memoryCapture?: ScopeRunState['memoryCapture']
   blockedReason?: string | null
   error?: string | null
@@ -213,6 +221,112 @@ function resolveTaskContinuationForProjection(
 ): ScopeRunState['taskContinuation'] {
   if (shouldPreferProjectionContinuation(projection)) return projection?.continuationRef || null
   return fallback || projection?.continuationRef || null
+}
+
+function childRunPhase(row: ActiveChildRunSummaryData): ScopeRunState['phase'] {
+  if (row.closeStatus === 'completed' || row.status === 'completed') return 'done'
+  if (row.closeStatus === 'failed' || row.status === 'failed') return 'error'
+  if (row.closeStatus === 'killed' || row.status === 'killed') return 'cancelled'
+  return 'checkpoint'
+}
+
+function childRunProjectionStatus(row: ActiveChildRunSummaryData): TaskProjectionRecordData['status'] {
+  if (row.closeStatus === 'completed' || row.status === 'completed') return 'done'
+  if (row.closeStatus === 'failed' || row.status === 'failed') return 'failed'
+  if (row.closeStatus === 'killed' || row.status === 'killed') return 'cancelled'
+  if (row.closeStatus === 'blocked' || row.status === 'blocked') return 'blocked'
+  return 'running'
+}
+
+function childRunWaitingFor(row: ActiveChildRunSummaryData): ScopeRunState['waitingFor'] {
+  const status = childRunProjectionStatus(row)
+  if (status === 'running') return 'background'
+  if (status === 'blocked') return 'input'
+  return 'none'
+}
+
+function childRunActions(row: ActiveChildRunSummaryData): ScopeRunState['resumableActions'] {
+  const status = childRunProjectionStatus(row)
+  if (status === 'done') return ['open_artifact']
+  if (status === 'failed') return ['retry', 'cancel', 'open_artifact']
+  if (status === 'cancelled') return ['none']
+  return ['continue', 'cancel', 'open_artifact']
+}
+
+function childRunTaskSummary(row: ActiveChildRunSummaryData): string {
+  const progress = formatTaskProgress(row.progress)
+  const status = childRunProjectionStatus(row)
+  if (status === 'done') return progress ? `后台任务已完成 · ${progress}` : '后台任务已完成'
+  if (status === 'failed') return row.blockedReason || '后台任务失败'
+  if (status === 'cancelled') return '后台任务已取消'
+  if (status === 'blocked') return row.blockedReason || progress || '后台任务等待继续'
+  return progress || '后台任务正在运行'
+}
+
+function artifactFromPath(kind: string, label: string, path: string | null | undefined, childRunId: string): AgentArtifact | null {
+  if (!path) return null
+  return {
+    id: `child:${childRunId}:${kind}:${path}`,
+    module: 'skill',
+    kind,
+    label,
+    path,
+    createdAt: new Date().toISOString(),
+    meta: { childRunId },
+  }
+}
+
+function activeChildRunToTaskRun(row: ActiveChildRunSummaryData, fallbackScopeId: string | null): TaskCardRun | null {
+  const scopeId = row.scopeId || fallbackScopeId
+  if (!scopeId) return null
+  const status = childRunProjectionStatus(row)
+  const updatedAt = row.progress?.updatedAt || new Date().toISOString()
+  const artifacts = [
+    artifactFromPath('folder', '输出目录', row.outputDir, row.childRunId),
+    artifactFromPath('run_state', 'run_state.json', row.runStatePath, row.childRunId),
+  ].filter(Boolean) as NonNullable<ScopeRunState['recentArtifacts']>
+  return {
+    scopeId,
+    taskId: `skill-child:${row.childRunId}`,
+    phase: childRunPhase(row),
+    status,
+    title: '后台任务',
+    taskTitle: `后台技能任务 · ${row.skillId}`,
+    taskSummary: childRunTaskSummary(row),
+    steps: [{
+      id: `child_run:${row.childRunId}`,
+      title: row.progress?.stage || '后台技能执行',
+      status:
+        status === 'done'
+          ? 'done'
+          : status === 'failed'
+            ? 'error'
+            : status === 'blocked'
+              ? 'blocked'
+              : 'running',
+      detail: childRunTaskSummary(row),
+      updatedAt,
+    }],
+    currentStepId: `child_run:${row.childRunId}`,
+    waitingFor: childRunWaitingFor(row),
+    resumableActions: childRunActions(row),
+    recentArtifacts: artifacts,
+    taskContinuation: {
+      taskId: `skill-child:${row.childRunId}`,
+      stepId: `child_run:${row.childRunId}`,
+      blockerType: status === 'running' ? 'background_running' : status,
+      pauseReason: status === 'running' ? 'background_running' : status,
+      childRunId: row.childRunId,
+      skillId: row.skillId,
+      runStatePath: row.runStatePath,
+      outputDir: row.outputDir,
+      progressFingerprint: row.progress?.fingerprint || null,
+    },
+    progress: row.progress,
+    blockedReason: row.blockedReason,
+    updatedAt,
+    toolTrace: [],
+  }
 }
 
 function memoryCaptureSourceLabel(
@@ -501,11 +615,33 @@ function budgetWarningBadgeLabel(level: TaskProjectionRecordData['budgetWarningL
   }
 }
 
+function formatTaskProgress(progress: ScopeRunState['progress'] | undefined | null): string | null {
+  if (!progress) return null
+  const stage = progress.stage || '当前阶段'
+  if (progress.completed != null && progress.total != null) {
+    return `${stage} · ${progress.completed}/${progress.total}`
+  }
+  if (progress.coverage != null) {
+    return `${stage} · ${Math.round(progress.coverage * 100)}%`
+  }
+  return progress.stage || null
+}
+
+function progressPercent(progress: ScopeRunState['progress'] | undefined | null): number | null {
+  if (!progress) return null
+  if (progress.total && progress.total > 0 && progress.completed != null) {
+    return Math.max(0, Math.min(100, Math.round((progress.completed / progress.total) * 100)))
+  }
+  if (progress.coverage != null) return Math.max(0, Math.min(100, Math.round(progress.coverage * 100)))
+  return null
+}
+
 function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
   if (!run) return false
   return Boolean(
     run.taskTitle ||
     run.taskSummary ||
+    run.progress ||
     (run.steps && run.steps.length > 0) ||
     (run.memoryCapture && run.memoryCapture.status !== 'dismissed')
   )
@@ -532,6 +668,8 @@ function TaskCard({
   onResumeRun,
   onCancelDetachedTask,
   onContinueDetachedTask,
+  onCancelChildRun,
+  onContinueChildRun,
 }: {
   run: TaskCardRun
   taskKey: string
@@ -553,6 +691,8 @@ function TaskCard({
   onResumeRun?: (scopeId: string) => void
   onCancelDetachedTask?: (scopeId: string, taskId?: string | null) => void
   onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
+  onCancelChildRun?: (scopeId: string, childRunId: string) => void
+  onContinueChildRun?: (scopeId: string, childRunId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const primaryTitle = vm.title
@@ -563,6 +703,9 @@ function TaskCard({
   const hiddenPlanStepCount = Math.max(0, steps.length - planStepsToRender.length)
   const recentArtifacts = run.recentArtifacts || []
   const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
+  const childRunId = run.taskContinuation?.childRunId || null
+  const progressLabel = formatTaskProgress(run.progress)
+  const progressValue = progressPercent(run.progress)
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const summaryPreview = formatSingleLinePreview(vm.summary)
@@ -686,6 +829,54 @@ function TaskCard({
           {expanded && vm.currentStep && (
             <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
               当前步骤：{vm.currentStep.title}
+            </div>
+          )}
+          {progressLabel && (
+            <div style={{ marginTop: 7 }}>
+              <div className="flex items-center justify-between" style={{ gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    color: 'var(--text-light)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                  }}
+                >
+                  {progressLabel}
+                </span>
+                {progressValue != null && (
+                  <span style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
+                    {progressValue}%
+                  </span>
+                )}
+              </div>
+              {progressValue != null && (
+                <div
+                  style={{
+                    height: 5,
+                    borderRadius: 999,
+                    marginTop: 5,
+                    overflow: 'hidden',
+                    background: 'color-mix(in srgb, var(--text-light) 14%, transparent)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progressValue}%`,
+                      height: '100%',
+                      borderRadius: 999,
+                      background: 'var(--color-blue)',
+                    }}
+                  />
+                </div>
+              )}
+              {run.progress?.lastError && expanded && (
+                <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
+                  最近阻塞：{run.progress.lastError}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -921,6 +1112,24 @@ function TaskCard({
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
                 继续后台任务
+              </button>
+            )}
+            {childRunId && (run.resumableActions || []).includes('continue') && (
+              <button
+                type="button"
+                onClick={() => onContinueChildRun?.(run.scopeId, childRunId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                继续处理
+              </button>
+            )}
+            {childRunId && (run.resumableActions || []).includes('cancel') && (
+              <button
+                type="button"
+                onClick={() => onCancelChildRun?.(run.scopeId, childRunId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                取消
               </button>
             )}
             {run.interactionState === 'suspended' && (
@@ -1747,6 +1956,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   const [persistedTaskProjections, setPersistedTaskProjections] = useState<
     Record<string, PersistedTaskProjection[]>
   >({})
+  const [activeChildRuns, setActiveChildRuns] = useState<ActiveChildRunSummaryData[]>([])
   const [sessionRecallQuery, setSessionRecallQuery] = useState('')
   const [sessionRecallResults, setSessionRecallResults] = useState<SessionRecallHit[]>([])
   const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
@@ -2034,6 +2244,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           resumableActions: run.resumableActions,
           recentArtifacts: run.recentArtifacts,
           taskContinuation: run.taskContinuation,
+          progress: run.progress,
           memoryCapture: run.memoryCapture,
           blockedReason: run.blockedReason,
           error: run.error,
@@ -2081,6 +2292,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
         taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
+        progress: projection?.progress || run.progress || null,
         memoryCapture: run.memoryCapture,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
@@ -2127,6 +2339,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             ? projection.recentArtifacts
             : (run.recentArtifacts || []),
         taskContinuation: resolveTaskContinuationForProjection(projection, run.taskContinuation),
+        progress: projection?.progress || run.progress || null,
         taskType: projection?.taskType,
         interactionState: projection?.interactionState,
         budgetUsagePercent: projection?.budgetUsagePercent,
@@ -2137,10 +2350,15 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason)
       })
     }
+    for (const row of activeChildRuns) {
+      const childRun = activeChildRunToTaskRun(row, currentScopeId)
+      if (!childRun) continue
+      merged.set(`${childRun.scopeId}:${childRun.taskId}`, childRun)
+    }
     return Array.from(merged.values()).sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     )
-  }, [inMemoryTaskRuns, persistedScopeRuns, persistedTaskProjections])
+  }, [activeChildRuns, currentScopeId, inMemoryTaskRuns, persistedScopeRuns, persistedTaskProjections])
 
   const currentTaskRun = useMemo(() => {
     const currentRun = currentScopeId
@@ -2174,6 +2392,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       resumableActions: snapshot.resumableActions,
       recentArtifacts: snapshot.recentArtifacts,
       taskContinuation: snapshot.taskContinuation,
+      progress: snapshot.progress,
       memoryCapture: snapshot.memoryCapture,
       blockedReason: snapshot.blockedReason,
       error: snapshot.error,
@@ -2393,6 +2612,28 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   }, [refreshPersistedTaskProjections, currentScopeId, persistedScopeRuns])
 
   useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setInterval> | null = null
+    const refresh = async () => {
+      if (!window.electronAPI?.agent?.listActiveChildRuns) {
+        if (!cancelled) setActiveChildRuns([])
+        return
+      }
+      const result = await window.electronAPI.agent.listActiveChildRuns().catch(() => null)
+      if (cancelled) return
+      setActiveChildRuns(result?.success && Array.isArray(result.data) ? result.data : [])
+    }
+    void refresh()
+    timer = setInterval(() => {
+      void refresh()
+    }, 2_000)
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
+  }, [currentScopeId])
+
+  useEffect(() => {
     return () => {
       if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
     }
@@ -2503,6 +2744,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         todoId: run?.taskContinuation?.todoId || undefined,
         todoTitle: run?.taskContinuation?.todoTitle || undefined,
         pauseReason: run?.taskContinuation?.pauseReason || undefined,
+        childRunId: run?.taskContinuation?.childRunId || undefined,
         detachedTaskId: run?.taskContinuation?.detachedTaskId || undefined,
         taskRunId: run?.taskContinuation?.taskRunId || undefined,
         jobId: run?.taskContinuation?.jobId || undefined,
@@ -2620,6 +2862,24 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       },
     }
     setComposerDraft(`继续后台任务 ${detachedTaskId}`, buildRunContinuationIntent(continuationRun) || null)
+    focusInputWithResize()
+  }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
+
+  const handleCancelChildRun = useCallback(async (_scopeId: string, childRunId: string) => {
+    if (!childRunId || !window.electronAPI?.agent?.cancelChildRun) return
+    await window.electronAPI.agent.cancelChildRun(childRunId).catch(() => null)
+    const result = await window.electronAPI.agent.listActiveChildRuns?.().catch(() => null)
+    if (result?.success && Array.isArray(result.data)) setActiveChildRuns(result.data)
+  }, [])
+
+  const handleContinueChildRun = useCallback((scopeId: string, childRunId: string) => {
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    const run =
+      mergedTaskRuns.find((item) => item.scopeId === scopeId && item.taskContinuation?.childRunId === childRunId) ||
+      mergedTaskRuns.find((item) => item.scopeId === scopeId && item.taskId === `skill-child:${childRunId}`)
+    setComposerDraft(`继续后台任务 ${childRunId}`, buildRunContinuationIntent(run) || null)
     focusInputWithResize()
   }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
 
@@ -2757,13 +3017,17 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           onResumeRun={handleResumeTask}
           onCancelDetachedTask={handleCancelDetachedTask}
           onContinueDetachedTask={handleContinueDetachedTask}
+          onCancelChildRun={handleCancelChildRun}
+          onContinueChildRun={handleContinueChildRun}
         />
       )
     },
     [
       handleContinueTaskInput,
       handleCancelDetachedTask,
+      handleCancelChildRun,
       handleContinueDetachedTask,
+      handleContinueChildRun,
       handleDismissMemoryCapture,
       handleOpenTaskArtifact,
       handleRetryTask,
@@ -2888,6 +3152,22 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     streamingMessageId,
     taskDisclosureState
   ])
+
+  const bottomTaskCard = useMemo<React.ReactNode | null>(() => {
+    if (!currentTaskRun) return null
+    const hasBackgroundTask =
+      currentTaskRun.waitingFor === 'background' ||
+      Boolean(currentTaskRun.taskContinuation?.childRunId) ||
+      Boolean(currentTaskRun.progress) ||
+      currentTaskRun.status === 'running' ||
+      currentTaskRun.status === 'blocked'
+    if (!hasBackgroundTask) return null
+    return renderTaskSnapshotCard(
+      currentTaskRun,
+      `bottom-task-${currentTaskRun.taskId || currentTaskRun.scopeId}`,
+      true,
+    )
+  }, [currentTaskRun, renderTaskSnapshotCard])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -3439,6 +3719,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           )}
           toLocalFileUrl={toLocalFileUrl}
         />
+
+        {bottomTaskCard}
 
         <ChatInput
           ref={chatInputRef}

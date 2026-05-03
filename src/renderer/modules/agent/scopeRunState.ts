@@ -8,6 +8,7 @@ import type {
   ScopeRunMemoryCapture,
   ScopeRunExecutionDiagnostics,
   ScopeRunResumableAction,
+  ScopeRunSkillProgress,
   ScopeRunState,
   ScopeRunTaskContinuation,
   ScopeRunTerminalReason,
@@ -53,6 +54,27 @@ export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): b
   )
 }
 
+function isDetachedSkillJob(run: ScopeRunState): boolean {
+  return (
+    run.module === 'skill' &&
+    run.executionKind === 'job' &&
+    typeof run.taskId === 'string' &&
+    run.taskId.startsWith('detached:')
+  )
+}
+
+function hasForegroundReleaseSignal(run: ScopeRunState): boolean {
+  const blockerType = run.taskContinuation?.blockerType
+  return (
+    run.terminalReason === 'checkpoint_background' ||
+    run.terminalReason === 'checkpoint_budget' ||
+    run.waitingFor === 'background' ||
+    blockerType === 'background_running' ||
+    blockerType === 'budget_paused' ||
+    isDetachedSkillJob(run)
+  )
+}
+
 export function isScopeRunPhase(value: unknown): value is ScopeRunState['phase'] {
   return (
     value === 'idle' ||
@@ -69,18 +91,17 @@ export function isScopeRunPhase(value: unknown): value is ScopeRunState['phase']
   )
 }
 
-export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
+export function isForegroundBusyScopeRunState(run: ScopeRunState | null | undefined): boolean {
   if (!run) return false
   if (run.terminalReason) return false
-  if (
-    run.module === 'skill' &&
-    run.executionKind === 'job' &&
-    typeof run.taskId === 'string' &&
-    run.taskId.startsWith('detached:')
-  ) {
-    return false
-  }
+  if (hasForegroundReleaseSignal(run)) return false
   return isActiveScopePhase(run.phase)
+}
+
+export const isComposerLockedScopeRunState = isForegroundBusyScopeRunState
+
+export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
+  return isForegroundBusyScopeRunState(run)
 }
 
 function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null {
@@ -466,6 +487,7 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   copyString('todoId')
   copyString('todoTitle')
   copyString('pauseReason')
+  copyString('childRunId')
   copyString('detachedTaskId')
   copyString('taskRunId')
   copyString('jobId')
@@ -475,6 +497,28 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   copyString('outputDir')
   copyString('progressFingerprint')
   return Object.keys(continuation).length > 0 ? continuation : null
+}
+
+function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const record = input as Record<string, unknown>
+  const readString = (key: string): string | null => {
+    const value = record[key]
+    return typeof value === 'string' && value.trim() ? value.trim() : null
+  }
+  const readNumber = (key: string): number | null => {
+    const value = Number(record[key])
+    return Number.isFinite(value) ? value : null
+  }
+  return {
+    stage: readString('stage'),
+    completed: readNumber('completed'),
+    total: readNumber('total'),
+    coverage: readNumber('coverage'),
+    fingerprint: readString('fingerprint'),
+    updatedAt: readString('updatedAt'),
+    lastError: readString('lastError'),
+  }
 }
 
 function toSkillWaitingFor(blockerType: string | null): ScopeRunWaitingFor {
@@ -626,6 +670,7 @@ export function deriveScopeRunStatePatch(
     taskContinuation?: ScopeRunTaskContinuation | Record<string, unknown> | null
     memoryCapture?: ScopeRunMemoryCapture | Record<string, unknown> | null
     executionDiagnostics?: ScopeRunExecutionDiagnostics | Record<string, unknown> | null
+    progress?: ScopeRunSkillProgress | Record<string, unknown> | null
     memoryRefs?: AgentMemoryRef[]
     triggerHits?: AgentTriggerHit[]
     contextBudget?: AgentContextBudget | null
@@ -678,6 +723,7 @@ export function deriveScopeRunStatePatch(
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
+  const structuredProgress = parseSkillProgress(event.progress)
   const terminalReason = 'terminalReason' in event
     ? normalizeTerminalReason(event.terminalReason)
     : null
@@ -759,6 +805,7 @@ export function deriveScopeRunStatePatch(
       structuredContinuation ||
       previous?.taskContinuation ||
       null,
+    progress: structuredProgress || previous?.progress || null,
     memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,
     executionDiagnostics: structuredExecutionDiagnostics || previous?.executionDiagnostics || null
   }

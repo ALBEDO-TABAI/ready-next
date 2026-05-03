@@ -551,6 +551,8 @@ describe('useAgent Store', () => {
             scopes: [],
             inputValue: '',
             isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
             streamingMessageId: null,
             streamingRequestId: null,
             conversations: [],
@@ -1054,6 +1056,108 @@ describe('useAgent Store', () => {
             { agent: 'butler', scopeId: 'conv-local-retry' },
             { agent: 'butler', scopeId: 'conv-local-retry' },
         ])
+    })
+
+    it('should send a new scoped message without killing a live background child run', async () => {
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+        const killCalls: Array<{ agent: string; scopeId?: string }> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-background-child',
+                        agent: 'butler',
+                        title: 'Existing task',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-background-child',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-05-04T10:00:00.000Z',
+                        updatedAt: '2026-05-04T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return { success: true }
+                },
+                kill: async (agent: string, scopeId?: string) => {
+                    killCalls.push({ agent, scopeId })
+                    return { success: true }
+                },
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-background-child',
+            currentScope: {
+                id: 'conv-local-background-child',
+                agent: 'butler',
+                title: 'Existing task',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-background-child',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-05-04T10:00:00.000Z',
+                updatedAt: '2026-05-04T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [{
+                id: 'conv-local-background-child',
+                agent: 'butler',
+                title: 'Existing task',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-background-child',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-05-04T10:00:00.000Z',
+                updatedAt: '2026-05-04T10:00:00.000Z',
+                lastMessageAt: null,
+            }],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            sendCoalescingEnabled: false,
+            isStreaming: true,
+            scopeRunStates: {
+                'conv-local-background-child': {
+                    scopeId: 'conv-local-background-child',
+                    agent: 'butler',
+                    requestId: 'run-background-child',
+                    phase: 'tool_running',
+                    module: 'skill',
+                    waitingFor: 'background',
+                    taskContinuation: {
+                        taskId: 'task-background-child',
+                        blockerType: 'background_running',
+                        detachedTaskId: 'dst-background-child',
+                    },
+                    toolTrace: [],
+                    startedAt: '2026-05-04T10:00:00.000Z',
+                    updatedAt: '2026-05-04T10:00:01.000Z',
+                },
+            },
+        })
+
+        const result = await useAgent.getState().sendMessage('start a separate question')
+
+        assert.strictEqual(result.success, true)
+        assert.strictEqual(killCalls.length, 0)
+        assert.strictEqual(sendScopedCalls.length, 1)
+        assert.strictEqual(sendScopedCalls[0].scopeId, 'conv-local-background-child')
+        assert.strictEqual(sendScopedCalls[0].message, 'start a separate question')
     })
 
     it('should show a friendly message when sendScoped reports user message persistence failure', async () => {

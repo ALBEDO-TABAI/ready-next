@@ -27,7 +27,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 
 import type {
@@ -36,6 +36,7 @@ import type {
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import type { ScopeRunSkillProgress } from './types'
 
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
@@ -47,6 +48,8 @@ import {
   deriveRuntimeChildRunLogPath,
 } from './skill-child-run-log'
 import { writeLifecycle } from './output-dir-lifecycle'
+import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
+import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
 import {
   ChildRunCircuitBreaker,
   shouldCountChildRunCircuitBreakerFailure,
@@ -195,6 +198,23 @@ interface ActiveRun {
   parentNextHint: SkillChildRunParentNextHint
   singleFlightKey: string
   agentContext: AgentSpawnContext | null
+  progress: ScopeRunSkillProgress
+  blockedReason: string | null
+}
+
+interface ChildRunSummary {
+  childRunId: string
+  skillId: string
+  sessionId: string | null
+  scopeId: string | null
+  status: SkillChildRunStatus
+  startedAt: string
+  outputDir: string
+  runStatePath: string
+  progress: ScopeRunSkillProgress
+  blockedReason: string | null
+  liveness: 'background' | null
+  closeStatus: SkillChildCloseEvent['status'] | null
 }
 
 class SkillChildRunner {
@@ -211,6 +231,7 @@ class SkillChildRunner {
   /** Snapshot of close events for completed runs so callers can read the
    *  result after the loop has finished. Capped at a small ring. */
   private readonly recentCloses = new Map<string, SkillChildCloseEvent>()
+  private readonly recentSummaries = new Map<string, ChildRunSummary>()
   private readonly circuitBreaker: ChildRunCircuitBreaker
 
   constructor(config: SkillChildRunnerConfig) {
@@ -231,26 +252,17 @@ class SkillChildRunner {
   // Public entry points
   // ------------------------------------------------------------------
 
-  listActiveRuns(): Array<{
-    childRunId: string
-    skillId: string
-    sessionId: string | null
-    scopeId: string | null
-    status: SkillChildRunStatus
-    startedAt: string
-    outputDir: string
-    runStatePath: string
-  }> {
-    return Array.from(this.active.values()).map((run) => ({
-      childRunId: run.childRunId,
-      skillId: run.skillId,
-      sessionId: run.sessionId,
-      scopeId: run.scopeId,
-      status: run.status,
-      startedAt: run.startedAt,
-      outputDir: run.outputDir,
-      runStatePath: run.runStatePath,
-    }))
+  listActiveRuns(): ChildRunSummary[] {
+    const rows = new Map<string, ChildRunSummary>()
+    for (const run of this.active.values()) {
+      rows.set(run.childRunId, this.summaryFromActive(run))
+    }
+    for (const summary of this.recentSummaries.values()) {
+      if (!rows.has(summary.childRunId)) {
+        rows.set(summary.childRunId, { ...summary, progress: { ...summary.progress } })
+      }
+    }
+    return Array.from(rows.values())
   }
 
   async startSkillChildRun(params: StartSkillChildRunParams): Promise<StartSkillChildRunResult> {
@@ -914,8 +926,12 @@ class SkillChildRunner {
       parentNextHint: launchParams.parentNextHint,
       singleFlightKey: params.singleFlightKey,
       agentContext: params.params.agentContext ?? null,
+      progress: emptyChildProgress(),
+      blockedReason: null,
     }
     this.active.set(childRunId, active)
+    this.rememberChildRunSummary(this.summaryFromActive(active))
+    this.publishProjectionLaunch(active)
 
     // Kick off async loop. The promise we return resolves AFTER the
     // close event is recorded so callers can `await` either the result
@@ -1104,14 +1120,32 @@ class SkillChildRunner {
           continue
         }
 
+        const observedAt = new Date().toISOString()
+        const progress = readChildProgressSnapshot({
+          outputDir: active.outputDir,
+          runStatePath: active.runStatePath,
+          payloadStage: event.payload.stage,
+          payloadFingerprint: event.payload.fingerprint,
+          observedAt,
+          previous: active.progress,
+        })
+        active.progress = progress
+        active.blockedReason = progress.lastError
+        this.rememberChildRunSummary(this.summaryFromActive(active))
+        this.publishProjectionProgress(active)
         await this.appendEvent(active, {
           type: 'state_observed',
-          at: new Date().toISOString(),
+          at: observedAt,
           runStatePath: active.runStatePath,
           state: {
             actionsPlanned: actionsStarted,
-            stage: event.payload.stage,
-            fingerprint: event.payload.fingerprint,
+            stage: progress.stage,
+            completed: progress.completed,
+            total: progress.total,
+            coverage: progress.coverage,
+            fingerprint: progress.fingerprint,
+            updatedAt: progress.updatedAt,
+            lastError: progress.lastError,
           },
         })
         continue
@@ -1125,13 +1159,14 @@ class SkillChildRunner {
           skillId: active.skillId,
           outputDir: active.outputDir,
           runStatePath: active.runStatePath,
+          progress: toCloseProgress(active.progress),
           isUserCancel: active.controller.signal.aborted
             && !isLaunchStuckFired
             && abortReason !== 'process_restarted',
           isParentSessionAbort: abortReason === 'process_restarted',
           isLaunchStuckFired,
         })
-        this.finalizeRun(active, close)
+        this.finalizeRun(active, mergeCloseWithLastProgress(close, active.progress))
         return
       }
     }
@@ -1167,6 +1202,110 @@ class SkillChildRunner {
     }
   }
 
+  private publishProjectionLaunch(active: ActiveRun): void {
+    recordSkillParentTaskLifecycleEvent({
+      scopeId: active.scopeId ?? undefined,
+      sessionId: active.sessionId ?? undefined,
+      skillId: active.skillId,
+      action: active.action,
+      state: 'background_running',
+      reason: 'background_running',
+      message: '技能任务已在后台启动',
+      stepId: childProjectionStepId(active.childRunId),
+      outputDir: active.outputDir,
+      runStatePath: active.runStatePath,
+      childRunId: active.childRunId,
+      progress: active.progress,
+    })
+  }
+
+  private publishProjectionProgress(active: ActiveRun): void {
+    recordSkillParentTaskLifecycleEvent({
+      scopeId: active.scopeId ?? undefined,
+      sessionId: active.sessionId ?? undefined,
+      skillId: active.skillId,
+      action: active.action,
+      state: 'background_running',
+      reason: 'background_running',
+      message: progressMessage(active.progress),
+      stepId: childProjectionStepId(active.childRunId),
+      outputDir: active.outputDir,
+      runStatePath: active.runStatePath,
+      childRunId: active.childRunId,
+      progressFingerprint: active.progress.fingerprint,
+      progress: active.progress,
+    })
+  }
+
+  private publishProjectionClose(active: ActiveRun, close: SkillChildCloseEvent): void {
+    const state = lifecycleStateForChildClose(close)
+    const reason = lifecycleReasonForChildClose(close)
+    const progress = mergeProgressFromClose(active.progress, close.progress)
+    recordSkillParentTaskLifecycleEvent({
+      scopeId: active.scopeId ?? undefined,
+      sessionId: active.sessionId ?? undefined,
+      skillId: active.skillId,
+      action: active.action,
+      state,
+      reason,
+      message: close.error?.message || closeMessage(close),
+      stepId: childProjectionStepId(active.childRunId),
+      outputDir: close.outputDir ?? active.outputDir,
+      runStatePath: close.runStatePath ?? active.runStatePath,
+      sceneScoresPath: close.sceneScoresPath,
+      deliveryReportPath: close.deliveryReportPath,
+      childRunId: active.childRunId,
+      progressFingerprint: progress.fingerprint,
+      progress,
+    })
+  }
+
+  private summaryFromActive(active: ActiveRun): ChildRunSummary {
+    return {
+      childRunId: active.childRunId,
+      skillId: active.skillId,
+      sessionId: active.sessionId,
+      scopeId: active.scopeId,
+      status: active.status,
+      startedAt: active.startedAt,
+      outputDir: active.outputDir,
+      runStatePath: active.runStatePath,
+      progress: { ...active.progress },
+      blockedReason: active.blockedReason,
+      liveness: 'background',
+      closeStatus: null,
+    }
+  }
+
+  private summaryFromClose(active: ActiveRun, close: SkillChildCloseEvent): ChildRunSummary {
+    const progress = mergeProgressFromClose(active.progress, close.progress)
+    return {
+      childRunId: active.childRunId,
+      skillId: active.skillId,
+      sessionId: active.sessionId,
+      scopeId: active.scopeId,
+      status: close.status,
+      startedAt: active.startedAt,
+      outputDir: close.outputDir ?? active.outputDir,
+      runStatePath: close.runStatePath ?? active.runStatePath,
+      progress,
+      blockedReason: close.error?.message || progress.lastError || null,
+      liveness: null,
+      closeStatus: close.status,
+    }
+  }
+
+  private rememberChildRunSummary(summary: ChildRunSummary): void {
+    this.recentSummaries.set(summary.childRunId, {
+      ...summary,
+      progress: { ...summary.progress },
+    })
+    if (this.recentSummaries.size > 64) {
+      const firstKey = this.recentSummaries.keys().next().value
+      if (firstKey) this.recentSummaries.delete(firstKey)
+    }
+  }
+
   private finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): void {
     // Identity guard — only the lifecycle that owns the current `active` map
     // entry may finalize. Two protections in one:
@@ -1195,6 +1334,8 @@ class SkillChildRunner {
         error: errorMessage(error),
       })
     }
+    this.publishProjectionClose(active, frozenClose)
+    this.rememberChildRunSummary(this.summaryFromClose(active, frozenClose))
     // Delete the active entry BEFORE recordCloses + resolveClose so any
     // re-entrant finalize attempt (or a downstream lookup that races
     // resolveClose) cannot find this lifecycle's `active` and accidentally
@@ -1369,6 +1510,186 @@ function ensureRunner(): SkillChildRunner {
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function emptyChildProgress(): ScopeRunSkillProgress {
+  return {
+    stage: null,
+    completed: null,
+    total: null,
+    coverage: null,
+    fingerprint: null,
+    updatedAt: null,
+    lastError: null,
+  }
+}
+
+function childProjectionStepId(childRunId: string): string {
+  return `child_run:${childRunId}`
+}
+
+function progressMessage(progress: ScopeRunSkillProgress): string {
+  if (progress.stage && progress.completed !== null && progress.total !== null) {
+    return `技能任务进行中 · ${progress.stage} · ${progress.completed}/${progress.total}`
+  }
+  if (progress.stage) return `技能任务进行中 · ${progress.stage}`
+  return '技能任务进行中'
+}
+
+function closeMessage(close: SkillChildCloseEvent): string {
+  switch (close.status) {
+    case 'completed':
+      return '技能任务已完成'
+    case 'blocked':
+      return '技能任务等待继续处理'
+    case 'failed':
+      return '技能任务失败'
+    case 'killed':
+      return '技能任务已取消'
+    case 'budget_paused':
+    case 'recoverable_paused':
+      return '技能任务已暂停，可继续执行'
+  }
+}
+
+function lifecycleStateForChildClose(
+  close: SkillChildCloseEvent,
+): 'background_running' | 'budget_paused' | 'blocked' | 'done' | 'failed' | 'cancelled' {
+  switch (close.status) {
+    case 'completed':
+      return 'done'
+    case 'blocked':
+      return 'blocked'
+    case 'failed':
+      return 'failed'
+    case 'killed':
+      return 'cancelled'
+    case 'budget_paused':
+    case 'recoverable_paused':
+      return 'budget_paused'
+  }
+}
+
+function lifecycleReasonForChildClose(
+  close: SkillChildCloseEvent,
+): 'background_running' | 'background_handoff' | 'budget_exhausted' | 'recoverable_paused' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'primitive_observation' | 'supervisor_close' {
+  switch (close.status) {
+    case 'completed':
+      return 'completed'
+    case 'blocked':
+      return 'blocked'
+    case 'failed':
+      return 'failed'
+    case 'killed':
+      return 'cancelled'
+    case 'budget_paused':
+      return 'budget_exhausted'
+    case 'recoverable_paused':
+      return 'recoverable_paused'
+  }
+}
+
+function readChildProgressSnapshot(args: {
+  outputDir: string
+  runStatePath: string
+  payloadStage: string | null
+  payloadFingerprint: string | null
+  observedAt: string
+  previous: ScopeRunSkillProgress
+}): ScopeRunSkillProgress {
+  const runState = readProgressRunState(args.runStatePath)
+  const artifactProgress = inspectSkillProgressArtifacts({
+    outputDir: args.outputDir,
+    sceneScoresPath: args.outputDir ? join(args.outputDir, 'scene_scores.json') : null,
+  })
+  return {
+    stage: runState.stage ?? args.payloadStage ?? args.previous.stage,
+    completed: artifactProgress.completedScenes ?? runState.completed ?? args.previous.completed,
+    total: artifactProgress.totalScenes ?? runState.total ?? args.previous.total,
+    coverage: artifactProgress.coverageRatio ?? runState.coverage ?? args.previous.coverage,
+    fingerprint: args.payloadFingerprint ?? runState.fingerprint ?? args.previous.fingerprint,
+    updatedAt: runState.updatedAt ?? args.previous.updatedAt ?? args.observedAt,
+    lastError: runState.lastError ?? args.previous.lastError,
+  }
+}
+
+function readProgressRunState(runStatePath: string | null): Partial<ScopeRunSkillProgress> {
+  if (!runStatePath) return {}
+  try {
+    const parsed = JSON.parse(readFileSync(runStatePath, 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const rec = parsed as Record<string, unknown>
+    return {
+      stage: pickString(rec.current_stage)
+        ?? pickString(rec.currentStage)
+        ?? pickString(rec.current_step)
+        ?? pickString(rec.currentStep),
+      completed: pickNumber(rec.completed_scenes ?? rec.completedScenes ?? rec.completed),
+      total: pickNumber(rec.total_scenes ?? rec.totalScenes ?? rec.total),
+      coverage: pickNumber(rec.coverage_ratio ?? rec.coverageRatio ?? rec.coverage),
+      fingerprint: pickString(rec.fingerprint ?? rec.progress_fingerprint ?? rec.progressFingerprint),
+      updatedAt: pickString(rec.updated_at ?? rec.updatedAt ?? rec.lastUpdated),
+      lastError: pickString(rec.last_error ?? rec.lastError ?? rec.error),
+    }
+  } catch {
+    return {}
+  }
+}
+
+function toCloseProgress(progress: ScopeRunSkillProgress): SkillChildCloseEvent['progress'] {
+  return {
+    stage: progress.stage,
+    completedUnits: progress.completed,
+    totalUnits: progress.total,
+    coverageRatio: progress.coverage,
+    fingerprint: progress.fingerprint,
+  }
+}
+
+function mergeProgressFromClose(
+  previous: ScopeRunSkillProgress,
+  closeProgress: SkillChildCloseEvent['progress'],
+): ScopeRunSkillProgress {
+  return {
+    stage: closeProgress.stage ?? previous.stage,
+    completed: closeProgress.completedUnits ?? previous.completed,
+    total: closeProgress.totalUnits ?? previous.total,
+    coverage: closeProgress.coverageRatio ?? previous.coverage,
+    fingerprint: closeProgress.fingerprint ?? previous.fingerprint,
+    updatedAt: previous.updatedAt,
+    lastError: previous.lastError,
+  }
+}
+
+function mergeCloseWithLastProgress(
+  close: SkillChildCloseEvent,
+  progress: ScopeRunSkillProgress,
+): SkillChildCloseEvent {
+  const mergedProgress = toCloseProgress(mergeProgressFromClose(progress, close.progress))
+  if (
+    mergedProgress.stage === close.progress.stage
+    && mergedProgress.completedUnits === close.progress.completedUnits
+    && mergedProgress.totalUnits === close.progress.totalUnits
+    && mergedProgress.coverageRatio === close.progress.coverageRatio
+    && mergedProgress.fingerprint === close.progress.fingerprint
+  ) {
+    return close
+  }
+  return freezeSkillChildCloseEvent({
+    ...(close as MutableSkillChildCloseEvent),
+    progress: mergedProgress,
+  })
+}
+
+function pickString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function pickNumber(value: unknown): number | null {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
 }
 
 function waitForClosePromise(

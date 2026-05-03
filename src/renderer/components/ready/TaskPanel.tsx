@@ -8,6 +8,7 @@ import {
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
+import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 
@@ -320,6 +321,7 @@ export default function TaskPanel() {
 
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
+  const composerLocked = activeRun ? isForegroundBusyScopeRunState(activeRun) : isStreaming
   const activeProjection = useMemo(() => {
     return resolveActiveProjection(taskProjections, activeRun)
   }, [taskProjections, activeRun])
@@ -396,7 +398,7 @@ export default function TaskPanel() {
   }, [activeProjection])
 
   const handleSend = async () => {
-    if (!inputValue.trim() || isStreaming) return
+    if (!inputValue.trim() || composerLocked) return
     const content = inputValue
     setInputValue('')
     const result = await sendMessage(content)
@@ -1064,14 +1066,15 @@ export default function TaskPanel() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value, { preserveContinuationIntent: true })}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              disabled={composerLocked}
               placeholder="给 Agent 发指令..."
               className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none"
-              style={{ fontSize: 11, color: 'var(--text-body)' }}
+              style={{ fontSize: 11, color: 'var(--text-body)', opacity: composerLocked ? 0.7 : 1 }}
             />
           </div>
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim() || isStreaming}
+            disabled={!inputValue.trim() || composerLocked}
             className="flex items-center justify-center text-white hover:brightness-95 disabled:opacity-40 transition-[filter,opacity,background-color] duration-200"
             style={{
               width: 26,

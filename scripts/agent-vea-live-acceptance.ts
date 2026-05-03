@@ -3,8 +3,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } fr
 import { writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { registerHooks } from 'node:module'
+import { createRequire, registerHooks } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skill-agent-handoff'
+
+const require = createRequire(import.meta.url)
+const { inspectVeaArtifacts } = require('./vea-assert-artifacts.cjs') as {
+  inspectVeaArtifacts: (outputDir: string) => VeaAssertReport
+}
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -46,7 +52,9 @@ registerHooks({
   },
 })
 
-type Mode = 'resume' | 'fresh' | 'both'
+type Mode = 'resume' | 'fresh' | 'both' | 'fresh-resume'
+type HandoffMode = 'observe' | 'complete'
+type Phase = 'resume' | 'fresh'
 
 interface AgentSpawnContextLike {
   provider: string
@@ -60,6 +68,7 @@ interface AgentSpawnContextLike {
 
 interface Options {
   mode: Mode
+  handoffMode: HandoffMode
   url: string
   outputDir: string
   runStatePath: string
@@ -124,9 +133,71 @@ interface ArtifactSummary {
   requiredOutputsOk: boolean
   requiredOutputProblems: string[]
   storyboardMd: { path: string; exists: boolean; size: number }
+  storyboardPdf: { path: string; exists: boolean; size: number }
   audiovisualMd: { path: string; exists: boolean; size: number }
+  audiovisualPdf: { path: string; exists: boolean; size: number }
   complete: boolean
   problems: string[]
+}
+
+interface VeaAssertFileInfo {
+  path: string
+  exists: boolean
+  size: number
+  ok: boolean
+}
+
+interface VeaAssertReport {
+  ok: boolean
+  outputDir: string
+  problems: string[]
+  summary: {
+    videoId: string
+    runStateStatus: string | null
+    runStateStage?: string | null
+    deliveryStatus: string | null
+    totalScenes: number
+    completeScenes: number
+    incompleteScenes: Array<{ sceneNumber: number; missing: string[] }>
+    hostBatches: ArtifactSummary['hostBatches']
+    requiredOutputs: Record<string, VeaAssertFileInfo>
+  }
+}
+
+interface PhaseResult {
+  phase: Phase
+  success: boolean
+  runs: ChildRunSummary[]
+  artifacts: ArtifactSummary
+  observedPendingHandoff?: boolean
+}
+
+interface AcceptanceReport {
+  success: boolean
+  startedAt: string
+  finishedAt: string
+  mode: Mode
+  handoffMode: HandoffMode
+  url: string
+  outputDir: string
+  runtimeRoot: string
+  agentContext: Record<string, unknown>
+  results: PhaseResult[]
+  freshResume?: {
+    expectedOutputDir: string
+    freshOutputDir: string | null
+    resumeOutputDir: string | null
+    sameOutputDir: boolean
+  }
+  debug: Record<string, unknown>
+}
+
+interface AcceptanceDeps {
+  makeAgentContext: (opts: Options) => AgentSpawnContextLike
+  createRunner: (opts: Options) => Promise<Awaited<ReturnType<typeof createRunner>>>
+  completePendingHandoffs: (outputDir: string, agentContext: AgentSpawnContextLike) => Promise<HandoffCompletionSummary[]>
+  repairHandoffValidationErrors: (outputDir: string, agentContext: AgentSpawnContextLike) => Promise<HandoffCompletionSummary[]>
+  cleanOutputDir: (outputDir: string) => void
 }
 
 const DEFAULT_URL = 'https://www.youtube.com/watch?v=4qkyxm4jppc'
@@ -151,11 +222,12 @@ const REQUIRED_STORYBOARD_KEYS = [
   'technique',
 ] as const
 
-function parseArgs(argv: string[]): Options {
+export function parseArgs(argv: string[]): Options {
   const config = readJson(DEFAULT_CONFIG)
   const autoScoring = objectValue(config?.auto_scoring)
   const opts: Options = {
     mode: 'resume',
+    handoffMode: 'complete',
     url: DEFAULT_URL,
     outputDir: DEFAULT_OUTPUT_DIR,
     runStatePath: join(DEFAULT_OUTPUT_DIR, 'run_state.json'),
@@ -171,8 +243,19 @@ function parseArgs(argv: string[]): Options {
     const arg = argv[index]
     if (arg === '--mode') {
       const mode = argv[index + 1] as Mode | undefined
-      if (mode !== 'resume' && mode !== 'fresh' && mode !== 'both') throw new Error(`Invalid --mode: ${mode}`)
+      if (mode !== 'resume' && mode !== 'fresh' && mode !== 'both' && mode !== 'fresh-resume') {
+        throw new Error(`Invalid --mode: ${mode}`)
+      }
       opts.mode = mode
+      index += 1
+      continue
+    }
+    if (arg === '--handoff' || arg === '--handoff-mode') {
+      const handoffMode = argv[index + 1] as HandoffMode | undefined
+      if (handoffMode !== 'observe' && handoffMode !== 'complete') {
+        throw new Error(`Invalid ${arg}: ${handoffMode}`)
+      }
+      opts.handoffMode = handoffMode
       index += 1
       continue
     }
@@ -245,7 +328,12 @@ function printHelp(): void {
     'Usage:',
     '  npm run agent:acceptance:vea-live -- --mode resume --run-state /abs/run_state.json',
     '  npm run agent:acceptance:vea-live -- --mode fresh --clean-before-fresh --url https://www.youtube.com/watch?v=4qkyxm4jppc --output-dir /abs/output',
+    '  npm run agent:acceptance:vea-live -- --mode fresh-resume --url https://www.youtube.com/watch?v=4qkyxm4jppc --output-dir /abs/output',
     '  npm run agent:acceptance:vea-live -- --mode both --clean-before-fresh',
+    '',
+    'Options:',
+    '  --handoff observe   Report pending audiovisual handoffs without completing them.',
+    '  --handoff complete  Complete pending handoffs before continuing artifact validation. (default)',
     '',
     'Runs the real Ready agent child-runner + skill runtime and validates VEA artifacts.',
   ].join('\n'))
@@ -352,64 +440,32 @@ function deliveryOutputPath(report: Record<string, unknown> | null, key: string,
 }
 
 function inspectArtifacts(outputDir: string): ArtifactSummary {
-  const runState = readJson(join(outputDir, 'run_state.json'))
-  const scores = readJson(join(outputDir, 'scene_scores.json'))
-  const scenes = Array.isArray(scores?.scenes) ? scores.scenes : []
-  const incompleteSceneNumbers: number[] = []
-  let completeScenes = 0
-  for (const scene of scenes) {
-    if (sceneComplete(scene)) {
-      completeScenes += 1
-    } else {
-      const number = numberValue((objectValue(scene) || {}).scene_number)
-      if (number !== null) incompleteSceneNumbers.push(number)
-    }
-  }
-
-  const host = inspectHostBatches(outputDir)
-  const delivery = readJson(join(outputDir, 'delivery_report.json'))
-  const required = objectValue(delivery?.required_outputs)
-  const requiredOutputProblems: string[] = []
-  if (required) {
-    for (const [key, value] of Object.entries(required)) {
-      const entry = objectValue(value)
-      if (entry && entry.ok === false) requiredOutputProblems.push(key)
-    }
-  } else {
-    requiredOutputProblems.push('delivery_report.required_outputs missing')
-  }
-
-  const videoId = outputDir.split('/').filter(Boolean).at(-1) || 'video'
-  const storyboardMd = fileInfo(deliveryOutputPath(delivery, 'storyboard_md', join(outputDir, `${videoId}_storyboard.md`)))
-  const audiovisualMd = fileInfo(deliveryOutputPath(delivery, 'audiovisual_md', join(outputDir, `${videoId}_audiovisual_analysis.md`)))
-  const runStateStatus = stringValue(runState?.status).toLowerCase()
-  const deliveryStatus = stringValue(delivery?.status).toLowerCase()
-  const totalScenes = scenes.length || numberValue(scores?.total_scenes ?? runState?.total_scenes) || 0
-  const problems: string[] = []
-  if (runStateStatus !== 'completed') problems.push(`run_state status=${runStateStatus || '(missing)'}`)
-  if (deliveryStatus !== 'completed') problems.push(`delivery_report status=${deliveryStatus || '(missing)'}`)
-  if (totalScenes <= 0) problems.push('scene_scores has no scenes')
-  if (completeScenes !== totalScenes) problems.push(`scene scoring incomplete ${completeScenes}/${totalScenes}`)
-  if (host.total > 0 && host.completed !== host.total) problems.push(`host batches incomplete ${host.completed}/${host.total}`)
-  if (requiredOutputProblems.length > 0) problems.push(`required outputs not ok: ${requiredOutputProblems.join(', ')}`)
-  if (!storyboardMd.exists || storyboardMd.size < 2_000) problems.push('storyboard markdown missing or too small')
-  if (!audiovisualMd.exists || audiovisualMd.size < 5_000) problems.push('audiovisual markdown missing or too small')
+  const assertion = inspectVeaArtifacts(outputDir)
+  const requiredOutputs = assertion.summary.requiredOutputs
+  const requiredOutputProblems = assertion.problems.filter((problem) => problem.includes('required output')
+    || problem.includes('required_outputs'))
+  const storyboardMd = requiredOutputs.storyboard_md || fileInfo(join(outputDir, `${assertion.summary.videoId}_storyboard.md`))
+  const storyboardPdf = requiredOutputs.storyboard_pdf || fileInfo(join(outputDir, `${assertion.summary.videoId}_storyboard.pdf`))
+  const audiovisualMd = requiredOutputs.audiovisual_md || fileInfo(join(outputDir, `${assertion.summary.videoId}_audiovisual_analysis.md`))
+  const audiovisualPdf = requiredOutputs.audiovisual_pdf || fileInfo(join(outputDir, `${assertion.summary.videoId}_audiovisual_analysis.pdf`))
 
   return {
-    outputDir,
-    runStateStatus,
-    runStateStage: stringValue(runState?.current_stage ?? runState?.currentStage),
-    totalScenes,
-    completeScenes,
-    incompleteSceneNumbers,
-    hostBatches: host,
-    deliveryStatus,
+    outputDir: assertion.outputDir,
+    runStateStatus: assertion.summary.runStateStatus || '',
+    runStateStage: assertion.summary.runStateStage || '',
+    totalScenes: assertion.summary.totalScenes,
+    completeScenes: assertion.summary.completeScenes,
+    incompleteSceneNumbers: assertion.summary.incompleteScenes.map((scene) => scene.sceneNumber),
+    hostBatches: assertion.summary.hostBatches,
+    deliveryStatus: assertion.summary.deliveryStatus || '',
     requiredOutputsOk: requiredOutputProblems.length === 0,
     requiredOutputProblems,
     storyboardMd,
+    storyboardPdf,
     audiovisualMd,
-    complete: problems.length === 0,
-    problems,
+    audiovisualPdf,
+    complete: assertion.ok,
+    problems: assertion.problems,
   }
 }
 
@@ -980,11 +1036,12 @@ async function runOneChildAction(args: {
 }
 
 async function runPhase(args: {
-  phase: 'resume' | 'fresh'
+  phase: Phase
   opts: Options
   runnerApi: Awaited<ReturnType<typeof createRunner>>
   agentContext: AgentSpawnContextLike
-}): Promise<{ phase: string; success: boolean; runs: ChildRunSummary[]; artifacts: ArtifactSummary }> {
+  deps: AcceptanceDeps
+}): Promise<PhaseResult> {
   const runs: ChildRunSummary[] = []
   for (let round = 1; round <= args.opts.maxRounds; round += 1) {
     const beforeOutputDir = resolveEffectiveOutputDir(args.opts.outputDir)
@@ -1010,9 +1067,20 @@ async function runPhase(args: {
     if (pendingHandoffs.length > 0) run.pendingHandoffs = pendingHandoffs
     const handoffCompletions: HandoffCompletionSummary[] = []
     if (pendingHandoffs.length > 0) {
-      handoffCompletions.push(...await completePendingHandoffs(afterOutputDir, args.agentContext))
+      if (args.opts.handoffMode === 'observe') {
+        runs.push(run)
+        const after = inspectArtifacts(afterOutputDir)
+        return {
+          phase: args.phase,
+          success: run.waitKind === 'closed' && run.closeStatus === 'completed',
+          runs,
+          artifacts: after,
+          observedPendingHandoff: true,
+        }
+      }
+      handoffCompletions.push(...await args.deps.completePendingHandoffs(afterOutputDir, args.agentContext))
     }
-    handoffCompletions.push(...await repairHandoffValidationErrors(afterOutputDir, args.agentContext))
+    handoffCompletions.push(...await args.deps.repairHandoffValidationErrors(afterOutputDir, args.agentContext))
     if (handoffCompletions.length > 0) run.handoffCompletions = handoffCompletions
     runs.push(run)
     const after = inspectArtifacts(afterOutputDir)
@@ -1050,31 +1118,76 @@ function summarizeAgentContext(agentContext: AgentSpawnContextLike): Record<stri
   }
 }
 
-async function main(): Promise<void> {
-  const opts = parseArgs(process.argv.slice(2))
-  const agentContext = makeAgentContext(opts)
-  const runnerApi = await createRunner(opts)
+const defaultDeps: AcceptanceDeps = {
+  makeAgentContext,
+  createRunner,
+  completePendingHandoffs,
+  repairHandoffValidationErrors,
+  cleanOutputDir,
+}
+
+function resolveDeps(deps: Partial<AcceptanceDeps> = {}): AcceptanceDeps {
+  return { ...defaultDeps, ...deps }
+}
+
+export function phasesForMode(mode: Mode): readonly Phase[] {
+  if (mode === 'both') return ['resume', 'fresh']
+  if (mode === 'fresh-resume') return ['fresh', 'resume']
+  return [mode]
+}
+
+function shouldCleanBeforePhase(opts: Options, phase: Phase): boolean {
+  return phase === 'fresh' && (opts.cleanBeforeFresh || opts.mode === 'fresh-resume')
+}
+
+function buildFreshResumeCheck(opts: Options, results: PhaseResult[]): AcceptanceReport['freshResume'] {
+  if (opts.mode !== 'fresh-resume') return undefined
+  const fresh = results.find((result) => result.phase === 'fresh')
+  const resume = results.find((result) => result.phase === 'resume')
+  const expectedOutputDir = resolve(opts.outputDir)
+  const freshOutputDir = fresh?.artifacts.outputDir ? resolve(fresh.artifacts.outputDir) : null
+  const resumeOutputDir = resume?.artifacts.outputDir ? resolve(resume.artifacts.outputDir) : null
+  return {
+    expectedOutputDir,
+    freshOutputDir,
+    resumeOutputDir,
+    sameOutputDir: freshOutputDir === expectedOutputDir && resumeOutputDir === expectedOutputDir,
+  }
+}
+
+export async function runAcceptance(
+  opts: Options,
+  depsInput: Partial<AcceptanceDeps> = {},
+): Promise<{ report: AcceptanceReport; reportPath: string }> {
+  const deps = resolveDeps(depsInput)
+  const agentContext = deps.makeAgentContext(opts)
+  const runnerApi = await deps.createRunner(opts)
   const startedAt = new Date().toISOString()
-  const phases = opts.mode === 'both' ? ['resume', 'fresh'] as const : [opts.mode] as const
-  const results = []
+  const phases = phasesForMode(opts.mode)
+  const results: PhaseResult[] = []
 
   for (const phase of phases) {
-    if (phase === 'fresh' && opts.cleanBeforeFresh) cleanOutputDir(opts.outputDir)
-    const result = await runPhase({ phase, opts, runnerApi, agentContext })
+    if (shouldCleanBeforePhase(opts, phase)) deps.cleanOutputDir(opts.outputDir)
+    const result = await runPhase({ phase, opts, runnerApi, agentContext, deps })
     results.push(result)
     if (!result.success) break
   }
 
-  const report = {
-    success: results.length === phases.length && results.every((result) => result.success),
+  const freshResume = buildFreshResumeCheck(opts, results)
+  const report: AcceptanceReport = {
+    success: results.length === phases.length
+      && results.every((result) => result.success)
+      && (!freshResume || freshResume.sameOutputDir),
     startedAt,
     finishedAt: new Date().toISOString(),
     mode: opts.mode,
+    handoffMode: opts.handoffMode,
     url: opts.url,
     outputDir: opts.outputDir,
     runtimeRoot: opts.runtimeRoot,
     agentContext: summarizeAgentContext(agentContext),
     results,
+    freshResume,
     debug: {
       directChatLog: '/tmp/ready-directchat.log',
       toolsLog: '/tmp/ready-tools.log',
@@ -1087,13 +1200,19 @@ async function main(): Promise<void> {
   mkdirSync(reportDir, { recursive: true })
   const reportPath = join(reportDir, 'report.json')
   await import('node:fs/promises').then((fs) => fs.writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8'))
+  return { report, reportPath }
+}
+
+async function main(): Promise<void> {
+  const opts = parseArgs(process.argv.slice(2))
+  const { report, reportPath } = await runAcceptance(opts)
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ ...report, reportPath }, null, 2)}\n`)
   } else {
     console.log(`Report: ${reportPath}`)
     console.log(`Success: ${report.success}`)
-    for (const result of results) {
+    for (const result of report.results) {
       console.log(`${result.phase}: ${result.success ? 'PASS' : 'FAIL'} ${result.artifacts.completeScenes}/${result.artifacts.totalScenes} scenes`)
       if (result.artifacts.problems.length) {
         for (const problem of result.artifacts.problems) console.log(`  - ${problem}`)
@@ -1115,7 +1234,14 @@ function latestFiles(dir: string, limit: number): string[] {
   }
 }
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.stack || error.message : String(error))
-  process.exitCode = 1
-})
+function isMainModule(): boolean {
+  const entry = process.argv[1]
+  return Boolean(entry) && import.meta.url === pathToFileURL(resolve(entry)).href
+}
+
+if (isMainModule()) {
+  void main().catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error))
+    process.exitCode = 1
+  })
+}

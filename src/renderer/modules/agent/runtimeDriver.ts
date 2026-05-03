@@ -1,4 +1,4 @@
-import { deriveScopeRunStatePatch, getActiveScopeRunState, isScopeRunPhase, isStreamingScopeRunState, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
+import { deriveScopeRunStatePatch, getActiveScopeRunState, isForegroundBusyScopeRunState, isScopeRunPhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
@@ -40,6 +40,7 @@ function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null,
       resumableActions: runState.resumableActions || [],
       recentArtifacts: runState.recentArtifacts || [],
       taskContinuation: runState.taskContinuation || null,
+      progress: runState.progress || null,
       memoryCapture: runState.memoryCapture || null,
       blockedReason: runState.blockedReason || null,
       error: runState.error || null,
@@ -83,10 +84,13 @@ function buildResponseSegmentMeta(scopeId: string, scope: ConversationScope | nu
 
 export function syncActiveScopeRunAliases(
   state: Pick<{ currentScopeId: string | null; scopeRunStates: Record<string, ScopeRunState> }, 'currentScopeId' | 'scopeRunStates'>,
-): Pick<{ isStreaming: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'toolTrace' | 'toolTraceStatus'> {
+): Pick<{ isStreaming: boolean; foregroundBusy: boolean; composerLocked: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'foregroundBusy' | 'composerLocked' | 'toolTrace' | 'toolTraceStatus'> {
   const activeRunState = getActiveScopeRunState(state.scopeRunStates, state.currentScopeId)
+  const foregroundBusy = isForegroundBusyScopeRunState(activeRunState)
   return {
-    isStreaming: isStreamingScopeRunState(activeRunState),
+    isStreaming: foregroundBusy,
+    foregroundBusy,
+    composerLocked: foregroundBusy,
     toolTrace: activeRunState?.toolTrace || [],
     toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
   }
@@ -1032,6 +1036,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
             store.setState({
               isStreaming: false,
+              foregroundBusy: false,
+              composerLocked: false,
               streamingMessageId: null,
               streamingRequestId: null,
               toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase),
