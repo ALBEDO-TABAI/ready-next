@@ -32,7 +32,7 @@ import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeRSSTool } from './rss-tools'
-import { executeSkillTool } from './skills-tools'
+import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
@@ -49,6 +49,7 @@ import {
   buildUnknownToolMessage,
   normalizeAllowedToolSet,
 } from './tool-not-allowed-message'
+import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -89,6 +90,21 @@ export interface ToolContext {
   } | null
 }
 
+function isFrameScopedInternalSkillActionAllowed(
+  toolName: string,
+  context: ToolContext,
+  allowedToolNames: Set<string> | null,
+): boolean {
+  if (!allowedToolNames?.has(toolName)) return false
+  const skillTool = findSkillToolByNameForExecution(toolName)
+  const skillId = skillTool?.kind === 'skill_action'
+    ? skillTool.skillId
+    : STATIC_SKILL_ACTIONS_BY_TOOL_NAME[toolName]?.skillId || null
+  if (!skillId) return false
+  const frameSkillId = context.frameSkillId || context.activeFrame?.runContract?.skillId || null
+  return Boolean(frameSkillId && frameSkillId === skillId)
+}
+
 export async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -109,14 +125,19 @@ export async function executeToolCall(
     })
   }
 
+  const allowedToolNames = normalizeAllowedToolSet(context.allowedToolNames)
   const allowsChildInternal =
     context.allowInternal === true && context.invoker === 'child_runner'
+  const allowsFrameScopedInternal =
+    definition.executionVisibility === 'internal'
+    && isFrameScopedInternalSkillActionAllowed(toolName, context, allowedToolNames)
   const childInternalStrictAdmission =
     context.turnFeatureFlags?.childInternalStrictAdmission ?? true
   if (
     childInternalStrictAdmission
     && definition.executionVisibility === 'internal'
     && !allowsChildInternal
+    && !allowsFrameScopedInternal
   ) {
     return createToolExecutionOutput(`Tool ${toolName} is internal-only and cannot be called from this context.`, {
       shape: 'json',
@@ -128,7 +149,6 @@ export async function executeToolCall(
     })
   }
 
-  const allowedToolNames = normalizeAllowedToolSet(context.allowedToolNames)
   if (definition.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
     return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
       shape: 'json',

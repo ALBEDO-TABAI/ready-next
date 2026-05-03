@@ -98,6 +98,12 @@ export function detectAllowedPreferredMismatch(
   return preferredToolNames.some((name) => !allowedSet.has(name))
 }
 
+function matchesSkillProgressFollowupIntent(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized) return false
+  return /(?:跟进|追踪|进度|状态|汇报|持续|一直|直到(?:跑|做|执行|完成|结束)|跑完整个任务|monitor|progress|status|watch)/i.test(normalized)
+}
+
 export function buildBudgetWarningMessage(params: {
   iterations: number
   effectiveMaxIterations: number
@@ -1183,6 +1189,11 @@ export class TurnEngine {
         requestEnvelope.pureUserText,
         contextualUserInput,
       ].some((text) => isConfigRepairTurn(String(text || '')) || matchesConfigRepairIntent(String(text || '')))
+      const isSkillProgressFollowupTurnDetected = [
+        requestEnvelope.primaryInstruction,
+        requestEnvelope.pureUserText,
+        contextualUserInput,
+      ].some((text) => matchesSkillProgressFollowupIntent(String(text || '')))
       const isSkillResumeTurnDetected = isRetryOnlyTurnDetected || isConfigRepairTurnDetected
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
@@ -1492,12 +1503,23 @@ export class TurnEngine {
       } catch {
         supervisorSnapshotForFrame = null
       }
+      const hasNonHintSkillContextForTurn = Boolean(
+        explicitRunStateResourceForTurn
+        || supervisorSnapshotForFrame?.skillId
+        || (
+          activeSkillContextForTurn
+          && activeSkillContextForTurn.source !== 'reference_hint'
+        ),
+      )
       turnFrame = resolveTurnFrame({
         sessionId: request.sessionId,
         requestId: request.runId,
         userIntent: isConfigRepairTurnDetected
           ? 'repair_config'
-          : isRetryOnlyTurnDetected
+          : isRetryOnlyTurnDetected || (
+            isSkillProgressFollowupTurnDetected
+            && hasNonHintSkillContextForTurn
+          )
             ? 'continue'
             : 'unknown',
         explicitSkillId: explicitRunStateResourceForTurn?.skillId || null,
@@ -1883,9 +1905,13 @@ export class TurnEngine {
       const shouldUseLongSkillResumeBudget =
         isLongSkillResumeTurn
         || (Boolean(continuationTaskId) && hasLongTypedSkillAction(preferredSkillToolNames))
+      const shouldUseActiveSkillResumeRoute =
+        turnFrame?.mode === 'skill_resume'
+        && Boolean(turnFrame.skill)
+        && turnFrame.liveness !== 'unknown'
       const shouldForceRunStateSkillResume =
         Boolean(explicitRunStateResourceForTurn) && shouldUseLongSkillResumeBudget
-      const taskTypeResolution = shouldUseLongSkillResumeBudget && (
+      const taskTypeResolution = (shouldUseLongSkillResumeBudget || shouldUseActiveSkillResumeRoute) && (
         resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
         || shouldForceRunStateSkillResume
       )

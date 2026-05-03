@@ -1925,6 +1925,83 @@ test('TurnEngine arms VEA continuation from prior run_state path when user says 
   }
 })
 
+test('TurnEngine routes active skill progress-followup turns through the skill loop', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let toolLoopRequests = 0
+  let simpleTextRequests = 0
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  try {
+    const { request } = createRequest({
+      userText: '你要一直跟进，及时汇报最新进度，直到跑完整个任务',
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            status: 'running',
+            liveness: 'background',
+            hasLiveWork: true,
+            hasRecentProgress: true,
+          }),
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: () => [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => null,
+          rememberExplicitReferenceSkillHint: () => false,
+          buildPreferredSkillToolNames: () => [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestSimpleText: async () => {
+          simpleTextRequests += 1
+          return { text: 'simple result' }
+        },
+        requestToolLoopResponse: async () => {
+          toolLoopRequests += 1
+          return {
+            text: '已检查进度',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(simpleTextRequests, 0)
+    assert.equal(toolLoopRequests, 1)
+    assert.equal(result.taskType, 'multi_step_task')
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_resume'
+      && event.skillId === 'video-expert-analyzer',
+    ))
+  } finally {
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
 test('RunCoordinator drives TurnEngine budget lifecycle through scope event and task projection sync', async () => {
   const engine = new TurnEngine()
   const scope: ConversationScope = {

@@ -4,6 +4,7 @@ import test, { beforeEach } from 'node:test'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
 import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
 import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { executeToolCall } from '../main/modules/tools/tool-executor'
 import {
   resolveSkillActionTimeoutMs,
   resolveStartDetachedActionTool,
@@ -99,6 +100,41 @@ test('ToolRuntime still requires explicit allowlist for internal VEA typed actio
 
   assert.equal(result.results[0]?.result.data?.reason, 'tool_restricted_this_turn')
   assert.notEqual(result.results[0]?.result.text, 'vea:ok')
+})
+
+test('tool executor admits frame-scoped internal VEA actions after explicit allowlist', async () => {
+  const abortController = new AbortController()
+  abortController.abort()
+
+  await assert.rejects(
+    executeToolCall(
+      'skill_video_expert_ai_analyze',
+      { sceneScoresPath: '/tmp/ready/scene_scores.json' },
+      {
+        allowedToolNames: new Set(['skill_video_expert_ai_analyze']),
+        frameSkillId: 'video-expert-analyzer',
+        abortSignal: abortController.signal,
+      },
+    ),
+    (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  )
+})
+
+test('tool executor rejects internal VEA actions when the active frame belongs to another skill', async () => {
+  const abortController = new AbortController()
+  abortController.abort()
+
+  const result = await executeToolCall(
+    'skill_video_expert_ai_analyze',
+    { sceneScoresPath: '/tmp/ready/scene_scores.json' },
+    {
+      allowedToolNames: new Set(['skill_video_expert_ai_analyze']),
+      frameSkillId: 'lets-go-rss',
+      abortSignal: abortController.signal,
+    },
+  )
+
+  assert.equal(result.data?.reason, 'internal_tool_not_allowed')
 })
 
 test('ToolRuntime uses the VEA typed action timeout instead of the generic skill timeout', async () => {

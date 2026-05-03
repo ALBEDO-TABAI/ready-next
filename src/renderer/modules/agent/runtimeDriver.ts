@@ -1029,7 +1029,13 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             event.phase === 'cancelled',
           )
           if (terminalRunEvent) {
-            store.setState({ streamingRequestId: null })
+            const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
+            store.setState({
+              isStreaming: false,
+              streamingMessageId: null,
+              streamingRequestId: null,
+              toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase),
+            })
           }
         }
         if (

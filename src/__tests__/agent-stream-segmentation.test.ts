@@ -498,4 +498,145 @@ describe('agent stream segmentation', () => {
 
     cleanup()
   })
+
+  it('clears streaming state when the final scope event arrives without a stream done event', async () => {
+    const listeners: {
+      onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
+      onStatusChange?: (data: unknown) => void
+      onError?: (data: unknown) => void
+      onToolAction?: (data: unknown) => void
+      onScopeRunEvent?: (data: unknown) => void
+      onConversationEvent?: (data: unknown) => void
+    } = {}
+    const savedMessages: Array<Record<string, unknown>> = []
+
+    const testWindow = globalThis as typeof globalThis & { window: { electronAPI?: unknown } }
+    testWindow.window.electronAPI = {
+      agent: {
+        onStream: (cb: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
+          listeners.onStream = cb
+          return () => { listeners.onStream = undefined }
+        },
+        onStatusChange: (cb: (data: unknown) => void) => {
+          listeners.onStatusChange = cb
+          return () => { listeners.onStatusChange = undefined }
+        },
+        onError: (cb: (data: unknown) => void) => {
+          listeners.onError = cb
+          return () => { listeners.onError = undefined }
+        },
+        onToolAction: (cb: (data: unknown) => void) => {
+          listeners.onToolAction = cb
+          return () => { listeners.onToolAction = undefined }
+        },
+        onScopeRunEvent: (cb: (data: unknown) => void) => {
+          listeners.onScopeRunEvent = cb
+          return () => { listeners.onScopeRunEvent = undefined }
+        },
+        onConversationEvent: (cb: (data: unknown) => void) => {
+          listeners.onConversationEvent = cb
+          return () => { listeners.onConversationEvent = undefined }
+        },
+        emitRendererMetric: async () => ({ success: true }),
+      },
+      chat: {
+        saveMessage: async (payload: Record<string, unknown>) => {
+          savedMessages.push(payload)
+          return { success: true }
+        },
+      },
+      settings: {
+        get: async () => ({ success: false }),
+      },
+    }
+
+    const { initAgentListeners } = await import('../renderer/stores/useAgent')
+    const cleanup = initAgentListeners()
+
+    useAgent.setState({
+      currentScopeId: 'scope-final-only',
+      currentScope: {
+        id: 'scope-final-only',
+        agent: 'butler',
+        title: 'Scope Final Only',
+        sourceKind: 'local',
+        sourceId: 'app',
+        threadKey: 'scope-final-only',
+        meta: {},
+        createdAt: '2026-03-07T09:00:00.000Z',
+        updatedAt: '2026-03-07T09:00:00.000Z',
+      },
+      scopes: [
+        {
+          id: 'scope-final-only',
+          agent: 'butler',
+          title: 'Scope Final Only',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: 'scope-final-only',
+          meta: {},
+          createdAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:00.000Z',
+        },
+      ],
+      messages: [
+        {
+          id: 'msg-final-only',
+          agent: 'butler',
+          content: '好的，我现在开始持续跟进。',
+          type: 'agent',
+          timestamp: new Date('2026-03-07T09:00:01.000Z'),
+          meta: {},
+        },
+      ],
+      isStreaming: true,
+      streamingMessageId: 'msg-final-only',
+      streamingRequestId: 'req-final-only',
+      toolTraceStatus: 'running',
+      scopeRunStates: {
+        'scope-final-only': {
+          scopeId: 'scope-final-only',
+          agent: 'butler',
+          requestId: 'req-final-only',
+          phase: 'responding',
+          toolTrace: [],
+          startedAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:01.000Z',
+          latestText: '好的，我现在开始持续跟进。',
+          blockedReason: null,
+          controllerId: null,
+          ownerTabId: null,
+          checkpointExpiresAt: null,
+          responseMessageId: 'msg-final-only',
+          responseBuffer: '好的，我现在开始持续跟进。',
+          responseSegmentBreakPending: false,
+          responseSegmentToolTraceStart: 0,
+          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+          error: null,
+        },
+      },
+    })
+
+    listeners.onScopeRunEvent?.({
+      scopeId: 'scope-final-only',
+      agent: 'butler',
+      runId: 'req-final-only',
+      phase: 'done',
+      terminalReason: 'done',
+      timestamp: '2026-03-07T09:00:03.000Z',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const state = useAgent.getState()
+    assert.strictEqual(state.isStreaming, false)
+    assert.strictEqual(state.streamingMessageId, null)
+    assert.strictEqual(state.streamingRequestId, null)
+    assert.strictEqual(state.toolTraceStatus, 'done')
+    assert.strictEqual(state.scopeRunStates['scope-final-only']?.phase, 'done')
+    assert.strictEqual(state.scopeRunStates['scope-final-only']?.terminalReason, 'done')
+    assert.strictEqual((savedMessages.at(-1)?.meta as { taskSnapshot?: { phase?: string } } | undefined)?.taskSnapshot?.phase, 'done')
+
+    cleanup()
+  })
 })
