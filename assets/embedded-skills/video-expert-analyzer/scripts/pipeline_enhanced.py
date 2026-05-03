@@ -1053,6 +1053,18 @@ class VideoAnalysisPipeline:
             **extra,
         )
 
+    def _mark_prepare_progress(self, *, total_scenes: int, completed_scenes: int) -> None:
+        if total_scenes <= 0:
+            return
+        self._mark_run_stage(
+            "prepare",
+            status="running",
+            completed=False,
+            total_scenes=total_scenes,
+            completed_scenes=completed_scenes,
+            coverage_ratio=completed_scenes / max(total_scenes, 1),
+        )
+
     def _extract_audio_from_video(self) -> bool:
         try:
             cmd = ["ffmpeg", "-i", str(self.video_path), "-vn", "-c:a", "copy", str(self.audio_path), "-y"]
@@ -1354,6 +1366,7 @@ class VideoAnalysisPipeline:
             print(f"   ✂️  切片编码器: {preferred_codec} ({preferred_reason})")
             print(f"   🧩 切片生成: {len(segments_to_render)} 个有效片段待输出")
             clip_started_at = time.perf_counter()
+            self._mark_prepare_progress(total_scenes=len(segments_to_render), completed_scenes=0)
 
             for index, segment in enumerate(segments_to_render, start=1):
                 output_path = self.scenes_dir / f"{self.video_path.stem}-Scene-{index:03d}.mp4"
@@ -1371,6 +1384,7 @@ class VideoAnalysisPipeline:
                 scene_files.append(output_path)
                 if index == 1 or index == len(segments_to_render) or index % 10 == 0:
                     print(f"   ⏳ 切片进度: {index}/{len(segments_to_render)}")
+                    self._mark_prepare_progress(total_scenes=len(segments_to_render), completed_scenes=index)
 
             if not scene_files:
                 fallback_path = self.scenes_dir / f"{self.video_path.stem}-Scene-001.mp4"
@@ -1387,6 +1401,7 @@ class VideoAnalysisPipeline:
                 scene_codecs_used.add(trim_result["video_codec"])
                 codec_fallback_used = codec_fallback_used or trim_result["fallback_used"]
                 scene_files = [fallback_path]
+                self._mark_prepare_progress(total_scenes=1, completed_scenes=1)
             clip_elapsed = time.perf_counter() - clip_started_at
 
         scene_count = len(scene_files) if self.extract_scenes else len(scene_segments)
@@ -1417,6 +1432,8 @@ class VideoAnalysisPipeline:
         self.results["scene_detection"] = scene_info
         self.results["steps_completed"].append("scene_detection")
         self._mark_step_complete("scene_detection", **scene_info)
+        if self.extract_scenes:
+            self._mark_prepare_progress(total_scenes=scene_count, completed_scenes=scene_count)
         return scene_info
 
     def _step_transcription(self) -> Dict:

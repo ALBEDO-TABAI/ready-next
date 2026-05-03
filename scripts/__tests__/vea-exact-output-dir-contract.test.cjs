@@ -67,3 +67,35 @@ print(json.dumps(ready_compat._build_pipeline_cmd(exact_payload), ensure_ascii=F
   assert.ok(!rootCmd.includes('--exact-output-dir'))
   assert.ok(exactCmd.includes('--exact-output-dir'))
 })
+
+test('VEA prepare stage reports scene clipping progress before scoring starts', () => {
+  const python = `
+import json
+import sys
+
+sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+import pipeline_enhanced
+
+pipeline = pipeline_enhanced.VideoAnalysisPipeline.__new__(pipeline_enhanced.VideoAnalysisPipeline)
+calls = []
+pipeline._mark_run_stage = lambda *args, **kwargs: calls.append({"args": args, "kwargs": kwargs})
+pipeline._mark_prepare_progress(total_scenes=10, completed_scenes=4)
+pipeline._mark_prepare_progress(total_scenes=0, completed_scenes=0)
+print(json.dumps(calls, ensure_ascii=False))
+`
+  const calls = JSON.parse(execFileSync('python3', ['-c', python], {
+    encoding: 'utf8',
+  }).trim().split('\n').at(-1))
+
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0], {
+    args: ['prepare'],
+    kwargs: {
+      status: 'running',
+      completed: false,
+      total_scenes: 10,
+      completed_scenes: 4,
+      coverage_ratio: 0.4,
+    },
+  })
+})
