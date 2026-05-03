@@ -466,11 +466,14 @@ export function buildTurnFrameSteering(
     : null
 
   if (!typedToolName) {
+    const preferredToolNames = frame.skill
+      ? [...FRAME_STEERING_PRIMITIVE_TOOL_NAMES]
+      : []
     return {
       ...frame.steering,
       mode: 'ask_model',
       requiredToolName: null,
-      preferredToolNames: [],
+      preferredToolNames,
       systemReminder: null,
       action: buildFrameAction({ frame, decidedMode: 'ask_model', toolName: null }),
     }

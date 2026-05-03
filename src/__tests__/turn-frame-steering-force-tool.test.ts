@@ -374,6 +374,28 @@ test('buildTurnFrameSteering blocks unknown action-derived tool names and emits 
   }
 })
 
+test('buildTurnFrameSteering keeps inspect primitives when a resume frame has no typed action yet', () => {
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      action: null,
+      artifactPaths: {
+        sceneScoresPath: null,
+        deliveryReportPath: null,
+      },
+      runContract: null,
+    },
+  })
+
+  const steering = buildTurnFrameSteering(frame)
+
+  assert.equal(steering.mode, 'ask_model')
+  assert.equal(steering.requiredToolName, null)
+  assert.ok(steering.preferredToolNames.includes('skill_inspect_run_state'))
+  assert.ok(!steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+  assert.ok(!steering.preferredToolNames.includes('skill_video_expert_ai_analyze'))
+})
+
 test('buildTurnFrameSteering keeps real manifest actions in preferredToolNames', () => {
   const contract = makeContract({
     action: 'video_expert_ai_analyze',

@@ -137,7 +137,10 @@ function reconcileAllowedToolNamesWithPreferredSkillTools(
 
 function shouldAdoptTurnFramePreferredSkillTools(frame: TurnFrame | null): boolean {
   if (!frame?.skill) return false
-  return frame.steering.preferredToolNames.length > 0 || frame.skill.source !== 'reference_hint'
+  if (frame.skill.source === 'reference_hint') {
+    return hasLongTypedSkillAction(frame.steering.preferredToolNames)
+  }
+  return frame.steering.preferredToolNames.length > 0
 }
 
 function matchesSkillProgressFollowupIntent(text: string): boolean {

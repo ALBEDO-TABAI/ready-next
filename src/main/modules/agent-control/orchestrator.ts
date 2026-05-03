@@ -254,7 +254,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
     let projectionTruth: ExecutionHostResult['projectionTruth']
     let terminalReason: ExecutionHostResult['terminalReason']
-    void this.send(
+    const sendResultPromise = this.send(
       agent,
       message,
       sessionId,
@@ -291,10 +291,27 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
           status: 'error',
         })
       }
+      return result
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      collector.handleError({
+        agent,
+        sessionId,
+        runId: requestId,
+        error: message || 'Agent execution failed',
+      })
+      collector.handleStatus({
+        agent,
+        sessionId,
+        runId: requestId,
+        status: 'error',
+      })
+      return null
     })
 
     try {
       const result = await collector.result
+      await sendResultPromise
       return {
         ...result,
         taskId: resolvedTaskId || undefined,
