@@ -99,6 +99,8 @@ test('applyTurnFramePatch: discoveredHandles only fills empty fields', () => {
   const frame = makeFrame({
     skill: {
       ...makeFrame().skill!,
+      skillId: 'generic-skill',
+      skillName: 'generic-skill',
       taskRunId: 'str-already-set',
       detachedTaskId: null,
       runStatePath: null,
@@ -132,6 +134,55 @@ test('applyTurnFramePatch: skillStatusUpdates overrides existing skill slice fie
   })
   assert.equal(next.skill?.status, 'recoverable_paused')
   assert.equal(next.skill?.staleBlockerReason, 'cleared_by_validator')
+})
+
+test('applyTurnFramePatch: VEA progress stage cannot overwrite known executable action', () => {
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_pipeline',
+      runContract: {
+        skillId: 'video-expert-analyzer',
+        skillName: 'video-expert-analyzer',
+        toolName: 'skill_video_expert_pipeline',
+        action: 'video_expert_pipeline',
+        actionInput: null,
+        originalInput: null,
+        sourceUrl: null,
+        taskRunId: null,
+        detachedTaskId: null,
+        jobId: null,
+        outputDir: '/tmp/video-output',
+        runStatePath: '/tmp/video-output/run_state.json',
+        artifactRoots: ['/tmp/video-output'],
+        artifactPaths: { sceneScoresPath: '/tmp/video-output/scene_scores.json', deliveryReportPath: null },
+        status: 'recoverable_paused',
+        liveness: 'recoverable_paused',
+        progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null, fingerprint: null },
+        blocker: { reason: null, stale: false },
+        projectionIdentity: { stableKey: null, supersedesProjectionIds: [] },
+        forceLoopGuard: {
+          lastForceToolName: null,
+          lastForceInputDigest: null,
+          lastForceToolDispatchedAt: null,
+          consecutiveForceCount: 0,
+        },
+        updatedAt: '2026-04-29T01:00:00.000Z',
+      },
+    },
+  })
+
+  const next = applyTurnFramePatch(frame, {
+    skillStatusUpdates: { action: 'score_batches' },
+    runContract: {
+      action: 'score_batches',
+      progress: { stage: 'score_batches', totalUnits: 5, completedUnits: 2, coverageRatio: 0.4, fingerprint: null },
+    },
+  })
+
+  assert.equal(next.skill?.action, 'video_expert_ai_analyze')
+  assert.equal(next.skill?.runContract?.action, 'video_expert_ai_analyze')
+  assert.equal(next.skill?.runContract?.progress.stage, 'score_batches')
 })
 
 test('applyTurnFramePatch: livenessHint upgrades from unknown', () => {

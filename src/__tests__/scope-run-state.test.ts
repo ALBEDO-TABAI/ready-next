@@ -149,6 +149,21 @@ describe('scope run state helpers', () => {
     assert.strictEqual(isStreamingScopeRunState(run as any), false)
   })
 
+  it('treats any active phase with a terminal reason as non-streaming', () => {
+    for (const phase of ['queued', 'planning', 'tool_running', 'checkpoint', 'takeover', 'resuming', 'responding'] as const) {
+      assert.strictEqual(isStreamingScopeRunState({
+        scopeId: `scope-${phase}`,
+        agent: 'assistant',
+        requestId: `run-${phase}`,
+        phase,
+        terminalReason: 'checkpoint_budget',
+        toolTrace: [],
+        startedAt: '2026-04-29T00:00:00.000Z',
+        updatedAt: '2026-04-29T00:00:01.000Z',
+      }), false, `${phase} with terminalReason must not stream`)
+    }
+  })
+
   it('preserves terminal reason from structured scope events', () => {
     const patch = deriveScopeRunStatePatch(
       {
@@ -164,6 +179,55 @@ describe('scope run state helpers', () => {
     assert.strictEqual((patch as any).terminalReason, 'checkpoint_budget')
     assert.strictEqual(patch.phase, 'checkpoint')
     assert.strictEqual(patch.waitingFor, 'background')
+  })
+
+  it('does not clear a terminal reason when a later same-run event omits it', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-checkpoint',
+        phase: 'responding',
+        latestText: '补充说明',
+        timestamp: '2026-04-29T00:00:02.000Z',
+      } as any,
+      {
+        scopeId: 'scope-checkpoint',
+        agent: 'assistant',
+        requestId: 'run-checkpoint',
+        phase: 'checkpoint',
+        terminalReason: 'checkpoint_budget',
+        toolTrace: [],
+        startedAt: '2026-04-29T00:00:00.000Z',
+        updatedAt: '2026-04-29T00:00:01.000Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+      },
+    )
+
+    assert.strictEqual((patch as any).terminalReason, 'checkpoint_budget')
+  })
+
+  it('does clear a stale terminal reason when a new run starts in the same scope', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-new',
+        phase: 'planning',
+        timestamp: '2026-04-29T00:01:00.000Z',
+      } as any,
+      {
+        scopeId: 'scope-checkpoint',
+        agent: 'assistant',
+        requestId: 'run-old',
+        phase: 'checkpoint',
+        terminalReason: 'checkpoint_budget',
+        toolTrace: [],
+        startedAt: '2026-04-29T00:00:00.000Z',
+        updatedAt: '2026-04-29T00:00:01.000Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+      },
+    )
+
+    assert.strictEqual((patch as any).terminalReason, null)
   })
 
   it('reads document pipeline diagnostics from structured scope run events', () => {

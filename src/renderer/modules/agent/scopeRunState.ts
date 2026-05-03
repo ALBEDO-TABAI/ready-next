@@ -53,6 +53,22 @@ export function isActiveScopePhase(phase: ScopeRunState['phase'] | undefined): b
   )
 }
 
+export function isScopeRunPhase(value: unknown): value is ScopeRunState['phase'] {
+  return (
+    value === 'idle' ||
+    value === 'queued' ||
+    value === 'planning' ||
+    value === 'tool_running' ||
+    value === 'checkpoint' ||
+    value === 'takeover' ||
+    value === 'resuming' ||
+    value === 'responding' ||
+    value === 'done' ||
+    value === 'error' ||
+    value === 'cancelled'
+  )
+}
+
 export function isStreamingScopeRunState(run: ScopeRunState | null | undefined): boolean {
   if (!run) return false
   if (run.terminalReason) return false
@@ -589,6 +605,7 @@ export function createEmptyScopeRunState(params: {
 
 export function deriveScopeRunStatePatch(
   event: {
+    runId?: string | null
     phase: ScopeRunState['phase']
     module?: AgentModuleKind | string | null
     intent?: string | null
@@ -663,9 +680,13 @@ export function deriveScopeRunStatePatch(
   const terminalReason = 'terminalReason' in event
     ? normalizeTerminalReason(event.terminalReason)
     : null
+  const eventRunId = typeof event.runId === 'string' && event.runId.trim()
+    ? event.runId.trim()
+    : null
+  const isNewRun = Boolean(previous?.requestId && eventRunId && previous.requestId !== eventRunId)
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
-    terminalReason: terminalReason || (isActiveScopePhase(event.phase) ? null : previous?.terminalReason || null),
+    terminalReason: terminalReason || (isNewRun ? null : previous?.terminalReason || null),
     latestText: event.latestText ?? previous?.latestText ?? null,
     module: eventModule || previous?.module || null,
     intent: typeof event.intent === 'string' ? event.intent : previous?.intent || null,

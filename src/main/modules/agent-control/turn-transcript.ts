@@ -3,6 +3,7 @@ import {
   serializeToolExecutionOutput,
 } from './tool-result-types'
 import type { TurnTranscriptEvent } from './run-contracts'
+import type { TurnTerminalReason } from './turn-frame'
 import { sanitizeAssistantText } from './tool-call-text-guard'
 
 export interface TurnTranscriptOptions {
@@ -28,7 +29,7 @@ export class TurnTranscript {
           projectionPatch?: Record<string, unknown> | null
         },
       ) => void
-      emitStatus: (status: string) => void
+      emitStatus: (status: string, terminalReason?: TurnTerminalReason | null) => void
       emitRuntimeError: (error: unknown, options?: { toolName?: string }) => void
       emitToolAction: (tool: string, args: Record<string, unknown>) => void
     },
@@ -76,9 +77,9 @@ export class TurnTranscript {
     })
   }
 
-  emitStatus(status: string): void {
-    this.events.push({ kind: 'status', status })
-    this.emitters.emitStatus(status)
+  emitStatus(status: string, terminalReason?: TurnTerminalReason | null): void {
+    this.events.push({ kind: 'status', status, terminalReason })
+    this.emitters.emitStatus(status, terminalReason)
   }
 
   emitRuntimeError(error: unknown, options?: { toolName?: string }): void {

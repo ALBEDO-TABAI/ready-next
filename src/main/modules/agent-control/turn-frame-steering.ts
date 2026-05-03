@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
 import { resolveToolInputSchemaForExecution } from './tool-registry'
 import { createSystemReminderRegistry } from './system-reminder-registry'
+import { logAgentMetric } from './metrics'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
 import { isTerminalChildCloseStatus } from './skill-child-run-types'
@@ -257,26 +258,36 @@ export function buildFrameAction(params: {
   }
 }
 
-function sanitizeToolToken(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '') || 'skill'
+function shouldResolveTypedToolForForceMode(
+  frame: TurnFrame,
+  extras?: BuildSteeringExtras,
+): boolean {
+  if (extras?.recentForceToolDispatched) return false
+  if (!frame.skill) return false
+  if (isChildOwnedFrame(frame)) return false
+  if (!FORCE_TOOL_LIVENESS_MODES.includes(frame.mode)) return false
+  if (!FORCE_TOOL_LIVENESS_STATES.includes(frame.liveness)) return false
+  if (frame.skill && frame.liveness === 'failed') return false
+  if (frame.budget.exhausted && frame.liveness === 'running_process') return false
+  return true
 }
 
-function fallbackToolName(skillId: string, actionName: string): string {
-  return `skill_${sanitizeToolToken(skillId)}_${sanitizeToolToken(actionName)}`
-}
-
-export function resolveTurnFrameSkillActionToolName(frame: TurnFrame): string | null {
+export function resolveTurnFrameSkillActionToolName(
+  frame: TurnFrame,
+  options?: { emitBlockedMetric?: boolean },
+): string | null {
   const skillId = nonEmpty(frame.skill?.skillId)
   if (!skillId) return null
   const action = nonEmpty(frame.skill?.action)
     || (frame.mode === 'skill_resume' ? DEFAULT_RESUME_ACTION_BY_SKILL_ID[skillId] : null)
   if (!action) return null
   if (action.startsWith('skill_')) return action
-  return getStaticSkillToolNameForAction(skillId, action) || fallbackToolName(skillId, action)
+  const staticToolName = getStaticSkillToolNameForAction(skillId, action)
+  if (staticToolName) return staticToolName
+  if (options?.emitBlockedMetric !== false) {
+    logAgentMetric('preferred_tool_name_synthesis_blocked', { skillId, action })
+  }
+  return null
 }
 
 /**
@@ -426,7 +437,9 @@ export function buildTurnFrameSteering(
   }
 
   const typedToolName = shouldPreferTypedAction(frame)
-    ? resolveTurnFrameSkillActionToolName(frame)
+    ? resolveTurnFrameSkillActionToolName(frame, {
+        emitBlockedMetric: !shouldResolveTypedToolForForceMode(frame, extras),
+      })
     : null
 
   if (!typedToolName) {

@@ -17,6 +17,7 @@ export interface StatusEventLike {
   sessionId?: string
   runId?: string
   status: string
+  terminalReason?: import('./turn-frame').TurnTerminalReason | null
 }
 
 export interface ErrorEventLike {
@@ -120,6 +121,7 @@ export function createScopedRunCollector(match: ScopedRunMatch) {
           finalText: finalChunks.join(''),
           cancelled: true,
           usedTools: Array.from(usedTools),
+          terminalReason: payload.terminalReason ?? null,
         })
         return
       }
@@ -130,6 +132,7 @@ export function createScopedRunCollector(match: ScopedRunMatch) {
           cancelled: false,
           usedTools: Array.from(usedTools),
           error: runtimeError || 'Agent execution failed',
+          terminalReason: payload.terminalReason ?? null,
         })
         return
       }
@@ -140,6 +143,7 @@ export function createScopedRunCollector(match: ScopedRunMatch) {
           cancelled,
           usedTools: Array.from(usedTools),
           error: runtimeError,
+          terminalReason: payload.terminalReason ?? null,
         })
       }
     },

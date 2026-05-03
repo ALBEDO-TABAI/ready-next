@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { buildTaskCardViewModel, deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
+import { isStreamingScopeRunState } from '../renderer/modules/agent/scopeRunState'
 
 test('task card view model renders document tasks with generic step sections', () => {
   const vm = buildTaskCardViewModel({
@@ -279,4 +280,38 @@ test('task card runtime state distinguishes background running, budget paused, d
     statusLabel: '失败',
     actionSet: ['retry', 'cancel', 'open_artifact'],
   })
+})
+
+test('budget exhausted pause uses the same terminal checkpoint truth for task card and typing state', () => {
+  const run = {
+    scopeId: 'scope-budget-truth',
+    agent: 'assistant',
+    requestId: 'run-budget-truth',
+    phase: 'checkpoint' as const,
+    terminalReason: 'checkpoint_budget' as const,
+    status: 'blocked' as const,
+    title: '视频分析',
+    waitingFor: 'background' as const,
+    taskContinuation: {
+      taskId: 'task-budget-truth',
+      blockerType: 'budget_paused',
+      pauseReason: 'budget_exhausted',
+      runStatePath: '/tmp/vea/run_state.json',
+    },
+    resumableActions: ['continue', 'retry', 'cancel'] as const,
+    toolTrace: [],
+    startedAt: '2026-04-29T00:00:00.000Z',
+    updatedAt: '2026-04-29T00:00:01.000Z',
+  }
+
+  assert.ok(
+    run.terminalReason === 'checkpoint_budget' || run.terminalReason === 'checkpoint_background',
+    'budget_exhausted pause must carry a checkpoint terminal reason',
+  )
+  assert.deepEqual(deriveTaskCardRuntimeState(run), {
+    visualState: 'budget_paused',
+    statusLabel: '预算已暂停',
+    actionSet: ['continue', 'retry', 'cancel'],
+  })
+  assert.equal(isStreamingScopeRunState(run), false)
 })

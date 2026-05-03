@@ -19,6 +19,7 @@ import type { IntentClassification } from '../main/modules/agent-control/intent-
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
+import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
 
@@ -59,8 +60,8 @@ function createEvents() {
       ) => {
         events.push({ kind: 'output', type, chunk, projectionPatch: options?.projectionPatch || null } as TurnTranscriptEvent)
       },
-      emitStatus: (status: string) => {
-        events.push({ kind: 'status', status })
+      emitStatus: (status: string, terminalReason?: TurnTerminalReason | null) => {
+        events.push({ kind: 'status', status, terminalReason } as TurnTranscriptEvent)
       },
       emitRuntimeError: (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
@@ -3331,7 +3332,7 @@ test('TurnEngine pauses a stalled long skill lease before the hard cap', async (
 
 test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor throws', async () => {
   const engine = new TurnEngine()
-  const { request } = createRequest({
+  const { request, events } = createRequest({
     userText: '继续视频分析',
     intentClassification: createIntent({
       primaryDomain: 'skill',
@@ -3406,6 +3407,11 @@ test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor thr
   assert.equal(result.success, true)
   assert.equal(result.skillTaskLifecycle, null)
   assert.equal(result.terminalReason, 'checkpoint_budget')
+  const checkpointStatus = events.find((event) => event.kind === 'status' && event.status === 'checkpoint')
+  assert.equal(
+    (checkpointStatus as TurnTranscriptEvent & { terminalReason?: TurnTerminalReason | null } | undefined)?.terminalReason,
+    'checkpoint_budget',
+  )
   assert.equal(result.interactionState, 'suspended')
   assert.equal(result.projectionTruth?.projectionPatch?.waitingFor, 'background')
   assert.equal(result.projectionTruth?.projectionPatch?.blockedReason, '本轮预算已用完，技能任务状态检查失败或暂时不可用')

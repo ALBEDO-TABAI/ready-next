@@ -161,3 +161,46 @@ test('active skill context treats remembered context as fallback behind recovera
     clearActiveSkillContext('conv-vea')
   }
 })
+
+test('active skill context resolves VEA progress stage to executable action when scene scores exist', () => {
+  const context = resolveActiveSkillContextFromInputs({
+    sessionId: 'conv-vea',
+    projections: [
+      projection({
+        currentStepId: 'score_batches',
+        continuationRef: null,
+        recentArtifacts: [
+          {
+            id: 'dst-vea:outputDir',
+            module: 'skill',
+            kind: 'directory',
+            label: '技能输出目录',
+            path: '/tmp/video-output',
+            createdAt: '2026-04-29T01:00:00.000Z',
+            meta: {
+              detachedTaskId: 'dst-vea',
+              skillId: 'video-expert-analyzer',
+              outputKey: 'outputDir',
+            },
+          },
+          {
+            id: 'dst-vea:sceneScoresPath',
+            module: 'skill',
+            kind: 'artifact',
+            label: 'scene_scores.json',
+            path: '/tmp/video-output/scene_scores.json',
+            createdAt: '2026-04-29T01:00:00.000Z',
+            meta: {
+              detachedTaskId: 'dst-vea',
+              skillId: 'video-expert-analyzer',
+              outputKey: 'sceneScoresPath',
+            },
+          },
+        ],
+      }),
+    ],
+  })
+
+  assert.equal(context?.skillId, 'video-expert-analyzer')
+  assert.equal(context?.action, 'video_expert_ai_analyze')
+})

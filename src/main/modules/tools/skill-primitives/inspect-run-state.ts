@@ -24,7 +24,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
@@ -39,6 +39,7 @@ import {
   type SkillRunContract,
 } from '../../agent-control/run-contracts'
 import type { TurnFrame, TurnFramePatch } from '../../agent-control/turn-frame'
+import { resolveVeaResumeAction } from '../../agent-control/vea-resume-action'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_MAX_RAW_BYTES = 16_384
@@ -255,11 +256,12 @@ function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch |
     : null
   const taskRunId = effectiveExpectedTaskId || resolvedFromTaskId || summaryTaskId
   const detachedTaskId = resolvedFromTaskId || null
-  const action = typeof summary.currentStage === 'string' && summary.currentStage.trim()
+  const currentStage = typeof summary.currentStage === 'string' && summary.currentStage.trim()
     ? summary.currentStage.trim()
     : null
 
   const sceneScoresPath = artifactProgress.sceneScoresPath || null
+  const action = resolveVeaResumeAction(currentStage, { sceneScoresPath })
   // run_state.json may reference a delivery report path under various keys.
   // Defensive lookup so we don't fabricate one that isn't there.
   const summaryRecord = summary as unknown as Record<string, unknown>
@@ -327,7 +329,7 @@ function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch |
     sceneScoresPath,
     deliveryReportPath,
     progress: {
-      currentStage: action,
+      currentStage,
       totalScenes,
       completedScenes,
       coverageRatio,
@@ -360,7 +362,7 @@ function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch |
     }
     contract.progress = {
       ...contract.progress,
-      stage: action ?? contract.progress.stage,
+      stage: currentStage ?? contract.progress.stage,
       totalUnits: totalScenes ?? contract.progress.totalUnits,
       completedUnits: completedScenes ?? contract.progress.completedUnits,
       coverageRatio: coverageRatio ?? contract.progress.coverageRatio,
@@ -388,8 +390,8 @@ function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch |
     staleBlockerReason: blockerReason,
     runStatePath,
     outputDir,
-    action: action ?? null,
     artifactPaths: { sceneScoresPath, deliveryReportPath },
+    ...(action ? { action } : {}),
   }
 
   return patch

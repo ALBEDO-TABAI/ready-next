@@ -42,6 +42,7 @@ import type {
   TurnEngineSession,
   TurnTranscriptEvent,
 } from '../main/modules/agent-control/run-contracts'
+import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 
 function createSession(userText: string): TurnEngineSession {
   return {
@@ -80,8 +81,8 @@ function createEvents() {
       ) => {
         events.push({ kind: 'output', type, chunk, projectionPatch: options?.projectionPatch || null } as TurnTranscriptEvent)
       },
-      emitStatus: (status: string) => {
-        events.push({ kind: 'status', status })
+      emitStatus: (status: string, terminalReason?: TurnTerminalReason | null) => {
+        events.push({ kind: 'status', status, terminalReason } as TurnTranscriptEvent)
       },
       emitRuntimeError: (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)

@@ -97,6 +97,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
   - **轻量方法论型**（如 `video-copy-analyzer`）：不写死命令，留给模型决定调用时机与参数
   - **prescriptive 长流程型**（如 `video-expert-analyzer-vnext`：staged 续跑、OpenClaw 接力、19 类视频路由）：允许 SKILL.md 内嵌精确命令；淡化 LLM 自由度反而会导致跳步
 - Phase 3 后所有 embedded skill 都已迁移完毕：`video-copy-analyzer` / `video-expert-analyzer (vnext swap)` / `lets-go-rss (混合：read_skill default + 5 retained public python actions)`，仓库内不再有 `skill.workflow.json`；混合形态的判定标准 = 是否有非 LLM 产品代码直接 `runSkill(skillId, action)`（如 `item-analysis-manager.ts` 调 `video_expert_pipeline` / `video_expert_ai_analyze`，UI 快捷键 `/skill lets-go-rss rss_update {…}`），有就把对应 action 留作 `visibility: 'public'` 或 `'internal'`（按是否需要 LLM 看见决定），并写好 `scripts/ready_compat.py` 这类 entry-script 翻译层把旧 `--payload-json` 契约翻译成新 entry script 的 CLI 形态
+- skill progress/stage 与 manifest action 是互不相交的命名空间：progress stage 只用于运行态展示、投影和恢复判断，runtime 不得把它拼成或暴露成模型可见的 `skill_<id>_<action>` 工具名；模型可见 action 只能来自 manifest action 或 primitive allowlist
 - reference/advisory skill 的 `read_skill` action 在加载期统一归一为 `visibility: 'internal'`（包括旧 manifest 显式写过 `public` 的情况，避免 LLM 看到 `skill_<id>_read_skill` 并在循环里反复调用）；非 reference 的 typed public action 继续按 manifest 保持可见
 - `skill_ask_user` 通过独立 IPC（`skill:askUserQuestion` push + `skills:askUser:submit` invoke）驱动渲染端 `SkillAskUserPrompt` 胶囊；ephemeral 状态存于 `EphemeralExecutionStore`（内存，不写 `skill_executions` 表），executionId 用 `eau-<8hex>` 前缀区分；24h 超时 / AbortSignal 抗抖 / session 关闭都会清 pending 记录
 
@@ -155,6 +156,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 用户通过附件 / `@[file]` / 当前文档 / 显式路径带入的 `run_state.json`，以及同一会话上一轮已打开或工具返回过的唯一 `run_state.json`，都是可信续跑句柄，必须进入 TurnFrame 并武装对应 reference-skill hint；但它只证明身份与恢复入口，VEA 真实进度仍以 `scene_scores.json` / `host_batches` 等产物核验为准
 - 长任务预算模型固定为 `220` 硬上限 + 前台 lease 可续租窗口；UI 与任务投影不得把预算暂停或后台存活误判为完成
 - continuation 全链路必须保留 durable skill handle：`pauseReason / detachedTaskId / taskRunId / jobId / skillId / action / runStatePath / outputDir / progressFingerprint`；即使没有 `executionId / todoId`，只要有这些 handle，也必须能构造继续入口
+- checkpoint / done / cancelled / error 都是 terminal IPC 状态；跨 main -> renderer 的 `emitStatus` / scope-run event 必须保留 `terminalReason`，不能只传 terminal status。只有 `working` 允许裸 status；`scripts/check-terminal-reason-propagation.cjs` 是硬门，新增明确字面量 terminal status 时必须同步传 reason
 - 任务卡状态只能消费 supervisor / lifecycle / projection 的真实信号，不在 UI 新增完成判断；展示优先级为真实失败且无后台存活、后台运行、预算暂停、等待用户、完成、普通运行
 - 任务卡中文状态标签固定为 `后台运行中` / `预算已暂停` / `等待补充` / `已完成` / `失败`；完成态只显示打开产物，不显示继续或重试；后台运行显示继续、打开产物、取消；预算暂停显示继续、重试、取消
 - SQLite-backed 验收前必须先跑 `npm run verify:native`；该命令会在 rebuild 后用 Electron runtime 真实打开 `better-sqlite3` 并执行 smoke query。若 Electron ABI 下 native check 不通过，只能标记为 DB 路径未证明，不能算验收通过

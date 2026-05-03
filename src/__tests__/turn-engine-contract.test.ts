@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { createScopedRunCollector } from '../main/modules/agent-control/run-collector'
+import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -44,8 +46,8 @@ function createContractTurnRequest(userText: string) {
         emitOutput: (chunk: string, type: string) => {
           events.push({ kind: 'output', chunk, type })
         },
-        emitStatus: (status: string) => {
-          events.push({ kind: 'status', status })
+        emitStatus: (status: string, terminalReason?: TurnTerminalReason | null) => {
+          events.push({ kind: 'status', status, terminalReason })
         },
         emitRuntimeError: (error: string) => {
           events.push({ kind: 'error', error })
@@ -89,6 +91,7 @@ function createContractTurnRequest(userText: string) {
         sessionHasVideoInputs: () => false,
         domainAdapters: [],
         skillContextOrchestrator: {
+          hasActiveSkillExecution: () => false,
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
           buildPreferredSkillToolNames: () => null,
@@ -218,8 +221,8 @@ test('phase3 shrinks DirectChatEngine.sendMessage into a TurnEngine host-shell e
       pattern: /resolveTaskExecutionRoute\(/,
     },
     {
-      label: 'turn engine should now own browser deterministic dispatch',
-      pattern: /const browserPrepareResult = browserDomainAdapter/,
+      label: 'turn engine should now own domain prepare dispatch',
+      pattern: /const selectedDomainPrepareResult: DomainAdapterPrepareResult/,
     },
     {
       label: 'turn engine should now own host shortcuts',
@@ -234,6 +237,34 @@ test('phase3 shrinks DirectChatEngine.sendMessage into a TurnEngine host-shell e
       pattern: /executeToolBatch\(/,
     },
   ])
+})
+
+test('scoped run collector preserves terminalReason from terminal status events', async () => {
+  const collector = createScopedRunCollector({
+    agent: 'agent-contract',
+    sessionId: 'scope-contract',
+    requestId: 'run-contract',
+  })
+
+  collector.handleOutput({
+    agent: 'agent-contract',
+    sessionId: 'scope-contract',
+    runId: 'run-contract',
+    chunk: 'partial',
+    type: 'text',
+  })
+  collector.handleStatus({
+    agent: 'agent-contract',
+    sessionId: 'scope-contract',
+    runId: 'run-contract',
+    status: 'checkpoint',
+    terminalReason: 'checkpoint_background',
+  })
+
+  const result = await collector.result
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, 'partial')
+  assert.equal(result.terminalReason, 'checkpoint_background')
 })
 
 test('phase0 freezes the future TurnEngine contract in roadmap and design docs', () => {

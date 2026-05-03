@@ -3,6 +3,7 @@ import type { ActiveSkillContextSource } from './active-skill-context'
 // frame schema can carry the durable contract without circular runtime
 // dependencies.
 import type { SkillRunContract } from './run-contracts'
+import { isVeaAction, isVeaStage, resolveVeaResumeAction } from './vea-resume-action'
 
 export type TurnTerminalReason =
   | 'done'
@@ -238,6 +239,7 @@ const TURN_FRAME_LIVENESS_RANK: Record<TurnFrameLiveness, number> = {
   done: 9,
   failed: 9,
 }
+const VEA_SKILL_ID = 'video-expert-analyzer'
 
 function isTerminalLiveness(value: TurnFrameLiveness): boolean {
   return value === 'done' || value === 'failed'
@@ -254,6 +256,62 @@ function dedupePreservingOrder(values: string[]): string[] {
     out.push(trimmed)
   }
   return out
+}
+
+function normalizeVeaAction(value: unknown): string | null {
+  if (isVeaAction(value)) return value
+  if (typeof value === 'string' && value.startsWith('skill_')) {
+    const unprefixed = value.slice('skill_'.length)
+    if (isVeaAction(unprefixed)) return unprefixed
+  }
+  return null
+}
+
+function sanitizeVeaAction(args: {
+  skillId?: string | null
+  candidate: unknown
+  fallback?: unknown
+  sceneScoresPath?: string | null
+}): string | null | undefined {
+  if (args.candidate === undefined) return undefined
+  if (args.candidate === null) return null
+  if (typeof args.candidate !== 'string') return undefined
+  if (args.skillId !== VEA_SKILL_ID) return args.candidate
+
+  const manifestAction = normalizeVeaAction(args.candidate)
+  if (manifestAction) return manifestAction
+
+  if (isVeaStage(args.candidate)) {
+    const resolved = resolveVeaResumeAction(args.candidate, {
+      sceneScoresPath: args.sceneScoresPath,
+    })
+    if (resolved) return resolved
+    const fallbackAction = normalizeVeaAction(args.fallback)
+    if (fallbackAction) return fallbackAction
+    return undefined
+  }
+
+  const resolved = resolveVeaResumeAction(args.candidate, {
+    sceneScoresPath: args.sceneScoresPath,
+  })
+  if (resolved) return resolved
+
+  if (isVeaStage(args.candidate)) {
+    return undefined
+  }
+
+  return undefined
+}
+
+function sceneScoresPathForPatch(
+  skill: TurnFrameSkillSlice,
+  patch: TurnFramePatch,
+): string | null {
+  return patch.runContract?.artifactPaths?.sceneScoresPath
+    || patch.skillStatusUpdates?.artifactPaths?.sceneScoresPath
+    || skill.runContract?.artifactPaths.sceneScoresPath
+    || skill.artifactPaths.sceneScoresPath
+    || null
 }
 
 /**
@@ -414,6 +472,7 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
 
   let nextSkill: TurnFrame['skill'] = frame.skill
   if (frame.skill) {
+    const sceneScoresPath = sceneScoresPathForPatch(frame.skill, patch)
     const additive: Partial<TurnFrameSkillSlice> = {}
     if (patch.discoveredHandles) {
       const handles = patch.discoveredHandles
@@ -421,14 +480,48 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
       if (frame.skill.detachedTaskId == null && handles.detachedTaskId != null) additive.detachedTaskId = handles.detachedTaskId
       if (frame.skill.runStatePath == null && handles.runStatePath != null) additive.runStatePath = handles.runStatePath
       if (frame.skill.outputDir == null && handles.outputDir != null) additive.outputDir = handles.outputDir
-      if (frame.skill.action == null && handles.action != null) additive.action = handles.action
+      if (frame.skill.action == null && handles.action != null) {
+        const action = sanitizeVeaAction({
+          skillId: frame.skill.skillId,
+          candidate: handles.action,
+          fallback: frame.skill.runContract?.action,
+          sceneScoresPath,
+        })
+        if (action !== undefined) additive.action = action
+      }
     }
-    const overrides = patch.skillStatusUpdates && typeof patch.skillStatusUpdates === 'object'
-      ? patch.skillStatusUpdates
+    const overrides: Partial<TurnFrameSkillSlice> = patch.skillStatusUpdates && typeof patch.skillStatusUpdates === 'object'
+      ? { ...patch.skillStatusUpdates }
       : {}
+    if ('action' in overrides) {
+      const action = sanitizeVeaAction({
+        skillId: frame.skill.skillId,
+        candidate: overrides.action,
+        fallback: frame.skill.action || frame.skill.runContract?.action,
+        sceneScoresPath,
+      })
+      if (action === undefined) {
+        delete overrides.action
+      } else {
+        overrides.action = action
+      }
+    }
     let nextRunContract: SkillRunContract | null = frame.skill.runContract
     if (hasContract) {
-      const partial = patch.runContract!
+      const partial: Partial<SkillRunContract> = { ...patch.runContract! }
+      if ('action' in partial) {
+        const action = sanitizeVeaAction({
+          skillId: partial.skillId || frame.skill.skillId,
+          candidate: partial.action,
+          fallback: frame.skill.runContract?.action || frame.skill.action,
+          sceneScoresPath,
+        })
+        if (action === undefined) {
+          delete partial.action
+        } else {
+          partial.action = action
+        }
+      }
       const existing = frame.skill.runContract
       const merged = mergeRunContractPartials(
         existing ? (existing as unknown as Partial<SkillRunContract>) : undefined,

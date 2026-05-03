@@ -207,6 +207,65 @@ test('VEA ready_compat validates delivery_report before reporting success', () =
   }
 })
 
+test('VEA ready_compat ai_analyze ignores stale delivery_report errors after fresh scoring success', () => {
+  const root = mkdtempSync(join(tmpdir(), 'vea-compat-stale-delivery-'))
+  try {
+    const fakeOrchestrator = join(root, 'fake_orchestrator.py')
+    const resultPath = join(root, 'result.json')
+    const harness = join(root, 'harness.py')
+    const outputDir = join(root, 'output')
+    const sceneScoresPath = join(outputDir, 'scene_scores.json')
+    mkdirSync(outputDir, { recursive: true })
+    writeFileSync(sceneScoresPath, '{}', 'utf8')
+    writeFileSync(join(outputDir, 'delivery_report.json'), JSON.stringify({
+      status: 'completed',
+      missing_outputs: ['old_storyboard'],
+      missing_screenshot_scenes: [],
+      missing_sample_scenes: [],
+      blocked_batches: [],
+      incomplete_scene_numbers: [],
+      required_outputs: {},
+    }), 'utf8')
+
+    writeFileSync(fakeOrchestrator, [
+      'import json, sys',
+      'from pathlib import Path',
+      'scores = Path(sys.argv[1])',
+      '(scores.parent / "run_state.json").write_text(json.dumps({"status":"completed"}), encoding="utf-8")',
+      'raise SystemExit(0)',
+      '',
+    ].join('\n'), 'utf8')
+
+    writeFileSync(harness, [
+      'import importlib.util, os, sys',
+      'from pathlib import Path',
+      `spec = importlib.util.spec_from_file_location("ready_compat", ${JSON.stringify(READY_COMPAT)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      `module.ORCHESTRATOR = Path(${JSON.stringify(fakeOrchestrator)})`,
+      `os.environ["READY_SKILL_RESULT_PATH"] = ${JSON.stringify(resultPath)}`,
+      `sys.argv = ["ready_compat.py", "--action", "video_expert_ai_analyze", "--payload-json", ${JSON.stringify(JSON.stringify({ sceneScoresPath }))}]`,
+      'raise SystemExit(module.main())',
+      '',
+    ].join('\n'), 'utf8')
+
+    execFileSync('python3', [harness], { encoding: 'utf8' })
+
+    const payload = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      ok: boolean
+      status: string
+      error?: { message?: string }
+    }
+
+    assert.equal(payload.ok, true)
+    assert.equal(payload.status, 'success')
+    assert.doesNotMatch(payload.error?.message || '', /old_storyboard/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('VEA ready_compat prefers output dir matching READY_SKILL_TASK_ID over newest mtime', () => {
   const root = mkdtempSync(join(tmpdir(), 'vea-compat-task-id-'))
   try {
@@ -423,7 +482,7 @@ test('VEA ready_compat reports ambiguous output when identity is missing and mul
   }
 })
 
-test('runtime-manager treats structured ok:false as a failed direct action even when process exits 0', async () => {
+test('runtime-manager treats structured ok:false as a failed direct action even when process exits 0', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'skill-structured-result-'))
   try {
     const runtimeRoot = join(root, 'runtime')
@@ -480,7 +539,17 @@ test('runtime-manager treats structured ok:false as a failed direct action even 
       startBackgroundTasks: false,
     })
 
-    const result = await manager.runSkill({ skillId, action: 'run', params: {} })
+    let result
+    try {
+      result = await manager.runSkill({ skillId, action: 'run', params: {} })
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      if (code === 'database_unavailable') {
+        t.skip('SQLite-backed runtime manager path requires Electron native DB runtime')
+        return
+      }
+      throw error
+    }
 
     assert.equal(result.success, false)
     assert.equal(result.status, 'error')

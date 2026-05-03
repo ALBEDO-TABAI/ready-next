@@ -31,6 +31,35 @@ async function makeTempOutputDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ready-vea-child-driver-'))
 }
 
+async function writeIncompleteSceneArtifacts(outputDir: string, totalScenes: number): Promise<string> {
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({
+    total_scenes: totalScenes,
+    scenes: Array.from({ length: totalScenes }, (_, index) => ({
+      scene_number: index + 1,
+      scores: {},
+      weighted_score: 0,
+      type_classification: '',
+      description: '',
+      selection_reasoning: '',
+      edit_suggestion: '',
+      storyboard: {},
+    })),
+  }), 'utf8')
+  const hostDir = path.join(outputDir, 'host_batches')
+  await fs.mkdir(hostDir)
+  await fs.writeFile(path.join(hostDir, 'index.json'), JSON.stringify({
+    total_scenes: totalScenes,
+    batches: [{
+      batch_id: 'batch-001',
+      scene_numbers: [1],
+      output: 'batch-001-output.json',
+      status: 'pending',
+    }],
+  }), 'utf8')
+  return sceneScoresPath
+}
+
 function isClose(value: unknown): value is SkillChildCloseEvent {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
@@ -122,6 +151,200 @@ test('Phase 5: completed run_state returns close event status=completed', async 
   const close = asClose(next)
   assert.equal(close.status, 'completed')
   assert.equal(close.terminalReason, 'completed')
+})
+
+test('Worker F: stale completed run_state with 0/97 scored scenes resumes ai_analyze instead of completing', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = await writeIncompleteSceneArtifacts(outputDir, 97)
+  await fs.writeFile(
+    path.join(outputDir, 'run_state.json'),
+    JSON.stringify({
+      status: 'completed',
+      current_stage: 'finalize',
+      scene_scores_path: sceneScoresPath,
+      total_scenes: 97,
+      completed_scenes: 97,
+      coverage_ratio: 1,
+    }),
+    'utf8',
+  )
+
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await driver.planNextAction(state)
+  const action = asAction(next)
+  assert.equal(action.action, 'video_expert_ai_analyze')
+  assert.equal(action.input.sceneScoresPath, sceneScoresPath)
+})
+
+test('Worker F: fresh ai_analyze blocks when preferred provider is missing from models catalog', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  const home = await makeTempOutputDir()
+  const configDir = path.join(home, '.config', 'video-expert-analyzer-vnext')
+  const modelsPath = path.join(configDir, 'models.multi.json')
+  await fs.mkdir(configDir, { recursive: true })
+  await fs.writeFile(path.join(configDir, 'config.json'), JSON.stringify({
+    auto_scoring: {
+      preferred_model: 'missing-provider/gpt-vision',
+      models_json_path: modelsPath,
+    },
+  }), 'utf8')
+  await fs.writeFile(modelsPath, JSON.stringify({
+    providers: {
+      available: {
+        models: [{ id: 'gpt-vision' }],
+      },
+    },
+  }), 'utf8')
+
+  const previousHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const state = await videoExpertChildDriver.createInitialState({
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_ai_analyze',
+      scopeId: 'scope-1',
+      sessionId: 'session-1',
+      requestedInput: { sceneScoresPath, outputDir },
+      parentNextHint: 'wait_for_close_event',
+      outputDir,
+    })
+
+    const next = await videoExpertChildDriver.planNextAction(state)
+    const close = asClose(next)
+    assert.equal(close.status, 'blocked')
+    assert.equal(close.terminalReason, 'blocked_config')
+    assert.equal(close.error?.kind, 'blocked_config')
+    assert.match(close.error?.message || '', /missing-provider\/gpt-vision/)
+    assert.doesNotMatch(close.error?.message || '', /apiKey|secret|token/i)
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+  }
+})
+
+test('Worker F: score_batches resume preflights provider before planning ai_analyze', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  await fs.writeFile(path.join(outputDir, 'run_state.json'), JSON.stringify({
+    status: 'running',
+    current_stage: 'score_batches',
+    scene_scores_path: sceneScoresPath,
+  }), 'utf8')
+  const home = await makeTempOutputDir()
+  const configDir = path.join(home, '.config', 'video-expert-analyzer-vnext')
+  const modelsPath = path.join(configDir, 'models.multi.json')
+  await fs.mkdir(configDir, { recursive: true })
+  await fs.writeFile(path.join(configDir, 'config.json'), JSON.stringify({
+    auto_scoring: {
+      preferred_model: 'missing-provider/gpt-vision',
+      models_json_path: modelsPath,
+    },
+  }), 'utf8')
+  await fs.writeFile(modelsPath, JSON.stringify({
+    providers: {
+      available: {
+        models: [{ id: 'gpt-vision' }],
+      },
+    },
+  }), 'utf8')
+
+  const previousHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const state = await videoExpertChildDriver.createInitialState({
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      scopeId: 'scope-1',
+      sessionId: 'session-1',
+      requestedInput: { outputDir },
+      parentNextHint: 'wait_for_close_event',
+      outputDir,
+    })
+
+    const next = await videoExpertChildDriver.planNextAction(state)
+    const close = asClose(next)
+    assert.equal(close.status, 'blocked')
+    assert.equal(close.terminalReason, 'blocked_config')
+    assert.match(close.error?.message || '', /missing-provider\/gpt-vision/)
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+  }
+})
+
+test('Worker F: missing configured models path can fall back to OpenClaw main catalog', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  const home = await makeTempOutputDir()
+  const configDir = path.join(home, '.config', 'video-expert-analyzer-vnext')
+  const openclawDir = path.join(home, '.openclaw', 'agents', 'main', 'agent')
+  await fs.mkdir(configDir, { recursive: true })
+  await fs.mkdir(openclawDir, { recursive: true })
+  await fs.writeFile(path.join(configDir, 'config.json'), JSON.stringify({
+    auto_scoring: {
+      preferred_model: 'kcode/K2.6-code-preview',
+      models_json_path: path.join(home, 'missing-models.json'),
+    },
+  }), 'utf8')
+  await fs.writeFile(path.join(openclawDir, 'models.json'), JSON.stringify({
+    providers: {
+      kcode: {
+        baseUrl: 'https://example.invalid',
+        models: [{ id: 'K2.6-code-preview' }],
+      },
+    },
+  }), 'utf8')
+
+  const previousHome = process.env.HOME
+  const previousOpenClawRoot = process.env.OPENCLAW_ROOT
+  process.env.HOME = home
+  delete process.env.OPENCLAW_ROOT
+  try {
+    const state = await videoExpertChildDriver.createInitialState({
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_ai_analyze',
+      scopeId: 'scope-1',
+      sessionId: 'session-1',
+      requestedInput: { sceneScoresPath, outputDir },
+      parentNextHint: 'wait_for_close_event',
+      outputDir,
+    })
+
+    const next = await videoExpertChildDriver.planNextAction(state)
+    const action = asAction(next)
+    assert.equal(action.action, 'video_expert_ai_analyze')
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+    if (previousOpenClawRoot === undefined) {
+      delete process.env.OPENCLAW_ROOT
+    } else {
+      process.env.OPENCLAW_ROOT = previousOpenClawRoot
+    }
+  }
 })
 
 test('Phase 5: missing scene_scores in score_batches stage closes recoverable_paused', async () => {

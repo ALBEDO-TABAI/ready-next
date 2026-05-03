@@ -82,6 +82,7 @@ import type {
   TurnProviderContext,
   TurnSimpleResponse,
 } from '../agent-control/run-contracts'
+import type { TurnTerminalReason } from '../agent-control/turn-frame'
 import type {
   BrowserTaskAttachmentResource,
   BrowserTaskDecision,
@@ -698,7 +699,7 @@ export class DirectChatEngine extends EventEmitter {
       session.abortController = null
     }
     if (runId) {
-      this.emit('status', { agent: name, runId, status: 'cancelled', isMock: false })
+      this.emit('status', { agent: name, runId, status: 'cancelled', terminalReason: 'cancelled_user', isMock: false })
       session.activeRunId = null
     }
   }
@@ -808,9 +809,16 @@ export class DirectChatEngine extends EventEmitter {
         projectionPatch: options?.projectionPatch || null,
       })
     }
-    const emitStatus = (status: string): void => {
+    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
       if (!isCurrentRun()) return
-      this.emit('status', { agent: name, sessionId, runId, status, isMock: false })
+      this.emit('status', {
+        agent: name,
+        sessionId,
+        runId,
+        status,
+        ...(typeof terminalReason === 'undefined' ? {} : { terminalReason }),
+        isMock: false,
+      })
     }
     const emitRuntimeError = (error: unknown, options?: { toolName?: string }): void => {
       if (!isCurrentRun()) return
@@ -835,7 +843,7 @@ export class DirectChatEngine extends EventEmitter {
       session.activeRunId = null
       emitOutput('未配置 API Key，请前往设置页配置', 'error')
       emitOutput('', 'done')
-      emitStatus('error')
+      emitStatus('error', 'persistence_failed')
       return {
         success: false,
         error: '未配置 API Key',
@@ -957,7 +965,7 @@ export class DirectChatEngine extends EventEmitter {
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         emitOutput('', 'done')
-        emitStatus('cancelled')
+        emitStatus('cancelled', 'cancelled_runtime')
         return {
           success: true,
           finalText: '',
@@ -978,7 +986,7 @@ export class DirectChatEngine extends EventEmitter {
       }
       emitOutput('', 'done')
       emitRuntimeError(error)
-      emitStatus('error')
+      emitStatus('error', 'persistence_failed')
       return {
         success: false,
         error: msg,

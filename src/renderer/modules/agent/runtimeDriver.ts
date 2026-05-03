@@ -1,4 +1,4 @@
-import { deriveScopeRunStatePatch, getActiveScopeRunState, isStreamingScopeRunState, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
+import { deriveScopeRunStatePatch, getActiveScopeRunState, isScopeRunPhase, isStreamingScopeRunState, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
@@ -101,7 +101,17 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   ): void {
     store.setState((state: any) => {
       const previous = state.scopeRunStates[scopeId] || null
-      const next = updater(previous)
+      const produced = updater(previous)
+      const hasTerminalReasonField = Object.prototype.hasOwnProperty.call(produced, 'terminalReason')
+      const sameRun = Boolean(
+        previous?.terminalReason &&
+        previous.requestId &&
+        produced.requestId &&
+        previous.requestId === produced.requestId,
+      )
+      const next = !hasTerminalReasonField && sameRun
+        ? { ...produced, terminalReason: previous.terminalReason }
+        : produced
       const nextScopeRunStates = {
         ...state.scopeRunStates,
         [scopeId]: next,
@@ -930,8 +940,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const cleanupScopeRunEvent = window.electronAPI.agent.onScopeRunEvent
       ? window.electronAPI.agent.onScopeRunEvent((event: any) => {
         if (!event.scopeId) return
+        if (!isScopeRunPhase(event.phase) || event.phase === 'idle') return
 
-      upsertScopeRunState(event.scopeId, (previous) => {
+        upsertScopeRunState(event.scopeId, (previous) => {
           const currentState = store.getState()
           const activeMessage = previous?.responseMessageId
             ? currentState.messages.find((item: AgentMessage) => item.id === previous.responseMessageId) || null
@@ -1012,7 +1023,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             store.setState({ streamingRequestId: event.runId || currentState.streamingRequestId })
           }
           const terminalRunEvent = Boolean(
-            event.terminalReason ||
+            store.getState().scopeRunStates[event.scopeId]?.terminalReason ||
             event.phase === 'done' ||
             event.phase === 'error' ||
             event.phase === 'cancelled',

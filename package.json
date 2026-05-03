@@ -59,9 +59,9 @@
     "test:i:gates": "npm run test:i1:gates && node --test scripts/__tests__/check-silent-catch.test.cjs",
     "test:i:focus": "node scripts/check-silent-catch.cjs",
     "verify:i": "npm run verify:i1 && npm run test:i:gates && npm run test:i:focus",
-    "test:j:gates": "node --test scripts/__tests__/check-process-handlers.test.cjs scripts/__tests__/check-log-rotation.test.cjs",
+    "test:j:gates": "node --test scripts/__tests__/check-process-handlers.test.cjs scripts/__tests__/check-log-rotation.test.cjs scripts/__tests__/check-terminal-reason-propagation.test.cjs",
     "test:j:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/process-handlers.test.ts src/__tests__/rotating-logger.test.ts",
-    "verify:j": "npm run verify:i && node scripts/check-process-handlers.cjs && node scripts/check-log-rotation.cjs && npm run test:j:gates && npm run test:j:focus"
+    "verify:j": "npm run verify:i && node scripts/check-process-handlers.cjs && node scripts/check-log-rotation.cjs && node scripts/check-terminal-reason-propagation.cjs && npm run test:j:gates && npm run test:j:focus"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

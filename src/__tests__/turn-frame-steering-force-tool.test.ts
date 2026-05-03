@@ -25,6 +25,7 @@ import {
   validateForcedActionInput,
 } from '../main/modules/agent-control/turn-frame-steering'
 import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminder-registry'
+import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/turn-frame'
 import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
 
@@ -233,6 +234,57 @@ test('selectSteeringMode: force_tool requires resolvable typed action — falls 
   // Without a default resume action AND no explicit action, we cannot
   // resolve a typed tool name, so we fall back to ask_model.
   assert.equal(selectSteeringMode(frame), 'ask_model')
+})
+
+test('buildTurnFrameSteering blocks unknown action-derived tool names and emits a metric', () => {
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const contract = makeContract({
+      action: 'score_batches',
+      toolName: null,
+      sourceUrl: null,
+    } as Partial<SkillRunContract>)
+    const frame = makeFrame({
+      skill: {
+        ...makeFrame().skill!,
+        action: 'score_batches',
+        runContract: contract,
+      },
+    })
+
+    const steering = buildTurnFrameSteering(frame)
+
+    assert.equal(steering.mode, 'ask_model')
+    assert.equal(steering.requiredToolName, null)
+    assert.ok(!steering.preferredToolNames.includes('skill_video_expert_analyzer_score_batches'))
+    const blocked = metrics.find((event) => event.metric === 'preferred_tool_name_synthesis_blocked')
+    assert.ok(blocked, 'expected preferred_tool_name_synthesis_blocked metric')
+    assert.equal(blocked.skillId, 'video-expert-analyzer')
+    assert.equal(blocked.action, 'score_batches')
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('buildTurnFrameSteering keeps real manifest actions in preferredToolNames', () => {
+  const contract = makeContract({
+    action: 'video_expert_ai_analyze',
+    toolName: 'skill_video_expert_ai_analyze',
+    sourceUrl: null,
+  })
+  const frame = makeFrame({
+    skill: {
+      ...makeFrame().skill!,
+      action: 'video_expert_ai_analyze',
+      runContract: contract,
+    },
+  })
+
+  const steering = buildTurnFrameSteering(frame, { recentForceToolDispatched: true })
+
+  assert.equal(steering.mode, 'ask_model')
+  assert.ok(steering.preferredToolNames.includes('skill_video_expert_ai_analyze'))
 })
 
 test('selectSteeringMode: failed liveness short-circuits even with typed action available', () => {

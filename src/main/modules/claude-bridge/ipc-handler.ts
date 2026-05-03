@@ -26,6 +26,7 @@ import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 import type { SendScopedUserMessage } from '../agent-control/send-scoped-confirmation'
+import type { ScopeRunEventPayload } from '../agent-control/types'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -76,6 +77,51 @@ function looksLikeReadableText(value: string): boolean {
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 function log(msg: string) {
   try { directChatLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+}
+
+function mapAgentStatusToScopeRunPhase(status: unknown): ScopeRunEventPayload['phase'] | null {
+  const normalized = String(status || '').trim()
+  if (normalized === 'working') return 'planning'
+  if (normalized === 'checkpoint') return 'checkpoint'
+  if (normalized === 'done') return 'done'
+  if (normalized === 'cancelled') return 'cancelled'
+  if (normalized === 'error' || normalized === 'timeout') return 'error'
+  return null
+}
+
+function mapAgentStatusToScopeRunEventType(status: unknown): ScopeRunEventPayload['type'] {
+  const normalized = String(status || '').trim()
+  if (normalized === 'working') return 'started'
+  if (
+    normalized === 'checkpoint' ||
+    normalized === 'done' ||
+    normalized === 'cancelled' ||
+    normalized === 'error' ||
+    normalized === 'timeout'
+  ) {
+    return 'finished'
+  }
+  return 'updated'
+}
+
+function normalizeScopeRunTerminalReason(value: unknown): ScopeRunEventPayload['terminalReason'] {
+  const normalized = String(value || '').trim()
+  if (
+    normalized === 'done' ||
+    normalized === 'checkpoint_budget' ||
+    normalized === 'checkpoint_background' ||
+    normalized === 'checkpoint_user_input' ||
+    normalized === 'blocked_config' ||
+    normalized === 'blocked_tool_error' ||
+    normalized === 'failed_skill' ||
+    normalized === 'resume_launch_failed' ||
+    normalized === 'persistence_failed' ||
+    normalized === 'cancelled_user' ||
+    normalized === 'cancelled_runtime'
+  ) {
+    return normalized
+  }
+  return null
 }
 
 export interface IPCResponse<T = unknown> {
@@ -1306,24 +1352,22 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:status', data)
       if (data.sessionId) {
-        const phase = data.status === 'working'
-          ? 'planning'
-          : data.status === 'done'
-            ? 'done'
-            : data.status === 'cancelled'
-              ? 'cancelled'
-              : data.status === 'error'
-                ? 'error'
-                : 'queued'
-        const payload = {
-          type: data.status === 'working' ? 'started' : data.status === 'done' || data.status === 'cancelled' || data.status === 'error' ? 'finished' : 'updated',
+        const phase = mapAgentStatusToScopeRunPhase(data.status)
+        if (!phase) {
+          log(`Ignoring unknown agent status for scope run event: status=${String(data.status || '')} agent=${data.agent || ''}`)
+          return
+        }
+        const terminalReason = normalizeScopeRunTerminalReason((data as { terminalReason?: unknown }).terminalReason)
+        const payload: ScopeRunEventPayload = {
+          type: mapAgentStatusToScopeRunEventType(data.status),
           scopeId: data.sessionId,
           agent: data.agent,
           runId: data.runId,
           phase,
+          terminalReason,
           latestText: typeof data.status === 'string' ? `状态：${data.status}` : undefined,
           timestamp: new Date().toISOString(),
-        } as const
+        }
         runtime?.recordScopeRunEvent(payload)
         mainWindow.webContents.send('agent:scopeRunEvent', payload)
       }

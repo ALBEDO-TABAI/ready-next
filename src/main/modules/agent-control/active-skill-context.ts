@@ -12,6 +12,7 @@ import {
   inspectLatestSkillTask,
   type SkillTaskSupervisorSnapshot,
 } from './skill-task-supervisor'
+import { isVeaAction, resolveVeaResumeAction } from './vea-resume-action'
 
 export type ActiveSkillContextSource =
   | 'explicit'
@@ -49,6 +50,7 @@ export interface ResolveActiveSkillContextInputs {
 }
 
 const ACTIVE_CONTEXT_TTL_MS = 30 * 60 * 1000
+const VEA_SKILL_ID = 'video-expert-analyzer'
 const rememberedContexts = new Map<string, ActiveSkillContext>()
 
 function nonEmpty(value: unknown): string | null {
@@ -99,6 +101,33 @@ function pathEnding(projection: TaskProjectionRecord, filename: string): string 
   return null
 }
 
+function normalizeVeaAction(value: unknown): string | null {
+  const raw = nonEmpty(value)
+  if (!raw) return null
+  if (isVeaAction(raw)) return raw
+  if (raw.startsWith('skill_')) {
+    const unprefixed = raw.slice('skill_'.length)
+    if (isVeaAction(unprefixed)) return unprefixed
+  }
+  return null
+}
+
+function resolveContextAction(args: {
+  skillId: string
+  knownAction?: unknown
+  progressStage?: unknown
+  sceneScoresPath?: string | null
+}): string | null {
+  const known = nonEmpty(args.knownAction)
+  if (args.skillId !== VEA_SKILL_ID) return known
+
+  const manifestAction = normalizeVeaAction(known)
+  if (manifestAction) return manifestAction
+
+  return resolveVeaResumeAction(known, { sceneScoresPath: args.sceneScoresPath })
+    || resolveVeaResumeAction(args.progressStage, { sceneScoresPath: args.sceneScoresPath })
+}
+
 function skillIdFromProjection(projection: TaskProjectionRecord): string | null {
   const continuation = projection.continuationRef
   if (continuation?.skillId) return continuation.skillId
@@ -128,6 +157,14 @@ function contextFromProjection(projection: TaskProjectionRecord): ActiveSkillCon
     continuation?.outputDir
     || artifactPathByOutputKey(projection, 'outputDir')
     || (runStatePath ? dirname(runStatePath) : null)
+  const sceneScoresPath =
+    artifactPathByOutputKey(projection, 'sceneScoresPath')
+    || pathEnding(projection, 'scene_scores.json')
+  const rawAction =
+    continuation?.action
+    || firstArtifactMetaString(projection, 'action')
+    || projection.currentStepId
+    || null
   return {
     skillId,
     skillName: null,
@@ -138,17 +175,16 @@ function contextFromProjection(projection: TaskProjectionRecord): ActiveSkillCon
       || (projection.runId.startsWith('dst-') ? projection.runId : null),
     runStatePath,
     outputDir,
-    sceneScoresPath:
-      artifactPathByOutputKey(projection, 'sceneScoresPath')
-      || pathEnding(projection, 'scene_scores.json'),
+    sceneScoresPath,
     deliveryReportPath:
       artifactPathByOutputKey(projection, 'deliveryReportPath')
       || pathEnding(projection, 'delivery_report.json'),
-    action:
-      continuation?.action
-      || firstArtifactMetaString(projection, 'action')
-      || projection.currentStepId
-      || null,
+    action: resolveContextAction({
+      skillId,
+      knownAction: rawAction,
+      progressStage: projection.currentStepId,
+      sceneScoresPath,
+    }),
     source: 'projection',
     confidence: projection.module === 'skill' ? 84 : 78,
     status: projection.status,
@@ -180,7 +216,12 @@ function contextFromSupervisor(snapshot: SkillTaskSupervisorSnapshot | null | un
     outputDir: snapshot.outputDir,
     sceneScoresPath: snapshot.sceneScoresPath,
     deliveryReportPath: snapshot.deliveryReportPath,
-    action: snapshot.action,
+    action: resolveContextAction({
+      skillId: snapshot.skillId,
+      knownAction: snapshot.action,
+      progressStage: snapshot.progress?.currentStage,
+      sceneScoresPath: snapshot.sceneScoresPath,
+    }),
     source: 'supervisor',
     confidence: 92,
     status: snapshot.status,
@@ -201,7 +242,12 @@ function contextFromTaskRun(run: SkillTaskRunRecord | null | undefined): ActiveS
     outputDir: run.outputDir || null,
     sceneScoresPath: run.sceneScoresPath || null,
     deliveryReportPath: run.deliveryReportPath || null,
-    action: run.action || run.toolName || null,
+    action: resolveContextAction({
+      skillId: run.skillId,
+      knownAction: run.action || run.toolName || null,
+      progressStage: null,
+      sceneScoresPath: run.sceneScoresPath || null,
+    }),
     source: 'task_run',
     confidence: run.status === 'running' || run.status === 'blocked' ? 72 : 62,
     status: run.status,

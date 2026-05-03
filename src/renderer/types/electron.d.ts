@@ -477,6 +477,7 @@ interface ScopeRunSummaryData {
   executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
   blockedReason?: string | null
   error?: string | null
+  terminalReason?: ScopeRunTerminalReasonData | null
   updatedAt: string
 }
 
@@ -557,6 +558,20 @@ interface ActiveChildRunSummaryData {
   runStatePath: string
 }
 
+type ScopeRunTerminalReasonData =
+  | 'done'
+  | 'checkpoint_budget'
+  | 'checkpoint_background'
+  | 'checkpoint_user_input'
+  | 'blocked_config'
+  | 'blocked_tool_error'
+  | 'failed_skill'
+  | 'resume_launch_failed'
+  | 'persistence_failed'
+  | 'cancelled_user'
+  | 'cancelled_runtime'
+  | 'infra_error'
+
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
@@ -573,6 +588,7 @@ interface ScopeRunEventData {
     | 'done'
     | 'error'
     | 'cancelled'
+  terminalReason?: ScopeRunTerminalReasonData | null
   latestText?: string
   module?:
     | 'browser'

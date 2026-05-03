@@ -280,7 +280,13 @@ def _validate_delivery_report(report_path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def _classify_result(return_code: int, output_dir: Optional[Path], stderr: str, resolution_error: str = "") -> tuple[bool, str, str]:
+def _classify_result(
+    return_code: int,
+    output_dir: Optional[Path],
+    stderr: str,
+    resolution_error: str = "",
+    action: str = "",
+) -> tuple[bool, str, str]:
     if resolution_error:
         return False, "blocked", resolution_error
     if not output_dir:
@@ -305,6 +311,8 @@ def _classify_result(return_code: int, output_dir: Optional[Path], stderr: str, 
         )
 
     if raw_status in {"completed", "success", "done"}:
+        if action == "video_expert_ai_analyze":
+            return True, "success", ""
         ok, reason = _validate_delivery_report(delivery_report_path)
         if ok:
             return True, "success", ""
@@ -371,7 +379,13 @@ def main() -> int:
         stderr = completed.stderr or ""
         output_dir, resolution_error = _resolve_output_dir(action, payload, stdout, stderr, started_at)
         outputs = _build_outputs(output_dir)
-        ok, status, error_message = _classify_result(completed.returncode, output_dir, stderr, resolution_error)
+        ok, status, error_message = _classify_result(
+            completed.returncode,
+            output_dir,
+            stderr,
+            resolution_error,
+            action,
+        )
         _write_structured_result(
             ok=ok,
             status=status,

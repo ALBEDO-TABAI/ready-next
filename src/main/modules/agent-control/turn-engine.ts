@@ -1082,7 +1082,7 @@ export class TurnEngine {
       } catch {
         // metrics must never break the control path
       }
-      transcript.emitStatus(status)
+      transcript.emitStatus(status, terminalReason)
       return {
         ...state.buildResult({
           success: params.success,

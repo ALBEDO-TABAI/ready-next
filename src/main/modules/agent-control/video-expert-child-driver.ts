@@ -16,13 +16,15 @@
  * Tests live in `src/__tests__/video-expert-child-driver.test.ts`.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 
 import { logAgentMetric } from './metrics'
 import type { SkillRunContract } from './run-contracts'
+import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from './skill-progress-artifacts'
 import {
   registerSkillChildDriver,
   type SkillChildDriver,
@@ -40,6 +42,7 @@ const AI_ANALYZE_ACTION = 'video_expert_ai_analyze'
 
 interface VeaDriverState extends SkillChildDriverState {
   skillId: string
+  requestedAction: string
   outputDir: string | null
   runStatePath: string | null
   requestedInput: Record<string, unknown>
@@ -136,6 +139,17 @@ function readRunState(runStatePath: string | null): ParsedVeaRunState | null {
   }
 }
 
+function readJson(path: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
 function inferSceneScoresPath(parsed: ParsedVeaRunState | null, outputDir: string | null): string | null {
   if (parsed?.sceneScoresPath) {
     if (existsSync(parsed.sceneScoresPath)) return parsed.sceneScoresPath
@@ -146,22 +160,105 @@ function inferSceneScoresPath(parsed: ParsedVeaRunState | null, outputDir: strin
   return existsSync(guessed) ? guessed : null
 }
 
+function hasUnfinishedArtifactProgress(progress: SkillProgressArtifacts): boolean {
+  if (!progress.hasEvidence) return false
+  if (progress.totalScenes !== null && progress.completedScenes !== null && progress.completedScenes < progress.totalScenes) {
+    return true
+  }
+  if (progress.hostBatches && progress.hostBatches.completedBatches < progress.hostBatches.totalBatches) {
+    return true
+  }
+  return false
+}
+
+function expandHome(path: string): string {
+  if (path === '~') return process.env.HOME || homedir()
+  if (path.startsWith('~/')) return join(process.env.HOME || homedir(), path.slice(2))
+  return path
+}
+
+function getObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function findPreferredModelConfigIssue(): string | null {
+  const configPath = expandHome('~/.config/video-expert-analyzer-vnext/config.json')
+  const config = existsSync(configPath) ? readJson(configPath) : null
+  const autoScoring = getObject(config?.auto_scoring)
+  const preferredModel = trim(autoScoring?.preferred_model) || 'kcode/K2.6-code-preview'
+  const modelsJsonPath = trim(autoScoring?.models_json_path)
+  const configuredCatalogPath = modelsJsonPath ? expandHome(modelsJsonPath) : null
+  const catalogPath = configuredCatalogPath && existsSync(configuredCatalogPath)
+    ? configuredCatalogPath
+    : findDefaultOpenClawModelsJson()
+
+  if (!catalogPath) {
+    return null
+  }
+
+  const catalog = existsSync(catalogPath) ? readJson(catalogPath) : null
+  const providers = getObject(catalog?.providers)
+  if (!providers) return `models catalog has no providers for ${preferredModel}.`
+
+  const slash = preferredModel.indexOf('/')
+  if (slash <= 0 || slash === preferredModel.length - 1) {
+    return `preferred model ${preferredModel} is not provider/model form.`
+  }
+  const providerName = preferredModel.slice(0, slash)
+  const modelId = preferredModel.slice(slash + 1)
+  const provider = getObject(providers[providerName])
+  if (!provider) return `preferred model ${preferredModel} references missing provider ${providerName}.`
+  const models = Array.isArray(provider.models) ? provider.models : []
+  const exists = models.some((model) => getObject(model)?.id === modelId)
+  return exists ? null : `preferred model ${preferredModel} is not in provider ${providerName} catalog.`
+}
+
+function findDefaultOpenClawModelsJson(): string | null {
+  const root = process.env.OPENCLAW_ROOT || join(process.env.HOME || homedir(), '.openclaw')
+  const explicit = process.env.OPENCLAW_MODELS_JSON
+  if (explicit && existsSync(expandHome(explicit))) return expandHome(explicit)
+  const agentsDir = join(root, 'agents')
+  try {
+    const candidates: Array<{ agentName: string; path: string }> = []
+    for (const agentName of readdirSync(agentsDir)) {
+      const candidate = join(agentsDir, agentName, 'agent', 'models.json')
+      if (existsSync(candidate)) candidates.push({ agentName, path: candidate })
+    }
+    candidates.sort((a, b) => {
+      const aMain = a.agentName === 'main' ? 0 : 1
+      const bMain = b.agentName === 'main' ? 0 : 1
+      return aMain - bMain || a.agentName.localeCompare(b.agentName)
+    })
+    return candidates[0]?.path || null
+  } catch {
+    return null
+  }
+}
+
+function shouldPreflightFreshAiAnalyze(state: VeaDriverState): boolean {
+  return state.actionsPlanned === 0
+}
+
 function makeBaseClose(
   state: VeaDriverState,
   parsed: ParsedVeaRunState | null,
+  artifactProgress?: SkillProgressArtifacts | null,
 ): Omit<SkillChildCloseEvent, 'status' | 'terminalReason' | 'error'> {
+  const sceneScoresPath = artifactProgress?.sceneScoresPath || inferSceneScoresPath(parsed, state.outputDir)
   return {
     childRunId: '',
     skillId: VEA_SKILL_ID,
     outputDir: state.outputDir,
     runStatePath: state.runStatePath,
-    sceneScoresPath: inferSceneScoresPath(parsed, state.outputDir),
+    sceneScoresPath,
     deliveryReportPath: null,
     progress: {
       stage: parsed?.currentStage ?? null,
-      totalUnits: parsed?.totalScenes ?? null,
-      completedUnits: parsed?.completedScenes ?? null,
-      coverageRatio: parsed?.coverageRatio ?? null,
+      totalUnits: artifactProgress?.totalScenes ?? parsed?.totalScenes ?? null,
+      completedUnits: artifactProgress?.completedScenes ?? parsed?.completedScenes ?? null,
+      coverageRatio: artifactProgress?.coverageRatio ?? parsed?.coverageRatio ?? null,
       fingerprint: null,
     },
     framePatch: null,
@@ -173,6 +270,33 @@ function isClose(value: unknown): value is SkillChildCloseEvent {
   return typeof value === 'object' && value !== null
     && 'status' in (value as Record<string, unknown>)
     && 'terminalReason' in (value as Record<string, unknown>)
+}
+
+function maybeBlockFreshAiAnalyze(state: VeaDriverState, parsed: ParsedVeaRunState | null, artifactProgress: SkillProgressArtifacts): SkillChildCloseEvent | null {
+  if (!shouldPreflightFreshAiAnalyze(state)) return null
+  const issue = findPreferredModelConfigIssue()
+  if (!issue) return null
+  return {
+    ...makeBaseClose(state, parsed, artifactProgress),
+    status: 'blocked',
+    terminalReason: 'blocked_config',
+    error: {
+      kind: 'blocked_config',
+      message: `VEA provider preflight failed: ${issue}`,
+    },
+  }
+}
+
+function makeAiAnalyzePlan(
+  state: VeaDriverState,
+  parsed: ParsedVeaRunState | null,
+  artifactProgress: SkillProgressArtifacts,
+  input: Record<string, unknown>,
+): SkillChildDriverAction | SkillChildCloseEvent {
+  const blocked = maybeBlockFreshAiAnalyze(state, parsed, artifactProgress)
+  if (blocked) return blocked
+  state.actionsPlanned += 1
+  return { action: AI_ANALYZE_ACTION, input }
 }
 
 class VideoExpertChildDriver implements SkillChildDriver {
@@ -211,6 +335,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     const parsedRunState = readRunState(runStatePath)
     const state: VeaDriverState = {
       skillId: VEA_SKILL_ID,
+      requestedAction: params.action,
       outputDir: outputDirInput,
       runStatePath,
       requestedInput,
@@ -228,11 +353,39 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // but a resume call lands here straight without an observation.
     const parsed = state.runStatePath ? readRunState(state.runStatePath) : null
     state.parsedRunState = parsed ?? state.parsedRunState
+    const artifactProgress = inspectSkillProgressArtifacts({
+      outputDir: state.outputDir,
+      sceneScoresPath: trim(state.requestedInput.sceneScoresPath),
+    })
+
+    const explicitSceneScoresPath = trim(state.requestedInput.sceneScoresPath)
+    const sceneScoresPath = explicitSceneScoresPath
+      ?? artifactProgress.sceneScoresPath
+      ?? inferSceneScoresPath(parsed, state.outputDir)
+
+    if (parsed?.status && COMPLETED_STATUSES.has(parsed.status) && hasUnfinishedArtifactProgress(artifactProgress)) {
+      if (sceneScoresPath) {
+        const input: Record<string, unknown> = { sceneScoresPath }
+        const mode = trim(state.requestedInput.mode)
+        if (mode) input.mode = mode
+        if (state.outputDir) input.outputDir = state.outputDir
+        return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
+      }
+      return {
+        ...makeBaseClose(state, parsed, artifactProgress),
+        status: 'recoverable_paused',
+        terminalReason: 'checkpoint_background',
+        error: {
+          kind: 'stale_completed_run_state',
+          message: 'VEA run_state is completed but progress artifacts are incomplete',
+        },
+      }
+    }
 
     // Terminal: completed.
     if (parsed?.status && COMPLETED_STATUSES.has(parsed.status)) {
       return {
-        ...makeBaseClose(state, parsed),
+        ...makeBaseClose(state, parsed, artifactProgress),
         status: 'completed',
         terminalReason: 'completed',
         error: null,
@@ -245,7 +398,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
         ? 'blocked_config'
         : 'blocked_external'
       return {
-        ...makeBaseClose(state, parsed),
+        ...makeBaseClose(state, parsed, artifactProgress),
         status: 'blocked',
         terminalReason: reason,
         error: {
@@ -258,7 +411,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // Terminal: skill-declared failure.
     if (parsed?.status && FAILED_STATUSES.has(parsed.status)) {
       return {
-        ...makeBaseClose(state, parsed),
+        ...makeBaseClose(state, parsed, artifactProgress),
         status: 'failed',
         terminalReason: 'failed_skill',
         error: { kind: 'failed_skill', message: `VEA run state reports status=${parsed.status}` },
@@ -269,8 +422,6 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // inference from run_state / outputDir. This is what unlocks the AI
     // scoring cold-start path where the caller already produced
     // scene_scores.json out-of-band (e.g. RSS visual flow's second stage).
-    const explicitSceneScoresPath = trim(state.requestedInput.sceneScoresPath)
-    const sceneScoresPath = explicitSceneScoresPath ?? inferSceneScoresPath(parsed, state.outputDir)
     const stagePostScore = parsed?.currentStage
       ? POST_SCORE_STAGES.has(parsed.currentStage)
       : false
@@ -279,8 +430,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
       const input: Record<string, unknown> = { sceneScoresPath }
       const mode = trim(state.requestedInput.mode)
       if (mode) input.mode = mode
-      state.actionsPlanned += 1
-      return { action: AI_ANALYZE_ACTION, input }
+      return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
     }
 
     // Cold-start AI-analyze: caller passed an explicit sceneScoresPath and
@@ -296,14 +446,13 @@ class VideoExpertChildDriver implements SkillChildDriver {
       const mode = trim(state.requestedInput.mode)
       if (mode) input.mode = mode
       if (state.outputDir) input.outputDir = state.outputDir
-      state.actionsPlanned += 1
-      return { action: AI_ANALYZE_ACTION, input }
+      return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
     }
 
     // Need scene_scores to advance but no path is reachable → recoverable pause.
     if (stagePostScore && !sceneScoresPath) {
       return {
-        ...makeBaseClose(state, parsed),
+        ...makeBaseClose(state, parsed, artifactProgress),
         status: 'recoverable_paused',
         terminalReason: 'checkpoint_background',
         error: {
@@ -329,7 +478,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // Edge case: no URL, no scene_scores, no useful run_state — surface as a
     // recoverable pause so the parent can ask the user instead of looping.
     return {
-      ...makeBaseClose(state, parsed),
+      ...makeBaseClose(state, parsed, artifactProgress),
       status: 'recoverable_paused',
       terminalReason: 'checkpoint_background',
       error: {

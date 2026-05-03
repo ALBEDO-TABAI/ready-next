@@ -89,6 +89,7 @@ export interface TurnTranscriptEvent {
   type?: string
   chunk?: string
   status?: string
+  terminalReason?: TurnTerminalReason | null
   error?: string
   tool?: string
   args?: Record<string, unknown>
@@ -842,7 +843,7 @@ export interface TurnEngineRequest<TSession extends TurnEngineSession = TurnEngi
         projectionPatch?: Record<string, unknown> | null
       },
     ) => void
-    emitStatus: (status: string) => void
+    emitStatus: (status: string, terminalReason?: TurnTerminalReason | null) => void
     emitRuntimeError: (error: unknown, options?: { toolName?: string }) => void
     emitToolAction: (tool: string, args: Record<string, unknown>) => void
   }

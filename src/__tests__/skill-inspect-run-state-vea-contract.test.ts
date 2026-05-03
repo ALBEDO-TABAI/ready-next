@@ -92,6 +92,9 @@ test('skill_inspect_run_state returns artifact progress and reconciled paused li
     assert.equal(data.artifactProgress.totalScenes, 97)
     assert.equal(data.artifactProgress.completedScenes, 0)
     assert.equal(data.artifactProgress.coverageRatio, 0)
+    assert.equal(data.artifactProgress.hostBatches.totalBatches, 17)
+    assert.equal(data.artifactProgress.hostBatches.completedBatches, 0)
+    assert.equal(data.artifactProgress.hostBatches.statusCounts.pending, 17)
     assert.equal(data.reconciledLiveness, 'recoverable_paused')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -417,6 +420,21 @@ test('A3: skill_inspect_run_state result carries framePatch.runContract.artifact
       runContract.artifactPaths!.sceneScoresPath,
       scenesPath,
       'Stage A3 regression: framePatch.runContract.artifactPaths.sceneScoresPath did not match the path the inspect already discovered.',
+    )
+    assert.equal(
+      (framePatch as any).runContract?.action,
+      'video_expert_ai_analyze',
+      'VEA progress stage score_batches must resolve to the executable ai_analyze action when scene_scores.json exists.',
+    )
+    assert.equal(
+      (framePatch as any).runContract?.progress?.stage,
+      'score_batches',
+      'VEA progress stage must remain visible as progress, not disappear into action.',
+    )
+    assert.equal(
+      (framePatch as any).skillStatusUpdates?.action,
+      'video_expert_ai_analyze',
+      'skillStatusUpdates.action must never receive the raw VEA progress stage.',
     )
   } finally {
     rmSync(dir, { recursive: true, force: true })
