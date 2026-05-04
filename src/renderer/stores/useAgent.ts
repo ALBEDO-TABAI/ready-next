@@ -52,7 +52,7 @@ async function callCreateLocalScopeWithMetric(
       return result ?? null
     }
     return result
-  } catch (error) {
+  } catch {
     scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'ipc_rejected', scopeId, agent)
     return null
   }

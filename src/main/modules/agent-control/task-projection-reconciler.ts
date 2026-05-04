@@ -97,7 +97,12 @@ function maybeEmitTaskProjectionJsonReadFailed(
   })
 }
 
-/** Test-only: clears the 60s metric throttle so successive cases emit independently. */
+/**
+ * Test-only: clears the 60s metric throttle so successive cases emit
+ * independently. Touches only the in-memory throttle Map; does NOT mutate
+ * any production invariant (the metric is pure observability).
+ */
+export const __noProductionInvariantBreach = true
 export function __resetTaskProjectionJsonReadThrottleForTests(): void {
   taskProjectionJsonReadEmitMs.clear()
 }
