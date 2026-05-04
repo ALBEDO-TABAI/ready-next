@@ -58,6 +58,7 @@ import {
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
+import { emitRendererAgentMetric } from '../../modules/agent/rendererMetrics'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 import type {
   ActiveChildRunSummaryData,
@@ -725,6 +726,22 @@ function TaskCard({
   onContinueChildRun?: (scopeId: string, childRunId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
+  const legacyHandoffReportedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const hit = vm.legacyHandoffHit
+    if (!hit) return
+    const runId = run.scopeId
+    if (!runId) return
+    const taskId = run.taskId ?? 'no-task'
+    const key = `${runId}|${taskId}|${hit}`
+    if (legacyHandoffReportedRef.current.has(key)) return
+    legacyHandoffReportedRef.current.add(key)
+    emitRendererAgentMetric('legacy_handoff_text_fallback_used', {
+      runId,
+      taskId,
+      source: hit,
+    })
+  }, [vm.legacyHandoffHit, run.scopeId, run.taskId])
   const primaryTitle = vm.title
   const steps = run.steps || []
   const PLAN_STEP_COLLAPSE_THRESHOLD = 10

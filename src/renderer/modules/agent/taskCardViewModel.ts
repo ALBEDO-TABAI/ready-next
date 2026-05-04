@@ -69,6 +69,7 @@ export interface TaskCardViewModel {
   currentStep?: NonNullable<TaskCardRunLike['steps']>[number] | null
   sections: Record<TaskSectionKey, TaskSectionViewModel>
   detailGroups: TaskEventGroupViewModel[]
+  legacyHandoffHit?: 'pathMatch' | 'subtaskMatch' | 'rawIncludes'
 }
 
 export type TaskCardVisualState =
@@ -154,6 +155,7 @@ interface InternalAgentHandoffInfo {
   taskName: string
   summary: string
   progressLabel: string
+  legacyHit?: 'pathMatch' | 'subtaskMatch' | 'rawIncludes'
 }
 
 const VEA_AUDIOVISUAL_HANDOFF_LABELS: Record<string, InternalAgentHandoffInfo> = {
@@ -181,11 +183,17 @@ function classifyInternalAgentHandoffText(text: string | null | undefined): Inte
   const subtaskMatch = raw.match(/视听剖析子任务\s*[`'“”"]?([^`'“”"\s；;]+)[`'“”"]?\s*待\s*agent\s*处理/i)
   if (!pathMatch && !subtaskMatch && !raw.includes('audiovisual_handoff')) return null
   const taskName = String(pathMatch?.[1] || subtaskMatch?.[1] || '').trim().toLowerCase()
-  return VEA_AUDIOVISUAL_HANDOFF_LABELS[taskName] || {
+  const legacyHit: InternalAgentHandoffInfo['legacyHit'] = pathMatch
+    ? 'pathMatch'
+    : subtaskMatch
+      ? 'subtaskMatch'
+      : 'rawIncludes'
+  const base = VEA_AUDIOVISUAL_HANDOFF_LABELS[taskName] || {
     taskName: taskName || 'handoff',
     summary: '视听报告还有收尾内容需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
     progressLabel: '生成视听报告',
   }
+  return { ...base, legacyHit }
 }
 
 function classifyStructuredHandoff(progress: ProgressWithActivity | undefined | null): InternalAgentHandoffInfo | null {
@@ -442,8 +450,13 @@ export function buildTaskCardViewModel(
   const detailGroups = buildDetailGroups(run.toolTrace || [])
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
-  const summary = run.progress?.handoff?.userMessage
-    || formatTaskUserFacingText(run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase))
+  const structuredHandoffMessage = run.progress?.handoff?.userMessage
+  const rawHandoffSource = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
+  const summary = structuredHandoffMessage
+    || formatTaskUserFacingText(rawHandoffSource)
+  const legacyHandoffHit = structuredHandoffMessage
+    ? undefined
+    : classifyInternalAgentHandoffText(rawHandoffSource)?.legacyHit
   const runtimeState = deriveTaskCardRuntimeState(run)
   const statusLabel = run.phase === 'cancelled' ? taskPhaseLabel(run.phase) : runtimeState.statusLabel
 
@@ -453,6 +466,7 @@ export function buildTaskCardViewModel(
     phase: run.phase,
     statusLabel,
     summary,
+    legacyHandoffHit,
     currentStep,
     sections: {
       overview: {

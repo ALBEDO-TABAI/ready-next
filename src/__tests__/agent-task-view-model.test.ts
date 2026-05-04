@@ -330,4 +330,83 @@ describe('task card view model', () => {
     assert.strictEqual(isInternalAgentHandoffTask(run), true)
     assert.ok(!vm.summary.includes('audiovisual_handoff'))
   })
+
+  it('reports legacyHandoffHit as pathMatch when raw text contains audiovisual_handoff path', () => {
+    const rawBlocker = '请读取并完成 `audiovisual_handoff/body/task.md` 后重新运行 finalize。'
+    const run = createRun({
+      phase: 'checkpoint',
+      status: 'blocked',
+      taskTitle: '后台技能任务 · video-expert-analyzer',
+      taskSummary: rawBlocker,
+      blockedReason: rawBlocker,
+      waitingFor: 'clarification',
+      resumableActions: ['continue', 'cancel'],
+      progress: null,
+    })
+
+    const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
+
+    assert.strictEqual(vm.legacyHandoffHit, 'pathMatch')
+  })
+
+  it('leaves legacyHandoffHit undefined when structured progress.handoff is present', () => {
+    const run = createRun({
+      phase: 'checkpoint',
+      status: 'blocked',
+      taskTitle: '后台技能任务 · video-expert-analyzer',
+      taskSummary: '内部状态占位',
+      blockedReason: '内部状态占位',
+      progress: {
+        stage: 'finalize',
+        completed: 19,
+        total: 19,
+        coverage: 1,
+        overallCoverage: 0.98,
+        fingerprint: 'fp-structured-handoff',
+        updatedAt: '2026-05-04T10:00:00.000Z',
+        lastError: null,
+        activityUpdatedAt: '2026-05-04T09:46:00.000Z',
+        handoff: {
+          status: 'pending_retry',
+          kind: 'audiovisual_report',
+          taskName: 'body',
+          userMessage: '视听报告正文生成超时，可继续重试。',
+          actionLabel: '继续生成报告',
+          attemptCount: 2,
+          lastErrorKind: 'handoff_timeout',
+          lastErrorMessage: '报告生成超时，可继续重试',
+          taskPath: '/tmp/output/audiovisual_handoff/body/task.md',
+          outputPath: '/tmp/output/audiovisual_handoff/body/output.md',
+          updatedAt: '2026-05-04T10:00:00.000Z',
+        },
+      } as TaskCardRunLike['progress'],
+    })
+
+    const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
+
+    assert.strictEqual(vm.legacyHandoffHit, undefined)
+  })
+
+  it('buildTaskCardViewModel is a pure function with no observable side effects', () => {
+    const rawBlocker = '请读取并完成 `audiovisual_handoff/body/task.md` 后重新运行 finalize。'
+    const run = createRun({
+      phase: 'checkpoint',
+      status: 'blocked',
+      taskSummary: rawBlocker,
+      blockedReason: rawBlocker,
+      progress: null,
+    })
+
+    // Snapshot global state that emitRendererAgentMetric would touch.
+    const hadWindow = typeof (globalThis as { window?: unknown }).window !== 'undefined'
+
+    for (let i = 0; i < 1000; i += 1) {
+      const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
+      assert.strictEqual(vm.legacyHandoffHit, 'pathMatch')
+    }
+
+    // No global was created by the call; the function must remain pure.
+    const stillHasWindow = typeof (globalThis as { window?: unknown }).window !== 'undefined'
+    assert.strictEqual(stillHasWindow, hadWindow)
+  })
 })
