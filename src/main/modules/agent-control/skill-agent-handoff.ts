@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { atomicWriteJson } from './atomic-write'
+import {
+  HANDOFF_TIMEOUT_USER_MESSAGE,
+  isSafeRelativePath,
+  numberValue,
+  objectValue,
+  readJson,
+  stringValue,
+} from './skill-handoff-shared'
 import type { ScopeRunSkillHandoff } from './types'
 
 export interface SkillHandoffWriteTarget {
@@ -17,46 +25,12 @@ const PENDING_HANDOFF_STATUSES = new Set(['pending', 'in_progress', 'blocked', '
 const HANDOFF_RECEIPT_LOCATIONS = [
   'audiovisual_handoff',
 ] as const
-const HANDOFF_TIMEOUT_USER_MESSAGE = '报告生成超时，可继续重试'
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
-function numberValue(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value)
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed)
-  }
-  return 0
-}
-
-function isSafeRelativePath(value: string): boolean {
-  if (isAbsolute(value)) return false
-  const parts = value.replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts.length > 0 && parts.every((part) => part !== '.' && part !== '..')
-}
 
 function targetPathForReceiptOutput(handoffDirName: string, output: string): string | null {
   const clean = output.replace(/\\/g, '/').trim()
   if (!isSafeRelativePath(clean)) return null
   if (clean === handoffDirName || clean.startsWith(`${handoffDirName}/`)) return clean
   return join(handoffDirName, clean)
-}
-
-function readJson(path: string): Record<string, unknown> | null {
-  try {
-    return objectValue(JSON.parse(readFileSync(path, 'utf8')) as unknown)
-  } catch {
-    return null
-  }
 }
 
 function sha256File(path: string): string {

@@ -1,9 +1,17 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { atomicWriteText } from './atomic-write'
 import { markSkillHandoffOutputCompleted, updateSkillHandoffTaskState } from './skill-agent-handoff'
+import {
+  HANDOFF_TIMEOUT_USER_MESSAGE,
+  isSafeRelativePath,
+  numberValue,
+  objectValue,
+  readJson,
+  stringValue,
+} from './skill-handoff-shared'
 
 export interface SkillHandoffTask {
   name: string
@@ -32,46 +40,12 @@ export interface CompletePendingSkillHandoffsOptions {
 const HANDOFF_DIR = 'audiovisual_handoff'
 const HANDOFF_TIMEOUT_MS = 240_000
 const HANDOFF_MAX_ATTEMPTS = 3
-const HANDOFF_TIMEOUT_USER_MESSAGE = '报告生成超时，可继续重试'
 const inFlightHandoffs = new Map<string, Promise<SkillHandoffCompletionSummary>>()
-
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function readJson(path: string): Record<string, unknown> | null {
-  try {
-    return objectValue(JSON.parse(readFileSync(path, 'utf8')) as unknown)
-  } catch {
-    return null
-  }
-}
-
-function numberValue(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value)
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed)
-  }
-  return 0
-}
-
-function isSafeRelativePath(path: string): boolean {
-  if (!path || isAbsolute(path)) return false
-  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts.length > 0 && parts.every((part) => part !== '.' && part !== '..')
-}
 
 function resolveTaskPaths(outputDir: string, name: string, rawTask: unknown): SkillHandoffTask | null {
   const task = objectValue(rawTask)
-  const taskRel = stringValue(task?.task) || `${HANDOFF_DIR}/${name}/task.md`
-  const outputRelRaw = stringValue(task?.output)
+  const taskRel = (stringValue(task?.task) ?? '') || `${HANDOFF_DIR}/${name}/task.md`
+  const outputRelRaw = stringValue(task?.output) ?? ''
   if (!isSafeRelativePath(taskRel) || !isSafeRelativePath(outputRelRaw)) return null
   const outputRel = outputRelRaw.startsWith(`${HANDOFF_DIR}/`)
     ? outputRelRaw
@@ -91,7 +65,7 @@ export function listPendingSkillHandoffTasks(outputDir: string): SkillHandoffTas
   const pending: SkillHandoffTask[] = []
   for (const [name, rawTask] of Object.entries(tasks)) {
     const task = objectValue(rawTask)
-    const status = stringValue(task?.status).toLowerCase()
+    const status = (stringValue(task?.status) ?? '').toLowerCase()
     if (status !== 'pending' && status !== 'pending_retry' && status !== 'in_progress' && status !== 'blocked' && status !== 'completed') continue
     const item = resolveTaskPaths(outputDir, name, rawTask)
     if (!item) continue
@@ -154,7 +128,7 @@ function extractOpenAIChatText(payload: unknown): string {
     const content = message?.content
     if (typeof content === 'string' && content.trim()) return content
     if (Array.isArray(content)) {
-      const text = content.map((part) => stringValue(objectValue(part)?.text)).filter(Boolean).join('\n')
+      const text = content.map((part) => stringValue(objectValue(part)?.text) ?? '').filter(Boolean).join('\n')
       if (text.trim()) return text
     }
   }
@@ -163,14 +137,14 @@ function extractOpenAIChatText(payload: unknown): string {
 
 function extractResponsesText(payload: unknown): string {
   const rec = objectValue(payload)
-  const direct = stringValue(rec?.output_text)
+  const direct = stringValue(rec?.output_text) ?? ''
   if (direct) return direct
   const output = Array.isArray(rec?.output) ? rec.output : []
   const parts: string[] = []
   for (const item of output) {
     const content = Array.isArray(objectValue(item)?.content) ? objectValue(item)?.content as unknown[] : []
     for (const part of content) {
-      const text = stringValue(objectValue(part)?.text)
+      const text = stringValue(objectValue(part)?.text) ?? ''
       if (text) parts.push(text)
     }
   }
@@ -180,7 +154,7 @@ function extractResponsesText(payload: unknown): string {
 function extractAnthropicText(payload: unknown): string {
   const rec = objectValue(payload)
   const content = Array.isArray(rec?.content) ? rec.content : []
-  return content.map((part) => stringValue(objectValue(part)?.text)).filter(Boolean).join('\n')
+  return content.map((part) => stringValue(objectValue(part)?.text) ?? '').filter(Boolean).join('\n')
 }
 
 async function fetchWithTimeout(
@@ -332,8 +306,8 @@ function markInProgress(task: SkillHandoffTask): void {
 
 function isAbortLikeError(error: unknown): boolean {
   const rec = objectValue(error)
-  const name = stringValue(rec?.name)
-  const message = error instanceof Error ? error.message : stringValue(rec?.message)
+  const name = stringValue(rec?.name) ?? ''
+  const message = error instanceof Error ? error.message : (stringValue(rec?.message) ?? '')
   return name === 'AbortError'
     || message === 'This operation was aborted'
     || message === 'The operation was aborted'
@@ -348,7 +322,7 @@ function classifyHandoffError(error: unknown): { kind: string, message: string }
   }
   const message = error instanceof Error
     ? error.message
-    : stringValue(error) || 'handoff completion failed'
+    : (stringValue(error) ?? '') || 'handoff completion failed'
   if (message.startsWith('handoff model failed')) {
     return {
       kind: 'handoff_model_failed',
