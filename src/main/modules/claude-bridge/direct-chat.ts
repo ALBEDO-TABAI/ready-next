@@ -142,6 +142,7 @@ import { OpenAIExecutionClient } from './openai-execution-client'
 import { VideoFallbackService } from './video-fallback-service'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { readAIConfigDetailed, type AIConfigLoad } from './direct-chat-ai-config'
+import { AttachmentLoadFailureThrottle } from './direct-chat-attachment-metrics'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -291,6 +292,7 @@ export class DirectChatEngine extends EventEmitter {
     }) => Promise<Record<string, unknown>>) | null = null
   private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
   private maxToolIterations = 24
+  private attachmentLoadFailureThrottle = new AttachmentLoadFailureThrottle()
 
   constructor() {
     super()
@@ -623,7 +625,16 @@ export class DirectChatEngine extends EventEmitter {
           createdAt: item.created_at,
         }))
         .filter((item) => item.attachmentId && item.name && item.path)
-    } catch {
+    } catch (error) {
+      // Stage 2.2: previously this catch silently returned `[]`, making DB
+      // load failures indistinguishable from "user has no attachments" for
+      // operators. Caller contract stays the same (`[]` on failure) so
+      // BrowserTaskPlanner is unaffected; the throttle ensures a polling
+      // renderer cannot flood the metric log on a persistent DB outage.
+      const message = error instanceof Error ? error.message : String(error)
+      this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'db_error', {
+        message: message.slice(0, 200),
+      })
       return []
     }
   }
