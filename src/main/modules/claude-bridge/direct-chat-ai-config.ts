@@ -44,3 +44,24 @@ export function readAIConfigDetailed(
     return { ok: false, reason: 'json_corrupt', message }
   }
 }
+
+/**
+ * Stage 2.4b — convert an `AIConfigLoad` result to a usable
+ * `AIModelConfig | null`, throwing with a descriptive message when the load
+ * itself failed.
+ *
+ * Used by Claude Code subprocess startup (agent-manager.ts) to refuse to
+ * launch on corrupt / DB-erroring config rather than silently falling
+ * through to env-var defaults — which previously masked the real cause as
+ * a downstream auth error.
+ */
+export function unwrapAIConfigOrThrow(detail: AIConfigLoad): AIModelConfig | null {
+  if (!detail.ok) {
+    const msg =
+      detail.reason === 'json_corrupt'
+        ? 'AI 配置已损坏（JSON 解析失败），请前往设置页重置'
+        : 'AI 配置读取失败（数据库错误），请稍后重试或检查日志'
+    throw new Error(msg)
+  }
+  return detail.config
+}

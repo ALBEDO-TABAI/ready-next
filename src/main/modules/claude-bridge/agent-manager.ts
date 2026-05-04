@@ -1,8 +1,13 @@
 import { spawn, spawnSync, ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { WorktreePool } from './worktree-pool'
-import { type AIModelConfig, normalizeAIConfig } from '../../../shared/ai-providers'
+import { type AIModelConfig } from '../../../shared/ai-providers'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import {
+  readAIConfigDetailed,
+  unwrapAIConfigOrThrow,
+  type AIConfigLoad,
+} from './direct-chat-ai-config'
 
 export interface AgentInstance {
   name: string
@@ -542,16 +547,20 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Read the current AI model config from the database (settings table).
-   * Falls back to env vars or hardcoded defaults if not set.
+   *
+   * Stage 2.4b — replaces the legacy try/catch-and-return-null with a
+   * detailed result via `readAIConfigDetailed` so callers can distinguish
+   * absent / corrupt / DB-error. The legacy `getAIConfig()` adapter is
+   * preserved for callers that don't need the failure mode.
    */
+  private getAIConfigDetailed(): AIConfigLoad {
+    return readAIConfigDetailed(() => settingsRepository.getSetting('ai_model_config'))
+  }
+
   private getAIConfig(): AIModelConfig | null {
-    try {
-      const raw = settingsRepository.getSetting('ai_model_config')
-      if (raw) return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
-    } catch {
-      // ignore parse errors
-    }
-    return null
+    const detail = this.getAIConfigDetailed()
+    if (!detail.ok) return null
+    return detail.config
   }
 
   /**
@@ -560,8 +569,13 @@ export class AgentManager extends EventEmitter {
   private createClaudeProcess(worktreePath: string, task: string): ChildProcess {
     const toolPrompt = buildToolSystemPrompt()
 
-    // Read dynamic AI config from database
-    const aiConfig = this.getAIConfig()
+    // Read dynamic AI config from database. Stage 2.4b: refuse to launch
+    // when the config is corrupt or the DB throws — the caller in
+    // `runWithSession` (try/catch around createClaudeProcess) catches this
+    // and falls back to mock mode with the actual reason in the output
+    // stream, instead of starting a subprocess with empty creds that fails
+    // later as an opaque auth error.
+    const aiConfig = unwrapAIConfigOrThrow(this.getAIConfigDetailed())
     const baseUrl = aiConfig?.baseUrl
       || process.env.ANTHROPIC_BASE_URL
       || 'https://api.moonshot.cn/v1'
