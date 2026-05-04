@@ -1,4 +1,5 @@
 import { logAgentMetric } from '../agent-control/metrics'
+import { PROJECTION_OBSERVABILITY_METRICS } from '../agent-control/projection-observability-metrics'
 
 export interface ChildRunIpcResponse<T = unknown> {
   success: boolean
@@ -7,8 +8,14 @@ export interface ChildRunIpcResponse<T = unknown> {
   mock?: boolean
 }
 
+/**
+ * Stage 3 W1 — IPC consumer reads `listActiveChildRunsWithDiagnostics`
+ * (rather than `listActiveChildRuns`) so projection-DB jitter surfaces as a
+ * metric while in-memory rows continue flowing to the UI. Cancel path is
+ * unchanged.
+ */
 interface ActiveChildRunRuntimeLike {
-  listActiveChildRuns: () => unknown
+  listActiveChildRunsWithDiagnostics: () => unknown
   cancelChildRun: (childRunId: string, options: { source: 'ui_button' }) => Promise<unknown>
 }
 
@@ -80,11 +87,28 @@ function normalizeActiveChildRun(
   }
 }
 
+function isProjectionFailure(value: unknown): value is { reason: string; message: string } {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.reason === 'string' && typeof candidate.message === 'string'
+}
+
 export function listActiveChildRunsForIpc(
-  runtime: Pick<ActiveChildRunRuntimeLike, 'listActiveChildRuns'> | null,
+  runtime: Pick<ActiveChildRunRuntimeLike, 'listActiveChildRunsWithDiagnostics'> | null,
 ): ChildRunIpcResponse {
   try {
-    const raw = runtime!.listActiveChildRuns()
+    const diagnostics = runtime!.listActiveChildRunsWithDiagnostics()
+    if (!diagnostics || typeof diagnostics !== 'object' || Array.isArray(diagnostics)) {
+      return { success: false, error: 'invalid_payload_shape' }
+    }
+    const projectionFailure = (diagnostics as { projectionFailure?: unknown }).projectionFailure
+    if (isProjectionFailure(projectionFailure)) {
+      logAgentMetric(PROJECTION_OBSERVABILITY_METRICS.activeChildRunProjectionQueryFailed, {
+        reason: projectionFailure.reason,
+        message: projectionFailure.message,
+      })
+    }
+    const raw = (diagnostics as { rows?: unknown }).rows
     if (!Array.isArray(raw)) {
       return { success: false, error: 'invalid_payload_shape' }
     }

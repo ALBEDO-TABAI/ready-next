@@ -737,20 +737,39 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listActiveChildRuns(): ActiveChildRunSummaryForRuntime[] {
-    const rows = new Map<string, ActiveChildRunSummaryForRuntime>()
-    for (const row of this.listProjectionBackedChildRunSummaries()) {
-      rows.set(row.childRunId, row)
-    }
-    for (const row of getSkillChildRunner()?.listActiveRuns() ?? []) {
-      rows.set(row.childRunId, row)
-    }
-    return Array.from(rows.values())
-      .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || '')))
+    return this.listActiveChildRunsWithDiagnostics().rows
   }
 
-  private listProjectionBackedChildRunSummaries(): ActiveChildRunSummaryForRuntime[] {
+  /**
+   * Stage 3 W1 — same merged result as `listActiveChildRuns`, plus a
+   * diagnostic field that surfaces projection DB query failures. The IPC
+   * normalizer (`active-child-run-ipc.ts`) reads `projectionFailure` and
+   * emits `active_child_run_projection_query_failed`; in-memory rows from
+   * `getSkillChildRunner().listActiveRuns()` are NEVER dropped on DB jitter.
+   */
+  listActiveChildRunsWithDiagnostics(): {
+    rows: ActiveChildRunSummaryForRuntime[]
+    projectionFailure: { reason: 'projection_db_error'; message: string } | null
+  } {
+    const projection = this.listProjectionBackedChildRunSummaries()
+    const merged = new Map<string, ActiveChildRunSummaryForRuntime>()
+    for (const row of projection.rows) {
+      merged.set(row.childRunId, row)
+    }
+    for (const row of getSkillChildRunner()?.listActiveRuns() ?? []) {
+      merged.set(row.childRunId, row)
+    }
+    const rows = Array.from(merged.values())
+      .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || '')))
+    return { rows, projectionFailure: projection.failure }
+  }
+
+  private listProjectionBackedChildRunSummaries(): {
+    rows: ActiveChildRunSummaryForRuntime[]
+    failure: { reason: 'projection_db_error'; message: string } | null
+  } {
     const rawDb = this.db.getRawDb()
-    if (!rawDb) return []
+    if (!rawDb) return { rows: [], failure: null }
     let rows: TaskProjectionChildSummaryRow[] = []
     try {
       rows = rawDb.prepare(`
@@ -762,11 +781,17 @@ export class AgentControlRuntime extends EventEmitter {
         ORDER BY updated_at DESC
         LIMIT 100
       `).all<TaskProjectionChildSummaryRow>()
-    } catch {
-      return []
+    } catch (error) {
+      return {
+        rows: [],
+        failure: {
+          reason: 'projection_db_error',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }
     }
 
-    return rows.map((row) => {
+    const mapped = rows.map((row) => {
       const continuation = parseRecordJson(row.continuation_ref_json)
       const artifacts = parseArrayJson(row.recent_artifacts_json)
       const childRunId = stringFromUnknown(continuation?.childRunId)
@@ -797,6 +822,7 @@ export class AgentControlRuntime extends EventEmitter {
         closeStatus: row.status === 'failed' ? 'failed' : null,
       }
     }).filter((row) => Boolean(row.childRunId))
+    return { rows: mapped, failure: null }
   }
 
   async cancelChildRun(childRunId: string, options: { source: 'ui_button' }): Promise<unknown> {
