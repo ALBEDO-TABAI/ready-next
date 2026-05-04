@@ -5,6 +5,19 @@ import {
   cancelChildRunForIpc,
   listActiveChildRunsForIpc,
 } from '../main/modules/claude-bridge/active-child-run-ipc'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent,
+} from '../main/modules/agent-control/metrics'
+
+function captureMetrics(): {
+  events: AgentMetricEvent[]
+  restore: () => void
+} {
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  return { events, restore: () => __setMetricSinkForTests(null) }
+}
 
 test('listActiveChildRunsForIpc returns active child run summaries with projection fields', () => {
   const rows = [{
@@ -46,6 +59,92 @@ test('listActiveChildRunsForIpc returns active child run summaries with projecti
       closeStatus: null,
     }],
   })
+})
+
+test('listActiveChildRunsForIpc rejects non-array payload as invalid shape', () => {
+  const { events, restore } = captureMetrics()
+  try {
+    for (const bad of [null, undefined, {}, { rows: [] }, 'oops', 42] as const) {
+      const runtime = { listActiveChildRuns: () => bad }
+      const response = listActiveChildRunsForIpc(runtime)
+      assert.deepEqual(response, { success: false, error: 'invalid_payload_shape' }, `non-array=${JSON.stringify(bad)}`)
+    }
+    // no rows were dropped because we never entered the row loop
+    assert.equal(events.length, 0)
+  } finally {
+    restore()
+  }
+})
+
+test('listActiveChildRunsForIpc drops non-object rows and emits sampled metrics', () => {
+  const { events, restore } = captureMetrics()
+  try {
+    const runtime = {
+      listActiveChildRuns: () => [
+        null,
+        'not-an-object',
+        42,
+        { childRunId: 'vcr_keep', status: 'running', startedAt: '2026-05-05T00:00:00.000Z' },
+      ],
+    }
+    const response = listActiveChildRunsForIpc(runtime)
+    assert.equal(response.success, true)
+    assert.equal(Array.isArray(response.data), true)
+    const data = response.data as Array<Record<string, unknown>>
+    assert.equal(data.length, 1)
+    assert.equal(data[0].childRunId, 'vcr_keep')
+    const dropped = events.filter((e) => e.metric === 'active_child_run_row_dropped')
+    assert.equal(dropped.length, 3)
+    for (const event of dropped) {
+      assert.equal(event.reason, 'not_an_object')
+      assert.deepEqual(event.sampleKeys, [])
+    }
+  } finally {
+    restore()
+  }
+})
+
+test('listActiveChildRunsForIpc drops rows missing childRunId with sampleKeys', () => {
+  const { events, restore } = captureMetrics()
+  try {
+    const runtime = {
+      listActiveChildRuns: () => [
+        { skillId: 'x', status: 'running', startedAt: '2026-05-05T00:00:00.000Z' },
+        { childRunId: '   ', status: 'running' }, // blank id is treated as missing
+        { childRunId: 'vcr_keep', status: 'running', startedAt: '2026-05-05T00:00:00.000Z' },
+      ],
+    }
+    const response = listActiveChildRunsForIpc(runtime)
+    assert.equal(response.success, true)
+    const data = response.data as Array<Record<string, unknown>>
+    assert.equal(data.length, 1)
+    assert.equal(data[0].childRunId, 'vcr_keep')
+    const dropped = events.filter((e) => e.metric === 'active_child_run_row_dropped')
+    assert.equal(dropped.length, 2)
+    for (const event of dropped) {
+      assert.equal(event.reason, 'missing_child_run_id')
+      assert.equal(Array.isArray(event.sampleKeys), true)
+    }
+  } finally {
+    restore()
+  }
+})
+
+test('listActiveChildRunsForIpc caps dropped-row metric samples at 5 per call', () => {
+  const { events, restore } = captureMetrics()
+  try {
+    const runtime = {
+      listActiveChildRuns: () => Array.from({ length: 12 }, () => null),
+    }
+    const response = listActiveChildRunsForIpc(runtime)
+    assert.equal(response.success, true)
+    const data = response.data as unknown[]
+    assert.equal(data.length, 0)
+    const dropped = events.filter((e) => e.metric === 'active_child_run_row_dropped')
+    assert.equal(dropped.length, 5, 'cap should be 5 sample emits per call')
+  } finally {
+    restore()
+  }
 })
 
 test('cancelChildRunForIpc validates childRunId and records ui_button source', async () => {
