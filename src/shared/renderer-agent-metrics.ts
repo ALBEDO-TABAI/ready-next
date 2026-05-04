@@ -5,6 +5,7 @@ export const RENDERER_AGENT_METRICS = [
   'renderer_assistant_persistence_failed',
   'renderer_assistant_done_finalize_failed',
   'legacy_handoff_text_fallback_used',
+  'scope_create_persistence_failed',
 ] as const
 
 export type RendererAgentMetricName = typeof RENDERER_AGENT_METRICS[number]

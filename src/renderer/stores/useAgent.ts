@@ -19,6 +19,44 @@ import {
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
+import {
+  ScopeCreatePersistenceMetricThrottle,
+  type ScopeCreatePersistenceSite,
+} from '../modules/agent/scope-create-persistence-metrics'
+
+/**
+ * Stage 3 W4 — observability-only throttle for createLocalScope IPC failures
+ * across newSession + 4 sendMessage bootstrap sites. The retry chain at
+ * sendMessage's "Conversation scope not found" handler still drives behavior;
+ * this throttle adds a renderer-channel metric so operators can see when
+ * scope persistence is failing without changing user-visible UI.
+ */
+const scopeCreatePersistenceMetricThrottle = new ScopeCreatePersistenceMetricThrottle(
+  5 * 60_000,
+  () => Date.now(),
+  (payload) => {
+    emitRendererAgentMetric('scope_create_persistence_failed', { ...payload })
+  },
+)
+
+async function callCreateLocalScopeWithMetric(
+  agent: string,
+  scopeId: string | null,
+  site: ScopeCreatePersistenceSite,
+  invoke: () => Promise<{ success: boolean; data?: unknown } | null | undefined>,
+): Promise<{ success: boolean; data?: unknown } | null> {
+  try {
+    const result = await invoke()
+    if (!result || !result.success || result.data == null) {
+      scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'result_failure', scopeId, agent)
+      return result ?? null
+    }
+    return result
+  } catch (error) {
+    scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'ipc_rejected', scopeId, agent)
+    return null
+  }
+}
 import type {
   Agent,
   AgentMessage,
@@ -579,10 +617,13 @@ export const useAgent = create<AgentState>((set, get) => ({
     })
     void persistLocalConversationScope(fallbackScope)
 
-    if (typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope) {
+    if (typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope !== undefined) {
       void window.electronAPI.agent.createLocalScope(currentAgent, fallbackScope.id)
         .then((result) => {
-          if (!result.success || !result.data) return
+          if (!result.success || !result.data) {
+            scopeCreatePersistenceMetricThrottle.maybeEmit('newSession', 'result_failure', fallbackScope.id, currentAgent)
+            return
+          }
           const scope = result.data as unknown as ConversationScope
           const currentState = useAgent.getState()
           const updatedScopes = [scope, ...currentState.scopes.filter((item) => item.id !== scope.id)]
@@ -594,7 +635,10 @@ export const useAgent = create<AgentState>((set, get) => ({
             conversations: updatedScopes.map(mapScopeToConversation),
           })
         })
-        .catch(console.error)
+        .catch((err) => {
+          scopeCreatePersistenceMetricThrottle.maybeEmit('newSession', 'ipc_rejected', fallbackScope.id, currentAgent)
+          console.error(err)
+        })
     }
   },
 
@@ -854,9 +898,14 @@ export const useAgent = create<AgentState>((set, get) => ({
     let scope = currentScope
     let scopeId = currentScopeId
     let localScopeBootstrapAttempted = false
-    if ((!scope || !scopeId) && typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope) {
+    if ((!scope || !scopeId) && typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope !== undefined) {
       localScopeBootstrapAttempted = true
-      const created = await window.electronAPI.agent.createLocalScope(currentAgent).catch(() => null)
+      const created = await callCreateLocalScopeWithMetric(
+        currentAgent,
+        null,
+        'sendMessage_no_scope',
+        () => window.electronAPI!.agent!.createLocalScope(currentAgent),
+      )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
         scope = nextScope
@@ -881,10 +930,15 @@ export const useAgent = create<AgentState>((set, get) => ({
       scope.sourceKind === 'local' &&
       !get().scopes.some((item) => item.id === scopeId) &&
       typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope
+      window.electronAPI?.agent?.createLocalScope !== undefined
     ) {
       localScopeBootstrapAttempted = true
-      const created = await window.electronAPI.agent.createLocalScope(currentAgent, scopeId || undefined).catch(() => null)
+      const created = await callCreateLocalScopeWithMetric(
+        currentAgent,
+        scopeId ?? null,
+        'sendMessage_local_scope_missing',
+        () => window.electronAPI!.agent!.createLocalScope(currentAgent, scopeId || undefined),
+      )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
         scope = nextScope
@@ -904,10 +958,15 @@ export const useAgent = create<AgentState>((set, get) => ({
       scope.sourceKind === 'local' &&
       scope.agent !== currentAgent &&
       typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope
+      window.electronAPI?.agent?.createLocalScope !== undefined
     ) {
       localScopeBootstrapAttempted = true
-      const created = await window.electronAPI.agent.createLocalScope(currentAgent).catch(() => null)
+      const created = await callCreateLocalScopeWithMetric(
+        currentAgent,
+        scopeId ?? null,
+        'sendMessage_agent_mismatch',
+        () => window.electronAPI!.agent!.createLocalScope(currentAgent),
+      )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
         scope = nextScope
@@ -932,9 +991,14 @@ export const useAgent = create<AgentState>((set, get) => ({
       !localScopeBootstrapAttempted &&
       activeScope.sourceKind === 'local' &&
       typeof window !== 'undefined' &&
-      window.electronAPI?.agent?.createLocalScope
+      window.electronAPI?.agent?.createLocalScope !== undefined
     ) {
-      const ensured = await window.electronAPI.agent.createLocalScope(activeScope.agent, activeScope.id).catch(() => null)
+      const ensured = await callCreateLocalScopeWithMetric(
+        activeScope.agent,
+        activeScope.id,
+        'sendMessage_ensure',
+        () => window.electronAPI!.agent!.createLocalScope(activeScope.agent, activeScope.id),
+      )
       if (ensured?.success && ensured.data) {
         const nextScope = ensured.data as unknown as ConversationScope
         activeScope = nextScope
