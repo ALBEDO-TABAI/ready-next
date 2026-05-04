@@ -19,6 +19,16 @@ export const PROJECTION_OBSERVABILITY_METRICS = {
    * runs disappeared" in the UI.
    */
   activeChildRunProjectionQueryFailed: 'active_child_run_projection_query_failed',
+  /**
+   * Stage 3 W2 — task-projection-reconciler tried to read
+   * `run_state.json` / `delivery_report.json` and got either a JSON parse
+   * error (`corrupt`), a permission denial (`denied`), or a parsed value
+   * that is not a plain object (`not_object`). `missing` (file absent) is
+   * a normal pre-completion state and intentionally NOT emitted. Same
+   * `pathTag × reason` is throttled at 60s to avoid metric storms when
+   * a single child-run keeps producing a malformed file.
+   */
+  taskProjectionJsonReadFailed: 'task_projection_json_read_failed',
 } as const
 
 export type ProjectionObservabilityMetricName =

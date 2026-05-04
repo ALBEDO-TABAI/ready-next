@@ -4,9 +4,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 
-import { reconcileTaskProjections } from '../main/modules/agent-control/task-projection-reconciler'
+import {
+  __resetTaskProjectionJsonReadThrottleForTests,
+  reconcileTaskProjections,
+} from '../main/modules/agent-control/task-projection-reconciler'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent,
+} from '../main/modules/agent-control/metrics'
+
+function captureMetrics(): { events: AgentMetricEvent[]; restore: () => void } {
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  return { events, restore: () => __setMetricSinkForTests(null) }
+}
 
 const NOW = '2026-05-04T10:00:00.000Z'
 const OLD = '2026-05-04T09:20:00.000Z'
@@ -352,4 +365,105 @@ test('reconcileTaskProjections restores child-run handles from DB row and event 
   assert.equal(updated.continuationRef?.action, 'video_expert_pipeline')
   assert.equal(updated.continuationRef?.outputDir, outputDir)
   assert.equal(updated.continuationRef?.runStatePath, runStatePath)
+})
+
+/**
+ * Stage 3 W2 — JSON read failure classification: malformed run_state.json
+ * emits `corrupt`, an array delivery_report.json emits `not_object`, and a
+ * missing run_state.json stays silent (normal pre-completion state).
+ * Reconciler-level behavior is unchanged: callers still see `null` and the
+ * projection status drives identically.
+ */
+
+test('reconcileTaskProjections emits corrupt metric when run_state.json is malformed', async () => {
+  const outputDir = createRoot('w2-corrupt')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(runStatePath, '{not json', 'utf8')
+  __resetTaskProjectionJsonReadThrottleForTests()
+  const { events, restore } = captureMetrics()
+  try {
+    const { store, records } = createStore([
+      baseProjection({
+        taskId: 'skill:run_state:w2-corrupt',
+        status: 'blocked',
+        continuationRef: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir,
+          runStatePath,
+        },
+      }),
+    ])
+
+    await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+    const corrupt = events.filter(
+      (e) => e.metric === 'task_projection_json_read_failed' && e.reason === 'corrupt',
+    )
+    assert.ok(corrupt.length >= 1, 'corrupt run_state.json should emit at least once')
+    assert.equal(corrupt[0].pathTag, 'run_state.json')
+  } finally {
+    restore()
+  }
+})
+
+test('reconcileTaskProjections emits not_object metric when delivery_report.json is an array', async () => {
+  const outputDir = createRoot('w2-not-object')
+  const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  // Overwrite delivery_report.json with a JSON array (parses but is not a plain object).
+  writeFileSync(deliveryReportPath, '[1,2,3]', 'utf8')
+  __resetTaskProjectionJsonReadThrottleForTests()
+  const { events, restore } = captureMetrics()
+  try {
+    const { store, records } = createStore([
+      baseProjection({
+        taskId: 'skill:run_state:w2-not-object',
+        continuationRef: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir,
+          runStatePath,
+        },
+      }),
+    ])
+
+    await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+    const notObject = events.filter(
+      (e) => e.metric === 'task_projection_json_read_failed' && e.reason === 'not_object',
+    )
+    assert.ok(notObject.length >= 1, 'array delivery_report.json should emit at least once')
+    assert.equal(notObject[0].pathTag, 'delivery_report.json')
+  } finally {
+    restore()
+  }
+})
+
+test('reconcileTaskProjections does not emit metric when run_state.json is missing', async () => {
+  const outputDir = createRoot('w2-missing')
+  // Note: no run_state.json written; outputDir is empty.
+  const runStatePath = join(outputDir, 'run_state.json')
+  __resetTaskProjectionJsonReadThrottleForTests()
+  const { events, restore } = captureMetrics()
+  try {
+    const { store, records } = createStore([
+      baseProjection({
+        taskId: 'skill:run_state:w2-missing',
+        status: 'blocked',
+        continuationRef: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir,
+          runStatePath,
+        },
+      }),
+    ])
+
+    await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+    const readFailed = events.filter((e) => e.metric === 'task_projection_json_read_failed')
+    assert.equal(readFailed.length, 0, 'missing run_state.json must not emit task_projection_json_read_failed')
+  } finally {
+    restore()
+  }
 })

@@ -5,6 +5,8 @@ import type { TaskProjectionRecord, TaskProjectionStore } from './run-contracts'
 import type { ScopeRunResumableAction } from './types'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
+import { logAgentMetric } from './metrics'
+import { PROJECTION_OBSERVABILITY_METRICS } from './projection-observability-metrics'
 
 const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
@@ -38,14 +40,101 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function readJson(path: string | null): JsonRecord | null {
-  if (!path) return null
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
-    return asRecord(parsed)
-  } catch {
-    return null
+/**
+ * Stage 3 W2 — JSON read failure is no longer "all reasons collapse to
+ * null". The classifier helpers below are exported so unit tests can feed
+ * synthetic errors (no chmod required), and the reconciler emits a
+ * throttled metric for non-`missing` failures so operators can see when
+ * a child-run's state file is corrupt vs. simply not yet written.
+ *
+ * Behavior of the legacy `readJson` wrapper is preserved: callers still
+ * see `null` on any failure mode and react identically. The metric is a
+ * pure side-channel observation.
+ */
+export type ProjectionJsonRead =
+  | { ok: true; value: JsonRecord }
+  | { ok: false; reason: 'missing' | 'corrupt' | 'denied' | 'not_object'; message?: string }
+
+export function classifyJsonReadError(error: unknown): 'missing' | 'denied' | 'corrupt' {
+  const errno = (error as NodeJS.ErrnoException | undefined)?.code
+  if (errno === 'ENOENT' || errno === 'ENOTDIR') return 'missing'
+  if (errno === 'EACCES' || errno === 'EPERM') return 'denied'
+  return 'corrupt'
+}
+
+export function classifyJsonReadValue(parsed: unknown):
+  | { ok: true; value: JsonRecord }
+  | { ok: false; reason: 'not_object' } {
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return { ok: true, value: parsed as JsonRecord }
   }
+  return { ok: false, reason: 'not_object' }
+}
+
+const TASK_PROJECTION_JSON_READ_THROTTLE_MS = 60_000
+const taskProjectionJsonReadEmitMs = new Map<string, number>()
+
+function pathTagFor(path: string): string {
+  const match = path.match(/[^/\\]+$/)
+  return match ? match[0] : 'unknown.json'
+}
+
+function maybeEmitTaskProjectionJsonReadFailed(
+  path: string,
+  reason: 'corrupt' | 'denied' | 'not_object',
+  message?: string,
+): void {
+  const tag = pathTagFor(path)
+  const key = `${tag}|${reason}`
+  const now = Date.now()
+  const last = taskProjectionJsonReadEmitMs.get(key) ?? 0
+  if (now - last < TASK_PROJECTION_JSON_READ_THROTTLE_MS) return
+  taskProjectionJsonReadEmitMs.set(key, now)
+  logAgentMetric(PROJECTION_OBSERVABILITY_METRICS.taskProjectionJsonReadFailed, {
+    pathTag: tag,
+    reason,
+    ...(message ? { message: message.slice(0, 200) } : {}),
+  })
+}
+
+/** Test-only: clears the 60s metric throttle so successive cases emit independently. */
+export function __resetTaskProjectionJsonReadThrottleForTests(): void {
+  taskProjectionJsonReadEmitMs.clear()
+}
+
+export function readProjectionJsonClassified(path: string | null): ProjectionJsonRead {
+  if (!path) return { ok: false, reason: 'missing' }
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf8')
+  } catch (error) {
+    const reason = classifyJsonReadError(error)
+    if (reason !== 'missing') {
+      const message = error instanceof Error ? error.message : String(error)
+      maybeEmitTaskProjectionJsonReadFailed(path, reason, message)
+      return { ok: false, reason, message }
+    }
+    return { ok: false, reason }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    maybeEmitTaskProjectionJsonReadFailed(path, 'corrupt', message)
+    return { ok: false, reason: 'corrupt', message }
+  }
+  const shape = classifyJsonReadValue(parsed)
+  if (!shape.ok) {
+    maybeEmitTaskProjectionJsonReadFailed(path, 'not_object')
+    return { ok: false, reason: 'not_object' }
+  }
+  return shape
+}
+
+function readJson(path: string | null): JsonRecord | null {
+  const result = readProjectionJsonClassified(path)
+  return result.ok ? result.value : null
 }
 
 function nonEmptyFile(path: string | null): boolean {
