@@ -15,7 +15,10 @@ import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { buildTextToolResultMessage, parseTextToolBridgeResponse } from './tool-bridge'
-import { parseProviderToolArguments } from './provider-tool-arguments'
+import {
+  buildChatCompletionsToolCalls,
+  buildResponsesToolCalls,
+} from './provider-tool-arguments'
 
 export interface OpenAIChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -664,25 +667,21 @@ export class OpenAIExecutionClient {
     const choice = json.choices?.[0]
     // Stage 2.1a — corrupt `arguments` JSON used to silently become `{}`,
     // letting an empty-args call into dispatch and ultimately invoking the
-    // wrong tool. We now drop the call from the response and emit
-    // `provider_arguments_corrupt`. Empty / "{}" args still parse to `{}`
-    // because some tools legitimately take zero arguments.
-    const toolCalls = (choice?.message?.tool_calls || []).flatMap((tc) => {
-      const parsed = parseProviderToolArguments(tc.function?.arguments)
-      if (!parsed.ok) {
-        logAgentMetric(TOOL_ERROR_METRICS.providerArgumentsCorrupt, {
-          route: 'chat_completions',
-          toolName: tc.function?.name || null,
-          callId: tc.id || null,
-          rawSample: parsed.rawSample,
-        })
-        return []
-      }
-      return [{ id: tc.id, name: tc.function?.name || '', input: parsed.input }]
-    })
+    // wrong tool. The helper drops corrupt calls and reports them so we
+    // can emit `provider_arguments_corrupt`. Empty / "{}" args still parse
+    // to `{}` because some tools legitimately take zero arguments.
+    const built = buildChatCompletionsToolCalls(choice?.message?.tool_calls)
+    for (const failure of built.failures) {
+      logAgentMetric(TOOL_ERROR_METRICS.providerArgumentsCorrupt, {
+        route: 'chat_completions',
+        toolName: failure.toolName,
+        callId: failure.callId,
+        rawSample: failure.rawSample,
+      })
+    }
     const nativeResponse: OpenAIExecutionResponse = {
       text: extractOpenAIMessageText(choice?.message?.content),
-      toolCalls,
+      toolCalls: built.toolCalls,
       stopReason: choice?.finish_reason || 'stop',
       reasoningContent: choice?.message?.reasoning_content,
       toolTransport: 'native',
@@ -854,33 +853,23 @@ export class OpenAIExecutionClient {
     const output = Array.isArray((payload as { output?: unknown[] }).output)
       ? (payload as { output?: unknown[] }).output as Array<Record<string, unknown>>
       : []
-    const calls: OpenAIToolCall[] = []
-    for (const item of output) {
-      if (item.type !== 'function_call') continue
-      // Stage 2.1a — see chat_completions branch above. Same corruption
-      // handling: drop the call + emit metric. Note that
-      // `item.arguments` defaults to `'{}'` when missing, so the parser
-      // sees a legitimate empty-args call (no metric).
-      const argumentsText = typeof item.arguments === 'string' ? item.arguments : '{}'
-      const callId = typeof item.call_id === 'string' ? item.call_id : null
-      const toolName = typeof item.name === 'string' ? item.name : ''
-      const parsed = parseProviderToolArguments(argumentsText)
-      if (!parsed.ok) {
-        logAgentMetric(TOOL_ERROR_METRICS.providerArgumentsCorrupt, {
-          route: 'responses',
-          toolName: toolName || null,
-          callId,
-          rawSample: parsed.rawSample,
-        })
-        continue
-      }
-      calls.push({
-        id: callId || `respfc_${randomUUID().replace(/-/g, '')}`,
-        name: toolName,
-        input: parsed.input,
+    // Stage 2.1a — same corruption handling as the chat_completions branch.
+    // Missing `item.arguments` defaults to `'{}'`, which the parser treats
+    // as a legitimate empty-args call (no metric). Synthetic call_id is
+    // generated only when the provider omits one.
+    const built = buildResponsesToolCalls(
+      output,
+      () => `respfc_${randomUUID().replace(/-/g, '')}`,
+    )
+    for (const failure of built.failures) {
+      logAgentMetric(TOOL_ERROR_METRICS.providerArgumentsCorrupt, {
+        route: 'responses',
+        toolName: failure.toolName,
+        callId: failure.callId,
+        rawSample: failure.rawSample,
       })
     }
-    return calls
+    return built.toolCalls
   }
 
   private getResponsesContinuationState(session: OpenAISessionLike): {
