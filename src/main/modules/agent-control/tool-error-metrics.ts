@@ -140,6 +140,19 @@ export const TOOL_ERROR_METRICS = {
    * not rewrite the SubAgent contract outcome.
    */
   subagentCleanupDrainFailed: 'subagent_cleanup_drain_failed',
+  /**
+   * Stage 2.1a — provider 返回的 tool_calls.arguments 不是合法的 JSON 对象
+   * （空串 / "{}" 视为合法的空参数；非空但解析失败、或解析为数组 / 字符串 /
+   * 数字 / null 都算 corrupt）。叶子层（openai-execution-client）丢弃该 call
+   * 而非用 `{}` 误调真工具，并 emit 这条指标。
+   *
+   * payload: `{ route: 'chat_completions' | 'responses', toolName, callId,
+   * rawSample (≤200 字符) }`。注意：本指标仅记录 provider response 层事件，
+   * 不进入 tool-executor 错误契约；模型不会通过 §6.11 的工具错误回流"看到"
+   * 该次调用——turn-engine 这一轮 toolCalls 数量减 1，行为退化为"只产文本"。
+   * 真正让模型感知（system reminder 注入）属 Stage 3 的 2.1b，独立审批后做。
+   */
+  providerArgumentsCorrupt: 'provider_arguments_corrupt',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]
