@@ -527,16 +527,6 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-function taskPhaseLabel(phase: ScopeRunState['phase']): string {
-  if (phase === 'planning') return '规划中'
-  if (phase === 'tool_running' || phase === 'responding' || phase === 'resuming') return '进行中'
-  if (phase === 'checkpoint' || phase === 'takeover') return '等待继续'
-  if (phase === 'done') return '已完成'
-  if (phase === 'error') return '失败'
-  if (phase === 'cancelled') return '已停止'
-  return '待处理'
-}
-
 function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined): string {
   switch (taskType) {
     case 'direct_answer':
