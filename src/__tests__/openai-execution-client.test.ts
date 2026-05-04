@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { OpenAIExecutionClient } from '../main/modules/claude-bridge/openai-execution-client'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent,
+} from '../main/modules/agent-control/metrics'
 import type { AIModelConfig } from '../shared/ai-providers'
 
 function createConfig(overrides: Partial<AIModelConfig> = {}): AIModelConfig {
@@ -12,6 +16,12 @@ function createConfig(overrides: Partial<AIModelConfig> = {}): AIModelConfig {
     model: 'gpt-test',
     ...overrides,
   }
+}
+
+function captureMetrics(): { events: AgentMetricEvent[]; restore: () => void } {
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  return { events, restore: () => __setMetricSinkForTests(null) }
 }
 
 function createJsonResponse(body: unknown, status = 200): Response {
@@ -182,4 +192,113 @@ test('OpenAIExecutionClient returns provider-side tool snapshots for request and
   assert.equal(toolSnapshots[0]?.mismatch, true)
   assert.equal(toolSnapshots[1]?.toolCallsCount, 1)
   assert.equal(logs.some((entry) => entry.includes('[tool_snapshot]')), true)
+})
+
+/**
+ * Stage 3 W0 — defend against future commits that bypass the
+ * `buildChatCompletionsToolCalls` / `buildResponsesToolCalls` helpers by
+ * inlining their own JSON.parse. Helper-level tests pin the parser shape;
+ * these client-level tests pin the wiring through the real client entry.
+ */
+
+test('OpenAIExecutionClient drops corrupt chat_completions tool_calls.arguments and emits route metric', async () => {
+  const { events, restore } = captureMetrics()
+  try {
+    const client = new OpenAIExecutionClient({
+      fetchWithTimeout: async () => createJsonResponse({
+        choices: [
+          {
+            message: {
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call_good',
+                  function: { name: 'browser_search', arguments: '{"query":"x"}' },
+                },
+                {
+                  id: 'call_bad',
+                  function: { name: 'shell', arguments: '{not json' },
+                },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+      }),
+      log: () => {},
+    })
+
+    const result = await client.requestWithTools({
+      session: {
+        messages: [{ role: 'user', content: 'q' }],
+        systemPrompt: 's',
+        preferTextToolBridge: false,
+      },
+      config: createConfig(),
+      baseUrl: 'https://example.com/v1',
+      provider: undefined,
+      signal: new AbortController().signal,
+    } as any)
+
+    assert.equal(result.toolCalls.length, 1, 'corrupt call should be dropped')
+    assert.equal(result.toolCalls[0].id, 'call_good')
+    const corruptEvents = events.filter((e) => e.metric === 'provider_arguments_corrupt')
+    assert.equal(corruptEvents.length, 1)
+    assert.equal(corruptEvents[0].route, 'chat_completions')
+    assert.equal(corruptEvents[0].toolName, 'shell')
+    assert.equal(corruptEvents[0].callId, 'call_bad')
+    assert.equal(corruptEvents[0].rawSample, '{not json')
+  } finally {
+    restore()
+  }
+})
+
+test('OpenAIExecutionClient drops corrupt responses output[].arguments and emits route metric', async () => {
+  const { events, restore } = captureMetrics()
+  try {
+    const client = new OpenAIExecutionClient({
+      fetchWithTimeout: async () => createJsonResponse({
+        id: 'resp_1',
+        status: 'completed',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'rc_good',
+            name: 'browser_search',
+            arguments: '{"query":"x"}',
+          },
+          {
+            type: 'function_call',
+            call_id: 'rc_bad',
+            name: 'arr_arg',
+            arguments: '[1,2,3]',
+          },
+        ],
+      }),
+      log: () => {},
+    })
+
+    const result = await client.requestWithTools({
+      session: {
+        messages: [{ role: 'user', content: 'q' }],
+        systemPrompt: 's',
+        preferTextToolBridge: false,
+      },
+      config: createConfig({ wireApi: 'responses' }),
+      baseUrl: 'https://example.com/v1',
+      provider: undefined,
+      signal: new AbortController().signal,
+    } as any)
+
+    assert.equal(result.toolCalls.length, 1, 'corrupt call should be dropped')
+    assert.equal(result.toolCalls[0].id, 'rc_good')
+    const corruptEvents = events.filter((e) => e.metric === 'provider_arguments_corrupt')
+    assert.equal(corruptEvents.length, 1)
+    assert.equal(corruptEvents[0].route, 'responses')
+    assert.equal(corruptEvents[0].toolName, 'arr_arg')
+    assert.equal(corruptEvents[0].callId, 'rc_bad')
+    assert.equal(corruptEvents[0].rawSample, '[1,2,3]')
+  } finally {
+    restore()
+  }
 })
