@@ -141,6 +141,7 @@ import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
 import { VideoFallbackService } from './video-fallback-service'
 import { createRotatingLogger } from '../../utils/rotating-logger'
+import { readAIConfigDetailed, type AIConfigLoad } from './direct-chat-ai-config'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -154,6 +155,7 @@ function toContinuationUpdatedAt(value?: string | null): number {
   const parsed = Date.parse(String(value || ''))
   return Number.isFinite(parsed) ? parsed : Date.now()
 }
+
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -560,12 +562,14 @@ export class DirectChatEngine extends EventEmitter {
     this.cancelPendingToolActions = canceller
   }
 
+  getAIConfigDetailed(): AIConfigLoad {
+    return readAIConfigDetailed(() => settingsRepository.getSetting('ai_model_config'))
+  }
+
   getAIConfig(): AIModelConfig | null {
-    try {
-      const raw = settingsRepository.getSetting('ai_model_config')
-      if (raw) return normalizeAIConfig(JSON.parse(raw) as AIModelConfig)
-    } catch { /* ignore */ }
-    return null
+    const detail = this.getAIConfigDetailed()
+    if (!detail.ok) return null
+    return detail.config
   }
 
   private isBrowserAgentV3Enabled(): boolean {
@@ -838,7 +842,39 @@ export class DirectChatEngine extends EventEmitter {
       this.emit('toolAction', { agent: name, sessionId, runId, tool, args })
     }
 
-    const config = this.getAIConfig()
+    const configDetail = this.getAIConfigDetailed()
+    if (!configDetail.ok) {
+      // Stage 2.4a: distinguish corrupt JSON from DB error rather than
+      // collapsing both into "no config". Each gets a different user
+      // message and a more honest terminalReason so the failure mode is
+      // visible to both the user and the renderer's task projection.
+      session.activeRunId = null
+      const userMsg =
+        configDetail.reason === 'json_corrupt'
+          ? 'AI 配置已损坏（JSON 解析失败），请前往设置页重置'
+          : 'AI 配置读取失败（数据库错误），请稍后重试或检查日志'
+      emitOutput(userMsg, 'error')
+      emitOutput('', 'done')
+      emitStatus(
+        'error',
+        configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed',
+      )
+      return {
+        success: false,
+        error: userMsg,
+        finalText: '',
+        usedTools: [],
+        cancelled: false,
+        taskId,
+        taskProjectionId: taskId,
+        executionDiagnostics: {
+          taskId,
+          taskBudgetRuntime: executionOptions?.taskBudgetRuntime || null,
+          fallback: buildExecutionFallbackState(null),
+        },
+      }
+    }
+    const config = configDetail.config
     if (!config || !config.apiKey) {
       session.activeRunId = null
       emitOutput('未配置 API Key，请前往设置页配置', 'error')
