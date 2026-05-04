@@ -57,6 +57,12 @@ import {
   type TaskCardRunLike,
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
+import {
+  childRunToPhase as childRunPhase,
+  childRunToProjectionStatus as childRunProjectionStatus,
+  childRunToTaskActions as childRunActions,
+  childRunToWaitingFor as childRunWaitingFor,
+} from '../../modules/agent/task-status-vocabulary'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import { emitRendererAgentMetric } from '../../modules/agent/rendererMetrics'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
@@ -241,36 +247,6 @@ function resolveTaskContinuationForProjection(
 ): ScopeRunState['taskContinuation'] {
   if (shouldPreferProjectionContinuation(projection)) return projection?.continuationRef || null
   return fallback || projection?.continuationRef || null
-}
-
-function childRunPhase(row: ActiveChildRunSummaryData): ScopeRunState['phase'] {
-  if (row.closeStatus === 'completed' || row.status === 'completed') return 'done'
-  if (row.closeStatus === 'failed' || row.status === 'failed') return 'error'
-  if (row.closeStatus === 'killed' || row.status === 'killed') return 'cancelled'
-  return 'checkpoint'
-}
-
-function childRunProjectionStatus(row: ActiveChildRunSummaryData): TaskProjectionRecordData['status'] {
-  if (row.closeStatus === 'completed' || row.status === 'completed') return 'done'
-  if (row.closeStatus === 'failed' || row.status === 'failed') return 'failed'
-  if (row.closeStatus === 'killed' || row.status === 'killed') return 'cancelled'
-  if (row.closeStatus === 'blocked' || row.status === 'blocked') return 'blocked'
-  return 'running'
-}
-
-function childRunWaitingFor(row: ActiveChildRunSummaryData): ScopeRunState['waitingFor'] {
-  const status = childRunProjectionStatus(row)
-  if (status === 'running') return 'background'
-  if (status === 'blocked') return 'input'
-  return 'none'
-}
-
-function childRunActions(row: ActiveChildRunSummaryData): ScopeRunState['resumableActions'] {
-  const status = childRunProjectionStatus(row)
-  if (status === 'done') return ['open_artifact']
-  if (status === 'failed') return ['retry', 'cancel', 'open_artifact']
-  if (status === 'cancelled') return ['none']
-  return ['continue', 'cancel', 'open_artifact']
 }
 
 function childRunTaskSummary(row: ActiveChildRunSummaryData): string {

@@ -8,6 +8,7 @@ import {
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
+import { phaseToUserLabel } from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
@@ -53,30 +54,7 @@ function extractTasksFromMessages(
 }
 
 function phaseLabel(phase: ScopeRunState['phase'] | undefined): string {
-  switch (phase) {
-    case 'queued':
-      return '排队中'
-    case 'planning':
-      return '规划'
-    case 'tool_running':
-      return '执行工具'
-    case 'checkpoint':
-      return '检查点'
-    case 'takeover':
-      return '人工接管'
-    case 'resuming':
-      return '恢复中'
-    case 'responding':
-      return '生成回复'
-    case 'done':
-      return '完成'
-    case 'error':
-      return '失败'
-    case 'cancelled':
-      return '已取消'
-    default:
-      return '待命'
-  }
+  return phaseToUserLabel(phase, 'taskPanel')
 }
 
 function phaseTone(phase: ScopeRunState['phase'] | undefined): { bg: string; color: string } {

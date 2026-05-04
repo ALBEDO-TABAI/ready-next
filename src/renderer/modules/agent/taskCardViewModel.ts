@@ -5,6 +5,7 @@ import type {
   ToolTraceEvent,
 } from './types'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
+import { phaseToUserLabel, projectionStatusToUserLabel } from './task-status-vocabulary'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
 
@@ -275,23 +276,11 @@ export function formatTaskProgressLabel(
 }
 
 function taskPhaseLabel(phase: ScopeRunState['phase']): string {
-  if (phase === 'planning') return '规划中'
-  if (phase === 'tool_running' || phase === 'responding' || phase === 'resuming') return '进行中'
-  if (phase === 'checkpoint' || phase === 'takeover') return '等待继续'
-  if (phase === 'done') return '已完成'
-  if (phase === 'error') return '失败'
-  if (phase === 'cancelled') return '已停止'
-  return '待处理'
+  return phaseToUserLabel(phase, 'taskCard')
 }
 
 function taskStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string | null {
-  if (status === 'queued') return '排队中'
-  if (status === 'running') return '进行中'
-  if (status === 'blocked') return '等待继续'
-  if (status === 'done') return '已完成'
-  if (status === 'failed') return '失败'
-  if (status === 'cancelled') return '已停止'
-  return null
+  return projectionStatusToUserLabel(status, 'taskCard')
 }
 
 function normalizeTaskFamily(title: string): string {
