@@ -8,7 +8,7 @@ import {
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
-import { phaseToUserLabel } from '../../modules/agent/task-status-vocabulary'
+import { phaseToUserLabel, projectionStatusToUserLabel } from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
@@ -183,22 +183,7 @@ function interactionStateLabel(
 }
 
 function projectionStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string {
-  switch (status) {
-    case 'queued':
-      return '排队中'
-    case 'running':
-      return '进行中'
-    case 'blocked':
-      return '待继续'
-    case 'done':
-      return '已完成'
-    case 'failed':
-      return '失败'
-    case 'cancelled':
-      return '已取消'
-    default:
-      return '待命'
-  }
+  return projectionStatusToUserLabel(status, 'taskPanel') ?? '待命'
 }
 
 function projectionStatusTone(

@@ -78,6 +78,21 @@ test('projectionStatusToUserLabel taskCard surface preserves existing labels', (
   }
 })
 
+test('projectionStatusToUserLabel taskPanel surface preserves existing TaskPanel labels', () => {
+  const cases: Array<[TaskProjectionRecordData['status'] | undefined, string]> = [
+    ['queued', '排队中'],
+    ['running', '进行中'],
+    ['blocked', '待继续'],
+    ['done', '已完成'],
+    ['failed', '失败'],
+    ['cancelled', '已取消'],
+    [undefined, '待命'],
+  ]
+  for (const [status, expected] of cases) {
+    assert.equal(projectionStatusToUserLabel(status, 'taskPanel'), expected, `status=${status}`)
+  }
+})
+
 function row(overrides: Partial<ActiveChildRunSummaryData> = {}): ActiveChildRunSummaryData {
   return {
     childRunId: 'vcr_test',

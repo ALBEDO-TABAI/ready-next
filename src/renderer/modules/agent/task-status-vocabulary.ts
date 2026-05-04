@@ -57,9 +57,27 @@ export function phaseToUserLabel(
 
 export function projectionStatusToUserLabel(
   status: TaskProjectionRecordData['status'] | undefined,
-  _surface: LabelSurface = 'taskCard',
+  surface: LabelSurface = 'taskCard',
 ): string | null {
-  // taskPanel 当前未消费 projection status label，先与 taskCard 同字面。
+  if (surface === 'taskPanel') {
+    switch (status) {
+      case 'queued':
+        return '排队中'
+      case 'running':
+        return '进行中'
+      case 'blocked':
+        return '待继续'
+      case 'done':
+        return '已完成'
+      case 'failed':
+        return '失败'
+      case 'cancelled':
+        return '已取消'
+      default:
+        return '待命'
+    }
+  }
+  // 'taskCard' surface (default) — 复刻 taskCardViewModel.ts 现有 mapping。
   if (status === 'queued') return '排队中'
   if (status === 'running') return '进行中'
   if (status === 'blocked') return '等待继续'
