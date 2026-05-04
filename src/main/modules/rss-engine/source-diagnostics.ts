@@ -194,11 +194,11 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
   xiaohongshu: {
     platform: 'xiaohongshu',
     label: platformLabel('xiaohongshu'),
-    backend: 'browser',
-    fallbackOrder: ['browser', 'scrapling'],
-    chromiumRequired: true,
-    scraplingEligible: true,
-    notes: '优先使用应用内浏览器获取；默认不再静默回退 RSSHub，browser route 仍不稳时再评估 Scrapling fallback。',
+    backend: 'rsshub',
+    fallbackOrder: ['rsshub'],
+    chromiumRequired: false,
+    scraplingEligible: false,
+    notes: '小红书后台获取不复用应用内浏览器登录态；只走 RSSHub，避免触发账号风控。',
   },
   vimeo: {
     platform: 'vimeo',

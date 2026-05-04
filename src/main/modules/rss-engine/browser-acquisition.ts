@@ -1004,7 +1004,7 @@ function describeBrowserFailure(platform: PlatformType, payload: BrowserFeedExtr
 }
 
 export function supportsBrowserSessionAcquisition(platform: PlatformType): boolean {
-  return platform === 'weibo' || platform === 'xiaohongshu' || platform === 'douyin'
+  return platform === 'weibo' || platform === 'douyin'
 }
 
 export async function fetchFeedViaBrowserSession(

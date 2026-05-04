@@ -40,9 +40,9 @@ async function runExtractionScript(
 }
 
 describe('RSS browser acquisition', () => {
-  it('marks weibo/xiaohongshu/douyin as browser-session capable', () => {
+  it('keeps xiaohongshu out of browser-session acquisition', () => {
     assert.equal(supportsBrowserSessionAcquisition('weibo'), true)
-    assert.equal(supportsBrowserSessionAcquisition('xiaohongshu'), true)
+    assert.equal(supportsBrowserSessionAcquisition('xiaohongshu'), false)
     assert.equal(supportsBrowserSessionAcquisition('douyin'), true)
     assert.equal(supportsBrowserSessionAcquisition('youtube'), false)
   })

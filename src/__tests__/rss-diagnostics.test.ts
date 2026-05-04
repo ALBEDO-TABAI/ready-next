@@ -11,7 +11,7 @@ import {
 import { needsRSSHub } from '../main/modules/rss-engine/scrapers/index'
 
 describe('RSS source diagnostics', () => {
-  it('marks browser-backed failures with structured failure kinds', () => {
+  it('marks xiaohongshu RSSHub failures without browser-session requirements', () => {
     recordSourceRouteAttempt({
       sourceId: 'xhs-source',
       sourceName: 'XHS Creator',
@@ -21,8 +21,7 @@ describe('RSS source diagnostics', () => {
       durationMs: 1840,
       itemCount: 0,
       success: false,
-      error:
-        'HTTP 503: Service Unavailable | {"error":{"message":"Waiting for selector `div.reds-tab-item:nth-child(2), #red-captcha` failed: Protocol error (Runtime.callFunctionOn): Target closed"}}',
+      error: 'RSSHub unavailable: embedded worker failed to start',
     })
 
     const [entry] = buildSourceDiagnostics([
@@ -35,12 +34,12 @@ describe('RSS source diagnostics', () => {
       },
     ])
 
-    assert.equal(entry.backend, 'browser')
+    assert.equal(entry.backend, 'rsshub')
     assert.equal(entry.backendState, 'failing')
-    assert.equal(entry.chromiumRequired, true)
-    assert.equal(entry.scraplingEligible, true)
-    assert.equal(entry.lastRouteError?.kind, 'route')
-    assert.equal(entry.lastRouteError?.detail, 'browser_target_closed')
+    assert.equal(entry.chromiumRequired, false)
+    assert.equal(entry.scraplingEligible, false)
+    assert.equal(entry.lastRouteError?.kind, 'startup')
+    assert.equal(entry.lastRouteError?.detail, 'rsshub_runtime_unavailable')
   })
 
   it('marks Chromium-dependent successful routes as conditional instead of stable', () => {
@@ -87,9 +86,9 @@ describe('RSS benchmark summary', () => {
         failureKind: null,
       },
       {
-        sourceId: 'xhs-source',
-        sourceName: 'XHS Creator',
-        platform: 'xiaohongshu',
+        sourceId: 'douyin-source',
+        sourceName: 'Douyin Creator',
+        platform: 'douyin',
         backend: 'browser',
         chromiumRequired: true,
         scraplingEligible: true,
@@ -103,7 +102,7 @@ describe('RSS benchmark summary', () => {
 
     assert.equal(summary.sourceCount, 2)
     assert.equal(summary.failureCount, 1)
-    assert.deepEqual(summary.scraplingCandidatePlatforms, ['xiaohongshu'])
+    assert.deepEqual(summary.scraplingCandidatePlatforms, ['douyin'])
   })
 
   it('exposes the fixed route capability matrix', () => {
@@ -117,7 +116,9 @@ describe('RSS benchmark summary', () => {
     assert.deepEqual(weibo?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(douyin?.backend, 'browser')
     assert.deepEqual(douyin?.fallbackOrder, ['browser', 'scrapling'])
-    assert.deepEqual(xiaohongshu?.fallbackOrder, ['browser', 'scrapling'])
+    assert.equal(xiaohongshu?.backend, 'rsshub')
+    assert.deepEqual(xiaohongshu?.fallbackOrder, ['rsshub'])
+    assert.equal(xiaohongshu?.chromiumRequired, false)
     assert.equal(douyin?.scraplingEligible, true)
     assert.equal(behance?.backend, 'native')
     assert.equal(behance?.scraplingEligible, false)
@@ -129,10 +130,10 @@ describe('RSS benchmark summary', () => {
     assert.equal(allowsRSSHubFallbackAfterBrowser('xiaohongshu'), false)
   })
 
-  it('treats only bilibili as RSSHub-required among creator platforms', () => {
+  it('treats bilibili and xiaohongshu as RSSHub-required among creator platforms', () => {
     assert.equal(needsRSSHub('bilibili'), true)
     assert.equal(needsRSSHub('weibo'), false)
     assert.equal(needsRSSHub('douyin'), false)
-    assert.equal(needsRSSHub('xiaohongshu'), false)
+    assert.equal(needsRSSHub('xiaohongshu'), true)
   })
 })

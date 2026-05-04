@@ -87,5 +87,5 @@ export function platformLabel(platform: PlatformType): string {
 
 /** Check if a platform depends on RSSHub */
 export function needsRSSHub(platform: PlatformType): boolean {
-  return platform === 'bilibili'
+  return platform === 'bilibili' || platform === 'xiaohongshu'
 }
